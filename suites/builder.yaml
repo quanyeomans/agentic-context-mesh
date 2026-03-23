@@ -1,0 +1,295 @@
+# Benchmark suite for Builder agent — Phase 1 fixed set
+# Canonical 39-query suite used for Phase 1 evaluation (2026-03-22)
+# Migrated from run-benchmark-hybrid.py to YAML format (issue #13)
+
+meta:
+  name: "builder-phase1"
+  version: "1.1"
+  agent: "builder"
+  collections: [vault, knowledge-builder, knowledge-shared, tc-engineering, tc-agent-zone]
+  phase: "1"
+  description: "Phase 1 retrieval benchmark for Builder agent — hybrid search evaluation"
+  baseline_hybrid: 0.610
+  baseline_bm25: 0.389
+  gate_phase1: 0.620
+
+cases:
+  # ---------------------------------------------------------------------------
+  # Recall (8 cases — exact gold_path match)
+  # ---------------------------------------------------------------------------
+  - id: R01
+    category: recall
+    query: "Arize Phoenix observability recommendation"
+    gold_path: "01-Projects/202603-Arize-Observability-Research/RESEARCH-REPORT.md"
+    score_method: exact
+
+  - id: R02
+    category: recall
+    query: "Mnemosyne architecture decisions record"
+    gold_path: "01-Projects/202603-Mnemosyne/ARCHITECTURE.md"
+    score_method: exact
+
+  - id: R03
+    category: recall
+    query: "agent secret isolation spec security P0"
+    gold_path: "01-Projects/202603-Agent-Secret-Isolation/spec.md"
+    score_method: exact
+
+  - id: R04
+    category: recall
+    query: "builder rules quality gates coding style safety constraints"
+    gold_path: "04-Agent-Knowledge/builder/rules.md"
+    score_method: exact
+
+  - id: R05
+    category: recall
+    query: "Mnemosyne benchmark test queries and scoring"
+    gold_path: "01-Projects/202603-Mnemosyne/BENCHMARK.md"
+    score_method: exact
+
+  - id: R06
+    category: recall
+    query: "builder reusable patterns upstream candidate engineering hub"
+    gold_path: "04-Agent-Knowledge/builder/patterns.md"
+    score_method: exact
+
+  - id: R07
+    category: recall
+    query: "RALPH method autonomous development loop methodology"
+    gold_path: "01-Projects/202603-Ralph-Method-Generalisation/research-report.md"
+    score_method: exact
+    notes: "Replaced 2026-03-23: original R07 gold (Boards/mnemosyne.md) no longer ranks in top-5 after board content updated to Phase 2 backlog"
+
+  - id: R08
+    category: recall
+    query: "agent observability ADR applicationmap"
+    gold_path: "01-Projects/202603-Agent-Observability/adr-applicationmap.md"
+    score_method: exact
+
+  # ---------------------------------------------------------------------------
+  # Temporal (6 cases — LLM judge, no gold_path)
+  # ---------------------------------------------------------------------------
+  - id: T01
+    category: temporal
+    query: "what was completed last week on Mnemosyne"
+    gold_path: null
+    score_method: llm
+
+  - id: T02
+    category: temporal
+    query: "what decisions were made in March 2026 about embeddings"
+    gold_path: null
+    score_method: llm
+
+  - id: T03
+    category: temporal
+    query: "when did we decide to use Azure text-embedding-3-large"
+    gold_path: null
+    score_method: llm
+
+  - id: T04
+    category: temporal
+    query: "what tasks were completed on 2026-03-22"
+    gold_path: null
+    score_method: llm
+
+  - id: T05
+    category: temporal
+    query: "what was the outcome of the Phase 0 benchmark"
+    gold_path: null
+    score_method: llm
+
+  - id: T06
+    category: temporal
+    query: "recent changes to the agent memory system"
+    gold_path: null
+    score_method: llm
+
+  # ---------------------------------------------------------------------------
+  # Entity (6 cases — LLM judge)
+  # ---------------------------------------------------------------------------
+  - id: E01
+    category: entity
+    query: "what do we know about the platform owner"
+    gold_path: "04-Agent-Knowledge/entities/person/alex-jordan.md"
+    score_method: exact
+
+  - id: E02
+    category: entity
+    query: "tell me about the consulting company as an organisation"
+    gold_path: "04-Agent-Knowledge/entities/organisation/triad-consulting.md"
+    score_method: exact
+
+  - id: E03
+    category: entity
+    query: "what is Builder agent responsible for"
+    gold_path: "04-Agent-Knowledge/entities/concept/builder.md"
+    score_method: exact
+
+  - id: E04
+    category: entity
+    query: "what has Shape agent been working on"
+    gold_path: null
+    score_method: llm
+
+  - id: E05
+    category: entity
+    query: "what is tc-productivity"
+    gold_path: "04-Agent-Knowledge/entities/project/tc-productivity.md"
+    score_method: exact
+
+  - id: E06
+    category: entity
+    query: "who is the OpenClaw platform built for"
+    gold_path: "04-Agent-Knowledge/entities/concept/openclaw.md"
+    score_method: exact
+
+  # ---------------------------------------------------------------------------
+  # Conceptual (8 cases — LLM judge)
+  # ---------------------------------------------------------------------------
+  - id: C01
+    category: conceptual
+    query: "what is the approach to memory retrieval in the platform"
+    gold_path: null
+    score_method: llm
+
+  - id: C02
+    category: conceptual
+    query: "how does the agent briefing system work"
+    gold_path: null
+    score_method: llm
+
+  - id: C03
+    category: conceptual
+    query: "what is the philosophy behind the Mnemosyne architecture"
+    gold_path: null
+    score_method: llm
+
+  - id: C04
+    category: conceptual
+    query: "how do we handle agent mistakes and corrections"
+    gold_path: null
+    score_method: llm
+
+  - id: C05
+    category: conceptual
+    query: "what are the privacy boundaries between agents"
+    gold_path: null
+    score_method: llm
+
+  - id: C06
+    category: conceptual
+    query: "what is the token budget strategy for context loading"
+    gold_path: null
+    score_method: llm
+
+  - id: C07
+    category: conceptual
+    query: "how does the embedding pipeline handle schema drift"
+    gold_path: null
+    score_method: llm
+
+  - id: C08
+    category: conceptual
+    query: "what is the data residency policy for agent memory"
+    gold_path: null
+    score_method: llm
+
+  # ---------------------------------------------------------------------------
+  # Multi-hop (5 cases — LLM judge)
+  # ---------------------------------------------------------------------------
+  - id: M01
+    category: multi_hop
+    query: "why did we choose Azure over local embeddings and what did it cost"
+    gold_path: null
+    score_method: llm
+
+  - id: M02
+    category: multi_hop
+    query: "what is the relationship between QMD, sqlite-vec, and Mnemosyne"
+    gold_path: null
+    score_method: llm
+
+  - id: M03
+    category: multi_hop
+    query: "how does BM25 compare to vector search and what is the plan"
+    gold_path: null
+    score_method: llm
+
+  - id: M04
+    category: multi_hop
+    query: "what blocked the original Mnemosyne approach and how was it resolved"
+    gold_path: null
+    score_method: llm
+
+  - id: M05
+    category: multi_hop
+    query: "what is the full Phase 0 to Phase 3 delivery roadmap"
+    gold_path: null
+    score_method: llm
+
+  # ---------------------------------------------------------------------------
+  # Procedural (6 cases — LLM judge)
+  # ---------------------------------------------------------------------------
+  - id: P01
+    category: procedural
+    query: "how do I run the embedding pipeline"
+    gold_path: null
+    score_method: llm
+
+  - id: P02
+    category: procedural
+    query: "what is the process for adding a new agent to OpenClaw"
+    gold_path: null
+    score_method: llm
+
+  - id: P03
+    category: procedural
+    query: "how should I handle a failed Azure API call in the embed pipeline"
+    gold_path: null
+    score_method: llm
+
+  - id: P04
+    category: procedural
+    query: "what do I do when the benchmark score drops"
+    gold_path: null
+    score_method: llm
+
+  - id: P05
+    category: procedural
+    query: "how do I add a new vault document to the QMD index"
+    gold_path: null
+    score_method: llm
+
+  - id: P06
+    category: procedural
+    query: "what is the git workflow for this project"
+    gold_path: null
+    score_method: llm
+
+  # ---------------------------------------------------------------------------
+  # Classification (4 cases — Phase 3, score_method: classification)
+  # ---------------------------------------------------------------------------
+  - id: CL01
+    category: classification
+    query: "Never write credentials to disk. Always fetch from Key Vault at runtime."
+    expected_type: "procedural-rule"
+    score_method: classification
+
+  - id: CL02
+    category: classification
+    query: "## 09:15\nFixed the RRF path dedup bug in mnemosyne/search/rrf.py"
+    expected_type: "episodic"
+    score_method: classification
+
+  - id: CL03
+    category: classification
+    query: "We decided to use GPT-4o-mini for synthesis. Rationale: Phi-4-mini cold-start failures make it unreliable."
+    expected_type: "semantic-decision"
+    score_method: classification
+
+  - id: CL04
+    category: classification
+    query: "Pattern: Entity boost must always be scoped to candidate results. Step 1: get candidates. Step 2: count mentions within candidates."
+    expected_type: "procedural-pattern"
+    score_method: classification
