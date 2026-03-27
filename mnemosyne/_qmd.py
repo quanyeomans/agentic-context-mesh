@@ -16,9 +16,11 @@ import shutil
 from pathlib import Path
 
 # Primary QMD binary paths in search order
+# Override with QMD_BINARY_PATH env var or MNEMOSYNE_DATA_DIR
+_DATA_DIR = os.environ.get("MNEMOSYNE_DATA_DIR", "/data")
 _QMD_SEARCH_PATHS: list[str] = [
-    "/data/workspace/.tools/qmd/node_modules/.bin/qmd",
-    "/data/workspace/.tools/qmd/.bin/qmd",
+    f"{_DATA_DIR}/workspace/.tools/qmd/node_modules/.bin/qmd",
+    f"{_DATA_DIR}/workspace/.tools/qmd/.bin/qmd",
     "/usr/local/bin/qmd",
     "/usr/bin/qmd",
 ]

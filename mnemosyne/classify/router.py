@@ -24,8 +24,9 @@ from datetime import date as _date
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant"})
 SHARED_AGENT = "shared"
 
-_VAULT_ROOT = "/data/obsidian-vault"
-_WORKSPACE_ROOT = "/data/workspaces"
+import os as _os
+_VAULT_ROOT = _os.environ.get("MNEMOSYNE_VAULT_ROOT", "/data/obsidian-vault")
+_WORKSPACE_ROOT = _os.environ.get("MNEMOSYNE_WORKSPACE_ROOT", "/data/workspaces")
 _KNOWLEDGE_ROOT = f"{_VAULT_ROOT}/04-Agent-Knowledge"
 
 # Agents where "shared" maps to the shared knowledge area
