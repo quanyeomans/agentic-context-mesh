@@ -21,7 +21,8 @@ import pytest
 
 pytestmark = pytest.mark.skipif(os.environ.get("QMD_E2E") != "1", reason="E2E tests skipped unless QMD_E2E=1")
 
-QMD_BIN = Path("/data/workspace/.tools/qmd/node_modules/.bin/qmd")
+_DATA_DIR = os.environ.get("MNEMOSYNE_DATA_DIR", "/data")
+QMD_BIN = Path(os.environ.get("QMD_BINARY_PATH", f"{_DATA_DIR}/workspace/.tools/qmd/node_modules/.bin/qmd"))
 
 # Known gold: (query, fragment that must appear in top-3 vsearch results)
 GOLD_QUERIES = [

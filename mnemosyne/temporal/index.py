@@ -28,8 +28,12 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-_VAULT_BOARDS_GLOB = "/data/obsidian-vault/01-Projects/Boards/*.md"
-_WORKSPACE_MEMORY_GLOB = "/data/workspaces/*/memory"
+import os as _os
+_VAULT_ROOT = _os.environ.get("MNEMOSYNE_VAULT_ROOT", "/data/obsidian-vault")
+_WORKSPACE_ROOT = _os.environ.get("MNEMOSYNE_WORKSPACE_ROOT", "/data/workspaces")
+
+_VAULT_BOARDS_GLOB = f"{_VAULT_ROOT}/01-Projects/Boards/*.md"
+_WORKSPACE_MEMORY_GLOB = f"{_WORKSPACE_ROOT}/*/memory"
 
 # Filename pattern for memory logs
 _MEMORY_LOG_FILENAME_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md$")
@@ -61,7 +65,7 @@ def get_memory_log_paths(
     """
     paths: list[str] = []
 
-    for workspace_dir in Path("/data/workspaces").iterdir():
+    for workspace_dir in Path(_WORKSPACE_ROOT).iterdir():
         memory_dir = workspace_dir / "memory"
         if not memory_dir.is_dir():
             continue
@@ -254,7 +258,7 @@ def query_temporal_chunks(
         all_chunks: list[TemporalChunk] = []
 
         # 1. Board files
-        for board_path in sorted(Path("/data/obsidian-vault/01-Projects/Boards").glob("*.md")):
+        for board_path in sorted(Path(f"{_VAULT_ROOT}/01-Projects/Boards").glob("*.md")):
             try:
                 all_chunks.extend(chunk_board(str(board_path)))
             except Exception as e:

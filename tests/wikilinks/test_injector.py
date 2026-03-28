@@ -37,9 +37,9 @@ def make_entity(
     )
 
 
-BUPA = make_entity("Acme Health", "02-Areas/Work/Clients/AcmeHealth/", link="[[AcmeHealth]]")
+ACME_INSURANCE = make_entity("Acme Health", "02-Areas/Work/Clients/AcmeHealth/", link="[[AcmeHealth]]")
 THREE_CUBES = make_entity("Triad Consulting", "02-Areas/Triad Consulting/", link="[[TriadConsulting]]")
-HUNGRY_JACKS = make_entity(
+BURGER_CHAIN = make_entity(
     "Burger Palace",
     "02-Areas/Work/Clients/BurgerPalace/",
     link="[[BurgerPalace|Burger Palace]]",
@@ -54,7 +54,7 @@ HUNGRY_JACKS = make_entity(
 
 def test_injects_on_first_mention() -> None:
     content = "We worked with Acme Health on their strategy. Acme Health is a major client."
-    modified, injected = inject_wikilinks(content, [BUPA])
+    modified, injected = inject_wikilinks(content, [ACME_INSURANCE])
     assert "[[AcmeHealth]]" in modified
     assert injected == ["Acme Health"]
     # First mention replaced
@@ -63,7 +63,7 @@ def test_injects_on_first_mention() -> None:
 
 def test_does_not_inject_second_mention() -> None:
     content = "We worked with Acme Health on their strategy. Acme Health is a major client."
-    modified, _injected = inject_wikilinks(content, [BUPA])
+    modified, _injected = inject_wikilinks(content, [ACME_INSURANCE])
     # Only one [[AcmeHealth]] in result
     assert modified.count("[[AcmeHealth]]") == 1
 
@@ -75,7 +75,7 @@ def test_does_not_inject_second_mention() -> None:
 
 def test_skips_already_linked() -> None:
     content = "We worked with [[AcmeHealth]] on their strategy."
-    modified, injected = inject_wikilinks(content, [BUPA])
+    modified, injected = inject_wikilinks(content, [ACME_INSURANCE])
     # No change
     assert modified == content
     assert injected == []
@@ -102,7 +102,7 @@ def test_skips_fenced_code_block() -> None:
     content = (
         "Here is code:\n\n```python\n# Acme Health client\nclient = 'Acme Health'\n```\n\nAcme Health is a client."
     )
-    modified, _injected = inject_wikilinks(content, [BUPA])
+    modified, _injected = inject_wikilinks(content, [ACME_INSURANCE])
     # Should inject on 'Acme Health is a client' (after the code block), not inside it
     assert "[[AcmeHealth]]" in modified
     # The Acme Health inside the code block should remain unlinked
@@ -111,7 +111,7 @@ def test_skips_fenced_code_block() -> None:
 
 def test_skips_inline_code() -> None:
     content = "Use the `Acme Health` constant. Triad Consulting is our company."
-    modified, _injected2 = inject_wikilinks(content, [BUPA, THREE_CUBES])
+    modified, _injected2 = inject_wikilinks(content, [ACME_INSURANCE, THREE_CUBES])
     # Acme Health inside backtick is skipped; Triad Consulting is injected
     assert "[[TriadConsulting]]" in modified
     # Acme Health should not be linked (only occurrence is inside inline code)
@@ -125,7 +125,7 @@ def test_skips_inline_code() -> None:
 
 def test_skips_frontmatter() -> None:
     content = "---\ntitle: Acme Health Project\nclient: Acme Health\n---\n\nAcme Health is a major health insurer."
-    modified, injected = inject_wikilinks(content, [BUPA])
+    modified, injected = inject_wikilinks(content, [ACME_INSURANCE])
     # Should inject in body, not frontmatter
     assert injected == ["Acme Health"]
     # Frontmatter preserved intact
@@ -134,9 +134,9 @@ def test_skips_frontmatter() -> None:
     assert "[[AcmeHealth]] is a major health insurer." in modified
 
 
-def test_frontmatter_bupa_not_linked_in_yaml() -> None:
+def test_frontmatter_acme_not_linked_in_yaml() -> None:
     content = "---\nclient: Acme Health\n---\n\nAcme Health overview."
-    modified, _ = inject_wikilinks(content, [BUPA])
+    modified, _ = inject_wikilinks(content, [ACME_INSURANCE])
     # frontmatter Acme Health stays as-is
     assert "client: [[AcmeHealth]]" not in modified
     assert "client: Acme Health" in modified
@@ -149,7 +149,7 @@ def test_frontmatter_bupa_not_linked_in_yaml() -> None:
 
 def test_whole_word_match_only() -> None:
     content = "AcmeHealthGroup is not the same as Acme Health."
-    modified, injected = inject_wikilinks(content, [BUPA])
+    modified, injected = inject_wikilinks(content, [ACME_INSURANCE])
     # "AcmeHealthGroup" should NOT be linked
     assert "[[AcmeHealth]]Group" not in modified
     # "Acme Health" at end should be linked
@@ -159,7 +159,7 @@ def test_whole_word_match_only() -> None:
 
 def test_no_match_for_substring() -> None:
     content = "AcmeHealthGroup and SubAcmeHealth are different."
-    modified, injected = inject_wikilinks(content, [BUPA])
+    modified, injected = inject_wikilinks(content, [ACME_INSURANCE])
     # Neither "AcmeHealthGroup" nor "SubAcmeHealth" are whole-word matches for "Acme Health"
     assert injected == []
     assert "[[AcmeHealth]]" not in modified
@@ -173,7 +173,7 @@ def test_no_match_for_substring() -> None:
 def test_no_self_link_on_own_page() -> None:
     content = "Acme Health is a major health insurer with global operations."
     modified, injected = inject_wikilinks(
-        content, [BUPA], source_path="/data/obsidian-vault/02-Areas/Work/Clients/AcmeHealth/Overview.md"
+        content, [ACME_INSURANCE], source_path="/data/obsidian-vault/02-Areas/Work/Clients/AcmeHealth/Overview.md"
     )
     assert injected == []
     assert "[[AcmeHealth]]" not in modified
@@ -184,7 +184,7 @@ def test_self_link_check_different_entity() -> None:
     content = "Triad Consulting works with Acme Health on strategy."
     modified, injected = inject_wikilinks(
         content,
-        [BUPA, THREE_CUBES],
+        [ACME_INSURANCE, THREE_CUBES],
         source_path="/data/obsidian-vault/02-Areas/Work/Clients/AcmeHealth/Overview.md",
     )
     # Triad Consulting should be linked, Acme Health should not
@@ -202,7 +202,7 @@ def test_self_link_check_different_entity() -> None:
 def test_alias_triggers_link() -> None:
     """Alias 'Burger Palace' should trigger the [[BurgerPalace|Burger Palace]] link."""
     content = "Burger Palace is a fast food chain."
-    modified, injected = inject_wikilinks(content, [HUNGRY_JACKS])
+    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
     assert "[[BurgerPalace|Burger Palace]]" in modified
     assert injected == ["Burger Palace"]
 
@@ -210,7 +210,7 @@ def test_alias_triggers_link() -> None:
 def test_primary_name_triggers_link() -> None:
     """Primary name 'Burger Palace' should also trigger."""
     content = "Burger Palace is a fast food chain."
-    modified, injected = inject_wikilinks(content, [HUNGRY_JACKS])
+    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
     assert "[[BurgerPalace|Burger Palace]]" in modified
     assert injected == ["Burger Palace"]
 
@@ -278,7 +278,7 @@ def test_should_not_inject_large_file(tmp_path: Path) -> None:
     # and calling it directly (the path won't match eligible prefixes, so test inject_file).
     from mnemosyne.wikilinks.injector import inject_file
 
-    result = inject_file(str(large_file), [BUPA])
+    result = inject_file(str(large_file), [ACME_INSURANCE])
     assert result == []
 
 
@@ -330,9 +330,9 @@ def test_only_first_alias_mention_linked() -> None:
     assert injected == ["Bridgewater Engineering"]
 
 
-def test_hungry_jacks_alias_produces_canonical_link() -> None:
+def test_burger_chain_alias_produces_canonical_link() -> None:
     """'Burger Palace' → '[[BurgerPalace|Burger Palace]]' (alias → canonical display)."""
     content = "Burger Palace is a major fast food chain."
-    modified, injected = inject_wikilinks(content, [HUNGRY_JACKS])
+    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
     assert "[[BurgerPalace|Burger Palace]]" in modified
     assert injected == ["Burger Palace"]
