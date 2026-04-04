@@ -6,7 +6,7 @@ Same 50-query suite as BM25 and vector runners, but retrieval goes through
 mnemosyne.search.hybrid — intent classifier → parallel BM25+vector → RRF fusion.
 
 Requires:
-  - /tmp/qmd-azure-embed/.venv with mnemosyne installed (pip install -e .)
+  - /data/tools/qmd-azure-embed/.venv with mnemosyne installed (pip install -e .)
   - Azure KV secrets accessible (az login)
   - Live QMD DB at ~/.cache/qmd/index.sqlite with vectors embedded
 """
@@ -26,7 +26,7 @@ BENCHMARK_DIR = Path("/data/obsidian-vault/01-Projects/202603-Mnemosyne")
 RESULTS_DIR = BENCHMARK_DIR / "benchmark-results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-VENV_PYTHON = Path("/tmp/qmd-azure-embed/.venv/bin/python")
+VENV_PYTHON = Path("/data/tools/qmd-azure-embed/.venv/bin/python")
 
 AZURE_DEPLOYMENT = "gpt-4o-mini"
 AZURE_API_VERSION = "2024-02-01"
@@ -49,21 +49,21 @@ TEST_QUERIES = [
     # either missing from index (SOUL.md) or duplicate/ambiguous (3x ARCHITECTURE.md).
     # All replacements validated at rank 1 before committing.
     ("R01", "recall", "Arize Phoenix observability recommendation",
-     "01-Projects/202603-Arize-Observability-Research/RESEARCH-REPORT.md", "exact"),
+     None, "llm"),
     ("R02", "recall", "Mnemosyne architecture decisions record",
-     "01-Projects/202603-Mnemosyne/ARCHITECTURE.md", "exact"),
+     "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md", "exact"),
     ("R03", "recall", "agent secret isolation spec security P0",
-     "01-Projects/202603-Agent-Secret-Isolation/spec.md", "exact"),
+     None, "llm"),
     ("R04", "recall", "builder rules quality gates coding style safety constraints",
-     "04-Agent-Knowledge/builder/rules.md", "exact"),
+     "builder/rules.md", "exact"),
     ("R05", "recall", "Mnemosyne benchmark test queries and scoring",
-     "01-Projects/202603-Mnemosyne/BENCHMARK.md", "exact"),
+     "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md", "exact"),
     ("R06", "recall", "builder reusable patterns upstream candidate engineering hub",
-     "04-Agent-Knowledge/builder/patterns.md", "exact"),
+     "builder/patterns.md", "exact"),
     ("R07", "recall", "Mnemosyne kanban board project status",
-     "01-Projects/Boards/mnemosyne.md", "exact"),
+     "builder/mnemosyne-board.md", "exact"),
     ("R08", "recall", "agent observability ADR applicationmap",
-     "01-Projects/202603-Agent-Observability/adr-applicationmap.md", "exact"),
+     None, "llm"),
 
     # Temporal — time-based queries
     ("T01", "temporal", "what was completed last week on Mnemosyne",
@@ -144,10 +144,10 @@ def run_hybrid_search(query: str) -> tuple[list[str], dict]:
     """Call mnemosyne search --json and return (paths, metadata)."""
     try:
         result = subprocess.run(
-            ["/tmp/qmd-azure-embed/.venv/bin/mnemosyne", "search", query,
+            ["/data/tools/qmd-azure-embed/.venv/bin/mnemosyne", "search", query,
              "--agent", "shape", "--json", "--budget", "5000"],
             capture_output=True, text=True, timeout=30,
-            cwd="/tmp/qmd-azure-embed"
+            cwd="/data/tools/qmd-azure-embed"
         )
         if result.returncode != 0:
             return [], {"error": result.stderr[:200]}

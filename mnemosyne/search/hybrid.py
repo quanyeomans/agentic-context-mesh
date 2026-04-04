@@ -53,11 +53,16 @@ _QUERY_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
 # Collections used per intent/scope
 # Collections available to all agents (shared knowledge + main vault)
 _SHARED_COLLECTIONS = [
-    "vault",  # main Obsidian vault (1655 docs — the primary corpus)
-    "vault-entities",  # Entity knowledge graph — boosted for entity/person/org queries
+    "vault-projects",        # Active projects (01-Projects)
+    "vault-areas",           # Areas of responsibility (02-Areas)
+    "vault-resources",       # Reference material (03-Resources)
+    "vault-agent-knowledge", # Agent knowledge files (04-Agent-Knowledge)
+    "vault-knowledge",       # Generalised knowledge (05-Knowledge)
+    "vault-entities",        # Entity knowledge graph — boosted for entity/person/org queries
     "knowledge-shared",
     "tc-engineering",
     "tc-agent-zone",
+    # vault-archive excluded from default — search explicitly when historical context needed
 ]
 # Per-agent private collections (agent name substituted at query time)
 _AGENT_COLLECTIONS_TMPL = ["knowledge-{agent}", "{agent}-memory"]
