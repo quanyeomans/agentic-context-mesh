@@ -29,8 +29,8 @@ RECALL_LOG = Path.home() / ".cache" / "qmd" / "recall-check.json"
 # Override with your own vault's known documents via RECALL_QUERIES env var (JSON)
 DEFAULT_RECALL_QUERIES = [
     ("R01", "Arize Phoenix observability recommendation", "arize-observability-research"),
-    ("R03", "SPF record duplicate permerror DNS", "shared/rules"),
-    ("R04", "Alex Jordan voice profile writing style", "alex-jordan-voice-profile"),
+    ("R03", "SPF record duplicate permerror DNS", "shared/facts"),
+    ("R04", "Alex Jordan voice profile writing style", "dan-mcmahon-voice-profile"),
     ("R05", "QMD SQLite WAL lock crash root cause", "shared/facts"),
     ("R12", "NemoClaw analysis OpenShell verdict", "nemoclaw-analysis"),
 ]
