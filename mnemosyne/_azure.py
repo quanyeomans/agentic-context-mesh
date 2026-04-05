@@ -38,7 +38,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 # Azure OpenAI embedding dimensions
-EMBED_DIMS = 1536
+EMBED_DIMS = 768
 
 # Key Vault name
 _KEY_VAULT_NAME = "kv-tc-exp"

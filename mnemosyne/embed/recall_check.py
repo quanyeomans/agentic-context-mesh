@@ -65,7 +65,7 @@ def _embed_query(query: str) -> bytes | None:
         resp = requests.post(
             f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version=2024-02-01",
             headers={"api-key": api_key, "Content-Type": "application/json"},
-            json={"input": [query], "dimensions": 1536},
+            json={"input": [query], "dimensions": 768},
             timeout=30,
         )
         resp.raise_for_status()

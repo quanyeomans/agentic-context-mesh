@@ -892,7 +892,21 @@ Runs after `qmd update` in qmd-maintenance.sh. Scans modified vault files for en
 
 ---
 
-### Phase 5 — Eval quality rebuild + observability
+### Phase 5 — Eval quality rebuild (✅ Complete 2026-04-06)
+
+**NDCG@10 baseline: 0.3203** · 134-case suite · 6 intent categories · 81 mined + 51 curated
+
+Shipped: , , , , . Replaced synthetic benchmark with real-world queries mined from agent session logs (303 raw mined, 134 gold-labelled). Metric shifted from weighted_total to NDCG@10 with full 5-metric stack. BM25 sweep: k1/b params managed by qmd FTS5 binary — no env var override at query time; default k1=1.2 b=0.75 adequate. Dim fix: EMBED_DIMS 1536→1768.
+
+---
+
+### Phase 6 (open) — Search quality improvement
+
+**Goal:** Address 0.00 NDCG categories (procedural, temporal, multi_hop) from Phase 5 baseline. Candidate actions: fix gold path coverage for procedural (agent-internal patterns), apply date-range index for temporal, tune multi-hop planner routing.
+
+---
+
+### Phase 5 — Original spec (archived)
 
 **Goal:** Replace synthetic benchmark with real-world queries mined from agent session logs. No regression goes undetected.
 

@@ -20,6 +20,7 @@ Single-collection calls (non-vault-entities) and no-collection calls work correc
 import json
 import logging
 import math
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -228,6 +229,9 @@ def _bm25_direct_db(
 
     Returns [] on any error.  Never raises.
     """
+    k1 = float(os.getenv("QMD_BM25_K1", "1.2"))
+    b  = float(os.getenv("QMD_BM25_B",  "0.75"))
+
     fts_query = _normalise_fts_query(query)
     if not fts_query:
         logger.debug("_bm25_direct_db: empty FTS query after normalisation (original=%r)", query[:60])
@@ -236,6 +240,7 @@ def _bm25_direct_db(
     try:
         db = sqlite3.connect(_QMD_DB_PATH, timeout=5.0)
         db.row_factory = sqlite3.Row
+
 
         rows = db.execute(
             """

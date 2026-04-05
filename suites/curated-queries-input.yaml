@@ -1,0 +1,764 @@
+# curated-queries-input.yaml — Phase 5A-2: Vault-grounded curated eval queries
+#
+# Rules (strictly enforced):
+# 1. Every query must be answerable from a real file in the vault
+# 2. candidate_gold_paths entries must be real vault paths (relative, lowercase)
+# 3. No fictional entities, no invented project names
+# 4. Draw from real projects, decisions, and platform files
+#
+# Format: lowercase paths relative to /data/obsidian-vault/
+# agent: which agent context to use for search (affects collection priority)
+
+queries:
+
+  # ── Entity (9) ────────────────────────────────────────────────────────────
+  # Queries about real people, agents, tools, and resources in the system
+
+  - id: "CV-E01"
+    category: entity
+    agent: shape
+    query: "Dan McMahon role responsibilities Three Cubes Ventures"
+    candidate_gold_paths:
+      - "04-agent-knowledge/entities/person/dan-mcmahon.md"
+      - "04-agent-knowledge/shared/facts.md"
+    notes: "Entity query — founder/principal role"
+
+  - id: "CV-E02"
+    category: entity
+    agent: shape
+    query: "Shape agent coordination authority responsibilities"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shape/rules.md"
+      - "04-agent-knowledge/shape/facts.md"
+    notes: "Entity query — Shape role definition"
+
+  - id: "CV-E03"
+    category: entity
+    agent: builder
+    query: "QMD tool what is it purpose sqlite-vec embeddings"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Entity query — QMD (Query-Metadata-Database) tool"
+
+  - id: "CV-E04"
+    category: entity
+    agent: builder
+    query: "Builder agent engineering role responsibilities rules"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/rules.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Entity query — Builder agent role"
+
+  - id: "CV-E05"
+    category: entity
+    agent: shape
+    query: "mnemosyne ontology entity types stop list aliases"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/mnemosyne-ontology.md"
+    notes: "Entity query — ontology config for entity extraction"
+
+  - id: "CV-E06"
+    category: entity
+    agent: shape
+    query: "key vault kv-tc-exp secrets Azure infrastructure"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/facts.md"
+    notes: "Entity query — Azure Key Vault name and usage"
+
+  - id: "CV-E07"
+    category: entity
+    agent: shape
+    query: "active projects list Three Cubes Ventures current"
+    candidate_gold_paths:
+      - "04-agent-knowledge/entities/project/active.md"
+    notes: "Entity query — active project portfolio"
+
+  - id: "CV-E08"
+    category: entity
+    agent: shape
+    query: "Leslie who is Leslie role in system"
+    candidate_gold_paths:
+      - "04-agent-knowledge/entities/person/leslie.md"
+    notes: "Entity query — Leslie person entity"
+
+  - id: "CV-E09"
+    category: entity
+    agent: builder
+    query: "wikilink entity index canonical names and aliases"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/wikilink-entity-index.md"
+    notes: "Entity query — canonical entity names for wikilinks"
+
+  # ── Semantic (9) ──────────────────────────────────────────────────────────
+  # Conceptual / why / philosophy queries
+
+  - id: "CV-S01"
+    category: semantic
+    agent: builder
+    query: "why hybrid BM25 vector search chosen over pure vector approach"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md"
+    notes: "Semantic — architecture rationale for hybrid search"
+
+  - id: "CV-S02"
+    category: semantic
+    agent: builder
+    query: "Ralph loop purpose methodology when to use it"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/patterns.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Semantic — RALPH loop as iterative work pattern"
+
+  - id: "CV-S03"
+    category: semantic
+    agent: builder
+    query: "why agentTurn crons converted to shellScript token savings"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/decisions.md"
+      - "04-agent-knowledge/shared/decisions.md"
+    notes: "Semantic — cron migration rationale"
+
+  - id: "CV-S04"
+    category: semantic
+    agent: builder
+    query: "file-first principle deliverables vault not workspace"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+      - "04-agent-knowledge/builder/rules.md"
+    notes: "Semantic — vault-first output discipline"
+
+  - id: "CV-S05"
+    category: semantic
+    agent: builder
+    query: "orchestration authority all agents can spawn subagents"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+    notes: "Semantic — agent orchestration model"
+
+  - id: "CV-S06"
+    category: semantic
+    agent: builder
+    query: "memory write discipline working assumption confirmed decision format"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+    notes: "Semantic — memory write format rules"
+
+  - id: "CV-S07"
+    category: semantic
+    agent: shape
+    query: "platform vision OpenClaw agent ecosystem purpose"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/platform-vision.md"
+      - "04-agent-knowledge/shared/facts.md"
+    notes: "Semantic — platform vision and purpose"
+
+  - id: "CV-S08"
+    category: semantic
+    agent: builder
+    query: "why not use openai SDK in qmd-azure-embed mnemosyne"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/decisions.md"
+    notes: "Semantic — Azure AI Foundry vs openai package"
+
+  - id: "CV-S09"
+    category: semantic
+    agent: shape
+    query: "no external sends without Dan approval draft first rule"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+      - "04-agent-knowledge/shape/rules.md"
+    notes: "Semantic — external communication safety constraint"
+
+  # ── Procedural (10) ───────────────────────────────────────────────────────
+  # How-to queries about processes and workflows
+
+  - id: "CV-P01"
+    category: procedural
+    agent: builder
+    query: "Ralph loop steps execution sequence complete process"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/patterns.md"
+      - "04-agent-knowledge/shared/patterns.md"
+      - "04-agent-knowledge/builder/engineering-standards.md"
+    notes: "Procedural — RALPH loop 8-step sequence"
+
+  - id: "CV-P02"
+    category: procedural
+    agent: builder
+    query: "quality gates before moving card to For Review board"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/rules.md"
+      - "04-agent-knowledge/builder/engineering-standards.md"
+    notes: "Procedural — QA gates required before For Review"
+
+  - id: "CV-P03"
+    category: procedural
+    agent: builder
+    query: "how to run mnemosyne benchmark suite test recall check"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md"
+    notes: "Procedural — running the benchmark"
+
+  - id: "CV-P04"
+    category: procedural
+    agent: builder
+    query: "how to register new cron job OpenClaw cron-registry"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/patterns.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Procedural — cron registration procedure"
+
+  - id: "CV-P05"
+    category: procedural
+    agent: builder
+    query: "git commit push workflow sequence sign-off standards"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/engineering-standards.md"
+      - "04-agent-knowledge/builder/rules.md"
+    notes: "Procedural — git commit and push conventions"
+
+  - id: "CV-P06"
+    category: procedural
+    agent: shape
+    query: "how to send deliverable notify Shape after task complete"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+      - "04-agent-knowledge/builder/rules.md"
+    notes: "Procedural — task completion and notification flow"
+
+  - id: "CV-P07"
+    category: procedural
+    agent: builder
+    query: "memory search discipline run before every task session start"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+      - "04-agent-knowledge/builder/rules.md"
+    notes: "Procedural — memory search discipline rule"
+
+  - id: "CV-P08"
+    category: procedural
+    agent: builder
+    query: "how to add new collection to QMD index embed pipeline"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Procedural — adding new QMD collection"
+
+  - id: "CV-P09"
+    category: procedural
+    agent: shape
+    query: "board card workflow Ready In-Progress For-Review Done states"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/rules.md"
+      - "04-agent-knowledge/shared/rules.md"
+    notes: "Procedural — kanban board card lifecycle"
+
+  - id: "CV-P10"
+    category: procedural
+    agent: builder
+    query: "wikilink format rules when to create entity links"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/rules.md"
+      - "04-agent-knowledge/shared/wikilink-entity-index.md"
+    notes: "Procedural — wikilink creation conventions"
+
+  # ── Temporal (7) ──────────────────────────────────────────────────────────
+  # Time-sensitive queries about when things happened or changed
+
+  - id: "CV-T01"
+    category: temporal
+    agent: builder
+    query: "Phase 4 mnemosyne completion date benchmark score result"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md"
+      - "04-agent-knowledge/builder/decisions.md"
+    notes: "Temporal — Phase 4 completion 2026-04-05"
+
+  - id: "CV-T02"
+    category: temporal
+    agent: builder
+    query: "Phase 3 benchmark score date when completed"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md"
+    notes: "Temporal — Phase 3 benchmark history"
+
+  - id: "CV-T03"
+    category: temporal
+    agent: builder
+    query: "March 2026 architecture decisions platform engineering"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/decisions.md"
+      - "04-agent-knowledge/builder/decisions.md"
+    notes: "Temporal — March 2026 ADR context"
+
+  - id: "CV-T04"
+    category: temporal
+    agent: shape
+    query: "2026-03-09 system overview VM specs six agent configuration"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/facts.md"
+    notes: "Temporal — fact entry dated 2026-03-09"
+
+  - id: "CV-T05"
+    category: temporal
+    agent: builder
+    query: "when was per-bot webhook secret routing implemented"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/decisions.md"
+      - "04-agent-knowledge/builder/decisions.md"
+    notes: "Temporal — webhook routing date"
+
+  - id: "CV-T06"
+    category: temporal
+    agent: builder
+    query: "recent changes mnemosyne chunker planner what shipped"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+      - "04-agent-knowledge/builder/decisions.md"
+    notes: "Temporal — Phase 4 shipped components"
+
+  - id: "CV-T07"
+    category: temporal
+    agent: builder
+    query: "April 2026 cron shellScript migration token savings"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/decisions.md"
+      - "04-agent-knowledge/builder/decisions.md"
+    notes: "Temporal — 2026-04-05 cron migration event"
+
+  # ── Multi-hop (7) ─────────────────────────────────────────────────────────
+  # Queries requiring information from multiple documents
+
+  - id: "CV-M01"
+    category: multi_hop
+    agent: shape
+    query: "FEAT-085 platform observability who owns it what is its status phase"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/feature-register.md"
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/readme.md"
+    notes: "Multi-hop — ownership from FEATURE-REGISTER, status from feature file"
+
+  - id: "CV-M02"
+    category: multi_hop
+    agent: builder
+    query: "vector storage backend why not pgvector chose sqlite-vec"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md"
+    notes: "Multi-hop — pgvector rejection + sqlite-vec choice in separate docs"
+
+  - id: "CV-M03"
+    category: multi_hop
+    agent: builder
+    query: "FEAT-020 mnemosyne ownership phase status current"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/feature-register.md"
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+    notes: "Multi-hop — ownership in register, status in feature file"
+
+  - id: "CV-M04"
+    category: multi_hop
+    agent: builder
+    query: "which model does Builder agent use why chosen over other models"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/facts.md"
+      - "04-agent-knowledge/shared/decisions.md"
+    notes: "Multi-hop — model spec in facts, rationale in decisions"
+
+  - id: "CV-M05"
+    category: multi_hop
+    agent: builder
+    query: "search quality gate threshold benchmark history NDCG score requirement"
+    candidate_gold_paths:
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md"
+      - "02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+    notes: "Multi-hop — gate threshold in benchmark, history in architecture"
+
+  - id: "CV-M06"
+    category: multi_hop
+    agent: shape
+    query: "agent sandbox Docker isolation what scoped and why decided"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/decisions.md"
+      - "04-agent-knowledge/shared/facts.md"
+    notes: "Multi-hop — sandbox decision + current state across docs"
+
+  - id: "CV-M07"
+    category: multi_hop
+    agent: builder
+    query: "OpenClaw exec provider protocol batch JSON what changed and why"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/decisions.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Multi-hop — exec provider protocol ADR and usage pattern"
+
+  # ── Keyword (5) ───────────────────────────────────────────────────────────
+  # Specific term / identifier lookup queries
+
+  - id: "CV-K01"
+    category: keyword
+    agent: builder
+    query: "NOPASSWD ALL sudoers openclaw journal access"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/facts.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Keyword — sudo NOPASSWD config for journal"
+
+  - id: "CV-K02"
+    category: keyword
+    agent: builder
+    query: "gen-agent-envs.sh script purpose location"
+    candidate_gold_paths:
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Keyword — specific script name lookup"
+
+  - id: "CV-K03"
+    category: keyword
+    agent: builder
+    query: "entity stop list mnemosyne-ontology excluded terms"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/mnemosyne-ontology.md"
+    notes: "Keyword — stop list for entity extraction"
+
+  - id: "CV-K04"
+    category: keyword
+    agent: shape
+    query: "extraPaths openclaw.json PATH configuration"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/facts.md"
+      - "04-agent-knowledge/builder/patterns.md"
+    notes: "Keyword — openclaw.json extraPaths field"
+
+  - id: "CV-K05"
+    category: keyword
+    agent: shape
+    query: "haiku sonnet opus model selection agent assignment"
+    candidate_gold_paths:
+      - "04-agent-knowledge/shared/facts.md"
+      - "04-agent-knowledge/shape/facts.md"
+    notes: "Keyword — Claude model tier assignments"
+
+  # ── Additional Entity queries ────────────────────────────────────────────────
+
+  - id: "CV-E10"
+    category: entity
+    agent: builder
+    query: "OpenClaw platform what is it multi-agent AI"
+    candidate_gold_paths:
+      - "concept/openclaw.md"
+      - "shared/facts.md"
+    notes: "Entity — OpenClaw platform description (uses search-normalized paths)"
+
+  - id: "CV-E11"
+    category: entity
+    agent: builder
+    query: "QMD SQLite vector search what is QMD tool"
+    candidate_gold_paths:
+      - "concept/qmd.md"
+      - "shared/facts.md"
+    notes: "Entity — QMD tool description"
+
+  - id: "CV-E12"
+    category: entity
+    agent: shape
+    query: "Bower Bird tc-productivity what is it personal productivity app"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+      - "shared/facts.md"
+    notes: "Entity — Bower Bird / tc-productivity product"
+
+  - id: "CV-E13"
+    category: entity
+    agent: shape
+    query: "Ralph methodology loop execution pattern what is Ralph"
+    candidate_gold_paths:
+      - "concept/ralph.md"
+    notes: "Entity — Ralph loop concept file (direct concept entity)"
+
+  - id: "CV-E14"
+    category: entity
+    agent: builder
+    query: "Builder agent Board.md tasks engineering board"
+    candidate_gold_paths:
+      - "builder/board.md"
+    notes: "Entity — Builder's kanban board"
+
+  - id: "CV-E15"
+    category: entity
+    agent: shape
+    query: "Avanade client work consulting engagement"
+    candidate_gold_paths:
+      - "shape/facts.md"
+    notes: "Entity — Avanade client context from Shape facts"
+
+  # ── Additional Semantic queries ──────────────────────────────────────────────
+
+  - id: "CV-S10"
+    category: semantic
+    agent: builder
+    query: "style checker false positives domain terms proper nouns workaround"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Semantic — style checker false positive known issue ADR-B"
+
+  - id: "CV-S11"
+    category: semantic
+    agent: builder
+    query: "CodeQL security alerts tc-productivity triage severity"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Semantic — CodeQL P2 security alert backlog"
+
+  - id: "CV-S12"
+    category: semantic
+    agent: builder
+    query: "QMD collections scope which repos are indexed vault engineering tc-agent-zone"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Semantic — ADR-B06 QMD collections scope decision"
+
+  - id: "CV-S13"
+    category: semantic
+    agent: builder
+    query: "why not index tc-productivity or tc-platform in QMD"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Semantic — ADR-B06 rationale for exclusion"
+
+  - id: "CV-S14"
+    category: semantic
+    agent: shape
+    query: "Shape agent do first explain after execution model"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Semantic — Shape operational rule 2"
+
+  - id: "CV-S15"
+    category: semantic
+    agent: shape
+    query: "never overwrite draft version proactively naming convention"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Semantic — Shape rule 10 draft versioning"
+
+  - id: "CV-S16"
+    category: semantic
+    agent: shape
+    query: "Dan McMahon voice profile banned rhetorical structures LLM defaults"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Semantic — rules 9a and 9b Dan voice constraints"
+
+  - id: "CV-S17"
+    category: semantic
+    agent: builder
+    query: "benchmark test categories six weighted recall temporal entity conceptual multi-hop procedural"
+    candidate_gold_paths:
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md"
+    notes: "Semantic — benchmark category framework from BENCHMARK.md"
+
+  - id: "CV-S18"
+    category: semantic
+    agent: builder
+    query: "sqlite-vec vector search dimension mismatch float embedding"
+    candidate_gold_paths:
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+    notes: "Semantic — architecture doc covering sqlite-vec"
+
+  # ── Additional Procedural queries ────────────────────────────────────────────
+
+  - id: "CV-P11"
+    category: procedural
+    agent: builder
+    query: "before gateway restart check subagents list active wait"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Procedural — Shape rule 7 gateway restart procedure"
+
+  - id: "CV-P12"
+    category: procedural
+    agent: builder
+    query: "how to remount root filesystem read-write before apt install"
+    candidate_gold_paths:
+      - "shared/facts.md"
+    notes: "Procedural — root FS remount procedure for package installs"
+
+  - id: "CV-P13"
+    category: procedural
+    agent: shape
+    query: "Dex CRM search before create contact log note API"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Procedural — Shape rule 13 Dex search-before-create"
+
+  - id: "CV-P14"
+    category: procedural
+    agent: builder
+    query: "how to read session logs daily memory files agents today yesterday"
+    candidate_gold_paths:
+      - "shared/rules.md"
+    notes: "Procedural — memory search discipline at session start"
+
+  - id: "CV-P15"
+    category: procedural
+    agent: shape
+    query: "brief scale lightweight spec config change full feature spec"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Procedural — Shape rule 6 brief sizing"
+
+  - id: "CV-P16"
+    category: procedural
+    agent: builder
+    query: "save reusable assets templates frameworks prompts before closing task"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Procedural — Shape rule 11 reusable asset preservation"
+
+  - id: "CV-P17"
+    category: procedural
+    agent: shape
+    query: "how to produce content in Dan voice pre-flight checklist"
+    candidate_gold_paths:
+      - "shape/rules.md"
+    notes: "Procedural — Shape rule 9a Dan voice pre-flight mandatory"
+
+  - id: "CV-P18"
+    category: procedural
+    agent: builder
+    query: "push key events Application Insights OTel observability"
+    candidate_gold_paths:
+      - "builder/rules.md"
+    notes: "Procedural — builder rule for observability push"
+
+  # ── Additional Temporal queries ───────────────────────────────────────────────
+
+  - id: "CV-T08"
+    category: temporal
+    agent: builder
+    query: "2026-03-22 decisions QMD reindex collections scope Builder ADR"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Temporal — ADR-B06 and ADR-B07 dated 2026-03-22"
+
+  - id: "CV-T09"
+    category: temporal
+    agent: shape
+    query: "2026-03-26 active projects Avanade client Shape operational context"
+    candidate_gold_paths:
+      - "shape/facts.md"
+    notes: "Temporal — Shape facts dated 2026-03-26"
+
+  - id: "CV-T10"
+    category: temporal
+    agent: builder
+    query: "2026-03-09 style checker CodeQL P2 open items Builder"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Temporal — Builder decisions dated 2026-03-09"
+
+  - id: "CV-T11"
+    category: temporal
+    agent: shape
+    query: "Bower Bird Phase 1 complete M3 milestone hold date 2026-03-12"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Temporal — Bower Bird milestone timeline entry"
+
+  - id: "CV-T12"
+    category: temporal
+    agent: builder
+    query: "2026-04-05 Docker sandbox Family agent implementation completed"
+    candidate_gold_paths:
+      - "builder/patterns.md"
+    notes: "Temporal — Docker sandbox implementation date (from patterns.md content)"
+
+  # ── Additional Multi-hop queries ─────────────────────────────────────────────
+
+  - id: "CV-M08"
+    category: multi_hop
+    agent: builder
+    query: "Mnemosyne benchmark Phase 0 baseline BM25 pure vector what was first result"
+    candidate_gold_paths:
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md"
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+    notes: "Multi-hop — Phase 0 baseline requires both benchmark framework + results"
+
+  - id: "CV-M09"
+    category: multi_hop
+    agent: shape
+    query: "Three Cubes active projects current platform engineering GTM 2026"
+    candidate_gold_paths:
+      - "shape/facts.md"
+      - "02-three-cubes-ventures/platform/feature-register.md"
+    notes: "Multi-hop — platform projects from Shape facts + FEATURE-REGISTER"
+
+  - id: "CV-M10"
+    category: multi_hop
+    agent: builder
+    query: "QMD reindex frequency why every 6 hours decision rationale"
+    candidate_gold_paths:
+      - "builder/decisions.md"
+    notes: "Multi-hop — ADR-B07 reindex frequency + rationale in same file"
+
+  - id: "CV-M11"
+    category: multi_hop
+    agent: builder
+    query: "Mnemosyne architecture sqlite-vec why chosen over pgvector Qdrant Weaviate"
+    candidate_gold_paths:
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+    notes: "Multi-hop — storage decision rationale in ARCHITECTURE.md"
+
+  - id: "CV-M12"
+    category: multi_hop
+    agent: shape
+    query: "OpenClaw agents models assigned Haiku Sonnet Opus which agent uses which"
+    candidate_gold_paths:
+      - "shared/facts.md"
+    notes: "Multi-hop — agent-to-model mapping requires facts.md"
+
+  # ── Additional Keyword queries ────────────────────────────────────────────────
+
+  - id: "CV-K06"
+    category: keyword
+    agent: builder
+    query: "text-embedding-3-large Azure deployment embedding model"
+    candidate_gold_paths:
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+      - "shared/facts.md"
+    notes: "Keyword — specific embedding model deployment name"
+
+  - id: "CV-K07"
+    category: keyword
+    agent: builder
+    query: "kv-tc-exp Key Vault Azure secrets"
+    candidate_gold_paths:
+      - "shared/facts.md"
+      - "builder/rules.md"
+    notes: "Keyword — Key Vault name reference"
+
+  - id: "CV-K08"
+    category: keyword
+    agent: builder
+    query: "vm-tc-openclaw Standard_D4as_v5 VM spec"
+    candidate_gold_paths:
+      - "shared/facts.md"
+    notes: "Keyword — VM name and spec from shared facts"
+
+  - id: "CV-K09"
+    category: keyword
+    agent: builder
+    query: "sqlite-vec vec0 virtual table embedding cosine distance"
+    candidate_gold_paths:
+      - "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md"
+    notes: "Keyword — sqlite-vec vec0 technical term"
+
+  - id: "CV-K10"
+    category: keyword
+    agent: shape
+    query: "tc-experimental Azure subscription vm-tc-openclaw"
+    candidate_gold_paths:
+      - "shared/facts.md"
+    notes: "Keyword — Azure subscription name"

@@ -44,7 +44,7 @@ EXPECTED_CONTENT_VECTORS_COLS = {"hash", "seq", "pos", "model", "embedded_at"}
 # Expected columns in content (source chunks — NB: text is in 'doc' column, NOT 'body')
 EXPECTED_CONTENT_COLS = {"hash", "doc", "created_at"}
 
-EMBED_VECTOR_DIMS = 1536  # text-embedding-3-large reduced dims
+EMBED_VECTOR_DIMS = 768  # matches existing vectors_vec float[768]
 
 
 class SchemaVersionError(Exception):
