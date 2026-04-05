@@ -65,7 +65,7 @@ _SHARED_COLLECTIONS = [
     # vault-archive excluded from default — search explicitly when historical context needed
 ]
 # Per-agent private collections (agent name substituted at query time)
-_AGENT_COLLECTIONS_TMPL = ["knowledge-{agent}", "{agent}-memory"]
+_AGENT_COLLECTIONS_TMPL = ["{agent}-memory"]  # knowledge-{agent} removed: vault-agent-knowledge already covers these files with correct prefixed paths
 
 
 # ---------------------------------------------------------------------------
