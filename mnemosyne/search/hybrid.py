@@ -173,6 +173,7 @@ def search(
     agent: str | None = None,
     scope: str = "shared+agent",
     budget: int = 3000,
+    _no_multi_hop: bool = False,
 ) -> SearchResult:
     """
     Run the full hybrid search pipeline.
@@ -226,7 +227,7 @@ def search(
             active_query = query
 
     # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
-    if intent == QueryIntent.MULTI_HOP:
+    if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
         try:
             from mnemosyne.search.planner import QueryPlanner
 
@@ -235,48 +236,41 @@ def search(
             if True:
                 logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
 
-                def _bm25_search_fn(sq: str) -> list:
-                    return bm25_search(sq, collections)
+                def _hybrid_search_fn(sq: str) -> list:
+                    # Run full hybrid (BM25+vector) per sub-query, bypassing MULTI_HOP
+                    sub_result = search(sq, agent=agent, scope=scope, budget=budget, _no_multi_hop=True)
+                    # Return BudgetedResult list — planner uses .result.path via getattr fallback
+                    return sub_result.results
 
                 fused_results = planner.retrieve_and_merge(
                     sub_queries,
-                    _bm25_search_fn,
+                    _hybrid_search_fn,
                     top_k_per_sub=6,
                     final_top_k=8,
                 )
-                # Convert BM25Result objects to FusedResult for apply_budget
-                fused_for_budget: list[FusedResult] = []
+                # fused_results are BudgetedResult objects from sub-query search() calls
+                # Use r.result (FusedResult) directly — avoids re-copying large snippets
+                # and lets apply_budget re-score tiers fresh for the merged result set.
                 seen_paths: set[str] = set()
+                fused_for_budget: list[FusedResult] = []
                 for i, r in enumerate(fused_results):
-                    # BM25 results are dicts with "file" key; FusedResult has .path
-                    if isinstance(r, dict):
-                        path = r.get("file") or r.get("path") or ""
-                        col = r.get("collection", "") or ""
-                        title = r.get("title", "") or path.split("/")[-1]
-                        snippet = r.get("snippet", "") or ""
-                    else:
-                        path = getattr(r, "path", "") or ""
-                        col = getattr(r, "collection", "") or ""
-                        title = getattr(r, "title", "") or path.split("/")[-1]
-                        snippet = getattr(r, "snippet", "") or ""
-                    # Strip qmd:// URI prefix if present
-                    path = path.removeprefix("qmd://")
-                    # Strip collection prefix (e.g. vault-areas/) from path
-                    for col_prefix in [col + "/"]:
-                        if path.startswith(col_prefix):
-                            path = path[len(col_prefix):]
-                            break
-                    if path in seen_paths:
+                    if not hasattr(r, "result") or not r.result.path:
                         continue
-                    seen_paths.add(path)
-                    fused_for_budget.append(FusedResult(
-                        path=path,
-                        collection=col,
-                        title=title,
-                        snippet=snippet,
+                    if r.result.path in seen_paths:
+                        continue
+                    seen_paths.add(r.result.path)
+                    # Re-score with RRF position for merged ordering.
+                    # Truncate snippet to cap per-result budget use; apply_budget
+                    # will fetch fresh content at the appropriate tier anyway.
+                    from dataclasses import replace as _replace
+                    snippet = r.result.snippet or ""
+                    merged_fr = _replace(
+                        r.result,
+                        snippet=snippet[:600] if len(snippet) > 600 else snippet,
                         rrf_score=1.0 / (60 + i + 1),
                         boosted_score=1.0 / (60 + i + 1),
-                    ))
+                    )
+                    fused_for_budget.append(merged_fr)
                 budgeted = apply_budget(fused_for_budget, budget=budget)
                 total_tokens = sum(r.token_estimate for r in budgeted)
                 tiers_used = sorted(set(r.tier for r in budgeted))

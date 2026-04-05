@@ -100,9 +100,12 @@ class QueryPlanner:
 
                 rank_list: list[str] = []
                 for r in results[:top_k_per_sub]:
-                    # BM25 results are dicts with "file" key; FusedResult has .path
+                    # BudgetedResult (from search()) has .result.path
+                    # FusedResult has .path; dict BM25 results have "file" key
                     if isinstance(r, dict):
                         key = r.get("file") or r.get("path") or str(r)
+                    elif hasattr(r, "result") and hasattr(r.result, "path"):
+                        key = r.result.path or str(r)
                     else:
                         key = getattr(r, "path", None) or str(r)
                     if key not in all_results:
