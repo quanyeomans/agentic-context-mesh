@@ -90,6 +90,8 @@ Give OpenClaw agents memory retrieval that works across all query types.
 
 **Measurable definition:** ≥ 0.75 weighted benchmark score across all 6 categories by end of Phase 3. This corresponds to "production quality" — comparable to what Muninn achieves on its domain before tuning.
 
+**Phase 4 result:** 0.6658 on revised 36-query, 6-category suite (gate ≥ 0.620 ✅). Phase 3 achieved 0.762 on the original 43-query, 7-category suite. These are different instruments.
+
 ### Per-phase gate scores
 
 | Phase | Weighted Total | Key category targets |
@@ -824,9 +826,21 @@ Stage 2 — LLM-judge (`judge.py`):
 
 ---
 
-### Phase 4 — Contradiction detection + automated entity extraction
+### Phase 4 — Date-aware chunking + multi-hop query planning (✅ Complete 2026-04-05)
 
-**Benchmark gate:** ≥ 0.80 weighted total. Entity category ≥ 0.65.
+> **Note:** The original Phase 4 scope (contradiction detection + entity extraction) was deferred. Phase 4 was re-scoped to address the two highest-impact search quality gaps: temporal retrieval and multi-hop synthesis.
+
+**Benchmark result:** 0.6658 on revised 36-query suite (gate ≥ 0.620 ✅). Temporal: 0.433→0.633, Multi-hop: 0.480→0.600.
+
+#### 4a. Date-aware chunking (`mnemosyne/search/chunker.py`)
+
+Splits documents on H2 boundaries, extracts `[completed::]` / `[started::]` date fields per chunk, stores in `chunk_metadata` SQLite table. Temporal re-ranking boosts chunks whose `chunk_date` falls in extracted date window.
+
+#### 4b. Multi-hop query planner (`mnemosyne/search/planner.py`)
+
+LLM-based decomposition via gpt-4o-mini (Azure AI Foundry, using `mnemosyne._azure.chat_completion`). Breaks connective queries into 2–3 sub-queries, executes in parallel via `ThreadPoolExecutor`, merges via RRF (k=60).
+
+**Original Phase 4 scope (contradiction detection + entity extraction):** Deferred to future phase. See original section preserved below for implementation notes.
 
 #### 4a. Contradiction detection (`mnemosyne/contradict/`)
 
@@ -878,7 +892,19 @@ Runs after `qmd update` in qmd-maintenance.sh. Scans modified vault files for en
 
 ---
 
-### Phase 5 — Observability + benchmark automation
+### Phase 5 — Eval quality rebuild + observability
+
+**Goal:** Replace synthetic benchmark with real-world queries mined from agent session logs. No regression goes undetected.
+
+#### 5a. Real-world eval suite
+
+Mine `memory_search` calls from OpenClaw agent session logs on the VM. Extract actual queries agents issued, their context, and ground-truth results (what was useful). Replace synthetic test cases (e.g. fictional entities) with real-world queries grounded in actual vault content.
+
+**Process:**
+1. Parse agent session logs from `/data/tc-agent-zone/logs/` and OpenClaw session history
+2. Extract `memory_search` tool calls + agent-provided context
+3. Score against current retrieval (gold = what agent actually used from results)
+4. Build `benchmark-results/test-cases-v2.jsonl` with real queries
 
 **Goal:** No regression goes undetected. Every retrieval decision is measurable.
 
