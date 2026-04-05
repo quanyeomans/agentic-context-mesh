@@ -226,7 +226,7 @@ def search(
             active_query = query
 
     # For KEYWORD and PROCEDURAL queries, skip vector search
-    skip_vector = intent in (QueryIntent.KEYWORD, QueryIntent.PROCEDURAL)
+    skip_vector = intent in (QueryIntent.KEYWORD,)  # PROCEDURAL now runs hybrid like SEMANTIC
 
     # Dispatch BM25 and (optionally) vector search in parallel
     # For TEMPORAL intent, active_query is the rewritten (date-expanded) query

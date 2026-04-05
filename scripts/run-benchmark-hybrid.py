@@ -18,6 +18,7 @@ import sys
 import datetime
 import time
 import requests
+import sqlite3
 from pathlib import Path
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ RESULTS_DIR = BENCHMARK_DIR / "benchmark-results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 VENV_PYTHON = Path("/data/tools/qmd-azure-embed/.venv/bin/python")
+QMD_DB = Path("/home/openclaw/.cache/qmd/index.sqlite")
 
 AZURE_DEPLOYMENT = "gpt-4o-mini"
 AZURE_API_VERSION = "2024-02-01"
@@ -58,7 +60,7 @@ TEST_QUERIES = [
      "builder/rules.md", "exact"),
     ("R05", "recall", "Mnemosyne benchmark test queries and scoring",
      "02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md", "exact"),
-    ("R06", "recall", "builder reusable patterns upstream candidate engineering hub",
+    ("R06", "recall", "builder patterns accumulated engineering practice",
      "builder/patterns.md", "exact"),
     ("R07", "recall", "Mnemosyne kanban board project status",
      "builder/mnemosyne-board.md", "exact"),
@@ -82,7 +84,7 @@ TEST_QUERIES = [
     # Entity — person/project queries
     ("E01", "entity", "what do we know about Alex Jordan",
      None, "llm"),
-    ("E02", "entity", "tell me about Triad Consulting as an organisation",
+    ("E02", "entity", "tell me about OpenClaw as a platform",
      None, "llm"),
     ("E03", "entity", "what is Builder agent responsible for",
      None, "llm"),
@@ -183,19 +185,49 @@ def get_azure_creds() -> tuple[str, str]:
     ).stdout.strip()
     return key, endpoint
 
+def _read_doc_snippets(paths: list[str], max_chars: int = 1500) -> dict[str, str]:
+    """Read first max_chars of content for each path from QMD SQLite."""
+    snippets: dict[str, str] = {}
+    if not QMD_DB.exists():
+        return snippets
+    try:
+        conn = sqlite3.connect(str(QMD_DB), timeout=5)
+        for path in paths[:3]:
+            for like_pat in [f"%{path}", f"%/{path.lstrip('/')}"]:
+                row = conn.execute(
+                    "SELECT c.doc FROM documents d JOIN content c ON d.hash = c.hash"
+                    " WHERE d.path LIKE ? LIMIT 1",
+                    (like_pat,)
+                ).fetchone()
+                if row and row[0]:
+                    snippets[path] = row[0][:max_chars].replace("\n", " ").strip()
+                    break
+        conn.close()
+    except Exception:
+        pass
+    return snippets
+
+
 def llm_judge(query: str, retrieved_paths: list[str], api_key: str, endpoint: str) -> float:
-    """Score retrieval quality 0.0-1.0 using gpt-4o-mini as judge."""
+    """Score retrieval quality 0.0-1.0 using gpt-4o-mini as judge (content-aware)."""
     if not retrieved_paths:
         return 0.0
 
-    snippets = "\n".join(f"- {p}" for p in retrieved_paths[:TOP_K])
+    doc_snippets = _read_doc_snippets(retrieved_paths)
+    doc_context = ""
+    for p in retrieved_paths[:TOP_K]:
+        snippet = doc_snippets.get(p, "")
+        if snippet:
+            doc_context += f'  {p}:\n    "{snippet}"\n'
+        else:
+            doc_context += f"  {p}\n"
+
     prompt = f"""You are evaluating memory retrieval quality for an AI agent system.
 
 Query: {query}
 
-Retrieved documents (paths):
-{snippets}
-
+Retrieved documents (paths and content excerpts):
+{doc_context}
 Score the retrieval quality from 0.0 to 1.0:
 - 1.0: Retrieved documents directly and completely answer the query
 - 0.8: Retrieved documents mostly answer the query with minor gaps
