@@ -225,6 +225,96 @@ def search(
             logger.warning("hybrid: temporal rewriting failed — %s", _e)
             active_query = query
 
+    # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
+    if intent == QueryIntent.MULTI_HOP:
+        try:
+            from mnemosyne.search.planner import QueryPlanner
+
+            planner = QueryPlanner()
+            sub_queries = planner.decompose(query)
+            if True:
+                logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
+
+                def _bm25_search_fn(sq: str) -> list:
+                    return bm25_search(sq, collections)
+
+                fused_results = planner.retrieve_and_merge(
+                    sub_queries,
+                    _bm25_search_fn,
+                    top_k_per_sub=6,
+                    final_top_k=8,
+                )
+                # Convert BM25Result objects to FusedResult for apply_budget
+                fused_for_budget: list[FusedResult] = []
+                seen_paths: set[str] = set()
+                for i, r in enumerate(fused_results):
+                    # BM25 results are dicts with "file" key; FusedResult has .path
+                    if isinstance(r, dict):
+                        path = r.get("file") or r.get("path") or ""
+                        col = r.get("collection", "") or ""
+                        title = r.get("title", "") or path.split("/")[-1]
+                        snippet = r.get("snippet", "") or ""
+                    else:
+                        path = getattr(r, "path", "") or ""
+                        col = getattr(r, "collection", "") or ""
+                        title = getattr(r, "title", "") or path.split("/")[-1]
+                        snippet = getattr(r, "snippet", "") or ""
+                    # Strip qmd:// URI prefix if present
+                    path = path.removeprefix("qmd://")
+                    # Strip collection prefix (e.g. vault-areas/) from path
+                    for col_prefix in [col + "/"]:
+                        if path.startswith(col_prefix):
+                            path = path[len(col_prefix):]
+                            break
+                    if path in seen_paths:
+                        continue
+                    seen_paths.add(path)
+                    fused_for_budget.append(FusedResult(
+                        path=path,
+                        collection=col,
+                        title=title,
+                        snippet=snippet,
+                        rrf_score=1.0 / (60 + i + 1),
+                        boosted_score=1.0 / (60 + i + 1),
+                    ))
+                budgeted = apply_budget(fused_for_budget, budget=budget)
+                total_tokens = sum(r.token_estimate for r in budgeted)
+                tiers_used = sorted(set(r.tier for r in budgeted))
+                t_end = time.monotonic()
+                latency_ms = (t_end - t_start) * 1000.0
+                query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
+                result = SearchResult(
+                    query=query,
+                    intent=intent,
+                    results=budgeted,
+                    bm25_count=len(fused_results),
+                    vec_count=0,
+                    fused_count=len(fused_for_budget),
+                    collections=collections,
+                    tiers_used=tiers_used,
+                    total_tokens=total_tokens,
+                    latency_ms=latency_ms,
+                    vec_failed=False,
+                    fallback_used=False,
+                )
+                _log_search_event({
+                    "query_hash": query_hash,
+                    "intent": intent.value,
+                    "agent": agent,
+                    "scope": scope,
+                    "bm25_count": len(fused_results),
+                    "vec_count": 0,
+                    "fused_count": len(fused_for_budget),
+                    "budget_tokens": total_tokens,
+                    "latency_ms": latency_ms,
+                    "sub_queries": len(sub_queries),
+                })
+                return result
+
+        except Exception as _mh_e:
+            logger.warning("hybrid: MULTI_HOP planner failed (%s) — falling back to SEMANTIC", _mh_e)
+            intent = QueryIntent.SEMANTIC
+
     # For KEYWORD and PROCEDURAL queries, skip vector search
     skip_vector = intent in (QueryIntent.KEYWORD,)  # PROCEDURAL now runs hybrid like SEMANTIC
 

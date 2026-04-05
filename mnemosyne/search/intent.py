@@ -63,6 +63,25 @@ _PROCEDURAL_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 # ---------------------------------------------------------------------------
+# Multi-hop signals — queries spanning multiple documents/topics
+# ---------------------------------------------------------------------------
+_MULTI_HOP_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"and\s+how", re.IGNORECASE),
+    re.compile(r"relates?\s+to", re.IGNORECASE),
+    re.compile(r"compared?\s+to", re.IGNORECASE),
+    re.compile(r"impact\s+on", re.IGNORECASE),
+    re.compile(r"connection\s+between", re.IGNORECASE),
+    re.compile(r"relationship\s+between", re.IGNORECASE),
+    re.compile(r"how\s+does.{1,40}affect", re.IGNORECASE),
+    re.compile(r"both.{1,40}and.{1,40}(strategy|approach|method|framework)", re.IGNORECASE),
+    re.compile(r"(positioning|methodology)\s+and\s+(how|why|what)", re.IGNORECASE),
+    re.compile(r"link\s+between", re.IGNORECASE),
+    re.compile(r"interaction\s+between", re.IGNORECASE),
+    re.compile(r"in\s+the\s+context\s+of", re.IGNORECASE),
+]
+
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Keyword signals (proper nouns, codes, paths, versions)
 # ---------------------------------------------------------------------------
 
@@ -184,13 +203,14 @@ class QueryIntent(str, Enum):
     ENTITY = "entity"
     PROCEDURAL = "procedural"
     SEMANTIC = "semantic"
+    MULTI_HOP = "multi_hop"
 
 
 def classify(query: str) -> QueryIntent:
     """
     Classify a query string into a QueryIntent.
 
-    Priority order: TEMPORAL > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
+    Priority order: TEMPORAL > MULTI_HOP > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
     Returns SEMANTIC on empty or unclassifiable input.
     Never raises.
     """
@@ -203,6 +223,11 @@ def classify(query: str) -> QueryIntent:
         for pattern in _TEMPORAL_PATTERNS:
             if pattern.search(q):
                 return QueryIntent.TEMPORAL
+
+        # 1b. Multi-hop — connective signals spanning multiple topics (before entity to catch complex queries)
+        for pattern in _MULTI_HOP_PATTERNS:
+            if pattern.search(q):
+                return QueryIntent.MULTI_HOP
 
         # 2. Entity — named-entity questions
         for pattern in _ENTITY_PATTERNS:
