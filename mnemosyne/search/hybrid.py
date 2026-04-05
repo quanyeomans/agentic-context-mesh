@@ -281,6 +281,29 @@ def search(
         finally:
             entities_db.close()
 
+    # Merge temporal chunks into fused results for TEMPORAL intent.
+    # Previously stored as _temporal_chunks side-channel; now merged into main
+    # results so benchmark and callers see them. (Phase 4B-1 fix 2026-04-05)
+    if temporal_chunks and intent == QueryIntent.TEMPORAL:
+        seen_paths = {fr.path for fr in fused}
+        temporal_fused = []
+        for tc in temporal_chunks[:6]:
+            if tc.source_path not in seen_paths:
+                heading = tc.metadata.get("section_heading") or tc.metadata.get("status") or ""
+                title = (heading + " — " + tc.source_path.split("/")[-1]) if heading else tc.source_path.split("/")[-1]
+                temporal_fused.append(FusedResult(
+                    path=tc.source_path,
+                    collection="temporal",
+                    title=title,
+                    snippet=tc.text[:500].strip(),
+                    rrf_score=0.82,
+                    boosted_score=0.82,
+                ))
+                seen_paths.add(tc.source_path)
+        if temporal_fused:
+            fused = temporal_fused + fused
+            logger.debug("hybrid: merged %d temporal chunks into results", len(temporal_fused))
+
     # Apply token budget
     budgeted = apply_budget(fused, budget=budget)
 
