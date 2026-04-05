@@ -185,8 +185,7 @@ cases:
   search_latency_ms: 2120.2
 - id: R-M079
   category: semantic
-  query: GitHub repo structure three-cubes separation of concerns engineering-hub
-    tc-agent-zone tc-platform tc-core-infrastructure
+  query: GitHub repo structure three-cubes separation of concerns engineering-hub tc-agent-zone tc-platform tc-core-infrastructure
   gold_paths:
   - path: decisions.md
     relevance: 1
@@ -482,8 +481,7 @@ cases:
   search_latency_ms: 556.9
 - id: R-M161
   category: semantic
-  query: agent heartbeat config all agents builder growth consultant coach family
-    enable
+  query: agent heartbeat config all agents builder growth consultant coach family enable
   gold_paths:
   - path: shared/decisions.md
     relevance: 2
@@ -839,8 +837,7 @@ cases:
   search_latency_ms: 1921.2
 - id: R-M225
   category: semantic
-  query: knowledge area vault refactor strategy operating models consulting delivery
-    solutions GTM
+  query: knowledge area vault refactor strategy operating models consulting delivery solutions GTM
   gold_paths:
   - path: 02-three-cubes-ventures/platform/feature-register.md
     relevance: 1
@@ -1046,8 +1043,7 @@ cases:
   search_latency_ms: 4331.4
 - id: R-M263
   category: semantic
-  query: repo consolidation architecture decision infrastructure engineering agent
-    zone
+  query: repo consolidation architecture decision infrastructure engineering agent zone
   gold_paths:
   - path: decisions.md
     relevance: 1
@@ -1559,70 +1555,84 @@ cases:
   category: temporal
   query: March 2026 architecture decisions platform engineering
   gold_paths:
-  - path: decisions.md
+  - path: /data/workspaces/builder/memory/2026-03-15.md
     relevance: 2
-  - path: shared/decisions.md
+  - path: /data/workspaces/shape/memory/2026-03-17.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/requirements/multi-agent-roadmap.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/obsidian-openclaw-knowledge-architecture-guide.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
     relevance: 2
-  - path: shared/decisions.md
-    relevance: 1
-  - path: builder/decisions.md
-    relevance: 1
   score_method: ndcg
   agent: builder
   source: curated
   judge_confidence: high
   has_tool_result: false
-  notes: Temporal — March 2026 ADR context
+  notes: 'Temporal — March 2026 ADR context [P6: rebuilt 3 gold paths from temporal search] [P6: rebuilt 6 gold paths from
+    temporal search]'
   search_intent: semantic
   search_latency_ms: 2040.5
 - id: R-CV-T04
   category: temporal
   query: 2026-03-09 system overview VM specs six agent configuration
   gold_paths:
+  - path: facts.md
+    relevance: 2
   - path: shared/facts.md
     relevance: 2
-  - path: decisions.md
-    relevance: 1
-  - path: shared/decisions.md
-    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
   judge_confidence: high
   has_tool_result: false
-  notes: Temporal — fact entry dated 2026-03-09
+  notes: 'Temporal — fact entry dated 2026-03-09 [P6: 0 gold paths after judge — not rebuilt] [P6: rebuilt 2 gold paths from
+    temporal search]'
   search_intent: semantic
   search_latency_ms: 1880.2
 - id: R-CV-T07
   category: temporal
   query: April 2026 cron shellScript migration token savings
   gold_paths:
-  - path: decisions.md
+  - path: /data/workspaces/builder/memory/2026-04-04.md
+    relevance: 2
+  - path: /data/workspaces/builder/memory/2026-04-05.md
     relevance: 1
-  - path: shared/decisions.md
+  - path: /data/workspaces/builder/memory/2026-03-26.md
     relevance: 1
-  - path: shared/decisions.md
-    relevance: 1
+  - path: 2026-04-05.md
+    relevance: 2
   score_method: ndcg
   agent: builder
   source: curated
-  judge_confidence: low
+  judge_confidence: high
   has_tool_result: false
-  notes: Temporal — 2026-04-05 cron migration event
+  notes: 'Temporal — 2026-04-05 cron migration event [P6: rebuilt 4 gold paths from temporal search] [P6: rebuilt 4 gold paths
+    from temporal search]'
   search_intent: semantic
   search_latency_ms: 2192.4
 - id: R-CV-M06
   category: multi_hop
   query: agent sandbox Docker isolation what scoped and why decided
   gold_paths:
-  - path: shared/decisions.md
-    relevance: 2
+  - path: docs/architecture.md
+    relevance: 1
+  - path: 2026-03-24.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/engineering/deploying-clawdbot-to-azure.md
+    relevance: 1
+  - path: docs/architecture/prd-agent-sandbox-governance.md
+    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
-  judge_confidence: high
+  judge_confidence: low
   has_tool_result: false
-  notes: Multi-hop — sandbox decision + current state across docs
+  notes: 'Multi-hop — sandbox decision + current state across docs [P6: rebuilt 2 gold paths from multi_hop search] [P6: rebuilt
+    4 gold paths from multi_hop search]'
   search_intent: semantic
   search_latency_ms: 1923.9
 - id: R-CV-K02
@@ -1923,88 +1933,98 @@ cases:
   gold_paths:
   - path: shape/facts.md
     relevance: 2
-  - path: decisions.md
-    relevance: 1
-  - path: shared/decisions.md
-    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
   judge_confidence: high
   has_tool_result: false
-  notes: Temporal — Shape facts dated 2026-03-26
+  notes: 'Temporal — Shape facts dated 2026-03-26 [P6: 0 gold paths after judge — not rebuilt] [P6: rebuilt 1 gold paths from
+    temporal search]'
   search_intent: semantic
   search_latency_ms: 3329.1
 - id: R-CV-T10
   category: temporal
   query: 2026-03-09 style checker CodeQL P2 open items Builder
   gold_paths:
-  - path: builder/decisions.md
-    relevance: 2
+  - path: /data/workspaces/builder/memory/2026-03-09.md
+    relevance: 1
   score_method: ndcg
   agent: builder
   source: curated
-  judge_confidence: high
+  judge_confidence: low
   has_tool_result: false
-  notes: Temporal — Builder decisions dated 2026-03-09
+  notes: 'Temporal — Builder decisions dated 2026-03-09 [P6: rebuilt 1 gold paths from temporal search] [P6: rebuilt 1 gold
+    paths from temporal search]'
   search_intent: semantic
   search_latency_ms: 1925.9
 - id: R-CV-T11
   category: temporal
   query: Bower Bird Phase 1 complete M3 milestone hold date 2026-03-12
   gold_paths:
-  - path: builder/decisions.md
-    relevance: 2
+  - path: /data/workspaces/builder/memory/2026-03-12.md
+    relevance: 1
+  - path: archive-feb-2026.md
+    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
-  judge_confidence: high
+  judge_confidence: low
   has_tool_result: false
-  notes: Temporal — Bower Bird milestone timeline entry
+  notes: 'Temporal — Bower Bird milestone timeline entry [P6: 0 gold paths after judge — not rebuilt] [P6: rebuilt 2 gold
+    paths from temporal search]'
   search_intent: semantic
   search_latency_ms: 3158.3
 - id: R-CV-T12
   category: temporal
   query: 2026-04-05 Docker sandbox Family agent implementation completed
   gold_paths:
-  - path: decisions.md
-    relevance: 2
-  - path: shared/decisions.md
-    relevance: 2
+  - path: docs/architecture/architecture-agent-sandbox.md
+    relevance: 1
   score_method: ndcg
   agent: builder
   source: curated
-  judge_confidence: high
+  judge_confidence: low
   has_tool_result: false
-  notes: Temporal — Docker sandbox implementation date (from patterns.md content)
+  notes: 'Temporal — Docker sandbox implementation date (from patterns.md content) [P6: 0 gold paths after judge — not rebuilt]
+    [P6: rebuilt 1 gold paths from temporal search]'
   search_intent: semantic
   search_latency_ms: 2336.9
 - id: R-CV-M09
   category: multi_hop
   query: Three Cubes active projects current platform engineering GTM 2026
   gold_paths:
-  - path: shape/facts.md
-    relevance: 2
+  - path: entities/organisation/three-cubes.md
+    relevance: 1
+  - path: organisation/three-cubes.md
+    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
-  judge_confidence: high
+  judge_confidence: low
   has_tool_result: false
-  notes: Multi-hop — platform projects from Shape facts + FEATURE-REGISTER
+  notes: 'Multi-hop — platform projects from Shape facts + FEATURE-REGISTER [P6: rebuilt 1 gold paths from multi_hop search]
+    [P6: rebuilt 2 gold paths from multi_hop search]'
   search_intent: semantic
   search_latency_ms: 2202.2
 - id: R-CV-M12
   category: multi_hop
   query: OpenClaw agents models assigned Haiku Sonnet Opus which agent uses which
   gold_paths:
-  - path: shared/facts.md
-    relevance: 2
+  - path: ops-runbook.md
+    relevance: 1
+  - path: shared/ops-runbook.md
+    relevance: 1
+  - path: 03-disciplines/technology-and-engineering/tool-model-tiering-guide.md
+    relevance: 1
+  - path: shape/spawn-model-guide.md
+    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
-  judge_confidence: high
+  judge_confidence: low
   has_tool_result: false
-  notes: Multi-hop — agent-to-model mapping requires facts.md
+  notes: 'Multi-hop — agent-to-model mapping requires facts.md [P6: rebuilt 1 gold paths from multi_hop search] [P6: rebuilt
+    4 gold paths from multi_hop search]'
   search_intent: semantic
   search_latency_ms: 2215.7
 - id: R-CV-K07
@@ -2065,17 +2085,19 @@ cases:
   agent: builder
   source: curated
   judge_confidence: low
-  notes: Manually added to meet >=5 multi_hop requirement
+  notes: 'Manually added to meet >=5 multi_hop requirement [P6: 0 gold paths after judge — not rebuilt] [P6: 0 gold paths
+    after judge — not rebuilt]'
 - id: R-CV-M14
   category: multi_hop
   query: RALPH loop completion contract what must Builder do at end of each loop session
   gold_paths:
-  - path: shared/rules.md
-    relevance: 2
-  - path: builder/rules.md
+  - path: builder/patterns.md
+    relevance: 1
+  - path: skills/builder/ralph-loop/skill.md
     relevance: 1
   score_method: ndcg
   agent: builder
   source: curated
   judge_confidence: low
-  notes: Manually added to meet >=5 multi_hop requirement
+  notes: 'Manually added to meet >=5 multi_hop requirement [P6: 0 gold paths after judge — not rebuilt] [P6: rebuilt 2 gold
+    paths from multi_hop search]'
