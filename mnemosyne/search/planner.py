@@ -11,6 +11,8 @@ Phase 4B-2 — 2026-04-05
 
 from __future__ import annotations
 
+import sqlite3
+
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,6 +31,19 @@ _DECOMPOSE_PROMPT = (
     "- Keep sub-queries concise (under 15 words each)."
 )
 
+_DECOMPOSE_PROMPT_WITH_CONTEXT = (
+    "You decompose complex queries into 2-3 focused sub-queries for document retrieval. "
+    "Reply with ONLY a JSON array of strings, no prose.\n\n"
+    "{entity_context}\n\n"
+    "Query: {query}\n\n"
+    "Rules:\n"
+    "- Each sub-query should retrieve a distinct aspect needed to answer the original.\n"
+    "- Use entity relationships above to expand abbreviations or implied connections.\n"
+    "- Maximum 3 sub-queries.\n"
+    "- If the query is simple (single topic), return just [\"original_query\"].\n"
+    "- Keep sub-queries concise (under 15 words each)."
+)
+
 
 class QueryPlanner:
     """LLM-based query decomposition with parallel execution and RRF merge.
@@ -37,7 +52,7 @@ class QueryPlanner:
     embeddings, no extra SDK dependencies.
     """
 
-    def decompose(self, query: str) -> list[str]:
+    def decompose(self, query: str, entities_db: sqlite3.Connection | None = None) -> list[str]:
         """
         Decompose a complex query into 2-3 focused sub-queries.
 
@@ -47,7 +62,19 @@ class QueryPlanner:
         try:
             from mnemosyne._azure import chat_completion
 
-            prompt = _DECOMPOSE_PROMPT.format(query=query)
+            # Inject entity graph context when available
+            ctx = None
+            if entities_db is not None:
+                try:
+                    from mnemosyne.entities.graph import graph_context
+                    ctx = graph_context(query, entities_db)
+                except Exception:
+                    pass
+            if ctx:
+                prompt = _DECOMPOSE_PROMPT_WITH_CONTEXT.format(entity_context=ctx, query=query)
+                logger.debug("planner: injecting entity context into decompose prompt")
+            else:
+                prompt = _DECOMPOSE_PROMPT.format(query=query)
             response = chat_completion(
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=150,

@@ -226,13 +226,16 @@ def search(
             logger.warning("hybrid: temporal rewriting failed — %s", _e)
             active_query = query
 
+    # Open entities DB early — used by both planner (context injection) and entity_boost
+    entities_db = _open_entities_db()
+
     # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
         try:
             from mnemosyne.search.planner import QueryPlanner
 
             planner = QueryPlanner()
-            sub_queries = planner.decompose(query)
+            sub_queries = planner.decompose(query, entities_db=entities_db)
             if True:
                 logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
 
@@ -358,12 +361,15 @@ def search(
     fused: list[FusedResult] = rrf(bm25_results, vec_results)
 
     # Entity boosting
-    entities_db = _open_entities_db()
     if entities_db is not None:
         try:
             fused = entity_boost(fused, entities_db)
+        except Exception as _eb_e:
+            logger.warning("hybrid: entity_boost failed — %s", _eb_e)
         finally:
             entities_db.close()
+    elif entities_db is not None:
+        entities_db.close()
 
     # Merge temporal chunks into fused results for TEMPORAL intent.
     # Previously stored as _temporal_chunks side-channel; now merged into main

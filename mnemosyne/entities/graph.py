@@ -421,3 +421,75 @@ def entity_list(db: sqlite3.Connection, entity_type: str | None = None) -> list[
         )
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Graph context for query planning
+# ---------------------------------------------------------------------------
+
+
+def graph_context(query: str, db: sqlite3.Connection, max_entities: int = 3) -> str | None:
+    """
+    Return a brief entity relationship context string for injection into the planner prompt.
+
+    Tokenises the query, matches entity names in the DB, loads their relationships,
+    and returns a formatted bullet list. Returns None if no relevant entities found
+    or on any error (silent degradation — never raises).
+
+    Example output:
+      Entity context:
+      - Dan McMahon (person): LEADS Shape, RELATED_TO OpenClaw
+      - Three Cubes (organisation): FOUNDED_BY Dan McMahon, RELATED_TO OpenClaw
+    """
+    try:
+        # Tokenise query: words >= 4 chars, deduped, preserve order
+        words = list(dict.fromkeys(
+            w for w in re.findall(r"[A-Za-z]{4,}", query)
+        ))
+        if not words:
+            return None
+
+        # Find matching entities (LIKE match on name, up to 5 candidates)
+        placeholders = " OR ".join("name LIKE ?" for _ in words)
+        params = [f"%{w}%" for w in words]
+        rows = db.execute(
+            f"SELECT id, type, name FROM entities WHERE status = 'active' AND ({placeholders}) LIMIT 5",
+            params,
+        ).fetchall()
+
+        if not rows:
+            return None
+
+        lines = []
+        seen_entities = set()
+        for entity_id, entity_type, entity_name in rows:
+            if entity_id in seen_entities or len(lines) >= max_entities:
+                break
+            seen_entities.add(entity_id)
+
+            # Load relationships for this entity
+            rels = db.execute(
+                """
+                SELECT er.relationship_type, e.name
+                FROM entity_relationships er
+                JOIN entities e ON e.id = er.entity_b_id
+                WHERE er.entity_a_id = ?
+                LIMIT 6
+                """,
+                (entity_id,),
+            ).fetchall()
+
+            if not rels:
+                continue  # Skip entities with no relationships (no useful context)
+
+            rel_parts = [f"{rel_type} {target_name}" for rel_type, target_name in rels]
+            lines.append(f"- {entity_name} ({entity_type}): {', '.join(rel_parts)}")
+
+        if not lines:
+            return None
+
+        return "Entity context:\n" + "\n".join(lines)
+
+    except Exception:
+        return None
+
