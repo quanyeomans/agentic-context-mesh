@@ -412,6 +412,34 @@ def run_embed(
                 db.commit()
             except Exception:
                 logger.debug("Non-critical cleanup failed", exc_info=True)
+            # Dimension mismatch: QMD cron may have recreated vectors_vec with wrong dims.
+            # Repair schema and retry the batch once.
+            if "dimension" in str(e).lower():
+                logger.warning(
+                    f"Dimension mismatch on batch {batch_idx} -- "
+                    "QMD cron may have recreated vectors_vec. Repairing schema and retrying."
+                )
+                try:
+                    ensure_vec_table(db, actual_dims)
+                    with db:
+                        for chunk, vector in zip(batch, vectors, strict=False):
+                            stage_embedding(
+                                db,
+                                chunk["hash"],
+                                chunk["seq"],
+                                chunk["pos"],
+                                vector,
+                                deployment,
+                                now,
+                            )
+                        flush_staging_to_vec(db)
+                    embedded += len(batch)
+                    logger.info(f"Batch {batch_idx} retry succeeded after schema repair.")
+                    continue
+                except Exception as retry_e:
+                    logger.error(
+                        f"DB write retry for batch {batch_idx} failed after schema repair: {retry_e}"
+                    )
             failed_chunks.extend(batch)
             continue
 
