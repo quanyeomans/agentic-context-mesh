@@ -18,3 +18,10 @@ benchmark-results/*.json
 
 # Live database file — not a repo artefact
 entities.db
+
+# Backup files from recall_check scaffolding
+*.bak-*
+*.bak
+
+# Stray cache directory (created by run-command agent context)
+None/

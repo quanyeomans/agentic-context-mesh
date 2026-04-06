@@ -1,0 +1,1517 @@
+meta:
+  name: v2-real-world
+  version: '1.0'
+  instrument: mnemosyne-hybrid-phase5
+  built: '2026-04-05'
+  n_cases: 81
+  n_excluded_no_gold: 222
+  category_distribution:
+    semantic: 81
+  source_distribution:
+    session_log: 81
+excluded_no_gold:
+- M001
+- M002
+- M003
+- M004
+- M005
+- M006
+- M007
+- M008
+- M009
+- M010
+- M011
+- M012
+- M013
+- M015
+- M016
+- M017
+- M018
+- M019
+- M020
+- M021
+- M023
+- M024
+- M025
+- M026
+- M027
+- M028
+- M029
+- M033
+- M034
+- M035
+- M036
+- M037
+- M038
+- M039
+- M040
+- M041
+- M042
+- M043
+- M044
+- M045
+- M046
+- M047
+- M048
+- M049
+- M050
+- M051
+- M053
+- M054
+- M055
+- M056
+- M058
+- M059
+- M060
+- M061
+- M062
+- M063
+- M064
+- M065
+- M066
+- M067
+- M069
+- M070
+- M072
+- M073
+- M074
+- M075
+- M077
+- M080
+- M081
+- M082
+- M083
+- M084
+- M086
+- M087
+- M088
+- M089
+- M090
+- M091
+- M092
+- M093
+- M094
+- M095
+- M096
+- M097
+- M098
+- M099
+- M100
+- M101
+- M102
+- M104
+- M105
+- M106
+- M109
+- M113
+- M114
+- M116
+- M117
+- M118
+- M119
+- M120
+- M121
+- M122
+- M123
+- M125
+- M126
+- M128
+- M129
+- M132
+- M133
+- M134
+- M135
+- M136
+- M137
+- M138
+- M139
+- M140
+- M142
+- M144
+- M148
+- M149
+- M150
+- M151
+- M152
+- M153
+- M154
+- M155
+- M156
+- M157
+- M158
+- M159
+- M160
+- M164
+- M165
+- M166
+- M167
+- M170
+- M171
+- M172
+- M173
+- M175
+- M176
+- M177
+- M178
+- M179
+- M180
+- M181
+- M182
+- M183
+- M184
+- M185
+- M186
+- M196
+- M203
+- M204
+- M205
+- M206
+- M207
+- M208
+- M209
+- M210
+- M211
+- M212
+- M213
+- M214
+- M215
+- M216
+- M217
+- M218
+- M219
+- M221
+- M222
+- M223
+- M224
+- M226
+- M227
+- M228
+- M229
+- M230
+- M231
+- M232
+- M233
+- M234
+- M235
+- M236
+- M237
+- M238
+- M239
+- M240
+- M242
+- M247
+- M248
+- M249
+- M250
+- M251
+- M252
+- M253
+- M254
+- M258
+- M265
+- M266
+- M267
+- M268
+- M272
+- M273
+- M274
+- M275
+- M276
+- M279
+- M280
+- M281
+- M282
+- M283
+- M284
+- M286
+- M290
+- M291
+- M293
+- M298
+- M299
+- M300
+- M301
+- M302
+cases:
+- id: R-M014
+  category: semantic
+  query: Avanade consulting Asia pilot use cases
+  gold_paths:
+  - path: organisation/avanade.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session d54388dc
+  search_intent: keyword
+  search_latency_ms: 446.5
+- id: R-M022
+  category: semantic
+  query: Azure resource group VM openclaw
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/engineering/azure-infrastructure-map-2026-03.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/architecture/multi-agent-as-built.md
+    relevance: 2
+  - path: shared/facts.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/architecture/infrastructure-map.md
+    relevance: 2
+  - path: facts.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 01f6f30e
+  search_intent: keyword
+  search_latency_ms: 696.1
+- id: R-M030
+  category: semantic
+  query: ChatGPT export SharePoint extraction
+  gold_paths:
+  - path: consultant/board.md
+    relevance: 2
+  - path: consultant/memory/2026-03-30.md
+    relevance: 1
+  - path: 202603-knowledge-ia-redesign/retrospective.md
+    relevance: 1
+  - path: consultant/patterns.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 0211a112
+  search_intent: keyword
+  search_latency_ms: 559.2
+- id: R-M031
+  category: semantic
+  query: Chief of Staff coordinator
+  gold_paths:
+  - path: concept/shape.md
+    relevance: 2
+  - path: concept/openclaw.md
+    relevance: 2
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 8c7c88cb
+  search_intent: keyword
+  search_latency_ms: 445.0
+- id: R-M032
+  category: semantic
+  query: Claude conversation export vault knowledge extraction
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8554113e
+  search_intent: semantic
+  search_latency_ms: 3981.6
+- id: R-M052
+  category: semantic
+  query: Dex CRM GraphQL API
+  gold_paths:
+  - path: growth/patterns.md
+    relevance: 2
+  - path: 01-work/market/gtm-runbook.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: false
+  notes: Mined from session 380b5583
+  search_intent: keyword
+  search_latency_ms: 593.8
+- id: R-M057
+  category: semantic
+  query: Dex contacts CRM relationship management
+  gold_paths:
+  - path: 01-work/market/gtm-runbook.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v2.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session d547033f
+  search_intent: keyword
+  search_latency_ms: 623.9
+- id: R-M068
+  category: semantic
+  query: Gartner extraction IT operating model
+  gold_paths:
+  - path: consultant/memory/2026-03-29.md
+    relevance: 1
+  - path: 202603-knowledge-ia-redesign/retrospective.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6022f392
+  search_intent: keyword
+  search_latency_ms: 776.0
+- id: R-M071
+  category: semantic
+  query: Gartner extraction domain capabilities customer channel
+  gold_paths:
+  - path: consultant/memory/2026-03-29.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session d14173e1
+  search_intent: semantic
+  search_latency_ms: 2162.7
+- id: R-M076
+  category: semantic
+  query: GitHub PAT Key Vault secret name credentials
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session ff1302d7
+  search_intent: semantic
+  search_latency_ms: 2066.1
+- id: R-M078
+  category: semantic
+  query: GitHub PAT token fit repos commit access
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session ff1302d7
+  search_intent: semantic
+  search_latency_ms: 2120.2
+- id: R-M079
+  category: semantic
+  query: GitHub repo structure three-cubes separation of concerns engineering-hub
+    tc-agent-zone tc-platform tc-core-infrastructure
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2118.7
+- id: R-M085
+  category: semantic
+  query: Knowledge IA Redesign decision points classification
+  gold_paths:
+  - path: 202603-knowledge-ia-redesign/archive/conflict-analysis-resolved.md
+    relevance: 2
+  - path: 202603-knowledge-ia-redesign/archive/ia-design-proposal.md
+    relevance: 2
+  - path: 202603-knowledge-ia-redesign/archive/classification-schema.md
+    relevance: 2
+  - path: 202603-knowledge-ia-redesign/archive/classification-method.md
+    relevance: 2
+  - path: 202603-knowledge-ia-redesign/archive/classification-v1.md
+    relevance: 2
+  - path: 202603-knowledge-ia-redesign/retrospective.md
+    relevance: 2
+  - path: 202603-knowledge-ia-redesign/ontology-v3-final.md
+    relevance: 2
+  - path: consultant/memory/2026-03-29.md
+    relevance: 2
+  - path: consultant/board.md
+    relevance: 1
+  - path: 202603-knowledge-ia-redesign/archive/migration-spec-v3.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 0211a112
+  search_intent: keyword
+  search_latency_ms: 642.2
+- id: R-M103
+  category: semantic
+  query: Mnemosyne project benchmark ADR decisions
+  gold_paths:
+  - path: organisation/three-cubes.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
+    relevance: 2
+  - path: builder/mnemosyne-board.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/content-brief-linkedin.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session fc6b248d
+  search_intent: keyword
+  search_latency_ms: 602.4
+- id: R-M107
+  category: semantic
+  query: Obsidian Sync E2E encryption upgrade method status
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 655a819e
+  search_intent: semantic
+  search_latency_ms: 2498.4
+- id: R-M108
+  category: semantic
+  query: Obsidian vault sync cron job service
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 820364aa
+  search_intent: semantic
+  search_latency_ms: 3069.1
+- id: R-M110
+  category: semantic
+  query: OpenClaw 2026.3.12 phase 2 hardening tasks completed QMD memory backend
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 6059c526
+  search_intent: keyword
+  search_latency_ms: 2644.7
+- id: R-M111
+  category: semantic
+  query: OpenClaw FEAT roadmap epics features planned
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 2
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session d65c4b99
+  search_intent: keyword
+  search_latency_ms: 509.0
+- id: R-M112
+  category: semantic
+  query: OpenClaw Teams SDK upgrade 2026 channel surface bot agent
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 38bc9213
+  search_intent: semantic
+  search_latency_ms: 1936.2
+- id: R-M115
+  category: semantic
+  query: OpenClaw feature epics roadmap backlog
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 2
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session d65c4b99
+  search_intent: semantic
+  search_latency_ms: 2120.0
+- id: R-M124
+  category: semantic
+  query: Platform Observability token logging cli-proxy-api LLM cost tracking
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session dc44d7b8
+  search_intent: semantic
+  search_latency_ms: 2576.2
+- id: R-M127
+  category: semantic
+  query: QMD BM25 collections vault knowledge architecture agent memory
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 00731a78
+  search_intent: semantic
+  search_latency_ms: 2658.5
+- id: R-M130
+  category: semantic
+  query: QMD memory architecture BM25 semantic search collections vault
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session d159ebb1
+  search_intent: semantic
+  search_latency_ms: 1912.2
+- id: R-M131
+  category: semantic
+  query: QMD memory architecture vault collections BM25 tiered memory
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 00731a78
+  search_intent: semantic
+  search_latency_ms: 1908.8
+- id: R-M141
+  category: semantic
+  query: SOW factory product service catalogue professional services
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 0cb42f08
+  search_intent: semantic
+  search_latency_ms: 2287.3
+- id: R-M143
+  category: semantic
+  query: Shape agent configuration openclaw.json session timeout
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2136.5
+- id: R-M145
+  category: semantic
+  query: Shape behavioural rules proactive reporting notifications
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 655a819e
+  search_intent: semantic
+  search_latency_ms: 2279.8
+- id: R-M146
+  category: semantic
+  query: Shape telegram chat ID contact
+  gold_paths:
+  - path: ops-runbook.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session be5a7a0e
+  search_intent: keyword
+  search_latency_ms: 519.8
+- id: R-M147
+  category: semantic
+  query: Shape telegram chat ID message target
+  gold_paths:
+  - path: ops-runbook.md
+    relevance: 1
+  - path: shared/ops-runbook.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v1.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session d98b6cf1
+  search_intent: keyword
+  search_latency_ms: 556.9
+- id: R-M161
+  category: semantic
+  query: agent heartbeat config all agents builder growth consultant coach family
+    enable
+  gold_paths:
+  - path: shared/decisions.md
+    relevance: 2
+  - path: decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session d159ebb1
+  search_intent: semantic
+  search_latency_ms: 1954.2
+- id: R-M162
+  category: semantic
+  query: agent observability monitoring evaluation LLM tracing
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 90a764a4
+  search_intent: semantic
+  search_latency_ms: 1934.2
+- id: R-M163
+  category: semantic
+  query: agent secret isolation Key Vault per-agent scoping
+  gold_paths:
+  - path: decisions.md
+    relevance: 2
+  - path: shared/decisions.md
+    relevance: 2
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 90a764a4
+  search_intent: semantic
+  search_latency_ms: 1920.0
+- id: R-M168
+  category: semantic
+  query: board in progress stale cards April 2026
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 01f6f30e
+  search_intent: semantic
+  search_latency_ms: 1970.4
+- id: R-M169
+  category: semantic
+  query: builder board kanban tasks in progress ready status
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 1969.9
+- id: R-M174
+  category: semantic
+  query: checkpoint shape QA approval required before deploy
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 139c36c1
+  search_intent: semantic
+  search_latency_ms: 1963.7
+- id: R-M187
+  category: semantic
+  query: current active work tasks in progress
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session e321ed48
+  search_intent: semantic
+  search_latency_ms: 2041.3
+- id: R-M188
+  category: semantic
+  query: current in progress tasks blockers recent decisions
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session a9bcf193
+  search_intent: semantic
+  search_latency_ms: 2591.6
+- id: R-M189
+  category: semantic
+  query: current priorities active context recent decisions
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session a1ae7191
+  search_intent: semantic
+  search_latency_ms: 1929.6
+- id: R-M190
+  category: semantic
+  query: current priorities active work backlog
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 90a764a4
+  search_intent: semantic
+  search_latency_ms: 2026.5
+- id: R-M191
+  category: semantic
+  query: current priorities active work in progress
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 1c43d9fe
+  search_intent: semantic
+  search_latency_ms: 2597.4
+- id: R-M192
+  category: semantic
+  query: current projects priorities in progress
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session d98b6cf1
+  search_intent: semantic
+  search_latency_ms: 2929.9
+- id: R-M193
+  category: semantic
+  query: current projects priorities recent work
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 2
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v2.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session e5e62658
+  search_intent: semantic
+  search_latency_ms: 2372.6
+- id: R-M194
+  category: semantic
+  query: current projects tasks in progress
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2221.6
+- id: R-M195
+  category: semantic
+  query: current projects tasks priorities
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+    relevance: 2
+  - path: project/tc-productivity.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session be5a7a0e
+  search_intent: semantic
+  search_latency_ms: 2024.5
+- id: R-M197
+  category: semantic
+  query: current tasks GTM pipeline priorities
+  gold_paths:
+  - path: archive/tc-platform-analysis.md
+    relevance: 1
+  - path: shared/archive/tc-platform-analysis.md
+    relevance: 1
+  - path: 01-work/gtm/industry/financial-services/fs-transformation-service-catalogue.md
+    relevance: 1
+  - path: 01-work/gtm/avanade-apac-growth-strategy.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: growth
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session b72bf116
+  search_intent: semantic
+  search_latency_ms: 2542.5
+- id: R-M198
+  category: semantic
+  query: current tasks backlog in progress blocked
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 2
+  - path: builder/board.md
+    relevance: 1
+  - path: shape/facts.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session a337565d
+  search_intent: semantic
+  search_latency_ms: 1999.0
+- id: R-M199
+  category: semantic
+  query: current tasks in progress recent work decisions
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session c6db08c4
+  search_intent: semantic
+  search_latency_ms: 1982.7
+- id: R-M200
+  category: semantic
+  query: current tasks in progress tc-productivity
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: false
+  notes: Mined from session 4bcdf4af
+  search_intent: semantic
+  search_latency_ms: 1938.4
+- id: R-M201
+  category: semantic
+  query: current tasks projects priorities
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 2
+  - path: project/tc-productivity.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 38bc9213
+  search_intent: semantic
+  search_latency_ms: 1980.0
+- id: R-M202
+  category: semantic
+  query: current work in progress tasks consultant
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 79cf4b59
+  search_intent: semantic
+  search_latency_ms: 2270.3
+- id: R-M220
+  category: semantic
+  query: heartbeat token cost reduced memory architecture slim MEMORY.md
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session d159ebb1
+  search_intent: semantic
+  search_latency_ms: 1921.2
+- id: R-M225
+  category: semantic
+  query: knowledge area vault refactor strategy operating models consulting delivery
+    solutions GTM
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8149c8d9
+  search_intent: semantic
+  search_latency_ms: 1941.4
+- id: R-M241
+  category: semantic
+  query: observability evaluation agent SDK telemetry monitoring
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 23ceadfc
+  search_intent: semantic
+  search_latency_ms: 2874.0
+- id: R-M243
+  category: semantic
+  query: ontology refactor mapping vault capability discipline structure proposal
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8df72a80
+  search_intent: semantic
+  search_latency_ms: 1933.1
+- id: R-M244
+  category: semantic
+  query: openclaw dashboard usage token logger observability
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+    relevance: 2
+  - path: builder/board.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: false
+  notes: Mined from session ed18ce8d
+  search_intent: semantic
+  search_latency_ms: 1992.1
+- id: R-M245
+  category: semantic
+  query: ops runbook openclaw infrastructure location
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 3b3b6b03
+  search_intent: semantic
+  search_latency_ms: 1948.2
+- id: R-M246
+  category: semantic
+  query: ops runbook shared facts location reference
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 3b3b6b03
+  search_intent: semantic
+  search_latency_ms: 2397.9
+- id: R-M255
+  category: semantic
+  query: quality gates testing security practices engineering standards
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 01f6f30e
+  search_intent: semantic
+  search_latency_ms: 2227.8
+- id: R-M256
+  category: semantic
+  query: recent priorities tasks in progress
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 655a819e
+  search_intent: semantic
+  search_latency_ms: 1941.6
+- id: R-M257
+  category: semantic
+  query: recent tasks decisions current work
+  gold_paths:
+  - path: decisions.md
+    relevance: 2
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session fc6b248d
+  search_intent: semantic
+  search_latency_ms: 2057.1
+- id: R-M259
+  category: semantic
+  query: recent work decisions priorities active context
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 78d4daf5
+  search_intent: semantic
+  search_latency_ms: 2763.3
+- id: R-M260
+  category: semantic
+  query: recent work in progress priorities
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session b7a73e4d
+  search_intent: semantic
+  search_latency_ms: 2279.8
+- id: R-M261
+  category: semantic
+  query: recent work priorities active projects
+  gold_paths:
+  - path: builder/board.md
+    relevance: 2
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: high
+  has_tool_result: true
+  notes: Mined from session 820364aa
+  search_intent: semantic
+  search_latency_ms: 2212.2
+- id: R-M262
+  category: semantic
+  query: recent work sessions decisions priorities
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  - path: consultant/board.md
+    relevance: 1
+  - path: 202603-opportunity-command-centre/spec.md
+    relevance: 1
+  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session bab61c79
+  search_intent: semantic
+  search_latency_ms: 4331.4
+- id: R-M263
+  category: semantic
+  query: repo consolidation architecture decision infrastructure engineering agent
+    zone
+  gold_paths:
+  - path: decisions.md
+    relevance: 1
+  - path: shared/decisions.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2559.2
+- id: R-M264
+  category: semantic
+  query: repo structure tasks tc-agent-zone directory stubs git-sync React 19 PR
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2336.3
+- id: R-M269
+  category: semantic
+  query: runbook existing docs tc-agent-zone infrastructure
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 1938.9
+- id: R-M270
+  category: semantic
+  query: runbook operations cron systemd openclaw
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2329.1
+- id: R-M271
+  category: semantic
+  query: runbook vm-tc-openclaw infrastructure operations
+  gold_paths:
+  - path: shared/decisions.md
+    relevance: 1
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6059c526
+  search_intent: semantic
+  search_latency_ms: 2218.3
+- id: R-M277
+  category: semantic
+  query: tc-agent-zone infra config changes
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 2ccf62c3
+  search_intent: semantic
+  search_latency_ms: 1944.5
+- id: R-M278
+  category: semantic
+  query: tc-agent-zone ops runbook location path
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 546470bf
+  search_intent: semantic
+  search_latency_ms: 2398.9
+- id: R-M285
+  category: semantic
+  query: today's memory file location daily log
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session d738a4b9
+  search_intent: temporal
+  search_latency_ms: 2109.6
+- id: R-M287
+  category: semantic
+  query: token audit cost heartbeat alerts efficiency
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session c6db08c4
+  search_intent: semantic
+  search_latency_ms: 1909.2
+- id: R-M288
+  category: semantic
+  query: token consumption audit cost analysis cron jobs agents
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session c6db08c4
+  search_intent: semantic
+  search_latency_ms: 1928.7
+- id: R-M289
+  category: semantic
+  query: token consumption logging proxy JSONL per-agent spend
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6e3597bc
+  search_intent: semantic
+  search_latency_ms: 1926.4
+- id: R-M292
+  category: semantic
+  query: token logger proxy port 8318 JSONL observability
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 6e3597bc
+  search_intent: semantic
+  search_latency_ms: 2341.2
+- id: R-M294
+  category: semantic
+  query: vault IA conventions folders categories levels knowledge areas
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8149c8d9
+  search_intent: semantic
+  search_latency_ms: 2097.7
+- id: R-M295
+  category: semantic
+  query: vault backup cron overnight run result
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: false
+  notes: Mined from session 506f9ef5
+  search_intent: semantic
+  search_latency_ms: 2139.3
+- id: R-M296
+  category: semantic
+  query: vault filing conventions PARA knowledge structure ChatGPT extraction
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: consultant
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8df72a80
+  search_intent: semantic
+  search_latency_ms: 1970.3
+- id: R-M297
+  category: semantic
+  query: vault folder structure reorganisation industry verticals categories
+  gold_paths:
+  - path: builder/board.md
+    relevance: 1
+  score_method: ndcg
+  agent: main
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8149c8d9
+  search_intent: semantic
+  search_latency_ms: 1907.7
+- id: R-M303
+  category: semantic
+  query: x bookmarks sync cron exec allowlist
+  gold_paths:
+  - path: 02-three-cubes-ventures/platform/feature-register.md
+    relevance: 1
+  score_method: ndcg
+  agent: builder
+  source: session_log
+  judge_confidence: low
+  has_tool_result: true
+  notes: Mined from session 8f45e3d8
+  search_intent: semantic
+  search_latency_ms: 2872.5
