@@ -164,7 +164,7 @@ cases:
   category: semantic
   query: 2026 campaign priorities industry triggers method record analytical process how built
   gold_paths:
-  - path: 01-work/gtm/2026-campaign-priorities-industry-triggers-method-record.md
+  - path: 02-areas/01-work/gtm/2026-campaign-priorities-industry-triggers-method-record.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -178,11 +178,11 @@ cases:
   category: semantic
   query: AI augmentation pricing billing professional services LLM tooling costs
   gold_paths:
-  - path: 01-work/ai-augmentation-pricing-pov.md
+  - path: 02-areas/01-work/ai-augmentation-pricing-pov.md
     relevance: 2
-  - path: research-briefs/consulting-industry-ai-inflection.md
+  - path: 03-resources/research-briefs/consulting-industry-ai-inflection.md
     relevance: 2
-  - path: 02-three-cubes-ventures/product/future-proofing-strategy-to-execution-consulting-firm-2015-2030.md
+  - path: 02-areas/02-three-cubes-ventures/product/future-proofing-strategy-to-execution-consulting-firm-2015-2030.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -196,11 +196,11 @@ cases:
   category: semantic
   query: Agent Boss Article 2 Delegation Trap growth article writing progress
   gold_paths:
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/linkedin-draft.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/linkedin-draft.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/outline.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/outline.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/deep-dive-draft.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/deep-dive-draft.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -214,11 +214,11 @@ cases:
   category: semantic
   query: Agent Boss Playbook production pipeline article style rules
   gold_paths:
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/article-plan.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/article-plan.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/article-production-pipeline.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/article-production-pipeline.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/01-correction-log/research-brief.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/01-correction-log/research-brief.md
     relevance: 1
   score_method: ndcg
   agent: growth
@@ -232,9 +232,9 @@ cases:
   category: semantic
   query: Agent Boss senior leader AI agents playbook
   gold_paths:
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/deep-dive-draft.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/02-delegation-trap/deep-dive-draft.md
     relevance: 2
-  - path: person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -248,13 +248,13 @@ cases:
   category: semantic
   query: Apollo cache Dex CRM API enrichment growth pipeline
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/crm/dex-enrichment-summary.md
+  - path: 06-archive/02-areas/platform-restructure-2026-04-06/dex-enrichment-summary.md
     relevance: 2
-  - path: 01-work/market/gtm-runbook.md
+  - path: 02-areas/01-work/market/gtm-runbook.md
     relevance: 2
-  - path: growth/patterns.md
+  - path: 04-agent-knowledge/growth/patterns.md
     relevance: 2
-  - path: growth/crm-hygiene.md
+  - path: 04-agent-knowledge/growth/crm-hygiene.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -268,7 +268,7 @@ cases:
   category: semantic
   query: Arielle executive brand LinkedIn recommendations framework
   gold_paths:
-  - path: 03-dm-brand-and-career/network/executive-networking-playbook.md
+  - path: 02-areas/03-dm-brand-and-career/network/executive-networking-playbook.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -282,11 +282,11 @@ cases:
   category: semantic
   query: Arize observability Three Cubes platform strategy OpenClaw OTel App Insights
   gold_paths:
-  - path: entities/organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -300,7 +300,7 @@ cases:
   category: semantic
   query: Avanade billing model engagement pricing AI delivery
   gold_paths:
-  - path: 01-work/ai-augmentation-pricing-pov.md
+  - path: 02-areas/01-work/ai-augmentation-pricing-pov.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -314,7 +314,7 @@ cases:
   category: semantic
   query: Avanade consulting Asia pilot use cases
   gold_paths:
-  - path: organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -328,7 +328,7 @@ cases:
   category: semantic
   query: Avanade resignation handover note Dan
   gold_paths:
-  - path: 03-dm-brand-and-career/career/resignation-and-transition.md
+  - path: 02-areas/03-dm-brand-and-career/career/resignation-and-transition.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -342,7 +342,7 @@ cases:
   category: semantic
   query: Avanade role evaluation career progression decision
   gold_paths:
-  - path: 03-dm-brand-and-career/career/job-opportunities/role-criteria-2026-03.md
+  - path: 02-areas/03-dm-brand-and-career/career/job-opportunities/role-criteria-2026-03.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -356,9 +356,9 @@ cases:
   category: semantic
   query: Azure infrastructure costs monthly spend resources PostgreSQL storage
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/engineering/azure-infrastructure-map-2026-03.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/azure-infrastructure-map-2026-03.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/architecture/infrastructure-map.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/infrastructure-map.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -372,19 +372,17 @@ cases:
   category: semantic
   query: Azure resource group VM openclaw
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/engineering/azure-infrastructure-map-2026-03.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/azure-infrastructure-map-2026-03.md
     relevance: 2
-  - path: builder/recovery.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
-  - path: shared/facts.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/infrastructure-map.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/architecture/infrastructure-map.md
+  - path: 04-agent-knowledge/builder/rules.md
     relevance: 2
-  - path: builder/rules.md
-    relevance: 2
-  - path: 02-three-cubes-ventures/platform/architecture/multi-agent-as-built.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-as-built.md
     relevance: 1
-  - path: facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -398,7 +396,7 @@ cases:
   category: semantic
   query: Azure subscription infrastructure cleanup consolidation plan
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/engineering/azure-infrastructure-map-2026-03.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/azure-infrastructure-map-2026-03.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -412,7 +410,7 @@ cases:
   category: semantic
   query: Baby Bunting AI data strategy retail CDO priorities
   gold_paths:
-  - path: research-briefs/australian-retail-ai-reality.md
+  - path: 03-resources/research-briefs/australian-retail-ai-reality.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -426,7 +424,7 @@ cases:
   category: semantic
   query: Bhavya India Avanade leader profile style
   gold_paths:
-  - path: 202603-executive-ai-leadership/03-customer-zero/bhavya-kapoor-profile.md
+  - path: 01-projects/202603-executive-ai-leadership/03-customer-zero/bhavya-kapoor-profile.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -440,7 +438,7 @@ cases:
   category: semantic
   query: Bhavya Indian leader Avanade
   gold_paths:
-  - path: 202603-executive-ai-leadership/03-customer-zero/bhavya-kapoor-profile.md
+  - path: 01-projects/202603-executive-ai-leadership/03-customer-zero/bhavya-kapoor-profile.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -454,7 +452,7 @@ cases:
   category: semantic
   query: CONVENTIONS.md PARA filing update changes made today
   gold_paths:
-  - path: archive/retro-2026-03-23.md
+  - path: 04-agent-knowledge/shared/archive/retro-2026-03-23.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -468,11 +466,11 @@ cases:
   category: semantic
   query: ChatGPT export SharePoint extraction
   gold_paths:
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 2
-  - path: consultant/memory/2026-03-30.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-30.md
     relevance: 1
-  - path: consultant/patterns.md
+  - path: 04-agent-knowledge/consultant/patterns.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -486,9 +484,9 @@ cases:
   category: semantic
   query: Chief of Staff coordinator
   gold_paths:
-  - path: concept/shape.md
+  - path: 04-agent-knowledge/entities/concept/shape.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -502,7 +500,7 @@ cases:
   category: semantic
   query: Claude conversation export vault knowledge extraction
   gold_paths:
-  - path: consultant/memory/2026-03-30.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-30.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -516,11 +514,11 @@ cases:
   category: semantic
   query: Dan LinkedIn profile brand value proposition executive positioning advisory Three Cubes
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/linkedin/archive/profile-update-brief-for-dan.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/archive/profile-update-brief-for-dan.md
     relevance: 2
-  - path: 03-dm-brand-and-career/foundation/linkedin/profile-audit-2026-03.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/profile-audit-2026-03.md
     relevance: 2
-  - path: 03-dm-brand-and-career/foundation/linkedin/archive/profile-rewrite-2026-03.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/archive/profile-rewrite-2026-03.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -534,7 +532,7 @@ cases:
   category: semantic
   query: Dan LinkedIn profile experience results achievements career narrative
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -548,7 +546,7 @@ cases:
   category: semantic
   query: Dan LinkedIn profile personal brand board positioning NED advisory
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -562,9 +560,9 @@ cases:
   category: semantic
   query: Dan McMahon tone of voice email writing style
   gold_paths:
-  - path: 03-dm-brand-and-career/voice/writing-style.md
+  - path: 02-areas/03-dm-brand-and-career/voice/writing-style.md
     relevance: 2
-  - path: 03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
+  - path: 02-areas/03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -578,13 +576,13 @@ cases:
   category: semantic
   query: Dan McMahon writing content agents executives
   gold_paths:
-  - path: 202603-executive-ai-leadership/06-prototype/article-draft-session-lessons.md
+  - path: 01-projects/202603-executive-ai-leadership/06-prototype/article-draft-session-lessons.md
     relevance: 2
-  - path: entities/person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 1
-  - path: person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 1
-  - path: 03-dm-brand-and-career/content/content-tracker.md
+  - path: 02-areas/03-dm-brand-and-career/content/content-tracker.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -598,9 +596,9 @@ cases:
   category: semantic
   query: Dan McMahon writing style voice personal brand LinkedIn articles
   gold_paths:
-  - path: 03-dm-brand-and-career/voice/writing-style.md
+  - path: 02-areas/03-dm-brand-and-career/voice/writing-style.md
     relevance: 2
-  - path: 03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
+  - path: 02-areas/03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -614,13 +612,13 @@ cases:
   category: semantic
   query: Dan SMEC mid-market SME commercial segment Avanade experience comfort zone
   gold_paths:
-  - path: entities/organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 2
-  - path: organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 2
-  - path: entities/concept/smec.md
+  - path: 04-agent-knowledge/entities/concept/smec.md
     relevance: 2
-  - path: concept/smec.md
+  - path: 04-agent-knowledge/entities/concept/smec.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -634,7 +632,7 @@ cases:
   category: semantic
   query: Dan career goals board ambitions advisory Three Cubes skills strengths enterprise leadership
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -648,7 +646,7 @@ cases:
   category: semantic
   query: Dan career pivot board positioning personal brand confidence Avanade experience results
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/archive/profile-review-2026-03-26.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -662,7 +660,7 @@ cases:
   category: semantic
   query: Dan career positioning brand executive networking LinkedIn board roles search firms
   gold_paths:
-  - path: 03-dm-brand-and-career/network/executive-networking-playbook.md
+  - path: 02-areas/03-dm-brand-and-career/network/executive-networking-playbook.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -676,7 +674,7 @@ cases:
   category: semantic
   query: Dan conviction values technology teams Australia Asia society competitive prosperous transformation
   gold_paths:
-  - path: research-briefs/enterprise-ai-deployment-australia.md
+  - path: 03-resources/research-briefs/enterprise-ai-deployment-australia.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -690,7 +688,7 @@ cases:
   category: semantic
   query: Dan personal values operations customers process improvement institutionalise technology
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/dan-mcmahon-personal-brand-foundation.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/dan-mcmahon-personal-brand-foundation.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -704,7 +702,7 @@ cases:
   category: semantic
   query: Dan why I do this expanding pie society teams empowerment technology mission purpose
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/dan-mcmahon-personal-brand-foundation.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/dan-mcmahon-personal-brand-foundation.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -718,9 +716,9 @@ cases:
   category: semantic
   query: Dex CRM GraphQL API
   gold_paths:
-  - path: growth/patterns.md
+  - path: 04-agent-knowledge/growth/patterns.md
     relevance: 2
-  - path: 01-work/market/gtm-runbook.md
+  - path: 02-areas/01-work/market/gtm-runbook.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -734,9 +732,9 @@ cases:
   category: semantic
   query: Dex CRM outstanding contacts notes Charlie Richardson meeting
   gold_paths:
-  - path: growth/crm-hygiene.md
+  - path: 04-agent-knowledge/growth/crm-hygiene.md
     relevance: 1
-  - path: growth/networking.md
+  - path: 04-agent-knowledge/growth/networking.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -750,9 +748,9 @@ cases:
   category: semantic
   query: Dex contacts CRM relationship management
   gold_paths:
-  - path: 01-work/market/gtm-runbook.md
+  - path: 02-areas/01-work/market/gtm-runbook.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/second-brain-architecture-v2.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -766,7 +764,7 @@ cases:
   category: semantic
   query: Family Hub Google Places API billing TfNSW venue answers Dan
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-084-family-hub-skills/spec.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-084-family-hub-skills/spec.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -780,7 +778,7 @@ cases:
   category: semantic
   query: Family Hub skills gaps travel restaurant booking
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-084-family-hub-skills/spec.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-084-family-hub-skills/spec.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -794,9 +792,9 @@ cases:
   category: semantic
   query: Gartner MIT CISR SharePoint PDF extraction vault filing
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 1
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -810,7 +808,7 @@ cases:
   category: semantic
   query: Gartner extraction CIO agenda memory log
   gold_paths:
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -824,7 +822,7 @@ cases:
   category: semantic
   query: Gartner extraction IT operating model
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -838,7 +836,7 @@ cases:
   category: semantic
   query: Gartner extraction batch B batch C completion
   gold_paths:
-  - path: consultant/memory/2026-03-30.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-30.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -852,9 +850,9 @@ cases:
   category: semantic
   query: Gartner extraction board executive advisory
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 1
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -868,7 +866,7 @@ cases:
   category: semantic
   query: Gartner extraction domain capabilities customer channel
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -882,7 +880,7 @@ cases:
   category: semantic
   query: Gartner extraction domain capabilities data analytics
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -896,7 +894,7 @@ cases:
   category: semantic
   query: GitHub PAT Key Vault secret name credentials
   gold_paths:
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -910,7 +908,7 @@ cases:
   category: semantic
   query: GitHub PAT token access create repository three-cubes
   gold_paths:
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -952,9 +950,9 @@ cases:
   category: semantic
   query: Knowledge IA Redesign decision points classification
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 2
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -968,9 +966,9 @@ cases:
   category: semantic
   query: LOCOMO benchmark memory evaluation temporal reasoning entity
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -984,7 +982,7 @@ cases:
   category: semantic
   query: Leslie Exponentially Tennis Australia CIO referrals
   gold_paths:
-  - path: 00-clients/tennis-australia/tennis-australia-cio-referrals.md
+  - path: 02-areas/00-clients/tennis-australia/tennis-australia-cio-referrals.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -998,11 +996,11 @@ cases:
   category: semantic
   query: LinkedIn profile brand career network foundations
   gold_paths:
-  - path: 03-dm-brand-and-career/foundation/linkedin/profile-audit-2026-03.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/profile-audit-2026-03.md
     relevance: 2
-  - path: 03-dm-brand-and-career/foundation/linkedin/career-profile-guide.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/career-profile-guide.md
     relevance: 2
-  - path: growth/content.md
+  - path: 04-agent-knowledge/growth/content.md
     relevance: 1
   score_method: ndcg
   agent: growth
@@ -1016,7 +1014,7 @@ cases:
   category: semantic
   query: M365 Copilot Avanade transcription meetings
   gold_paths:
-  - path: 01-work/market/events/ignite-notes.md
+  - path: 02-areas/01-work/market/events/ignite-notes.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1030,9 +1028,9 @@ cases:
   category: semantic
   query: MIT CISR Melbourne attendees event session
   gold_paths:
-  - path: 202603-mit-cisr/readme.md
+  - path: 01-projects/202603-mit-cisr/readme.md
     relevance: 2
-  - path: 202603-mit-cisr/archive/melbourne-rsvp-brief.md
+  - path: 01-projects/202603-mit-cisr/archive/melbourne-rsvp-brief.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1046,11 +1044,11 @@ cases:
   category: semantic
   query: MIT CISR event attendees client list RSVP
   gold_paths:
-  - path: 202603-mit-cisr/archive/melbourne-rsvp-brief.md
+  - path: 01-projects/202603-mit-cisr/archive/melbourne-rsvp-brief.md
     relevance: 2
-  - path: 202603-mit-cisr/sydney-invite-proofpoints.md
+  - path: 01-projects/202603-mit-cisr/sydney-invite-proofpoints.md
     relevance: 2
-  - path: 202603-mit-cisr/readme.md
+  - path: 01-projects/202603-mit-cisr/readme.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1064,11 +1062,11 @@ cases:
   category: semantic
   query: MIT Melbourne briefing attendee profiles sector research
   gold_paths:
-  - path: 202603-mit-cisr/archive/melbourne-rsvp-brief.md
+  - path: 01-projects/202603-mit-cisr/archive/melbourne-rsvp-brief.md
     relevance: 2
-  - path: 202603-mit-cisr/readme.md
+  - path: 01-projects/202603-mit-cisr/readme.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/audience-brief.md
+  - path: 02-areas/03-dm-brand-and-career/content/audience-brief.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1082,9 +1080,9 @@ cases:
   category: semantic
   query: MIT events Sydney Melbourne speaking March 2026
   gold_paths:
-  - path: shape/facts.md
+  - path: 04-agent-knowledge/shape/facts.md
     relevance: 2
-  - path: 202603-mit-cisr/readme.md
+  - path: 01-projects/202603-mit-cisr/readme.md
     relevance: 2
   score_method: ndcg
   agent: growth
@@ -1098,17 +1096,17 @@ cases:
   category: semantic
   query: Mnemosyne project benchmark ADR decisions
   gold_paths:
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
     relevance: 2
-  - path: builder/mnemosyne-board.md
+  - path: 04-agent-knowledge/builder/mnemosyne-board.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/content-brief-linkedin.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/content-brief-linkedin.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1122,9 +1120,9 @@ cases:
   category: semantic
   query: Network to Target Orgs matched contacts report GTM
   gold_paths:
-  - path: 01-work/market/gtm-runbook.md
+  - path: 02-areas/01-work/market/gtm-runbook.md
     relevance: 2
-  - path: growth/patterns.md
+  - path: 04-agent-knowledge/growth/patterns.md
     relevance: 1
   score_method: ndcg
   agent: growth
@@ -1138,7 +1136,7 @@ cases:
   category: semantic
   query: Obsidian vault sync cron job service
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1152,7 +1150,7 @@ cases:
   category: semantic
   query: OpenClaw FEAT roadmap epics features planned
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1166,7 +1164,7 @@ cases:
   category: semantic
   query: OpenClaw feature epics roadmap backlog
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1180,11 +1178,11 @@ cases:
   category: semantic
   query: OpenClaw implementation enterprise maturity agent platform architecture
   gold_paths:
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/readme.md
+  - path: 02-areas/02-three-cubes-ventures/platform/readme.md
     relevance: 2
-  - path: entities/concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1198,7 +1196,7 @@ cases:
   category: semantic
   query: OpenViking tiered memory L0 L1 L2 vault abstracts
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1212,7 +1210,7 @@ cases:
   category: semantic
   query: Opportunity Command Centre created delegated Shape builder 2026-03-20
   gold_paths:
-  - path: 202603-opportunity-command-centre/status.md
+  - path: 01-projects/202603-opportunity-command-centre/status.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1226,7 +1224,7 @@ cases:
   category: semantic
   query: Opportunity Command Centre started delegated who initiated
   gold_paths:
-  - path: 202603-opportunity-command-centre/status.md
+  - path: 01-projects/202603-opportunity-command-centre/status.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1240,7 +1238,7 @@ cases:
   category: semantic
   query: Opportunity Command Centre v1 pipeline spec tasks
   gold_paths:
-  - path: 202603-opportunity-command-centre/spec.md
+  - path: 01-projects/202603-opportunity-command-centre/spec.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1254,7 +1252,7 @@ cases:
   category: semantic
   query: Platform Observability token logging cli-proxy-api LLM cost tracking
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1268,7 +1266,7 @@ cases:
   category: semantic
   query: QMD BM25 collections vault knowledge architecture agent memory
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/obsidian-openclaw-knowledge-architecture-guide.md
+  - path: 06-archive/02-areas/02-three-cubes-ventures/platform/engineering-exports/obsidian-openclaw-knowledge-architecture-guide.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1282,7 +1280,7 @@ cases:
   category: semantic
   query: QMD memory architecture BM25 semantic search collections vault
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1296,7 +1294,7 @@ cases:
   category: semantic
   query: QMD memory architecture vault collections BM25 tiered memory
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1310,7 +1308,7 @@ cases:
   category: semantic
   query: Ralph method atomic task loop quality gates acceptance criteria
   gold_paths:
-  - path: 202603-ralph-method-generalisation/ralph-method-brief.md
+  - path: 01-projects/202603-ralph-method-generalisation/ralph-method-brief.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1324,17 +1322,17 @@ cases:
   category: semantic
   query: Retail AI Readiness Index structure assessment draft progress
   gold_paths:
-  - path: 202603-retail-ai-readiness-index/assessment-draft.md
+  - path: 01-projects/202603-retail-ai-readiness-index/assessment-draft.md
     relevance: 2
-  - path: 202603-retail-ai-readiness-index/readme.md
+  - path: 01-projects/202603-retail-ai-readiness-index/readme.md
     relevance: 2
-  - path: 202603-retail-ai-readiness-index/assessment-v2.md
+  - path: 01-projects/202603-retail-ai-readiness-index/assessment-v2.md
     relevance: 2
-  - path: 202603-retail-ai-readiness-index/prd-v2.md
+  - path: 01-projects/202603-retail-ai-readiness-index/prd-v2.md
     relevance: 2
-  - path: 202603-retail-ai-readiness-index/source-material/structuring-ai-audit-framework-retailers.md
+  - path: 01-projects/202603-retail-ai-readiness-index/source-material/structuring-ai-audit-framework-retailers.md
     relevance: 2
-  - path: 202603-retail-ai-readiness-index/source-material/retail-ai-quick-reference.md
+  - path: 01-projects/202603-retail-ai-readiness-index/source-material/retail-ai-quick-reference.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1348,9 +1346,9 @@ cases:
   category: semantic
   query: Ritual slash commands in progress status what remains
   gold_paths:
-  - path: rituals/ritual-readme.md
+  - path: 04-agent-knowledge/shared/rituals/ritual-readme.md
     relevance: 2
-  - path: shared/rituals/ritual-readme.md
+  - path: 04-agent-knowledge/shared/rituals/ritual-readme.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1364,9 +1362,9 @@ cases:
   category: semantic
   query: SME&C corporate segment Microsoft partner market evidence research
   gold_paths:
-  - path: entities/concept/smec.md
+  - path: 04-agent-knowledge/entities/concept/smec.md
     relevance: 2
-  - path: concept/smec.md
+  - path: 04-agent-knowledge/entities/concept/smec.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -1380,7 +1378,7 @@ cases:
   category: semantic
   query: SMEC playbook chapter research
   gold_paths:
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1394,7 +1392,7 @@ cases:
   category: semantic
   query: Shape agent behaviour defaults rules content in chat vs vault email draft
   gold_paths:
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1408,7 +1406,7 @@ cases:
   category: semantic
   query: Shape agent configuration openclaw.json session timeout
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1422,7 +1420,7 @@ cases:
   category: semantic
   query: Shape agent stalling timeout configuration session processing
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/agent-infrastructure.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/agent-infrastructure.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1436,9 +1434,9 @@ cases:
   category: semantic
   query: Shape behavioural rules proactive reporting notifications
   gold_paths:
-  - path: archive/retro-2026-03-23.md
+  - path: 04-agent-knowledge/shared/archive/retro-2026-03-23.md
     relevance: 1
-  - path: shared/archive/retro-2026-03-23.md
+  - path: 04-agent-knowledge/shared/archive/retro-2026-03-23.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1452,11 +1450,11 @@ cases:
   category: semantic
   query: Shape telegram chat ID message target
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v1.md
+  - path: 06-archive/02-areas/02-three-cubes-ventures/platform/engineering-exports/second-brain-architecture-v1.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1470,7 +1468,7 @@ cases:
   category: semantic
   query: SharePoint Knowledge Injection Phase 3 ChatGPT progress
   gold_paths:
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1484,7 +1482,7 @@ cases:
   category: semantic
   query: SharePoint Microsoft Graph API skill access
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/second-brain-architecture-v2.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1498,9 +1496,9 @@ cases:
   category: semantic
   query: Shield social media tool LinkedIn posting Dan content strategy
   gold_paths:
-  - path: 03-dm-brand-and-career/content/social-media/content-distribution-strategy.md
+  - path: 02-areas/03-dm-brand-and-career/content/social-media/content-distribution-strategy.md
     relevance: 2
-  - path: 03-dm-brand-and-career/foundation/linkedin/profile-audit-2026-03.md
+  - path: 02-areas/03-dm-brand-and-career/foundation/linkedin/profile-audit-2026-03.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1514,7 +1512,7 @@ cases:
   category: semantic
   query: X bookmark sync last run
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1528,7 +1526,7 @@ cases:
   category: semantic
   query: agent fluency executives customer zero Bhavya program design
   gold_paths:
-  - path: 202603-executive-ai-leadership/readme.md
+  - path: 01-projects/202603-executive-ai-leadership/readme.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1542,7 +1540,7 @@ cases:
   category: semantic
   query: agent observability monitoring evaluation LLM tracing
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1556,9 +1554,9 @@ cases:
   category: semantic
   query: board in progress stale cards April 2026
   gold_paths:
-  - path: consultant/memory/2026-04-02.md
+  - path: 04-agent-knowledge/consultant/memory/2026-04-02.md
     relevance: 2
-  - path: consultant/memory/2026-04-03.md
+  - path: 04-agent-knowledge/consultant/memory/2026-04-03.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1572,7 +1570,7 @@ cases:
   category: semantic
   query: builder board kanban tasks in progress ready status
   gold_paths:
-  - path: coach/board.md
+  - path: 04-agent-knowledge/coach/board.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1586,7 +1584,7 @@ cases:
   category: semantic
   query: builder retrospective performance patterns rules
   gold_paths:
-  - path: builder/rules.md
+  - path: 04-agent-knowledge/builder/rules.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1600,7 +1598,7 @@ cases:
   category: semantic
   query: campaign priorities APAC mid-market source inputs research conversations how framework was derived
   gold_paths:
-  - path: 01-work/gtm/2026-campaign-priorities-industry-triggers-method-record.md
+  - path: 02-areas/01-work/gtm/2026-campaign-priorities-industry-triggers-method-record.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -1614,7 +1612,7 @@ cases:
   category: semantic
   query: chief-of-staff MCP what is it used for active deprecated
   gold_paths:
-  - path: x-bookmarks/2026-03-26-mar-10-2025-what-is-mcp-why-is-everyon.md
+  - path: 03-resources/x-bookmarks/2026-03-26-mar-10-2025-what-is-mcp-why-is-everyon.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1628,7 +1626,7 @@ cases:
   category: semantic
   query: claude code prompt playbook resources
   gold_paths:
-  - path: x-bookmarks/2026-03-31-nov-16-2025-fuck-it-i-m-giving-away-my.md
+  - path: 03-resources/x-bookmarks/2026-03-31-nov-16-2025-fuck-it-i-m-giving-away-my.md
     relevance: 2
   - path: method-claude-md-optimisation-strategy.md
     relevance: 1
@@ -1658,7 +1656,7 @@ cases:
   category: semantic
   query: concurrent agents subagent Phase 3 extraction running
   gold_paths:
-  - path: 202603-sow-factory-product/platform-spec/agents/architecture.md
+  - path: 01-projects/202603-sow-factory-product/platform-spec/agents/architecture.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1672,11 +1670,11 @@ cases:
   category: semantic
   query: content schedule publishing plan articles drafts brand career
   gold_paths:
-  - path: 03-dm-brand-and-career/content/content-tracker.md
+  - path: 02-areas/03-dm-brand-and-career/content/content-tracker.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/social-media/content-distribution-strategy.md
+  - path: 02-areas/03-dm-brand-and-career/content/social-media/content-distribution-strategy.md
     relevance: 1
-  - path: 03-dm-brand-and-career/content/content-strategy.md
+  - path: 02-areas/03-dm-brand-and-career/content/content-strategy.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1690,7 +1688,7 @@ cases:
   category: semantic
   query: context specificity audit priority 1 generalisation files clusters process operations GTM
   gold_paths:
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1704,11 +1702,11 @@ cases:
   category: semantic
   query: conversation export extraction methodology ChatGPT Claude export processing
   gold_paths:
-  - path: consultant/patterns.md
+  - path: 04-agent-knowledge/consultant/patterns.md
     relevance: 2
-  - path: consultant/memory/2026-03-30.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-30.md
     relevance: 1
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1722,15 +1720,15 @@ cases:
   category: semantic
   query: current active work tasks in progress
   gold_paths:
-  - path: entities/project/active.md
+  - path: 04-agent-knowledge/entities/project/active.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase2.md
     relevance: 2
-  - path: project/active.md
+  - path: 04-agent-knowledge/entities/project/active.md
     relevance: 1
-  - path: 202603-executive-ai-leadership/05-curriculum/programme-curriculum-v1.md
+  - path: 01-projects/202603-executive-ai-leadership/05-curriculum/programme-curriculum-v1.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1744,13 +1742,13 @@ cases:
   category: semantic
   query: current in progress tasks blockers recent decisions
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
     relevance: 2
-  - path: builder/mnemosyne-board.md
+  - path: 04-agent-knowledge/builder/mnemosyne-board.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/requirements/multi-agent-roadmap.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-roadmap.md
     relevance: 2
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1764,7 +1762,7 @@ cases:
   category: semantic
   query: current priorities active work backlog
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -1778,15 +1776,15 @@ cases:
   category: semantic
   query: current priorities active work in progress
   gold_paths:
-  - path: entities/project/active.md
+  - path: 04-agent-knowledge/entities/project/active.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/requirements/multi-agent-roadmap.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-roadmap.md
     relevance: 2
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 1
-  - path: project/active.md
+  - path: 04-agent-knowledge/entities/project/active.md
     relevance: 1
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -1800,9 +1798,9 @@ cases:
   category: semantic
   query: current projects priorities in progress
   gold_paths:
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -1816,11 +1814,11 @@ cases:
   category: semantic
   query: current projects priorities recent work
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -1834,11 +1832,11 @@ cases:
   category: semantic
   query: current projects tasks in progress
   gold_paths:
-  - path: project/active.md
+  - path: 04-agent-knowledge/entities/project/active.md
     relevance: 2
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1852,17 +1850,17 @@ cases:
   category: semantic
   query: current projects tasks priorities
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: 202604-memory-optimisation/brief.md
+  - path: 01-projects/202604-memory-optimisation/brief.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
-  - path: project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/requirements/multi-agent-roadmap.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-roadmap.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1876,7 +1874,7 @@ cases:
   category: semantic
   query: current sprint in progress work March 2026
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1890,7 +1888,7 @@ cases:
   category: semantic
   query: current tasks GTM pipeline priorities
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
   score_method: ndcg
   agent: growth
@@ -1904,19 +1902,19 @@ cases:
   category: semantic
   query: current tasks backlog in progress blocked
   gold_paths:
-  - path: dashboard.md
+  - path: 00-home/dashboard.md
     relevance: 2
-  - path: shared/dashboard.md
+  - path: 00-home/dashboard.md
     relevance: 2
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 2
-  - path: builder/mnemosyne-board.md
+  - path: 04-agent-knowledge/builder/mnemosyne-board.md
     relevance: 2
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
-  - path: shape/facts.md
+  - path: 04-agent-knowledge/shape/facts.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1930,17 +1928,17 @@ cases:
   category: semantic
   query: current tasks in progress recent work decisions
   gold_paths:
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase2.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/obsidian-openclaw-knowledge-architecture-guide.md
+  - path: 06-archive/02-areas/02-three-cubes-ventures/platform/engineering-exports/obsidian-openclaw-knowledge-architecture-guide.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/second-brain-architecture-v2.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -1954,7 +1952,7 @@ cases:
   category: semantic
   query: current tasks in progress tc-productivity
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -1968,13 +1966,13 @@ cases:
   category: semantic
   query: current tasks projects priorities
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: 202604-memory-optimisation/brief.md
+  - path: 01-projects/202604-memory-optimisation/brief.md
     relevance: 2
-  - path: project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -1988,7 +1986,7 @@ cases:
   category: semantic
   query: current work in progress tasks consultant
   gold_paths:
-  - path: consultant/board.md
+  - path: 04-agent-knowledge/consultant/board.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -2002,8 +2000,6 @@ cases:
   category: semantic
   query: email PDF report send document
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/engineering/deliverable-pipeline-development-case-study.md
-    relevance: 1
   score_method: ndcg
   agent: main
   source: session_log
@@ -2016,10 +2012,6 @@ cases:
   category: semantic
   query: entity alias resolution canonical names ontology
   gold_paths:
-  - path: mnemosyne-ontology.md
-    relevance: 2
-  - path: shared/mnemosyne-ontology.md
-    relevance: 2
   score_method: ndcg
   agent: builder
   source: session_log
@@ -2032,7 +2024,7 @@ cases:
   category: semantic
   query: entity graph fault location wikilinks vault ontology
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2046,9 +2038,9 @@ cases:
   category: semantic
   query: executive agent learning Bhavya Copilot Studio demo
   gold_paths:
-  - path: 202603-executive-ai-leadership/03-customer-zero/bhavya-session-brief-2026-04-01.md
+  - path: 01-projects/202603-executive-ai-leadership/03-customer-zero/bhavya-session-brief-2026-04-01.md
     relevance: 2
-  - path: 202603-executive-ai-leadership/04-programme-design/programme-design-v4.md
+  - path: 01-projects/202603-executive-ai-leadership/04-programme-design/programme-design-v4.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2062,7 +2054,7 @@ cases:
   category: semantic
   query: feature register platform FEATURE-REGISTER missing
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2076,9 +2068,9 @@ cases:
   category: semantic
   query: feature register visualisation dashboard backlog projects
   gold_paths:
-  - path: dashboard.md
+  - path: 00-home/dashboard.md
     relevance: 2
-  - path: shared/dashboard.md
+  - path: 00-home/dashboard.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2092,9 +2084,9 @@ cases:
   category: semantic
   query: fit repos repositories GitHub three-cubes
   gold_paths:
-  - path: entities/project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 2
-  - path: project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -2108,7 +2100,7 @@ cases:
   category: semantic
   query: folder structure digital customer marketing finance operations 5 plus minus 2
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/prototypes/catalogue.md
+  - path: 02-areas/02-three-cubes-ventures/platform/prototypes/catalogue.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2122,7 +2114,7 @@ cases:
   category: semantic
   query: growth agent work completed March 12 13 MIT events articles
   gold_paths:
-  - path: 01-work/market/session-retrospective-2026-03-09-to-10.md
+  - path: 02-areas/01-work/market/session-retrospective-2026-03-09-to-10.md
     relevance: 1
   score_method: ndcg
   agent: growth
@@ -2136,7 +2128,7 @@ cases:
   category: semantic
   query: heartbeat frequency agents reduced token cost regular intervals
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2150,7 +2142,7 @@ cases:
   category: semantic
   query: heartbeat token cost reduced memory architecture slim MEMORY.md
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2164,9 +2156,9 @@ cases:
   category: semantic
   query: job search workflow opportunity pipeline advisory asset
   gold_paths:
-  - path: 202603-opportunity-command-centre/spec.md
+  - path: 01-projects/202603-opportunity-command-centre/spec.md
     relevance: 2
-  - path: 202603-opportunity-command-centre/status.md
+  - path: 01-projects/202603-opportunity-command-centre/status.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2180,13 +2172,13 @@ cases:
   category: semantic
   query: knowledge area vault refactor strategy operating models consulting delivery solutions GTM
   gold_paths:
-  - path: entities/organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 1
-  - path: organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 1
-  - path: entities/organisation/microsoft.md
+  - path: 04-agent-knowledge/entities/organisation/microsoft.md
     relevance: 1
-  - path: organisation/microsoft.md
+  - path: 04-agent-knowledge/entities/organisation/microsoft.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2200,7 +2192,7 @@ cases:
   category: semantic
   query: local embedding azure foundry mnemosyne fast slow path
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2214,7 +2206,7 @@ cases:
   category: semantic
   query: memory file 2026-03-29 location
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -2228,15 +2220,11 @@ cases:
   category: semantic
   query: mnemosyne entity extract wikilinks inject pipeline
   gold_paths:
-  - path: mnemosyne-ontology.md
-    relevance: 2
-  - path: shared/mnemosyne-ontology.md
-    relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
     relevance: 1
-  - path: entities/project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
-  - path: project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2250,7 +2238,7 @@ cases:
   category: semantic
   query: mnemosyne nightly entity wikilinks cron
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2264,7 +2252,7 @@ cases:
   category: semantic
   query: mnemosyne nightly maintenance entity extract wikilinks
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2292,9 +2280,9 @@ cases:
   category: semantic
   query: networking contacts prospects clients business development growth
   gold_paths:
-  - path: growth/networking.md
+  - path: 04-agent-knowledge/growth/networking.md
     relevance: 2
-  - path: 03-dm-brand-and-career/network/network-overview.md
+  - path: 02-areas/03-dm-brand-and-career/network/network-overview.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2308,7 +2296,7 @@ cases:
   category: semantic
   query: observability evaluation agent SDK telemetry monitoring
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2322,7 +2310,7 @@ cases:
   category: semantic
   query: observability instrumentation logging telemetry token tracking
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -2350,11 +2338,11 @@ cases:
   category: semantic
   query: openclaw dashboard usage token logger observability
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/observability/token-cost-audit-setup.md
+  - path: 06-archive/02-areas/platform-engineering-exports/token-cost-audit-setup.md
     relevance: 2
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2386,7 +2374,7 @@ cases:
   gold_paths:
   - path: readme.md
     relevance: 2
-  - path: facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2400,11 +2388,11 @@ cases:
   category: semantic
   query: overnight autonomous work Builder capabilities constraints
   gold_paths:
-  - path: builder/patterns.md
+  - path: 04-agent-knowledge/builder/patterns.md
     relevance: 1
-  - path: entities/concept/builder.md
+  - path: 04-agent-knowledge/entities/concept/builder.md
     relevance: 1
-  - path: concept/builder.md
+  - path: 04-agent-knowledge/entities/concept/builder.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2418,7 +2406,7 @@ cases:
   category: semantic
   query: patterns.md research methodology extraction PDF
   gold_paths:
-  - path: consultant/patterns.md
+  - path: 04-agent-knowledge/consultant/patterns.md
     relevance: 2
   score_method: ndcg
   agent: consultant
@@ -2432,7 +2420,7 @@ cases:
   category: semantic
   query: pending Dan approvals outstanding actions 2026-03-29
   gold_paths:
-  - path: 04-personal/dan-backlog.md
+  - path: 02-areas/04-personal/dan-backlog.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2446,9 +2434,9 @@ cases:
   category: semantic
   query: platform dashboard backlog visualisation kanban feature status
   gold_paths:
-  - path: dashboard.md
+  - path: 00-home/dashboard.md
     relevance: 2
-  - path: shared/dashboard.md
+  - path: 00-home/dashboard.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2462,11 +2450,11 @@ cases:
   category: semantic
   query: qmd azure embed package source pyproject setup install
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
     relevance: 2
-  - path: entities/project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 1
-  - path: project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2480,17 +2468,17 @@ cases:
   category: semantic
   query: qmd-azure-embed mnemosyne source code git repository location install
   gold_paths:
-  - path: entities/project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 2
-  - path: project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 2
-  - path: entities/project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 2
-  - path: project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase1.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase1.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2504,11 +2492,11 @@ cases:
   category: semantic
   query: quality gates testing security practices engineering standards
   gold_paths:
-  - path: builder/engineering-standards.md
+  - path: 04-agent-knowledge/builder/engineering-standards.md
     relevance: 2
-  - path: 202603-ralph-method-generalisation/research-report.md
+  - path: 01-projects/202603-ralph-method-generalisation/research-report.md
     relevance: 1
-  - path: builder/rules.md
+  - path: 04-agent-knowledge/builder/rules.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2522,7 +2510,7 @@ cases:
   category: semantic
   query: recent priorities tasks in progress
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2536,15 +2524,15 @@ cases:
   category: semantic
   query: recent tasks decisions current work
   gold_paths:
-  - path: shape/board.md
+  - path: 04-agent-knowledge/shape/board.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/requirements/multi-agent-roadmap.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-roadmap.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/fix-plan-phase2.md
     relevance: 2
-  - path: shape/facts.md
+  - path: 04-agent-knowledge/shape/facts.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2558,7 +2546,7 @@ cases:
   category: semantic
   query: recent work in progress priorities
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2572,7 +2560,7 @@ cases:
   category: semantic
   query: recent work priorities active projects
   gold_paths:
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2586,7 +2574,7 @@ cases:
   category: semantic
   query: repo consolidation architecture decision infrastructure engineering agent zone
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/architecture/infrastructure-map.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/infrastructure-map.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -2600,7 +2588,7 @@ cases:
   category: semantic
   query: retail AI readiness index client notes sent last week
   gold_paths:
-  - path: research-briefs/australian-retail-ai-reality.md
+  - path: 03-resources/research-briefs/australian-retail-ai-reality.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -2614,7 +2602,7 @@ cases:
   category: semantic
   query: retail AI statistics sources attribution Gartner NRF 2026
   gold_paths:
-  - path: 202603-retail-ai-readiness-index/research-refresh.md
+  - path: 01-projects/202603-retail-ai-readiness-index/research-refresh.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2642,11 +2630,11 @@ cases:
   category: semantic
   query: runbook operations cron systemd openclaw
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
-  - path: facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2660,7 +2648,7 @@ cases:
   category: semantic
   query: runbook vm-tc-openclaw infrastructure operations
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -2674,13 +2662,13 @@ cases:
   category: semantic
   query: session retrospective improvements agent behaviour rules
   gold_paths:
-  - path: archive/retro-2026-03-25.md
+  - path: 04-agent-knowledge/shared/archive/retro-2026-03-25.md
     relevance: 2
-  - path: shared/archive/retro-2026-03-25.md
+  - path: 04-agent-knowledge/shared/archive/retro-2026-03-25.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/observability/session-review-reports/2026-03-30.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/session-review-reports/2026-03-30.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/observability/session-review-reports/2026-03-31.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/session-review-reports/2026-03-31.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2694,7 +2682,7 @@ cases:
   category: semantic
   query: sub-agent spawn model selection task types writing research engineering
   gold_paths:
-  - path: shape/spawn-model-guide.md
+  - path: 04-agent-knowledge/shape/spawn-model-guide.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2708,9 +2696,9 @@ cases:
   category: semantic
   query: target organisations list Three Cubes advisory prospect accounts GTM segmentation
   gold_paths:
-  - path: entities/organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2724,9 +2712,9 @@ cases:
   category: semantic
   query: target organisations prospect list network mapping Dex contacts
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/crm/dex-enrichment-summary.md
+  - path: 06-archive/02-areas/platform-restructure-2026-04-06/dex-enrichment-summary.md
     relevance: 2
-  - path: growth/networking.md
+  - path: 04-agent-knowledge/growth/networking.md
     relevance: 1
   score_method: ndcg
   agent: main
@@ -2782,7 +2770,7 @@ cases:
   category: semantic
   query: today memory file path 2026-03-29
   gold_paths:
-  - path: consultant/memory/2026-03-29.md
+  - path: 04-agent-knowledge/consultant/memory/2026-03-29.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -2796,7 +2784,7 @@ cases:
   category: semantic
   query: today's memory file location daily log
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -2810,7 +2798,7 @@ cases:
   category: semantic
   query: token audit cost heartbeat alerts efficiency
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 1
   - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/provider-pricing-and-billing-equivalency.md
     relevance: 1
@@ -2826,17 +2814,17 @@ cases:
   category: semantic
   query: token consumption audit cost analysis cron jobs agents
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/observability/token-cost-audit-setup.md
+  - path: 06-archive/02-areas/platform-engineering-exports/token-cost-audit-setup.md
     relevance: 2
-  - path: token-usage-log.md
+  - path: 04-agent-knowledge/shared/token-usage-log.md
     relevance: 2
-  - path: shared/token-usage-log.md
+  - path: 04-agent-knowledge/shared/token-usage-log.md
     relevance: 2
-  - path: archive/token-usage-log.md
+  - path: 04-agent-knowledge/shared/archive/token-usage-log.md
     relevance: 1
-  - path: shared/archive/token-usage-log.md
+  - path: 04-agent-knowledge/shared/archive/token-usage-log.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2850,11 +2838,11 @@ cases:
   category: semantic
   query: token consumption logging proxy JSONL per-agent spend
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-cost-audit-setup.md
+  - path: 06-archive/02-areas/platform-engineering-exports/token-cost-audit-setup.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-085-platform-observability/prd.md
     relevance: 2
   score_method: ndcg
   agent: main
@@ -2868,9 +2856,9 @@ cases:
   category: semantic
   query: token cost observability per-agent instrumentation cli-proxy-api
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-cost-audit-setup.md
+  - path: 06-archive/02-areas/platform-engineering-exports/token-cost-audit-setup.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -2884,17 +2872,17 @@ cases:
   category: semantic
   query: token instrumentation cost visibility FEAT-085 FEAT-012 cli-proxy-api
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/observability/token-audit-2026-03-26.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/token-audit-2026-03-26.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/observability/token-cost-audit-setup.md
+  - path: 06-archive/02-areas/platform-engineering-exports/token-cost-audit-setup.md
     relevance: 2
-  - path: token-usage-log.md
+  - path: 04-agent-knowledge/shared/token-usage-log.md
     relevance: 2
-  - path: shared/token-usage-log.md
+  - path: 04-agent-knowledge/shared/token-usage-log.md
     relevance: 2
-  - path: archive/token-usage-log.md
+  - path: 04-agent-knowledge/shared/archive/token-usage-log.md
     relevance: 1
-  - path: shared/archive/token-usage-log.md
+  - path: 04-agent-knowledge/shared/archive/token-usage-log.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2908,7 +2896,7 @@ cases:
   category: semantic
   query: vault filing conventions PARA knowledge structure ChatGPT extraction
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v1.md
+  - path: 06-archive/02-areas/02-three-cubes-ventures/platform/engineering-exports/second-brain-architecture-v1.md
     relevance: 1
   score_method: ndcg
   agent: consultant
@@ -2922,7 +2910,7 @@ cases:
   category: semantic
   query: vault inbox location path
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/obsidian-openclaw-knowledge-architecture-guide.md
+  - path: 06-archive/02-areas/02-three-cubes-ventures/platform/engineering-exports/obsidian-openclaw-knowledge-architecture-guide.md
     relevance: 1
   - path: 02-three-cubes-ventures/platform/guides/knowledge-architecture-implementation-guide.md
     relevance: 1
@@ -2938,17 +2926,17 @@ cases:
   category: semantic
   query: vm infrastructure facts shared knowledge agent
   gold_paths:
-  - path: facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
   - path: readme.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/architecture/multi-agent-as-built.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-as-built.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -2962,13 +2950,13 @@ cases:
   category: entity
   query: Dan McMahon role responsibilities Three Cubes Ventures
   gold_paths:
-  - path: entities/person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 2
-  - path: person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 2
-  - path: entities/organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
   - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 2
@@ -2984,7 +2972,7 @@ cases:
   category: entity
   query: Shape agent coordination authority responsibilities
   gold_paths:
-  - path: 202603-sow-factory-product/platform-spec/agents/architecture.md
+  - path: 01-projects/202603-sow-factory-product/platform-spec/agents/architecture.md
     relevance: 2
   - path: 04-agent-knowledge/shape/rules.md
     relevance: 1
@@ -3000,7 +2988,7 @@ cases:
   category: entity
   query: QMD tool what is it purpose sqlite-vec embeddings
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
@@ -3016,9 +3004,9 @@ cases:
   category: entity
   query: Builder agent engineering role responsibilities rules
   gold_paths:
-  - path: entities/concept/builder.md
+  - path: 04-agent-knowledge/entities/concept/builder.md
     relevance: 2
-  - path: concept/builder.md
+  - path: 04-agent-knowledge/entities/concept/builder.md
     relevance: 2
   - path: 04-agent-knowledge/builder/rules.md
     relevance: 2
@@ -3036,15 +3024,9 @@ cases:
   category: entity
   query: mnemosyne ontology entity types stop list aliases
   gold_paths:
-  - path: mnemosyne-ontology.md
-    relevance: 2
-  - path: shared/mnemosyne-ontology.md
-    relevance: 2
-  - path: 04-agent-knowledge/shared/mnemosyne-ontology.md
-    relevance: 2
-  - path: entities/project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
-  - path: project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3058,9 +3040,9 @@ cases:
   category: entity
   query: key vault kv-tc-exp secrets Azure infrastructure
   gold_paths:
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
   - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
@@ -3076,15 +3058,15 @@ cases:
   category: entity
   query: active projects list Three Cubes Ventures current
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
     relevance: 2
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
-  - path: person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 1
-  - path: entities/project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3098,11 +3080,11 @@ cases:
   category: entity
   query: Leslie who is Leslie role in system
   gold_paths:
-  - path: concept/shape.md
+  - path: 04-agent-knowledge/entities/concept/shape.md
     relevance: 1
-  - path: entities/person/leslie.md
+  - path: 04-agent-knowledge/entities/person/leslie.md
     relevance: 1
-  - path: person/leslie.md
+  - path: 04-agent-knowledge/entities/person/leslie.md
     relevance: 1
   - path: 04-agent-knowledge/entities/person/leslie.md
     relevance: 1
@@ -3118,13 +3100,9 @@ cases:
   category: entity
   query: wikilink entity index canonical names and aliases
   gold_paths:
-  - path: mnemosyne-ontology.md
-    relevance: 2
-  - path: shared/mnemosyne-ontology.md
-    relevance: 2
-  - path: wikilink-entity-index.md
+  - path: 06-archive/04-agent-knowledge/wikilink-entity-index.md
     relevance: 1
-  - path: 04-agent-knowledge/shared/wikilink-entity-index.md
+  - path: 06-archive/04-agent-knowledge/wikilink-entity-index.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3138,7 +3116,7 @@ cases:
   category: semantic
   query: why hybrid BM25 vector search chosen over pure vector approach
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
@@ -3154,15 +3132,15 @@ cases:
   category: semantic
   query: Ralph loop purpose methodology when to use it
   gold_paths:
-  - path: entities/concept/ralph.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
-  - path: 202603-ralph-method-generalisation/research-report.md
+  - path: 01-projects/202603-ralph-method-generalisation/research-report.md
     relevance: 2
-  - path: concept/ralph.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
   - path: 04-agent-knowledge/builder/patterns.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3194,11 +3172,11 @@ cases:
   gold_paths:
   - path: 04-agent-knowledge/shared/rules.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/agent-infrastructure.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/agent-infrastructure.md
     relevance: 1
-  - path: archive/tc-platform-analysis.md
+  - path: 04-agent-knowledge/shared/archive/tc-platform-analysis.md
     relevance: 1
-  - path: shared/archive/tc-platform-analysis.md
+  - path: 04-agent-knowledge/shared/archive/tc-platform-analysis.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3214,7 +3192,7 @@ cases:
   gold_paths:
   - path: 04-agent-knowledge/shared/rules.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3228,21 +3206,21 @@ cases:
   category: semantic
   query: platform vision OpenClaw agent ecosystem purpose
   gold_paths:
-  - path: entities/concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/second-brain-architecture-v2.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/second-brain-architecture-v2.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/platform-vision.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/platform-vision.md
     relevance: 2
-  - path: 02-areas/02-three-cubes-ventures/platform/platform-vision.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/platform-vision.md
     relevance: 2
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/readme.md
+  - path: 02-areas/02-three-cubes-ventures/platform/readme.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3256,15 +3234,15 @@ cases:
   category: semantic
   query: why not use openai SDK in qmd-azure-embed mnemosyne
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
     relevance: 2
-  - path: entities/project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 1
-  - path: project/qmd-azure-embed.md
+  - path: 04-agent-knowledge/entities/project/qmd-azure-embed.md
     relevance: 1
-  - path: entities/project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
-  - path: project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3278,11 +3256,11 @@ cases:
   category: semantic
   query: no external sends without Dan approval draft first rule
   gold_paths:
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 2
   - path: 04-agent-knowledge/shape/rules.md
     relevance: 2
-  - path: builder/rules.md
+  - path: 04-agent-knowledge/builder/rules.md
     relevance: 1
   - path: 04-agent-knowledge/shared/rules.md
     relevance: 1
@@ -3298,15 +3276,15 @@ cases:
   category: procedural
   query: Ralph loop steps execution sequence complete process
   gold_paths:
-  - path: entities/concept/ralph.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
-  - path: concept/ralph.md
-    relevance: 2
-  - path: builder/patterns.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
   - path: 04-agent-knowledge/builder/patterns.md
     relevance: 2
-  - path: 202603-sow-factory-product/competitive-research.md
+  - path: 04-agent-knowledge/builder/patterns.md
+    relevance: 2
+  - path: 01-projects/202603-sow-factory-product/competitive-research.md
     relevance: 1
   - path: 04-agent-knowledge/builder/engineering-standards.md
     relevance: 1
@@ -3324,7 +3302,7 @@ cases:
   gold_paths:
   - path: 04-agent-knowledge/builder/engineering-standards.md
     relevance: 2
-  - path: 202603-ralph-method-generalisation/research-report.md
+  - path: 01-projects/202603-ralph-method-generalisation/research-report.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3338,13 +3316,13 @@ cases:
   category: procedural
   query: how to run mnemosyne benchmark suite test recall check
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
     relevance: 1
-  - path: entities/project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
-  - path: project/mnemosyne.md
+  - path: 04-agent-knowledge/entities/project/mnemosyne.md
     relevance: 1
   - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
@@ -3360,6 +3338,10 @@ cases:
   category: procedural
   query: how to register new cron job OpenClaw cron-registry
   gold_paths:
+  - path: 02-areas/02-three-cubes-ventures/platform/runbooks/how-to-add-new-skill.md
+    relevance: 2
+  - path: 02-areas/02-three-cubes-ventures/platform/runbooks/how-to-add-new-agent.md
+    relevance: 1
   - path: 04-agent-knowledge/shared/patterns.md
     relevance: 1
   score_method: ndcg
@@ -3390,8 +3372,6 @@ cases:
   gold_paths:
   - path: 04-agent-knowledge/shared/rules.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/engineering/deliverable-pipeline-development-case-study.md
-    relevance: 1
   score_method: ndcg
   agent: shape
   source: curated
@@ -3404,7 +3384,7 @@ cases:
   category: procedural
   query: board card workflow Ready In-Progress For-Review Done states
   gold_paths:
-  - path: coach/board.md
+  - path: 04-agent-knowledge/coach/board.md
     relevance: 2
   score_method: ndcg
   agent: shape
@@ -3418,15 +3398,11 @@ cases:
   category: procedural
   query: wikilink format rules when to create entity links
   gold_paths:
-  - path: mnemosyne-ontology.md
-    relevance: 2
-  - path: shared/mnemosyne-ontology.md
-    relevance: 2
-  - path: wikilink-entity-index.md
+  - path: 06-archive/04-agent-knowledge/wikilink-entity-index.md
     relevance: 2
   - path: 04-agent-knowledge/shared/rules.md
     relevance: 2
-  - path: 04-agent-knowledge/shared/wikilink-entity-index.md
+  - path: 06-archive/04-agent-knowledge/wikilink-entity-index.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -3440,9 +3416,9 @@ cases:
   category: temporal
   query: Phase 4 mnemosyne completion date benchmark score result
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/work-breakdown.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3456,7 +3432,7 @@ cases:
   category: temporal
   query: Phase 3 benchmark score date when completed
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/retro-phase3.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/retro-phase3.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3478,13 +3454,13 @@ cases:
     relevance: 1
   - path: /data/workspaces/shape/memory/2026-03-27.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/requirements/multi-agent-roadmap.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/multi-agent-roadmap.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/obsidian-openclaw-knowledge-architecture-guide.md
+  - path: 06-archive/02-areas/02-three-cubes-ventures/platform/engineering-exports/obsidian-openclaw-knowledge-architecture-guide.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/decisions.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -3498,7 +3474,7 @@ cases:
   category: temporal
   query: 2026-03-09 system overview VM specs six agent configuration
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
   score_method: ndcg
   agent: shape
@@ -3512,7 +3488,7 @@ cases:
   category: temporal
   query: recent changes mnemosyne chunker planner what shipped
   gold_paths:
-  - path: builder/mnemosyne-board.md
+  - path: 04-agent-knowledge/builder/mnemosyne-board.md
     relevance: 1
   - path: 2026-03-23.md
     relevance: 1
@@ -3548,7 +3524,7 @@ cases:
   category: multi_hop
   query: FEAT-085 platform observability who owns it what is its status phase
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3562,9 +3538,9 @@ cases:
   category: multi_hop
   query: FEAT-020 mnemosyne ownership phase status current
   gold_paths:
-  - path: builder/mnemosyne-board.md
+  - path: 04-agent-knowledge/builder/mnemosyne-board.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 1
   - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 1
@@ -3582,7 +3558,7 @@ cases:
   category: multi_hop
   query: which model does Builder agent use why chosen over other models
   gold_paths:
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3628,7 +3604,7 @@ cases:
   category: keyword
   query: NOPASSWD ALL sudoers openclaw journal access
   gold_paths:
-  - path: builder/rules.md
+  - path: 04-agent-knowledge/builder/rules.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -3642,12 +3618,6 @@ cases:
   category: keyword
   query: entity stop list mnemosyne-ontology excluded terms
   gold_paths:
-  - path: mnemosyne-ontology.md
-    relevance: 2
-  - path: shared/mnemosyne-ontology.md
-    relevance: 2
-  - path: 04-agent-knowledge/shared/mnemosyne-ontology.md
-    relevance: 2
   score_method: ndcg
   agent: builder
   source: curated
@@ -3660,7 +3630,7 @@ cases:
   category: keyword
   query: extraPaths openclaw.json PATH configuration
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
   - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
@@ -3676,7 +3646,7 @@ cases:
   category: keyword
   query: haiku sonnet opus model selection agent assignment
   gold_paths:
-  - path: shape/spawn-model-guide.md
+  - path: 04-agent-knowledge/shape/spawn-model-guide.md
     relevance: 2
   - path: 04-agent-knowledge/shared/facts.md
     relevance: 1
@@ -3692,19 +3662,19 @@ cases:
   category: entity
   query: OpenClaw platform what is it multi-agent AI
   gold_paths:
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: entities/concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/readme.md
+  - path: 02-areas/02-three-cubes-ventures/platform/readme.md
     relevance: 2
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 2
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3718,15 +3688,15 @@ cases:
   category: entity
   query: QMD SQLite vector search what is QMD tool
   gold_paths:
-  - path: concept/qmd.md
+  - path: 04-agent-knowledge/entities/concept/qmd.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 1
-  - path: entities/concept/qmd.md
+  - path: 04-agent-knowledge/entities/concept/qmd.md
     relevance: 1
-  - path: concept/builder.md
+  - path: 04-agent-knowledge/entities/concept/builder.md
     relevance: 1
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3740,15 +3710,15 @@ cases:
   category: entity
   query: Bower Bird tc-productivity what is it personal productivity app
   gold_paths:
-  - path: entities/project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 2
-  - path: project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 2
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 2
-  - path: entities/project/bower-bird.md
+  - path: 04-agent-knowledge/entities/project/bower-bird.md
     relevance: 1
-  - path: project/bower-bird.md
+  - path: 04-agent-knowledge/entities/project/bower-bird.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3762,13 +3732,13 @@ cases:
   category: entity
   query: Ralph methodology loop execution pattern what is Ralph
   gold_paths:
-  - path: concept/ralph.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
-  - path: entities/concept/ralph.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
-  - path: 202603-ralph-method-generalisation/research-report.md
+  - path: 01-projects/202603-ralph-method-generalisation/research-report.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3782,13 +3752,13 @@ cases:
   category: entity
   query: Builder agent Board.md tasks engineering board
   gold_paths:
-  - path: concept/ralph.md
+  - path: 04-agent-knowledge/entities/concept/ralph.md
     relevance: 2
-  - path: concept/shape.md
+  - path: 04-agent-knowledge/entities/concept/shape.md
     relevance: 2
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 2
-  - path: project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3802,17 +3772,17 @@ cases:
   category: entity
   query: Avanade client work consulting engagement
   gold_paths:
-  - path: organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 2
-  - path: entities/organisation/avanade.md
+  - path: 04-agent-knowledge/entities/organisation/avanade.md
     relevance: 2
-  - path: organisation/bupa.md
+  - path: 04-agent-knowledge/entities/organisation/bupa.md
     relevance: 2
-  - path: shape/facts.md
+  - path: 04-agent-knowledge/shape/facts.md
     relevance: 2
-  - path: ideas/non-compete-business-ideas.md
+  - path: 03-resources/ideas/non-compete-business-ideas.md
     relevance: 1
-  - path: person/dan-mcmahon.md
+  - path: 04-agent-knowledge/entities/person/dan-mcmahon.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3826,13 +3796,9 @@ cases:
   category: semantic
   query: style checker false positives domain terms proper nouns workaround
   gold_paths:
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 2
-  - path: mnemosyne-ontology.md
-    relevance: 1
-  - path: shared/mnemosyne-ontology.md
-    relevance: 1
-  - path: project/tc-productivity.md
+  - path: 04-agent-knowledge/entities/project/tc-productivity.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3846,7 +3812,7 @@ cases:
   category: semantic
   query: CodeQL security alerts tc-productivity triage severity
   gold_paths:
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -3860,9 +3826,9 @@ cases:
   category: semantic
   query: why not index tc-productivity or tc-platform in QMD
   gold_paths:
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3876,11 +3842,11 @@ cases:
   category: semantic
   query: Shape agent do first explain after execution model
   gold_paths:
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 2
-  - path: 202603-executive-ai-leadership/04-programme-design/programme-design-v2.md
+  - path: 01-projects/202603-executive-ai-leadership/04-programme-design/programme-design-v2.md
     relevance: 1
-  - path: 202603-executive-ai-leadership/04-programme-design/programme-design-v1.md
+  - path: 01-projects/202603-executive-ai-leadership/04-programme-design/programme-design-v1.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3894,11 +3860,11 @@ cases:
   category: semantic
   query: Dan McMahon voice profile banned rhetorical structures LLM defaults
   gold_paths:
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 2
-  - path: 03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
+  - path: 02-areas/03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
     relevance: 1
-  - path: 03-dm-brand-and-career/voice/writing-style.md
+  - path: 02-areas/03-dm-brand-and-career/voice/writing-style.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3912,9 +3878,9 @@ cases:
   category: semantic
   query: benchmark test categories six weighted recall temporal entity conceptual multi-hop procedural
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 2
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3928,13 +3894,15 @@ cases:
   category: procedural
   query: before gateway restart check subagents list active wait
   gold_paths:
-  - path: builder/recovery.md
+  - path: 02-areas/02-three-cubes-ventures/platform/runbooks/how-to-upgrade-openclaw-binary.md
     relevance: 2
-  - path: shape/rules.md
+  - path: 02-areas/02-three-cubes-ventures/platform/runbooks/how-to-edit-openclaw-config-safely.md
     relevance: 2
-  - path: ops-runbook.md
+  - path: 04-agent-knowledge/shape/rules.md
+    relevance: 2
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -3948,7 +3916,7 @@ cases:
   category: procedural
   query: how to remount root filesystem read-write before apt install
   gold_paths:
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -3962,7 +3930,7 @@ cases:
   category: procedural
   query: Dex CRM search before create contact log note API
   gold_paths:
-  - path: 01-work/market/gtm-runbook.md
+  - path: 02-areas/01-work/market/gtm-runbook.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3976,11 +3944,11 @@ cases:
   category: procedural
   query: brief scale lightweight spec config change full feature spec
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/feature-register.md
+  - path: 02-areas/02-three-cubes-ventures/platform/feature-register.md
     relevance: 1
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 1
-  - path: 02-three-cubes-ventures/platform/agent-ecosystem/agent-infrastructure.md
+  - path: 02-areas/02-three-cubes-ventures/platform/architecture/agent-infrastructure.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -3994,7 +3962,7 @@ cases:
   category: procedural
   query: save reusable assets templates frameworks prompts before closing task
   gold_paths:
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -4008,11 +3976,11 @@ cases:
   category: procedural
   query: how to produce content in Dan voice pre-flight checklist
   gold_paths:
-  - path: 03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
+  - path: 02-areas/03-dm-brand-and-career/voice/dan-mcmahon-voice-profile.md
     relevance: 2
-  - path: shape/rules.md
+  - path: 04-agent-knowledge/shape/rules.md
     relevance: 2
-  - path: 03-dm-brand-and-career/content/agent-boss-playbook/article-production-pipeline.md
+  - path: 02-areas/03-dm-brand-and-career/content/agent-boss-playbook/article-production-pipeline.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -4026,7 +3994,7 @@ cases:
   category: temporal
   query: 2026-03-26 active projects Avanade client Shape operational context
   gold_paths:
-  - path: shape/facts.md
+  - path: 04-agent-knowledge/shape/facts.md
     relevance: 2
   score_method: ndcg
   agent: shape
@@ -4042,7 +4010,7 @@ cases:
   gold_paths:
   - path: /data/workspaces/builder/memory/2026-03-09.md
     relevance: 1
-  - path: builder/board.md
+  - path: 04-agent-knowledge/builder/board.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -4056,7 +4024,7 @@ cases:
   category: temporal
   query: Bower Bird Phase 1 complete M3 milestone hold date 2026-03-12
   gold_paths:
-  - path: builder/decisions.md
+  - path: 04-agent-knowledge/builder/decisions.md
     relevance: 2
   score_method: ndcg
   agent: shape
@@ -4070,7 +4038,7 @@ cases:
   category: multi_hop
   query: Mnemosyne benchmark Phase 0 baseline BM25 pure vector what was first result
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/benchmark.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -4085,13 +4053,13 @@ cases:
   category: multi_hop
   query: Three Cubes active projects current platform engineering GTM 2026
   gold_paths:
-  - path: entities/organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 1
-  - path: shape/facts.md
+  - path: 04-agent-knowledge/shape/facts.md
     relevance: 2
-  - path: 202603-knowledge-ia-redesign/archive/ia-design-proposal.md
+  - path: 06-archive/01-projects/202603-knowledge-ia-redesign/archive/ia-design-proposal.md
     relevance: 1
   - path: 2026-04-03.md
     relevance: 1
@@ -4107,7 +4075,7 @@ cases:
   category: multi_hop
   query: Mnemosyne architecture sqlite-vec why chosen over pgvector Qdrant Weaviate
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/architecture.md
     relevance: 1
   score_method: ndcg
   agent: builder
@@ -4121,13 +4089,13 @@ cases:
   category: multi_hop
   query: OpenClaw agents models assigned Haiku Sonnet Opus which agent uses which
   gold_paths:
-  - path: ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: shared/ops-runbook.md
+  - path: 02-areas/02-three-cubes-ventures/platform/ops-runbook.md
     relevance: 1
-  - path: 03-disciplines/technology-and-engineering/tool-model-tiering-guide.md
+  - path: 05-knowledge/03-disciplines/technology-and-engineering/tool-model-tiering-guide.md
     relevance: 1
-  - path: shape/spawn-model-guide.md
+  - path: 04-agent-knowledge/shape/spawn-model-guide.md
     relevance: 1
   score_method: ndcg
   agent: shape
@@ -4141,7 +4109,7 @@ cases:
   category: keyword
   query: text-embedding-3-large Azure deployment embedding model
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
+  - path: 02-areas/02-three-cubes-ventures/platform/features/feat-020-mnemosyne/azure-embed-spec.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -4155,11 +4123,11 @@ cases:
   category: keyword
   query: kv-tc-exp Key Vault Azure secrets
   gold_paths:
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -4173,13 +4141,13 @@ cases:
   category: keyword
   query: vm-tc-openclaw Standard_D4as_v5 VM spec
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/engineering/azure-infrastructure-map-2026-03.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/azure-infrastructure-map-2026-03.md
     relevance: 2
-  - path: entities/concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
   score_method: ndcg
   agent: builder
@@ -4193,13 +4161,13 @@ cases:
   category: keyword
   query: tc-experimental Azure subscription vm-tc-openclaw
   gold_paths:
-  - path: 02-three-cubes-ventures/platform/engineering/azure-infrastructure-map-2026-03.md
+  - path: 02-areas/02-three-cubes-ventures/platform/operations/azure-infrastructure-map-2026-03.md
     relevance: 2
-  - path: organisation/three-cubes.md
+  - path: 04-agent-knowledge/entities/organisation/three-cubes.md
     relevance: 2
-  - path: concept/openclaw.md
+  - path: 04-agent-knowledge/entities/concept/openclaw.md
     relevance: 2
-  - path: shared/facts.md
+  - path: 04-agent-knowledge/shared/facts.md
     relevance: 2
   score_method: ndcg
   agent: shape
