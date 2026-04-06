@@ -27,7 +27,7 @@ jobs:
     # This job requires secrets — only runs when triggered manually by an authorised user.
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
