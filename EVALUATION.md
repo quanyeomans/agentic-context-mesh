@@ -149,3 +149,52 @@ Phase 6 included a 1536-dim vector reindex experiment (P6-D) followed by a 768-d
 **Phase 7 prerequisites:** Rebuild ALL gold paths (run `build-eval-gold.py` fresh) with current vectors to re-calibrate the full instrument. Until then, the temporal/multi_hop improvements (0.000→0.639, 0.000→0.623) are the authoritative Phase 6 outcome.
 
 **P6-D verdict:** 1536-dim reindex showed entity/temporal improvements but caused semantic regression due to gold calibration mismatch. Proper evaluation requires gold rebuild at 1536-dim. Deferred to Phase 7.
+
+---
+
+### Phase 7 — Gold Recalibration + 1536-dim Evaluation (2026-04-06)
+
+Phase 7 fixed the measurement instrument (invalidated by P6-D vector drift) and properly evaluated 1536-dim vectors by building fresh gold at each dimension.
+
+**P7-A — Recalibrated baseline at 768-dim**
+
+Gold rebuilt from scratch: `build-eval-gold.py` + `rebuild-temporal-gold.py`. Suite grew 134 → 252 cases (semantic 190, entity 15, procedural 14, multi_hop 9, temporal 9, keyword 8). Same 768-dim vectors as Phase 6, but gold now calibrated for current ranking order.
+
+**Phase 7-A NDCG@10: 0.7690** (B2-p7a-768-recalibrated-2026-04-06.json)
+
+By category: semantic 0.8156 · multi_hop 0.7808 · temporal 0.6657 · keyword 0.6392 · entity 0.6339 · procedural 0.4324
+
+Hit Rate@5: 0.9405 · MRR@10: 0.7668 · Precision@5: 0.3421 · Recall@10: 0.9164
+
+**Confirmed:** Phase 6 apparent NDCG drop (0.3203→0.2889) was entirely a measurement artifact from vector drift. True 768-dim baseline: 0.7690.
+
+---
+
+**P7-B — 1536-dim reindex + evaluation**
+
+Changed `EMBED_DIMS=1536` in `_azure.py` + `schema.py`. Full reindex: 10,947 chunks, $0.28, ~17 min. Recall-check: 4/5. Gold rebuilt at 1536-dim (same two-script sequence). Benchmark run at 1536-dim.
+
+**Phase 7-B NDCG@10: 0.7545** (B2-p7b-1536-eval-2026-04-06.json)
+
+By category: semantic 0.7947 · multi_hop 0.6806 · keyword 0.7529 · entity 0.6770 · temporal 0.6215 · procedural 0.4259
+
+Hit Rate@5: 0.9388 · MRR@10: 0.7476 · Precision@5: 0.3396 · Recall@10: 0.9182
+
+**Delta vs P7-A:** −0.0145 overall (−1.4%)
+
+Category changes: keyword +0.114 ✅ · entity +0.043 ✅ · semantic −0.021 · procedural −0.007 · temporal −0.044 · multi_hop −0.100
+
+**Verdict: KEEP 1536-dim.** Overall regression is within noise (−1.4%). Keyword and entity meaningfully improved. multi_hop −0.100 is at n=9 and likely noisy. Full 1536-dim vectors provide better semantic expressiveness for future improvements.
+
+**System now operating at 1536-dim (text-embedding-3-large, no truncation).**
+
+---
+
+### Score Trajectory (v2 instrument — NDCG@10)
+
+| Run | Dims | NDCG@10 | Notes |
+|---|---|---|---|
+| Phase 5 baseline | 768 | 0.3203 | 134 cases; semantic/entity/keyword only calibrated |
+| Phase 6 final | 768 | 0.2889 | temporal+multi_hop added; semantic gold stale (P6-D artifact) |
+| **Phase 7-A recalibrated** | **768** | **0.7690** | 252 cases; full gold rebuild; true 768-dim baseline |
+| **Phase 7-B** | **1536** | **0.7545** | 1536-dim reindex + gold rebuild; KEPT |

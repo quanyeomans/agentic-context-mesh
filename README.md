@@ -2,7 +2,7 @@
 
 Hybrid memory retrieval system for [QMD](https://github.com/tobi/qmd) + Obsidian agent stacks. Extends the existing BM25 index with Azure OpenAI vector embeddings, entity graph, alias resolution, session briefing synthesis, and auto-classification of memory writes.
 
-**Current status:** Phase 4 complete. Benchmark: **0.6658** weighted total on 36-query suite (6 categories). Temporal improved +0.10 vs Phase 3 baseline (0.6458). Phase 5 scope: eval rebuild from real agent usage logs.
+**Current status:** Phase 7 complete. Benchmark: **NDCG@10 0.7545** on 245-case v2-real-world suite (6 categories, 1536-dim). 1536-dim evaluation complete — kept (−1.4% vs 768-dim baseline 0.7690; keyword +0.114, entity +0.043). Phase 8 scope: procedural improvement (file structure refactoring, content-authoring delegation).
 
 ---
 
@@ -89,7 +89,10 @@ Full design in [PRD.md](PRD.md).
 | Hybrid Phase 2.5 (entity fix) | 0.655 |
 | Hybrid Phase 3 (43-query suite, archived) | 0.762 |
 | Phase 3 baseline (36-query suite, 6 categories) | 0.6458 |
-| **Hybrid Phase 4 (current)** | **0.6658** |
+| Hybrid Phase 4 | 0.6658 |
+| Phase 5 baseline (v2 NDCG@10) | 0.3203 | 134-case real-world suite |
+| Phase 7-A recalibrated (768-dim) | 0.7690 | 252 cases; true baseline after instrument fix |
+| **Phase 7-B 1536-dim (current)** | **0.7545** | KEPT — keyword +0.114, entity +0.043 |
 
 Temporal improved from 0.533 to 0.633 (+0.10) via temporal chunk integration (4B-1). Multi-hop planner (4B-2) maintained at 0.600. Entity/conceptual/procedural unchanged. Phase 5 will replace the synthetic benchmark with real agent usage queries mined from server logs.
 

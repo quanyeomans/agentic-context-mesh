@@ -44,7 +44,7 @@ EXPECTED_CONTENT_VECTORS_COLS = {"hash", "seq", "pos", "model", "embedded_at"}
 # Expected columns in content (source chunks — NB: text is in 'doc' column, NOT 'body')
 EXPECTED_CONTENT_COLS = {"hash", "doc", "created_at"}
 
-EMBED_VECTOR_DIMS = 768  # reverted: P6-D rollback (gold calibrated at 768)
+EMBED_VECTOR_DIMS = 1536
 
 
 class SchemaVersionError(Exception):
