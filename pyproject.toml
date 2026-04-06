@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mnemosyne"
-version = "0.2.0"
+version = "0.6.0"
 description = "Memory system for QMD + Obsidian agent stacks — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "MIT" }

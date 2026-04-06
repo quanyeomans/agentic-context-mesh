@@ -2,7 +2,7 @@
 
 Hybrid memory retrieval system for [QMD](https://github.com/tobi/qmd) + Obsidian agent stacks. Extends the existing BM25 index with Azure OpenAI vector embeddings, entity graph, alias resolution, session briefing synthesis, and auto-classification of memory writes.
 
-**Current status:** Phase O-1 complete (entity graph seeded, planner context injection live). Benchmark: **NDCG@10 0.7541** on 245-case v2-real-world suite — multi_hop **0.716** (+0.035 vs P7-B). **Backlog:** Phase O-2 (LLM-typed relationship enrichment via Azure GPT-4o-mini) → Phase 8 (procedural NDCG improvement: file structure refactoring + content-authoring delegation).
+**Current status:** R1 complete (post-refactor benchmark, full gold rebuild). **NDCG@10 0.7756** on 263-case v2-real-world suite — entity **0.823**, recall **0.788**, multi_hop **0.728**. **Backlog:** Phase 8 (procedural NDCG improvement: 0.389 → target 0.55).
 
 ---
 
@@ -51,6 +51,8 @@ mnemosyne classify "<content>"
 | 3 | `mnemosyne brief` | ✅ Shipped | Session briefing synthesis via GPT-4o-mini |
 | 3 | `mnemosyne classify` | ✅ Shipped | Auto-classification of memory writes |
 | 3 | `mnemosyne benchmark` | ✅ Shipped | YAML-driven benchmark runner, phase gates |
+| O-1 | `mnemosyne entity` (enhanced) | ✅ Shipped | Entity graph + multi-hop QueryPlanner with context injection |
+| O-2 | `scripts/seed-entity-relations.py` | ✅ Shipped | LLM-typed relationship enrichment (GPT-4o-mini, nightly cron) |
 | 4 | `mnemosyne contradict` | 🔲 Planned | Contradiction detection on writes |
 
 Full design in [PRD.md](PRD.md).
@@ -59,56 +61,57 @@ Full design in [PRD.md](PRD.md).
 
 ## Benchmark Results
 
-**Suite:** 43 queries across 7 categories. Scoring: exact path match for entity/recall cases; LLM-as-judge (GPT-4o-mini) for conceptual/temporal/multi-hop/procedural.
+**Suite:** 263 cases across 7 categories (v2-real-world, NDCG@10). Scoring: NDCG@10 with LLM-as-judge (GPT-4o-mini) relevance grading. Suite rebuilt from scratch after vault refactor (R1, 2026-04-07).
 
-| Category | Weight | Score | Status |
+### R1 results (current)
+
+| Category | NDCG@10 | Cases |
+|---|---|---|
+| entity | 0.823 | 47 |
+| recall | 0.788 | 49 |
+| multi_hop | 0.728 | 33 |
+| temporal | 0.810 | 39 |
+| conceptual | 0.804 | 47 |
+| keyword | 0.800 | 32 |
+| procedural | 0.389 | 16 |
+| **Overall** | **0.7756** | **263** |
+
+### Score trajectory (NDCG@10 from Phase 5 onward)
+
+| Run | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| Recall | 25% | 0.875 | ✅ |
-| Temporal | 20% | 0.633 | ✅ improved via temporal chunk integration |
-| Entity | 20% | 0.933 | ✅ |
-| Conceptual | 15% | 0.500 | ✅ |
-| Multi-hop | 10% | 0.600 | ✅ planner shipped (LLM decompose + parallel BM25+vector) |
-| Procedural | 10% | 0.533 | — |
-| **Weighted total** | | **0.6658** | |
-
-### Phase gates
-
-| Gate | Threshold | Score | Result |
-|---|---|---|---|
-| Phase 1 | ≥ 0.620 | 0.655 | ✅ PASSED |
-| Phase 2 | ≥ 0.680 | 0.762 | ✅ PASSED |
-| Phase 3 | ≥ 0.750 | 0.762 | ✅ PASSED |
-| Phase 4 | ≥ 0.620 (revised suite) | 0.6658 | ✅ PASSED |
-
-### Score trajectory
-
-| System | Weighted total |
-|---|---|
-| BM25 baseline (Phase 0) | 0.389 |
-| Hybrid Phase 1 (first run) | 0.558 |
-| Hybrid Phase 2.5 (entity fix) | 0.655 |
-| Hybrid Phase 3 (43-query suite, archived) | 0.762 |
-| Phase 3 baseline (36-query suite, 6 categories) | 0.6458 |
-| Hybrid Phase 4 | 0.6658 |
-| Phase 5 baseline (v2 NDCG@10) | 0.3203 | 134-case real-world suite |
-| Phase 7-A recalibrated (768-dim) | 0.7690 | 252 cases; true baseline after instrument fix |
-| Phase 7-B 1536-dim | 0.7545 | KEPT — keyword +0.114, entity +0.043 |
-| **Phase O-1 entity-graph-planner (current)** | **0.7541** | multi_hop 0.716 (+0.035), entity 0.677 (=) |
-
-Temporal improved from 0.533 to 0.633 (+0.10) via temporal chunk integration (4B-1). Multi-hop planner (4B-2) maintained at 0.600. Entity/conceptual/procedural unchanged. Phase 5 will replace the synthetic benchmark with real agent usage queries mined from server logs.
+| BM25 baseline (Phase 0, weighted) | 0.389 | 43 | Pre-NDCG era; synthetic suite |
+| Hybrid Phase 4 (weighted) | 0.6658 | 43 | Phase 0–4 synthetic suite |
+| Phase 5 baseline | 0.3203 | 134 | First real-world suite; instrument issues |
+| Phase 7-A recalibrated | 0.7690 | 252 | After instrument fix (768→1536 dim correction) |
+| Phase 7-B 1536-dim | 0.7545 | 252 | Confirmed 1536-dim; keyword +0.114, entity +0.043 |
+| O-1 entity-graph-planner | 0.7541 | 245 | multi_hop 0.716 (+0.035 vs P7-B) |
+| **R1 post-refactor (current)** | **0.7756** | **263** | Gold suite rebuilt; vault fully re-indexed |
 
 ---
+
+## Prerequisites
+
+- **Python 3.10+**
+- **QMD** (installed and indexed — `qmd index` must have run at least once to create `~/.cache/qmd/index.sqlite`)
+- **sqlite-vec** extension (`.so`/`.dylib` on `SQLITE_VEC_PATH`, or auto-discovered by QMD)
+- **Azure OpenAI** resource with:
+  - `text-embedding-3-large` deployment (1536-dim)
+  - `gpt-4o-mini` deployment (for briefing, classify, benchmark judging)
+- **Azure Key Vault** (recommended) — or export secrets as environment variables directly
+
+See [OPERATIONS.md](OPERATIONS.md) for full infrastructure setup, cron configuration, and first-run sequence.
 
 ## Install
 
 ```bash
-git clone https://github.com/three-cubes/qmd-azure-embed /tmp/mnemosyne
-cd /tmp/mnemosyne
+git clone https://github.com/three-cubes/qmd-azure-embed /opt/mnemosyne
+cd /opt/mnemosyne
 python3 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
-Requires: Python 3.10+, QMD with sqlite-vec, Azure OpenAI API access (embedding + GPT-4o-mini).
+Then follow the [OPERATIONS.md first-run sequence](OPERATIONS.md#first-run-sequence).
 
 ---
 

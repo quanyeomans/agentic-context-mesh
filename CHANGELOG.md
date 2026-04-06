@@ -6,7 +6,71 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-*No unreleased changes. Phase 4 (contradiction detection, date-aware chunking) is planned.*
+*Phase 8: procedural NDCG improvement (target ≥ 0.55, current 0.389 in R1).*
+
+## [0.6.0] - 2026-04-07 — R1: Post-Refactor Benchmark + O-2 Enrichment
+
+### Added
+- O-2: `scripts/seed-entity-relations.py` LLM-typed relationship enrichment via GPT-4o-mini batch classifier
+- O-2: Nightly cron (`0 3 * * * AEST`) — entity extract + relationship seed, Azure KV secret fetch
+- O-2: `cron-scripts/cron-registry.json` entry for `entity-relation-seed`
+- R1: `scripts/build-eval-gold.py` — rebuilds v2-real-world.yaml from scratch using live mnemosyne search + LLM judge
+- R1: `suites/v2-real-world.yaml` — fully rebuilt gold suite (263 cases from 388 queries; collection-relative path format)
+- R1 benchmark results: NDCG@10 **0.7756** (entity 0.823, recall 0.788, multi_hop 0.728, temporal 0.810, conceptual 0.804, keyword 0.800, procedural 0.389)
+- OPERATIONS.md: comprehensive deployment guide (Azure prerequisites, Key Vault secrets, first-run sequence, cron setup, monitoring, troubleshooting)
+
+### Fixed
+- ADR-M08: Embed batch retry on QMD-induced dimension mismatch — `ensure_vec_table(db, actual_dims)` called per-batch on dimension error, retries once; handles `qmd-reindex-6h` cron overwriting `vectors_vec` mid-run
+- Hourly embed cron: now fetches `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` from Azure Key Vault at runtime (managed identity)
+- Gold suite paths: rebuilt to collection-relative format (matching `mnemosyne search` output) after vault refactor broke 196/554 paths
+
+### Benchmark
+- R1 (post-refactor): NDCG@10 **0.7756** on 263-case suite (vault refactor fully indexed, gold paths rebuilt)
+- Entity graph: 1160 entities, 112 typed relationships seeded
+- Phase 8 target: procedural NDCG ≥ 0.55 (current 0.389)
+
+---
+
+## [0.5.3] - 2026-03-28 — Phase 7: 1536-dim Gold Recalibration
+
+### Added
+- Phase 7-A: Recalibrated benchmark instrument after discovering 768-dim baseline was measuring a broken config (extension load order caused silent 0-dim writes)
+- Phase 7-B: Confirmed 1536-dim as correct operational config; rebuilt 252-case gold suite at correct dimensionality
+- `scripts/run-benchmark-v2.py`: NDCG@10 scoring engine replacing weighted-total runner
+
+### Benchmark
+- Phase 7-A (768-dim, true baseline): NDCG@10 0.7690 on 252-case suite
+- Phase 7-B (1536-dim operational): NDCG@10 0.7545 — keyword +0.114, entity +0.043 vs 768-dim
+
+---
+
+## [0.5.2] - 2026-03-26 — Phase 5–6: Real-World Eval Rebuild
+
+### Added
+- Phase 5: Replaced synthetic benchmark with real agent usage queries mined from server logs
+- Phase 5: NDCG@10 scoring (was weighted category averages) — 134-case real-world suite
+- Phase 6: Temporal routing fix — temporal queries routed to `mnemosyne temporal query` before hybrid search
+- Phase 6: Multi-hop pattern improvements — intermediate result reranking, entity bridging
+- Phase 6: Suite expanded to 252 cases; multi-category NDCG scoring
+
+### Benchmark
+- Phase 5 initial (instrument issues): NDCG@10 0.3203 on 134-case suite
+- Phase 6 (after instrument + temporal fix): NDCG@10 improved to 0.69+ range before recalibration
+
+---
+
+## [0.5.1] - 2026-04-06 — O-1: Entity Graph + Multi-Hop Planner
+
+### Added
+- O-1: Multi-hop QueryPlanner — GPT-4o-mini decomposes complex queries into sub-queries, parallel BM25+vector dispatch, result synthesis
+- O-1: Entity graph seeded from vault-entities collection; entity boost wired into planner context injection
+- O-1: `mnemosyne entity extract --changed` incremental extraction pipeline
+- O-1: `scripts/seed-entity-relations.py` (pattern-matching v1 — superseded by O-2 LLM classifier)
+
+### Benchmark
+- O-1: NDCG@10 0.7541 on 245-case suite — multi_hop 0.716 (+0.035 vs P7-B), entity 0.677
+
+---
 
 ## [0.5.0] - 2026-03-23 — Phase 2: Temporal + Summaries + Wikilinks
 

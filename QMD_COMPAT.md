@@ -3,6 +3,55 @@
 This tool writes directly to QMD's internal SQLite schema. Compatibility is pinned explicitly
 and tested weekly via CI to prevent silent breakage on QMD updates.
 
+## Installing QMD
+
+QMD must be installed and have indexed your vault before Mnemosyne can run. QMD creates
+`~/.cache/qmd/index.sqlite` on first index.
+
+```bash
+# Install QMD (requires Go 1.21+)
+go install github.com/tobi/qmd@latest
+
+# Or download a pre-built binary from https://github.com/tobi/qmd/releases
+
+# Verify installation
+qmd --version   # should show 1.1.x or later
+
+# Create and index a collection (run from your vault root)
+qmd index --collection vault /path/to/obsidian-vault
+qmd index --collection vault-entities /path/to/entity-stubs-dir
+
+# Verify the index exists
+ls -lh ~/.cache/qmd/index.sqlite
+```
+
+## Verifying sqlite-vec is available
+
+QMD ships with sqlite-vec bundled on most platforms. To confirm:
+
+```bash
+# Check QMD's built-in vec capability
+qmd vec --help    # should not error
+
+# Or verify the extension path directly
+qmd info | grep vec   # shows sqlite-vec version if bundled
+
+# Manual check via Python (if needed)
+python3 -c "
+import sqlite3, os
+db = sqlite3.connect(':memory:')
+# QMD typically bundles the extension at its install location
+# Check: find $(go env GOPATH)/bin -name 'vec*.so' 2>/dev/null
+"
+```
+
+Mnemosyne's `ensure_vec_table()` will raise a clear error if sqlite-vec cannot be loaded,
+with the extension path it tried. Set `SQLITE_VEC_PATH` to override the auto-discovered path:
+
+```bash
+export SQLITE_VEC_PATH=/usr/local/lib/vec0.so
+```
+
 ## Tested versions
 
 | qmd version | Status | Tested | Notes |
