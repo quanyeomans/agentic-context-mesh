@@ -25,3 +25,11 @@ entities.db
 
 # Stray cache directory (created by run-command agent context)
 None/
+
+# Benchmark suites contain vault-specific gold paths and query content
+# generated from your personal knowledge base — not suitable for public repos.
+# Generate your own with: scripts/build-eval-gold.py
+# See suites/example.yaml for the format.
+suites/v2-real-world.yaml
+suites/*.yaml
+!suites/example.yaml

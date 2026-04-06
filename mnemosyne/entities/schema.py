@@ -160,8 +160,14 @@ def _migrate_v1_to_v2(db: sqlite3.Connection) -> None:
 
 
 def _add_column_if_missing(db: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
-    """Add a column to a table only if it doesn't already exist (idempotent)."""
-    existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    """Add a column to a table only if it doesn't already exist (idempotent).
+
+    INTERNAL migration helper — called exclusively from _migrate_v1_to_v2() with
+    compile-time string literals. The dynamic SQL is intentional: PRAGMA table_info()
+    and ALTER TABLE do not support parameter binding in SQLite. Do not call this
+    function with user-supplied input.
+    """
+    existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}  # nosec B608
     if column not in existing:
-        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")  # nosec B608
         db.commit()

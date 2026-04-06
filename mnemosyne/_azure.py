@@ -6,7 +6,8 @@ Provides:
         Embeds text via Azure OpenAI text-embedding-3-large.
         Returns [] on any failure — callers treat [] as "no embedding available".
 
-Secrets are fetched at runtime from Key Vault `kv-tc-exp` using the Azure CLI.
+Secrets are fetched at runtime from Azure Key Vault using the Azure CLI.
+The Key Vault name is read from the MNEMOSYNE_KV_NAME environment variable.
 They are cached in-process for the process lifetime (never written to disk or logs).
 
 Key Vault secret names:
@@ -14,10 +15,11 @@ Key Vault secret names:
   azure-openai-endpoint
   azure-openai-embedding-deployment  (default: text-embedding-3-large)
 
-Override secrets via environment variables for testing:
+Override secrets via environment variables for testing (or when not using Key Vault):
   AZURE_OPENAI_API_KEY
   AZURE_OPENAI_ENDPOINT
   AZURE_OPENAI_EMBED_DEPLOYMENT
+  MNEMOSYNE_KV_NAME  — Key Vault name (required when using Key Vault auth)
 
 Failure modes:
   - Key Vault unavailable: returns []
@@ -40,8 +42,9 @@ logger = logging.getLogger(__name__)
 # Azure OpenAI embedding dimensions
 EMBED_DIMS = 1536
 
-# Key Vault name
-_KEY_VAULT_NAME = "kv-tc-exp"
+# Key Vault name — read from environment. Required when using Key Vault auth.
+# Set MNEMOSYNE_KV_NAME in your environment or service env file.
+_KEY_VAULT_NAME = os.environ.get("MNEMOSYNE_KV_NAME", "")
 
 # Default deployment
 _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"

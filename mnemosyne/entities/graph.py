@@ -438,8 +438,8 @@ def graph_context(query: str, db: sqlite3.Connection, max_entities: int = 3) -> 
 
     Example output:
       Entity context:
-      - Dan McMahon (person): LEADS Shape, RELATED_TO OpenClaw
-      - Three Cubes (organisation): FOUNDED_BY Dan McMahon, RELATED_TO OpenClaw
+      - Alice Chen (person): LEADS engineering, WORKS_AT Acme Corp
+      - Acme Corp (organisation): FOUNDED_BY Alice Chen, PARTNER_OF Beta Ltd
     """
     try:
         # Tokenise query: words >= 4 chars, deduped, preserve order

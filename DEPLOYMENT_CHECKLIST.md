@@ -45,7 +45,7 @@ az keyvault secret list --vault-name <vault-name> --query "[].name" -o tsv
 Test that secrets can be fetched from Key Vault:
 
 ```bash
-source /opt/openclaw/env/openclaw.env
+source /opt/<service-user>/env/service.env
 export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show \
   --vault-name <vault-name> --name azure-openai-endpoint --query value -o tsv)
 export AZURE_OPENAI_API_KEY=$(az keyvault secret show \

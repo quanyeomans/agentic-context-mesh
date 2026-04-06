@@ -16,7 +16,7 @@ You need an Azure subscription with the following resources:
 - Deployment: `text-embedding-3-large` (1536-dim, for embedding)
 - Deployment: `gpt-4o-mini` (for briefing, classification, entity extraction)
 
-**Azure Key Vault** (e.g. `kv-tc-exp`)
+**Azure Key Vault** — set `KV_NAME` env var to your vault name (e.g. `my-project-kv`)
 - Used to store API credentials at runtime — credentials are never hardcoded or stored in env files
 
 Create the following secrets in Key Vault:
@@ -30,13 +30,13 @@ Create the following secrets in Key Vault:
 
 ```bash
 # Create secrets (run once, from a machine with Key Vault access)
-az keyvault secret set --vault-name kv-tc-exp --name azure-openai-endpoint \
+az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-endpoint \
   --value "https://your-resource.cognitiveservices.azure.com/"
-az keyvault secret set --vault-name kv-tc-exp --name azure-openai-api-key \
+az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-api-key \
   --value "your-api-key"
-az keyvault secret set --vault-name kv-tc-exp --name azure-openai-embedding-deployment \
+az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-embedding-deployment \
   --value "text-embedding-3-large"
-az keyvault secret set --vault-name kv-tc-exp --name azure-openai-gpt4o-mini-deployment \
+az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-gpt4o-mini-deployment \
   --value "gpt-4o-mini"
 ```
 
@@ -51,12 +51,12 @@ The VM running Mnemosyne must be able to authenticate to Azure Key Vault. Two op
 
 ```bash
 # Verify managed identity auth is working
-az keyvault secret show --vault-name kv-tc-exp --name azure-openai-endpoint --query value -o tsv
+az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-endpoint --query value -o tsv
 ```
 
 **Option B: Service Principal**
 - Create a service principal with Key Vault Secrets User access
-- Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` in the service env file (e.g. `/opt/openclaw/env/openclaw.env`)
+- Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` in the service env file (e.g. `/opt/<service-user>/env/service.env`)
 - Or use `az login --service-principal` in the deploy script
 
 ### 3. QMD Installed and Running
@@ -89,7 +89,7 @@ Create the required directories on the VM before first run:
 ```bash
 sudo mkdir -p /data/mnemosyne/briefing
 sudo mkdir -p /data/mnemosyne/logs
-sudo chown -R openclaw:openclaw /data/mnemosyne
+sudo chown -R <service-user>:<service-user> /data/mnemosyne
 ```
 
 Mnemosyne expects:
@@ -125,11 +125,11 @@ Run these in order on a fresh deployment. Each step must succeed before the next
 ### Step 1: Verify Azure credentials
 
 ```bash
-source /opt/openclaw/env/openclaw.env
+source /opt/<service-user>/env/service.env
 
-ENDPOINT=$(az keyvault secret show --vault-name kv-tc-exp \
+ENDPOINT=$(az keyvault secret show --vault-name ${KV_NAME} \
   --name azure-openai-endpoint --query value -o tsv)
-APIKEY=$(az keyvault secret show --vault-name kv-tc-exp \
+APIKEY=$(az keyvault secret show --vault-name ${KV_NAME} \
   --name azure-openai-api-key --query value -o tsv)
 
 echo "Endpoint: ${ENDPOINT:0:40}..."
@@ -217,9 +217,9 @@ Two recurring jobs are required for a production deployment.
 Runs mnemosyne embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed.
 
 ```cron
-15 * * * * source /opt/openclaw/env/openclaw.env \
-  && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name kv-tc-exp --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
-  && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name kv-tc-exp --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
+15 * * * * source /opt/<service-user>/env/service.env \
+  && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
+  && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
   && cd /data/tools/qmd-azure-embed \
   && .venv/bin/mnemosyne embed >> /data/mnemosyne/logs/embed.log 2>&1
 ```
@@ -236,7 +236,7 @@ The shell script (`entity-relation-seed.sh`) handles Key Vault credential fetchi
 1. `mnemosyne entity extract --changed`
 2. `python scripts/seed-entity-relations.py`
 
-Add both crons with `crontab -e` as the `openclaw` service user.
+Add both crons with `crontab -e` as the `<service-user>` service user.
 
 ### Verifying cron jobs are registered
 
@@ -354,7 +354,7 @@ The embed or briefing command can't find Azure credentials.
 ```bash
 # Check Key Vault auth
 az account show
-az keyvault secret show --vault-name kv-tc-exp --name azure-openai-api-key --query value -o tsv
+az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-api-key --query value -o tsv
 ```
 
 If `az account show` fails, run `az login` or check the VM's managed identity assignment.

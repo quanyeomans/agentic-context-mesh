@@ -2,12 +2,12 @@
 # deploy.sh — fetch secrets from Key Vault and run qmd-azure-embed
 # Usage: ./scripts/deploy.sh [--force] [--limit N]
 #
-# Requires: az CLI authenticated, kv-tc-exp accessible
+# Requires: az CLI authenticated, KV_NAME env var set to your Azure Key Vault name
 # Logs to: /data/tc-agent-zone/logs/azure-embed.log
 
 set -euo pipefail
 
-KV_NAME="${KV_NAME:-kv-tc-exp}"
+KV_NAME="${KV_NAME:?Error: KV_NAME must be set (your Azure Key Vault name)}"
 LOG=/data/tc-agent-zone/logs/azure-embed.log
 mkdir -p "$(dirname "$LOG")"
 timestamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }

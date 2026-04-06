@@ -336,7 +336,12 @@ def run_benchmark(
     endpoint = ""
     deployment = "gpt-4o-mini"
     try:
+        import os
         import subprocess
+
+        _kv_name = os.environ.get("MNEMOSYNE_KV_NAME", "")
+        if not _kv_name:
+            raise ValueError("MNEMOSYNE_KV_NAME environment variable not set — cannot fetch LLM judge credentials from Key Vault. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT directly to skip Key Vault.")
 
         api_key = subprocess.run(
             [
@@ -345,7 +350,7 @@ def run_benchmark(
                 "secret",
                 "show",
                 "--vault-name",
-                "kv-tc-exp",
+                _kv_name,
                 "--name",
                 "azure-openai-api-key",
                 "--query",
@@ -364,7 +369,7 @@ def run_benchmark(
                 "secret",
                 "show",
                 "--vault-name",
-                "kv-tc-exp",
+                _kv_name,
                 "--name",
                 "azure-openai-endpoint",
                 "--query",
@@ -383,7 +388,7 @@ def run_benchmark(
                 "secret",
                 "show",
                 "--vault-name",
-                "kv-tc-exp",
+                _kv_name,
                 "--name",
                 "azure-openai-gpt4o-mini-deployment",
                 "--query",
@@ -520,6 +525,7 @@ def run_benchmark(
                 f,
                 indent=2,
             )
-        print(f"Results saved to: {out_path}")
+        import logging as _logging
+        _logging.getLogger(__name__).info("Results saved to: %s", out_path)
 
     return result
