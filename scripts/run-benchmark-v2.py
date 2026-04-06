@@ -203,7 +203,7 @@ def main() -> None:
         category   = case["category"]
         source     = case.get("source", "unknown")
         agent      = args.agent or case.get("agent", "shape")
-        gold_paths = case.get("gold_paths", [])
+        gold_paths = case.get("gold_paths") or []
 
         t0 = time.time()
         retrieved, meta = run_search(query, agent)
