@@ -1,0 +1,595 @@
+"""
+Tests for mnemosyne.benchmark.suite and mnemosyne.benchmark.runner.
+
+Covers:
+  - load_suite(): valid YAML loads correctly
+  - validate_suite(): missing gold path returns error string
+  - validate_suite(): duplicate gold paths returns error string
+  - _exact_match(): case-insensitive substring match
+  - run_benchmark(): mocked retrieval, correct weighted total calculation
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import textwrap
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from mnemosyne.benchmark.runner import (
+    BenchmarkResult,
+    _exact_match,
+    run_benchmark,
+)
+from mnemosyne.benchmark.suite import (
+    BenchmarkCase,
+    BenchmarkSuite,
+    load_suite,
+    validate_suite,
+)
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def minimal_suite_yaml(tmp_path: Path) -> Path:
+    """Create a minimal valid suite YAML file."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test-agent
+          collections:
+            - vault
+          version: "1.0"
+          created: "2026-03-23"
+
+        cases:
+          - id: R01
+            category: recall
+            query: "Arize Phoenix observability"
+            gold_path: "01-projects/arize/report.md"
+            score_method: exact
+            notes: "Test recall case"
+
+          - id: C01
+            category: conceptual
+            query: "what is the memory architecture"
+            gold_path: null
+            score_method: llm
+            notes: null
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    return p
+
+
+@pytest.fixture
+def in_memory_db() -> sqlite3.Connection:
+    """Create an in-memory SQLite DB mimicking the QMD documents table."""
+    db = sqlite3.connect(":memory:")
+    db.execute(
+        """
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY,
+            collection TEXT,
+            path TEXT,
+            title TEXT,
+            hash TEXT,
+            created_at TEXT,
+            modified_at TEXT,
+            active INTEGER DEFAULT 1
+        )
+        """
+    )
+    # Insert some test documents
+    db.executemany(
+        "INSERT INTO documents (collection, path, title, active) VALUES (?, ?, ?, 1)",
+        [
+            ("vault", "01-projects/arize/report.md", "Arize Report"),
+            ("vault", "04-agent-knowledge/builder/rules.md", "Builder Rules"),
+            ("vault", "01-projects/mnemosyne/architecture.md", "Mnemosyne Architecture"),
+        ],
+    )
+    db.commit()
+    return db
+
+
+# ---------------------------------------------------------------------------
+# load_suite() tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_load_suite_valid_yaml_loads_correctly(minimal_suite_yaml: Path) -> None:
+    """Valid YAML file loads into BenchmarkSuite with correct structure."""
+    suite = load_suite(str(minimal_suite_yaml))
+
+    assert isinstance(suite, BenchmarkSuite)
+    assert suite.meta["agent"] == "test-agent"
+    assert suite.meta["collections"] == ["vault"]
+    assert len(suite.cases) == 2
+
+    r01 = suite.cases[0]
+    assert isinstance(r01, BenchmarkCase)
+    assert r01.id == "R01"
+    assert r01.category == "recall"
+    assert r01.query == "Arize Phoenix observability"
+    assert r01.gold_path == "01-projects/arize/report.md"
+    assert r01.score_method == "exact"
+    assert r01.notes == "Test recall case"
+
+    c01 = suite.cases[1]
+    assert c01.id == "C01"
+    assert c01.category == "conceptual"
+    assert c01.gold_path is None
+    assert c01.score_method == "llm"
+    assert c01.notes is None
+
+
+@pytest.mark.unit
+def test_load_suite_missing_file_raises_file_not_found() -> None:
+    """Missing file raises FileNotFoundError."""
+    with pytest.raises(FileNotFoundError):
+        load_suite("/nonexistent/path/suite.yaml")
+
+
+@pytest.mark.unit
+def test_load_suite_invalid_yaml_raises_value_error(tmp_path: Path) -> None:
+    """Invalid YAML raises ValueError."""
+    p = tmp_path / "bad.yaml"
+    p.write_text("cases: [{{invalid")
+    with pytest.raises(ValueError, match="YAML parse error"):
+        load_suite(str(p))
+
+
+@pytest.mark.unit
+def test_load_suite_missing_required_field_raises_value_error(tmp_path: Path) -> None:
+    """Missing required field raises ValueError with details."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test
+        cases:
+          - id: R01
+            category: recall
+            # query is missing
+            gold_path: "some/path.md"
+            score_method: exact
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    with pytest.raises(ValueError, match="query"):
+        load_suite(str(p))
+
+
+@pytest.mark.unit
+def test_load_suite_invalid_category_raises_value_error(tmp_path: Path) -> None:
+    """Invalid category raises ValueError."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test
+        cases:
+          - id: X01
+            category: invalid_category
+            query: "test query"
+            gold_path: null
+            score_method: llm
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    with pytest.raises(ValueError, match="invalid_category"):
+        load_suite(str(p))
+
+
+@pytest.mark.unit
+def test_load_suite_all_categories_accepted(tmp_path: Path) -> None:
+    """All valid categories are accepted."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test
+        cases:
+          - id: R01
+            category: recall
+            query: "test recall"
+            gold_path: "some/path.md"
+            score_method: exact
+          - id: T01
+            category: temporal
+            query: "test temporal"
+            gold_path: null
+            score_method: llm
+          - id: E01
+            category: entity
+            query: "test entity"
+            gold_path: null
+            score_method: llm
+          - id: C01
+            category: conceptual
+            query: "test conceptual"
+            gold_path: null
+            score_method: llm
+          - id: M01
+            category: multi_hop
+            query: "test multi_hop"
+            gold_path: null
+            score_method: llm
+          - id: P01
+            category: procedural
+            query: "test procedural"
+            gold_path: null
+            score_method: llm
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+    assert len(suite.cases) == 6
+    categories = [c.category for c in suite.cases]
+    assert "recall" in categories
+    assert "temporal" in categories
+    assert "multi_hop" in categories
+
+
+# ---------------------------------------------------------------------------
+# validate_suite() tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_validate_suite_all_valid_returns_empty_list(
+    minimal_suite_yaml: Path,
+    in_memory_db: sqlite3.Connection,
+) -> None:
+    """Valid suite with all gold paths in the index returns empty errors."""
+    suite = load_suite(str(minimal_suite_yaml))
+    errors = validate_suite(suite, in_memory_db)
+    assert errors == []
+
+
+@pytest.mark.unit
+def test_validate_suite_missing_gold_path_returns_error(
+    in_memory_db: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    """Missing gold path returns an error string describing the problem."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test
+        cases:
+          - id: R01
+            category: recall
+            query: "something specific"
+            gold_path: "path/that/does/not/exist.md"
+            score_method: exact
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+
+    errors = validate_suite(suite, in_memory_db)
+
+    assert len(errors) >= 1
+    assert any("R01" in e for e in errors)
+    assert any("path/that/does/not/exist.md" in e for e in errors)
+    assert any("not found" in e.lower() for e in errors)
+
+
+@pytest.mark.unit
+def test_validate_suite_duplicate_gold_paths_returns_error(
+    in_memory_db: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    """Two cases with the same gold path return an error string."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test
+        cases:
+          - id: R01
+            category: recall
+            query: "first query about arize"
+            gold_path: "01-projects/arize/report.md"
+            score_method: exact
+          - id: R02
+            category: recall
+            query: "second query about arize"
+            gold_path: "01-projects/arize/report.md"
+            score_method: exact
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+
+    errors = validate_suite(suite, in_memory_db)
+
+    # Should have at least one error mentioning duplicate
+    assert len(errors) >= 1
+    assert any("duplicate" in e.lower() or ("R01" in e and "R02" in e) for e in errors), (
+        f"Expected duplicate error, got: {errors}"
+    )
+
+
+@pytest.mark.unit
+def test_validate_suite_non_recall_cases_not_validated(
+    in_memory_db: sqlite3.Connection,
+    tmp_path: Path,
+) -> None:
+    """Non-recall cases without gold paths do not generate errors."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          agent: test
+        cases:
+          - id: T01
+            category: temporal
+            query: "what happened last week"
+            gold_path: null
+            score_method: llm
+          - id: C01
+            category: conceptual
+            query: "what is the architecture"
+            gold_path: null
+            score_method: llm
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+
+    errors = validate_suite(suite, in_memory_db)
+    assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# _exact_match() tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_exact_match_returns_1_when_gold_in_top5() -> None:
+    """Returns 1.0 when gold path appears in top-5 results (case-insensitive)."""
+    paths = [
+        "vault/01-projects/arize/research-report.md",
+        "vault/02-areas/foo/bar.md",
+        "vault/04-knowledge/rules.md",
+    ]
+    gold = "01-Projects/Arize/Research-Report.md"
+    assert _exact_match(paths, gold) == 1.0
+
+
+@pytest.mark.unit
+def test_exact_match_case_insensitive() -> None:
+    """Match is case-insensitive."""
+    paths = ["vault/PATH/TO/DOC.MD"]
+    gold = "path/to/doc.md"
+    assert _exact_match(paths, gold) == 1.0
+
+
+@pytest.mark.unit
+def test_exact_match_returns_0_when_gold_not_in_paths() -> None:
+    """Returns 0.0 when gold path is not in the retrieved paths."""
+    paths = [
+        "vault/01-projects/something-else/doc.md",
+        "vault/02-areas/foo/bar.md",
+    ]
+    gold = "01-projects/totally-different/report.md"
+    assert _exact_match(paths, gold) == 0.0
+
+
+@pytest.mark.unit
+def test_exact_match_only_checks_top5() -> None:
+    """Only checks the top 5 results, not beyond."""
+    paths = [
+        "vault/doc1.md",
+        "vault/doc2.md",
+        "vault/doc3.md",
+        "vault/doc4.md",
+        "vault/doc5.md",
+        "vault/unique-report-xyz-9999.md",  # position 6 — should NOT match
+    ]
+    gold = "unique-report-xyz-9999.md"
+    assert _exact_match(paths, gold) == 0.0
+
+
+@pytest.mark.unit
+def test_exact_match_empty_paths_returns_0() -> None:
+    """Empty paths list returns 0.0."""
+    assert _exact_match([], "some/path.md") == 0.0
+
+
+@pytest.mark.unit
+def test_exact_match_empty_gold_returns_0() -> None:
+    """Empty gold path returns 0.0."""
+    assert _exact_match(["some/path.md"], "") == 0.0
+
+
+# ---------------------------------------------------------------------------
+# run_benchmark() tests — mocked retrieval
+# ---------------------------------------------------------------------------
+
+
+def _mock_retrieve_result(paths: list[str]) -> tuple:
+    """Build a mock _retrieve() return value: (paths, snippets, metadata)."""
+    snippets = ["snippet"] * len(paths)
+    meta = {
+        "intent": "semantic",
+        "bm25_count": len(paths),
+        "vec_count": len(paths),
+        "fused_count": len(paths),
+        "vec_failed": False,
+        "latency_ms": 50.0,
+    }
+    return paths, snippets, meta
+
+
+@pytest.mark.unit
+def test_run_benchmark_mocked_retrieval_correct_scores() -> None:
+    """
+    run_benchmark with mocked _retrieve returns correct scores.
+
+    R01 gold path appears in results → score=1.0
+    R02 gold path does NOT appear → score=0.0
+    Recall category score: (1.0 + 0.0) / 2 = 0.5
+    """
+    suite = BenchmarkSuite(
+        meta={"agent": "test", "collections": ["vault"]},
+        cases=[
+            BenchmarkCase(
+                id="R01",
+                category="recall",
+                query="Arize Phoenix observability",
+                gold_path="01-projects/arize/report.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="R02",
+                category="recall",
+                query="Mnemosyne architecture",
+                gold_path="01-projects/mnemosyne/architecture.md",
+                score_method="exact",
+            ),
+        ],
+    )
+
+    r01_paths = ["vault/01-projects/arize/report.md", "vault/other.md"]
+    r02_paths = ["vault/something-else.md"]
+
+    with patch("mnemosyne.benchmark.runner._retrieve") as mock_retrieve:
+        mock_retrieve.side_effect = [
+            _mock_retrieve_result(r01_paths),
+            _mock_retrieve_result(r02_paths),
+        ]
+
+        result = run_benchmark(suite, system="hybrid", agent="test")
+
+    assert isinstance(result, BenchmarkResult)
+    assert len(result.cases) == 2
+
+    r01_case = next(c for c in result.cases if c["id"] == "R01")
+    r02_case = next(c for c in result.cases if c["id"] == "R02")
+
+    assert r01_case["score"] == 1.0
+    assert r02_case["score"] == 0.0
+
+    # Recall category score: (1.0 + 0.0) / 2 = 0.5
+    assert result.summary["category_scores"]["recall"] == pytest.approx(0.5)
+    # weighted_total = recall_weight * recall_score = 0.25 * 0.5 = 0.125
+    # (other categories score 0.0, contributing 0.0 to the weighted sum)
+    assert result.summary["weighted_total"] == pytest.approx(0.125)
+
+
+@pytest.mark.unit
+def test_run_benchmark_weighted_total_calculation() -> None:
+    """
+    Weighted total is correctly computed from per-category scores.
+
+    recall=1.0 (weight 0.25), all others=0.0
+    weighted_total = 0.25 * 1.0 + 0.20 * 0.0 + ... = 0.25
+    """
+    suite = BenchmarkSuite(
+        meta={"agent": "test", "collections": ["vault"]},
+        cases=[
+            BenchmarkCase(id="R01", category="recall", query="q1", gold_path="p1.md", score_method="exact"),
+            BenchmarkCase(id="T01", category="temporal", query="q2", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="E01", category="entity", query="q3", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="C01", category="conceptual", query="q4", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="M01", category="multi_hop", query="q5", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="P01", category="procedural", query="q6", gold_path=None, score_method="llm"),
+        ],
+    )
+
+    # R01: gold path p1.md appears in results → score=1.0
+    # All others: empty paths → _llm_judge patched to return 0.0
+    retrieve_results = [
+        _mock_retrieve_result(["p1.md"]),  # R01 — exact match hits
+        _mock_retrieve_result([]),  # T01
+        _mock_retrieve_result([]),  # E01
+        _mock_retrieve_result([]),  # C01
+        _mock_retrieve_result([]),  # M01
+        _mock_retrieve_result([]),  # P01
+    ]
+
+    with patch("mnemosyne.benchmark.runner._retrieve") as mock_retrieve:
+        mock_retrieve.side_effect = retrieve_results
+        with patch("mnemosyne.benchmark.runner._llm_judge", return_value=0.0):
+            result = run_benchmark(suite, system="hybrid", agent="test")
+
+    assert result.summary["category_scores"]["recall"] == pytest.approx(1.0)
+    assert result.summary["category_scores"]["temporal"] == pytest.approx(0.0)
+    assert result.summary["category_scores"]["entity"] == pytest.approx(0.0)
+    # weighted_total = 0.25*1.0 + 0.20*0.0 + 0.20*0.0 + 0.15*0.0 + 0.10*0.0 + 0.10*0.0 = 0.25
+    assert result.summary["weighted_total"] == pytest.approx(0.25)
+
+
+@pytest.mark.unit
+def test_run_benchmark_all_scores_1_gives_weighted_total_1() -> None:
+    """When all cases score 1.0, weighted total is 1.0."""
+    suite = BenchmarkSuite(
+        meta={"agent": "test", "collections": ["vault"]},
+        cases=[
+            BenchmarkCase(id="R01", category="recall", query="q1", gold_path="path/to/doc.md", score_method="exact"),
+            BenchmarkCase(id="T01", category="temporal", query="q2", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="E01", category="entity", query="q3", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="C01", category="conceptual", query="q4", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="M01", category="multi_hop", query="q5", gold_path=None, score_method="llm"),
+            BenchmarkCase(id="P01", category="procedural", query="q6", gold_path=None, score_method="llm"),
+        ],
+    )
+
+    with patch("mnemosyne.benchmark.runner._retrieve") as mock_retrieve:
+        mock_retrieve.side_effect = [
+            _mock_retrieve_result(["path/to/doc.md"]),
+            _mock_retrieve_result(["result.md"]),
+            _mock_retrieve_result(["result.md"]),
+            _mock_retrieve_result(["result.md"]),
+            _mock_retrieve_result(["result.md"]),
+            _mock_retrieve_result(["result.md"]),
+        ]
+        with patch("mnemosyne.benchmark.runner._llm_judge", return_value=1.0):
+            result = run_benchmark(suite, system="hybrid", agent="test")
+
+    assert result.summary["category_scores"]["recall"] == pytest.approx(1.0)
+    assert result.summary["category_scores"]["temporal"] == pytest.approx(1.0)
+    # All 6 categories = 1.0, all weights sum to 1.0 → weighted_total = 1.0
+    assert result.summary["weighted_total"] == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_run_benchmark_saves_json_to_output_dir(tmp_path: Path) -> None:
+    """Output dir is created and JSON file is saved."""
+    suite = BenchmarkSuite(
+        meta={"agent": "test", "name": "test-suite", "collections": ["vault"]},
+        cases=[
+            BenchmarkCase(id="R01", category="recall", query="q1", gold_path="p.md", score_method="exact"),
+        ],
+    )
+    output_dir = str(tmp_path / "results")
+
+    with patch("mnemosyne.benchmark.runner._retrieve") as mock_retrieve:
+        mock_retrieve.return_value = _mock_retrieve_result([])
+        _ = run_benchmark(suite, system="bm25", agent="test", output_dir=output_dir)
+
+    json_files = list(Path(output_dir).glob("*.json"))
+    assert len(json_files) == 1
+
+    with open(json_files[0]) as f:
+        saved = json.load(f)
+
+    assert "meta" in saved
+    assert "summary" in saved
+    assert "diagnostics" in saved
+    assert "cases" in saved
+    assert saved["meta"]["system"] == "bm25"

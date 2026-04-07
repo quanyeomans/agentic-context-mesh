@@ -1,0 +1,20 @@
+# CODEOWNERS
+# Each line maps a path pattern to one or more owners (GitHub usernames or teams).
+# The last matching rule takes precedence.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @quanyeomans
+
+# Core retrieval modules — require maintainer review
+/mnemosyne/embed/       @quanyeomans
+/mnemosyne/search/      @quanyeomans
+/mnemosyne/entities/    @quanyeomans
+
+# Schema and migrations — high-risk changes
+/mnemosyne/entities/schema.py   @quanyeomans
+/mnemosyne/embed/schema.py      @quanyeomans
+
+# CI/CD and security configuration
+/.github/                       @quanyeomans
+/pyproject.toml                 @quanyeomans

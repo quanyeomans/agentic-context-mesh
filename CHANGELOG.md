@@ -1,0 +1,170 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
+Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+*Phase 8: procedural NDCG improvement (target ≥ 0.55, current 0.389 in R1).*
+
+## [0.6.0] - 2026-04-07 — R1: Post-Refactor Benchmark + O-2 Enrichment
+
+### Added
+- O-2: `scripts/seed-entity-relations.py` LLM-typed relationship enrichment via GPT-4o-mini batch classifier
+- O-2: Nightly cron (`0 3 * * * AEST`) — entity extract + relationship seed, Azure KV secret fetch
+- O-2: `cron-scripts/cron-registry.json` entry for `entity-relation-seed`
+- R1: `scripts/build-eval-gold.py` — rebuilds v2-real-world.yaml from scratch using live mnemosyne search + LLM judge
+- R1: `suites/v2-real-world.yaml` — fully rebuilt gold suite (263 cases from 388 queries; collection-relative path format)
+- R1 benchmark results: NDCG@10 **0.7756** (entity 0.823, recall 0.788, multi_hop 0.728, temporal 0.810, conceptual 0.804, keyword 0.800, procedural 0.389)
+- OPERATIONS.md: comprehensive deployment guide (Azure prerequisites, Key Vault secrets, first-run sequence, cron setup, monitoring, troubleshooting)
+
+### Fixed
+- ADR-M08: Embed batch retry on QMD-induced dimension mismatch — `ensure_vec_table(db, actual_dims)` called per-batch on dimension error, retries once; handles `qmd-reindex-6h` cron overwriting `vectors_vec` mid-run
+- Hourly embed cron: now fetches `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` from Azure Key Vault at runtime (managed identity)
+- Gold suite paths: rebuilt to collection-relative format (matching `mnemosyne search` output) after vault refactor broke 196/554 paths
+
+### Benchmark
+- R1 (post-refactor): NDCG@10 **0.7756** on 263-case suite (vault refactor fully indexed, gold paths rebuilt)
+- Entity graph: 1160 entities, 112 typed relationships seeded
+- Phase 8 target: procedural NDCG ≥ 0.55 (current 0.389)
+
+---
+
+## [0.5.3] - 2026-03-28 — Phase 7: 1536-dim Gold Recalibration
+
+### Added
+- Phase 7-A: Recalibrated benchmark instrument after discovering 768-dim baseline was measuring a broken config (extension load order caused silent 0-dim writes)
+- Phase 7-B: Confirmed 1536-dim as correct operational config; rebuilt 252-case gold suite at correct dimensionality
+- `scripts/run-benchmark-v2.py`: NDCG@10 scoring engine replacing weighted-total runner
+
+### Benchmark
+- Phase 7-A (768-dim, true baseline): NDCG@10 0.7690 on 252-case suite
+- Phase 7-B (1536-dim operational): NDCG@10 0.7545 — keyword +0.114, entity +0.043 vs 768-dim
+
+---
+
+## [0.5.2] - 2026-03-26 — Phase 5–6: Real-World Eval Rebuild
+
+### Added
+- Phase 5: Replaced synthetic benchmark with real agent usage queries mined from server logs
+- Phase 5: NDCG@10 scoring (was weighted category averages) — 134-case real-world suite
+- Phase 6: Temporal routing fix — temporal queries routed to `mnemosyne temporal query` before hybrid search
+- Phase 6: Multi-hop pattern improvements — intermediate result reranking, entity bridging
+- Phase 6: Suite expanded to 252 cases; multi-category NDCG scoring
+
+### Benchmark
+- Phase 5 initial (instrument issues): NDCG@10 0.3203 on 134-case suite
+- Phase 6 (after instrument + temporal fix): NDCG@10 improved to 0.69+ range before recalibration
+
+---
+
+## [0.5.1] - 2026-04-06 — O-1: Entity Graph + Multi-Hop Planner
+
+### Added
+- O-1: Multi-hop QueryPlanner — GPT-4o-mini decomposes complex queries into sub-queries, parallel BM25+vector dispatch, result synthesis
+- O-1: Entity graph seeded from vault-entities collection; entity boost wired into planner context injection
+- O-1: `mnemosyne entity extract --changed` incremental extraction pipeline
+- O-1: `scripts/seed-entity-relations.py` (pattern-matching v1 — superseded by O-2 LLM classifier)
+
+### Benchmark
+- O-1: NDCG@10 0.7541 on 245-case suite — multi_hop 0.716 (+0.035 vs P7-B), entity 0.677
+
+---
+
+## [0.5.0] - 2026-03-23 — Phase 2: Temporal + Summaries + Wikilinks
+
+### Added
+- Phase 2: temporal chunker + query rewriter + timeline CLI
+- Phase 2: L0/L1 summaries generation (gpt-4o-mini) + tier router
+- Phase 2: wikilink injector + entity resolver + audit CLI (ADR-M07)
+- Phase 2: entity NER extraction pipeline + ontology reconciler
+- entities.db schema v2: vault_path, status, frequency, relationships table
+- Raw query logging: MNEMOSYNE_LOG_QUERIES=1 → queries.jsonl
+- scripts/analyze_queries.py: real query distribution analysis
+- Keyword zero-result fallback to vector search
+- Entity vec_failed fix: KV timeout 15s → 30s
+
+### Fixed
+- Vector index re-embedded at 1536-dim (was 768-dim QMD native — vectors never landed in vectors_vec)
+- KV cold-start causing entity vector search failures (20-45% failure rate)
+- Keyword queries returning 0 results when BM25 returns empty
+
+## [0.4.0] - 2026-03-23 — Phase 3: Briefing + Classification
+
+### Added
+- Phase 3: `mnemosyne brief <agent>` — 8-step concurrent briefing pipeline synthesises ~800-token session context from memory logs, entity stubs, rules, decisions, and hybrid search via GPT-4o-mini
+- Phase 3: `mnemosyne classify "<content>"` — two-stage auto-classification (rule-based first, LLM fallback) routes new writes to the correct vault file with confidence score
+- `mnemosyne/_azure.py`: `chat_completion()` for GPT-4o-mini synthesis calls
+- `mnemosyne/briefing/`: pipeline.py, sources.py, synthesiser.py, writer.py, cli.py — 48 tests
+- `mnemosyne/classify/`: rules.py, judge.py, router.py, cli.py — 83 tests
+- Benchmark suite v1.1: CL01–CL04 classification cases; classification scoring in runner
+- WORK-BREAKDOWN.md: implementation sequence, task breakdown, open questions
+- Phase 2.5 PRD section: entity benchmark repair specification and approach
+- ENGINEERING.md: entity failure-mode patterns, benchmark suite maintenance rules, gold-path validity rules
+
+### Fixed
+- LLM judge KV secret name: `azure-openai-gpt4o-mini-deployment` (was `azure-openai-deployment` — silent 0.0 scoring on all LLM-judged benchmark cases)
+- RRF path dedup: `_canonical_path()` strips `qmd://collection-name/` prefix so BM25 and vector results for vault-entities stubs now merge correctly in fused dict
+- Entity benchmark gold paths: E01–E06 now have `gold_path` + `score_method: exact` (was `null`/`llm` — LLM judge had no ground truth, scored 0.2–0.4 on tangential docs)
+- Entity stub content: alice-chen.md, acme-corp.md, platform.md enriched to 650–750 words; project-x.md to 490 words
+
+### Benchmark
+- Phase 3 gate (≥0.750): **PASS** — 0.762 weighted total
+- entity: 0.300 → 0.933 (Phase 2.5 gold-path fix + stub enrichment)
+- classification: 1.000 (4/4 rule-based, deterministic)
+- recall: 0.875 (stable)
+- Structural ceilings remaining: temporal (0.433 — Phase 4 date-aware chunking), multi_hop (0.480 — Phase 4 connected retrieval)
+
+---
+
+## [0.3.0] - 2026-03-23 — Phase 2.5: Entity Benchmark Repair
+
+### Added
+- Phase 2.5 entity stub enrichment: alice-chen.md, acme-corp.md, platform.md, project-x.md enriched to ≥500 words
+- Gold paths added to entity benchmark cases E01–E06
+
+### Fixed
+- Entity score collapse (0.733→0.300): root cause — benchmark gold_path: null + sparse stub content
+- Phase 1 YAML suite gate re-confirmed: 0.655 (entity 0.300 → 0.933 after fix)
+
+
+## [0.2.0] - 2026-03-22
+
+### Added
+- Phase 1: intent classifier (keyword/semantic/temporal/entity/procedural)
+- Phase 1: BM25 wrapper (qmd subprocess → structured results)
+- Phase 1: vector search wrapper (sqlite-vec CTE MATCH)
+- Phase 1: RRF fusion + entity boost
+- Phase 1: token budget enforcer (L0/L1/L2 tiers)
+- Phase 1: hybrid orchestrator + parallel dispatch
+- Phase 1: mnemosyne search CLI
+- Phase 1b: entities.db schema + migration system
+- Phase 1b: entity graph (write, lookup, mentions, relationships)
+- Phase 1b: mnemosyne entity CLI
+- Benchmark CLI: YAML suite format, validate/run/compare/init commands
+- Generalised benchmark framework SPEC.md
+- CI: 4-stage pipeline, mypy strict, ruff, bandit, pip-audit, Dependabot
+- ENGINEERING.md contributor guide
+
+### Fixed
+- sqlite-vec CTE pattern: MATCH must be primary table in inner CTE
+- Collection scope: _SHARED_COLLECTIONS was missing vault (93% of content)
+- Benchmark gold-pair validity: R03/R04/R06/R07/R08 replaced with valid pairs
+
+## [0.1.0] - 2026-03-22
+
+### Added
+- Phase 0: Azure OpenAI embedding pipeline (text-embedding-3-large, 1536-dim)
+- Phase 0: schema validation + sqlite-vec extension loading
+- Phase 0: staging table pattern for vec0 upserts
+- Phase 0: recall gate (5/5 known-doc queries post-embed)
+- Phase 0: mnemosyne embed CLI
+- Phase 0: 50-query benchmark runner (BM25 baseline: 0.5054)
+- PRD v3.0 (68KB, 5 phases, 10 ADRs, benchmark gates)
+- qmd_azure_embed shim for backwards compatibility
+
+### Fixed
+- Extension load order: load_sqlite_vec() before vec0 operations
+- INSERT OR REPLACE not supported on vec0: use staging table pattern
+- content.doc vs content.body: QMD schema uses doc not body

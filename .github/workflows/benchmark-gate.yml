@@ -1,0 +1,139 @@
+name: Benchmark gate (manual)
+
+# Manual benchmark comparison — required on PRs that change retrieval logic.
+# Engineering hub: "PRs that change retrieval logic must include benchmark result comparison."
+# This workflow is triggered manually by Builder after a benchmark run completes.
+# It does NOT run automatically (benchmark requires live Azure API and QMD DB).
+
+on:
+  workflow_dispatch:
+    inputs:
+      system:
+        description: "Search system to benchmark (bm25|vector|hybrid)"
+        required: true
+        default: "hybrid"
+      pr_number:
+        description: "PR number to comment results on (leave blank for push)"
+        required: false
+      baseline_score:
+        description: "Previous weighted total to compare against (e.g. 0.51)"
+        required: false
+        default: "0.51"
+
+jobs:
+  benchmark:
+    name: Run benchmark — ${{ inputs.system }}
+    runs-on: ubuntu-latest
+    # This job requires secrets — only runs when triggered manually by an authorised user.
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run benchmark
+        run: |
+          echo "Benchmark gate: ${{ inputs.system }}"
+          echo "Baseline: ${{ inputs.baseline_score }}"
+          echo ""
+          echo "NOTE: This workflow is a gate template."
+          echo "The actual benchmark run happens on your-deployment-server where the live"
+          echo "QMD DB and Azure credentials are available. Results from that run"
+          echo "are committed to benchmark-results/ and referenced in the PR."
+          echo ""
+          echo "Verifying benchmark results file exists:"
+          ls benchmark-results/*.json 2>/dev/null || echo "No results yet — run mnemosyne benchmark on your-deployment-server first."
+
+      - name: Check benchmark results against baseline
+        if: ${{ inputs.baseline_score != '' }}
+        run: |
+          python3 -c "
+          import json, glob, sys, os
+          from pathlib import Path
+
+          baseline = float('${{ inputs.baseline_score }}')
+          system = '${{ inputs.system }}'
+          results_dir = Path('benchmark-results')
+
+          # Find most recent result file for this system
+          pattern = str(results_dir / f'*{system}*.json')
+          files = sorted(glob.glob(pattern), reverse=True)
+
+          if not files:
+              print(f'No benchmark results found for system={system}')
+              print('Run: mnemosyne benchmark --system {system} on your-deployment-server')
+              sys.exit(0)  # Warning, not failure — results may not be committed yet
+
+          with open(files[0]) as f:
+              result = json.load(f)
+
+          score = result.get('weighted_total', 0)
+          delta = score - baseline
+          delta_pct = (delta / baseline) * 100
+
+          print(f'System:   {system}')
+          print(f'Baseline: {baseline:.4f}')
+          print(f'Current:  {score:.4f}')
+          print(f'Delta:    {delta:+.4f} ({delta_pct:+.1f}%)')
+          print()
+
+          # Per-category breakdown
+          scores = result.get('scores', {})
+          print('Category breakdown:')
+          for cat, data in scores.items():
+              s = data.get('score', 0)
+              print(f'  {cat:<14} {s:.4f}')
+
+          print()
+          # Engineering hub: alert on >5% regression
+          if delta < -0.025:  # 5% of 0.51 baseline = 0.025
+              print(f'REGRESSION: score dropped by {abs(delta_pct):.1f}% — investigation required')
+              sys.exit(1)
+          elif delta < 0:
+              print(f'WARNING: minor regression ({abs(delta_pct):.1f}%) — review category breakdown')
+          else:
+              print(f'PASS: score improved or maintained')
+          "
+
+      - name: Comment benchmark results on PR
+        if: ${{ inputs.pr_number != '' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const glob = require('glob');
+            const system = '${{ inputs.system }}';
+
+            const files = glob.sync(`benchmark-results/*${system}*.json`).sort().reverse();
+            if (files.length === 0) {
+              console.log('No benchmark result files found to comment.');
+              return;
+            }
+
+            const result = JSON.parse(fs.readFileSync(files[0]));
+            const score = result.weighted_total || 0;
+            const baseline = parseFloat('${{ inputs.baseline_score }}' || '0.51');
+            const delta = score - baseline;
+            const emoji = delta >= 0 ? '✅' : '⚠️';
+
+            const categoryTable = Object.entries(result.scores || {})
+              .map(([cat, data]) => `| ${cat} | ${(data.score || 0).toFixed(4)} |`)
+              .join('\n');
+
+            const body = `## Benchmark Results — \`${system}\`\n\n` +
+              `${emoji} **Weighted total:** ${score.toFixed(4)} (baseline: ${baseline.toFixed(4)}, delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(4)})\n\n` +
+              `| Category | Score |\n|---|---|\n${categoryTable}\n\n` +
+              `*Run date: ${result.date || 'unknown'} | File: ${files[0]}*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt('${{ inputs.pr_number }}'),
+              body: body
+            });

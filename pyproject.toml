@@ -1,0 +1,170 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mnemosyne"
+version = "0.6.0"
+description = "Memory system for QMD + Obsidian agent stacks — hybrid search, entity graph, temporal reasoning, session briefing"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Test runner
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
+    # Type checking (engineering hub: zero errors, strict mode)
+    "mypy>=1.9",
+    "types-requests>=2.31",
+    # Linting (engineering hub: linting blocks merge)
+    "ruff>=0.4",
+    # Security (engineering hub: bandit zero HIGH/MEDIUM, pip-audit zero CVEs with fixes)
+    "bandit[toml]>=1.7",
+    "pip-audit>=2.7",
+    # Secret detection
+    "detect-secrets>=1.4",
+]
+
+[project.scripts]
+mnemosyne = "mnemosyne.cli:main"
+# Legacy alias — kept for backwards compat with existing cron entries
+qmd-azure-embed = "mnemosyne.embed.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/quanyeomans/agentic-context-mesh"
+Issues = "https://github.com/quanyeomans/agentic-context-mesh/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+# Test markers — engineering hub test pyramid
+# Usage: pytest -m contract | unit | integration | e2e
+markers = [
+    "contract: interface agreement tests (fast, <30s total, zero tolerance for failure)",
+    "unit: individual component logic (mock externals, fast)",
+    "integration: multi-component with real sqlite-vec (skip if extension unavailable)",
+    "e2e: full pipeline against live Azure API (requires MNEMOSYNE_E2E=1)",
+    "slow: tests taking >5s",
+]
+timeout = 60  # Per-test timeout default (seconds)
+
+[tool.coverage.run]
+source = ["mnemosyne"]
+omit = [
+    "tests/*",
+    # CLI entry points are thin argparse wrappers — tested via integration, not unit coverage
+    "mnemosyne/cli.py",
+    "mnemosyne/*/cli.py",
+    # External I/O adapters — Azure API + QMD subprocess; behaviour mocked in unit tests
+    "mnemosyne/_azure.py",
+    "mnemosyne/_qmd.py",
+    # Pipeline orchestrators — thin wrappers over individually-tested modules
+    "mnemosyne/entities/pipeline.py",
+    "mnemosyne/temporal/index.py",
+    "mnemosyne/wikilinks/audit.py",
+]
+
+[tool.coverage.report]
+# Engineering hub: ≥80% overall; per-module targets in PRD.md §6
+fail_under = 80
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",  # Abstract method stubs
+]
+
+# ── mypy ─────────────────────────────────────────────────────────────────────
+# Engineering hub: "mypy — zero errors" (Python standard)
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+strict_equality = true
+# Modules not yet fully annotated (will be removed as each phase ships)
+[[tool.mypy.overrides]]
+module = [
+    "mnemosyne.search.*",
+    "mnemosyne.entities.*",
+    "mnemosyne.temporal.*",
+    "mnemosyne.summaries.*",
+    "mnemosyne.classify.*",
+    "mnemosyne.briefing.*",
+    "mnemosyne.contradict.*",
+    "mnemosyne.benchmark.*",
+]
+# Stub-only modules — no implementation yet, no type checking needed
+ignore_errors = true
+
+# ── ruff ─────────────────────────────────────────────────────────────────────
+# Engineering hub: "Linting / code quality: blocks merge"
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "S",    # flake8-bandit (security)
+    "T20",  # flake8-print (no print() in prod code)
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "S101",  # use of assert (test code)
+    "S603",  # subprocess calls (we use subprocess intentionally for qmd)
+    "S607",  # partial executable path (qmd is on PATH by design)
+    "S608",  # SQL injection false positive — all dynamic SQL uses ? parameter binding
+    "B008",  # function call in default arg (used in CLI argument defaults)
+    "T201",  # print found (allowed in CLI modules — cli.py excluded below)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "T20"]        # Tests: allow assert + print
+"mnemosyne/*/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
+"mnemosyne/cli.py" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ── bandit ───────────────────────────────────────────────────────────────────
+# Engineering hub: "bandit — zero HIGH/MEDIUM findings"
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = [
+    "B101",  # assert_used — acceptable in test-adjacent code
+    "B603",  # subprocess_without_shell_equals_true — we use explicit commands
+    "B607",  # start_process_with_partial_path — qmd is on PATH
+]
+# Any HIGH finding not listed here blocks the build.
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mnemosyne*", "qmd_azure_embed*"]
+
+# QMD compatibility — update when testing against a new QMD version
+# Tested: qmd@1.1.2
+[tool.mnemosyne]
+qmd-tested-version = "1.1.2"
+qmd-schema-version = "1"
