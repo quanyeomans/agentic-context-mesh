@@ -1,6 +1,6 @@
 # Prior Art & Inspirations
 
-This document acknowledges the search, retrieval, and agent-memory implementations that influenced the design of `qmd-azure-embed` and the broader [Mnemosyne](https://github.com/three-cubes/qmd-azure-embed) retrieval architecture it feeds into.
+This document acknowledges the search, retrieval, and agent-memory implementations that influenced the design of `qmd-azure-embed` and the broader [Mnemosyne](https://github.com/quanyeomans/agentic-context-mesh) retrieval architecture it feeds into.
 
 We've reviewed these systems as primary references. Where we've adopted a pattern directly, we've said so.
 

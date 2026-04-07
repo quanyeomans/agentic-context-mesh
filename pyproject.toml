@@ -39,8 +39,8 @@ mnemosyne = "mnemosyne.cli:main"
 qmd-azure-embed = "mnemosyne.embed.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/three-cubes/qmd-azure-embed"
-Issues = "https://github.com/three-cubes/qmd-azure-embed/issues"
+Homepage = "https://github.com/quanyeomans/agentic-context-mesh"
+Issues = "https://github.com/quanyeomans/agentic-context-mesh/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -105,7 +105,7 @@ See [OPERATIONS.md](OPERATIONS.md) for full infrastructure setup, cron configura
 ## Install
 
 ```bash
-git clone https://github.com/three-cubes/qmd-azure-embed /opt/mnemosyne
+git clone https://github.com/quanyeomans/agentic-context-mesh /opt/mnemosyne
 cd /opt/mnemosyne
 python3 -m venv .venv
 .venv/bin/pip install -e .

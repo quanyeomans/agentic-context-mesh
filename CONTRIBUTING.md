@@ -3,7 +3,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/three-cubes/qmd-azure-embed
+git clone https://github.com/quanyeomans/agentic-context-mesh
 cd qmd-azure-embed
 pip install -e ".[dev]"
 ```

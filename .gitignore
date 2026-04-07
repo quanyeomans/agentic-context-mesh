@@ -39,3 +39,4 @@ suites/*.yaml
 .env
 *.env
 !env.example
+PRD.md

@@ -1,7 +1,6 @@
 # Engineering Disciplines
 
-Standards, quality gates, and compliance requirements for Mnemosyne contributors.
-Aligned with the [Triad Consulting Engineering Hub](https://github.com/three-cubes/engineering-hub).
+Standards, quality gates, and compliance requirements for Agentic Context Mesh contributors.
 
 ---
 
@@ -508,7 +507,7 @@ Environment variables:
 
 ---
 
-*Aligned with Triad Consulting Engineering Hub (`engineering-hub/standards/`). Where this document and the engineering hub conflict, the hub takes precedence — raise a PR to sync this document.*
+
 
 ---
 
@@ -546,7 +545,7 @@ Environment variables:
 
 **Fix:** Entity stubs must be ≥500 words of substantive content. Each stub should be the definitive answer to "what do we know about X" — not a registry entry.
 
-**Standard content sections:** About/Overview, Role in Triad Consulting, Key Decisions, Active Projects, Communication Patterns, Relationships, Tags.
+**Standard content sections:** About/Overview, Role in the Team, Key Decisions, Active Projects, Communication Patterns, Relationships, Tags.
 
 **Rule:** After enriching a stub, run `mnemosyne embed --changed` to re-index before running benchmark. Unenriched stubs with new content that hasn't been embedded will not surface in vector search.
 

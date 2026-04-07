@@ -145,7 +145,7 @@ Mnemosyne expects:
 
 ```bash
 # Clone to the VM
-git clone https://github.com/three-cubes/qmd-azure-embed /data/tools/qmd-azure-embed
+git clone https://github.com/quanyeomans/agentic-context-mesh /data/tools/qmd-azure-embed
 cd /data/tools/qmd-azure-embed
 
 # Create virtualenv and install
