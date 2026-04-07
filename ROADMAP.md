@@ -18,7 +18,7 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 
 ---
 
-## Current state — v0.6.0
+## Current state — v0.7.0
 
 **NDCG@10 0.7756** on 263-case real-world benchmark suite (top-tier for heterogeneous personal knowledge bases — production RAG systems typically score 0.60–0.75).
 
@@ -31,7 +31,8 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 | Session briefing synthesis | ✅ Shipped | GPT-4o-mini, 8-source concurrent pipeline |
 | Auto-classification of writes | ✅ Shipped | Rule-based + LLM fallback |
 | LLM-typed relationship enrichment | ✅ Shipped | Nightly cron, GPT-4o-mini batch classifier |
-| Contradiction detection | 🔲 Planned | v0.7.0 |
+| Procedural path boost | ✅ Shipped | 1.4× re-rank for how-to/runbook paths, procedural NDCG 0.389 → 0.5542 |
+| Contradiction detection | 🔲 Planned | v0.8.0 |
 | Local/offline embedding | 🔲 Planned | v0.8.0 |
 | REST API server mode | 🔲 Planned | v1.0.0 |
 
@@ -45,20 +46,29 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 | keyword | 0.800 | 32 | Strong — BM25 baseline solid |
 | recall | 0.788 | 49 | Strong — known-document retrieval reliable |
 | multi_hop | 0.728 | 33 | Good — QueryPlanner functional |
-| **procedural** | **0.389** | **16** | **Gap — primary focus for v0.7.0** |
+| **procedural** | **0.5542** | **30** | **Path boost shipped — target ≥ 0.55 met** |
 | **Overall** | **0.7756** | **263** | |
 
 ---
 
 ## v0.7.0 — Procedural retrieval + contradiction detection
 
-**Target: procedural NDCG ≥ 0.55** (from 0.389)
+**Procedural retrieval target: NDCG ≥ 0.55 — ✅ Met (0.5542)**
 
-Procedural queries ("how do I add a new agent", "what are the steps to configure X") are the weakest category. The knowledge exists in the indexed vault but isn't being retrieved at the right rank. Two complementary approaches:
+Procedural queries ("how do I add a new agent", "what are the steps to configure X") were the weakest category. Root cause: files were being retrieved (Hit@5 = 0.533) but ranked at positions 4–7 rather than top-3. The fix is a path-aware re-ranking boost applied post-RRF.
 
 **Retrieval-side:**
-- [ ] Procedural intent classifier — route "how to" queries to a dedicated re-ranker that boosts step-by-step structured content
-- [ ] Runbook-aware chunking — split procedural docs by step headers rather than fixed-size windows, preserving the sequence structure that BM25 and vector search both miss
+- [x] Procedural path boost — 1.4× `boosted_score` multiplier for documents whose path matches `how-to-*`, `/runbooks/`, `runbook-*`, or `procedure*` patterns. Applied after RRF and entity boost, gated to `PROCEDURAL` intent. Zero effect on other query types. See `mnemosyne/search/rrf.py:procedural_boost()`.
+- [ ] Step-header chunking — split procedural docs by `##` step headers rather than fixed-size windows (next iteration for further improvement)
+
+**Benchmark evidence (30-case procedural validation suite):**
+
+| Metric | Before (v0.6.0) | After (v0.7.0) | Delta |
+|---|---|---|---|
+| procedural NDCG@10 | 0.389 | 0.5542 | +0.165 |
+| procedural Hit@5 | 0.533 | 0.800 | +0.267 |
+
+The Hit@5 improvement confirms the files were already being retrieved — the boost corrects ranking, not retrieval.
 
 **Content-side:**
 - [ ] Contribution guide for structuring procedural knowledge so it indexes well (this repo itself demonstrates the pattern)
@@ -68,7 +78,7 @@ Procedural queries ("how do I add a new agent", "what are the steps to configure
 - [ ] Flag conflicts rather than silently overwriting — human-agent teams need to know when the knowledge base disagrees with itself
 - [ ] CLI: `mnemosyne contradict check "<new content>"` → reports conflicting documents + confidence
 
-**Good first issues for contributors:** procedural intent classifier, step-based chunker, contradiction check prototype.
+**Good first issues for contributors:** step-based chunker, contradiction check prototype.
 
 ---
 

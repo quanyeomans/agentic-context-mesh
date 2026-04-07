@@ -20,8 +20,10 @@ import pytest
 from mnemosyne.search.bm25 import BM25Result
 from mnemosyne.search.rrf import (
     ENTITY_BOOST_CAP,
+    PROCEDURAL_BOOST_FACTOR,
     RRF_K,
     entity_boost,
+    procedural_boost,
     rrf,
 )
 from mnemosyne.search.vector import VecResult
@@ -280,6 +282,87 @@ def test_entity_boost_returns_unmodified_on_unexpected_error() -> None:
 
     boosted = entity_boost(results, mock_db)
     assert len(boosted) == 1
+
+
+# ---------------------------------------------------------------------------
+# procedural_boost
+# ---------------------------------------------------------------------------
+
+
+def _fused(path: str, score: float = 0.1) -> FusedResult:
+    from mnemosyne.search.rrf import FusedResult
+    r = FusedResult(path=path, collection="c", title="T", snippet="s")
+    r.rrf_score = score
+    r.boosted_score = score
+    return r
+
+
+@pytest.mark.unit
+def test_procedural_boost_how_to_file_boosted() -> None:
+    """Path starting with how-to- gets boosted."""
+    r = _fused("docs/runbooks/how-to-configure-something.md", score=0.1)
+    results = procedural_boost([r])
+    assert results[0].boosted_score == pytest.approx(0.1 * PROCEDURAL_BOOST_FACTOR)
+
+
+@pytest.mark.unit
+def test_procedural_boost_runbooks_dir_boosted() -> None:
+    """File inside a /runbooks/ directory gets boosted."""
+    r = _fused("platform/runbooks/deploy-agent.md", score=0.1)
+    results = procedural_boost([r])
+    assert results[0].boosted_score == pytest.approx(0.1 * PROCEDURAL_BOOST_FACTOR)
+
+
+@pytest.mark.unit
+def test_procedural_boost_runbook_prefix_boosted() -> None:
+    """Filename starting with runbook- gets boosted."""
+    r = _fused("docs/runbook-deployment-guide.md", score=0.1)
+    results = procedural_boost([r])
+    assert results[0].boosted_score == pytest.approx(0.1 * PROCEDURAL_BOOST_FACTOR)
+
+
+@pytest.mark.unit
+def test_procedural_boost_non_procedural_path_unchanged() -> None:
+    """Non-matching path is not boosted."""
+    r = _fused("notes/meeting-2026-01-15.md", score=0.1)
+    results = procedural_boost([r])
+    assert results[0].boosted_score == pytest.approx(0.1)
+
+
+@pytest.mark.unit
+def test_procedural_boost_ranking_reorder() -> None:
+    """Procedural doc rises above non-procedural doc after boost."""
+    non_proc = _fused("notes/general-note.md", score=0.2)
+    proc = _fused("docs/runbooks/how-to-setup.md", score=0.15)
+    # Before boost: non_proc > proc
+    assert non_proc.boosted_score > proc.boosted_score
+
+    results = procedural_boost([non_proc, proc])
+    # After boost: proc (0.15 * 1.4 = 0.21) > non_proc (0.2)
+    assert results[0].path == "docs/runbooks/how-to-setup.md"
+    assert results[1].path == "notes/general-note.md"
+
+
+@pytest.mark.unit
+def test_procedural_boost_empty_input() -> None:
+    """Empty input returns empty list without error."""
+    assert procedural_boost([]) == []
+
+
+@pytest.mark.unit
+def test_procedural_boost_custom_factor() -> None:
+    """Custom boost_factor is applied correctly."""
+    r = _fused("guide/how-to-do-x.md", score=0.5)
+    results = procedural_boost([r], boost_factor=2.0)
+    assert results[0].boosted_score == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_procedural_boost_procedure_prefix_boosted() -> None:
+    """Filename starting with procedure is boosted."""
+    r = _fused("ops/procedure-rollback.md", score=0.1)
+    results = procedural_boost([r])
+    assert results[0].boosted_score == pytest.approx(0.1 * PROCEDURAL_BOOST_FACTOR)
 
 
 @pytest.mark.unit

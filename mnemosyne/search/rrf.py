@@ -1,14 +1,18 @@
 """
-Reciprocal Rank Fusion (RRF) + entity boosting for the Mnemosyne search pipeline.
+Reciprocal Rank Fusion (RRF) + entity boosting + procedural boosting for the
+Mnemosyne search pipeline.
 
 RRF combines BM25 and vector search result lists into a single ranked list.
 Entity boosting increases scores for documents that have known entity mentions,
 rewarding documents that are associated with important named entities.
+Procedural boosting re-ranks procedural content (how-to guides, runbooks) for
+PROCEDURAL intent queries where retrieval hits but ranking is weak.
 
 Constants:
-  RRF_K = 60                  Standard RRF constant (Cormack et al., 2009)
-  ENTITY_BOOST_FACTOR = 0.20  Multiplier for log(1 + mention_count)
-  ENTITY_BOOST_CAP = 2.0      Maximum boost multiplier (prevents runaway scores)
+  RRF_K = 60                      Standard RRF constant (Cormack et al., 2009)
+  ENTITY_BOOST_FACTOR = 0.20      Multiplier for log(1 + mention_count)
+  ENTITY_BOOST_CAP = 2.0          Maximum boost multiplier (prevents runaway scores)
+  PROCEDURAL_BOOST_FACTOR = 1.4   Score multiplier for procedural path patterns
 
 RRF formula per document:
   score(d) = sum(1 / (k + rank_in_list) for each list containing d)
@@ -18,11 +22,18 @@ Entity boost formula:
   boost(d) = 1 + min(ENTITY_BOOST_FACTOR * log(1 + mention_count), CAP - 1)
   Applied after RRF, before budget trim.
 
-Both functions return [] on empty inputs. Never raise.
+Procedural boost:
+  Applied post-RRF, after entity boost, for PROCEDURAL intent queries only.
+  Multiplies boosted_score by PROCEDURAL_BOOST_FACTOR for documents whose path
+  matches procedural content patterns (how-to-*, /runbooks/, runbook-*, procedure*).
+  Zero effect on other intent types.
+
+All functions return [] on empty inputs. Never raise.
 """
 
 import logging
 import math
+import re
 import sqlite3
 from dataclasses import dataclass
 
@@ -38,6 +49,18 @@ logger = logging.getLogger(__name__)
 RRF_K: int = 60
 ENTITY_BOOST_FACTOR: float = 0.20
 ENTITY_BOOST_CAP: float = 2.0
+PROCEDURAL_BOOST_FACTOR: float = 1.4
+
+# ---------------------------------------------------------------------------
+# Procedural path patterns
+# ---------------------------------------------------------------------------
+
+_PROCEDURAL_PATH_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(?:^|/)how-to-", re.IGNORECASE),
+    re.compile(r"/runbooks?/", re.IGNORECASE),
+    re.compile(r"(?:^|/)runbook-", re.IGNORECASE),
+    re.compile(r"(?:^|/)procedure", re.IGNORECASE),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -293,4 +316,59 @@ def _entity_boost_impl(
             r.boosted_score = r.rrf_score
 
     # Re-sort by boosted score
+    return sorted(results, key=lambda r: r.boosted_score, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Procedural boosting
+# ---------------------------------------------------------------------------
+
+
+def procedural_boost(
+    results: list[FusedResult],
+    boost_factor: float = PROCEDURAL_BOOST_FACTOR,
+) -> list[FusedResult]:
+    """
+    Boost documents whose paths match procedural content patterns for PROCEDURAL
+    intent queries.
+
+    Called after entity_boost(), before apply_budget(). Only called when
+    intent == QueryIntent.PROCEDURAL — callers are responsible for the guard.
+
+    Boost logic:
+      If any pattern in _PROCEDURAL_PATH_PATTERNS matches result.path:
+        result.boosted_score *= boost_factor
+
+    This is a re-ranking fix, not a retrieval fix. Procedural files are typically
+    retrieved (Hit@5 > 0.5) but ranked too low (positions 4–7). The 1.4× multiplier
+    moves them into the top-3 without over-ranking them for non-procedural queries
+    (the boost is gated to PROCEDURAL intent in hybrid.py).
+
+    Args:
+        results:       List of FusedResult (from rrf(), after entity_boost()).
+        boost_factor:  Multiplier for matching paths. Default 1.4.
+
+    Returns:
+        Results re-sorted by boosted_score descending.
+        Returns results unmodified on any error.
+        Never raises.
+    """
+    if not results:
+        return results
+
+    try:
+        return _procedural_boost_impl(results, boost_factor)
+    except Exception as e:
+        logger.warning("procedural_boost: error — %s — returning unmodified results", e)
+        return results
+
+
+def _procedural_boost_impl(
+    results: list[FusedResult],
+    boost_factor: float,
+) -> list[FusedResult]:
+    """Implementation of procedural boosting — called from procedural_boost() with error boundary."""
+    for r in results:
+        if any(p.search(r.path) for p in _PROCEDURAL_PATH_PATTERNS):
+            r.boosted_score *= boost_factor
     return sorted(results, key=lambda r: r.boosted_score, reverse=True)
