@@ -2,14 +2,21 @@
 # deploy.sh — fetch secrets from Key Vault and run qmd-azure-embed
 # Usage: ./scripts/deploy.sh [--force] [--limit N]
 #
-# Requires: az CLI authenticated, KV_NAME env var set to your Azure Key Vault name
-# Logs to: /data/tc-agent-zone/logs/azure-embed.log
+# Requires:
+#   - az CLI authenticated (managed identity or service principal)
+#   - KV_NAME env var set to your Azure Key Vault name
+#   - Optionally: LOG_DIR env var for log output (default: /var/log/mnemosyne)
+#
+# See env.example for all configurable variables.
 
 set -euo pipefail
 
-KV_NAME="${KV_NAME:?Error: KV_NAME must be set (your Azure Key Vault name)}"
-LOG=/data/tc-agent-zone/logs/azure-embed.log
-mkdir -p "$(dirname "$LOG")"
+KV_NAME="${KV_NAME:?Error: KV_NAME must be set to your Azure Key Vault name (see env.example)}"
+export MNEMOSYNE_KV_NAME="$KV_NAME"   # Python modules read MNEMOSYNE_KV_NAME
+
+LOG_DIR="${LOG_DIR:-/var/log/mnemosyne}"
+LOG="${LOG_DIR}/azure-embed.log"
+mkdir -p "$LOG_DIR"
 timestamp() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 echo "[$(timestamp)] deploy.sh: fetching secrets from $KV_NAME" | tee -a "$LOG"

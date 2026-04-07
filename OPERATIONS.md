@@ -6,6 +6,46 @@ For design rationale see [PRD.md](PRD.md). For benchmark methodology see [EVALUA
 
 ---
 
+## Environment Configuration
+
+All infrastructure-specific values (vault name, paths, credentials) are passed via environment variables — nothing is hardcoded in the source. The repo ships [`env.example`](../env.example) with every variable documented.
+
+**Setting up your environment file:**
+
+```bash
+# On your deployment VM
+cp env.example /opt/mnemosyne/service.env
+chmod 600 /opt/mnemosyne/service.env
+# Edit with your values (Key Vault name, vault path, data dir, etc.)
+nano /opt/mnemosyne/service.env
+
+# Source it in each cron job (see Cron Scheduling below)
+source /opt/mnemosyne/service.env
+```
+
+**For local dev/testing:**
+
+```bash
+cp env.example .env    # .env is gitignored
+# Edit with your values, then:
+source .env && mnemosyne search "test query" --agent builder
+```
+
+**For GitHub Actions:** add each variable as a repository secret (Settings → Secrets and variables → Actions). The CI workflows that need Azure credentials read them as `${{ secrets.AZURE_OPENAI_API_KEY }}` etc.
+
+**Key variables to set first:**
+
+| Variable | What it is |
+|---|---|
+| `MNEMOSYNE_KV_NAME` | Your Azure Key Vault name |
+| `MNEMOSYNE_VAULT_ROOT` | Path to your Obsidian vault |
+| `MNEMOSYNE_DATA_DIR` | Where entities.db and logs go |
+| `LOG_DIR` | Where deploy.sh and cron wrappers write logs |
+
+See `env.example` for the complete variable reference.
+
+---
+
 ## Prerequisites
 
 ### 1. Azure Resources

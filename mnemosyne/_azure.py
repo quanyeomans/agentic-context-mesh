@@ -43,8 +43,9 @@ logger = logging.getLogger(__name__)
 EMBED_DIMS = 1536
 
 # Key Vault name — read from environment. Required when using Key Vault auth.
-# Set MNEMOSYNE_KV_NAME in your environment or service env file.
-_KEY_VAULT_NAME = os.environ.get("MNEMOSYNE_KV_NAME", "")
+# Set MNEMOSYNE_KV_NAME (or the shorter alias KV_NAME used by deploy.sh) in
+# your service env file. MNEMOSYNE_KV_NAME takes precedence if both are set.
+_KEY_VAULT_NAME = os.environ.get("MNEMOSYNE_KV_NAME") or os.environ.get("KV_NAME", "")
 
 # Default deployment
 _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"

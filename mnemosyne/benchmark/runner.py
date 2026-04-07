@@ -339,9 +339,13 @@ def run_benchmark(
         import os
         import subprocess
 
-        _kv_name = os.environ.get("MNEMOSYNE_KV_NAME", "")
+        _kv_name = os.environ.get("MNEMOSYNE_KV_NAME") or os.environ.get("KV_NAME", "")
         if not _kv_name:
-            raise ValueError("MNEMOSYNE_KV_NAME environment variable not set — cannot fetch LLM judge credentials from Key Vault. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT directly to skip Key Vault.")
+            raise ValueError(
+                "Key Vault name not set — cannot fetch LLM judge credentials. "
+                "Set MNEMOSYNE_KV_NAME (or KV_NAME) to your Azure Key Vault name, "
+                "or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT directly to skip Key Vault."
+            )
 
         api_key = subprocess.run(
             [

@@ -33,3 +33,9 @@ None/
 suites/v2-real-world.yaml
 suites/*.yaml
 !suites/example.yaml
+
+# Local environment files — copy env.example and fill in your values
+# Never commit files with real credentials or infrastructure names
+.env
+*.env
+!env.example
