@@ -255,6 +255,7 @@ def _entity_boost_impl(
     # (e.g. 01-projects/foo-bar/file.md).
     def _to_qmd_path(uri: str) -> str:
         import os as _os
+
         vault_root = _os.environ.get("MNEMOSYNE_VAULT_ROOT", "/data/obsidian-vault")
         vault_prefix = f"{vault_root}/"
         if uri.startswith(vault_prefix):
@@ -340,7 +341,7 @@ def procedural_boost(
         result.boosted_score *= boost_factor
 
     This is a re-ranking fix, not a retrieval fix. Procedural files are typically
-    retrieved (Hit@5 > 0.5) but ranked too low (positions 4–7). The 1.4× multiplier
+    retrieved (Hit@5 > 0.5) but ranked too low (positions 4-7). The 1.4x multiplier
     moves them into the top-3 without over-ranking them for non-procedural queries
     (the boost is gated to PROCEDURAL intent in hybrid.py).
 
