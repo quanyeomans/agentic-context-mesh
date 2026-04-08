@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 import os as _os
 _VAULT_ROOT = _os.environ.get("MNEMOSYNE_VAULT_ROOT", "/data/obsidian-vault")
 _WORKSPACE_ROOT = _os.environ.get("MNEMOSYNE_WORKSPACE_ROOT", "/data/workspaces")
-_VAULT_BOARDS_DIR = _os.environ.get("MNEMOSYNE_BOARDS_DIR", f"{_VAULT_ROOT}/01-Projects/Boards"  # override with MNEMOSYNE_BOARDS_DIR env var)
+_VAULT_BOARDS_DIR = _os.environ.get("MNEMOSYNE_BOARDS_DIR", f"{_VAULT_ROOT}/01-Projects/Boards")
 
 _VAULT_BOARDS_GLOB = f"{_VAULT_BOARDS_DIR}/*.md"
 _WORKSPACE_MEMORY_GLOB = f"{_WORKSPACE_ROOT}/*/memory"
