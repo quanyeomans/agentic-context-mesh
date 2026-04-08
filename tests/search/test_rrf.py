@@ -22,6 +22,7 @@ from mnemosyne.search.rrf import (
     ENTITY_BOOST_CAP,
     PROCEDURAL_BOOST_FACTOR,
     RRF_K,
+    FusedResult,
     entity_boost,
     procedural_boost,
     rrf,
@@ -290,7 +291,6 @@ def test_entity_boost_returns_unmodified_on_unexpected_error() -> None:
 
 
 def _fused(path: str, score: float = 0.1) -> FusedResult:
-    from mnemosyne.search.rrf import FusedResult
     r = FusedResult(path=path, collection="c", title="T", snippet="s")
     r.rrf_score = score
     r.boosted_score = score
