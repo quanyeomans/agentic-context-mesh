@@ -31,7 +31,7 @@ from mnemosyne.embed.schema import get_qmd_db_path, load_sqlite_vec
 from mnemosyne.search.bm25 import BM25Result, bm25_search
 from mnemosyne.search.budget import BudgetedResult, apply_budget
 from mnemosyne.search.intent import QueryIntent, classify
-from mnemosyne.search.rrf import FusedResult, entity_boost, rrf
+from mnemosyne.search.rrf import FusedResult, entity_boost, procedural_boost, rrf
 from mnemosyne.search.vector import VecResult, vector_search_bytes
 
 logger = logging.getLogger(__name__)
@@ -372,6 +372,10 @@ def search(
             entities_db.close()
     elif entities_db is not None:
         entities_db.close()
+
+    # Procedural boosting for PROCEDURAL intent
+    if intent == QueryIntent.PROCEDURAL:
+        fused = procedural_boost(fused)
 
     # Merge temporal chunks into fused results for TEMPORAL intent.
     # Previously stored as _temporal_chunks side-channel; now merged into main

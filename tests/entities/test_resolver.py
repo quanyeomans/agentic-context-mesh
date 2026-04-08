@@ -190,7 +190,7 @@ def test_resolve_microsoft_corp_alias(db):
 
 
 @pytest.mark.unit
-def test_resolve_delta-suite_alias(db):
+def test_resolve_delta_suite_alias(db):
     """DeltaSuite → delta-suite."""
     row = resolve_canonical("DeltaSuite", db)
     assert row is not None and row["id"] == "delta-suite"
