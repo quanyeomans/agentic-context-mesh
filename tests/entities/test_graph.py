@@ -201,7 +201,7 @@ def test_entity_lookup_fuzzy_match(db, vault_root):
         markdown_path="06-Entities/person/alice-chen.md",
         db=db,
     )
-    result = entity_lookup("Jordan", db)
+    result = entity_lookup("Alice", db)
     assert result is not None
     assert result.id == "alice-chen"
 

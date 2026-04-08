@@ -55,19 +55,19 @@ _QUERY_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
 # Update to match your deployment's collection names.
 # Collections available to all agents (shared knowledge + main vault)
 _SHARED_COLLECTIONS = [
-    "vault-projects",        # Active projects (01-Projects)
-    "vault-areas",           # Areas of responsibility (02-Areas)
-    "vault-resources",       # Reference material (03-Resources)
-    "vault-agent-knowledge", # Agent knowledge files (04-Agent-Knowledge)
-    "vault-knowledge",       # Generalised knowledge (05-Knowledge)
-    "vault-entities",        # Entity knowledge graph — boosted for entity/person/org queries
+    "vault-projects",  # Active projects (01-Projects)
+    "vault-areas",  # Areas of responsibility (02-Areas)
+    "vault-resources",  # Reference material (03-Resources)
+    "vault-agent-knowledge",  # Agent knowledge files (04-Agent-Knowledge)
+    "vault-knowledge",  # Generalised knowledge (05-Knowledge)
+    "vault-entities",  # Entity knowledge graph — boosted for entity/person/org queries
     "knowledge-shared",
     "tc-engineering",
     "tc-agent-zone",
     # vault-archive excluded from default — search explicitly when historical context needed
 ]
 # Per-agent private collections (agent name substituted at query time)
-_AGENT_COLLECTIONS_TMPL = ["{agent}-memory"]  # knowledge-{agent} removed: vault-agent-knowledge already covers these files with correct prefixed paths
+_AGENT_COLLECTIONS_TMPL = ["{agent}-memory"]  # knowledge-{agent} removed: vault-agent-knowledge covers these
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +268,7 @@ def search(
                     # Truncate snippet to cap per-result budget use; apply_budget
                     # will fetch fresh content at the appropriate tier anyway.
                     from dataclasses import replace as _replace
+
                     snippet = r.result.snippet or ""
                     merged_fr = _replace(
                         r.result,
@@ -296,18 +297,20 @@ def search(
                     vec_failed=False,
                     fallback_used=False,
                 )
-                _log_search_event({
-                    "query_hash": query_hash,
-                    "intent": intent.value,
-                    "agent": agent,
-                    "scope": scope,
-                    "bm25_count": len(fused_results),
-                    "vec_count": 0,
-                    "fused_count": len(fused_for_budget),
-                    "budget_tokens": total_tokens,
-                    "latency_ms": latency_ms,
-                    "sub_queries": len(sub_queries),
-                })
+                _log_search_event(
+                    {
+                        "query_hash": query_hash,
+                        "intent": intent.value,
+                        "agent": agent,
+                        "scope": scope,
+                        "bm25_count": len(fused_results),
+                        "vec_count": 0,
+                        "fused_count": len(fused_for_budget),
+                        "budget_tokens": total_tokens,
+                        "latency_ms": latency_ms,
+                        "sub_queries": len(sub_queries),
+                    }
+                )
                 return result
 
         except Exception as _mh_e:
@@ -387,14 +390,16 @@ def search(
             if tc.source_path not in seen_paths:
                 heading = tc.metadata.get("section_heading") or tc.metadata.get("status") or ""
                 title = (heading + " — " + tc.source_path.split("/")[-1]) if heading else tc.source_path.split("/")[-1]
-                temporal_fused.append(FusedResult(
-                    path=tc.source_path,
-                    collection="temporal",
-                    title=title,
-                    snippet=tc.text[:500].strip(),
-                    rrf_score=0.82,
-                    boosted_score=0.82,
-                ))
+                temporal_fused.append(
+                    FusedResult(
+                        path=tc.source_path,
+                        collection="temporal",
+                        title=title,
+                        snippet=tc.text[:500].strip(),
+                        rrf_score=0.82,
+                        boosted_score=0.82,
+                    )
+                )
                 seen_paths.add(tc.source_path)
         if temporal_fused:
             fused = temporal_fused + fused

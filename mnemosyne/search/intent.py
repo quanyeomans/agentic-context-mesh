@@ -37,8 +37,11 @@ _TEMPORAL_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bover\s+the\s+(last|past)\b", re.IGNORECASE),
     re.compile(r"\bwhat\s+did\b.*\bdo\s+(last|this|in)\b", re.IGNORECASE),
     # P6 additions: date-prefixed temporal queries
-    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),                                          # ISO date: 2026-03-09
-    re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b", re.IGNORECASE),  # "March 2026"
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),  # ISO date: 2026-03-09
+    re.compile(  # "March 2026"
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b",
+        re.IGNORECASE,
+    ),
 ]
 
 # ---------------------------------------------------------------------------
@@ -83,9 +86,9 @@ _MULTI_HOP_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"in\s+the\s+context\s+of", re.IGNORECASE),
     # P6-A additions: natural-language multi-hop signals
     re.compile(r"\bwhy\s+(?:was|were|is|has)\b", re.IGNORECASE),  # "why was X", "why were Y"
-    re.compile(r"\band\s+why\b", re.IGNORECASE),                   # "and why does", "and why do"
-    re.compile(r"\bwhat\s+must\b", re.IGNORECASE),                 # "what must X do"
-    re.compile(r"\btradeoffs?\b", re.IGNORECASE),                   # "explain the tradeoffs"
+    re.compile(r"\band\s+why\b", re.IGNORECASE),  # "and why does", "and why do"
+    re.compile(r"\bwhat\s+must\b", re.IGNORECASE),  # "what must X do"
+    re.compile(r"\btradeoffs?\b", re.IGNORECASE),  # "explain the tradeoffs"
 ]
 
 # ---------------------------------------------------------------------------

@@ -443,9 +443,7 @@ def graph_context(query: str, db: sqlite3.Connection, max_entities: int = 3) -> 
     """
     try:
         # Tokenise query: words >= 4 chars, deduped, preserve order
-        words = list(dict.fromkeys(
-            w for w in re.findall(r"[A-Za-z]{4,}", query)
-        ))
+        words = list(dict.fromkeys(w for w in re.findall(r"[A-Za-z]{4,}", query)))
         if not words:
             return None
 
@@ -492,4 +490,3 @@ def graph_context(query: str, db: sqlite3.Connection, max_entities: int = 3) -> 
 
     except Exception:
         return None
-

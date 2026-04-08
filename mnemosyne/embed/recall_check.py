@@ -19,9 +19,9 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from mnemosyne._azure import EMBED_DIMS
-
 import requests
+
+from mnemosyne._azure import EMBED_DIMS
 
 logger = logging.getLogger(__name__)
 
