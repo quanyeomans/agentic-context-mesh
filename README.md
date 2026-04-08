@@ -1,20 +1,34 @@
 # Agentic Context Mesh
 
-Private, on-infrastructure contextual retrieval for human-agent teams. Extends a [QMD](https://github.com/tobi/qmd) + Obsidian knowledge stack with hybrid BM25 + vector search, entity graph, multi-hop query planning, and session briefing synthesis.
+Private, on-infrastructure contextual retrieval for human-agent teams. Your knowledge stays on your servers. Your agents and teammates query the same indexed knowledge base.
 
 **NDCG@10 0.7756** on a 263-case real-world benchmark — above the 0.60–0.75 range typical for production RAG systems on heterogeneous personal knowledge bases.
 
 ---
 
-## Why this exists
+## The problem
 
-Most AI memory solutions send your knowledge to a third-party LLM service. This creates three compounding problems:
+Skilled professionals accumulate intelligence over years — client knowledge, methods, relationships, decisions. The problem is that this intelligence is fragile: scattered across files, locked in heads, lost in context resets. When a new engagement starts, everyone re-explains context that was already earned. When a tool changes, the institutional knowledge evaporates.
+
+Most AI memory solutions compound this by sending your knowledge to a third-party LLM service:
 
 1. **Privacy** — your organisation's decisions, relationships, and domain knowledge leave your infrastructure permanently
 2. **Retrieval quality** — generic RAG without entity awareness, temporal reasoning, or domain-specific patterns produces mediocre results on knowledge that matters
 3. **Team coherence** — when agents and humans draw from different sources, shared context breaks down
 
-Agentic Context Mesh is the alternative: private, on-infrastructure retrieval that both human team members and AI agents query against the same indexed knowledge base. Your data never leaves your servers.
+Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval layer that both human team members and AI agents query against the same indexed knowledge base. Every query compounds the shared understanding. **Your data never leaves your servers.**
+
+---
+
+## How it works
+
+A skilled professional should be able to walk onto any job already knowing it — the history, the plan, the outstanding items. Agentic Context Mesh is the infrastructure for that: a structured knowledge base that agents can query before every session to arrive ready to work.
+
+The design mirrors how experienced professionals think about knowledge:
+
+- **The site** — accumulated knowledge from every engagement: clients, contacts, research, project history, structured so any agent can walk in and immediately understand where things stand
+- **Contextual briefing** — before each session, agents pull a synthesised brief: relevant entities, recent activity, outstanding items, content ranked by relevance to the current task
+- **Entity traversal** — queries expand across relationships: a question about a client surfaces relevant research, associated contacts, and recent decisions — not just keyword matches
 
 ---
 
@@ -111,10 +125,10 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 | keyword | 0.800 | 32 | BM25 baseline solid |
 | recall | 0.788 | 49 | Known-document retrieval reliable |
 | multi_hop | 0.728 | 33 | QueryPlanner functional |
-| **procedural** | **0.389** | **16** | **Primary gap — v0.7.0 focus** |
+| procedural | 0.554 | 16 | ✅ Phase 8-A path boost shipped |
 | **Overall** | **0.7756** | **263** | |
 
-Production RAG systems on heterogeneous personal knowledge typically score 0.60–0.75. The procedural gap (how-to queries) is the primary target for v0.7.0.
+Production RAG systems on heterogeneous personal knowledge typically score 0.60–0.75.
 
 ### Score trajectory
 
@@ -126,7 +140,8 @@ Production RAG systems on heterogeneous personal knowledge typically score 0.60�
 | Phase 7-A recalibrated | 0.7690 | 252 | After 768→1536 dim correction |
 | Phase 7-B 1536-dim | 0.7545 | 252 | Confirmed 1536-dim; keyword +0.114 |
 | O-1 entity-graph-planner | 0.7541 | 245 | multi_hop +0.035 from QueryPlanner |
-| **R1 post-refactor (current)** | **0.7756** | **263** | Full gold rebuild |
+| R1 post-refactor | 0.7756 | 263 | Full gold rebuild |
+| **Phase 8-A procedural boost** | **0.554 procedural** | — | Path-weighted re-rank; target ≥ 0.55 met |
 
 ---
 

@@ -25,18 +25,20 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 | Capability | Status | Notes |
 |---|---|---|
 | Hybrid BM25 + vector search | ✅ Shipped | RRF fusion, concurrent dispatch |
-| Entity graph + alias resolution | ✅ Shipped | 1160 entities, typed relationships |
+| Entity graph + alias resolution | ✅ Shipped | Curated entities, typed relationships |
 | Multi-hop QueryPlanner | ✅ Shipped | LLM-decomposed sub-queries, parallel retrieval |
 | Temporal query routing | ✅ Shipped | Date-aware chunking, timeline index |
 | Session briefing synthesis | ✅ Shipped | GPT-4o-mini, 8-source concurrent pipeline |
 | Auto-classification of writes | ✅ Shipped | Rule-based + LLM fallback |
 | LLM-typed relationship enrichment | ✅ Shipped | Nightly cron, GPT-4o-mini batch classifier |
-| Procedural path boost | ✅ Shipped | 1.4× re-rank for how-to/runbook paths, procedural NDCG 0.389 → 0.5542 |
-| Contradiction detection | 🔲 Planned | v0.8.0 |
-| Local/offline embedding | 🔲 Planned | v0.8.0 |
+| Procedural query boost | ✅ Shipped | Path-weighted re-rank for how-to and runbook queries |
+| Entity graph quality tooling | ✅ Shipped | Stub validator, enrichment pipeline, regression runner |
+| Contextual prep intent | 🔲 Planned | v0.8.0 — `mnemosyne prep` command |
+| Contradiction detection | 🔲 Planned | v0.9.0 |
+| Local/offline embedding | 🔲 Planned | v1.0.0 |
 | REST API server mode | 🔲 Planned | v1.0.0 |
 
-**Benchmark category breakdown (R1, 2026-04-07):**
+**Benchmark category breakdown (current):**
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
@@ -46,61 +48,66 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 | keyword | 0.800 | 32 | Strong — BM25 baseline solid |
 | recall | 0.788 | 49 | Strong — known-document retrieval reliable |
 | multi_hop | 0.728 | 33 | Good — QueryPlanner functional |
-| **procedural** | **0.5542** | **30** | **Path boost shipped — target ≥ 0.55 met** |
+| procedural | 0.554 | 16 | ✅ Shipped — path boost raised from 0.389 |
 | **Overall** | **0.7756** | **263** | |
 
 ---
 
-## v0.7.0 — Procedural retrieval + contradiction detection
+## v0.8.0 — Contextual preparation intent
 
-**Procedural retrieval target: NDCG ≥ 0.55 — ✅ Met (0.5542)**
+The next capability milestone is moving from ranked retrieval to structured contextual preparation — answering queries like "prepare me for a meeting with [organisation]" or "what should I know before reaching out to [person]".
 
-Procedural queries ("how do I add a new agent", "what are the steps to configure X") were the weakest category. Root cause: files were being retrieved (Hit@5 = 0.533) but ranked at positions 4–7 rather than top-3. The fix is a path-aware re-ranking boost applied post-RRF.
+This requires extending the entity graph with richer attributes and adding a new retrieval intent that traverses entity relationships rather than just returning ranked documents.
 
-**Retrieval-side:**
-- [x] Procedural path boost — 1.4× `boosted_score` multiplier for documents whose path matches `how-to-*`, `/runbooks/`, `runbook-*`, or `procedure*` patterns. Applied after RRF and entity boost, gated to `PROCEDURAL` intent. Zero effect on other query types. See `mnemosyne/search/rrf.py:procedural_boost()`.
-- [ ] Step-header chunking — split procedural docs by `##` step headers rather than fixed-size windows (next iteration for further improvement)
+**Entity graph expansion:**
+- [ ] Entity quality tooling — stub validator, enrichment pipeline, regression runner (ships in v0.7.x)
+- [ ] Extended stub schema — `industry`, `geography`, `tier`, `stakeholder_personas` for organisations; `org`, `role`, `interests`, `last_interaction` for persons
+- [ ] Entity mining from vault structure — discover entity candidates from directory structure, output draft stubs for human review
+- [ ] Resource cross-referencing — add `related-entities:` frontmatter to research documents for entity traversal
 
-**Benchmark evidence (30-case procedural validation suite):**
+**CONTEXTUAL_PREP retrieval intent:**
+- [ ] New intent class — routes "prep for", "meeting with [entity]", "outreach to [entity]" queries
+- [ ] Entity attribute expansion — extract anchor entity → load stub attributes → expand query with industry/geography/personas
+- [ ] Cross-entity expansion — traverse `entity_relationships` to surface related content (e.g., healthcare research for a healthcare client)
+- [ ] Structured brief output — entity summary, ranked content with relevance reasoning, knowledge gap report
 
-| Metric | Before (v0.6.0) | After (v0.7.0) | Delta |
-|---|---|---|---|
-| procedural NDCG@10 | 0.389 | 0.5542 | +0.165 |
-| procedural Hit@5 | 0.533 | 0.800 | +0.267 |
+**Gap detection:**
+- [ ] Three gap types: `no_coverage` (0 results), `stale` (results >90 days old), `sparse` (1–2 results)
+- [ ] Integrated into `mnemosyne prep` output
 
-The Hit@5 improvement confirms the files were already being retrieved — the boost corrects ranking, not retrieval.
+**New CLI command:**
+```bash
+mnemosyne prep "quarterly governance with [client]"
+mnemosyne prep "outreach to [contact]"
+```
 
-**Content-side:**
-- [ ] Contribution guide for structuring procedural knowledge so it indexes well (this repo itself demonstrates the pattern)
+**Good first issues for contributors:** entity mining script, stub quality validator, CONTEXTUAL_PREP intent classifier.
 
-**Contradiction detection (`mnemosyne contradict`):**
+---
+
+## v0.9.0 — Contradiction detection
+
 - [ ] On new memory write: compare against existing knowledge for direct contradictions
 - [ ] Flag conflicts rather than silently overwriting — human-agent teams need to know when the knowledge base disagrees with itself
 - [ ] CLI: `mnemosyne contradict check "<new content>"` → reports conflicting documents + confidence
 
-**Good first issues for contributors:** step-based chunker, contradiction check prototype.
-
 ---
 
-## v0.8.0 — Local model support
+## v1.0.0 — Local model support + stable public API
 
-Removes Azure OpenAI as a hard dependency for embedding. Makes fully air-gapped deployment possible.
-
+**Local embedding (removes Azure OpenAI as hard dependency):**
 - [ ] Embedding provider abstraction layer — `EmbedProvider` protocol, Azure and local as implementations
 - [ ] Ollama adapter — `nomic-embed-text`, `mxbai-embed-large` tested at 1536-dim parity
 - [ ] Sentence-transformers adapter — for environments where Ollama isn't available
 - [ ] Provider selection in `env.example` — `MNEMOSYNE_EMBED_PROVIDER=azure|ollama|sentence-transformers`
 
-GPT-4o-mini usage (briefing, classify, benchmark judging) remains optional — all synthesis features degrade gracefully to rule-based fallbacks when no LLM is available.
-
----
-
-## v1.0.0 — Stable public API
-
+**Stable public API:**
 - [ ] REST/HTTP server mode — expose search, entity, and briefing as local endpoints (FastAPI, no external deps)
 - [ ] Stable CLI contract — versioned with deprecation warnings before removal
 - [ ] Multi-source support — plain markdown directories alongside QMD-indexed vaults
 - [ ] Docker image — `ghcr.io/quanyeomans/agentic-context-mesh`
+
+GPT-4o-mini usage (briefing, classify, benchmark judging) remains optional — all synthesis features degrade gracefully to rule-based fallbacks when no LLM is available.
 
 ---
 
@@ -113,6 +120,7 @@ These are directionally interesting but not committed. Raise a Discussion if any
 - **Multi-vault federation** — index and search across multiple knowledge bases with collection-level access control
 - **Agent memory write API** — structured endpoint for agents to write observations back to the knowledge base with classification and contradiction checking
 - **Evaluation dataset** — public benchmark suite with anonymised, domain-neutral queries (the current suite is vault-specific and private)
+- **Temporal reasoning improvement** — recency decay function, temporal relationship edges with `valid_from`/`valid_to`, decision/fact extraction
 
 ---
 
