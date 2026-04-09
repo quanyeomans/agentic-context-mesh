@@ -437,9 +437,7 @@ def run_embed(
                     logger.info(f"Batch {batch_idx} retry succeeded after schema repair.")
                     continue
                 except Exception as retry_e:
-                    logger.error(
-                        f"DB write retry for batch {batch_idx} failed after schema repair: {retry_e}"
-                    )
+                    logger.error(f"DB write retry for batch {batch_idx} failed after schema repair: {retry_e}")
             failed_chunks.extend(batch)
             continue
 

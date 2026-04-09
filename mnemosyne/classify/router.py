@@ -15,6 +15,7 @@ Path mappings:
 
 from __future__ import annotations
 
+import os as _os
 from datetime import date as _date
 
 # ---------------------------------------------------------------------------
@@ -24,7 +25,6 @@ from datetime import date as _date
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant"})
 SHARED_AGENT = "shared"
 
-import os as _os
 _VAULT_ROOT = _os.environ.get("MNEMOSYNE_VAULT_ROOT", "/data/obsidian-vault")
 _WORKSPACE_ROOT = _os.environ.get("MNEMOSYNE_WORKSPACE_ROOT", "/data/workspaces")
 _KNOWLEDGE_ROOT = f"{_VAULT_ROOT}/04-Agent-Knowledge"

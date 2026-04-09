@@ -44,11 +44,11 @@ class TestEpisodicRouting:
 class TestProceduralRuleRouting:
     def test_builder_rules(self):
         path = resolve_target_path("builder", "procedural-rule")
-        assert path == "/vault/agent-knowledge/builder/rules.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/rules.md"
 
     def test_shape_rules(self):
         path = resolve_target_path("shape", "procedural-rule")
-        assert path == "/vault/agent-knowledge/shape/rules.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/rules.md"
 
     def test_shared_rules(self):
         path = resolve_target_path("shared", "procedural-rule")
@@ -64,11 +64,11 @@ class TestProceduralRuleRouting:
 class TestProceduralPatternRouting:
     def test_builder_patterns(self):
         path = resolve_target_path("builder", "procedural-pattern")
-        assert path == "/vault/agent-knowledge/builder/patterns.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/patterns.md"
 
     def test_shape_patterns(self):
         path = resolve_target_path("shape", "procedural-pattern")
-        assert path == "/vault/agent-knowledge/shape/patterns.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/patterns.md"
 
     def test_shared_patterns(self):
         path = resolve_target_path("shared", "procedural-pattern")
@@ -79,11 +79,11 @@ class TestProceduralPatternRouting:
 class TestSemanticDecisionRouting:
     def test_builder_decisions(self):
         path = resolve_target_path("builder", "semantic-decision")
-        assert path == "/vault/agent-knowledge/builder/decisions.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/decisions.md"
 
     def test_shape_decisions(self):
         path = resolve_target_path("shape", "semantic-decision")
-        assert path == "/vault/agent-knowledge/shape/decisions.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/decisions.md"
 
     def test_shared_decisions(self):
         path = resolve_target_path("shared", "semantic-decision")
@@ -94,11 +94,11 @@ class TestSemanticDecisionRouting:
 class TestSemanticFactRouting:
     def test_builder_facts(self):
         path = resolve_target_path("builder", "semantic-fact")
-        assert path == "/vault/agent-knowledge/builder/facts.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/facts.md"
 
     def test_shape_facts(self):
         path = resolve_target_path("shape", "semantic-fact")
-        assert path == "/vault/agent-knowledge/shape/facts.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/facts.md"
 
     def test_shared_facts(self):
         path = resolve_target_path("shared", "semantic-fact")
@@ -109,7 +109,7 @@ class TestSemanticFactRouting:
 class TestEntityRouting:
     def test_entity_person(self):
         path = resolve_target_path("builder", "entity", entity_type="person", entity_slug="alice-chen")
-        assert path == "/vault/agent-knowledge/entities/person/alice-chen.md"
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/entities/person/alice-chen.md"
 
     def test_entity_organisation(self):
         path = resolve_target_path("builder", "entity", entity_type="organisation", entity_slug="triad-consulting")

@@ -530,6 +530,7 @@ def run_benchmark(
                 indent=2,
             )
         import logging as _logging
+
         _logging.getLogger(__name__).info("Results saved to: %s", out_path)
 
     return result

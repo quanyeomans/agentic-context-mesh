@@ -11,12 +11,12 @@ Phase 4B-2 — 2026-04-05
 
 from __future__ import annotations
 
-import sqlite3
-
 import json
 import logging
+import sqlite3
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ _DECOMPOSE_PROMPT = (
     "Rules:\n"
     "- Each sub-query should retrieve a distinct aspect needed to answer the original.\n"
     "- Maximum 3 sub-queries.\n"
-    "- If the query is simple (single topic), return just [\"original_query\"].\n"
+    '- If the query is simple (single topic), return just ["original_query"].\n'
     "- Keep sub-queries concise (under 15 words each)."
 )
 
@@ -40,7 +40,7 @@ _DECOMPOSE_PROMPT_WITH_CONTEXT = (
     "- Each sub-query should retrieve a distinct aspect needed to answer the original.\n"
     "- Use entity relationships above to expand abbreviations or implied connections.\n"
     "- Maximum 3 sub-queries.\n"
-    "- If the query is simple (single topic), return just [\"original_query\"].\n"
+    '- If the query is simple (single topic), return just ["original_query"].\n'
     "- Keep sub-queries concise (under 15 words each)."
 )
 
@@ -67,9 +67,10 @@ class QueryPlanner:
             if entities_db is not None:
                 try:
                     from mnemosyne.entities.graph import graph_context
+
                     ctx = graph_context(query, entities_db)
                 except Exception:
-                    pass
+                    logger.debug("planner: entity graph context unavailable")
             if ctx:
                 prompt = _DECOMPOSE_PROMPT_WITH_CONTEXT.format(entity_context=ctx, query=query)
                 logger.debug("planner: injecting entity context into decompose prompt")

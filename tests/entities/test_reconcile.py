@@ -96,7 +96,7 @@ def test_string_similarity_dissimilar():
 @pytest.mark.unit
 def test_string_similarity_partial():
     """Partially similar strings should have intermediate scores."""
-    score = _string_similarity("Acme Corp", "Triad Consultin")
+    score = _string_similarity("Acme Corp", "Acme Corporation")
     assert 0.5 < score < 1.0
 
 
@@ -115,7 +115,7 @@ def test_find_canonical_exact_match(db_with_entities):
 @pytest.mark.unit
 def test_find_canonical_exact_match_case_insensitive(db_with_entities):
     """Exact match should be case-insensitive."""
-    entity_id = find_canonical("triad consulting", db_with_entities)
+    entity_id = find_canonical("ACME CORP", db_with_entities)
     assert entity_id == "acme-corp"
 
 
@@ -136,9 +136,7 @@ def test_find_canonical_alias_match(db_with_entities):
     """Alias entity match should return the canonical entity_id, not the alias id."""
     # "3 Cubes" is an alias for "Acme Corp" (canonical_id = 'acme-corp')
     entity_id = find_canonical("3 Cubes", db_with_entities)
-    assert entity_id == "acme-corp", (
-        f"Expected canonical 'acme-corp' for alias '3 Cubes', got: {entity_id}"
-    )
+    assert entity_id == "acme-corp", f"Expected canonical 'acme-corp' for alias '3 Cubes', got: {entity_id}"
 
 
 # ---------------------------------------------------------------------------

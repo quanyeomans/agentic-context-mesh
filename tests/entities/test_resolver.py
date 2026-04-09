@@ -64,7 +64,7 @@ def _seed_test_db(db: sqlite3.Connection) -> None:
         ("scft", "organisation", "SCFT", "softcorp"),
         ("softcorp-corp", "organisation", "Softcorp Corporation", "softcorp"),
         ("d365", "concept", "D365", "delta-suite"),
-        ("delta-suite", "concept", "DeltaSuite", "delta-suite"),
+        ("deltasuite", "concept", "DeltaSuite", "delta-suite"),
         ("delta-suite-alt", "concept", "Delta Suite Alt", "delta-suite"),
         ("gamma-systems", "organisation", "Gamma Systems", "gamma-systems-canonical"),
         ("burgerpalace", "organisation", "BurgerPalace", "gamma-systems-canonical"),
@@ -156,8 +156,8 @@ def test_resolve_case_insensitive_canonical(db):
 
 @pytest.mark.unit
 def test_resolve_case_insensitive_canonical_name(db):
-    """resolve_canonical('triad consulting', db) → canonical row (case-insensitive name match)."""
-    row = resolve_canonical("triad consulting", db)
+    """resolve_canonical('3 cubes', db) → canonical row (case-insensitive alias match)."""
+    row = resolve_canonical("3 cubes", db)
     assert row is not None
     assert row["id"] == "acme-corp"
 

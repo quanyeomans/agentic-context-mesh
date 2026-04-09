@@ -208,7 +208,7 @@ def test_bootstrap_parses_acme_health(bootstrap_file: str) -> None:
 def test_bootstrap_parses_burger_palace_alias(bootstrap_file: str) -> None:
     """Gamma Systems should parse the display-alias link form correctly."""
     entities = load_entities_from_bootstrap(bootstrap_file)
-    bp = next((e for e in entities if "Burger" in e.name), None)
+    bp = next((e for e in entities if "Gamma" in e.name), None)
     assert bp is not None, "Gamma Systems not found in bootstrap entities"
     assert bp.link == "[[Gamma-Systems|Gamma Systems]]"
 

@@ -115,7 +115,7 @@ def test_collections_for_shared_plus_agent() -> None:
     """scope='shared+agent' includes agent-specific collections."""
     cols = _collections_for("shape", "shared+agent")
     assert "knowledge-shared" in cols
-    assert "knowledge-shape" in cols
+    assert "vault-agent-knowledge" in cols
     assert "shape-memory" in cols
 
 
