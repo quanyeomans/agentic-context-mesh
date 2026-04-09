@@ -20,7 +20,9 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 
 ## Current state — v0.7.0
 
-**NDCG@10 0.7756** on 263-case real-world benchmark suite (top-tier for heterogeneous personal knowledge bases — production RAG systems typically score 0.60–0.75).
+**NDCG@10 0.58** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.86** — a relevant document in the top 5 for 86% of queries.
+
+The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rather than the weighted category score used in earlier phases. See [EVALUATION.md](EVALUATION.md) for methodology details and full score trajectory.
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -33,23 +35,23 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 | LLM-typed relationship enrichment | ✅ Shipped | Nightly cron, GPT-4o-mini batch classifier |
 | Procedural query boost | ✅ Shipped | Path-weighted re-rank for how-to and runbook queries |
 | Entity graph quality tooling | ✅ Shipped | Stub validator, enrichment pipeline, regression runner |
+| Deployment-specific collections | ✅ Shipped | `MNEMOSYNE_EXTRA_COLLECTIONS` env var |
 | Contextual prep intent | 🔲 Planned | v0.8.0 — `mnemosyne prep` command |
 | Contradiction detection | 🔲 Planned | v0.9.0 |
 | Local/offline embedding | 🔲 Planned | v1.0.0 |
 | REST API server mode | 🔲 Planned | v1.0.0 |
 
-**Benchmark category breakdown (current):**
+**Benchmark category breakdown (v2 suite, NDCG@10):**
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| entity | 0.823 | 47 | Strong — entity graph + alias resolution working |
-| temporal | 0.810 | 39 | Strong — temporal routing + date-aware chunking |
-| conceptual | 0.804 | 47 | Strong — vector search carrying semantic load |
-| keyword | 0.800 | 32 | Strong — BM25 baseline solid |
-| recall | 0.788 | 49 | Strong — known-document retrieval reliable |
-| multi_hop | 0.728 | 33 | Good — QueryPlanner functional |
-| procedural | 0.554 | 16 | ✅ Shipped — path boost raised from 0.389 |
-| **Overall** | **0.7756** | **263** | |
+| entity | 0.735 | 14 | Entity graph + alias resolution |
+| keyword | 0.649 | 8 | BM25 baseline solid |
+| multi_hop | 0.547 | 10 | QueryPlanner functional |
+| semantic | 0.553 | 13 | Hybrid vector load |
+| procedural | **0.569** | 30 | ✅ Path boost raised from 0.39 (Phase 0) |
+| temporal | 0.366 | 8 | Date-aware routing; improvement targeted in v0.8 |
+| **Overall** | **0.580** | **83** | Curated suite, strict NDCG@10 |
 
 ---
 

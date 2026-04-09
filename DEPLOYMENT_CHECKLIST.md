@@ -38,7 +38,7 @@ az keyvault secret list --vault-name <vault-name> --query "[].name" -o tsv
 - [ ] Infra directories exist and are writable:
   - [ ] `/data/mnemosyne/briefing/`
   - [ ] `/data/mnemosyne/logs/` (or wherever embed log goes)
-  - [ ] `/data/tc-agent-zone/logs/`
+  - [ ] `$MNEMOSYNE_EMBED_LOG` parent directory (default `/data/mnemosyne/logs/`)
 
 ## 4. Environment Variables
 
@@ -108,7 +108,7 @@ Mnemosyne validates the QMD schema on startup. Run a quick embed dry-run:
 
 ## 10. Post-Deploy Verification (next day)
 
-- [ ] Embed log shows successful run since install: `grep "Done —" /data/tc-agent-zone/logs/azure-embed.log | tail -3`
+- [ ] Embed log shows successful run since install: `grep "Done —" "$MNEMOSYNE_EMBED_LOG" | tail -3`
 - [ ] Chunk count is increasing or stable (not zero)
 - [ ] No `failed=N` with N > 0 in embed log
 - [ ] Entity count stable: `mnemosyne entity list | wc -l`
