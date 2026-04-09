@@ -219,8 +219,7 @@ def test_extract_file_skips_llm_when_rules_sufficient(tmp_path, db_with_entities
     # Create a test markdown file with 3+ known entity names
     md_file = tmp_path / "test_note.md"
     md_file.write_text(
-        "# Meeting Notes\n\nAlice Chen met with the Acme Corp team."
-        "\nWe also discussed Mnemosyne development.\n",
+        "# Meeting Notes\n\nAlice Chen met with the Acme Corp team.\nWe also discussed Mnemosyne development.\n",
         encoding="utf-8",
     )
 
@@ -316,8 +315,7 @@ def test_read_stub_aliases_block_list(tmp_path):
     """Reads aliases from block YAML list syntax."""
     stub = tmp_path / "smec.md"
     stub.write_text(
-        "---\ntype: concept\nname: Delta Co\naliases:\n"
-        "  - BWE-C\n  - BWE&C\n---\n\n# Delta Co\n",
+        "---\ntype: concept\nname: Delta Co\naliases:\n  - BWE-C\n  - BWE&C\n---\n\n# Delta Co\n",
         encoding="utf-8",
     )
     aliases = read_stub_aliases(str(stub))

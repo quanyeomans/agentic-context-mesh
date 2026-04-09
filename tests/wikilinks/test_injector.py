@@ -111,11 +111,12 @@ def test_skips_fenced_code_block() -> None:
 
 def test_skips_inline_code() -> None:
     content = "Use the `Acme Corp` constant. Acme Corp is our company."
-    modified, _injected2 = inject_wikilinks(content, [ACME_CORP, THREE_CUBES])
-    # Acme Corp inside backtick is skipped; Acme Corp is injected
-    assert "[[AcmeCorp]]" in modified
-    # Acme Corp should not be linked (only occurrence is inside inline code)
-    assert "[[Acme-Corp]]" not in modified
+    modified, injected = inject_wikilinks(content, [ACME_CORP])
+    # The body occurrence of Acme Corp (outside backticks) is linked
+    assert "[[Acme-Corp]]" in modified
+    # The inline code occurrence is NOT wrapped in a link
+    assert "`[[Acme-Corp]]`" not in modified
+    assert injected == ["Acme Corp"]
 
 
 # ---------------------------------------------------------------------------
@@ -173,24 +174,24 @@ def test_no_match_for_substring() -> None:
 def test_no_self_link_on_own_page() -> None:
     content = "Acme Corp is a major health insurer with global operations."
     modified, injected = inject_wikilinks(
-        content, [ACME_CORP], source_path="/vault/02-Areas/Clients/Acme-Corp/Overview.md"
+        content, [ACME_CORP], source_path="/data/obsidian-vault/02-Areas/Clients/Acme-Corp/Overview.md"
     )
     assert injected == []
     assert "[[Acme-Corp]]" not in modified
 
 
 def test_self_link_check_different_entity() -> None:
-    """On Acme Corp's page, Acme Corp should still be linked."""
-    content = "Acme Corp works with Acme Corp on strategy."
+    """On Acme Corp's page, a different entity is still linked."""
+    content = "Acme Corp works with Gamma Systems on strategy."
     modified, injected = inject_wikilinks(
         content,
-        [ACME_CORP, THREE_CUBES],
-        source_path="/vault/02-Areas/Clients/Acme-Corp/Overview.md",
+        [ACME_CORP, BURGER_CHAIN],
+        source_path="/data/obsidian-vault/02-Areas/Clients/Acme-Corp/Overview.md",
     )
-    # Acme Corp should be linked, Acme Corp should not
-    assert "[[AcmeCorp]]" in modified
+    # Acme Corp suppressed (self-link on own page); Gamma Systems still linked
     assert "[[Acme-Corp]]" not in modified
-    assert "Acme Corp" in injected
+    assert "[[Gamma-Systems|Gamma Systems]]" in modified
+    assert "Gamma Systems" in injected
     assert "Acme Corp" not in injected
 
 
@@ -225,19 +226,19 @@ def test_should_inject_memory_log() -> None:
 
 
 def test_should_inject_agent_knowledge() -> None:
-    assert should_inject("/vault/agent-knowledge/builder/patterns.md") is True
+    assert should_inject("/data/obsidian-vault/04-Agent-Knowledge/builder/patterns.md") is True
 
 
 def test_should_inject_projects() -> None:
-    assert should_inject("/vault/01-Projects/202603-Mnemosyne/README.md") is True
+    assert should_inject("/data/obsidian-vault/01-Projects/202603-Mnemosyne/README.md") is True
 
 
 def test_should_inject_areas() -> None:
-    assert should_inject("/vault/02-Areas/Clients/Acme-Corp/Overview.md") is True
+    assert should_inject("/data/obsidian-vault/02-Areas/Clients/Acme-Corp/Overview.md") is True
 
 
 def test_should_inject_knowledge() -> None:
-    assert should_inject("/vault/05-Knowledge/01-Strategy/notes.md") is True
+    assert should_inject("/data/obsidian-vault/05-Knowledge/01-Strategy/notes.md") is True
 
 
 def test_should_not_inject_archived_path() -> None:

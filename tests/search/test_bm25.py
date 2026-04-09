@@ -249,14 +249,13 @@ class TestNormaliseFtsQuery:
         assert "we" not in result
         assert "know" not in result
         assert "about" not in result
-        assert "alex" in result.lower()
-        assert "jordan" in result.lower()
+        assert "alice" in result.lower()
+        assert "chen" in result.lower()
 
     def test_replaces_hyphens_with_spaces(self) -> None:
         result = _normalise_fts_query("project-x")
         assert "-" not in result
-        assert "tc" in result
-        assert "productivity" in result
+        assert "project" in result
 
     def test_filters_short_tokens(self) -> None:
         # Single-character tokens should be removed
@@ -265,8 +264,8 @@ class TestNormaliseFtsQuery:
 
     def test_preserves_meaningful_terms(self) -> None:
         result = _normalise_fts_query("tell me about Acme Corp as an organisation")
-        assert "triad" in result
-        assert "consulting" in result
+        assert "acme" in result
+        assert "corp" in result
         assert "organisation" in result
 
     def test_empty_query_returns_empty(self) -> None:
@@ -281,7 +280,5 @@ class TestNormaliseFtsQuery:
         result = _normalise_fts_query("what does the platform do")
         tokens = result.split()
         assert "platform" in tokens
-        assert "platform" in tokens
-        assert "built" in tokens
         assert "who" not in tokens
         assert "for" not in tokens
