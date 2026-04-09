@@ -14,3 +14,4 @@ from mnemosyne.embed.embed import (  # noqa: F401
     ensure_staging_table,
     run_embed,
 )
+
