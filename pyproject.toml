@@ -140,7 +140,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S", "T20"]        # Tests: allow assert + print
+"tests/*" = ["S", "T20"]           # Tests: allow assert + print
+"tests/e2e/*" = ["S", "T20", "I001"]  # E2E tests: inline imports required for lazy loading
 "mnemosyne/*/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
 "mnemosyne/cli.py" = ["T201"]
 
