@@ -269,7 +269,7 @@ Runs mnemosyne embed incrementally — only embeds files modified since the last
 Runs incremental entity extraction and relationship seeding. Uses GPT-4o-mini for relationship classification.
 
 ```cron
-0 17 * * * /data/tc-agent-zone/cron-scripts/entity-relation-seed.sh >> /data/mnemosyne/logs/entity-relation-seed.log 2>&1
+0 17 * * * /opt/mnemosyne/cron-scripts/entity-relation-seed.sh >> /data/mnemosyne/logs/entity-relation-seed.log 2>&1
 ```
 
 The shell script (`entity-relation-seed.sh`) handles Key Vault credential fetching and runs:
@@ -324,7 +324,7 @@ cd /data/tools/qmd-azure-embed
   --suite suites/v2-real-world.yaml
 
 # View latest results
-tail -30 /data/tc-agent-zone/logs/benchmark-R1.log
+tail -30 /data/mnemosyne/logs/benchmark.log
 ```
 
 **Current scores (R1, 2026-04-07):**
@@ -467,7 +467,7 @@ crontab -l
 tail -20 /data/mnemosyne/logs/entity-relation-seed.log
 
 # Run manually to debug
-/data/tc-agent-zone/cron-scripts/entity-relation-seed.sh
+/opt/mnemosyne/cron-scripts/entity-relation-seed.sh
 ```
 
 ### Briefing output is empty or incoherent

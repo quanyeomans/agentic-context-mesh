@@ -33,7 +33,7 @@ meta:
     - vault
     - knowledge-builder
     - builder-memory
-    - tc-engineering
+    - engineering-knowledge
   version: "1.0"
   created: "2026-03-23"
 
@@ -196,7 +196,7 @@ Include when running validate:
 Knowledge volume summary:
   Total documents: 1784
   Vectors embedded: 6198 chunks
-  Collections: vault (1655), tc-engineering (78), shape-memory (35), ...
+  Collections: vault (1655), engineering-knowledge (78), agent-memory (35), ...
 
 Scale warnings:
   ⚠ vault collection is approaching 2000 docs — consider subcollection routing at 5000+

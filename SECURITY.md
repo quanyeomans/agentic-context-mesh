@@ -105,7 +105,7 @@ Dependabot is configured (`.github/dependabot.yml`) to open PRs for dependency u
 ## Audit Logging
 
 Mnemosyne does not produce a dedicated audit log. Operational visibility:
-- Embed logs: `/data/tc-agent-zone/logs/azure-embed.log` — timestamps, chunk counts, errors
+- Embed logs: `$MNEMOSYNE_EMBED_LOG` (default `/data/mnemosyne/logs/azure-embed.log`) — timestamps, chunk counts, errors
 - Query logs: `~/.cache/qmd/queries.jsonl` (when `MNEMOSYNE_LOG_QUERIES=1`)
 - Benchmark results: `benchmark-results/*.json` — archived per-run NDCG scores
 - Azure OpenAI usage: visible in Azure Portal → Azure OpenAI → Monitoring → Requests

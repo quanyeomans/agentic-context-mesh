@@ -26,7 +26,7 @@ from .schema import (
     validate_schema,
 )
 
-LOG_FILE = Path("/data/tc-agent-zone/logs/azure-embed.log")
+LOG_FILE = Path(os.environ.get("MNEMOSYNE_EMBED_LOG", "/data/mnemosyne/logs/azure-embed.log"))
 LOCKFILE = Path("/tmp/qmd-embed.lock")  # nosec: S108 — intentional lockfile, documented in PRD §7.2
 LOCK_WAIT_SECS = 60
 

@@ -1,45 +1,61 @@
-# Evaluation Results
+# Evaluation
 
-Performance of Mnemosyne hybrid search across Phases 0–3 on a real-world Obsidian vault (~1,800 documents, 6,264 vectors).
+Benchmark results for Mnemosyne hybrid search across phases of development.
 
 ---
 
-## Current Results (Phase 4 — 2026-04-05)
+## Current Results — v0.7.0 (R4 Hybrid Baseline)
 
-**Suite:** 43 queries, 7 categories. Scoring: exact path match for entity/recall cases; LLM-as-judge (GPT-4o-mini, 0.0–1.0 scale) for conceptual/temporal/multi-hop/procedural; deterministic rule match for classification.
+**Suite:** 83 curated real-world cases across 6 query categories. Scored with strict NDCG@10 using graded relevance (0/1/2) with LLM-as-judge (GPT-4o-mini). Evaluated on a real-world personal knowledge base (~2,800 documents, 10,986 vectors at 1536-dim).
 
-| Category | Weight | Score | Notes |
+| Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| Recall | 25% | 0.875 | Hybrid BM25+vector finds known docs reliably |
-| Temporal | 20% | 0.633 | Date-aware chunking shipped (Phase 4) |
-| Entity | 20% | 0.933 | Entity stubs + entity boost working correctly |
-| Conceptual | 15% | 0.500 | Abstract queries partially resolved |
-| Multi-hop | 10% | 0.600 | LLM-based query planner shipped (Phase 4) |
-| Procedural | 10% | 0.400 | Collection scope adequate; LLM judge variance ±0.1 |
-| Classification | 15% | 1.000 | Rule-based classifier deterministic on standard cases |
-| **Weighted total** | | **0.762** | |
+| entity | 0.735 | 14 | Entity graph + alias resolution working well |
+| keyword | 0.649 | 8 | BM25 baseline solid |
+| procedural | 0.569 | 30 | Path-weighted re-rank shipped (Phase 8-A) |
+| semantic | 0.553 | 13 | Hybrid vector load |
+| multi_hop | 0.547 | 10 | QueryPlanner functional |
+| temporal | 0.366 | 8 | Date-aware routing; improvement targeted in v0.8 |
+| **Overall** | **0.580** | **83** | Curated suite, strict NDCG@10 |
 
-### Phase gates
+**Hit@5: 0.8554** — a relevant document in the top 5 for 85.5% of queries.
+**MRR@10: 0.7068**
 
-| Gate | Threshold | Score | Result |
-|---|---|---|---|
-| Phase 1 | ≥ 0.620 | 0.655 | ✅ PASSED |
-| Phase 2 | ≥ 0.680 | 0.762 | ✅ PASSED |
-| Phase 3 | ≥ 0.750 | 0.762 | ✅ PASSED |
-| Phase 4 | ≥ 0.620 | 0.6658 | ✅ PASSED (revised 36-query suite) |
+All queries: `vec_failed=False` — hybrid search (BM25 + 1536-dim vector) operating correctly.
 
 ---
 
 ## Score Trajectory
 
-| Date | System | Weighted total | Notes |
+### Phase 0–4 (weighted total — synthetic suite)
+
+Early phases used a synthetic 43-case suite scored by category-weighted total rather than NDCG@10. These scores are not directly comparable to v2 instrument scores.
+
+| Run | Score | Notes |
+|---|---|---|
+| BM25 baseline | 0.389 | Phase 0, 39-query suite |
+| Azure vector only | 0.384 | Vector worse than BM25 on procedural/conceptual |
+| Hybrid Phase 1 | 0.558 | RRF fusion; entity stubs sparse |
+| Hybrid Phase 2.5 | 0.655 | Gold path fix + stub enrichment; Phase 1 gate ✅ |
+| Hybrid Phase 3 | 0.762 | Briefing + classification; Phase 3 gate ✅ |
+| Hybrid Phase 4 | 0.666 | Chunking + multi-hop planner; Phase 4 gate ✅ |
+
+### v2 Instrument — NDCG@10 (real-world suite)
+
+Starting Phase 5, the instrument switched to NDCG@10 with graded relevance on real-world cases derived from actual agent session logs. This is the authoritative metric going forward.
+
+| Run | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| 2026-03-22 | BM25 baseline | 0.389 | Phase 0, 39-query suite |
-| 2026-03-22 | Azure vector only | 0.384 | Vector worse than BM25 on procedural/conceptual |
-| 2026-03-23 | Hybrid Phase 1 (first run) | 0.558 | RRF fusion, entity stubs sparse |
-| 2026-03-23 | Hybrid Phase 2.5 (entity fix) | 0.655 | Gold paths + stub enrichment, Phase 1 gate confirmed |
-| 2026-03-23 | **Hybrid Phase 3 (current)** | **0.762** | Briefing + classification, Phase 3 gate passed |
-| 2026-04-05 | **Hybrid Phase 4** | **0.6658** | Chunking + multi-hop planner, Phase 4 gate passed (36-query suite) |
+| Phase 5 baseline | 0.320 | 134 | First real-world suite; temporal/multi_hop gold incomplete |
+| Phase 6 final | 0.289 | 134 | temporal+multi_hop gold added; vector drift artifact |
+| Phase 7-A recalibrated | 0.769 | 252 | Full gold rebuild at 768-dim; true baseline |
+| Phase 7-B 1536-dim | 0.755 | 252 | 1536-dim reindex + gold rebuild; dimension kept |
+| O-1 entity graph + planner | 0.754 | 245 | multi_hop +0.035 from QueryPlanner context injection |
+| R1 post-refactor | 0.776 | 263 | Full gold rebuild after vault refactor |
+| Phase 8-A procedural boost | 0.569 procedural | — | Path-weighted re-rank; target ≥ 0.55 met |
+| **R4 hybrid baseline** | **0.580** | **83** | Curated suite only (session_log cases excluded); strict graded gold |
+
+**Note on R4 vs R1:** R4 (0.580) and R1 (0.776) are not directly comparable. R1 used a mixed suite (263 cases, majority session_log with self-referential gold). R4 is curated-only (83 cases, independently graded gold), which is a stricter and more meaningful quality signal. The curated subset of R1 scored 0.595; R4 (0.580) is consistent with that baseline.
 
 ---
 
@@ -47,246 +63,87 @@ Performance of Mnemosyne hybrid search across Phases 0–3 on a real-world Obsid
 
 ### Suite format
 
-Cases are defined in `suites/builder.yaml`. Each case specifies:
-- `category`: recall / temporal / entity / conceptual / multi_hop / procedural / classification
-- `query`: the search or classification input
-- `gold_path` (optional): canonical vault path for exact scoring
-- `score_method`: `exact` (gold_path match in top-3) or `llm` (LLM relevance judge)
+Cases are defined in YAML suites under `suites/`. Each case specifies:
 
-Exact scoring is used whenever there is one unambiguous correct document. LLM scoring is used for cases where the correct answer genuinely spans multiple documents or changes over time.
+```yaml
+id: R-CV-E01
+category: entity          # entity / keyword / multi_hop / semantic / procedural / temporal
+query: "Alice Chen contact details"
+gold_paths:
+  - path/to/document.md   # collection-relative path, matched against search results
+  grade: 2                # 0 = irrelevant, 1 = partially relevant, 2 = highly relevant
+```
 
-### Category weights (Phase 3 suite v1.1)
+Gold paths use collection-relative format matching `mnemosyne search` output — collection prefixes are stripped (e.g. `vault-agent-knowledge|shared/rules.md` → `shared/rules.md`).
 
-| Category | Weight | Rationale |
-|---|---|---|
-| recall | 25% | Highest-value — finding known documents reliably |
-| temporal | 20% | Time-anchored queries are common in agent workflows |
-| entity | 20% | People, orgs, projects — frequent agent lookups |
-| conceptual | 15% | Abstract/semantic reasoning |
-| classification | 15% | New Phase 3 capability — auto-routing writes |
-| multi_hop | 10% | Connected retrieval — structural ceiling pre-Phase 4 |
-| procedural | 10% | How-to queries — adequate but LLM judge variance |
+### Graded relevance (v2 suite)
 
-### Score interpretation
+The v2 suite uses graded relevance (0/1/2) rather than binary gold matching:
 
-| Score | Label |
+| Grade | Meaning |
 |---|---|
-| ≥ 0.80 | Phase 4 target — fully tuned with synthesis |
-| ≥ 0.75 | Production quality — Phase 3 gate |
-| ≥ 0.68 | Phase 2 gate — temporal + tiered context working |
-| ≥ 0.62 | Phase 1 gate — hybrid search + entity graph |
-| ≥ 0.51 | Typical BM25 on well-curated vault |
-| ≥ 0.35 | BM25 on Phase 0 query suite |
-| < 0.35 | Below BM25 baseline — something is broken |
+| 2 | Highly relevant — directly answers the query |
+| 1 | Partially relevant — provides useful context but not the primary answer |
+| 0 | Irrelevant — not expected in results |
+
+NDCG@10 is computed with the standard DCG formula using these grades. LLM-as-judge (GPT-4o-mini) assigns grades for cases where relevance is not deterministic.
+
+### Gold suite maintenance
+
+Gold paths require maintenance when the underlying knowledge base is reorganised. The key risks:
+
+- **Path moves**: files moved between directories change their collection-relative path
+- **File deletion**: gold paths referencing deleted files produce zero-score on those cases
+- **Vector drift**: re-embedding at different dimensions or with updated models changes ranking order, invalidating gold calibrated for the prior model
+
+Best practice: after major vault reorganisations, run the gold validation script to check what percentage of gold paths are still present in the QMD index. Cases with missing gold paths should be updated or excluded — they produce artificially low NDCG scores and obscure genuine retrieval quality.
+
+### Scoring interpretation
+
+| NDCG@10 | Label |
+|---|---|
+| ≥ 0.78 | Epic 1 target |
+| 0.70–0.78 | Strong — production quality |
+| 0.60–0.70 | Solid — above typical RAG baseline |
+| 0.55–0.60 | Current (v0.7.0 curated) |
+| < 0.40 | Below BM25 baseline — instrument or system issue |
+
+Production RAG systems on heterogeneous personal knowledge typically score 0.60–0.75 on held-out curated suites.
 
 ---
 
-## Structural Ceilings
+## Category Analysis
 
-Two categories are below floor and are not addressed by search tuning:
+### Temporal (0.366 — weakest category)
 
-**Temporal (0.433):** Memory logs and Kanban board updates have embedded dates in filenames and frontmatter but the current chunker does not index these as structured temporal attributes. Queries like "what happened last week" rely on keyword match of date strings rather than a date-range index. Fix: date-aware chunking (Phase 4).
+Date-anchored queries are the current weakest point. Date-aware chunking and a timeline index shipped in Phase 4 and improved routing, but the category ceiling requires:
 
-**Multi-hop (0.480):** Queries requiring synthesis across 3+ connected documents (e.g. "what decisions led to the current PostgreSQL config") can't be answered by retrieval alone — they require a planning layer that chains searches. Fix: connected retrieval / planning layer (Phase 4).
+- Recency decay in ranking (recent documents scored higher for queries referencing "last week", "recently")
+- Explicit `valid_from`/`valid_to` temporal attributes on entity relationships
+- Structured date extraction from frontmatter and filenames as a first-class index
 
-Temporal and procedural scores show ±0.1 variance between runs due to GPT-4o-mini judge non-determinism. These are not functional regressions.
+Targeted improvement is on the v0.8.0 roadmap via the `CONTEXTUAL_PREP` retrieval intent.
+
+### Procedural (0.569 — at target)
+
+Phase 8-A shipped path-weighted re-ranking for procedural queries (how-to, runbook, step-by-step patterns). This raised procedural NDCG from 0.390 (R1 post-refactor) to 0.569 (R4), meeting the ≥ 0.55 Phase 8 target.
+
+### Multi-hop (0.547 — functional)
+
+The `QueryPlanner` decomposes complex queries into sub-queries and runs them in parallel. Entity graph context injection (O-1) improved multi_hop NDCG by +0.035. The main remaining ceiling is the entity graph quality — a sparse or noisy entity set limits planner effectiveness.
+
+### Entity (0.735 — strongest)
+
+The entity graph with alias resolution is the system's strongest capability. Queries that name a known entity surface the entity stub plus related documents via relationship traversal.
 
 ---
 
 ## Data Residency
 
-- **Vault content** is sent to Azure OpenAI (Australia East) for embedding (text-embedding-3-large) and synthesis (GPT-4o-mini). No data is retained by Azure beyond the API request.
-- **All vectors** are stored in QMD's SQLite database on your own infrastructure (`~/.cache/qmd/index.sqlite`).
-- **Entity data** is stored in `/data/mnemosyne/entities.db` on your own infrastructure.
-- **Briefings and logs** are written to `/data/mnemosyne/` on your own infrastructure.
+- **Vault content** is sent to Azure OpenAI for embedding (`text-embedding-3-large`) and synthesis (`gpt-4o-mini`). No data is retained by Azure beyond the API request.
+- **All vectors** are stored in QMD's SQLite database on your own infrastructure.
+- **Entity data** is stored in `entities.db` on your own infrastructure.
 
-No vault content is transmitted to any third party other than Azure OpenAI for the operations above.
+No vault content is transmitted to any third party other than Azure OpenAI for the operations listed above.
 
----
-
-## Maturity Statement
-
-Mnemosyne is production-ready for the use cases it covers (recall, entity lookup, session briefing, write classification). Phase 4 shipped date-aware chunking and LLM-based multi-hop query planning, raising the Phase 4 suite score to 0.6658 (gate ≥ 0.620 ✅).
-
-Note: Phase 3 (0.762) and Phase 4 (0.6658) scores are measured on different benchmark suites — the Phase 4 suite is a 36-query, 6-category instrument; Phase 3 used a 43-query, 7-category instrument (includes classification).
-
-Phase 5 shipped 2026-04-06: real-world eval rebuild from actual agent session logs. The v2-real-world.yaml suite (134 cases, 6 intent categories) replaces the synthetic Phase 4 suite as the authoritative instrument. Scores from Phase 5 onward are not directly comparable to Phase 3/4 scores (different instrument, different metric — NDCG@10 vs weighted_total).
-
-**Phase 5 baseline (v2-real-world, NDCG@10): 0.3203**
-By category: semantic 0.447 · entity 0.115 · keyword 0.109 · procedural 0.000 · temporal 0.000 · multi_hop 0.000
-
-Hit Rate@5: 0.388 · MRR@10: 0.350 · Precision@5: 0.113 · Recall@10: 0.336
-
-The 0.00 scores for procedural/temporal/multi_hop reflect structural search limitations, not regressions: (a) procedural gold paths reference agent-internal patterns not indexed by the vault collection; (b) temporal queries require date-range retrieval; (c) multi_hop queries require query planning — both Phase 4 additions, but the new instrument exposes their coverage limits. These are candidate targets for Phase 6.
-
-BM25 parameter sweep (k1 × b grid, 9 configs): BM25 parameters are managed by the qmd FTS5 binary and are not overridable at query time. All 9 configs produce equivalent NDCG@10 to baseline. Default k1=1.2, b=0.75 adequate.
-
-CI: 685 tests passing, 80% coverage, ruff + mypy + bandit clean.
-
-
----
-
-### Phase 6 — Intent patterns + temporal/multi_hop gold (2026-04-06)
-
-**Phase 6 NDCG@10: 0.2889** (B2-p6-final-2026-04-06.json)
-
-By category: semantic 0.262 · entity 0.342 · keyword 0.271 · procedural 0.087 · temporal **0.639** · multi_hop **0.623**
-
-Hit Rate@5: 0.396 · MRR@10: 0.291 · Precision@5: 0.121 · Recall@10: 0.363
-
-**What shipped (P6-A + P6-C):**
-- **P6-A:** Added 6 patterns to `_TEMPORAL_PATTERNS` (ISO date `\d{4}-\d{2}-\d{2}`, "Month YYYY") and 4 patterns to `_MULTI_HOP_PATTERNS` (`\bwhy\s+(?:was|were|is|has)\b`, `\band\s+why\b`, `\bwhat\s+must\b`, `\btradeoffs?\b`). All 5 multi_hop test queries now correctly classify as MULTI_HOP; all 5 temporal date-prefixed queries now classify as TEMPORAL.
-- **P6-C:** New script `scripts/rebuild-temporal-gold.py` re-ran search for 12 cases (7 temporal + 5 multi_hop) using snippet-based LLM judge. 11/12 cases rebuilt. Temporal gold now contains absolute workspace paths (`/data/workspaces/*/memory/YYYY-MM-DD.md`); multi_hop gold rebuilt against planner output.
-
-**Category improvements:**
-- temporal: 0.000 → 0.639 (+0.639) — date-prefixed queries now route to `query_temporal_chunks()` and gold rebuilt from workspace memory files
-- multi_hop: 0.000 → 0.623 (+0.623) — queries now route to `QueryPlanner` and gold calibrated for planner output
-- entity: 0.115 → 0.342, keyword: 0.109 → 0.271 — partial improvement from vector drift (see below)
-
-**Note on overall score (0.2889 < 0.3203 baseline):**
-Phase 6 included a 1536-dim vector reindex experiment (P6-D) followed by a 768-dim rollback. The re-embed at 768-dim produced vectors with slightly different rankings than the original Phase 5 vectors. The semantic gold paths (91 cases, built in Phase 5) were calibrated for the original vectors. With the drifted vectors, semantic NDCG dropped from 0.447 → 0.262. This is a measurement artifact, not a search quality regression — the system correctly returns relevant documents but the gold calibration is stale.
-
-**Phase 7 prerequisites:** Rebuild ALL gold paths (run `build-eval-gold.py` fresh) with current vectors to re-calibrate the full instrument. Until then, the temporal/multi_hop improvements (0.000→0.639, 0.000→0.623) are the authoritative Phase 6 outcome.
-
-**P6-D verdict:** 1536-dim reindex showed entity/temporal improvements but caused semantic regression due to gold calibration mismatch. Proper evaluation requires gold rebuild at 1536-dim. Deferred to Phase 7.
-
----
-
-### Phase 7 — Gold Recalibration + 1536-dim Evaluation (2026-04-06)
-
-Phase 7 fixed the measurement instrument (invalidated by P6-D vector drift) and properly evaluated 1536-dim vectors by building fresh gold at each dimension.
-
-**P7-A — Recalibrated baseline at 768-dim**
-
-Gold rebuilt from scratch: `build-eval-gold.py` + `rebuild-temporal-gold.py`. Suite grew 134 → 252 cases (semantic 190, entity 15, procedural 14, multi_hop 9, temporal 9, keyword 8). Same 768-dim vectors as Phase 6, but gold now calibrated for current ranking order.
-
-**Phase 7-A NDCG@10: 0.7690** (B2-p7a-768-recalibrated-2026-04-06.json)
-
-By category: semantic 0.8156 · multi_hop 0.7808 · temporal 0.6657 · keyword 0.6392 · entity 0.6339 · procedural 0.4324
-
-Hit Rate@5: 0.9405 · MRR@10: 0.7668 · Precision@5: 0.3421 · Recall@10: 0.9164
-
-**Confirmed:** Phase 6 apparent NDCG drop (0.3203→0.2889) was entirely a measurement artifact from vector drift. True 768-dim baseline: 0.7690.
-
----
-
-**P7-B — 1536-dim reindex + evaluation**
-
-Changed `EMBED_DIMS=1536` in `_azure.py` + `schema.py`. Full reindex: 10,947 chunks, $0.28, ~17 min. Recall-check: 4/5. Gold rebuilt at 1536-dim (same two-script sequence). Benchmark run at 1536-dim.
-
-**Phase 7-B NDCG@10: 0.7545** (B2-p7b-1536-eval-2026-04-06.json)
-
-By category: semantic 0.7947 · multi_hop 0.6806 · keyword 0.7529 · entity 0.6770 · temporal 0.6215 · procedural 0.4259
-
-Hit Rate@5: 0.9388 · MRR@10: 0.7476 · Precision@5: 0.3396 · Recall@10: 0.9182
-
-**Delta vs P7-A:** −0.0145 overall (−1.4%)
-
-Category changes: keyword +0.114 ✅ · entity +0.043 ✅ · semantic −0.021 · procedural −0.007 · temporal −0.044 · multi_hop −0.100
-
-**Verdict: KEEP 1536-dim.** Overall regression is within noise (−1.4%). Keyword and entity meaningfully improved. multi_hop −0.100 is at n=9 and likely noisy. Full 1536-dim vectors provide better semantic expressiveness for future improvements.
-
-**System now operating at 1536-dim (text-embedding-3-large, no truncation).**
-
----
-
-### Score Trajectory (v2 instrument — NDCG@10)
-
-| Run | Dims | NDCG@10 | Notes |
-|---|---|---|---|
-| Phase 5 baseline | 768 | 0.3203 | 134 cases; semantic/entity/keyword only calibrated |
-| Phase 6 final | 768 | 0.2889 | temporal+multi_hop added; semantic gold stale (P6-D artifact) |
-| **Phase 7-A recalibrated** | **768** | **0.7690** | 252 cases; full gold rebuild; true 768-dim baseline |
-| **Phase 7-B** | **1536** | **0.7545** | 1536-dim reindex + gold rebuild; KEPT |
-
----
-
-### O-1 — Entity Graph + Planner Context Injection (2026-04-06)
-
-O-1 shipped the entity graph seed (~930 entities, LLM-typed relationships) and wired the entity graph into the multi-hop planner as context injection. Benchmark run against **v2 suite, 245 cases** (expanded from Phase 7's 252 cases — slight reduction after case deduplication).
-
-**O-1 NDCG@10: 0.7541** (B2-O1-entity-graph-planner-2026-04-06.json)
-
-By category: semantic 0.? · multi_hop **0.716** (+0.035 vs P7-B) · entity **0.677** (+0.001 vs P7-B) · procedural **0.426** · temporal 0.? · keyword 0.?
-
-Hit Rate@5: 0.? · MRR@10: 0.? · Precision@5: 0.? · Recall@10: 0.?
-
-**What shipped:**
-- Entity graph seeded: ~930 entities in `/data/mnemosyne/entities.db` via `seed-entity-relations.py`
-- Planner context injection: pre-search entity lookup wired into `QueryPlanner` for multi_hop queries
-- Entity relationships: LLM-typed via GPT-4o-mini classifier (O-2 in progress)
-
-**Key improvements vs P7-B:**
-- multi_hop: 0.6806 → 0.716 (+0.035) — planner context injection providing better query decomposition
-- entity: 0.6770 → 0.677 — marginal, entity graph providing additional signal
-- procedural: 0.426 — target for Phase 8 improvement (new Platform runbooks being added)
-
-**O-2 status:** LLM-typed entity relationship enrichment nightly cron added (`entity-relation-seed` at 03:00 AEST). `seed-entity-relations.py` updated with GPT-4o-mini batch classifier. O-2 runs nightly; relationship count will grow from ~28 to ~50-80+ as LLM-typed relationships accumulate.
-
----
-
-### Phase 8 — Procedural NDCG Improvement (In Progress)
-
-**Target:** procedural NDCG 0.426 → ≥ 0.55
-
-**Status:** Benchmark repair complete (R1-post-refactor running). New Platform how-to runbooks (18 files in Platform/runbooks/) added as gold paths for procedural cases. All 14 procedural cases now at 100% path coverage.
-
-**What changed since O-1:**
-- Vault refactor: 1,814 of 2,798 files modified; 30+ new how-to runbooks added
-- v2-real-world.yaml repaired: 476 paths fixed, 20 truly-missing removed, 2 cases enhanced with new how-to paths
-- R1-post-refactor benchmark run: see below
-
-
-
----
-
-### O-2 Update — Entity Relationships Seeded (2026-04-07)
-
-Entity graph grown from vault refactor (new entity stubs). `mnemosyne entity extract --changed` processed updated vault files.
-
-- **Entity count:** 1160 (up from ~930 at O-1, +230 new entities from vault refactor)
-- **Relationships:** 112 (up from 28 at O-1, +84 seeded today via `seed-entity-relations.py` pattern-based classifier)
-- **LLM-typed relationships:** O-2 nightly cron (`entity-relation-seed` at 03:00 AEST) registered — will grow relationship count further as GPT-4o-mini classifier runs on entity stubs
-
-`seed-entity-relations.py` updated with GPT-4o-mini batch classifier (commit `e585d867`). Pattern fallback retained.
-
----
-
-### Phase 8 Update — Gold Rebuild Required (2026-04-07)
-
-After vault refactor (1,814 of 2,798 files modified), 196 of 554 gold paths were broken (files renamed/moved). `qmd update` re-indexed 234 new files. Path patching approach (vault-relative prefix mapping) was attempted but failed — gold paths must be in collection-relative format matching `mnemosyne search` output, not vault filesystem paths.
-
-**Correct fix:** Running `build-eval-gold.py` to rebuild all 388 query gold paths from current search results using LLM judge. This is the same gold-rebuild process used in Phase 7. Expected output: fully recalibrated v2-real-world.yaml with new collection-relative paths.
-
-**Status:** build-eval-gold.py in progress (~388 queries, ~$0.27 cost). R1-post-refactor benchmark will follow gold rebuild.
-
-
----
-
-### R1 — Post-Refactor Benchmark (2026-04-07)
-
-Gold paths fully rebuilt (`build-eval-gold.py`) after vault refactor (1,814 files modified). Suite: **263 cases** (semantic 206, entity 15, procedural 15, temporal 9, multi_hop 10, keyword 8). Saved: `B2-R1-post-refactor-2026-04-07.json`.
-
-**R1 NDCG@10: 0.7756** (vs O-1 0.7541, +0.0215)
-
-By category:
-| Category | n | NDCG@10 | Hit@5 | MRR | vs O-1 |
-|---|---|---|---|---|---|
-| semantic | 206 | 0.8308 | 0.9660 | 0.8144 | +0.07 est |
-| entity | 15 | 0.7631 | 1.0000 | 0.8300 | +0.086 |
-| keyword | 8 | 0.7905 | 1.0000 | 0.8542 | — |
-| multi_hop | 10 | 0.5845 | 0.8000 | 0.7500 | −0.131 |
-| procedural | 15 | 0.3892 | 0.5333 | 0.4429 | −0.037 |
-| temporal | 9 | 0.3776 | 0.6667 | 0.2733 | — |
-
-By source: session_log 0.8410 · curated 0.5953
-
-**Key findings:**
-- Overall system improving (+2.1% NDCG) — vault refactor + new runbooks well indexed
-- Procedural 0.3892 remains below Phase 8 target (≥ 0.55). Hit@5=0.533 suggests runbooks are being found but not always ranked top-3.
-- multi_hop 0.5845: lower vs O-1 0.716 — gold paths rebuilt with different calibration at n=10; directional
-- temporal 0.3776: date-anchored memory queries; workspace memory logs correctly indexed
-- Entity 0.7631: entity graph + planner context injection working well
-
-**Phase 8 next actions:** Procedural score 0.3892 (target 0.55). New Platform runbooks are indexed. Issue is ranking: `mnemosyne search` retrieves them but not always in top positions. Potential improvements: boost procedural query routing, add entity annotations to runbook files, investigate per-case NDCG for procedural.
-
+See [SECURITY.md](SECURITY.md) for full data handling detail.

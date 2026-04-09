@@ -65,7 +65,7 @@ def _discover_vault_docs() -> list[str]:
 
 
 def _open_db() -> sqlite3.Connection:
-    db_path = Path("/data/mnemosyne/summaries.db")
+    db_path = Path(os.environ.get("MNEMOSYNE_SUMMARIES_DB", "/data/mnemosyne/summaries.db"))
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     from mnemosyne.summaries.staleness import init_summaries_db

@@ -2,7 +2,7 @@
 
 Private, on-infrastructure contextual retrieval for human-agent teams. Your knowledge stays on your servers. Your agents and teammates query the same indexed knowledge base.
 
-**NDCG@10 0.7756** on a 263-case real-world benchmark — above the 0.60–0.75 range typical for production RAG systems on heterogeneous personal knowledge bases.
+**NDCG@10 0.58** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.86** — a relevant document appears in the top 5 for 86% of queries. Procedural query boost raised how-to/runbook NDCG from 0.39 to 0.57.
 
 ---
 
@@ -41,7 +41,7 @@ The design mirrors how experienced professionals think about knowledge:
 | **Entity awareness** | Graph with alias resolution | No | No | No |
 | **Token efficiency** | Budget-managed retrieval | Unranked export | Unranked export | Unbounded |
 | **Temporal reasoning** | Date-aware chunking + routing | No | Limited | No |
-| **NDCG@10** | 0.776 | Not published | Not published | N/A |
+| **NDCG@10** | 0.58 curated / 0.94 session | Not published | Not published | N/A |
 
 **On token efficiency:** commercial alternatives typically export full page content and rely on the LLM to filter relevance — you pay for every token regardless of utility. Agentic Context Mesh runs ranked retrieval with a configurable token budget (`--budget`), returning only the highest-relevance chunks within that budget. L0/L1 tiered loading (summary-first, full text on demand) further reduces context consumption.
 

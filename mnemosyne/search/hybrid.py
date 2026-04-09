@@ -10,7 +10,7 @@ Orchestrates the full search pipeline:
   6. Log retrieval event
 
 Falls back to BM25-only if vector search fails.
-Logs every search event to /data/mnemosyne/logs/search.jsonl.
+Logs every search event to the path set by MNEMOSYNE_SEARCH_LOG (default: /data/mnemosyne/logs/search.jsonl).
 
 Never raises — returns SearchResult with empty results on any failure.
 """
@@ -52,7 +52,6 @@ _QUERY_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
 # Collections used per intent/scope
 # These collection names must match your QMD index.yml configuration.
-# Update to match your deployment's collection names.
 # Collections available to all agents (shared knowledge + main vault)
 _SHARED_COLLECTIONS = [
     "vault-projects",  # Active projects (01-Projects)
@@ -62,9 +61,9 @@ _SHARED_COLLECTIONS = [
     "vault-knowledge",  # Generalised knowledge (05-Knowledge)
     "vault-entities",  # Entity knowledge graph — boosted for entity/person/org queries
     "knowledge-shared",
-    "tc-engineering",
-    "tc-agent-zone",
     # vault-archive excluded from default — search explicitly when historical context needed
+    # Add deployment-specific collections via MNEMOSYNE_EXTRA_COLLECTIONS (comma-separated):
+    *[c.strip() for c in os.environ.get("MNEMOSYNE_EXTRA_COLLECTIONS", "").split(",") if c.strip()],
 ]
 # Per-agent private collections (agent name substituted at query time)
 _AGENT_COLLECTIONS_TMPL = ["{agent}-memory"]  # knowledge-{agent} removed: vault-agent-knowledge covers these
