@@ -289,11 +289,26 @@ def _bm25_direct_db(
     return results
 
 
+def _path_from_file_uri(file_uri: str) -> str:
+    """Extract vault-relative path from a QMD file URI.
+
+    QMD file URIs have the format ``qmd://{collection}/{path}``.
+    Returns the vault-relative ``{path}`` component.
+    Falls back to returning the full URI unchanged for non-qmd URIs.
+    """
+    if "://" in file_uri:
+        after_scheme = file_uri.split("://", 1)[1]
+        parts = after_scheme.split("/", 1)
+        return parts[1] if len(parts) == 2 else after_scheme
+    return file_uri
+
+
 def bm25_search(
     query: str,
     collections: list[str] | None = None,
     limit: int = BM25_DEFAULT_LIMIT,
     agent: str | None = None,
+    date_filter_paths: frozenset[str] | None = None,
 ) -> list[BM25Result]:
     """
     Run BM25 search via qmd subprocess.
@@ -379,6 +394,10 @@ def bm25_search(
         if r["file"] not in seen:
             merged.append(r)
             seen.add(r["file"])
+    # TMP-2: apply date-range path filter for TEMPORAL queries
+    if date_filter_paths:
+        merged = [r for r in merged if _path_from_file_uri(r["file"]) in date_filter_paths]
+
     return merged
 
 

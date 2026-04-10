@@ -6,7 +6,27 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-*Phase 8: procedural NDCG improvement (target ≥ 0.55, current 0.389 in R1).*
+*Next: keyword regression investigation, Dex CRM chunking (TMP-3), temporal benchmark expansion (TMP-6).*
+
+## [0.7.0] - 2026-04-10 — Sprint 3: Temporal Retrieval + Date Infrastructure
+
+### Added
+- **TMP-1**: `chunk_date` column in `content_vectors` — idempotent migration via `schema.py:ensure_vec_table`. Stores the date extracted from each chunk's source document.
+- **TMP-1**: `mnemosyne/embed/date_extract.py` — date extraction at embed time from (1) frontmatter `date`/`created`/`updated`/`created_at` fields (YYYY-MM-DD), (2) YYYY-MM year-month fields (mapped to first of month), (3) filename pattern `YYYY-MM-DD.md`. 24 tests.
+- **TMP-2**: `get_date_filtered_paths(db, start, end)` in `embed/schema.py` — returns `frozenset[str]` of document paths with `chunk_date` in the given window. Used by `hybrid.py` for TEMPORAL intent date-range filtering.
+- **TMP-2**: `is_relative_temporal(query)` in `temporal/rewriter.py` — returns `True` for relative temporal expressions (`last N days/weeks/months`, `recently`, `yesterday`, `today`, `this week/month`). Date filtering is only applied for relative expressions — absolute date references (`March 2026`, `2026-03-09`) query `about` a time period and must not be filtered by chunk_date.
+- **TMP-2**: Date-filtered retrieval in `hybrid.py` — BM25 results post-filtered via `_path_from_file_uri()` + `date_filter_paths`; vector results post-filtered directly on `path`. Both fallback gracefully (no filter applied) when `date_filter_paths` is `None` or empty.
+- **TMP-4**: `scripts/chunk-daily-files.py` — pre-processor for daily memory log files (`YYYY-MM-DD.md`). Splits on `##` headings, writes section chunks with injected frontmatter so each section inherits its parent document's date. 11 tests.
+- **TMP-5**: `scripts/audit-date-formats.py` — scans Obsidian vault `.md` frontmatter for date field coverage. Classifies values as ISO / YYYY-MM (year-month) / non-ISO / absent. 13 tests.
+- **TMP-5b**: YYYY-MM year-month frontmatter pattern in `date_extract.py` — maps `date: 2025-11` to `2025-11-01`. 6 additional tests.
+
+### Fixed
+- `mnemosyne/embed/embed.py` — replaced hardcoded Key Vault name in error messages with `$MNEMOSYNE_KV_NAME` env var reference.
+
+### Benchmark (R5 — 2026-04-10, 83 curated queries)
+- temporal NDCG: 0.369 → **0.382** (TMP-2 date filtering for relative temporal expressions)
+- entity: 0.751 · multi_hop: 0.549 · procedural: 0.564 · semantic: 0.519 · keyword: 0.439
+- **Overall NDCG@10: 0.5569** · Hit@5: 0.84 · MRR: 0.67
 
 ## [0.6.0] - 2026-04-07 — R1: Post-Refactor Benchmark + O-2 Enrichment
 

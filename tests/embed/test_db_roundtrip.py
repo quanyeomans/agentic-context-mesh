@@ -46,6 +46,7 @@ def create_qmd_schema(db: sqlite3.Connection) -> None:
             pos INTEGER NOT NULL DEFAULT 0,
             model TEXT NOT NULL,
             embedded_at TEXT NOT NULL,
+            chunk_date DATE,
             PRIMARY KEY (hash, seq)
         );
     """)
