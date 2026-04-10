@@ -8,6 +8,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 *Next: keyword regression investigation, Dex CRM chunking (TMP-3), temporal benchmark expansion (TMP-6).*
 
+## [0.8.0] - 2026-04-11 — Sprint 4: CRM Interaction Chunker + Temporal Benchmark Expansion
+
+### Added
+- **TMP-3**:  — Generic CRM interaction chunker. Processes JSON contact/interaction exports and writes one chunk file per interaction with injected frontmatter (date, contact, meeting_type). Enables CRM timelines to be embedded and searched with temporal filtering. 20 tests.
+- **TMP-6**: Expanded temporal benchmark in  — 7 new cases (T02–T08) covering absolute date queries (T02–T05) and relative temporal expressions (T06–T08). Demonstrates correct behaviour: absolute date queries bypass date-range filter; relative expressions apply it.
+
+### Notes
+- The absolute-vs-relative temporal distinction (introduced in v0.7.0) is now validated with a broader case set.
+- CRM interaction chunker is format-agnostic — adapt  to your CRM's export schema.
+
 ## [0.7.0] - 2026-04-10 — Sprint 3: Temporal Retrieval + Date Infrastructure
 
 ### Added
