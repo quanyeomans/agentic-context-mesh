@@ -2,7 +2,7 @@
 
 Private, on-infrastructure contextual retrieval for human-agent teams. Your knowledge stays on your servers. Your agents and teammates query the same indexed knowledge base.
 
-**NDCG@10 0.58** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.86** — a relevant document appears in the top 5 for 86% of queries. Procedural query boost raised how-to/runbook NDCG from 0.39 to 0.57.
+**NDCG@10 0.5569** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.84**. Temporal date-filtered retrieval (Sprint 3) raised temporal NDCG from 0.37 to 0.38; procedural path boost raised how-to/runbook NDCG from 0.39 to 0.56.
 
 ---
 
@@ -99,7 +99,7 @@ All search and entity data is stored in SQLite — no separate vector database, 
 | `mnemosyne embed` | ✅ Shipped | Azure OpenAI `text-embedding-3-large` → sqlite-vec (1536-dim) |
 | `mnemosyne search` | ✅ Shipped | Hybrid BM25 + vector via RRF, token budget management |
 | `mnemosyne entity` | ✅ Shipped | Entity graph, alias resolution, entity boost, multi-hop query planning |
-| `mnemosyne temporal` | ✅ Shipped | Temporal query rewriting + date-aware chunking |
+| `mnemosyne temporal` | ✅ Shipped | Temporal query rewriting + date-filtered retrieval (TMP-2); `chunk_date` extraction at embed time (TMP-1/5b) |
 | `mnemosyne summarise` | ✅ Shipped | L0/L1 tiered context loading |
 | `mnemosyne wikilinks` | ✅ Shipped | Wikilink injection + entity resolver |
 | `mnemosyne brief` | ✅ Shipped | Session briefing synthesis via GPT-4o-mini |
@@ -113,22 +113,21 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 
 ## Benchmark Results
 
-**Suite:** 263 cases across 7 query categories, scored with NDCG@10 using LLM-as-judge (GPT-4o-mini) relevance grading. Evaluated on a real-world personal knowledge base of ~2,800 documents.
+**Suite:** 83 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~3,200 documents.
 
-### Current results (R1)
+### Current results (R5 — 2026-04-10)
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| entity | 0.823 | 47 | Entity graph + alias resolution working well |
-| temporal | 0.810 | 39 | Date-aware chunking effective |
-| conceptual | 0.804 | 47 | Vector search carrying semantic load |
-| keyword | 0.800 | 32 | BM25 baseline solid |
-| recall | 0.788 | 49 | Known-document retrieval reliable |
-| multi_hop | 0.728 | 33 | QueryPlanner functional |
-| procedural | 0.554 | 16 | ✅ Phase 8-A path boost shipped |
-| **Overall** | **0.7756** | **263** | |
+| entity | 0.751 | 14 | Entity graph + alias resolution |
+| multi_hop | 0.549 | 10 | QueryPlanner, entity-aware sub-query decomposition |
+| procedural | 0.564 | 30 | Path boost for how-to/runbook queries |
+| semantic | 0.519 | 13 | Vector search carrying semantic load |
+| temporal | 0.382 | 8 | Date-filtered retrieval (TMP-2) |
+| keyword | 0.439 | 8 | BM25 baseline; keyword regression under investigation |
+| **Overall** | **0.5569** | **83** | |
 
-Production RAG systems on heterogeneous personal knowledge typically score 0.60–0.75.
+Production RAG systems on heterogeneous personal knowledge typically score 0.45–0.65 on strict curated suites.
 
 ### Score trajectory
 

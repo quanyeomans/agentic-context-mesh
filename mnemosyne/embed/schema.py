@@ -16,9 +16,12 @@ See QMD_COMPAT.md for the full schema and upgrade procedure.
 """
 
 import json
+import logging
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 # Known paths for the sqlite-vec extension (vec0.so)
 # QMD ships it as an npm package — these are the expected install locations
@@ -39,7 +42,7 @@ _SQLITE_VEC_ENV = "SQLITE_VEC_PATH"
 QMD_TESTED_VERSION = "1.1.2"
 
 # Expected columns in content_vectors
-EXPECTED_CONTENT_VECTORS_COLS = {"hash", "seq", "pos", "model", "embedded_at"}
+EXPECTED_CONTENT_VECTORS_COLS = {"hash", "seq", "pos", "model", "embedded_at", "chunk_date"}
 
 # Expected columns in content (source chunks — NB: text is in 'doc' column, NOT 'body')
 EXPECTED_CONTENT_COLS = {"hash", "doc", "created_at"}
@@ -173,7 +176,7 @@ def ensure_vec_table(db: sqlite3.Connection, dims: int = EMBED_VECTOR_DIMS) -> N
     db.commit()
 
 
-def get_pending_chunks(db: sqlite3.Connection) -> list[dict]:
+def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     Return chunks that need embedding.
     Mirrors QMD's getHashesNeedingEmbedding() logic.
@@ -205,7 +208,7 @@ def get_pending_chunks(db: sqlite3.Connection) -> list[dict]:
     return chunks
 
 
-def get_all_chunks_needing_embedding(db: sqlite3.Connection) -> list[dict]:
+def get_all_chunks_needing_embedding(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     Return all (hash, seq, pos, text) tuples from content_vectors
     that exist in content_vectors but have no entry in vectors_vec.
@@ -223,7 +226,7 @@ def get_all_chunks_needing_embedding(db: sqlite3.Connection) -> list[dict]:
     return [{"hash": r[0], "seq": r[1], "pos": r[2], "body": r[3]} for r in rows]
 
 
-def save_run_log(entry: dict) -> None:
+def save_run_log(entry: dict[str, Any]) -> None:
     """Append run metadata to ~/.cache/qmd/azure-embed-runs.json."""
     log_path = Path.home() / ".cache" / "qmd" / "azure-embed-runs.json"
     runs = []
@@ -236,3 +239,75 @@ def save_run_log(entry: dict) -> None:
     # Keep last 90 runs
     runs = runs[-90:]
     log_path.write_text(json.dumps(runs, indent=2))
+
+
+_logger = logging.getLogger(__name__)
+
+
+def migrate_content_vectors(db: sqlite3.Connection) -> None:
+    """
+    Idempotent migration: add chunk_date column to content_vectors if missing.
+
+    This migration is additive-only (ALTER TABLE ADD COLUMN). The column is
+    nullable with no default so existing rows are unaffected.
+
+    Safe to call on every startup -- it is a no-op when the column already
+    exists.
+    """
+    existing = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
+    if "chunk_date" in existing:
+        return
+
+    db.execute("ALTER TABLE content_vectors ADD COLUMN chunk_date TEXT")
+    db.commit()
+    _logger.info("Migration: added chunk_date column to content_vectors")
+
+
+def get_date_filtered_paths(
+    db: sqlite3.Connection,
+    start: date | None,
+    end: date | None,
+) -> frozenset[str]:
+    """
+    Return vault-relative paths whose chunk_date falls within [start, end].
+
+    Used by TMP-2 to pre-filter hybrid search results for TEMPORAL queries.
+    When both start and end are None, returns an empty frozenset immediately
+    (caller treats empty as no-filter to avoid zero-result searches during
+    the chunk_date backfill transition period).
+
+    Falls back to empty frozenset on any DB error rather than raising.
+
+    Args:
+        db:    Open sqlite3.Connection (QMD index — no sqlite-vec extension needed).
+        start: Lower bound (inclusive). None means no lower bound.
+        end:   Upper bound (inclusive). None means no upper bound.
+
+    Returns:
+        frozenset of vault-relative document paths with chunk_date in [start, end].
+        Empty frozenset means no dated chunks found; caller must not filter results.
+    """
+    if start is None and end is None:
+        return frozenset()
+
+    conditions = ["cv.chunk_date IS NOT NULL"]
+    params: list[str] = []
+    if start is not None:
+        conditions.append("cv.chunk_date >= ?")
+        params.append(start.isoformat())
+    if end is not None:
+        conditions.append("cv.chunk_date <= ?")
+        params.append(end.isoformat())
+
+    try:
+        rows = db.execute(
+            "SELECT DISTINCT d.path "
+            "FROM content_vectors cv "
+            "JOIN documents d ON d.hash = cv.hash "
+            "WHERE " + " AND ".join(conditions),
+            params,
+        ).fetchall()
+        return frozenset(r[0] for r in rows)
+    except Exception as exc:
+        _logger.warning("get_date_filtered_paths: query failed — %s", exc)
+        return frozenset()

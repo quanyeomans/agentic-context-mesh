@@ -80,6 +80,7 @@ def vector_search_bytes(
     query_bytes: bytes,
     k: int = VECTOR_DEFAULT_K,
     collections: list[str] | None = None,
+    date_filter_paths: frozenset[str] | None = None,
 ) -> list[VecResult]:
     """
     Vector search using pre-packed float32 bytes (as returned by embed_text_as_bytes).
@@ -88,7 +89,11 @@ def vector_search_bytes(
     """
     if not query_bytes:
         return []
-    return _vsearch_with_bytes(db, query_bytes, k, collections)
+    results = _vsearch_with_bytes(db, query_bytes, k, collections)
+    # TMP-2: apply date-range path filter for TEMPORAL queries
+    if date_filter_paths:
+        results = [r for r in results if r["path"] in date_filter_paths]
+    return results
 
 
 def _vsearch_with_bytes(

@@ -98,6 +98,45 @@ _RECENTLY_RE = re.compile(r"\b(?:recently|lately)\b", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 
 
+
+
+def is_relative_temporal(query: str) -> bool:
+    """
+    Return True if *query* contains a RELATIVE temporal expression.
+
+    Relative expressions refer to time windows anchored on "today" —
+    e.g. "last week", "recently", "yesterday".  For these, date-filtered
+    retrieval (TMP-2) is appropriate: we expect documents *written* in that
+    window to be the relevant ones.
+
+    Absolute expressions ("March 2026", "2026-03-09") refer to a named
+    period and are better served by query rewriting + BM25/vector matching
+    the date tokens in document content.  Applying a date filter to absolute
+    expressions would filter out gold documents that merely *mention* the
+    date rather than being *written* on that date.
+
+    Returns True for: last N days, last week/month/year/quarter,
+    this week/month, yesterday, today, recently/lately.
+    Returns False for: ISO dates, "in Month YYYY", "on YYYY-MM-DD".
+    Never raises.
+    """
+    try:
+        q = query.strip()
+        for pattern in (
+            _LAST_N_DAYS_RE,
+            _LAST_PERIOD_RE,
+            _THIS_PERIOD_RE,
+            _YESTERDAY_RE,
+            _TODAY_RE,
+            _RECENTLY_RE,
+        ):
+            if pattern.search(q):
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def extract_time_window(
     query: str,
     reference_date: date | None = None,

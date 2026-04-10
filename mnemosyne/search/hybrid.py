@@ -28,7 +28,7 @@ from pathlib import Path
 
 from mnemosyne._azure import embed_text_as_bytes
 from mnemosyne.embed.schema import get_qmd_db_path, load_sqlite_vec
-from mnemosyne.search.bm25 import BM25Result, bm25_search
+from mnemosyne.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
 from mnemosyne.search.budget import BudgetedResult, apply_budget
 from mnemosyne.search.intent import QueryIntent, classify
 from mnemosyne.search.rrf import FusedResult, entity_boost, procedural_boost, rrf
@@ -213,6 +213,7 @@ def search(
     # Temporal query rewriting — expand query with explicit date tokens before retrieval
     active_query = query
     temporal_chunks: list = []
+    date_filter_paths: frozenset[str] | None = None  # TMP-2: set in TEMPORAL block below
     if intent == QueryIntent.TEMPORAL:
         try:
             from datetime import date as _date
@@ -223,6 +224,30 @@ def search(
             active_query = rewrite_temporal_query(query, reference_date=_date.today())
             start, end = extract_time_window(query, reference_date=_date.today())
             temporal_chunks = query_temporal_chunks(topic=active_query, start=start, end=end, limit=10)
+            # TMP-2: build date-filtered path set to restrict BM25 and vector results
+            # Only for RELATIVE temporal expressions (last week, recently, yesterday).
+            # NOT for absolute date references (March 2026, 2026-03-09) — those queries
+            # are ABOUT a time period, not filtered by document creation date.
+            if start is not None:
+                from mnemosyne.embed.schema import get_date_filtered_paths
+                from mnemosyne.temporal.rewriter import is_relative_temporal
+
+                if is_relative_temporal(query):
+                    _tmp2_db = sqlite3.connect(str(get_qmd_db_path()))
+                    try:
+                        _paths = get_date_filtered_paths(_tmp2_db, start, end)
+                        if _paths:  # empty = no dated chunks yet; do not filter
+                            date_filter_paths = _paths
+                            logger.debug(
+                                "hybrid: TMP-2 date filter active — %d paths in [%s, %s]",
+                                len(_paths),
+                                start,
+                                end,
+                            )
+                    except Exception as _dfp_e:
+                        logger.warning("hybrid: TMP-2 get_date_filtered_paths failed — %s", _dfp_e)
+                    finally:
+                        _tmp2_db.close()
         except Exception as _e:
             logger.warning("hybrid: temporal rewriting failed — %s", _e)
             active_query = query
@@ -325,11 +350,13 @@ def search(
         futures: dict[str, Future] = {}
 
         # Always run BM25
-        futures["bm25"] = executor.submit(bm25_search, active_query, collections)
+        futures["bm25"] = executor.submit(
+            bm25_search, active_query, collections, BM25_DEFAULT_LIMIT, None, date_filter_paths
+        )
 
         # Run vector search unless intent says skip
         if not skip_vector:
-            futures["vec"] = executor.submit(_run_vector_search, active_query, collections)
+            futures["vec"] = executor.submit(_run_vector_search, active_query, collections, date_filter_paths)
 
         # Collect results
         for name, future in futures.items():
@@ -352,7 +379,7 @@ def search(
     if not bm25_results and skip_vector:
         logger.info("hybrid: %s BM25 returned 0 results — falling back to vector (query=%r)", intent.value, query[:60])
         try:
-            vec_results = _run_vector_search(active_query, collections)
+            vec_results = _run_vector_search(active_query, collections, date_filter_paths)
             fallback_used = True
             if not vec_results:
                 vec_failed = True
@@ -477,7 +504,11 @@ def search(
     return result
 
 
-def _run_vector_search(query: str, collections: list[str]) -> list[VecResult]:
+def _run_vector_search(
+    query: str,
+    collections: list[str],
+    date_filter_paths: frozenset[str] | None = None,
+) -> list[VecResult]:
     """
     Embed query and run vector search. Returns [] on any failure.
     Called from ThreadPoolExecutor — must not raise.
@@ -504,7 +535,9 @@ def _run_vector_search(query: str, collections: list[str]) -> list[VecResult]:
             return []
 
         try:
-            return vector_search_bytes(db, query_bytes, collections=collections or None)
+            return vector_search_bytes(
+                db, query_bytes, collections=collections or None, date_filter_paths=date_filter_paths
+            )
         finally:
             db.close()
     except Exception as e:

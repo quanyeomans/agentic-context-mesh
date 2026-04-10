@@ -172,7 +172,7 @@ def embed_text(text: str) -> list[float]:
         return []
 
 
-def chat_completion(messages: list[dict], max_tokens: int = 800) -> str:
+def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> str:
     """
     Call GPT-4o-mini for synthesis via Azure OpenAI chat completions.
 
