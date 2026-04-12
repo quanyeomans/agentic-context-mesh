@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.search.planner — QueryPlanner decompose + retrieve_and_merge.
+Tests for kairix.search.planner — QueryPlanner decompose + retrieve_and_merge.
 
 Tests cover:
   - decompose() fallback when chat_completion import fails
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from mnemosyne.search.planner import QueryPlanner
+from kairix.search.planner import QueryPlanner
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,7 +65,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.side_effect = RuntimeError("API down")
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("query that fails")
         assert result == ["query that fails"]
 
@@ -74,7 +74,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = ""
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("what happened in march")
         assert result == ["what happened in march"]
 
@@ -83,7 +83,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = "not json at all"
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("some query")
         assert result == ["some query"]
 
@@ -92,7 +92,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = '{"key": "value"}'
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("what")
         assert result == ["what"]
 
@@ -101,7 +101,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = '["a", "b", "c", "d"]'
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("something")
         assert result == ["something"]
 
@@ -110,7 +110,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = "[]"
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("empty response")
         assert result == ["empty response"]
 
@@ -119,7 +119,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = '["simple query passthrough"]'
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("simple query passthrough")
         assert result == ["simple query passthrough"]
 
@@ -128,7 +128,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = '["sub1", "sub2", "sub3"]'
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("complex query needing decomposition")
         assert result == ["sub1", "sub2", "sub3"]
 
@@ -137,7 +137,7 @@ class TestDecompose:
         planner = QueryPlanner()
         mock_azure = MagicMock()
         mock_azure.chat_completion.return_value = '["sub1", "", "sub2"]'
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             result = planner.decompose("query with blanks")
         assert result == ["sub1", "sub2"]
 
@@ -148,12 +148,12 @@ class TestDecompose:
         mock_azure.chat_completion.return_value = '["query"]'
         db = sqlite3.connect(":memory:")
 
-        with patch.dict("sys.modules", {"mnemosyne._azure": mock_azure}):
+        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
             with patch(
-                "mnemosyne.search.planner.QueryPlanner.decompose",
+                "kairix.search.planner.QueryPlanner.decompose",
                 wraps=planner.decompose,
             ):
-                # graph_context import will fail since mnemosyne.entities.graph
+                # graph_context import will fail since kairix.entities.graph
                 # is not fully set up — should fall back to plain prompt
                 result = planner.decompose("active projects avanade", entities_db=db)
 
@@ -175,8 +175,8 @@ class TestDecompose:
         with patch.dict(
             "sys.modules",
             {
-                "mnemosyne._azure": mock_azure,
-                "mnemosyne.entities.graph": mock_graph,
+                "kairix._azure": mock_azure,
+                "kairix.entities.graph": mock_graph,
             },
         ):
             result = planner.decompose("what is avanade doing", entities_db=db)

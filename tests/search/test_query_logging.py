@@ -1,9 +1,9 @@
 """
-Tests for optional raw query logging in mnemosyne.search.hybrid.
+Tests for optional raw query logging in kairix.search.hybrid.
 
 Coverage:
-  - MNEMOSYNE_LOG_QUERIES=0 (default): no queries.jsonl written
-  - MNEMOSYNE_LOG_QUERIES=1: entry written with correct fields after search
+  - KAIRIX_LOG_QUERIES=0 (default): no queries.jsonl written
+  - KAIRIX_LOG_QUERIES=1: entry written with correct fields after search
   - Entry contains query, query_hash, intent, top_paths
   - top_paths limited to 3 entries
   - Rotation: when file > 10MB, rotates to .1 before writing
@@ -15,10 +15,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mnemosyne.search.budget import BudgetedResult
-from mnemosyne.search.hybrid import _log_query_event, _rotate_query_log, search
-from mnemosyne.search.intent import QueryIntent
-from mnemosyne.search.rrf import FusedResult
+from kairix.search.budget import BudgetedResult
+from kairix.search.hybrid import _log_query_event, _rotate_query_log, search
+from kairix.search.intent import QueryIntent
+from kairix.search.rrf import FusedResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,13 +44,13 @@ def _budgeted(path: str, tokens: int = 50) -> BudgetedResult:
 def _make_search_mock(budgeted_results: list[BudgetedResult]) -> dict:
     """Return a dict of patches that simulate a successful search pipeline."""
     return {
-        "mnemosyne.search.hybrid.classify": MagicMock(return_value=QueryIntent.SEMANTIC),
-        "mnemosyne.search.hybrid.bm25_search": MagicMock(return_value=[]),
-        "mnemosyne.search.hybrid._run_vector_search": MagicMock(return_value=[]),
-        "mnemosyne.search.hybrid.rrf": MagicMock(return_value=[]),
-        "mnemosyne.search.hybrid._open_entities_db": MagicMock(return_value=None),
-        "mnemosyne.search.hybrid.apply_budget": MagicMock(return_value=budgeted_results),
-        "mnemosyne.search.hybrid._log_search_event": MagicMock(),  # don't touch search.jsonl
+        "kairix.search.hybrid.classify": MagicMock(return_value=QueryIntent.SEMANTIC),
+        "kairix.search.hybrid.bm25_search": MagicMock(return_value=[]),
+        "kairix.search.hybrid._run_vector_search": MagicMock(return_value=[]),
+        "kairix.search.hybrid.rrf": MagicMock(return_value=[]),
+        "kairix.search.hybrid._open_entities_db": MagicMock(return_value=None),
+        "kairix.search.hybrid.apply_budget": MagicMock(return_value=budgeted_results),
+        "kairix.search.hybrid._log_search_event": MagicMock(),  # don't touch search.jsonl
     }
 
 
@@ -61,12 +61,12 @@ def _make_search_mock(budgeted_results: list[BudgetedResult]) -> dict:
 
 @pytest.mark.unit
 class TestQueryLoggingDisabled:
-    """When MNEMOSYNE_LOG_QUERIES=0, no queries.jsonl should be written."""
+    """When KAIRIX_LOG_QUERIES=0, no queries.jsonl should be written."""
 
     def test_no_file_written_when_disabled(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", False),
@@ -92,19 +92,19 @@ class TestQueryLoggingDisabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/a.md"), _budgeted("/vault/b.md")]
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", False),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("mnemosyne.search.hybrid.classify", mocks["mnemosyne.search.hybrid.classify"]),
-            patch("mnemosyne.search.hybrid.bm25_search", mocks["mnemosyne.search.hybrid.bm25_search"]),
-            patch("mnemosyne.search.hybrid._run_vector_search", mocks["mnemosyne.search.hybrid._run_vector_search"]),
-            patch("mnemosyne.search.hybrid.rrf", mocks["mnemosyne.search.hybrid.rrf"]),
-            patch("mnemosyne.search.hybrid._open_entities_db", mocks["mnemosyne.search.hybrid._open_entities_db"]),
-            patch("mnemosyne.search.hybrid.apply_budget", mocks["mnemosyne.search.hybrid.apply_budget"]),
-            patch("mnemosyne.search.hybrid._log_search_event", mocks["mnemosyne.search.hybrid._log_search_event"]),
+            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
+            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
+            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
+            patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
+            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
+            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
             search("what is the capital of France", agent="builder")
 
@@ -118,25 +118,25 @@ class TestQueryLoggingDisabled:
 
 @pytest.mark.unit
 class TestQueryLoggingEnabled:
-    """When MNEMOSYNE_LOG_QUERIES=1, entry must be written with correct fields."""
+    """When KAIRIX_LOG_QUERIES=1, entry must be written with correct fields."""
 
     def test_entry_written_after_search(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/doc1.md"), _budgeted("/vault/doc2.md")]
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("mnemosyne.search.hybrid.classify", mocks["mnemosyne.search.hybrid.classify"]),
-            patch("mnemosyne.search.hybrid.bm25_search", mocks["mnemosyne.search.hybrid.bm25_search"]),
-            patch("mnemosyne.search.hybrid._run_vector_search", mocks["mnemosyne.search.hybrid._run_vector_search"]),
-            patch("mnemosyne.search.hybrid.rrf", mocks["mnemosyne.search.hybrid.rrf"]),
-            patch("mnemosyne.search.hybrid._open_entities_db", mocks["mnemosyne.search.hybrid._open_entities_db"]),
-            patch("mnemosyne.search.hybrid.apply_budget", mocks["mnemosyne.search.hybrid.apply_budget"]),
-            patch("mnemosyne.search.hybrid._log_search_event", mocks["mnemosyne.search.hybrid._log_search_event"]),
+            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
+            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
+            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
+            patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
+            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
+            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
             search("what is Dan working on", agent="shape")
 
@@ -160,19 +160,19 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/a.md")]
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("mnemosyne.search.hybrid.classify", mocks["mnemosyne.search.hybrid.classify"]),
-            patch("mnemosyne.search.hybrid.bm25_search", mocks["mnemosyne.search.hybrid.bm25_search"]),
-            patch("mnemosyne.search.hybrid._run_vector_search", mocks["mnemosyne.search.hybrid._run_vector_search"]),
-            patch("mnemosyne.search.hybrid.rrf", mocks["mnemosyne.search.hybrid.rrf"]),
-            patch("mnemosyne.search.hybrid._open_entities_db", mocks["mnemosyne.search.hybrid._open_entities_db"]),
-            patch("mnemosyne.search.hybrid.apply_budget", mocks["mnemosyne.search.hybrid.apply_budget"]),
-            patch("mnemosyne.search.hybrid._log_search_event", mocks["mnemosyne.search.hybrid._log_search_event"]),
+            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
+            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
+            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
+            patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
+            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
+            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
             search("test query for hash", agent=None)
 
@@ -192,19 +192,19 @@ class TestQueryLoggingEnabled:
             _budgeted("/vault/e.md"),
         ]
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("mnemosyne.search.hybrid.classify", mocks["mnemosyne.search.hybrid.classify"]),
-            patch("mnemosyne.search.hybrid.bm25_search", mocks["mnemosyne.search.hybrid.bm25_search"]),
-            patch("mnemosyne.search.hybrid._run_vector_search", mocks["mnemosyne.search.hybrid._run_vector_search"]),
-            patch("mnemosyne.search.hybrid.rrf", mocks["mnemosyne.search.hybrid.rrf"]),
-            patch("mnemosyne.search.hybrid._open_entities_db", mocks["mnemosyne.search.hybrid._open_entities_db"]),
-            patch("mnemosyne.search.hybrid.apply_budget", mocks["mnemosyne.search.hybrid.apply_budget"]),
-            patch("mnemosyne.search.hybrid._log_search_event", mocks["mnemosyne.search.hybrid._log_search_event"]),
+            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
+            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
+            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
+            patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
+            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
+            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
             search("multi-result query", agent="builder")
 
@@ -216,19 +216,19 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/only.md")]
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("mnemosyne.search.hybrid.classify", mocks["mnemosyne.search.hybrid.classify"]),
-            patch("mnemosyne.search.hybrid.bm25_search", mocks["mnemosyne.search.hybrid.bm25_search"]),
-            patch("mnemosyne.search.hybrid._run_vector_search", mocks["mnemosyne.search.hybrid._run_vector_search"]),
-            patch("mnemosyne.search.hybrid.rrf", mocks["mnemosyne.search.hybrid.rrf"]),
-            patch("mnemosyne.search.hybrid._open_entities_db", mocks["mnemosyne.search.hybrid._open_entities_db"]),
-            patch("mnemosyne.search.hybrid.apply_budget", mocks["mnemosyne.search.hybrid.apply_budget"]),
-            patch("mnemosyne.search.hybrid._log_search_event", mocks["mnemosyne.search.hybrid._log_search_event"]),
+            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
+            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
+            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
+            patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
+            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
+            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
             search("single result query", agent="builder")
 
@@ -240,19 +240,19 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/x.md")]
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         patches = (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("mnemosyne.search.hybrid.classify", mocks["mnemosyne.search.hybrid.classify"]),
-            patch("mnemosyne.search.hybrid.bm25_search", mocks["mnemosyne.search.hybrid.bm25_search"]),
-            patch("mnemosyne.search.hybrid._run_vector_search", mocks["mnemosyne.search.hybrid._run_vector_search"]),
-            patch("mnemosyne.search.hybrid.rrf", mocks["mnemosyne.search.hybrid.rrf"]),
-            patch("mnemosyne.search.hybrid._open_entities_db", mocks["mnemosyne.search.hybrid._open_entities_db"]),
-            patch("mnemosyne.search.hybrid.apply_budget", mocks["mnemosyne.search.hybrid.apply_budget"]),
-            patch("mnemosyne.search.hybrid._log_search_event", mocks["mnemosyne.search.hybrid._log_search_event"]),
+            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
+            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
+            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
+            patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
+            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
+            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         )
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
             search("first query", agent="builder")
@@ -282,7 +282,7 @@ class TestQueryLogRotation:
         log_path.write_bytes(b"x" * (10 * 1024 * 1024 + 1))
         original_size = log_path.stat().st_size
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
@@ -321,7 +321,7 @@ class TestQueryLogRotation:
         # Oversized active log
         log_path.write_bytes(b"y" * (10 * 1024 * 1024 + 1))
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
@@ -355,7 +355,7 @@ class TestQueryLogRotation:
         # Small file — should not rotate
         log_path.write_text('{"ts": 1, "query": "existing"}\n')
 
-        import mnemosyne.search.hybrid as hybrid_mod
+        import kairix.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),

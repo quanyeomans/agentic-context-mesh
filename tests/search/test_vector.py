@@ -1,6 +1,6 @@
 """
-Tests for mnemosyne.search.vector — vector CTE search wrapper.
-Tests for mnemosyne._azure — Azure OpenAI embedding client.
+Tests for kairix.search.vector — vector CTE search wrapper.
+Tests for kairix._azure — Azure OpenAI embedding client.
 
 All DB and network calls are mocked. Tests cover:
   - Successful vector search returns VecResult list
@@ -19,8 +19,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mnemosyne._azure import embed_text
-from mnemosyne.search.vector import VecResult, vector_search, vector_search_bytes
+from kairix._azure import embed_text
+from kairix.search.vector import VecResult, vector_search, vector_search_bytes
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -174,11 +174,11 @@ def test_vector_search_bytes_returns_empty_for_empty_bytes() -> None:
 @pytest.mark.unit
 def test_embed_text_returns_empty_on_missing_secrets() -> None:
     """When secrets are unavailable, embed_text returns []."""
-    import mnemosyne._azure as azure_mod
+    import kairix._azure as azure_mod
 
     # Clear lru_cache so new mock is used
     azure_mod._get_secrets.cache_clear()
-    with patch("mnemosyne._azure._get_secrets", return_value={}):
+    with patch("kairix._azure._get_secrets", return_value={}):
         result = embed_text("hello world")
     assert result == []
     # Restore for other tests
@@ -190,12 +190,12 @@ def test_embed_text_returns_empty_on_network_failure() -> None:
     """RequestException → []."""
     import requests
 
-    import mnemosyne._azure as azure_mod
+    import kairix._azure as azure_mod
 
     azure_mod._get_secrets.cache_clear()
     with (
         patch(
-            "mnemosyne._azure._get_secrets",
+            "kairix._azure._get_secrets",
             return_value={"api_key": "k", "endpoint": "https://x", "deployment": "d"},
         ),
         patch("requests.post", side_effect=requests.exceptions.ConnectionError("network down")),
@@ -210,14 +210,14 @@ def test_embed_text_returns_empty_on_api_error_response() -> None:
     """HTTP error response → []."""
     import requests
 
-    import mnemosyne._azure as azure_mod
+    import kairix._azure as azure_mod
 
     azure_mod._get_secrets.cache_clear()
     mock_resp = MagicMock()
     mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("401 Unauthorized")
     with (
         patch(
-            "mnemosyne._azure._get_secrets",
+            "kairix._azure._get_secrets",
             return_value={"api_key": "k", "endpoint": "https://x", "deployment": "d"},
         ),
         patch("requests.post", return_value=mock_resp),

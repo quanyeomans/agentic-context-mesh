@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.embed.recall_check
+Tests for kairix.embed.recall_check
 
 Covers:
 - _get_recall_queries(): default + env override
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mnemosyne.embed.recall_check import (
+from kairix.embed.recall_check import (
     _embed_query,
     _get_recall_queries,
     _vsearch_direct,
@@ -79,7 +79,7 @@ def test_embed_query_returns_bytes_on_success(monkeypatch: pytest.MonkeyPatch) -
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {"data": [{"embedding": fake_vec}]}
 
-    with patch("mnemosyne.embed.recall_check.requests.post", return_value=mock_resp):
+    with patch("kairix.embed.recall_check.requests.post", return_value=mock_resp):
         result = _embed_query("test query")
 
     assert result is not None
@@ -91,7 +91,7 @@ def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "fake-key")
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
 
-    with patch("mnemosyne.embed.recall_check.requests.post", side_effect=OSError("timeout")):
+    with patch("kairix.embed.recall_check.requests.post", side_effect=OSError("timeout")):
         result = _embed_query("test query")
 
     assert result is None
@@ -121,7 +121,7 @@ def test_check_recall_skips_when_embed_returns_none() -> None:
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE vectors_vec (rowid INTEGER, source_path TEXT, embedding BLOB)")
 
-    with patch("mnemosyne.embed.recall_check._embed_query", return_value=None):
+    with patch("kairix.embed.recall_check._embed_query", return_value=None):
         result = check_recall(db=db)
 
     assert result["score"] == 0.0
@@ -134,7 +134,7 @@ def test_check_recall_returns_structure() -> None:
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE vectors_vec (rowid INTEGER, source_path TEXT, embedding BLOB)")
 
-    with patch("mnemosyne.embed.recall_check._embed_query", return_value=None):
+    with patch("kairix.embed.recall_check._embed_query", return_value=None):
         result = check_recall(db=db)
 
     assert "score" in result
@@ -152,10 +152,10 @@ def test_check_recall_counts_hit_when_gold_in_results() -> None:
     fake_files = ["04-Agent-Knowledge/builder/patterns.md"]
 
     with (
-        patch("mnemosyne.embed.recall_check._embed_query", return_value=fake_vec),
-        patch("mnemosyne.embed.recall_check._vsearch_direct", return_value=fake_files),
+        patch("kairix.embed.recall_check._embed_query", return_value=fake_vec),
+        patch("kairix.embed.recall_check._vsearch_direct", return_value=fake_files),
         patch(
-            "mnemosyne.embed.recall_check._get_recall_queries",
+            "kairix.embed.recall_check._get_recall_queries",
             return_value=[("R1", "engineering patterns", "builder/patterns")],
         ),
     ):

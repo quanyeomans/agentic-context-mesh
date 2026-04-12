@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.temporal.chunker.
+Tests for kairix.temporal.chunker.
 
 Covers:
   - chunk_board(): column parsing, date extraction, cards without dates
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from mnemosyne.temporal.chunker import (
+from kairix.temporal.chunker import (
     chunk_board,
     chunk_file,
     chunk_memory_log,

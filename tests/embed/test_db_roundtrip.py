@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
-from mnemosyne.embed.embed import ensure_staging_table, flush_staging_to_vec, stage_embedding
-from mnemosyne.embed.schema import (
+from kairix.embed.embed import ensure_staging_table, flush_staging_to_vec, stage_embedding
+from kairix.embed.schema import (
     EMBED_VECTOR_DIMS,
     SchemaVersionError,
     ensure_vec_table,
@@ -209,7 +209,7 @@ class TestFullRoundtrip:
         ):
             with patch("qmd_azure_embed.embed.preflight_check", return_value=EMBED_VECTOR_DIMS):
                 with patch("qmd_azure_embed.embed.embed_batch", return_value=[fake_vec] * 100):
-                    from mnemosyne.embed.embed import run_embed
+                    from kairix.embed.embed import run_embed
 
                     result = run_embed(tmp_db_with_docs, force=False)
 

@@ -21,7 +21,7 @@ import pytest
 
 pytestmark = pytest.mark.skipif(os.environ.get("QMD_E2E") != "1", reason="E2E tests skipped unless QMD_E2E=1")
 
-_DATA_DIR = os.environ.get("MNEMOSYNE_DATA_DIR", "/data")
+_DATA_DIR = os.environ.get("KAIRIX_DATA_DIR", "/data")
 QMD_BIN = Path(os.environ.get("QMD_BINARY_PATH", f"{_DATA_DIR}/workspace/.tools/qmd/node_modules/.bin/qmd"))
 
 # Known gold: (query, fragment that must appear in top-3 vsearch results)
@@ -39,7 +39,7 @@ def embedded_db(tmp_path_factory):
     Copy the live QMD DB to a temp path, embed 50 chunks via Azure,
     and return the path. Restores env after.
     """
-    from mnemosyne.embed.schema import get_qmd_db_path
+    from kairix.embed.schema import get_qmd_db_path
 
     src = get_qmd_db_path()
     tmp_dir = tmp_path_factory.mktemp("qmd_e2e")
@@ -56,8 +56,8 @@ def embedded_db(tmp_path_factory):
     # Run embed on the copy with --limit 50
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("QMD_CACHE_DIR", str(tmp_dir))
-        from mnemosyne.embed.embed import run_embed
-        from mnemosyne.embed.schema import ensure_vec_table, validate_schema
+        from kairix.embed.embed import run_embed
+        from kairix.embed.schema import ensure_vec_table, validate_schema
 
         db = sqlite3.connect(str(tmp_db_path))
         validate_schema(db)

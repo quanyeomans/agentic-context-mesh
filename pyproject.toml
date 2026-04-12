@@ -3,7 +3,7 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mnemosyne"
+name = "kairix"
 version = "0.8.0"
 description = "Memory system for QMD + Obsidian agent stacks — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
@@ -34,9 +34,9 @@ dev = [
 ]
 
 [project.scripts]
-mnemosyne = "mnemosyne.cli:main"
+kairix = "kairix.cli:main"
 # Legacy alias — kept for backwards compat with existing cron entries
-qmd-azure-embed = "mnemosyne.embed.cli:main"
+qmd-embed = "kairix.embed.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/quanyeomans/agentic-context-mesh"
@@ -57,19 +57,19 @@ markers = [
 timeout = 60  # Per-test timeout default (seconds)
 
 [tool.coverage.run]
-source = ["mnemosyne"]
+source = ["kairix"]
 omit = [
     "tests/*",
     # CLI entry points are thin argparse wrappers — tested via integration, not unit coverage
-    "mnemosyne/cli.py",
-    "mnemosyne/*/cli.py",
+    "kairix/cli.py",
+    "kairix/*/cli.py",
     # External I/O adapters — Azure API + QMD subprocess; behaviour mocked in unit tests
-    "mnemosyne/_azure.py",
-    "mnemosyne/_qmd.py",
+    "kairix/_azure.py",
+    "kairix/_qmd.py",
     # Pipeline orchestrators — thin wrappers over individually-tested modules
-    "mnemosyne/entities/pipeline.py",
-    "mnemosyne/temporal/index.py",
-    "mnemosyne/wikilinks/audit.py",
+    "kairix/entities/pipeline.py",
+    "kairix/temporal/index.py",
+    "kairix/wikilinks/audit.py",
 ]
 
 [tool.coverage.report]
@@ -99,14 +99,14 @@ strict_equality = true
 # Modules not yet fully annotated (will be removed as each phase ships)
 [[tool.mypy.overrides]]
 module = [
-    "mnemosyne.search.*",
-    "mnemosyne.entities.*",
-    "mnemosyne.temporal.*",
-    "mnemosyne.summaries.*",
-    "mnemosyne.classify.*",
-    "mnemosyne.briefing.*",
-    "mnemosyne.contradict.*",
-    "mnemosyne.benchmark.*",
+    "kairix.search.*",
+    "kairix.entities.*",
+    "kairix.temporal.*",
+    "kairix.summaries.*",
+    "kairix.classify.*",
+    "kairix.briefing.*",
+    "kairix.contradict.*",
+    "kairix.benchmark.*",
 ]
 # Stub-only modules — no implementation yet, no type checking needed
 ignore_errors = true
@@ -142,8 +142,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "T20"]           # Tests: allow assert + print
 "tests/e2e/*" = ["S", "T20", "I001"]  # E2E tests: inline imports required for lazy loading
-"mnemosyne/*/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
-"mnemosyne/cli.py" = ["T201"]
+"kairix/*/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
+"kairix/cli.py" = ["T201"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -162,10 +162,10 @@ skips = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mnemosyne*", "qmd_azure_embed*"]
+include = ["kairix*", "qmd_azure_embed*"]
 
 # QMD compatibility — update when testing against a new QMD version
 # Tested: qmd@1.1.2
-[tool.mnemosyne]
+[tool.kairix]
 qmd-tested-version = "1.1.2"
 qmd-schema-version = "1"

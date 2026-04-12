@@ -14,7 +14,7 @@ def run_classify_cli(args: list[str]) -> tuple[str, str, int]:
     """Run classify CLI and return (stdout, stderr, exit_code)."""
     import io
 
-    from mnemosyne.classify.cli import main
+    from kairix.classify.cli import main
 
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()

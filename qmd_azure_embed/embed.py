@@ -1,7 +1,7 @@
 """
 Backwards compatibility shim — qmd_azure_embed.embed → mnemosyne.embed.embed.
 """
-from mnemosyne.embed.embed import (  # noqa: F401
+from kairix.embed.embed import (  # noqa: F401
     encode_vector,
     build_hash_seq,
     batched,

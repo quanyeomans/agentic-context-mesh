@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.wikilinks.resolver
+Tests for kairix.wikilinks.resolver
 
 Covers:
 - load_entities_from_bootstrap(): parses a synthetic index file (tmp_path fixture)
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from mnemosyne.wikilinks.resolver import (
+from kairix.wikilinks.resolver import (
     WikiEntity,
     get_entities,
     load_entities_from_bootstrap,
@@ -316,7 +316,7 @@ def test_get_entities_uses_db_when_sufficient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_entities() uses DB when it has >= 5 entities with vault_path."""
-    import mnemosyne.wikilinks.resolver as resolver_mod
+    import kairix.wikilinks.resolver as resolver_mod
 
     monkeypatch.setattr(resolver_mod, "load_entities_from_db", lambda: load_entities_from_db(synthetic_db))
     monkeypatch.setattr(
@@ -357,7 +357,7 @@ def test_get_entities_falls_back_to_bootstrap_when_db_sparse(
     db.commit()
     db.close()
 
-    import mnemosyne.wikilinks.resolver as resolver_mod
+    import kairix.wikilinks.resolver as resolver_mod
 
     monkeypatch.setattr(resolver_mod, "load_entities_from_db", lambda: load_entities_from_db(sparse_db))
     monkeypatch.setattr(
@@ -374,7 +374,7 @@ def test_get_entities_no_prefer_db_uses_bootstrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_entities(prefer_db=False) returns bootstrap entities directly."""
-    import mnemosyne.wikilinks.resolver as resolver_mod
+    import kairix.wikilinks.resolver as resolver_mod
 
     monkeypatch.setattr(
         resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)

@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.summaries.loader
+Tests for kairix.summaries.loader
 """
 
 import sqlite3
@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from mnemosyne.summaries.generate import SummaryResult
-from mnemosyne.summaries.loader import get_l0, get_l1, load_tiered_content
-from mnemosyne.summaries.staleness import init_summaries_db, write_summary
+from kairix.summaries.generate import SummaryResult
+from kairix.summaries.loader import get_l0, get_l1, load_tiered_content
+from kairix.summaries.staleness import init_summaries_db, write_summary
 
 # ---------------------------------------------------------------------------
 # Fixtures

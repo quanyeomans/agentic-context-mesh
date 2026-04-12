@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.summaries.staleness
+Tests for kairix.summaries.staleness
 """
 
 import sqlite3
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from mnemosyne.summaries.generate import SummaryResult
-from mnemosyne.summaries.staleness import (
+from kairix.summaries.generate import SummaryResult
+from kairix.summaries.staleness import (
     get_stale_paths,
     get_summary,
     init_summaries_db,

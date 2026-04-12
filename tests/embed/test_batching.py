@@ -1,6 +1,6 @@
 """Unit tests for batch splitting and chunk text logic."""
 
-from mnemosyne.embed.embed import batched, chunk_text
+from kairix.embed.embed import batched, chunk_text
 
 
 class TestBatched:
@@ -69,7 +69,7 @@ class TestChunkText:
 
     def test_exact_chunk_size_boundary(self):
         # At exactly chunk_size, should still be one chunk
-        from mnemosyne.embed.embed import CHUNK_SIZE_CHARS
+        from kairix.embed.embed import CHUNK_SIZE_CHARS
 
         text = "a" * CHUNK_SIZE_CHARS
         chunks = chunk_text(text)

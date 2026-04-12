@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.embed.embed — covers previously-untested paths:
+Tests for kairix.embed.embed — covers previously-untested paths:
 - _get_azure_config(): env vars, missing key/endpoint errors
 - preflight_check(): mocked HTTP success + error
 - embed_batch(): mocked API + staging + vec write
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mnemosyne.embed.embed import (
+from kairix.embed.embed import (
     _get_azure_config,
     batched,
     build_hash_seq,
@@ -133,7 +133,7 @@ def test_preflight_check_returns_dims_on_success() -> None:
     mock_resp.raise_for_status = MagicMock()
     mock_resp.json.return_value = {"data": [{"embedding": fake_vec}]}
 
-    with patch("mnemosyne.embed.embed.requests.post", return_value=mock_resp):
+    with patch("kairix.embed.embed.requests.post", return_value=mock_resp):
         dims = preflight_check("key", "https://fake.example.com", "text-embedding-3-large")
 
     assert dims == 1536
@@ -143,7 +143,7 @@ def test_preflight_check_raises_on_http_error() -> None:
     mock_resp = MagicMock()
     mock_resp.raise_for_status.side_effect = Exception("HTTP 401")
 
-    with patch("mnemosyne.embed.embed.requests.post", return_value=mock_resp):
+    with patch("kairix.embed.embed.requests.post", return_value=mock_resp):
         with pytest.raises(Exception, match="401"):
             preflight_check("bad-key", "https://fake.example.com", "deploy")
 
@@ -275,7 +275,7 @@ def test_chunk_text_splits_on_paragraph_boundary() -> None:
 
 def test_run_embed_with_no_chunks_returns_stats() -> None:
     """run_embed() with no pending chunks returns embedded=0 immediately."""
-    from mnemosyne.embed.embed import run_embed
+    from kairix.embed.embed import run_embed
 
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
@@ -284,10 +284,10 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
     db.execute("CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY, embedding BLOB)")
 
     with (
-        patch("mnemosyne.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
-        patch("mnemosyne.embed.embed.load_sqlite_vec"),
-        patch("mnemosyne.embed.embed.preflight_check", return_value=1536),
-        patch("mnemosyne.embed.embed.ensure_vec_table"),
+        patch("kairix.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
+        patch("kairix.embed.embed.load_sqlite_vec"),
+        patch("kairix.embed.embed.preflight_check", return_value=1536),
+        patch("kairix.embed.embed.ensure_vec_table"),
     ):
         result = run_embed(db, batch_size=10)
 
@@ -298,15 +298,15 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
 
 def test_run_embed_raises_on_dim_mismatch() -> None:
     """run_embed() raises SchemaVersionError when Azure returns unexpected dims."""
-    from mnemosyne.embed.embed import run_embed
-    from mnemosyne.embed.schema import SchemaVersionError
+    from kairix.embed.embed import run_embed
+    from kairix.embed.schema import SchemaVersionError
 
     db = sqlite3.connect(":memory:")
 
     with (
-        patch("mnemosyne.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
-        patch("mnemosyne.embed.embed.load_sqlite_vec"),
-        patch("mnemosyne.embed.embed.preflight_check", return_value=512),  # wrong dims
+        patch("kairix.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
+        patch("kairix.embed.embed.load_sqlite_vec"),
+        patch("kairix.embed.embed.preflight_check", return_value=512),  # wrong dims
     ):
         with pytest.raises(SchemaVersionError):
             run_embed(db)

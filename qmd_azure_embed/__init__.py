@@ -1,10 +1,10 @@
 """
 Backwards compatibility shim.
 
-The qmd_azure_embed package has been renamed to mnemosyne.
+The qmd_azure_embed package has been renamed to kairix.
 All public symbols are re-exported from their new locations.
 """
-from mnemosyne.embed.embed import (  # noqa: F401
+from kairix.embed.embed import (  # noqa: F401
     encode_vector,
     build_hash_seq,
     batched,

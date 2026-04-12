@@ -1,16 +1,16 @@
 """
-Tests for mnemosyne.entities.graph — entity CRUD and mentions.
+Tests for kairix.entities.graph — entity CRUD and mentions.
 """
 
 import pytest
 
-from mnemosyne.entities.graph import (
+from kairix.entities.graph import (
     entity_lookup,
     entity_write,
     get_mentions,
     slug,
 )
-from mnemosyne.entities.schema import open_entities_db
+from kairix.entities.schema import open_entities_db
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -21,7 +21,7 @@ from mnemosyne.entities.schema import open_entities_db
 def db(tmp_path, monkeypatch):
     """Open a fresh entities DB backed by a temp file."""
     db_path = str(tmp_path / "test_entities.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
     conn = open_entities_db()
     yield conn
     conn.close()
@@ -32,7 +32,7 @@ def vault_root(tmp_path, monkeypatch):
     """Patch VAULT_ROOT to a temp directory so tests don't write to /data/obsidian-vault."""
     vault = tmp_path / "vault"
     vault.mkdir()
-    import mnemosyne.entities.graph as graph_module
+    import kairix.entities.graph as graph_module
 
     monkeypatch.setattr(graph_module, "VAULT_ROOT", vault)
     return vault

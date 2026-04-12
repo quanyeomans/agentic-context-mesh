@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.entities.resolver — resolve_canonical().
+Tests for kairix.entities.resolver — resolve_canonical().
 
 Covers:
 - Canonical entity lookup (already canonical, returns itself)
@@ -15,8 +15,8 @@ import sqlite3
 
 import pytest
 
-from mnemosyne.entities.resolver import resolve_canonical
-from mnemosyne.entities.schema import open_entities_db
+from kairix.entities.resolver import resolve_canonical
+from kairix.entities.schema import open_entities_db
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -27,7 +27,7 @@ from mnemosyne.entities.schema import open_entities_db
 def db(tmp_path, monkeypatch):
     """Fresh entities DB backed by a temp file, pre-seeded with test data."""
     db_path = str(tmp_path / "test_resolver.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
     conn = open_entities_db()
     conn.row_factory = sqlite3.Row
     _seed_test_db(conn)
@@ -258,7 +258,7 @@ def test_resolve_empty_string_returns_none(db):
 def test_resolve_empty_db(tmp_path, monkeypatch):
     """resolve_canonical on an empty DB returns None."""
     db_path = str(tmp_path / "empty.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
     conn = open_entities_db()
     row = resolve_canonical("Anything", conn)
     assert row is None

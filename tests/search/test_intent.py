@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.search.intent — query intent classifier.
+Tests for kairix.search.intent — query intent classifier.
 
 20 labelled examples covering all five intent classes.
 Priority order tested: TEMPORAL > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
@@ -7,7 +7,7 @@ Priority order tested: TEMPORAL > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
 
 import pytest
 
-from mnemosyne.search.intent import QueryIntent, classify
+from kairix.search.intent import QueryIntent, classify
 
 # ---------------------------------------------------------------------------
 # Labelled test cases

@@ -62,7 +62,7 @@ jobs:
       - name: Type checking — mypy strict
         # Engineering hub: "mypy — zero errors". Strict mode from Phase 1.
         run: |
-          mypy mnemosyne/ \
+          mypy kairix/ \
             --ignore-missing-imports \
             --disallow-untyped-defs \
             --disallow-incomplete-defs \
@@ -79,14 +79,14 @@ jobs:
         # Engineering hub: "Linting / code quality: blocks merge."
         run: |
           pip install ruff
-          ruff check mnemosyne/ tests/
-          ruff format --check mnemosyne/ tests/
+          ruff check kairix/ tests/
+          ruff format --check kairix/ tests/
 
       - name: Unit tests with coverage
         run: |
           pytest tests/ \
             -m "not integration and not e2e" \
-            --cov=mnemosyne \
+            --cov=kairix \
             --cov-report=xml \
             --cov-report=term-missing \
             --cov-fail-under=80 \
@@ -136,13 +136,13 @@ jobs:
           pytest tests/ -m integration -v --tb=short --maxfail=3
         # maxfail=3: engineering hub "stop on >3 failures"
         env:
-          MNEMOSYNE_TEST_DB: /tmp/mnemosyne-test-${{ github.run_id }}.sqlite
+          KAIRIX_TEST_DB: /tmp/kairix-test-${{ github.run_id }}.sqlite
 
       - name: Verify backwards compatibility (qmd_azure_embed shim)
         # Ensure legacy entry point still works after refactor
         run: |
           python -c "from qmd_azure_embed.embed import encode_vector, build_hash_seq; print('Shim OK')"
-          python -c "from mnemosyne.embed.embed import encode_vector, build_hash_seq; print('New path OK')"
+          python -c "from kairix.embed.embed import encode_vector, build_hash_seq; print('New path OK')"
 
   # ── Stage 4: Security ────────────────────────────────────────────────────────
   # Engineering hub: "4-layer defence: SAST, dependency analysis, dynamic, source control."
@@ -170,7 +170,7 @@ jobs:
       # Engineering hub: "Bandit — zero HIGH/MEDIUM findings."
       - name: SAST — bandit
         run: |
-          bandit -r mnemosyne/ \
+          bandit -r kairix/ \
             --severity-level medium \
             --confidence-level medium \
             --format txt \
@@ -178,7 +178,7 @@ jobs:
             -o bandit-report.txt
           cat bandit-report.txt
           # Fail on HIGH severity (gate). MEDIUM documented in report only.
-          bandit -r mnemosyne/ \
+          bandit -r kairix/ \
             --severity-level high \
             --confidence-level high \
             --format txt
@@ -206,11 +206,11 @@ jobs:
           # Scan staged/new files in PR
           git diff origin/main...HEAD --name-only | \
             xargs -I {} detect-secrets scan {} 2>/dev/null || \
-            detect-secrets scan --all-files mnemosyne/ tests/ scripts/ \
+            detect-secrets scan --all-files kairix/ tests/ scripts/ \
               --exclude-files '.*\.pyc' \
               --baseline .secrets.baseline 2>/dev/null || true
           # On first run or if no baseline: scan and report only
-          detect-secrets scan mnemosyne/ tests/ scripts/ \
+          detect-secrets scan kairix/ tests/ scripts/ \
             --exclude-files '.*\.pyc' | \
             python -c "
           import json, sys

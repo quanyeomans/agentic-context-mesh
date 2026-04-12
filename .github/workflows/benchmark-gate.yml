@@ -48,7 +48,7 @@ jobs:
           echo "are committed to benchmark-results/ and referenced in the PR."
           echo ""
           echo "Verifying benchmark results file exists:"
-          ls benchmark-results/*.json 2>/dev/null || echo "No results yet — run mnemosyne benchmark on your-deployment-server first."
+          ls benchmark-results/*.json 2>/dev/null || echo "No results yet — run kairix benchmark on your-deployment-server first."
 
       - name: Check benchmark results against baseline
         if: ${{ inputs.baseline_score != '' }}
@@ -67,7 +67,7 @@ jobs:
 
           if not files:
               print(f'No benchmark results found for system={system}')
-              print('Run: mnemosyne benchmark --system {system} on your-deployment-server')
+              print('Run: kairix benchmark --system {system} on your-deployment-server')
               sys.exit(0)  # Warning, not failure — results may not be committed yet
 
           with open(files[0]) as f:
