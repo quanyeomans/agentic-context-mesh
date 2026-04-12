@@ -87,14 +87,14 @@ def test_absent_date_no_frontmatter(tmp_path: Path) -> None:
 def test_absent_date_frontmatter_no_date_field(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("---\ntitle: No date\ntags: [test]\n---\n# Body\n")
-    cls, raw = audit_file(f)
+    cls, _raw = audit_file(f)
     assert cls == "absent"
 
 
 def test_datetime_frontmatter_detected(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("---\ncreated: 2026-04-10T09:30:00\n---\n# Body\n")
-    cls, raw = audit_file(f)
+    cls, _raw = audit_file(f)
     assert cls == "datetime"
 
 
