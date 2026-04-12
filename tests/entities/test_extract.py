@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.entities.extract — NER extraction pipeline.
+Tests for kairix.entities.extract — NER extraction pipeline.
 
 Covers:
 - extract_rules_based_with_db(): vault folder names, DB entity names, Title Case heuristic,
@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from mnemosyne.entities.extract import (
+from kairix.entities.extract import (
     _invalidate_vault_cache,
     extract_file,
     extract_rules_based_with_db,
     read_stub_aliases,
 )
-from mnemosyne.entities.schema import open_entities_db
+from kairix.entities.schema import open_entities_db
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -28,7 +28,7 @@ from mnemosyne.entities.schema import open_entities_db
 def db(tmp_path, monkeypatch):
     """Fresh entities DB backed by a temp file."""
     db_path = str(tmp_path / "test_entities.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
     conn = open_entities_db()
     yield conn
     conn.close()
@@ -229,9 +229,9 @@ def test_extract_file_skips_llm_when_rules_sufficient(tmp_path, db_with_entities
         llm_called.append(True)
         return []
 
-    monkeypatch.setattr("mnemosyne.entities.extract.extract_llm", mock_extract_llm)
+    monkeypatch.setattr("kairix.entities.extract.extract_llm", mock_extract_llm)
     # Also patch vault_root in extract module
-    import mnemosyne.entities.extract as extract_mod
+    import kairix.entities.extract as extract_mod
 
     monkeypatch.setattr(extract_mod, "VAULT_ROOT", vault_root)
     _invalidate_vault_cache()
@@ -275,7 +275,7 @@ def test_extract_file_returns_empty_for_missing_file(db):
 def test_extract_file_strips_frontmatter(tmp_path, db, vault_root, monkeypatch):
     """extract_file should strip YAML frontmatter before NER."""
     _invalidate_vault_cache()
-    import mnemosyne.entities.extract as extract_mod
+    import kairix.entities.extract as extract_mod
 
     monkeypatch.setattr(extract_mod, "VAULT_ROOT", vault_root)
     _invalidate_vault_cache()

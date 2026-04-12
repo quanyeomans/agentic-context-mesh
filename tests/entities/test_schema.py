@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.entities.schema — entities.db schema management.
+Tests for kairix.entities.schema — entities.db schema management.
 """
 
 import os
@@ -7,7 +7,7 @@ import sqlite3
 
 import pytest
 
-from mnemosyne.entities.schema import (
+from kairix.entities.schema import (
     SCHEMA_VERSION,
     SchemaVersionError,
     ensure_schema,
@@ -23,8 +23,8 @@ def tmp_db_path(tmp_path):
 
 @pytest.fixture()
 def fresh_db(tmp_db_path, monkeypatch):
-    """Open a fresh entities DB via MNEMOSYNE_TEST_DB env var."""
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", tmp_db_path)
+    """Open a fresh entities DB via KAIRIX_TEST_DB env var."""
+    monkeypatch.setenv("KAIRIX_TEST_DB", tmp_db_path)
     db = open_entities_db()
     yield db
     db.close()
@@ -73,7 +73,7 @@ def test_fresh_db_version_matches_constant(fresh_db):
 @pytest.mark.contract
 def test_ensure_schema_is_idempotent(tmp_db_path, monkeypatch):
     """Calling ensure_schema twice on the same DB should be safe."""
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", tmp_db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", tmp_db_path)
     db = open_entities_db()
     # Second call should not raise
     ensure_schema(db)
@@ -92,7 +92,7 @@ def test_ensure_schema_is_idempotent(tmp_db_path, monkeypatch):
 @pytest.mark.contract
 def test_schema_version_error_when_db_newer(tmp_db_path, monkeypatch):
     """ensure_schema should raise SchemaVersionError if DB version > SCHEMA_VERSION."""
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", tmp_db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", tmp_db_path)
     db = open_entities_db()
 
     # Manually bump the version beyond what's supported
@@ -114,7 +114,7 @@ def test_schema_version_error_when_db_newer(tmp_db_path, monkeypatch):
 @pytest.mark.contract
 def test_wal_mode_is_set(tmp_db_path, monkeypatch):
     """open_entities_db should configure WAL journal mode."""
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", tmp_db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", tmp_db_path)
     db = open_entities_db()
     row = db.execute("PRAGMA journal_mode").fetchone()
     assert row[0] == "wal"
@@ -122,16 +122,16 @@ def test_wal_mode_is_set(tmp_db_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# MNEMOSYNE_TEST_DB env var
+# KAIRIX_TEST_DB env var
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.contract
 def test_test_db_env_var_redirects_path(tmp_path, monkeypatch):
-    """MNEMOSYNE_TEST_DB env var should redirect the DB path away from DEFAULT_DB_PATH."""
+    """KAIRIX_TEST_DB env var should redirect the DB path away from DEFAULT_DB_PATH."""
     test_db_path = str(tmp_path / "redirected.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", test_db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", test_db_path)
 
     db = open_entities_db()
     db.close()
@@ -153,10 +153,10 @@ def test_test_db_env_var_redirects_path(tmp_path, monkeypatch):
 @pytest.mark.unit
 @pytest.mark.contract
 def test_test_db_env_var_overrides_explicit_path(tmp_path, monkeypatch):
-    """MNEMOSYNE_TEST_DB should take priority over an explicit path argument."""
+    """KAIRIX_TEST_DB should take priority over an explicit path argument."""
     env_path = str(tmp_path / "env.db")
     explicit_path = str(tmp_path / "explicit.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", env_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", env_path)
 
     db = open_entities_db(path=explicit_path)
     db.close()

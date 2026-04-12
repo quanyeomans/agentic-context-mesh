@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.search.bm25 — BM25 subprocess wrapper.
+Tests for kairix.search.bm25 — BM25 subprocess wrapper.
 
 All subprocess calls are mocked. Tests cover:
   - Successful parse of --json output
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mnemosyne.search.bm25 import BM25Result, _normalise_fts_query, _parse_bm25_output, bm25_search
+from kairix.search.bm25 import BM25Result, _normalise_fts_query, _parse_bm25_output, bm25_search
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -63,7 +63,7 @@ def _make_completed_process(
 def test_bm25_search_returns_results_on_success() -> None:
     """Successful qmd call returns parsed BM25Result list."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", return_value=_make_completed_process(stdout=json.dumps(VALID_QMD_OUTPUT))),
     ):
         results = bm25_search("vault memory facts")
@@ -78,7 +78,7 @@ def test_bm25_search_returns_results_on_success() -> None:
 def test_bm25_search_passes_limit_to_cmd() -> None:
     """limit parameter is passed as --limit to qmd."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", return_value=_make_completed_process(stdout=json.dumps([]))) as mock_run,
     ):
         bm25_search("test query", limit=5)
@@ -92,7 +92,7 @@ def test_bm25_search_passes_limit_to_cmd() -> None:
 def test_bm25_search_passes_collections_to_cmd() -> None:
     """collections parameter is passed as --collection flags."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", return_value=_make_completed_process(stdout=json.dumps([]))) as mock_run,
     ):
         bm25_search("test", collections=["knowledge-shared", "knowledge-builder"])
@@ -111,7 +111,7 @@ def test_bm25_search_passes_collections_to_cmd() -> None:
 @pytest.mark.unit
 def test_bm25_search_returns_empty_when_binary_not_found() -> None:
     """FileNotFoundError from get_qmd_binary → []."""
-    with patch("mnemosyne.search.bm25.get_qmd_binary", side_effect=FileNotFoundError("not found")):
+    with patch("kairix.search.bm25.get_qmd_binary", side_effect=FileNotFoundError("not found")):
         results = bm25_search("query")
     assert results == []
 
@@ -120,7 +120,7 @@ def test_bm25_search_returns_empty_when_binary_not_found() -> None:
 def test_bm25_search_returns_empty_on_timeout() -> None:
     """TimeoutExpired → []."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="qmd", timeout=5)),
     ):
         results = bm25_search("query")
@@ -131,7 +131,7 @@ def test_bm25_search_returns_empty_on_timeout() -> None:
 def test_bm25_search_returns_empty_on_nonzero_exit() -> None:
     """Non-zero returncode → []."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", return_value=_make_completed_process(returncode=1, stderr="error")),
     ):
         results = bm25_search("query")
@@ -142,7 +142,7 @@ def test_bm25_search_returns_empty_on_nonzero_exit() -> None:
 def test_bm25_search_returns_empty_on_empty_output() -> None:
     """Empty stdout → []."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", return_value=_make_completed_process(stdout="")),
     ):
         results = bm25_search("query")
@@ -153,7 +153,7 @@ def test_bm25_search_returns_empty_on_empty_output() -> None:
 def test_bm25_search_returns_empty_on_oserror() -> None:
     """OSError launching subprocess → []."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", side_effect=OSError("permission denied")),
     ):
         results = bm25_search("query")
@@ -164,7 +164,7 @@ def test_bm25_search_returns_empty_on_oserror() -> None:
 def test_bm25_search_returns_empty_on_malformed_json() -> None:
     """Invalid JSON → []."""
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run", return_value=_make_completed_process(stdout="not json {")),
     ):
         results = bm25_search("query")

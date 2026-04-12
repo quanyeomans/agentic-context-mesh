@@ -1,5 +1,5 @@
 """
-Additional tests for mnemosyne.embed.schema — covers previously-untested paths:
+Additional tests for kairix.embed.schema — covers previously-untested paths:
 - find_sqlite_vec(): env override, fallback, missing
 - load_sqlite_vec(): missing extension error
 - get_qmd_db_path(): env override, missing file
@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from mnemosyne.embed.schema import (
+from kairix.embed.schema import (
     ensure_vec_table,
     find_sqlite_vec,
     get_all_chunks_needing_embedding,
@@ -45,7 +45,7 @@ def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when no vec0.so can be located."""
     monkeypatch.delenv("SQLITE_VEC_PATH", raising=False)
-    with patch("mnemosyne.embed.schema._SQLITE_VEC_SEARCH_PATHS", ["/nonexistent/vec0.so"]):
+    with patch("kairix.embed.schema._SQLITE_VEC_SEARCH_PATHS", ["/nonexistent/vec0.so"]):
         with patch("pathlib.Path.exists", return_value=False):
             result = find_sqlite_vec()
     assert result is None
@@ -59,7 +59,7 @@ def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyP
 def test_load_sqlite_vec_raises_when_not_found() -> None:
     """Raises RuntimeError with helpful message when extension is not found."""
     db = sqlite3.connect(":memory:")
-    with patch("mnemosyne.embed.schema.find_sqlite_vec", return_value=None):
+    with patch("kairix.embed.schema.find_sqlite_vec", return_value=None):
         with pytest.raises(RuntimeError, match="sqlite-vec extension"):
             load_sqlite_vec(db)
 

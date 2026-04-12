@@ -1,11 +1,11 @@
 """
-Tests for mnemosyne.summaries.generate
+Tests for kairix.summaries.generate
 """
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from mnemosyne.summaries.generate import (
+from kairix.summaries.generate import (
     _first_n_words,
     generate_l0,
     generate_summaries,
@@ -36,7 +36,7 @@ def test_generate_l0_returns_string():
     """generate_l0() makes one API call and returns the abstract string."""
     expected = "This doc covers Azure Key Vault setup and token rotation."
 
-    with patch("mnemosyne.summaries.generate.httpx.Client") as mock_client_cls:
+    with patch("kairix.summaries.generate.httpx.Client") as mock_client_cls:
         mock_ctx = MagicMock()
         mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
         mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -61,7 +61,7 @@ def test_generate_l0_uses_first_800_words():
 
     captured_body: list[dict] = []
 
-    with patch("mnemosyne.summaries.generate.httpx.Client") as mock_client_cls:
+    with patch("kairix.summaries.generate.httpx.Client") as mock_client_cls:
         mock_ctx = MagicMock()
         mock_client_cls.return_value.__enter__ = MagicMock(return_value=mock_ctx)
         mock_client_cls.return_value.__exit__ = MagicMock(return_value=False)
@@ -108,8 +108,8 @@ def test_generate_summaries_handles_api_failure_gracefully(tmp_path: Path):
             raise RuntimeError("API error for bad file")
         return "Good abstract."
 
-    with patch("mnemosyne.summaries.generate.generate_l0", side_effect=mock_l0):
-        with patch("mnemosyne.summaries.generate.time.sleep"):
+    with patch("kairix.summaries.generate.generate_l0", side_effect=mock_l0):
+        with patch("kairix.summaries.generate.time.sleep"):
             results = generate_summaries(
                 paths=[str(good_file), str(bad_file)],
                 api_key="k",
@@ -141,8 +141,8 @@ def test_generate_summaries_sleeps_between_batches(tmp_path: Path):
     def mock_l0(path, content, api_key, endpoint, deployment="gpt-4o-mini"):
         return f"Abstract for {Path(path).name}."
 
-    with patch("mnemosyne.summaries.generate.generate_l0", side_effect=mock_l0):
-        with patch("mnemosyne.summaries.generate.time.sleep", side_effect=mock_sleep):
+    with patch("kairix.summaries.generate.generate_l0", side_effect=mock_l0):
+        with patch("kairix.summaries.generate.time.sleep", side_effect=mock_sleep):
             results = generate_summaries(
                 paths=files,
                 api_key="k",

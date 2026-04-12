@@ -1,12 +1,12 @@
 """
-Unit tests for mnemosyne.embed.date_extract.extract_chunk_date.
+Unit tests for kairix.embed.date_extract.extract_chunk_date.
 
 Targets >= 90% coverage of date_extract.py.
 """
 
 from __future__ import annotations
 
-from mnemosyne.embed.date_extract import extract_chunk_date
+from kairix.embed.date_extract import extract_chunk_date
 
 # ---------------------------------------------------------------------------
 # Frontmatter: date field
@@ -186,6 +186,6 @@ def test_yearmonth_path_date_fallback_still_works() -> None:
 
 def test_yearmonth_not_matched_if_dd_follows() -> None:
     """YYYY-MM-DD must NOT be matched by yearmonth pattern."""
-    from mnemosyne.embed.date_extract import _FRONTMATTER_YEARMONTH_PATTERN
+    from kairix.embed.date_extract import _FRONTMATTER_YEARMONTH_PATTERN
 
     assert _FRONTMATTER_YEARMONTH_PATTERN.search("date: 2026-04-10") is None

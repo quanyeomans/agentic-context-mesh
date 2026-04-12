@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.embed.schema.get_date_filtered_paths.
+Tests for kairix.embed.schema.get_date_filtered_paths.
 
 Verifies:
   - Empty frozenset when both bounds are None
@@ -16,7 +16,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from mnemosyne.embed.schema import get_date_filtered_paths
+from kairix.embed.schema import get_date_filtered_paths
 
 # ---------------------------------------------------------------------------
 # Helpers

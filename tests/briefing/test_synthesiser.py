@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from mnemosyne.briefing.synthesiser import _fallback_briefing, synthesise
+from kairix.briefing.synthesiser import _fallback_briefing, synthesise
 
 
 class TestSynthesise:
@@ -25,7 +25,7 @@ class TestSynthesise:
             "recent_decisions": "ADR-007: Use RRF",
             "knowledge_rules": "Never write credentials to disk",
         }
-        with patch("mnemosyne._azure.chat_completion", return_value=mock_body):
+        with patch("kairix._azure.chat_completion", return_value=mock_body):
             result = synthesise("builder", context)
         assert "Pending" in result
         assert "Decisions" in result or "ADR" in result
@@ -35,13 +35,13 @@ class TestSynthesise:
         assert "synthesis unavailable" in result.lower() or "fallback" in result.lower() or "failed" in result.lower()
 
     def test_api_failure_returns_fallback(self):
-        with patch("mnemosyne._azure.chat_completion", return_value=""):
+        with patch("kairix._azure.chat_completion", return_value=""):
             result = synthesise("builder", {"memory_logs": "some content"})
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_api_exception_returns_fallback(self):
-        with patch("mnemosyne._azure.chat_completion", side_effect=Exception("API down")):
+        with patch("kairix._azure.chat_completion", side_effect=Exception("API down")):
             result = synthesise("builder", {"memory_logs": "some content"})
         assert isinstance(result, str)
         # Should contain fallback message
@@ -56,7 +56,7 @@ class TestSynthesise:
             return "## Pending & Blocked\nNone."
 
         context = {"memory_logs": "UNIQUE_MARKER_12345"}
-        with patch("mnemosyne._azure.chat_completion", side_effect=mock_chat):
+        with patch("kairix._azure.chat_completion", side_effect=mock_chat):
             synthesise("builder", context)
 
         full_prompt = " ".join(str(m) for m in captured_messages)
@@ -71,7 +71,7 @@ class TestSynthesise:
             captured_messages.extend(messages)
             return "## Pending & Blocked\nNone."
 
-        with patch("mnemosyne._azure.chat_completion", side_effect=mock_chat):
+        with patch("kairix._azure.chat_completion", side_effect=mock_chat):
             synthesise("builder", context)
 
         full_prompt = " ".join(str(m) for m in captured_messages)

@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.search.hybrid + mnemosyne.search.budget + mnemosyne.search.cli.
+Tests for kairix.search.hybrid + kairix.search.budget + kairix.search.cli.
 
 Tests cover:
   - Successful hybrid search (BM25 + vector)
@@ -18,12 +18,12 @@ from unittest.mock import patch
 
 import pytest
 
-from mnemosyne.search.bm25 import BM25Result
-from mnemosyne.search.budget import DEFAULT_BUDGET, apply_budget
-from mnemosyne.search.hybrid import SearchResult, _collections_for, search
-from mnemosyne.search.intent import QueryIntent
-from mnemosyne.search.rrf import rrf
-from mnemosyne.search.vector import VecResult
+from kairix.search.bm25 import BM25Result
+from kairix.search.budget import DEFAULT_BUDGET, apply_budget
+from kairix.search.hybrid import SearchResult, _collections_for, search
+from kairix.search.intent import QueryIntent
+from kairix.search.rrf import rrf
+from kairix.search.vector import VecResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -122,7 +122,7 @@ def test_collections_for_shared_plus_agent() -> None:
 @pytest.mark.unit
 def test_collections_for_no_agent() -> None:
     """None agent → only shared collections regardless of scope."""
-    from mnemosyne.search.hybrid import _SHARED_COLLECTIONS
+    from kairix.search.hybrid import _SHARED_COLLECTIONS
 
     cols = _collections_for(None, "shared+agent")
     assert cols == list(_SHARED_COLLECTIONS)
@@ -137,10 +137,10 @@ def test_collections_for_no_agent() -> None:
 def test_search_returns_search_result_type() -> None:
     """search() always returns SearchResult."""
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("test query")
     assert isinstance(result, SearchResult)
@@ -152,10 +152,10 @@ def test_search_returns_bm25_results_when_vec_fails() -> None:
     bm25_data = [_bm25_result("/vault/a.md"), _bm25_result("/vault/b.md")]
 
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("test semantic query about memory systems")
 
@@ -171,10 +171,10 @@ def test_search_fuses_both_lists() -> None:
     vec_data = [_vec_result("/vault/a.md"), _vec_result("/vault/c.md")]
 
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=vec_data),
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("test semantic query about knowledge retrieval")
 
@@ -188,10 +188,10 @@ def test_search_fuses_both_lists() -> None:
 def test_search_keyword_intent_skips_vector() -> None:
     """KEYWORD intent skips vector search dispatch."""
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[_bm25_result()]),
-        patch("mnemosyne.search.hybrid._run_vector_search") as mock_vec,
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
+        patch("kairix.search.hybrid._run_vector_search") as mock_vec,
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent
 
@@ -205,10 +205,10 @@ def test_search_logs_event(tmp_path: Path) -> None:
     log_file = tmp_path / "search.jsonl"
 
     with (
-        patch("mnemosyne.search.hybrid.SEARCH_LOG_PATH", log_file),
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.SEARCH_LOG_PATH", log_file),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         search("test query about rules")
 
@@ -226,10 +226,10 @@ def test_search_log_directory_created(tmp_path: Path) -> None:
     log_file = tmp_path / "nested" / "dir" / "search.jsonl"
 
     with (
-        patch("mnemosyne.search.hybrid.SEARCH_LOG_PATH", log_file),
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.SEARCH_LOG_PATH", log_file),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         search("another query")
 
@@ -240,10 +240,10 @@ def test_search_log_directory_created(tmp_path: Path) -> None:
 def test_search_records_latency() -> None:
     """latency_ms is recorded in the result."""
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("latency test")
 
@@ -254,10 +254,10 @@ def test_search_records_latency() -> None:
 def test_search_intent_is_classified() -> None:
     """Intent is classified and included in SearchResult."""
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("how to fetch a Key Vault secret")
 
@@ -272,7 +272,7 @@ def test_search_intent_is_classified() -> None:
 @pytest.mark.unit
 def test_cli_formats_output(capsys: pytest.CaptureFixture) -> None:
     """CLI prints formatted search results."""
-    from mnemosyne.search.cli import main as search_cli
+    from kairix.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="test query",
@@ -283,7 +283,7 @@ def test_cli_formats_output(capsys: pytest.CaptureFixture) -> None:
         fused_count=0,
     )
 
-    with patch("mnemosyne.search.cli.search", return_value=mock_sr):
+    with patch("kairix.search.cli.search", return_value=mock_sr):
         search_cli(["test query"])
 
     captured = capsys.readouterr()
@@ -294,7 +294,7 @@ def test_cli_formats_output(capsys: pytest.CaptureFixture) -> None:
 @pytest.mark.unit
 def test_cli_json_flag(capsys: pytest.CaptureFixture) -> None:
     """--json flag outputs valid JSON."""
-    from mnemosyne.search.cli import main as search_cli
+    from kairix.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="test",
@@ -305,7 +305,7 @@ def test_cli_json_flag(capsys: pytest.CaptureFixture) -> None:
         fused_count=0,
     )
 
-    with patch("mnemosyne.search.cli.search", return_value=mock_sr):
+    with patch("kairix.search.cli.search", return_value=mock_sr):
         search_cli(["test", "--json"])
 
     captured = capsys.readouterr()
@@ -317,7 +317,7 @@ def test_cli_json_flag(capsys: pytest.CaptureFixture) -> None:
 @pytest.mark.unit
 def test_cli_agent_flag_passed_to_search(capsys: pytest.CaptureFixture) -> None:
     """--agent flag is forwarded to search()."""
-    from mnemosyne.search.cli import main as search_cli
+    from kairix.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="test",
@@ -328,7 +328,7 @@ def test_cli_agent_flag_passed_to_search(capsys: pytest.CaptureFixture) -> None:
         fused_count=0,
     )
 
-    with patch("mnemosyne.search.cli.search", return_value=mock_sr) as mock_search:
+    with patch("kairix.search.cli.search", return_value=mock_sr) as mock_search:
         search_cli(["test", "--agent", "shape"])
 
     mock_search.assert_called_once_with(
@@ -350,10 +350,10 @@ def test_search_keyword_fallback_to_vector_when_bm25_empty() -> None:
     vec_data = [_vec_result("/vault/keyword-fallback.md")]
 
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=vec_data) as mock_vec,
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data) as mock_vec,
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent — BM25 returns nothing
 
@@ -370,10 +370,10 @@ def test_search_keyword_no_fallback_when_bm25_has_results() -> None:
     bm25_data = [_bm25_result("/vault/kw.md")]
 
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("mnemosyne.search.hybrid._run_vector_search") as mock_vec,
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.search.hybrid._run_vector_search") as mock_vec,
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent — BM25 has results
 
@@ -385,10 +385,10 @@ def test_search_keyword_no_fallback_when_bm25_has_results() -> None:
 def test_search_result_has_fallback_used_field() -> None:
     """SearchResult always has fallback_used field."""
     with (
-        patch("mnemosyne.search.hybrid.bm25_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._run_vector_search", return_value=[]),
-        patch("mnemosyne.search.hybrid._log_search_event"),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("anything")
 
@@ -404,7 +404,7 @@ def test_search_result_has_fallback_used_field() -> None:
 def test_rotate_query_log_moves_file(tmp_path: Path) -> None:
     """_rotate_query_log() moves path → path.1 and removes older rotated file."""
 
-    import mnemosyne.search.hybrid as hybrid_mod
+    import kairix.search.hybrid as hybrid_mod
 
     log_file = tmp_path / "queries.jsonl"
     log_file.write_text('{"q": "test"}\n')
@@ -421,7 +421,7 @@ def test_rotate_query_log_moves_file(tmp_path: Path) -> None:
 
 def test_log_query_event_writes_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() appends to JSONL log when _LOG_QUERIES is True."""
-    import mnemosyne.search.hybrid as hybrid_mod
+    import kairix.search.hybrid as hybrid_mod
 
     log_path = tmp_path / "queries.jsonl"
     monkeypatch.setattr(hybrid_mod, "_LOG_QUERIES", True)
@@ -438,7 +438,7 @@ def test_log_query_event_writes_when_enabled(tmp_path: Path, monkeypatch: pytest
 
 def test_log_query_event_noop_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() is a no-op when _LOG_QUERIES is False."""
-    import mnemosyne.search.hybrid as hybrid_mod
+    import kairix.search.hybrid as hybrid_mod
 
     log_path = tmp_path / "queries.jsonl"
     monkeypatch.setattr(hybrid_mod, "_LOG_QUERIES", False)
@@ -450,7 +450,7 @@ def test_log_query_event_noop_when_disabled(tmp_path: Path, monkeypatch: pytest.
 
 def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() rotates the file when it exceeds the size threshold."""
-    import mnemosyne.search.hybrid as hybrid_mod
+    import kairix.search.hybrid as hybrid_mod
 
     log_path = tmp_path / "queries.jsonl"
     log_path.write_text("x" * 100)
@@ -467,7 +467,7 @@ def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.
 
 def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """_open_vec_db() returns None when QMD DB is unavailable."""
-    from mnemosyne.search import hybrid as hybrid_mod
+    from kairix.search import hybrid as hybrid_mod
 
     monkeypatch.setattr(hybrid_mod, "get_qmd_db_path", lambda: (_ for _ in ()).throw(FileNotFoundError("no db")))
     result = hybrid_mod._open_vec_db()
@@ -477,7 +477,7 @@ def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) ->
 def test_open_entities_db_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """_open_entities_db() returns None when entities.db does not exist."""
 
-    from mnemosyne.search import hybrid as hybrid_mod
+    from kairix.search import hybrid as hybrid_mod
 
     monkeypatch.setattr(hybrid_mod, "ENTITIES_DB_PATH", tmp_path / "nonexistent.db")
     result = hybrid_mod._open_entities_db()
@@ -486,27 +486,27 @@ def test_open_entities_db_returns_none_when_missing(monkeypatch: pytest.MonkeyPa
 
 def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) -> None:
     """search() with TEMPORAL intent calls temporal rewriting (mocked)."""
-    from mnemosyne.search.bm25 import BM25Result
-    from mnemosyne.search.hybrid import search
-    from mnemosyne.search.intent import QueryIntent
+    from kairix.search.bm25 import BM25Result
+    from kairix.search.hybrid import search
+    from kairix.search.intent import QueryIntent
 
     bm25_items = [BM25Result(path="memory/2026-01-01.md", snippet="Session from last week", score=0.9)]
 
     with (
-        patch("mnemosyne.search.intent.classify", return_value=QueryIntent.TEMPORAL),
-        patch("mnemosyne.search.bm25.bm25_search", return_value=bm25_items),
-        patch("mnemosyne.search.hybrid._open_vec_db", return_value=None),
-        patch("mnemosyne.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.intent.classify", return_value=QueryIntent.TEMPORAL),
+        patch("kairix.search.bm25.bm25_search", return_value=bm25_items),
+        patch("kairix.search.hybrid._open_vec_db", return_value=None),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
         patch(
-            "mnemosyne.temporal.rewriter.rewrite_temporal_query",
+            "kairix.temporal.rewriter.rewrite_temporal_query",
             return_value="recent session logs",
         ),
         patch(
-            "mnemosyne.temporal.rewriter.extract_time_window",
+            "kairix.temporal.rewriter.extract_time_window",
             return_value=(None, None),
         ),
         patch(
-            "mnemosyne.temporal.index.query_temporal_chunks",
+            "kairix.temporal.index.query_temporal_chunks",
             return_value=[],
         ),
     ):

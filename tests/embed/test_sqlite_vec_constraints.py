@@ -25,7 +25,7 @@ def _find_vec_extension() -> str | None:
 
     sys.path.insert(0, str(Path(__file__).parents[2]))
     try:
-        from mnemosyne.embed.schema import find_sqlite_vec
+        from kairix.embed.schema import find_sqlite_vec
 
         return find_sqlite_vec()
     except Exception:
@@ -114,7 +114,7 @@ class TestExtensionLoadOrder:
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).parents[2]))
-        from mnemosyne.embed.schema import load_sqlite_vec
+        from kairix.embed.schema import load_sqlite_vec
 
         db = sqlite3.connect(":memory:")
         load_sqlite_vec(db)
@@ -165,7 +165,7 @@ class TestSqliteVecInsertConstraints:
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).parents[2]))
-        from mnemosyne.embed.embed import ensure_staging_table, flush_staging_to_vec
+        from kairix.embed.embed import ensure_staging_table, flush_staging_to_vec
 
         db = make_vec_db()
         ensure_staging_table(db)
@@ -198,8 +198,8 @@ class TestSqliteVecInsertConstraints:
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).parents[2]))
-        from mnemosyne.embed.embed import ensure_staging_table, flush_staging_to_vec, stage_embedding
-        from mnemosyne.embed.schema import ensure_vec_table, load_sqlite_vec
+        from kairix.embed.embed import ensure_staging_table, flush_staging_to_vec, stage_embedding
+        from kairix.embed.schema import ensure_vec_table, load_sqlite_vec
 
         db = sqlite3.connect(":memory:")
         load_sqlite_vec(db)
@@ -240,7 +240,7 @@ class TestSqliteVecInsertConstraints:
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).parents[2]))
-        from mnemosyne.embed.embed import ensure_staging_table, flush_staging_to_vec
+        from kairix.embed.embed import ensure_staging_table, flush_staging_to_vec
 
         db = make_vec_db()
         ensure_staging_table(db)
@@ -315,7 +315,7 @@ class TestDirectVectorSearch:
         from unittest.mock import patch
 
         sys.path.insert(0, str(Path(__file__).parents[2]))
-        from mnemosyne.embed.recall_check import _vsearch_direct
+        from kairix.embed.recall_check import _vsearch_direct
 
         db = make_vec_db(dims=4)
 

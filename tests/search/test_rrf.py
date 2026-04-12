@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.search.rrf — Reciprocal Rank Fusion + entity boosting.
+Tests for kairix.search.rrf — Reciprocal Rank Fusion + entity boosting.
 
 Tests cover:
   - RRF score formula correctness
@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mnemosyne.search.bm25 import BM25Result
-from mnemosyne.search.rrf import (
+from kairix.search.bm25 import BM25Result
+from kairix.search.rrf import (
     ENTITY_BOOST_CAP,
     PROCEDURAL_BOOST_FACTOR,
     RRF_K,
@@ -27,7 +27,7 @@ from mnemosyne.search.rrf import (
     procedural_boost,
     rrf,
 )
-from mnemosyne.search.vector import VecResult
+from kairix.search.vector import VecResult
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,13 +1,13 @@
 """
-Tests for mnemosyne.llm — LLM backend abstraction (P1-2).
+Tests for kairix.llm — LLM backend abstraction (P1-2).
 """
 
 from __future__ import annotations
 
 from unittest.mock import patch
 
-from mnemosyne.llm import AnthropicBackend, AzureOpenAIBackend, get_default_backend
-from mnemosyne.llm.protocol import LLMBackend
+from kairix.llm import AnthropicBackend, AzureOpenAIBackend, get_default_backend
+from kairix.llm.protocol import LLMBackend
 
 # ---------------------------------------------------------------------------
 # Protocol conformance
@@ -38,7 +38,7 @@ def test_azure_backend_chat_delegates_to_azure() -> None:
     backend = AzureOpenAIBackend()
     messages = [{"role": "user", "content": "Hello"}]
 
-    with patch("mnemosyne._azure.chat_completion", return_value="Hi there") as mock_chat:
+    with patch("kairix._azure.chat_completion", return_value="Hi there") as mock_chat:
         result = backend.chat(messages, max_tokens=100)
 
     mock_chat.assert_called_once_with(messages, max_tokens=100)
@@ -49,7 +49,7 @@ def test_azure_backend_chat_default_max_tokens() -> None:
     backend = AzureOpenAIBackend()
     messages = [{"role": "user", "content": "test"}]
 
-    with patch("mnemosyne._azure.chat_completion", return_value="ok") as mock_chat:
+    with patch("kairix._azure.chat_completion", return_value="ok") as mock_chat:
         backend.chat(messages)
 
     mock_chat.assert_called_once_with(messages, max_tokens=800)
@@ -59,7 +59,7 @@ def test_azure_backend_embed_delegates_to_azure() -> None:
     backend = AzureOpenAIBackend()
     expected = [0.1, 0.2, 0.3]
 
-    with patch("mnemosyne._azure.embed_text", return_value=expected) as mock_embed:
+    with patch("kairix._azure.embed_text", return_value=expected) as mock_embed:
         result = backend.embed("some text")
 
     mock_embed.assert_called_once_with("some text")
@@ -69,7 +69,7 @@ def test_azure_backend_embed_delegates_to_azure() -> None:
 def test_azure_backend_chat_returns_empty_string_on_failure() -> None:
     backend = AzureOpenAIBackend()
 
-    with patch("mnemosyne._azure.chat_completion", return_value=""):
+    with patch("kairix._azure.chat_completion", return_value=""):
         result = backend.chat([{"role": "user", "content": "test"}])
 
     assert result == ""
@@ -78,7 +78,7 @@ def test_azure_backend_chat_returns_empty_string_on_failure() -> None:
 def test_azure_backend_embed_returns_empty_list_on_failure() -> None:
     backend = AzureOpenAIBackend()
 
-    with patch("mnemosyne._azure.embed_text", return_value=[]):
+    with patch("kairix._azure.embed_text", return_value=[]):
         result = backend.embed("text")
 
     assert result == []
@@ -118,7 +118,7 @@ def _do_summarise(text: str, llm: LLMBackend) -> str:
 def test_caller_accepts_protocol_type() -> None:
     backend = AzureOpenAIBackend()
 
-    with patch("mnemosyne._azure.chat_completion", return_value="Summary."):
+    with patch("kairix._azure.chat_completion", return_value="Summary."):
         result = _do_summarise("long document", backend)
 
     assert result == "Summary."

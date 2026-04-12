@@ -10,7 +10,7 @@ from datetime import date
 
 import pytest
 
-from mnemosyne.classify.router import VALID_AGENTS, resolve_target_path
+from kairix.classify.router import VALID_AGENTS, resolve_target_path
 
 
 class TestEpisodicRouting:

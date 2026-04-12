@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from mnemosyne.search.bm25 import BM25Result, _path_from_file_uri, bm25_search
-from mnemosyne.search.vector import VecResult, vector_search_bytes
+from kairix.search.bm25 import BM25Result, _path_from_file_uri, bm25_search
+from kairix.search.vector import VecResult, vector_search_bytes
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,9 +81,9 @@ def test_bm25_date_filter_none_no_filtering() -> None:
     r2 = _make_bm25_result("doc-b.md")
 
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run") as mock_run,
-        patch("mnemosyne.search.bm25._bm25_direct_db", return_value=[]),
+        patch("kairix.search.bm25._bm25_direct_db", return_value=[]),
     ):
         import json
 
@@ -119,9 +119,9 @@ def test_bm25_date_filter_empty_no_filtering() -> None:
     r1 = _make_bm25_result("doc-a.md")
 
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run") as mock_run,
-        patch("mnemosyne.search.bm25._bm25_direct_db", return_value=[]),
+        patch("kairix.search.bm25._bm25_direct_db", return_value=[]),
     ):
         import json
 
@@ -151,9 +151,9 @@ def test_bm25_date_filter_applied() -> None:
     r2 = _make_bm25_result("02-Areas/bad.md")
 
     with (
-        patch("mnemosyne.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
         patch("subprocess.run") as mock_run,
-        patch("mnemosyne.search.bm25._bm25_direct_db", return_value=[]),
+        patch("kairix.search.bm25._bm25_direct_db", return_value=[]),
     ):
         import json
 
@@ -184,7 +184,7 @@ def test_vector_date_filter_none_passthrough() -> None:
     r1 = _make_vec_result("doc-a.md")
     r2 = _make_vec_result("doc-b.md")
 
-    with patch("mnemosyne.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
+    with patch("kairix.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
         results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=None)
 
     assert len(results) == 2
@@ -195,7 +195,7 @@ def test_vector_date_filter_empty_passthrough() -> None:
     mock_db = MagicMock()
     r1 = _make_vec_result("doc-a.md")
 
-    with patch("mnemosyne.search.vector._vsearch_with_bytes", return_value=[r1]):
+    with patch("kairix.search.vector._vsearch_with_bytes", return_value=[r1]):
         results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=frozenset())
 
     assert len(results) == 1
@@ -207,7 +207,7 @@ def test_vector_date_filter_applied() -> None:
     r1 = _make_vec_result("02-Areas/good.md")
     r2 = _make_vec_result("02-Areas/bad.md")
 
-    with patch("mnemosyne.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
+    with patch("kairix.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
         results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=frozenset({"02-Areas/good.md"}))
 
     assert len(results) == 1

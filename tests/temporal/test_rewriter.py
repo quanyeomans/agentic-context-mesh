@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.temporal.rewriter.
+Tests for kairix.temporal.rewriter.
 
 Covers:
   - extract_time_window(): all supported temporal patterns
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from mnemosyne.temporal.rewriter import extract_time_window, rewrite_temporal_query
+from kairix.temporal.rewriter import extract_time_window, rewrite_temporal_query
 
 # Fixed reference date for deterministic tests
 REFERENCE = date(2026, 3, 22)  # A Sunday

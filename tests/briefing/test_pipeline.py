@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from mnemosyne.briefing.pipeline import (
+from kairix.briefing.pipeline import (
     _TOTAL_CONTEXT_CAP,
     _estimate_tokens,
     _trim_context,
@@ -68,14 +68,14 @@ class TestGenerateBriefing:
         )
 
         with (
-            patch("mnemosyne.briefing.sources.fetch_memory_logs", return_value="memory logs content"),
-            patch("mnemosyne.briefing.sources.fetch_recent_memory", return_value="recent memory"),
-            patch("mnemosyne.briefing.sources.fetch_entity_stub", return_value="entity stub"),
-            patch("mnemosyne.briefing.sources.fetch_knowledge_rules", return_value="rules content"),
-            patch("mnemosyne.briefing.sources.fetch_recent_decisions", return_value="decisions"),
-            patch("mnemosyne.briefing.sources.fetch_hybrid_search", return_value="search results"),
-            patch("mnemosyne.briefing.synthesiser.synthesise", return_value=mock_briefing_body),
-            patch("mnemosyne.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.sources.fetch_memory_logs", return_value="memory logs content"),
+            patch("kairix.briefing.sources.fetch_recent_memory", return_value="recent memory"),
+            patch("kairix.briefing.sources.fetch_entity_stub", return_value="entity stub"),
+            patch("kairix.briefing.sources.fetch_knowledge_rules", return_value="rules content"),
+            patch("kairix.briefing.sources.fetch_recent_decisions", return_value="decisions"),
+            patch("kairix.briefing.sources.fetch_hybrid_search", return_value="search results"),
+            patch("kairix.briefing.synthesiser.synthesise", return_value=mock_briefing_body),
+            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -85,14 +85,14 @@ class TestGenerateBriefing:
 
     def test_header_is_included(self, tmp_path):
         with (
-            patch("mnemosyne.briefing.sources.fetch_memory_logs", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_recent_memory", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_entity_stub", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_knowledge_rules", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_recent_decisions", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_hybrid_search", return_value=""),
-            patch("mnemosyne.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("mnemosyne.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.sources.fetch_memory_logs", return_value=""),
+            patch("kairix.briefing.sources.fetch_recent_memory", return_value=""),
+            patch("kairix.briefing.sources.fetch_entity_stub", return_value=""),
+            patch("kairix.briefing.sources.fetch_knowledge_rules", return_value=""),
+            patch("kairix.briefing.sources.fetch_recent_decisions", return_value=""),
+            patch("kairix.briefing.sources.fetch_hybrid_search", return_value=""),
+            patch("kairix.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
+            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -106,14 +106,14 @@ class TestGenerateBriefing:
             raise RuntimeError("simulated source failure")
 
         with (
-            patch("mnemosyne.briefing.sources.fetch_memory_logs", side_effect=failing_source),
-            patch("mnemosyne.briefing.sources.fetch_recent_memory", return_value="some memory"),
-            patch("mnemosyne.briefing.sources.fetch_entity_stub", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_knowledge_rules", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_recent_decisions", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_hybrid_search", return_value=""),
-            patch("mnemosyne.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("mnemosyne.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.sources.fetch_memory_logs", side_effect=failing_source),
+            patch("kairix.briefing.sources.fetch_recent_memory", return_value="some memory"),
+            patch("kairix.briefing.sources.fetch_entity_stub", return_value=""),
+            patch("kairix.briefing.sources.fetch_knowledge_rules", return_value=""),
+            patch("kairix.briefing.sources.fetch_recent_decisions", return_value=""),
+            patch("kairix.briefing.sources.fetch_hybrid_search", return_value=""),
+            patch("kairix.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
+            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -122,14 +122,14 @@ class TestGenerateBriefing:
     def test_synthesis_failure_returns_partial_briefing(self, tmp_path):
         """Synthesis API failure should return a partial/fallback briefing, not raise."""
         with (
-            patch("mnemosyne.briefing.sources.fetch_memory_logs", return_value="some logs"),
-            patch("mnemosyne.briefing.sources.fetch_recent_memory", return_value="memory"),
-            patch("mnemosyne.briefing.sources.fetch_entity_stub", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_knowledge_rules", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_recent_decisions", return_value=""),
-            patch("mnemosyne.briefing.sources.fetch_hybrid_search", return_value=""),
-            patch("mnemosyne.briefing.synthesiser.synthesise", return_value="synthesis unavailable"),
-            patch("mnemosyne.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.sources.fetch_memory_logs", return_value="some logs"),
+            patch("kairix.briefing.sources.fetch_recent_memory", return_value="memory"),
+            patch("kairix.briefing.sources.fetch_entity_stub", return_value=""),
+            patch("kairix.briefing.sources.fetch_knowledge_rules", return_value=""),
+            patch("kairix.briefing.sources.fetch_recent_decisions", return_value=""),
+            patch("kairix.briefing.sources.fetch_hybrid_search", return_value=""),
+            patch("kairix.briefing.synthesiser.synthesise", return_value="synthesis unavailable"),
+            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -138,14 +138,14 @@ class TestGenerateBriefing:
 
     def test_output_file_is_written(self, tmp_path):
         with (
-            patch("mnemosyne.briefing.sources.fetch_memory_logs", return_value="logs"),
-            patch("mnemosyne.briefing.sources.fetch_recent_memory", return_value="memory"),
-            patch("mnemosyne.briefing.sources.fetch_entity_stub", return_value="entity"),
-            patch("mnemosyne.briefing.sources.fetch_knowledge_rules", return_value="rules"),
-            patch("mnemosyne.briefing.sources.fetch_recent_decisions", return_value="decisions"),
-            patch("mnemosyne.briefing.sources.fetch_hybrid_search", return_value="search"),
-            patch("mnemosyne.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("mnemosyne.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.sources.fetch_memory_logs", return_value="logs"),
+            patch("kairix.briefing.sources.fetch_recent_memory", return_value="memory"),
+            patch("kairix.briefing.sources.fetch_entity_stub", return_value="entity"),
+            patch("kairix.briefing.sources.fetch_knowledge_rules", return_value="rules"),
+            patch("kairix.briefing.sources.fetch_recent_decisions", return_value="decisions"),
+            patch("kairix.briefing.sources.fetch_hybrid_search", return_value="search"),
+            patch("kairix.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
+            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
         ):
             generate_briefing("builder")
 

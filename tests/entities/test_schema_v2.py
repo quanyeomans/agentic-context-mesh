@@ -7,7 +7,7 @@ import sqlite3
 
 import pytest
 
-from mnemosyne.entities.schema import (
+from kairix.entities.schema import (
     SCHEMA_VERSION,
     _migrate_v1_to_v2,
     ensure_schema,
@@ -19,7 +19,7 @@ from mnemosyne.entities.schema import (
 def fresh_db(tmp_path, monkeypatch):
     """Open a fresh entities DB at schema v2."""
     db_path = str(tmp_path / "entities_v2_test.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
     db = open_entities_db()
     yield db
     db.close()
@@ -29,7 +29,7 @@ def fresh_db(tmp_path, monkeypatch):
 def v1_db(tmp_path, monkeypatch):
     """Open a DB pinned to schema v1 (migration NOT run yet past v1)."""
     db_path = str(tmp_path / "entities_v1.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
 
     # Open and apply only the initial (v1) migration — bypass ensure_schema's auto-upgrade
     db = sqlite3.connect(db_path)
@@ -38,7 +38,7 @@ def v1_db(tmp_path, monkeypatch):
 
     from pathlib import Path
 
-    migration = Path(__file__).parent.parent.parent / "mnemosyne/entities/migrations/001_initial.sql"
+    migration = Path(__file__).parent.parent.parent / "kairix/entities/migrations/001_initial.sql"
     db.executescript(migration.read_text())
 
     yield db

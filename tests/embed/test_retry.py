@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from mnemosyne.embed.embed import embed_batch
+from kairix.embed.embed import embed_batch
 
 API_KEY = "test-key"
 ENDPOINT = "https://test.openai.azure.com"
@@ -109,7 +109,7 @@ class TestEmbedBatch:
         env_backup = os.environ.pop("AZURE_OPENAI_API_KEY", None)
         env_backup2 = os.environ.pop("AZURE_OPENAI_ENDPOINT", None)
         try:
-            from mnemosyne.embed.embed import _get_azure_config
+            from kairix.embed.embed import _get_azure_config
 
             with pytest.raises(EnvironmentError, match="AZURE_OPENAI_API_KEY"):
                 _get_azure_config()

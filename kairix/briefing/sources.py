@@ -1,0 +1,297 @@
+"""
+Individual source fetchers for the briefing pipeline.
+
+Each fetcher is independent and safe to run concurrently.
+All functions return strings (may be empty on failure) and never raise.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+from datetime import date, timedelta
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault"))
+_WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces"))
+_ENTITIES_DB = Path(os.environ.get("KAIRIX_ENTITIES_DB", "/data/kairix/entities.db"))
+_MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", "/data/workspaces"))
+
+# Approximate token estimator: words * 1.3
+_WORDS_PER_TOKEN = 1.3
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from word count."""
+    return int(len(text.split()) * _WORDS_PER_TOKEN)
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to approximately max_tokens."""
+    words = text.split()
+    limit_words = int(max_tokens / _WORDS_PER_TOKEN)
+    if len(words) <= limit_words:
+        return text
+    return " ".join(words[:limit_words]) + "\n... [truncated]"
+
+
+# ---------------------------------------------------------------------------
+# Source 1: Recent memory log files (last 7 days)
+# ---------------------------------------------------------------------------
+
+
+def fetch_memory_logs(agent: str, max_tokens: int = 500) -> str:
+    """
+    Fetch last 7 days of memory log files for agent.
+
+    Extracts items tagged [pending], [blocked], [action:], and summaries.
+    Returns empty string on failure.
+    """
+    try:
+        memory_dir = _WORKSPACE_ROOT / agent / "memory"
+        if not memory_dir.exists():
+            logger.warning("sources: memory dir not found for agent %r: %s", agent, memory_dir)
+            return ""
+
+        today = date.today()
+        lines: list[str] = []
+
+        for days_back in range(7):
+            day = today - timedelta(days=days_back)
+            path = memory_dir / f"{day.isoformat()}.md"
+            if not path.exists():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+                # Extract tagged items and session headers
+                for line in content.splitlines():
+                    stripped = line.strip()
+                    if any(tag in stripped.lower() for tag in ["[pending]", "[blocked]", "[action:", "todo", "## "]):
+                        lines.append(f"[{day.isoformat()}] {stripped}")
+            except Exception as e:
+                logger.warning("sources: error reading memory log %s — %s", path, e)
+
+        if not lines:
+            return ""
+
+        result = "\n".join(lines)
+        return _truncate_to_tokens(result, max_tokens)
+
+    except Exception as e:
+        logger.warning("sources: fetch_memory_logs failed for %r — %s", agent, e)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Source 2: Today's + yesterday's memory files (full content)
+# ---------------------------------------------------------------------------
+
+
+def fetch_recent_memory(agent: str, max_tokens: int = 300) -> str:
+    """
+    Fetch today's and yesterday's memory files for agent (full content).
+    Returns empty string on failure.
+    """
+    try:
+        memory_dir = _WORKSPACE_ROOT / agent / "memory"
+        if not memory_dir.exists():
+            return ""
+
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+
+        parts: list[str] = []
+        for day in [today, yesterday]:
+            path = memory_dir / f"{day.isoformat()}.md"
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                    parts.append(f"### {day.isoformat()}\n{content}")
+                except Exception as e:
+                    logger.warning("sources: error reading %s — %s", path, e)
+
+        if not parts:
+            return ""
+
+        combined = "\n\n".join(parts)
+        return _truncate_to_tokens(combined, max_tokens)
+
+    except Exception as e:
+        logger.warning("sources: fetch_recent_memory failed for %r — %s", agent, e)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Source 3: Entity stub for agent
+# ---------------------------------------------------------------------------
+
+
+def fetch_entity_stub(agent: str, max_tokens: int = 400) -> str:
+    """
+    Fetch the agent's own entity stub from vault-entities.
+    Returns empty string on failure.
+    """
+    try:
+        # Try agent-specific entity stub (concept type)
+        candidate_paths = [
+            _VAULT_ROOT / "04-Agent-Knowledge" / "entities" / "concept" / f"{agent}.md",
+            _VAULT_ROOT / "04-Agent-Knowledge" / "entities" / "agent" / f"{agent}.md",
+            _VAULT_ROOT / "04-Agent-Knowledge" / "entities" / "person" / f"{agent}.md",
+        ]
+
+        for path in candidate_paths:
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                    return _truncate_to_tokens(content, max_tokens)
+                except Exception as e:
+                    logger.warning("sources: error reading entity stub %s — %s", path, e)
+
+        logger.debug("sources: no entity stub found for agent %r", agent)
+        return ""
+
+    except Exception as e:
+        logger.warning("sources: fetch_entity_stub failed for %r — %s", agent, e)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Source 4: Agent knowledge rules
+# ---------------------------------------------------------------------------
+
+
+def fetch_knowledge_rules(agent: str, max_tokens: int = 300) -> str:
+    """
+    Fetch rules/constraints from agent's knowledge collection.
+    Returns empty string on failure.
+    """
+    try:
+        rules_paths = [
+            _VAULT_ROOT / "04-Agent-Knowledge" / agent / "rules.md",
+            _VAULT_ROOT / "04-Agent-Knowledge" / "shared" / "rules.md",
+        ]
+
+        parts: list[str] = []
+        for path in rules_paths:
+            if path.exists():
+                try:
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                    parts.append(f"### Rules from {path.parent.name}/rules.md\n{content}")
+                except Exception as e:
+                    logger.warning("sources: error reading rules %s — %s", path, e)
+
+        if not parts:
+            return ""
+
+        combined = "\n\n".join(parts)
+        return _truncate_to_tokens(combined, max_tokens)
+
+    except Exception as e:
+        logger.warning("sources: fetch_knowledge_rules failed for %r — %s", agent, e)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Source 5: Recent decisions (last 30 days)
+# ---------------------------------------------------------------------------
+
+
+def fetch_recent_decisions(agent: str, max_tokens: int = 400) -> str:
+    """
+    Fetch decisions from last 30 days from decisions.md and entities.db.
+    Returns empty string on failure.
+    """
+    try:
+        parts: list[str] = []
+
+        # decisions.md
+        decisions_path = _VAULT_ROOT / "04-Agent-Knowledge" / agent / "decisions.md"
+        if decisions_path.exists():
+            try:
+                content = decisions_path.read_text(encoding="utf-8", errors="replace")
+                # Take last 30 days worth — heuristic: last 3000 chars
+                if len(content) > 3000:
+                    content = content[-3000:]
+                parts.append(f"### decisions.md\n{content}")
+            except Exception as e:
+                logger.warning("sources: error reading decisions.md — %s", e)
+
+        # entities.db entity_facts
+        if _ENTITIES_DB.exists():
+            try:
+                conn = sqlite3.connect(str(_ENTITIES_DB))
+                try:
+                    # Look for decision facts in last 30 days
+                    cutoff = (date.today() - timedelta(days=30)).isoformat()
+                    cursor = conn.execute(
+                        """
+                        SELECT ef.fact_type, ef.fact_value, ef.created_at
+                        FROM entity_facts ef
+                        WHERE (ef.fact_type LIKE '%decision%'
+                               OR ef.fact_value LIKE '%decided%'
+                               OR ef.fact_value LIKE '%rationale%')
+                          AND ef.created_at >= ?
+                        ORDER BY ef.created_at DESC
+                        LIMIT 10
+                        """,
+                        (cutoff,),
+                    )
+                    rows = cursor.fetchall()
+                    if rows:
+                        db_lines = [f"- [{row[2][:10]}] {row[0]}: {row[1]}" for row in rows]
+                        parts.append("### entity_facts (decisions)\n" + "\n".join(db_lines))
+                except sqlite3.OperationalError as e:
+                    logger.debug("sources: entities.db query failed — %s", e)
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning("sources: entities.db access failed — %s", e)
+
+        if not parts:
+            return ""
+
+        combined = "\n\n".join(parts)
+        return _truncate_to_tokens(combined, max_tokens)
+
+    except Exception as e:
+        logger.warning("sources: fetch_recent_decisions failed for %r — %s", agent, e)
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Source 6: Hybrid search on agent name
+# ---------------------------------------------------------------------------
+
+
+def fetch_hybrid_search(agent: str, max_tokens: int = 600) -> str:
+    """
+    Run hybrid search on agent name to get top 5 relevant chunks.
+    Returns empty string on failure.
+    """
+    try:
+        from kairix.search.hybrid import search
+
+        result = search(query=agent, agent=agent, scope="shared+agent", budget=max_tokens * 2)
+
+        if not result.results:
+            return ""
+
+        chunks: list[str] = []
+        for item in result.results[:5]:
+            path = getattr(item.result, "path", "unknown")
+            content = getattr(item, "content", "")[:400]
+            chunks.append(f"**{path}**\n{content}")
+
+        combined = "\n\n---\n\n".join(chunks)
+        return _truncate_to_tokens(combined, max_tokens)
+
+    except Exception as e:
+        logger.warning("sources: fetch_hybrid_search failed for %r — %s", agent, e)
+        return ""

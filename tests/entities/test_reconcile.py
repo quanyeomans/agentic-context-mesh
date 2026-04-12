@@ -1,5 +1,5 @@
 """
-Tests for mnemosyne.entities.reconcile — ontology reconciler.
+Tests for kairix.entities.reconcile — ontology reconciler.
 
 Covers:
 - find_canonical(): exact match, alias match, no match
@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import pytest
 
-from mnemosyne.entities.extract import ExtractedEntity
-from mnemosyne.entities.reconcile import (
+from kairix.entities.extract import ExtractedEntity
+from kairix.entities.reconcile import (
     _string_similarity,
     find_canonical,
     reconcile_extracted,
     update_mentions,
 )
-from mnemosyne.entities.schema import open_entities_db
+from kairix.entities.schema import open_entities_db
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -29,7 +29,7 @@ from mnemosyne.entities.schema import open_entities_db
 def db(tmp_path, monkeypatch):
     """Fresh entities DB backed by a temp file."""
     db_path = str(tmp_path / "test_reconcile.db")
-    monkeypatch.setenv("MNEMOSYNE_TEST_DB", db_path)
+    monkeypatch.setenv("KAIRIX_TEST_DB", db_path)
     conn = open_entities_db()
     yield conn
     conn.close()

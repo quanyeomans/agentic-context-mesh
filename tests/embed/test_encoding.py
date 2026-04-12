@@ -2,7 +2,7 @@
 
 import struct
 
-from mnemosyne.embed.embed import build_hash_seq, encode_vector
+from kairix.embed.embed import build_hash_seq, encode_vector
 
 
 class TestEncodeVector:
