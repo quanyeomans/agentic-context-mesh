@@ -1,4 +1,5 @@
 """Tests for chunk-crm-interactions.py (TMP-3)."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -24,6 +25,7 @@ cdi = _load_script()
 
 # ── _extract_date ─────────────────────────────────────────────────────────────
 
+
 def test_extract_date_iso_utc():
     assert cdi._extract_date("2026-04-06T09:00:00Z") == "2026-04-06"
 
@@ -45,6 +47,7 @@ def test_extract_date_empty():
 
 
 # ── parse_crm_export ──────────────────────────────────────────────────────────
+
 
 def test_parse_crm_export_valid(tmp_path):
     data = [{"contact_name": "Alice Smith", "company": "Acme", "interactions": []}]
@@ -148,6 +151,7 @@ def test_chunk_contact_skips_missing_name():
 
 # ── render_chunk ──────────────────────────────────────────────────────────────
 
+
 def test_render_chunk_contains_frontmatter():
     chunk = {
         "date": "2026-04-06",
@@ -194,6 +198,7 @@ def test_render_chunk_omits_company_line_if_empty():
 
 
 # ── process_export integration ────────────────────────────────────────────────
+
 
 def test_process_export_writes_files(tmp_path):
     export = [

@@ -98,8 +98,6 @@ _RECENTLY_RE = re.compile(r"\b(?:recently|lately)\b", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 
 
-
-
 def is_relative_temporal(query: str) -> bool:
     """
     Return True if *query* contains a RELATIVE temporal expression.
