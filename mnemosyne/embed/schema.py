@@ -41,8 +41,8 @@ _SQLITE_VEC_ENV = "SQLITE_VEC_PATH"
 # Bump this when QMD changes the schema and we've validated compatibility.
 QMD_TESTED_VERSION = "1.1.2"
 
-# Expected columns in content_vectors
-EXPECTED_CONTENT_VECTORS_COLS = {"hash", "seq", "pos", "model", "embedded_at", "chunk_date"}
+# Expected columns in content_vectors (QMD-owned; chunk_date is our migration via migrate_content_vectors)
+EXPECTED_CONTENT_VECTORS_COLS = {"hash", "seq", "pos", "model", "embedded_at"}
 
 # Expected columns in content (source chunks — NB: text is in 'doc' column, NOT 'body')
 EXPECTED_CONTENT_COLS = {"hash", "doc", "created_at"}
