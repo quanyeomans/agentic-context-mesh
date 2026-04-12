@@ -16,7 +16,7 @@ false signal.
 from __future__ import annotations
 
 import re
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 # Scan only the first 2 000 characters for frontmatter to keep extraction fast.
 _FRONTMATTER_HEAD = 2000
@@ -56,7 +56,7 @@ def _is_valid_date(value: str) -> bool:
     except ValueError:
         return False
 
-    max_date = datetime.now(UTC).date() + timedelta(days=1)
+    max_date = datetime.now(timezone.utc).date() + timedelta(days=1)
     return _MIN_DATE <= parsed <= max_date
 
 
