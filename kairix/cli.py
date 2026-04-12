@@ -5,6 +5,7 @@ Subcommands:
   embed      Embed vault documents into QMD sqlite-vec (text-embedding-3-large)
   search     Hybrid search: BM25 + vector via RRF (Phase 1)
   entity     Entity graph: lookup, write, extract (Phase 1)
+  curator    Curator agent: entity health monitoring and enrichment (CA-1)
   timeline   Temporal query rewriting + date-aware retrieval (Phase 2)
   summarise  L0/L1 tiered context generation (Phase 2)
   classify   Auto-classify memory writes (Phase 3)
@@ -34,6 +35,11 @@ def main() -> None:
         from kairix.entities.cli import main as entity_main
 
         entity_main(sys.argv[2:])
+
+    elif cmd == "curator":
+        from kairix.curator.cli import main as curator_main
+
+        curator_main(sys.argv[2:])
 
     elif cmd == "search":
         from kairix.search.cli import main as search_main
