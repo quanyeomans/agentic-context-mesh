@@ -28,7 +28,7 @@ dev = [
     "ruff>=0.4",
     # Security (engineering hub: bandit zero HIGH/MEDIUM, pip-audit zero CVEs with fixes)
     "bandit[toml]>=1.7",
-    "pip-audit>=2.7",
+    "pip-audit>=2.10.0",
     # Secret detection
     "detect-secrets>=1.4",
 ]
