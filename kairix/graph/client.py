@@ -34,7 +34,7 @@ _CONSTRAINT_QUERIES = [
 
 def _try_import_neo4j() -> Any:
     try:
-        from neo4j import GraphDatabase  # type: ignore[import]
+        from neo4j import GraphDatabase
 
         return GraphDatabase
     except ImportError:
@@ -58,7 +58,7 @@ class Neo4jClient:
         self._uri = uri
         self._user = user
         self._password = password
-        self._driver = None
+        self._driver: Any = None
         self.available = False
         self._connect()
 
