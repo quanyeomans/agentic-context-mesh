@@ -19,7 +19,7 @@ import yaml
 VALID_CATEGORIES = frozenset(
     {"recall", "temporal", "entity", "conceptual", "multi_hop", "procedural", "classification"}
 )
-VALID_SCORE_METHODS = frozenset({"exact", "fuzzy", "llm", "classification"})
+VALID_SCORE_METHODS = frozenset({"exact", "fuzzy", "llm", "classification", "ndcg"})
 
 
 @dataclass
@@ -28,9 +28,10 @@ class BenchmarkCase:
     category: str  # recall|temporal|entity|conceptual|multi_hop|procedural|classification
     query: str
     gold_path: str | None
-    score_method: str  # exact|fuzzy|llm|classification
+    score_method: str  # exact|fuzzy|llm|classification|ndcg
     notes: str | None = None
     expected_type: str | None = None  # for classification score_method
+    gold_paths: list[dict] | None = None  # for ndcg: [{path, relevance}] graded relevance 0-2
 
 
 @dataclass
@@ -96,6 +97,7 @@ def load_suite(path: str) -> BenchmarkSuite:
         score_method = raw_case.get("score_method")
         notes = raw_case.get("notes")
         expected_type = raw_case.get("expected_type")
+        gold_paths = raw_case.get("gold_paths")  # list of {path, relevance} for ndcg
 
         # Required fields
         if not case_id:
@@ -120,6 +122,12 @@ def load_suite(path: str) -> BenchmarkSuite:
         if category == "recall" and not gold_path and not errors:
             errors.append(f"Case [{i}] ({case_id}): recall cases must have a gold_path")
 
+        # If gold_paths provided but gold_path is absent, derive from highest-relevance entry
+        if gold_paths and isinstance(gold_paths, list) and not gold_path:
+            best = max(gold_paths, key=lambda g: g.get("relevance", 0), default=None)
+            if best:
+                gold_path = best.get("path")
+
         if not errors or (case_id and category and query and score_method):
             cases.append(
                 BenchmarkCase(
@@ -130,6 +138,7 @@ def load_suite(path: str) -> BenchmarkSuite:
                     score_method=str(score_method) if score_method else "",
                     notes=str(notes) if notes else None,
                     expected_type=str(expected_type) if expected_type else None,
+                    gold_paths=gold_paths if isinstance(gold_paths, list) else None,
                 )
             )
 

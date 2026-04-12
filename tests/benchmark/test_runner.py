@@ -19,9 +19,14 @@ from kairix.benchmark.runner import (
     BenchmarkResult,
     _category_diagnosis,
     _classification_score,
+    _dcg,
     _exact_match,
     _fuzzy_match,
+    _hit_at_k,
+    _ideal_dcg,
     _llm_judge,
+    _ndcg_score,
+    _reciprocal_rank,
     _score_tier,
     format_interpretation,
 )
@@ -275,3 +280,119 @@ def test_format_interpretation_returns_string() -> None:
     assert "0.762" in output
     assert isinstance(output, str)
     assert len(output) > 50
+
+# ---------------------------------------------------------------------------
+# NDCG@10 helpers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_dcg_perfect_relevance() -> None:
+    import math
+    expected = 2 / math.log2(2) + 1 / math.log2(3)
+    assert _dcg([2, 1, 0], k=3) == pytest.approx(expected)
+
+
+@pytest.mark.unit
+def test_dcg_empty_relevances() -> None:
+    assert _dcg([], k=10) == 0.0
+
+
+@pytest.mark.unit
+def test_dcg_k_truncates() -> None:
+    import math
+    assert _dcg([2, 1, 1], k=1) == pytest.approx(2 / math.log2(2))
+
+
+@pytest.mark.unit
+def test_ideal_dcg_sorts_by_relevance() -> None:
+    gold = [{"path": "a.md", "relevance": 1}, {"path": "b.md", "relevance": 2}]
+    import math
+    expected = 2 / math.log2(2) + 1 / math.log2(3)
+    assert _ideal_dcg(gold, k=10) == pytest.approx(expected)
+
+
+@pytest.mark.unit
+def test_ndcg_score_perfect_retrieval() -> None:
+    gold = [{"path": "a.md", "relevance": 2}, {"path": "b.md", "relevance": 1}]
+    retrieved = ["a.md", "b.md", "c.md"]
+    assert _ndcg_score(retrieved, gold, k=10) == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_ndcg_score_no_relevant_retrieved() -> None:
+    gold = [{"path": "a.md", "relevance": 2}]
+    retrieved = ["x.md", "y.md"]
+    assert _ndcg_score(retrieved, gold, k=10) == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+def test_ndcg_score_empty_gold() -> None:
+    assert _ndcg_score(["a.md", "b.md"], [], k=10) == 0.0
+
+
+@pytest.mark.unit
+def test_ndcg_score_partial_retrieval() -> None:
+    gold = [{"path": "a.md", "relevance": 2}, {"path": "b.md", "relevance": 1}]
+    retrieved = ["b.md"]
+    score = _ndcg_score(retrieved, gold, k=10)
+    assert 0.0 < score < 1.0
+
+
+@pytest.mark.unit
+def test_ndcg_score_case_insensitive() -> None:
+    gold = [{"path": "Docs/Alpha.md", "relevance": 2}]
+    retrieved = ["docs/alpha.md"]
+    assert _ndcg_score(retrieved, gold, k=10) == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_ndcg_score_known_value() -> None:
+    import math
+    gold = [
+        {"path": "a.md", "relevance": 2},
+        {"path": "b.md", "relevance": 1},
+        {"path": "c.md", "relevance": 0},
+    ]
+    retrieved = ["b.md", "a.md"]
+    idcg = _ideal_dcg(gold, k=10)
+    actual_dcg = 1 / math.log2(2) + 2 / math.log2(3)
+    expected = actual_dcg / idcg
+    assert _ndcg_score(retrieved, gold, k=10) == pytest.approx(expected, abs=1e-9)
+
+
+@pytest.mark.unit
+def test_hit_at_k_true_when_relevant_in_top_k() -> None:
+    gold = [{"path": "a.md", "relevance": 2}]
+    assert _hit_at_k(["x.md", "a.md", "y.md"], gold, k=5) is True
+
+
+@pytest.mark.unit
+def test_hit_at_k_false_when_outside_k() -> None:
+    gold = [{"path": "a.md", "relevance": 2}]
+    retrieved = ["x.md"] * 5 + ["a.md"]
+    assert _hit_at_k(retrieved, gold, k=5) is False
+
+
+@pytest.mark.unit
+def test_hit_at_k_excludes_zero_relevance() -> None:
+    gold = [{"path": "a.md", "relevance": 0}]
+    assert _hit_at_k(["a.md"], gold, k=5) is False
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_first_position() -> None:
+    gold = [{"path": "a.md", "relevance": 1}]
+    assert _reciprocal_rank(["a.md", "b.md"], gold, k=10) == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_second_position() -> None:
+    gold = [{"path": "b.md", "relevance": 1}]
+    assert _reciprocal_rank(["a.md", "b.md", "c.md"], gold, k=10) == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_not_found() -> None:
+    gold = [{"path": "x.md", "relevance": 1}]
+    assert _reciprocal_rank(["a.md", "b.md"], gold, k=10) == pytest.approx(0.0)

@@ -8,11 +8,13 @@ Score methods:
   exact - gold_path present in top-5 retrieved paths (case-insensitive substring)
   fuzzy - gold_path present in top-10 (relaxed, for approximate matching)
   llm   - gpt-4o-mini rates retrieved content relevance 0.0-1.0
+  ndcg  - true NDCG@10 with graded relevance (0/1/2); also computes Hit@5 and MRR@10
 """
 
 from __future__ import annotations
 
 import json
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -59,6 +61,49 @@ CATEGORY_FLOOR = 0.50  # per-category minimum for gate pass
 # How many top results to inspect for exact/fuzzy matching
 EXACT_MATCH_TOPK = 5
 FUZZY_MATCH_TOPK = 10
+
+# ---------------------------------------------------------------------------
+# NDCG@10 helpers (ported from run-benchmark-v2.py, VM private repo)
+# ---------------------------------------------------------------------------
+
+
+def _dcg(relevances: list[float], k: int) -> float:
+    """Discounted Cumulative Gain at k."""
+    return sum(rel / math.log2(i + 2) for i, rel in enumerate(relevances[:k]))
+
+
+def _ideal_dcg(gold_paths: list[dict], k: int) -> float:
+    """IDCG: ideal ordering (sort by relevance desc, take top k)."""
+    sorted_rels = sorted([g["relevance"] for g in gold_paths], reverse=True)
+    return _dcg(sorted_rels, k)
+
+
+def _ndcg_score(retrieved: list[str], gold_paths: list[dict], k: int = 10) -> float:
+    """Compute NDCG@k given retrieved path list and graded gold list."""
+    if not gold_paths:
+        return 0.0
+    idcg = _ideal_dcg(gold_paths, k)
+    if idcg == 0.0:
+        return 0.0
+    gold_map = {g["path"].lower(): g["relevance"] for g in gold_paths}
+    rels = [gold_map.get(p.lower(), 0) for p in retrieved[:k]]
+    return _dcg(rels, k) / idcg
+
+
+def _hit_at_k(retrieved: list[str], gold_paths: list[dict], k: int) -> bool:
+    """True if any gold path (any relevance ≥ 1) appears in top-k retrieved."""
+    gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
+    return any(p.lower() in gold_set for p in retrieved[:k])
+
+
+def _reciprocal_rank(retrieved: list[str], gold_paths: list[dict], k: int) -> float:
+    """Reciprocal rank of first relevant gold path in top-k (0 if none)."""
+    gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
+    for i, p in enumerate(retrieved[:k]):
+        if p.lower() in gold_set:
+            return 1.0 / (i + 1)
+    return 0.0
+
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -431,6 +476,7 @@ def run_benchmark(
                 paths, snippets, retrieval_meta = [], [], {"error": str(exc)}
 
         # Score
+        ndcg_detail: dict[str, Any] = {}
         if case.score_method == "classification":
             # Classification cases: run classify and compare type (no retrieval needed)
             score = _classification_score(case.query, case.expected_type or "")
@@ -438,6 +484,15 @@ def run_benchmark(
             score = _exact_match(paths, case.gold_path or "")
         elif case.score_method == "fuzzy":
             score = _fuzzy_match(paths, case.gold_path or "")
+        elif case.score_method == "ndcg":
+            effective_gold = case.gold_paths or (
+                [{"path": case.gold_path, "relevance": 2}] if case.gold_path else []
+            )
+            score = _ndcg_score(paths, effective_gold, k=10)
+            ndcg_detail = {
+                "hit_at_5": _hit_at_k(paths, effective_gold, k=5),
+                "rr": _reciprocal_rank(paths, effective_gold, k=10),
+            }
         else:  # llm
             score = _llm_judge(
                 query=case.query,
@@ -464,6 +519,7 @@ def run_benchmark(
                 "score": round(score, 4),
                 "retrieved_paths": paths[:10],
                 "elapsed_ms": round(elapsed_ms, 1),
+                **ndcg_detail,
                 **retrieval_meta,
             }
         )
@@ -491,6 +547,12 @@ def run_benchmark(
 
     gates = {gate: weighted_total >= threshold for gate, threshold in PHASE_GATES.items()}
 
+    # Aggregate NDCG-specific metrics across ndcg-scored cases
+    ndcg_cases = [c for c in case_results if c.get("score_method") == "ndcg"]
+    ndcg_at_10 = round(sum(c["score"] for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
+    hit_rate_at_5 = round(sum(float(c.get("hit_at_5", 0)) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
+    mrr_at_10 = round(sum(c.get("rr", 0.0) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
+
     result = BenchmarkResult(
         meta={
             "suite_name": suite.meta.get("name", "unknown"),
@@ -504,6 +566,9 @@ def run_benchmark(
             "weighted_total": weighted_total,
             "category_scores": per_category_avg,
             "gates": gates,
+            "ndcg_at_10": ndcg_at_10,
+            "hit_rate_at_5": hit_rate_at_5,
+            "mrr_at_10": mrr_at_10,
         },
         diagnostics={
             "category_counts": {cat: len(scores) for cat, scores in category_scores.items()},
