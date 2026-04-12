@@ -66,6 +66,8 @@ omit = [
     # External I/O adapters — Azure API + QMD subprocess; behaviour mocked in unit tests
     "kairix/_azure.py",
     "kairix/_qmd.py",
+    # Neo4j graph layer — requires live Neo4j instance; not available in CI
+    "kairix/graph/*",
     # Pipeline orchestrators — thin wrappers over individually-tested modules
     "kairix/entities/pipeline.py",
     "kairix/temporal/index.py",
