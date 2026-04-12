@@ -92,7 +92,7 @@ def vector_search_bytes(
     # TMP-7: when a date filter is active, pre-fetch more candidates so the
     # narrow date window still has results to work with after filtering.
     # A K=10 scan rarely surfaces docs from a 7-day window (e.g. "this week");
-    # fetching 4× more guarantees recent docs appear before the filter runs.
+    # fetching 4x more guarantees recent docs appear before the filter runs.
     fetch_k = k * 4 if date_filter_paths else k
     results = _vsearch_with_bytes(db, query_bytes, fetch_k, collections)
     # TMP-2: apply date-range path filter for TEMPORAL queries
