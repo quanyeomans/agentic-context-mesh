@@ -13,11 +13,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from mnemosyne.search.bm25 import BM25Result, _path_from_file_uri, bm25_search
 from mnemosyne.search.vector import VecResult, vector_search_bytes
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,12 +89,24 @@ def test_bm25_date_filter_none_no_filtering() -> None:
 
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps([
-                {"file": r1["file"], "title": r1["title"], "snippet": r1["snippet"],
-                 "score": r1["score"], "collection": r1["collection"]},
-                {"file": r2["file"], "title": r2["title"], "snippet": r2["snippet"],
-                 "score": r2["score"], "collection": r2["collection"]},
-            ]),
+            stdout=json.dumps(
+                [
+                    {
+                        "file": r1["file"],
+                        "title": r1["title"],
+                        "snippet": r1["snippet"],
+                        "score": r1["score"],
+                        "collection": r1["collection"],
+                    },
+                    {
+                        "file": r2["file"],
+                        "title": r2["title"],
+                        "snippet": r2["snippet"],
+                        "score": r2["score"],
+                        "collection": r2["collection"],
+                    },
+                ]
+            ),
             stderr="",
         )
         results = bm25_search("test query", date_filter_paths=None)
@@ -118,10 +127,17 @@ def test_bm25_date_filter_empty_no_filtering() -> None:
 
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps([
-                {"file": r1["file"], "title": r1["title"], "snippet": r1["snippet"],
-                 "score": r1["score"], "collection": r1["collection"]},
-            ]),
+            stdout=json.dumps(
+                [
+                    {
+                        "file": r1["file"],
+                        "title": r1["title"],
+                        "snippet": r1["snippet"],
+                        "score": r1["score"],
+                        "collection": r1["collection"],
+                    },
+                ]
+            ),
             stderr="",
         )
         results = bm25_search("test query", date_filter_paths=frozenset())
@@ -143,10 +159,12 @@ def test_bm25_date_filter_applied() -> None:
 
         mock_run.return_value = MagicMock(
             returncode=0,
-            stdout=json.dumps([
-                {"file": r1["file"], "title": "", "snippet": "", "score": 1.0, "collection": "vault-areas"},
-                {"file": r2["file"], "title": "", "snippet": "", "score": 0.5, "collection": "vault-areas"},
-            ]),
+            stdout=json.dumps(
+                [
+                    {"file": r1["file"], "title": "", "snippet": "", "score": 1.0, "collection": "vault-areas"},
+                    {"file": r2["file"], "title": "", "snippet": "", "score": 0.5, "collection": "vault-areas"},
+                ]
+            ),
             stderr="",
         )
         results = bm25_search("test query", date_filter_paths=frozenset({"02-Areas/good.md"}))
@@ -190,9 +208,7 @@ def test_vector_date_filter_applied() -> None:
     r2 = _make_vec_result("02-Areas/bad.md")
 
     with patch("mnemosyne.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
-        results = vector_search_bytes(
-            mock_db, b"\x00" * 4, date_filter_paths=frozenset({"02-Areas/good.md"})
-        )
+        results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=frozenset({"02-Areas/good.md"}))
 
     assert len(results) == 1
     assert results[0]["path"] == "02-Areas/good.md"
