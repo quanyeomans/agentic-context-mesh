@@ -2,16 +2,17 @@
 kairix — contextual intelligence layer for QMD + Obsidian agent stacks.
 
 Subcommands:
-  embed      Embed vault documents into QMD sqlite-vec (text-embedding-3-large)
-  search     Hybrid search: BM25 + vector via RRF (Phase 1)
-  entity     Entity graph: lookup, write, extract (Phase 1)
-  curator    Curator agent: entity health monitoring and enrichment (CA-1)
-  timeline   Temporal query rewriting + date-aware retrieval (Phase 2)
-  summarise  L0/L1 tiered context generation (Phase 2)
-  classify   Auto-classify memory writes (Phase 3)
-  brief      Session briefing synthesis (Phase 3)
-  benchmark  Run retrieval quality benchmark (Phase 5)
-  wikilinks  Inject [[wikilinks]] on first mention in agent-written vault files (ADR-M07)
+  embed       Embed vault documents into QMD sqlite-vec (text-embedding-3-large)
+  search      Hybrid search: BM25 + vector via RRF (Phase 1)
+  entity      Entity graph: lookup, write, extract (Phase 1)
+  curator     Curator agent: entity health monitoring and enrichment (CA-1)
+  contradict  Contradiction detection: check new content against vault knowledge
+  timeline    Temporal query rewriting + date-aware retrieval (Phase 2)
+  summarise   L0/L1 tiered context generation (Phase 2)
+  classify    Auto-classify memory writes (Phase 3)
+  brief       Session briefing synthesis (Phase 3)
+  benchmark   Run retrieval quality benchmark (Phase 5)
+  wikilinks   Inject [[wikilinks]] on first mention in agent-written vault files (ADR-M07)
 
 See PRD.md for architecture, phase targets, and ADRs.
 """
@@ -75,6 +76,11 @@ def main() -> None:
         from kairix.briefing.cli import main as brief_main
 
         brief_main(sys.argv[2:])
+
+    elif cmd == "contradict":
+        from kairix.contradict.cli import main as contradict_main
+
+        contradict_main(sys.argv[2:])
 
     else:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)
