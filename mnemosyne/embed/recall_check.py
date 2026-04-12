@@ -21,7 +21,7 @@ from pathlib import Path
 
 import requests
 
-from mnemosyne._azure import EMBED_DIMS
+from mnemosyne.embed.schema import EMBED_VECTOR_DIMS as EMBED_DIMS
 
 logger = logging.getLogger(__name__)
 

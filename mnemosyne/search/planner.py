@@ -60,8 +60,9 @@ class QueryPlanner:
         prompt for reliable parsing. Falls back to [query] on any failure.
         """
         try:
-            from mnemosyne._azure import chat_completion
+            from mnemosyne.llm import get_default_backend as _get_llm
 
+            chat_completion = _get_llm().chat
             # Inject entity graph context when available
             ctx = None
             if entities_db is not None:

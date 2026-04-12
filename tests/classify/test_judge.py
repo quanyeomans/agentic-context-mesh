@@ -24,7 +24,7 @@ class TestClassifyWithLLM:
                 "reason": "Contains 'we decided' and rationale",
             }
         )
-        with patch("mnemosyne.classify.judge.chat_completion", return_value=mock_response):
+        with patch("mnemosyne._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("some ambiguous content", agent="builder")
         assert isinstance(result, ClassificationResult)
         assert result.type == "semantic-decision"
@@ -39,33 +39,33 @@ class TestClassifyWithLLM:
                 "reason": "Could be episodic or procedural",
             }
         )
-        with patch("mnemosyne.classify.judge.chat_completion", return_value=mock_response):
+        with patch("mnemosyne._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("ambiguous content", agent="builder")
         assert result.needs_confirmation is True
         assert result.confidence == 0.55
 
     def test_api_failure_returns_unknown(self):
-        with patch("mnemosyne.classify.judge.chat_completion", return_value=""):
+        with patch("mnemosyne._azure.chat_completion", return_value=""):
             result = classify_with_llm("some content", agent="builder")
         assert result.type == "unknown"
         assert result.confidence == 0.0
         assert result.needs_confirmation is True
 
     def test_json_parse_error_returns_unknown(self):
-        with patch("mnemosyne.classify.judge.chat_completion", return_value="not valid json"):
+        with patch("mnemosyne._azure.chat_completion", return_value="not valid json"):
             result = classify_with_llm("some content", agent="builder")
         assert result.type == "unknown"
         assert result.needs_confirmation is True
 
     def test_empty_content_returns_unknown(self):
-        with patch("mnemosyne.classify.judge.chat_completion", return_value="{}"):
+        with patch("mnemosyne._azure.chat_completion", return_value="{}"):
             result = classify_with_llm("", agent="builder")
         assert result.type == "unknown"
         assert result.needs_confirmation is True
 
     def test_code_fence_wrapped_json(self):
         mock_response = '```json\n{"type": "episodic", "confidence": 0.9, "reason": "timestamp"}\n```'
-        with patch("mnemosyne.classify.judge.chat_completion", return_value=mock_response):
+        with patch("mnemosyne._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("## 09:15 did stuff", agent="builder")
         assert result.type == "episodic"
         assert result.confidence == 0.9
@@ -78,7 +78,7 @@ class TestClassifyWithLLM:
                 "reason": "contains normative constraint",
             }
         )
-        with patch("mnemosyne.classify.judge.chat_completion", return_value=mock_response):
+        with patch("mnemosyne._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("never do X", agent="builder")
         assert result.target_path != ""
         assert "rules.md" in result.target_path
@@ -95,6 +95,6 @@ class TestClassifyWithLLM:
                 "reason": "infrastructure fact",
             }
         )
-        with patch("mnemosyne.classify.judge.chat_completion", return_value=mock_response):
+        with patch("mnemosyne._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("endpoint: https://api.example.com", agent="shared")
         assert result.type == "semantic-fact"
