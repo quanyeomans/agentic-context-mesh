@@ -133,6 +133,12 @@ class _MockLLMBackend:
     def embed(self, text: str) -> list[float]:
         return [0.0] * 1536
 
+    def embed_as_bytes(self, text: str) -> bytes | None:
+        import struct
+
+        vec = self.embed(text)
+        return struct.pack(f"<{len(vec)}f", *vec)
+
 
 def test_mock_backend_satisfies_protocol() -> None:
     mock = _MockLLMBackend()

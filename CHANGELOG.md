@@ -6,7 +6,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-*Next: keyword regression investigation, Dex CRM chunking (TMP-3), temporal benchmark expansion (TMP-6).*
+### Added
+- **P1-2**: `mnemosyne/llm/` — `LLMBackend` protocol with `chat()`, `embed()`, `embed_as_bytes()` methods. `AzureOpenAIBackend` and `AnthropicBackend` (stub) implementations. `get_default_backend()` returns `AzureOpenAIBackend`. All product code now receives `LLMBackend` via dependency injection rather than importing backends directly.
+- **P1-3**: Repo boundary — all direct `mnemosyne._azure` imports removed from product code. `hybrid.py` acquires embed via `_get_llm().embed_as_bytes()`. `search/planner.py` acquires chat via `_get_llm().chat()`. No module-level `mnemosyne._azure` imports remain outside `mnemosyne/llm/backends.py`.
+
+### Fixed
+- **TMP-7**: `vector_search_bytes()` now fetches `k × 4` candidates when a date filter is active. `VECTOR_DEFAULT_K=10` was too small for narrow date windows (e.g., "this week") — after force re-embed populated `chunk_date`, the top-10 candidates rarely included docs from a 7-day window, causing vec_count=0 for relative temporal queries.
 
 ## [0.8.0] - 2026-04-11 — Sprint 4: CRM Interaction Chunker + Temporal Benchmark Expansion
 

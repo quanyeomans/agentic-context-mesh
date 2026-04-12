@@ -33,6 +33,12 @@ class AzureOpenAIBackend:
 
         return embed_text(text)
 
+    def embed_as_bytes(self, text: str) -> bytes | None:
+        """Embed text and return as packed float32 bytes for sqlite-vec."""
+        from mnemosyne._azure import embed_text_as_bytes
+
+        return embed_text_as_bytes(text)
+
 
 class AnthropicBackend:
     """
@@ -48,6 +54,11 @@ class AnthropicBackend:
         )
 
     def embed(self, text: str) -> list[float]:
+        raise NotImplementedError(
+            "AnthropicBackend does not support embedding. Use AzureOpenAIBackend for embedding operations."
+        )
+
+    def embed_as_bytes(self, text: str) -> bytes | None:
         raise NotImplementedError(
             "AnthropicBackend does not support embedding. Use AzureOpenAIBackend for embedding operations."
         )

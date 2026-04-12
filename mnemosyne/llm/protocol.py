@@ -54,3 +54,16 @@ class LLMBackend(Protocol):
             Float vector, or [] on failure.  Never raises.
         """
         ...
+
+    def embed_as_bytes(self, text: str) -> bytes | None:
+        """
+        Embed text and return as packed float32 bytes (for sqlite-vec).
+
+        Args:
+            text: The text to embed.
+
+        Returns:
+            Struct-packed little-endian float32 bytes, or None on failure.
+            Never raises.
+        """
+        ...

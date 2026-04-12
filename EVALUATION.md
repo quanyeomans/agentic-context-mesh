@@ -4,24 +4,21 @@ Benchmark results for Mnemosyne hybrid search across phases of development.
 
 ---
 
-## Current Results — v0.7.0 (R4 Hybrid Baseline)
+## Current Results — v0.8.0+ (R9, 2026-04-12)
 
-**Suite:** 83 curated real-world cases across 6 query categories. Scored with strict NDCG@10 using graded relevance (0/1/2) with LLM-as-judge (GPT-4o-mini). Evaluated on a real-world personal knowledge base (~2,800 documents, 10,986 vectors at 1536-dim).
+**Suite:** 95 curated real-world cases across 6 query categories. Scored with NDCG@10 using graded relevance (0/1/2). Evaluated on a real-world personal knowledge base (~2,800 documents, 11,316 vectors at 1536-dim).
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| entity | 0.735 | 14 | Entity graph + alias resolution working well |
-| keyword | 0.649 | 8 | BM25 baseline solid |
-| procedural | 0.569 | 30 | Path-weighted re-rank shipped (Phase 8-A) |
-| semantic | 0.553 | 13 | Hybrid vector load |
-| multi_hop | 0.547 | 10 | QueryPlanner functional |
-| temporal | 0.366 | 8 | Date-aware routing; improvement targeted in v0.8 |
-| **Overall** | **0.580** | **83** | Curated suite, strict NDCG@10 |
+| entity | 0.733 | 14 | Entity graph + alias resolution |
+| keyword | 0.488 | 8 | BM25 baseline |
+| multi_hop | 0.549 | 10 | QueryPlanner RRF merge |
+| procedural | 0.564 | 30 | Path-weighted re-rank |
+| semantic | 0.519 | 13 | Hybrid vector |
+| temporal | 0.423 | 20 | TMP-7 fix: K×4 pre-fetch when date filter active |
+| **Overall** | **0.545** | **95** | Curated suite, strict NDCG@10 |
 
-**Hit@5: 0.8554** — a relevant document in the top 5 for 85.5% of queries.
-**MRR@10: 0.7068**
-
-All queries: `vec_failed=False` — hybrid search (BM25 + 1536-dim vector) operating correctly.
+**Hit@5: 0.832** · **MRR@10: 0.648**
 
 ---
 
@@ -53,9 +50,14 @@ Starting Phase 5, the instrument switched to NDCG@10 with graded relevance on re
 | O-1 entity graph + planner | 0.754 | 245 | multi_hop +0.035 from QueryPlanner context injection |
 | R1 post-refactor | 0.776 | 263 | Full gold rebuild after vault refactor |
 | Phase 8-A procedural boost | 0.569 procedural | — | Path-weighted re-rank; target ≥ 0.55 met |
-| **R4 hybrid baseline** | **0.580** | **83** | Curated suite only (session_log cases excluded); strict graded gold |
+| R4 hybrid baseline | 0.580 | 83 | Curated suite only (session_log cases excluded); strict graded gold |
+| R6 Sprint 4 | 0.564 | 95 | 95-case suite; entity enrichment + S1-C/CP; temporal 0.509 |
+| R8 post-reembed | 0.538 | 95 | Force re-embed activated chunk_date filter; temporal regression (TMP-7) |
+| **R9 TMP-7 fix** | **0.545** | **95** | **vec K×4 when date filter active; temporal 0.423** |
 
-**Note on R4 vs R1:** R4 (0.580) and R1 (0.776) are not directly comparable. R1 used a mixed suite (263 cases, majority session_log with self-referential gold). R4 is curated-only (83 cases, independently graded gold), which is a stricter and more meaningful quality signal. The curated subset of R1 scored 0.595; R4 (0.580) is consistent with that baseline.
+**Note on R4 vs R1:** R4 (0.580) and R1 (0.776) are not directly comparable. R1 used a mixed suite (263 cases, majority session_log with self-referential gold). R4 is curated-only (83 cases, independently graded gold), which is a stricter and more meaningful quality signal.
+
+**Note on R6 vs R9:** The 95-case suite is harder than the 83-case R4 suite (12 new temporal cases added). R9 (0.545) represents a partial recovery after the TMP-7 temporal regression introduced by force re-embed. Remaining temporal gap (0.509 R6 → 0.423 R9) is attributed to hard cases involving duplicate-path ranking changes and budget truncation.
 
 ---
 
