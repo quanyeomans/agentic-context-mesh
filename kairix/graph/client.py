@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any
 
-from kairix.graph.models import EdgeKind, GraphEdge, OrganisationNode, OutcomeNode, PersonNode
+from kairix.graph.models import GraphEdge, OrganisationNode, OutcomeNode, PersonNode
 
 logger = logging.getLogger(__name__)
 
@@ -63,15 +63,15 @@ class Neo4jClient:
         self._connect()
 
     def _connect(self) -> None:
-        GraphDatabase = _try_import_neo4j()
-        if GraphDatabase is None:
+        driver_cls = _try_import_neo4j()
+        if driver_cls is None:
             logger.warning("Neo4jClient: neo4j driver not installed — graph layer unavailable")
             return
         if not self._password:
             logger.warning("Neo4jClient: KAIRIX_NEO4J_PASSWORD not set — graph layer unavailable")
             return
         try:
-            self._driver = GraphDatabase.driver(self._uri, auth=(self._user, self._password))
+            self._driver = driver_cls.driver(self._uri, auth=(self._user, self._password))
             self._driver.verify_connectivity()
             self.available = True
             logger.info("Neo4jClient: connected to %s", self._uri)

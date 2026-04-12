@@ -23,10 +23,10 @@ from kairix.graph.models import (
 )
 
 __all__ = [
-    "Neo4jClient",
-    "get_client",
-    "OrganisationNode",
-    "PersonNode",
-    "OutcomeNode",
     "EdgeKind",
+    "Neo4jClient",
+    "OrganisationNode",
+    "OutcomeNode",
+    "PersonNode",
+    "get_client",
 ]
