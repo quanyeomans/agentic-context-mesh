@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 from mnemosyne.search.bm25 import BM25Result, _path_from_file_uri, bm25_search
 from mnemosyne.search.vector import VecResult, vector_search_bytes
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
