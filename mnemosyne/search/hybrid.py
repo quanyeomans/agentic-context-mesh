@@ -26,8 +26,8 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mnemosyne._azure import embed_text_as_bytes
 from mnemosyne.embed.schema import get_qmd_db_path, load_sqlite_vec
+from mnemosyne.llm import get_default_backend as _get_llm
 from mnemosyne.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
 from mnemosyne.search.budget import BudgetedResult, apply_budget
 from mnemosyne.search.intent import QueryIntent, classify
@@ -35,6 +35,12 @@ from mnemosyne.search.rrf import FusedResult, entity_boost, procedural_boost, rr
 from mnemosyne.search.vector import VecResult, vector_search_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def embed_text_as_bytes(text: str) -> bytes | None:
+    """Embed text via the default LLM backend and return packed float32 bytes."""
+    return _get_llm().embed_as_bytes(text)
+
 
 # ---------------------------------------------------------------------------
 # Configuration

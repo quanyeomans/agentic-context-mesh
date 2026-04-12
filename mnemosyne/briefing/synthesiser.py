@@ -59,8 +59,9 @@ def synthesise(
         Returns formatted partial briefing with error note on failure.
         Never raises.
     """
-    from mnemosyne._azure import chat_completion
+    from mnemosyne.llm import get_default_backend as _get_llm
 
+    chat_completion = _get_llm().chat
     # Build context block
     context_parts: list[str] = []
     for source_name, content in context.items():

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 
-from mnemosyne._azure import chat_completion
+from mnemosyne.llm import get_default_backend as _get_llm
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def classify_with_llm(content: str, agent: str = "shared") -> ClassificationResu
     ]
 
     try:
-        raw = chat_completion(messages, max_tokens=200)
+        raw = _get_llm().chat(messages, max_tokens=200)
         if not raw:
             raise ValueError("empty response from LLM")
 

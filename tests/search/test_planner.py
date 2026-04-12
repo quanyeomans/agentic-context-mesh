@@ -184,7 +184,8 @@ class TestDecompose:
         assert result == ["entity-aware sub-query"]
         # Confirm the call included entity context in the prompt
         call_args = mock_azure.chat_completion.call_args
-        prompt_content = call_args[1]["messages"][0]["content"]
+        # messages is passed positionally by AzureOpenAIBackend.chat()
+        prompt_content = call_args[0][0][0]["content"]
         assert "Entity" in prompt_content
         db.close()
 
