@@ -38,7 +38,7 @@ def v1_db(tmp_path, monkeypatch):
 
     from pathlib import Path
 
-    migration = Path(__file__).parent.parent.parent / "mnemosyne/entities/migrations/001_initial.sql"
+    migration = Path(__file__).parent.parent.parent / "kairix/entities/migrations/001_initial.sql"
     db.executescript(migration.read_text())
 
     yield db
