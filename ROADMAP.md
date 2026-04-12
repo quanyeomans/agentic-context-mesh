@@ -2,7 +2,7 @@
 
 Agentic Context Mesh is a contextual retrieval platform for human-agent teams that keeps your knowledge private and on your own infrastructure. This document describes the current state, near-term priorities, and longer-term vision.
 
-Discussion of priorities and feature direction happens in [GitHub Discussions → Roadmap & Priorities](https://github.com/quanyeomans/agentic-context-mesh/discussions).
+Discussion of priorities and feature direction happens in [GitHub Discussions → Roadmap & Priorities](https://github.com/quanyeomans/kairix/discussions).
 
 ---
 
@@ -18,9 +18,9 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 
 ---
 
-## Current state — v0.7.0
+## Current state — v0.8.0
 
-**NDCG@10 0.58** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.86** — a relevant document in the top 5 for 86% of queries.
+**NDCG@10 0.5449** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.84** — a relevant document in the top 5 for 84% of queries.
 
 The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rather than the weighted category score used in earlier phases. See [EVALUATION.md](EVALUATION.md) for methodology details and full score trajectory.
 
@@ -35,63 +35,44 @@ The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rat
 | LLM-typed relationship enrichment | ✅ Shipped | Nightly cron, GPT-4o-mini batch classifier |
 | Procedural query boost | ✅ Shipped | Path-weighted re-rank for how-to and runbook queries |
 | Entity graph quality tooling | ✅ Shipped | Stub validator, enrichment pipeline, regression runner |
-| Deployment-specific collections | ✅ Shipped | `MNEMOSYNE_EXTRA_COLLECTIONS` env var |
-| Contextual prep intent | 🔲 Planned | v0.8.0 — `mnemosyne prep` command |
+| Neo4j graph layer | ✅ Shipped | Community Edition, Bolt, `kairix.graph` module |
+| Vault crawler | ✅ Shipped | ADR-014 entity discovery from vault structure |
+| Entity health check | ✅ Shipped | `kairix curator health` — synthesis failures, staleness, missing vault paths |
+| LLM backend abstraction | ✅ Shipped | `LLMBackend` protocol, `AzureOpenAIBackend` adapter |
+| Deployment-specific collections | ✅ Shipped | `KAIRIX_EXTRA_COLLECTIONS` env var |
 | Contradiction detection | 🔲 Planned | v0.9.0 |
 | Local/offline embedding | 🔲 Planned | v1.0.0 |
 | REST API server mode | 🔲 Planned | v1.0.0 |
 
-**Benchmark category breakdown (v2 suite, NDCG@10):**
+**Benchmark category breakdown (R9, 95-case suite, NDCG@10):**
 
-| Category | NDCG@10 | Cases | Notes |
-|---|---|---|---|
-| entity | 0.735 | 14 | Entity graph + alias resolution |
-| keyword | 0.649 | 8 | BM25 baseline solid |
-| multi_hop | 0.547 | 10 | QueryPlanner functional |
-| semantic | 0.553 | 13 | Hybrid vector load |
-| procedural | **0.569** | 30 | ✅ Path boost raised from 0.39 (Phase 0) |
-| temporal | 0.366 | 8 | Date-aware routing; improvement targeted in v0.8 |
-| **Overall** | **0.580** | **83** | Curated suite, strict NDCG@10 |
-
----
-
-## v0.8.0 — Contextual preparation intent
-
-The next capability milestone is moving from ranked retrieval to structured contextual preparation — answering queries like "prepare me for a meeting with [organisation]" or "what should I know before reaching out to [person]".
-
-This requires extending the entity graph with richer attributes and adding a new retrieval intent that traverses entity relationships rather than just returning ranked documents.
-
-**Entity graph expansion:**
-- [ ] Entity quality tooling — stub validator, enrichment pipeline, regression runner (ships in v0.7.x)
-- [ ] Extended stub schema — `industry`, `geography`, `tier`, `stakeholder_personas` for organisations; `org`, `role`, `interests`, `last_interaction` for persons
-- [ ] Entity mining from vault structure — discover entity candidates from directory structure, output draft stubs for human review
-- [ ] Resource cross-referencing — add `related-entities:` frontmatter to research documents for entity traversal
-
-**CONTEXTUAL_PREP retrieval intent:**
-- [ ] New intent class — routes "prep for", "meeting with [entity]", "outreach to [entity]" queries
-- [ ] Entity attribute expansion — extract anchor entity → load stub attributes → expand query with industry/geography/personas
-- [ ] Cross-entity expansion — traverse `entity_relationships` to surface related content (e.g., healthcare research for a healthcare client)
-- [ ] Structured brief output — entity summary, ranked content with relevance reasoning, knowledge gap report
-
-**Gap detection:**
-- [ ] Three gap types: `no_coverage` (0 results), `stale` (results >90 days old), `sparse` (1–2 results)
-- [ ] Integrated into `mnemosyne prep` output
-
-**New CLI command:**
-```bash
-mnemosyne prep "quarterly governance with [client]"
-mnemosyne prep "outreach to [contact]"
-```
-
-**Good first issues for contributors:** entity mining script, stub quality validator, CONTEXTUAL_PREP intent classifier.
+| Category | NDCG@10 | Notes |
+|---|---|---|
+| entity | 0.751 | Entity graph + alias resolution |
+| multi_hop | 0.549 | QueryPlanner functional |
+| procedural | 0.564 | Path boost active |
+| semantic | 0.519 | Hybrid vector load |
+| keyword | 0.439 | BM25 baseline |
+| temporal | 0.4225 | TMP-7 k×4 fix applied; improvement ongoing |
+| **Overall** | **0.5449** | Curated suite, strict NDCG@10 |
 
 ---
 
-## v0.9.0 — Contradiction detection
+## v0.9.0 — Contradiction detection + entity enrichment
 
+**Contradiction detection:**
 - [ ] On new memory write: compare against existing knowledge for direct contradictions
 - [ ] Flag conflicts rather than silently overwriting — human-agent teams need to know when the knowledge base disagrees with itself
-- [ ] CLI: `mnemosyne contradict check "<new content>"` → reports conflicting documents + confidence
+- [ ] CLI: `kairix contradict check "<new content>"` → reports conflicting documents + confidence
+
+**Entity graph enrichment:**
+- [ ] Extended stub schema — `industry`, `geography`, `tier`, `stakeholder_personas` for organisations; `org`, `role`, `interests`, `last_interaction` for persons
+- [ ] Resource cross-referencing — add `related-entities:` frontmatter to research documents for entity traversal
+- [ ] Curator enrichment pipeline — auto-populate missing summaries and vault paths from indexed content
+
+**Good first issues for contributors:** entity mining script, stub quality validator, contradiction detection prototype.
+
+---
 
 ---
 
@@ -101,13 +82,13 @@ mnemosyne prep "outreach to [contact]"
 - [ ] Embedding provider abstraction layer — `EmbedProvider` protocol, Azure and local as implementations
 - [ ] Ollama adapter — `nomic-embed-text`, `mxbai-embed-large` tested at 1536-dim parity
 - [ ] Sentence-transformers adapter — for environments where Ollama isn't available
-- [ ] Provider selection in `env.example` — `MNEMOSYNE_EMBED_PROVIDER=azure|ollama|sentence-transformers`
+- [ ] Provider selection in `env.example` — `KAIRIX_EMBED_PROVIDER=azure|ollama|sentence-transformers`
 
 **Stable public API:**
 - [ ] REST/HTTP server mode — expose search, entity, and briefing as local endpoints (FastAPI, no external deps)
 - [ ] Stable CLI contract — versioned with deprecation warnings before removal
 - [ ] Multi-source support — plain markdown directories alongside QMD-indexed vaults
-- [ ] Docker image — `ghcr.io/quanyeomans/agentic-context-mesh`
+- [ ] Docker image — `ghcr.io/quanyeomans/kairix`
 
 GPT-4o-mini usage (briefing, classify, benchmark judging) remains optional — all synthesis features degrade gracefully to rule-based fallbacks when no LLM is available.
 
@@ -135,7 +116,7 @@ The project is maintained by [@quanyeomans](https://github.com/quanyeomans). Pri
 3. **Community demand** — upvoted Discussions and well-articulated issues
 
 If you want to influence the roadmap, the most effective approaches are:
-- Open a Discussion in [Roadmap & Priorities](https://github.com/quanyeomans/agentic-context-mesh/discussions) with a concrete use case
+- Open a Discussion in [Roadmap & Priorities](https://github.com/quanyeomans/kairix/discussions) with a concrete use case
 - Submit a PR — working code with tests moves faster than feature requests
 - Share benchmark results from your own deployment — real-world data changes priorities
 
@@ -144,4 +125,4 @@ If you want to influence the roadmap, the most effective approaches are:
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing standards, and PR process.
-The issues labelled [`good first issue`](https://github.com/quanyeomans/agentic-context-mesh/issues?q=label%3A%22good+first+issue%22) are explicitly scoped for new contributors.
+The issues labelled [`good first issue`](https://github.com/quanyeomans/kairix/issues?q=label%3A%22good+first+issue%22) are explicitly scoped for new contributors.
