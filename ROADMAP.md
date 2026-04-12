@@ -20,7 +20,7 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 
 ## Current state — v0.8.0
 
-**NDCG@10 0.5449** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.84** — a relevant document in the top 5 for 84% of queries.
+**NDCG@10 0.5686** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.87** — a relevant document in the top 5 for 87% of queries.
 
 The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rather than the weighted category score used in earlier phases. See [EVALUATION.md](EVALUATION.md) for methodology details and full score trajectory.
 
@@ -53,8 +53,8 @@ The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rat
 | procedural | 0.564 | Path boost active |
 | semantic | 0.519 | Hybrid vector load |
 | keyword | 0.439 | BM25 baseline |
-| temporal | 0.4225 | TMP-7 k×4 fix applied; improvement ongoing |
-| **Overall** | **0.5449** | Curated suite, strict NDCG@10 |
+| temporal | 0.5354 | Scorer path suffix fix; measurement artefact resolved |
+| **Overall** | **0.5686** | Curated suite, strict NDCG@10 |
 
 ---
 

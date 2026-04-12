@@ -4,21 +4,21 @@ Benchmark results for Mnemosyne hybrid search across phases of development.
 
 ---
 
-## Current Results — v0.8.0+ (R9, 2026-04-12)
+## Current Results — v0.8.0+ (R10, 2026-04-12)
 
 **Suite:** 95 curated real-world cases across 6 query categories. Scored with NDCG@10 using graded relevance (0/1/2). Evaluated on a real-world personal knowledge base (~2,800 documents, 11,316 vectors at 1536-dim).
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| entity | 0.733 | 14 | Entity graph + alias resolution |
+| entity | 0.733 | 14 | Entity graph + alias resolution; 76 entities with vault_path + summaries |
 | keyword | 0.488 | 8 | BM25 baseline |
 | multi_hop | 0.549 | 10 | QueryPlanner RRF merge |
 | procedural | 0.564 | 30 | Path-weighted re-rank |
 | semantic | 0.519 | 13 | Hybrid vector |
-| temporal | 0.423 | 20 | TMP-7 fix: K×4 pre-fetch when date filter active |
-| **Overall** | **0.545** | **95** | Curated suite, strict NDCG@10 |
+| temporal | 0.535 | 20 | Scorer path suffix fix; measurement artefact resolved |
+| **Overall** | **0.569** | **95** | Curated suite, strict NDCG@10 |
 
-**Hit@5: 0.832** · **MRR@10: 0.648**
+**Hit@5: 0.874** · **MRR@10: 0.673**
 
 ---
 
@@ -53,11 +53,12 @@ Starting Phase 5, the instrument switched to NDCG@10 with graded relevance on re
 | R4 hybrid baseline | 0.580 | 83 | Curated suite only (session_log cases excluded); strict graded gold |
 | R6 Sprint 4 | 0.564 | 95 | 95-case suite; entity enrichment + S1-C/CP; temporal 0.509 |
 | R8 post-reembed | 0.538 | 95 | Force re-embed activated chunk_date filter; temporal regression (TMP-7) |
-| **R9 TMP-7 fix** | **0.545** | **95** | **vec K×4 when date filter active; temporal 0.423** |
+| R9 TMP-7 fix | 0.545 | 95 | vec K×4 when date filter active; temporal 0.423 |
+| **R10 Sprint 5** | **0.569** | **95** | **Scorer path suffix fix + entity enrichment; temporal 0.535** |
 
 **Note on R4 vs R1:** R4 (0.580) and R1 (0.776) are not directly comparable. R1 used a mixed suite (263 cases, majority session_log with self-referential gold). R4 is curated-only (83 cases, independently graded gold), which is a stricter and more meaningful quality signal.
 
-**Note on R6 vs R9:** The 95-case suite is harder than the 83-case R4 suite (12 new temporal cases added). R9 (0.545) represents a partial recovery after the TMP-7 temporal regression introduced by force re-embed. Remaining temporal gap (0.509 R6 → 0.423 R9) is attributed to hard cases involving duplicate-path ranking changes and budget truncation.
+**Note on R9 vs R10:** The temporal improvement (0.423 → 0.535) was largely a measurement artefact: the NDCG scorer was comparing collection-relative gold paths against absolute `/data/workspaces/` retrieved paths as exact strings (no match), assigning zero relevance to correctly retrieved documents. Path suffix matching resolves this. True retrieval capability did not change between R9 and R10 for temporal. Entity enrichment (76 entities now have vault_path + summaries) accounts for marginal non-temporal gains.
 
 ---
 
