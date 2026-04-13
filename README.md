@@ -1,8 +1,8 @@
-# Agentic Context Mesh
+# Kairix — Agentic Context Mesh
 
 Private, on-infrastructure contextual retrieval for human-agent teams. Your knowledge stays on your servers. Your agents and teammates query the same indexed knowledge base.
 
-**NDCG@10 0.5569** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.84**. Temporal date-filtered retrieval (Sprint 3) raised temporal NDCG from 0.37 to 0.38; procedural path boost raised how-to/runbook NDCG from 0.39 to 0.56.
+**NDCG@10 0.5686** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.874** · **MRR@10 0.673**.
 
 ---
 
@@ -16,13 +16,13 @@ Most AI memory solutions compound this by sending your knowledge to a third-part
 2. **Retrieval quality** — generic RAG without entity awareness, temporal reasoning, or domain-specific patterns produces mediocre results on knowledge that matters
 3. **Team coherence** — when agents and humans draw from different sources, shared context breaks down
 
-Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval layer that both human team members and AI agents query against the same indexed knowledge base. Every query compounds the shared understanding. **Your data never leaves your servers.**
+Kairix is the alternative: a private, on-infrastructure retrieval layer that both human team members and AI agents query against the same indexed knowledge base. Every query compounds the shared understanding. **Your data never leaves your servers.**
 
 ---
 
 ## How it works
 
-A skilled professional should be able to walk onto any job already knowing it — the history, the plan, the outstanding items. Agentic Context Mesh is the infrastructure for that: a structured knowledge base that agents can query before every session to arrive ready to work.
+A skilled professional should be able to walk onto any job already knowing it — the history, the plan, the outstanding items. Kairix is the infrastructure for that: a structured knowledge base that agents can query before every session to arrive ready to work.
 
 The design mirrors how experienced professionals think about knowledge:
 
@@ -34,16 +34,16 @@ The design mirrors how experienced professionals think about knowledge:
 
 ## How it differs from alternatives
 
-| | Agentic Context Mesh | Notion AI / Confluence AI | Mem.ai / Rewind | Raw LLM context |
+| | Kairix | Notion AI / Confluence AI | Mem.ai / Rewind | Raw LLM context |
 |---|---|---|---|---|
 | **Data residency** | Your infrastructure | Vendor cloud | Vendor cloud | API provider |
 | **Search approach** | Hybrid BM25 + vector + entity | Full-text only | Vector only | None — full dump |
 | **Entity awareness** | Graph with alias resolution | No | No | No |
 | **Token efficiency** | Budget-managed retrieval | Unranked export | Unranked export | Unbounded |
 | **Temporal reasoning** | Date-aware chunking + routing | No | Limited | No |
-| **NDCG@10** | 0.58 curated / 0.94 session | Not published | Not published | N/A |
+| **NDCG@10** | 0.5686 curated real-world | Not published | Not published | N/A |
 
-**On token efficiency:** commercial alternatives typically export full page content and rely on the LLM to filter relevance — you pay for every token regardless of utility. Agentic Context Mesh runs ranked retrieval with a configurable token budget (`--budget`), returning only the highest-relevance chunks within that budget. L0/L1 tiered loading (summary-first, full text on demand) further reduces context consumption.
+**On token efficiency:** commercial alternatives typically export full page content and rely on the LLM to filter relevance — you pay for every token regardless of utility. Kairix runs ranked retrieval with a configurable token budget (`--budget`), returning only the highest-relevance chunks within that budget. L0/L1 tiered loading (summary-first, full text on demand) further reduces context consumption.
 
 ---
 
@@ -61,20 +61,20 @@ The retrieval design draws on several well-validated approaches:
 ## Architecture
 
 ```
-mnemosyne search "query" --agent <name>
+kairix search "query" --agent <name>
        │
        ├─ BM25 search (QMD FTS)        ─┐
        ├─ Vector search (sqlite-vec)    ─┤ concurrent
        │                                │
        └─ RRF fusion ◄──────────────────┘
               │
-              ├─ Entity boost (entities.db)
+              ├─ Entity boost (Neo4j / entities.db)
               ├─ Token budget cap
               └─ SearchResult → agent context
 ```
 
 ```
-mnemosyne brief <agent>
+kairix brief <agent>
        │
        ├─ Memory logs (last 7 days)
        ├─ Entity stubs (entity collection)
@@ -82,13 +82,20 @@ mnemosyne brief <agent>
        ├─ Hybrid search (top queries)
        └─ GPT-4o-mini synthesis → briefing.md
 
-mnemosyne classify "<content>"
+kairix classify "<content>"
        │
        ├─ Rule-based classifier (≥90% coverage)
        └─ GPT-4o-mini fallback → vault destination
+
+kairix vault crawl --vault-root /path/to/vault
+       │
+       ├─ Scans PARA structure → OrganisationNode, PersonNode, OutcomeNode
+       ├─ Extracts WORKS_AT edges from frontmatter
+       ├─ Extracts MENTIONS edges from [[wikilinks]]
+       └─ Upserts into Neo4j (idempotent)
 ```
 
-All search and entity data is stored in SQLite — no separate vector database, no external services beyond Azure OpenAI for embedding and synthesis calls.
+All search and entity data is stored in SQLite — no separate vector database. Neo4j Community Edition is used for the entity graph (optional; degrades gracefully when unavailable).
 
 ---
 
@@ -96,16 +103,19 @@ All search and entity data is stored in SQLite — no separate vector database, 
 
 | Module | Status | What it delivers |
 |---|---|---|
-| `mnemosyne embed` | ✅ Shipped | Azure OpenAI `text-embedding-3-large` → sqlite-vec (1536-dim) |
-| `mnemosyne search` | ✅ Shipped | Hybrid BM25 + vector via RRF, token budget management |
-| `mnemosyne entity` | ✅ Shipped | Entity graph, alias resolution, entity boost, multi-hop query planning |
-| `mnemosyne temporal` | ✅ Shipped | Temporal query rewriting + date-filtered retrieval (TMP-2); `chunk_date` extraction at embed time (TMP-1/5b) |
-| `mnemosyne summarise` | ✅ Shipped | L0/L1 tiered context loading |
-| `mnemosyne wikilinks` | ✅ Shipped | Wikilink injection + entity resolver |
-| `mnemosyne brief` | ✅ Shipped | Session briefing synthesis via GPT-4o-mini |
-| `mnemosyne classify` | ✅ Shipped | Auto-classification of memory writes to vault destinations |
-| `mnemosyne benchmark` | ✅ Shipped | YAML-driven benchmark runner, NDCG@10 scoring, phase gates |
-| `mnemosyne contradict` | 🔲 Planned | Contradiction detection on new knowledge writes |
+| `kairix embed` | ✅ Shipped | Azure OpenAI `text-embedding-3-large` → sqlite-vec (1536-dim) |
+| `kairix search` | ✅ Shipped | Hybrid BM25 + vector via RRF, token budget management |
+| `kairix entity` | ✅ Shipped | Entity graph, alias resolution, entity boost, multi-hop query planning |
+| `kairix temporal` | ✅ Shipped | Temporal query rewriting + date-filtered retrieval (TMP-2); `chunk_date` extraction at embed time (TMP-1/5b) |
+| `kairix summarise` | ✅ Shipped | L0/L1 tiered context loading |
+| `kairix wikilinks` | ✅ Shipped | Wikilink injection + entity resolver |
+| `kairix brief` | ✅ Shipped | Session briefing synthesis via GPT-4o-mini |
+| `kairix classify` | ✅ Shipped | Auto-classification of memory writes to vault destinations |
+| `kairix benchmark` | ✅ Shipped | YAML-driven benchmark runner, NDCG@10/Hit@5/MRR@10 scoring |
+| `kairix contradict` | ✅ Shipped | Contradiction detection on new knowledge writes |
+| `kairix vault` | ✅ Shipped | Vault crawler → Neo4j entity graph; vault health check |
+| `kairix mcp` | ✅ Shipped | MCP server exposing search/entity/prep/timeline to any MCP-compatible agent |
+| `kairix curator` | ✅ Shipped | Entity health monitoring and enrichment (CA-1) |
 
 See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md) for design detail.
 
@@ -115,7 +125,7 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 
 **Suite:** 83 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~3,200 documents.
 
-### Current results (R5 — 2026-04-10)
+### Current results (R10 — 2026-04-10)
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
@@ -123,9 +133,9 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 | multi_hop | 0.549 | 10 | QueryPlanner, entity-aware sub-query decomposition |
 | procedural | 0.564 | 30 | Path boost for how-to/runbook queries |
 | semantic | 0.519 | 13 | Vector search carrying semantic load |
-| temporal | 0.382 | 8 | Date-filtered retrieval (TMP-2) |
-| keyword | 0.439 | 8 | BM25 baseline; keyword regression under investigation |
-| **Overall** | **0.5569** | **83** | |
+| temporal | 0.535 | 8 | Date-filtered retrieval (TMP-2) |
+| keyword | 0.439 | 8 | BM25 baseline |
+| **Overall** | **0.5686** | **83** | Hit@5 0.874, MRR@10 0.673 |
 
 Production RAG systems on heterogeneous personal knowledge typically score 0.45–0.65 on strict curated suites.
 
@@ -136,11 +146,10 @@ Production RAG systems on heterogeneous personal knowledge typically score 0.45�
 | BM25 baseline | 0.389 | 43 | Pre-vector baseline; synthetic suite |
 | Hybrid Phase 4 | 0.6658 | 43 | First hybrid; synthetic suite |
 | Phase 5 real-world | 0.3203 | 134 | First real-world suite; instrument issues |
-| Phase 7-A recalibrated | 0.7690 | 252 | After 768→1536 dim correction |
-| Phase 7-B 1536-dim | 0.7545 | 252 | Confirmed 1536-dim; keyword +0.114 |
-| O-1 entity-graph-planner | 0.7541 | 245 | multi_hop +0.035 from QueryPlanner |
+| Phase 7-B 1536-dim | 0.7545 | 252 | Confirmed 1536-dim |
 | R1 post-refactor | 0.7756 | 263 | Full gold rebuild |
-| **Phase 8-A procedural boost** | **0.554 procedural** | — | Path-weighted re-rank; target ≥ 0.55 met |
+| R9 procedural boost | 0.5449 | 83 | Real-world curated suite |
+| **R10** | **0.5686** | **83** | NDCG/Hit@5/MRR alignment; temporal +0.015 |
 
 ---
 
@@ -153,16 +162,20 @@ Production RAG systems on heterogeneous personal knowledge typically score 0.45�
   - `text-embedding-3-large` deployment (1536-dim)
   - `gpt-4o-mini` deployment (briefing, classify, benchmark judging)
 - **Azure Key Vault** (recommended) — or export secrets as environment variables directly
+- **Neo4j Community Edition** (optional) — for entity graph; kairix degrades gracefully when unavailable
 
 See [OPERATIONS.md](OPERATIONS.md) for full infrastructure setup, cron configuration, and first-run sequence.
 
 ## Install
 
 ```bash
-git clone https://github.com/quanyeomans/agentic-context-mesh /opt/mnemosyne
-cd /opt/mnemosyne
+git clone https://github.com/quanyeomans/agentic-context-mesh /opt/kairix
+cd /opt/kairix
 python3 -m venv .venv
 .venv/bin/pip install -e .
+
+# Optional: MCP server support
+.venv/bin/pip install -e '.[agents]'
 ```
 
 Copy and fill in your environment configuration:
@@ -182,64 +195,95 @@ Then follow the [OPERATIONS.md first-run sequence](OPERATIONS.md#first-run-seque
 ### Embed
 
 ```bash
-mnemosyne embed                  # incremental — pending docs only
-mnemosyne embed --force          # full re-embed
-mnemosyne embed --limit 50       # test with first 50 chunks
-mnemosyne embed --changed        # re-embed recently modified files
+kairix embed                  # incremental — pending docs only
+kairix embed --force          # full re-embed
+kairix embed --limit 50       # test with first 50 chunks
+kairix embed --changed        # re-embed recently modified files
 ```
 
 ### Search
 
 ```bash
-mnemosyne search "what are our engineering patterns" --agent builder
-mnemosyne search "decisions made last week" --agent shape --budget 3000
+kairix search "what are our engineering patterns" --agent builder
+kairix search "decisions made last week" --agent shape --budget 3000
 ```
 
 ### Entity graph
 
 ```bash
-mnemosyne entity list
-mnemosyne entity lookup "alice chen"
-mnemosyne entity write --name "Alice Chen" --type person
-mnemosyne entity extract --collection <your-entities-collection>
+kairix entity list
+kairix entity lookup "alice chen"
+kairix entity write --name "Alice Chen" --type person
+kairix entity extract --collection <your-entities-collection>
+```
+
+### Vault crawler (Neo4j)
+
+```bash
+kairix vault crawl --vault-root /path/to/vault        # populate Neo4j from PARA structure
+kairix vault crawl --vault-root /path/to/vault --dry-run  # preview without writing
+kairix vault health                                    # entity graph health check
+kairix vault health --json                             # machine-readable output
 ```
 
 ### Session briefing
 
 ```bash
-mnemosyne brief builder           # synthesise briefing for builder agent
-mnemosyne brief shape --budget 5000
+kairix brief builder           # synthesise briefing for builder agent
+kairix brief shape --budget 5000
 ```
 
 ### Auto-classification
 
 ```bash
-mnemosyne classify "We decided to use PostgreSQL for the jobs table"
+kairix classify "We decided to use PostgreSQL for the jobs table"
 # → type: decision, destination: <vault-root>/agent-knowledge/builder/decisions.md, confidence: 0.95
 
-mnemosyne classify "Use monkeypatching for Azure API calls in unit tests"
+kairix classify "Use monkeypatching for Azure API calls in unit tests"
 # → type: pattern, destination: <vault-root>/agent-knowledge/builder/patterns.md, confidence: 0.92
 ```
 
 ### Temporal
 
 ```bash
-mnemosyne temporal index          # index date-tagged chunks
-mnemosyne temporal query "decisions last week"
+kairix temporal index          # index date-tagged chunks
+kairix temporal query "decisions last week"
 ```
 
 ### Wikilinks
 
 ```bash
-mnemosyne wikilinks inject --vault /path/to/vault
-mnemosyne wikilinks audit
+kairix wikilinks inject --vault /path/to/vault
+kairix wikilinks audit
+```
+
+### Contradiction detection
+
+```bash
+kairix contradict check "We use PostgreSQL for all persistence" --top-k 5
+kairix contradict check "$(cat new-decision.md)" --threshold 0.7 --format json
+```
+
+### Curator health
+
+```bash
+kairix curator health          # entity graph health (Neo4j primary, entities.db fallback)
+kairix curator health --json
+```
+
+### MCP server
+
+```bash
+# Requires: pip install 'kairix[agents]'
+kairix mcp serve                            # stdio transport (Claude Desktop)
+kairix mcp serve --transport sse --port 8080  # SSE transport (HTTP)
 ```
 
 ### Benchmark
 
 ```bash
-mnemosyne benchmark run --suite suites/example.yaml --system hybrid --agent shape
-mnemosyne benchmark compare benchmark-results/run-2026-04-07.json
+kairix benchmark run --suite suites/example.yaml --system hybrid --agent shape
+kairix benchmark compare benchmark-results/run-2026-04-07.json
 ```
 
 ---
@@ -260,10 +304,10 @@ Tested against qmd@1.1.2. The embed module validates schema before writing. See 
 ```bash
 .venv/bin/pytest tests/           # unit + integration suite
 .venv/bin/pytest tests/embed/     # embed module only
-.venv/bin/python -m ruff check mnemosyne/ tests/
+.venv/bin/ruff check kairix/ tests/
 ```
 
-Coverage: 80% (unit + integration). See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, architecture, and PR process.
+Coverage: 82% (unit + integration). See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, architecture, and PR process.
 
 ---
 
@@ -275,7 +319,7 @@ See [PRIOR_ART.md](PRIOR_ART.md). Key inspirations: [QMD](https://github.com/tob
 
 ## Data Residency
 
-Vault content is sent to Azure OpenAI for embedding and synthesis only. No data is stored externally. All vectors and entity data live in SQLite on your own infrastructure. See [EVALUATION.md](EVALUATION.md) and [SECURITY.md](SECURITY.md) for detail.
+Vault content is sent to Azure OpenAI for embedding and synthesis only. No data is stored externally. All vectors and entity data live in SQLite and Neo4j on your own infrastructure. See [EVALUATION.md](EVALUATION.md) and [SECURITY.md](SECURITY.md) for detail.
 
 ---
 
