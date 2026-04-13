@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+agents = [
+    # MCP server (Model Context Protocol — exposes kairix tools to agents)
+    "mcp>=1.0",
+]
 dev = [
     # Test runner
     "pytest>=8.0",

@@ -21,7 +21,7 @@
 
 *Required if this PR changes search, embed, entity, or temporal logic.*
 
-- [ ] Benchmark run completed: `mnemosyne benchmark run --suite suites/<suite>.yaml`
+- [ ] Benchmark run completed: `kairix benchmark run --suite suites/<suite>.yaml`
 - [ ] NDCG@10 result: **__.__** (baseline: 0.7756)
 - [ ] No category regressed by more than 0.02
 
@@ -36,7 +36,7 @@
 
 ## Checklist
 
-- [ ] `ruff check mnemosyne/ tests/` — zero errors
-- [ ] `mypy mnemosyne/` — zero errors (for changed modules)
+- [ ] `ruff check kairix/ tests/` — zero errors
+- [ ] `mypy kairix/` — zero errors (for changed modules)
 - [ ] Coverage ≥ 80% maintained
 - [ ] Documentation updated (if behaviour or CLI surface changed)

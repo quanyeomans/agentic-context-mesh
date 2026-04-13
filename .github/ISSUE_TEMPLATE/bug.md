@@ -24,7 +24,7 @@ labels: bug
 
 ## Environment
 
-- Mnemosyne version: `mnemosyne --version`
+- Kairix version: `kairix --version`
 - Python version: `python3 --version`
 - QMD version: `qmd --version`
 - sqlite-vec loaded: yes / no
