@@ -5,7 +5,7 @@ Tests cover:
   - Successful hybrid search (BM25 + vector)
   - Fallback: vector fails → BM25-only results returned
   - Parallel dispatch via ThreadPoolExecutor
-  - KEYWORD intent skips vector search
+  - KEYWORD intent runs full hybrid (BM25 + vector) like SEMANTIC
   - Token budget is applied and limits results
   - Search log file is written
   - CLI formats output correctly
@@ -185,18 +185,22 @@ def test_search_fuses_both_lists() -> None:
 
 
 @pytest.mark.unit
-def test_search_keyword_intent_skips_vector() -> None:
-    """KEYWORD intent skips vector search dispatch."""
+def test_search_keyword_intent_runs_hybrid() -> None:
+    """KEYWORD intent runs full hybrid (BM25 + vector), not BM25-only.
+
+    Previously KEYWORD skipped vector search, which degraded NDCG@10 to 0.439.
+    Now it runs the same BM25+vector RRF path as SEMANTIC and PROCEDURAL.
+    """
     with (
         patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
-        patch("kairix.search.hybrid._run_vector_search") as mock_vec,
+        patch("kairix.search.hybrid._run_vector_search", return_value=[_vec_result()]) as mock_vec,
         patch("kairix.search.hybrid._log_search_event"),
         patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent
 
     assert result.intent == QueryIntent.KEYWORD
-    mock_vec.assert_not_called()
+    mock_vec.assert_called_once()  # vector IS dispatched for keyword queries
 
 
 @pytest.mark.unit
@@ -340,45 +344,46 @@ def test_cli_agent_flag_passed_to_search(capsys: pytest.CaptureFixture) -> None:
 
 
 # ---------------------------------------------------------------------------
-# keyword BM25→vector fallback
+# keyword hybrid dispatch
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_search_keyword_fallback_to_vector_when_bm25_empty() -> None:
-    """KEYWORD intent falls back to vector when BM25 returns empty."""
-    vec_data = [_vec_result("/vault/keyword-fallback.md")]
+def test_search_keyword_uses_both_bm25_and_vector() -> None:
+    """KEYWORD intent now runs hybrid: both BM25 and vector contribute to RRF."""
+    bm25_data = [_bm25_result("/vault/schema-error.md")]
+    vec_data = [_vec_result("/vault/schema-overview.md")]
+
+    with (
+        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+    ):
+        result = search("SchemaVersionError")  # KEYWORD intent
+
+    assert result.intent == QueryIntent.KEYWORD
+    # Both sources contribute — fused results should include both paths
+    paths = [r.result.path for r in result.results]
+    assert "/vault/schema-error.md" in paths
+    assert "/vault/schema-overview.md" in paths
+
+
+@pytest.mark.unit
+def test_search_keyword_vec_only_when_bm25_empty() -> None:
+    """When BM25 returns nothing for a keyword query, vector results are still used."""
+    vec_data = [_vec_result("/vault/keyword-vec.md")]
 
     with (
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data) as mock_vec,
+        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
         patch("kairix.search.hybrid._log_search_event"),
         patch("kairix.search.hybrid._open_entities_db", return_value=None),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent — BM25 returns nothing
 
     assert result.intent == QueryIntent.KEYWORD
-    assert result.fallback_used is True
     assert len(result.results) == 1
-    # Vector was called (fallback triggered)
-    mock_vec.assert_called_once()
-
-
-@pytest.mark.unit
-def test_search_keyword_no_fallback_when_bm25_has_results() -> None:
-    """KEYWORD intent does NOT fall back to vector when BM25 returns results."""
-    bm25_data = [_bm25_result("/vault/kw.md")]
-
-    with (
-        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("kairix.search.hybrid._run_vector_search") as mock_vec,
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
-    ):
-        result = search("SchemaVersionError")  # KEYWORD intent — BM25 has results
-
-    assert result.fallback_used is False
-    mock_vec.assert_not_called()
 
 
 @pytest.mark.unit

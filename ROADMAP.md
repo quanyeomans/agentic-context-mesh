@@ -44,7 +44,7 @@ The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rat
 | Local/offline embedding | 🔲 Planned | v1.0.0 |
 | REST API server mode | 🔲 Planned | v1.0.0 |
 
-**Benchmark category breakdown (R9, 95-case suite, NDCG@10):**
+**Benchmark category breakdown (R10, 83-case suite, NDCG@10):**
 
 | Category | NDCG@10 | Notes |
 |---|---|---|
@@ -52,27 +52,56 @@ The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rat
 | multi_hop | 0.549 | QueryPlanner functional |
 | procedural | 0.564 | Path boost active |
 | semantic | 0.519 | Hybrid vector load |
-| keyword | 0.439 | BM25 baseline |
-| temporal | 0.5354 | Scorer path suffix fix; measurement artefact resolved |
-| **Overall** | **0.5686** | Curated suite, strict NDCG@10 |
+| keyword | 0.439 | Hybrid fix shipped (R11 expected improvement) |
+| temporal | 0.535 | Date-filtered retrieval (TMP-2) |
+| **Overall** | **0.5686** | Hit@5 0.874, MRR@10 0.673 |
 
 ---
 
-## v0.9.0 — Contradiction detection + entity enrichment
+## v0.9.0 — Retrieval quality uplift + keyword fix
 
-**Contradiction detection:**
-- [ ] On new memory write: compare against existing knowledge for direct contradictions
-- [ ] Flag conflicts rather than silently overwriting — human-agent teams need to know when the knowledge base disagrees with itself
-- [ ] CLI: `kairix contradict check "<new content>"` → reports conflicting documents + confidence
+**Keyword hybrid fix (shipped in v0.8.1):**
+- [x] KEYWORD intent now runs full BM25 + vector hybrid (was BM25-only)
+- [x] Root cause: skip_vector=True for KEYWORD halved RRF scores and triggered serial fallback
+- Expected: keyword NDCG ≥ 0.55 in R11 (was 0.439 in R10)
 
-**Entity graph enrichment:**
-- [ ] Extended stub schema — `industry`, `geography`, `tier`, `stakeholder_personas` for organisations; `org`, `role`, `interests`, `last_interaction` for persons
-- [ ] Resource cross-referencing — add `related-entities:` frontmatter to research documents for entity traversal
-- [ ] Curator enrichment pipeline — auto-populate missing summaries and vault paths from indexed content
+**Entity graph vault_path population:**
+- [ ] Run `kairix vault crawl` on TC vault → populate Neo4j org/person nodes with vault_path
+- [ ] Verify `kairix vault health` reports ok: true (orgs_missing_vault_path = 0)
+- [ ] Re-run R11 benchmark — hypothesis: entity NDCG improves as entity boost resolves correctly
+- [ ] Target: entity NDCG ≥ 0.75 maintained; multi_hop NDCG ≥ 0.60
 
-**Good first issues for contributors:** entity mining script, stub quality validator, contradiction detection prototype.
+**Entity summary synthesis:**
+- [ ] Populate `summary` field on Neo4j nodes from vault stub body text
+- [ ] Target: summary coverage ≥ 80% (per SLO.md)
+
+**Contradiction detection (shipped in v0.8.0):**
+- [x] `kairix contradict check "<new content>"` — hybrid search + LLM conflict detection
+- [x] Configurable threshold and top-k, JSON output
 
 ---
+
+## v0.10.0 — Observability + SLO instrumentation
+
+**Latency tracking:**
+- [ ] Aggregate `SearchResult.latency_ms` into a rolling P50/P95 log in `KAIRIX_SEARCH_LOG`
+- [ ] `kairix search stats` — display P50/P95/P99 from last N queries
+- [ ] Alert threshold: P95 > 2,000ms logs a WARNING to the embed log
+
+**Vault health time series:**
+- [ ] `kairix vault health` writes a JSON snapshot to `KAIRIX_DATA_DIR/health-history.jsonl`
+- [ ] `kairix vault health --trend` — display deltas vs last snapshot (entity count growth, missing vault_path change)
+
+**Benchmark CI gate:**
+- [ ] `kairix benchmark run --suite suites/example.yaml` runs in CI on every PR touching search/entity/temporal/embed
+- [ ] Hard floor per category (see SLO.md §1) blocks merge when breached
+
+**Agent feedback loop (telemetry opt-in):**
+- [ ] `search_outcome` event field in `KAIRIX_SEARCH_LOG` — agents can emit useful/not_useful/no_results
+- [ ] `kairix search feedback` CLI for interactive sessions
+- [ ] Correlate NDCG@10 against feedback rate to validate benchmark relevance
+
+See [SLO.md](SLO.md) for full target definitions and measurement methods.
 
 ---
 

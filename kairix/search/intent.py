@@ -5,11 +5,12 @@ Classifies a query string into one of five intent types. Pure function — no I/
 no external dependencies. Rule-based with defined priority order.
 
 Intent types and their dispatch in hybrid.py:
-  KEYWORD    → BM25 only (proper nouns, error codes, file paths, version strings)
-  TEMPORAL   → BM25 with date-string awareness (Phase 2: temporal module)
+  KEYWORD    → BM25 + vector via RRF (proper nouns, error codes, file paths, version strings)
+  TEMPORAL   → BM25 + vector with date-string rewriting and date-filtered path set (TMP-2)
   ENTITY     → entity graph first, then hybrid (Phase 1b+)
-  PROCEDURAL → BM25 on procedural collections only
+  PROCEDURAL → BM25 + vector via RRF with procedural path boost
   SEMANTIC   → BM25 + vector via RRF (default for abstract/conceptual queries)
+  MULTI_HOP  → QueryPlanner decomposes into sub-queries, each runs hybrid
 
 Priority order (first match wins):
   TEMPORAL > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC

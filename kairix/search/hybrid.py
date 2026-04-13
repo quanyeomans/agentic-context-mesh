@@ -97,7 +97,7 @@ class SearchResult:
     total_tokens: int = 0
     latency_ms: float = 0.0
     vec_failed: bool = False
-    fallback_used: bool = False  # True when KEYWORD/PROCEDURAL fell back to vector
+    fallback_used: bool = False  # True when BM25 returned 0 and vector was the sole source
     error: str = ""
 
 
@@ -347,22 +347,22 @@ def search(
             logger.warning("hybrid: MULTI_HOP planner failed (%s) — falling back to SEMANTIC", _mh_e)
             intent = QueryIntent.SEMANTIC
 
-    # For KEYWORD and PROCEDURAL queries, skip vector search
-    skip_vector = intent in (QueryIntent.KEYWORD,)  # PROCEDURAL now runs hybrid like SEMANTIC
+    # All intents run BM25 + vector in parallel via RRF.
+    # Previously KEYWORD ran BM25-only, which degraded NDCG@10 (0.439) because:
+    # (a) BM25-only misses semantically-relevant docs for proper nouns/codes
+    # (b) the vector-only fallback when BM25 returned 0 results halved RRF scores
+    # Running hybrid gives KEYWORD queries both BM25 exact-match strength and
+    # vector semantic coverage — the same approach that lifted PROCEDURAL from 0.389→0.564.
 
-    # Dispatch BM25 and (optionally) vector search in parallel
+    # Dispatch BM25 and vector search in parallel for all intents
     # For TEMPORAL intent, active_query is the rewritten (date-expanded) query
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures: dict[str, Future] = {}
 
-        # Always run BM25
         futures["bm25"] = executor.submit(
             bm25_search, active_query, collections, BM25_DEFAULT_LIMIT, None, date_filter_paths
         )
-
-        # Run vector search unless intent says skip
-        if not skip_vector:
-            futures["vec"] = executor.submit(_run_vector_search, active_query, collections, date_filter_paths)
+        futures["vec"] = executor.submit(_run_vector_search, active_query, collections, date_filter_paths)
 
         # Collect results
         for name, future in futures.items():
@@ -377,22 +377,9 @@ def search(
                 if name == "vec":
                     vec_failed = True
 
-    if not vec_results and not skip_vector:
+    if not vec_results:
         vec_failed = True
         logger.info("hybrid: vector search returned no results, using BM25 only (query=%r)", query[:60])
-
-    # KEYWORD/PROCEDURAL fallback: if BM25 returned nothing, retry with vector search
-    if not bm25_results and skip_vector:
-        logger.info("hybrid: %s BM25 returned 0 results — falling back to vector (query=%r)", intent.value, query[:60])
-        try:
-            vec_results = _run_vector_search(active_query, collections, date_filter_paths)
-            fallback_used = True
-            if not vec_results:
-                vec_failed = True
-                logger.warning("hybrid: keyword vector fallback also returned 0 results (query=%r)", query[:60])
-        except Exception as e:
-            logger.warning("hybrid: keyword vector fallback failed — %s", e)
-            vec_failed = True
 
     # Fuse results
     fused: list[FusedResult] = rrf(bm25_results, vec_results)
