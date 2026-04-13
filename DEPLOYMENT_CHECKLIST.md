@@ -34,7 +34,7 @@ az keyvault secret list --vault-name <vault-name> --query "[].name" -o tsv
 
 - [ ] Repository cloned to `/data/tools/qmd-azure-embed` (or your chosen path)
 - [ ] Virtualenv created: `.venv/bin/python --version` → 3.10+
-- [ ] Package installed: `.venv/bin/mnemosyne --help` prints usage without error
+- [ ] Package installed: `.venv/bin/kairix --help` prints usage without error
 - [ ] Infra directories exist and are writable:
   - [ ] `/data/mnemosyne/briefing/`
   - [ ] `/data/mnemosyne/logs/` (or wherever embed log goes)
@@ -62,7 +62,7 @@ echo "Key length: ${#AZURE_OPENAI_API_KEY}"
 Mnemosyne validates the QMD schema on startup. Run a quick embed dry-run:
 
 ```bash
-.venv/bin/mnemosyne embed --limit 1
+.venv/bin/kairix embed --limit 1
 ```
 
 - [ ] No `SchemaVersionError` — confirms `content.doc` column present
@@ -79,7 +79,7 @@ Mnemosyne validates the QMD schema on startup. Run a quick embed dry-run:
 ## 7. Search Smoke Test
 
 ```bash
-.venv/bin/mnemosyne search "test query" --agent builder
+.venv/bin/kairix search "test query" --agent builder
 ```
 
 - [ ] Returns results (not empty)
@@ -88,7 +88,7 @@ Mnemosyne validates the QMD schema on startup. Run a quick embed dry-run:
 ## 8. Entity Graph
 
 ```bash
-.venv/bin/mnemosyne entity list | head -5
+.venv/bin/kairix entity list | head -5
 ```
 
 - [ ] Returns entity records (not empty, assuming entity stubs exist in vault)
@@ -98,11 +98,11 @@ Mnemosyne validates the QMD schema on startup. Run a quick embed dry-run:
 
 - [ ] Hourly embed cron added to `crontab -l`:
   ```
-  15 * * * * source ... && export AZURE_... && cd /data/tools/qmd-azure-embed && .venv/bin/mnemosyne embed
+  15 * * * * source ... && export AZURE_... && cd /data/tools/qmd-azure-embed && .venv/bin/kairix embed
   ```
 - [ ] Nightly entity seed cron added:
   ```
-  0 17 * * * source ... && export AZURE_... && cd /data/tools/qmd-azure-embed && .venv/bin/mnemosyne entity extract --changed && .venv/bin/python scripts/seed-entity-relations.py
+  0 17 * * * source ... && export AZURE_... && cd /data/tools/qmd-azure-embed && .venv/bin/kairix entity extract --changed && .venv/bin/python scripts/seed-entity-relations.py
   ```
 - [ ] `crontab -l` shows both entries with no syntax errors
 

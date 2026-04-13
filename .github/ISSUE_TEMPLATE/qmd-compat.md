@@ -29,7 +29,7 @@ labels: compatibility, qmd
 ## Steps to verify
 
 1. Run: `pytest tests/ -k "schema" -v`
-2. Run: `mnemosyne embed --limit 5` against new QMD version
-3. Run: `mnemosyne search "test query" --agent <agent>` — verify results returned
+2. Run: `kairix embed --limit 5` against new QMD version
+3. Run: `kairix search "test query" --agent <agent>` — verify results returned
 
 See [QMD_COMPAT.md](../../QMD_COMPAT.md) for the full compatibility verification procedure.
