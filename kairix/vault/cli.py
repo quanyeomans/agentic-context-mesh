@@ -1,0 +1,128 @@
+"""
+kairix.vault.cli — CLI entry point for vault operations.
+
+Usage:
+    kairix vault crawl [--vault-root PATH] [--dry-run] [--verbose]
+    kairix vault health [--vault-root PATH] [--json]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="kairix vault",
+        description="Vault structure operations: crawl entities into Neo4j, health check",
+    )
+    sub = parser.add_subparsers(dest="subcommand")
+
+    # ── crawl ────────────────────────────────────────────────────────────────
+    crawl_p = sub.add_parser("crawl", help="Crawl vault structure → upsert entities into Neo4j")
+    crawl_p.add_argument("--vault-root", default=None, help="Vault root directory (default: KAIRIX_VAULT_ROOT env var)")
+    crawl_p.add_argument("--dry-run", action="store_true", help="Print what would be written without writing")
+    crawl_p.add_argument("--verbose", action="store_true", help="Log each entity discovered")
+
+    # ── health ───────────────────────────────────────────────────────────────
+    health_p = sub.add_parser("health", help="Vault and entity graph health summary")
+    health_p.add_argument("--vault-root", default=None, help="Vault root directory")
+    health_p.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args(argv)
+
+    if args.subcommand == "crawl":
+        _cmd_crawl(args)
+    elif args.subcommand == "health":
+        _cmd_health(args)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+def _resolve_vault_root(arg: str | None) -> str:
+    import os
+
+    if arg:
+        return arg
+    env = os.environ.get("KAIRIX_VAULT_ROOT")
+    if env:
+        return env
+    print("Error: --vault-root or KAIRIX_VAULT_ROOT required", file=sys.stderr)
+    sys.exit(1)
+
+
+def _cmd_crawl(args: argparse.Namespace) -> None:
+    import logging
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+
+    vault_root = _resolve_vault_root(args.vault_root)
+
+    from kairix.graph.client import get_client
+    from kairix.vault.crawler import crawl
+
+    neo4j_client = get_client()
+
+    if not neo4j_client.available and not args.dry_run:
+        print("Warning: Neo4j unavailable — running in dry-run mode", file=sys.stderr)
+        args.dry_run = True
+
+    report = crawl(vault_root=vault_root, neo4j_client=neo4j_client, dry_run=args.dry_run)
+
+    mode = "[DRY RUN] " if report.dry_run else ""
+    print(f"{mode}Vault crawl complete: {vault_root}")
+    print(f"  Organisations: {report.organisations_found} found", end="")
+    if not report.dry_run:
+        print(f", {report.organisations_upserted} upserted")
+    else:
+        print(" (dry run — not written)")
+    print(f"  Persons:       {report.persons_found} found", end="")
+    if not report.dry_run:
+        print(f", {report.persons_upserted} upserted")
+    else:
+        print(" (dry run — not written)")
+    print(f"  Outcomes:      {report.outcomes_found} found", end="")
+    if not report.dry_run:
+        print(f", {report.outcomes_upserted} upserted")
+    else:
+        print(" (dry run — not written)")
+    print(f"  Edges:         {report.edges_found} found", end="")
+    if not report.dry_run:
+        print(f", {report.edges_upserted} upserted")
+    else:
+        print(" (dry run — not written)")
+
+    if report.errors:
+        print(f"\n  Errors ({len(report.errors)}):")
+        for err in report.errors:
+            print(f"    - {err}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(0)
+
+
+def _cmd_health(args: argparse.Namespace) -> None:
+    from kairix.graph.client import get_client
+    from kairix.vault.health import run_vault_health
+
+    vault_root = args.vault_root  # optional for health check
+
+    neo4j_client = get_client()
+    report = run_vault_health(neo4j_client=neo4j_client, vault_root=vault_root)
+
+    if args.json_out:
+        import dataclasses
+
+        print(json.dumps(dataclasses.asdict(report), indent=2))
+    else:
+        from kairix.vault.health import format_health_text
+
+        print(format_health_text(report))
+
+    sys.exit(0 if report.ok else 1)

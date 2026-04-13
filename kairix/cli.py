@@ -3,18 +3,20 @@ kairix — contextual intelligence layer for QMD + Obsidian agent stacks.
 
 Subcommands:
   embed       Embed vault documents into QMD sqlite-vec (text-embedding-3-large)
-  search      Hybrid search: BM25 + vector via RRF (Phase 1)
-  entity      Entity graph: lookup, write, extract (Phase 1)
+  search      Hybrid search: BM25 + vector via RRF
+  entity      Entity graph: lookup, write, extract
   curator     Curator agent: entity health monitoring and enrichment (CA-1)
   contradict  Contradiction detection: check new content against vault knowledge
-  timeline    Temporal query rewriting + date-aware retrieval (Phase 2)
-  summarise   L0/L1 tiered context generation (Phase 2)
-  classify    Auto-classify memory writes (Phase 3)
-  brief       Session briefing synthesis (Phase 3)
-  benchmark   Run retrieval quality benchmark (Phase 5)
-  wikilinks   Inject [[wikilinks]] on first mention in agent-written vault files (ADR-M07)
+  vault       Vault operations: crawl entities into Neo4j, health check
+  mcp         MCP server: expose search/entity/prep/timeline as MCP tools
+  timeline    Temporal query rewriting + date-aware retrieval
+  summarise   L0/L1 tiered context generation
+  classify    Auto-classify memory writes
+  brief       Session briefing synthesis
+  benchmark   Run retrieval quality benchmark
+  wikilinks   Inject [[wikilinks]] on first mention in agent-written vault files
 
-See PRD.md for architecture, phase targets, and ADRs.
+See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
 
 import sys
@@ -81,6 +83,16 @@ def main() -> None:
         from kairix.contradict.cli import main as contradict_main
 
         contradict_main(sys.argv[2:])
+
+    elif cmd == "vault":
+        from kairix.vault.cli import main as vault_main
+
+        vault_main(sys.argv[2:])
+
+    elif cmd == "mcp":
+        from kairix.mcp.cli import main as mcp_main
+
+        mcp_main(sys.argv[2:])
 
     else:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)

@@ -1,13 +1,13 @@
 """
 kairix.curator.health — Entity graph health check (CA-1).
 
-Checks entities.db for quality and coverage issues:
+Primary path: queries Neo4j when a client is provided and available.
+Fallback path: checks entities.db for quality and coverage issues:
   - Entity count by type
   - Synthesis failures (entities with no summary)
   - Missing vault_path (entities not linked to canonical vault note)
   - Staleness (entities with no activity for > N days)
 
-Optionally queries Neo4j for node counts when a client is provided.
 Never raises — returns a HealthReport reflecting available data.
 """
 
@@ -148,19 +148,29 @@ def run_health_check(
         )
     ]
 
-    # ── Neo4j node counts ─────────────────────────────────────────────────────
+    # ── Neo4j node counts (primary) ───────────────────────────────────────────
+    # When Neo4j is available, use it as the authoritative entity source and
+    # overlay the counts into the report.  entities.db figures remain for
+    # deployments that haven't yet migrated to Neo4j-primary.
     neo4j_available = False
     neo4j_node_counts: dict[str, int] = {}
     if neo4j_client is not None:
         try:
             if neo4j_client.available:
-                rows = neo4j_client.cypher("MATCH (n) RETURN labels(n)[0] AS label, COUNT(*) AS cnt")
+                rows = neo4j_client.cypher(
+                    "MATCH (n) WHERE labels(n)[0] IN ['Organisation','Person','Outcome'] "
+                    "RETURN labels(n)[0] AS label, COUNT(*) AS cnt"
+                )
                 for r in rows:
                     label = r.get("label")
                     cnt = r.get("cnt")
                     if label is not None and cnt is not None:
                         neo4j_node_counts[str(label)] = int(cnt)
                 neo4j_available = True
+                # When Neo4j is available, overwrite the entities.db total so
+                # the report reflects the canonical graph rather than the stub DB.
+                total_entities = sum(neo4j_node_counts.values())
+                entities_by_type = {k.lower(): v for k, v in neo4j_node_counts.items()}
         except Exception as exc:
             logger.debug("Neo4j health check failed: %s", exc)
 
