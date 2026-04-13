@@ -4,21 +4,21 @@ Benchmark results for Mnemosyne hybrid search across phases of development.
 
 ---
 
-## Current Results — v0.8.0+ (R10, 2026-04-12)
+## Current Results — v0.8.1 (R13, 2026-04-13)
 
 **Suite:** 95 curated real-world cases across 6 query categories. Scored with NDCG@10 using graded relevance (0/1/2). Evaluated on a real-world personal knowledge base (~2,800 documents, 11,316 vectors at 1536-dim).
 
 | Category | NDCG@10 | Cases | Notes |
 |---|---|---|---|
-| entity | 0.733 | 14 | Entity graph + alias resolution; 76 entities with vault_path + summaries |
-| keyword | 0.488 | 8 | BM25 baseline |
-| multi_hop | 0.549 | 10 | QueryPlanner RRF merge |
-| procedural | 0.564 | 30 | Path-weighted re-rank |
-| semantic | 0.519 | 13 | Hybrid vector |
-| temporal | 0.535 | 20 | Scorer path suffix fix; measurement artefact resolved |
-| **Overall** | **0.569** | **95** | Curated suite, strict NDCG@10 |
+| entity | 0.811 | 14 | Entity graph + alias resolution; Neo4j vault crawler; refreshed gold |
+| keyword | 0.599 | 8 | Full BM25+vector hybrid (v0.8.1 fix, was 0.488) |
+| multi_hop | 0.536 | 10 | QueryPlanner RRF merge |
+| procedural | 0.588 | 30 | Path-weighted re-rank |
+| semantic | 0.504 | 13 | Hybrid vector |
+| temporal | 0.577 | 20 | Date-aware retrieval; gold refreshed post-vault-crawl |
+| **Overall** | **0.603** | **95** | Curated suite, strict NDCG@10 |
 
-**Hit@5: 0.874** · **MRR@10: 0.673**
+**Hit@5: 0.821** · **MRR@10: 0.669**
 
 ---
 
@@ -54,7 +54,8 @@ Starting Phase 5, the instrument switched to NDCG@10 with graded relevance on re
 | R6 Sprint 4 | 0.564 | 95 | 95-case suite; entity enrichment + S1-C/CP; temporal 0.509 |
 | R8 post-reembed | 0.538 | 95 | Force re-embed activated chunk_date filter; temporal regression (TMP-7) |
 | R9 TMP-7 fix | 0.545 | 95 | vec K×4 when date filter active; temporal 0.423 |
-| **R10 Sprint 5** | **0.569** | **95** | **Scorer path suffix fix + entity enrichment; temporal 0.535** |
+| R10 Sprint 5 | 0.569 | 95 | Scorer path suffix fix + entity enrichment; temporal 0.535 |
+| **R13 v0.8.1** | **0.603** | **95** | **Keyword hybrid fix + vault crawler + gold refresh; entity 0.811** |
 
 **Note on R4 vs R1:** R4 (0.580) and R1 (0.776) are not directly comparable. R1 used a mixed suite (263 cases, majority session_log with self-referential gold). R4 is curated-only (83 cases, independently graded gold), which is a stricter and more meaningful quality signal.
 
@@ -117,27 +118,25 @@ Production RAG systems on heterogeneous personal knowledge typically score 0.60�
 
 ## Category Analysis
 
-### Temporal (0.366 — weakest category)
+### Entity (0.811 — strongest)
 
-Date-anchored queries are the current weakest point. Date-aware chunking and a timeline index shipped in Phase 4 and improved routing, but the category ceiling requires:
+The entity graph with alias resolution is the system's strongest capability. Queries that name a known entity surface the entity stub plus related documents via relationship traversal. The vault crawler (ADR-014) populates Neo4j with organisation and person nodes derived from vault structure, providing rich relationship context.
 
-- Recency decay in ranking (recent documents scored higher for queries referencing "last week", "recently")
-- Explicit `valid_from`/`valid_to` temporal attributes on entity relationships
-- Structured date extraction from frontmatter and filenames as a first-class index
+### Keyword (0.599 — improved in v0.8.1)
 
-Targeted improvement is on the v0.8.0 roadmap via the `CONTEXTUAL_PREP` retrieval intent.
+The v0.8.1 keyword hybrid fix removed `skip_vector = intent in (KEYWORD,)` which caused keyword queries to run BM25-only. All intents now run BM25 + vector in parallel via RRF. NDCG improved from 0.488 → 0.599 (+0.110).
 
-### Procedural (0.569 — at target)
+### Temporal (0.577 — improved)
 
-Phase 8-A shipped path-weighted re-ranking for procedural queries (how-to, runbook, step-by-step patterns). This raised procedural NDCG from 0.390 (R1 post-refactor) to 0.569 (R4), meeting the ≥ 0.55 Phase 8 target.
+Date-aware chunking and a timeline index route temporal queries to date-filtered document sets. Gold suite maintenance (refreshing date-sensitive gold paths after vault reorganisation) resolved measurement artefacts that suppressed the reported score. The main ceiling for further improvement is recency decay in ranking.
 
-### Multi-hop (0.547 — functional)
+### Procedural (0.588 — at target)
 
-The `QueryPlanner` decomposes complex queries into sub-queries and runs them in parallel. Entity graph context injection (O-1) improved multi_hop NDCG by +0.035. The main remaining ceiling is the entity graph quality — a sparse or noisy entity set limits planner effectiveness.
+Path-weighted re-ranking for procedural queries (how-to, runbook, step-by-step patterns) meets the ≥ 0.55 target.
 
-### Entity (0.735 — strongest)
+### Multi-hop (0.536 — functional)
 
-The entity graph with alias resolution is the system's strongest capability. Queries that name a known entity surface the entity stub plus related documents via relationship traversal.
+The `QueryPlanner` decomposes complex queries into sub-queries and runs them in parallel. The main remaining ceiling is entity graph completeness — a sparse entity set limits planner effectiveness.
 
 ---
 

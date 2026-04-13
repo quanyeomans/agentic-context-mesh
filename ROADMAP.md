@@ -18,7 +18,7 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 
 ---
 
-## Current state — v0.8.1
+## Current state — v0.8.1 (R13, 2026-04-13)
 
 **NDCG@10 0.5686** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.87** — a relevant document in the top 5 for 87% of queries.
 
@@ -49,13 +49,13 @@ The v2 benchmark uses stricter NDCG@10 scoring with graded relevance (0/1/2) rat
 
 | Category | NDCG@10 | Notes |
 |---|---|---|
-| entity | 0.751 | Entity graph + alias resolution |
-| multi_hop | 0.549 | QueryPlanner functional |
-| procedural | 0.564 | Path boost active |
-| semantic | 0.519 | Hybrid vector load |
-| keyword | 0.439 | Hybrid fix shipped in v0.8.1 (R11 expected improvement) |
-| temporal | 0.535 | Date-filtered retrieval |
-| **Overall** | **0.5686** | Hit@5 0.874, MRR@10 0.673 |
+| entity | 0.811 | Entity graph + alias resolution; Neo4j vault crawler |
+| multi_hop | 0.536 | QueryPlanner functional |
+| procedural | 0.588 | Path boost active |
+| semantic | 0.504 | Hybrid vector |
+| keyword | 0.599 | Full hybrid fix shipped in v0.8.1 (+0.110 vs R10) |
+| temporal | 0.577 | Date-filtered retrieval; gold refreshed |
+| **Overall** | **0.603** | Hit@5 0.821, MRR@10 0.669 |
 
 ---
 
