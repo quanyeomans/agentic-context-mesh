@@ -1,6 +1,6 @@
 # Operations Guide
 
-Step-by-step deployment and operations guide for Mnemosyne on an a server. This document is the single source of truth for getting a new deployment running and keeping it healthy.
+Step-by-step deployment and operations guide for Kairix on a server. This document is the single source of truth for getting a new deployment running and keeping it healthy.
 
 For design rationale see [PRD.md](PRD.md). For benchmark methodology see [EVALUATION.md](EVALUATION.md). For QMD schema compatibility see [QMD_COMPAT.md](QMD_COMPAT.md).
 
@@ -14,13 +14,13 @@ All infrastructure-specific values (vault name, paths, credentials) are passed v
 
 ```bash
 # On your deployment VM
-cp env.example /opt/mnemosyne/service.env
-chmod 600 /opt/mnemosyne/service.env
+cp env.example /opt/kairix/service.env
+chmod 600 /opt/kairix/service.env
 # Edit with your values (Key Vault name, vault path, data dir, etc.)
-nano /opt/mnemosyne/service.env
+nano /opt/kairix/service.env
 
 # Source it in each cron job (see Cron Scheduling below)
-source /opt/mnemosyne/service.env
+source /opt/kairix/service.env
 ```
 
 **For local dev/testing:**
@@ -28,7 +28,7 @@ source /opt/mnemosyne/service.env
 ```bash
 cp env.example .env    # .env is gitignored
 # Edit with your values, then:
-source .env && mnemosyne search "test query" --agent builder
+source .env && kairix search "test query" --agent builder
 ```
 
 **For GitHub Actions:** add each variable as a repository secret (Settings → Secrets and variables → Actions). The CI workflows that need Azure credentials read them as `${{ secrets.AZURE_OPENAI_API_KEY }}` etc.
@@ -37,9 +37,9 @@ source .env && mnemosyne search "test query" --agent builder
 
 | Variable | What it is |
 |---|---|
-| `MNEMOSYNE_KV_NAME` | Your Azure Key Vault name |
-| `MNEMOSYNE_VAULT_ROOT` | Path to your Obsidian vault |
-| `MNEMOSYNE_DATA_DIR` | Where entities.db and logs go |
+| `KAIRIX_KV_NAME` | Your Azure Key Vault name |
+| `KAIRIX_VAULT_ROOT` | Path to your Obsidian vault |
+| `KAIRIX_DATA_DIR` | Where entities.db and logs go |
 | `LOG_DIR` | Where deploy.sh and cron wrappers write logs |
 
 See `env.example` for the complete variable reference.
@@ -82,7 +82,7 @@ az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-gpt4o-mini-de
 
 ### 2. Azure Authentication on the VM
 
-The VM running Mnemosyne must be able to authenticate to Azure Key Vault. Two options:
+The VM running Kairix must be able to authenticate to Azure Key Vault. Two options:
 
 **Option A: Azure Managed Identity (recommended for production)**
 - Assign a system-assigned or user-assigned managed identity to the VM
@@ -101,7 +101,7 @@ az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-endpoint --q
 
 ### 3. QMD Installed and Running
 
-Mnemosyne writes into QMD's SQLite index. QMD must be installed and have indexed your vault before running `mnemosyne embed`.
+Kairix writes into QMD's SQLite index. QMD must be installed and have indexed your vault before running `kairix embed`.
 
 ```bash
 # Verify QMD is installed
@@ -115,7 +115,7 @@ qmd status
 # Expected: N files, N vectors, last updated <date>
 ```
 
-**sqlite-vec:** Mnemosyne uses the sqlite-vec extension bundled with QMD. No separate installation needed — the extension is discovered automatically from QMD's `node_modules` directory. If the discovery fails at startup, set:
+**sqlite-vec:** Kairix uses the sqlite-vec extension bundled with QMD. No separate installation needed — the extension is discovered automatically from QMD's `node_modules` directory. If the discovery fails at startup, set:
 ```bash
 export SQLITE_VEC_PATH="/path/to/vec0.so"
 ```
@@ -127,16 +127,16 @@ See [QMD_COMPAT.md](QMD_COMPAT.md) for compatible QMD versions and schema detail
 Create the required directories on the VM before first run:
 
 ```bash
-sudo mkdir -p /data/mnemosyne/briefing
-sudo mkdir -p /data/mnemosyne/logs
-sudo chown -R <service-user>:<service-user> /data/mnemosyne
+sudo mkdir -p /data/kairix/briefing
+sudo mkdir -p /data/kairix/logs
+sudo chown -R <service-user>:<service-user> /data/kairix
 ```
 
-Mnemosyne expects:
+Kairix expects:
 - `/data/obsidian-vault/` — vault root (QMD indexes this; set your actual vault path via `VAULT_ROOT` if different)
-- `/data/mnemosyne/entities.db` — entity graph (created automatically on first run)
-- `/data/mnemosyne/briefing/` — session briefings output directory
-- `/data/mnemosyne/logs/` — optional query logs (`MNEMOSYNE_LOG_QUERIES=1`)
+- `/data/kairix/entities.db` — entity graph (created automatically on first run)
+- `/data/kairix/briefing/` — session briefings output directory
+- `/data/kairix/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `/data/workspaces/<agent>/memory/` — agent memory logs (required for briefing pipeline)
 
 ---
@@ -153,7 +153,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e .
 
 # Verify
-.venv/bin/mnemosyne --help
+.venv/bin/kairix --help
 ```
 
 ---
@@ -185,7 +185,7 @@ cd /data/tools/qmd-azure-embed
 
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-.venv/bin/mnemosyne embed --limit 20
+.venv/bin/kairix embed --limit 20
 ```
 
 Expected output:
@@ -204,13 +204,13 @@ If you see `SchemaVersionError` or `sqlite-vec extension load failed`, see [Trou
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-nohup .venv/bin/mnemosyne embed >> /data/mnemosyne/logs/embed.log 2>&1 &
+nohup .venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1 &
 echo "PID: $!"
 ```
 
 For a ~2,800 file vault this takes 15–20 minutes and costs ~$0.30–0.40 at 1536-dim. Monitor with:
 ```bash
-tail -f /data/mnemosyne/logs/embed.log
+tail -f /data/kairix/logs/embed.log
 ```
 
 Done when you see: `Done — embedded=N failed=0`
@@ -218,7 +218,7 @@ Done when you see: `Done — embedded=N failed=0`
 ### Step 4: Verify search works
 
 ```bash
-.venv/bin/mnemosyne search "what are our engineering standards" --agent builder
+.venv/bin/kairix search "what are our engineering standards" --agent builder
 ```
 
 Expected: 3–5 results with file paths and relevance snippets. If you get 0 results, the embed didn't complete or the QMD index path is wrong.
@@ -226,8 +226,8 @@ Expected: 3–5 results with file paths and relevance snippets. If you get 0 res
 ### Step 5: Seed the entity graph
 
 ```bash
-.venv/bin/mnemosyne entity extract --changed
-.venv/bin/mnemosyne entity list   # should report entity count
+.venv/bin/kairix entity extract --changed
+.venv/bin/kairix entity list   # should report entity count
 ```
 
 Expected: entity count ≥ 100 for a typical vault. The entity extraction runs LLM calls for named entity recognition — requires Azure credentials.
@@ -237,10 +237,10 @@ Expected: entity count ≥ 100 for a typical vault. The entity extraction runs L
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-.venv/bin/mnemosyne brief builder
+.venv/bin/kairix brief builder
 ```
 
-Output written to `/data/mnemosyne/briefing/builder-latest.md`. Verify it's non-empty and coherent.
+Output written to `/data/kairix/briefing/builder-latest.md`. Verify it's non-empty and coherent.
 
 ### Step 7: Register cron jobs
 
@@ -254,14 +254,14 @@ Two recurring jobs are required for a production deployment.
 
 ### Hourly embed (new vault files)
 
-Runs mnemosyne embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed.
+Runs kairix embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed.
 
 ```cron
 15 * * * * source /opt/<service-user>/env/service.env \
   && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
   && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
   && cd /data/tools/qmd-azure-embed \
-  && .venv/bin/mnemosyne embed >> /data/mnemosyne/logs/embed.log 2>&1
+  && .venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1
 ```
 
 ### Nightly entity + relationship seed (03:00 AEST / 17:00 UTC)
@@ -269,11 +269,11 @@ Runs mnemosyne embed incrementally — only embeds files modified since the last
 Runs incremental entity extraction and relationship seeding. Uses GPT-4o-mini for relationship classification.
 
 ```cron
-0 17 * * * /opt/mnemosyne/cron-scripts/entity-relation-seed.sh >> /data/mnemosyne/logs/entity-relation-seed.log 2>&1
+0 17 * * * /opt/kairix/cron-scripts/entity-relation-seed.sh >> /data/kairix/logs/entity-relation-seed.log 2>&1
 ```
 
 The shell script (`entity-relation-seed.sh`) handles Key Vault credential fetching and runs:
-1. `mnemosyne entity extract --changed`
+1. `kairix entity extract --changed`
 2. `python scripts/seed-entity-relations.py`
 
 Add both crons with `crontab -e` as the `<service-user>` service user.
@@ -289,10 +289,10 @@ crontab -l
 
 ```bash
 # Check embed log (should show runs at :15 of each hour)
-grep "Done —" /data/mnemosyne/logs/embed.log | tail -5
+grep "Done —" /data/kairix/logs/embed.log | tail -5
 
 # Check entity log (should show a run at 03:00 AEST)
-tail -20 /data/mnemosyne/logs/entity-relation-seed.log
+tail -20 /data/kairix/logs/entity-relation-seed.log
 ```
 
 ---
@@ -307,7 +307,7 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `azure-openai-endpoint` |
 | `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment name | From Key Vault `azure-openai-embedding-deployment` |
 | `VAULT_ROOT` | Path to Obsidian vault | `/data/obsidian-vault` |
-| `MNEMOSYNE_LOG_QUERIES` | Set to `1` to log all search queries to `queries.jsonl` | Off |
+| `KAIRIX_LOG_QUERIES` | Set to `1` to log all search queries to `queries.jsonl` | Off |
 | `SQLITE_VEC_PATH` | Override sqlite-vec `.so` path | Auto-discovered from QMD node_modules |
 
 ---
@@ -324,7 +324,7 @@ cd /data/tools/qmd-azure-embed
   --suite suites/v2-real-world.yaml
 
 # View latest results
-tail -30 /data/mnemosyne/logs/benchmark.log
+tail -30 /data/kairix/logs/benchmark.log
 ```
 
 **Current scores (R1, 2026-04-07):**
@@ -343,7 +343,7 @@ To rebuild gold paths after a large vault restructure:
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" AZURE_OPENAI_API_KEY="$APIKEY" \
 PYTHONUNBUFFERED=1 .venv/bin/python -u scripts/build-eval-gold.py \
-  > /data/mnemosyne/logs/build-eval-gold.log 2>&1 &
+  > /data/kairix/logs/build-eval-gold.log 2>&1 &
 ```
 This takes ~80 minutes and costs ~$0.27 for 388 queries.
 
@@ -355,13 +355,13 @@ This takes ~80 minutes and costs ~$0.27 for 388 queries.
 
 ```bash
 # Embed ran and found/embedded the right number of files
-grep "Done —" /data/mnemosyne/logs/embed.log | tail -3
+grep "Done —" /data/kairix/logs/embed.log | tail -3
 
 # No dimension mismatch errors (would indicate QMD cron conflict)
-grep -i "dimension mismatch" /data/mnemosyne/logs/embed.log | tail -5
+grep -i "dimension mismatch" /data/kairix/logs/embed.log | tail -5
 
 # Entity extraction ran cleanly
-tail -5 /data/mnemosyne/logs/entity-relation-seed.log
+tail -5 /data/kairix/logs/entity-relation-seed.log
 
 # Vector count is stable or growing
 qmd status
@@ -370,15 +370,15 @@ qmd status
 ### Key metrics to track
 
 - **Vector count:** Should grow as vault grows. Sudden drop indicates QMD reindex issue.
-- **Entity count:** Grows as new entity stubs are written. Check with `mnemosyne entity list`.
-- **Relationship count:** Grows as nightly seed runs. Check with sqlite CLI: `sqlite3 /data/mnemosyne/entities.db "SELECT COUNT(*) FROM entity_relationships;"`
-- **Recall gate:** Post-embed recall check in embed log — should be ≥ 4/5. If < 4/5, run `mnemosyne embed --force`.
+- **Entity count:** Grows as new entity stubs are written. Check with `kairix entity list`.
+- **Relationship count:** Grows as nightly seed runs. Check with sqlite CLI: `sqlite3 /data/kairix/entities.db "SELECT COUNT(*) FROM entity_relationships;"`
+- **Recall gate:** Post-embed recall check in embed log — should be ≥ 4/5. If < 4/5, run `kairix embed --force`.
 
 ### Enabling query logging
 
 ```bash
-export MNEMOSYNE_LOG_QUERIES=1
-# Queries logged to /data/mnemosyne/logs/queries.jsonl
+export KAIRIX_LOG_QUERIES=1
+# Queries logged to /data/kairix/logs/queries.jsonl
 # Analyse with:
 .venv/bin/python scripts/analyze_queries.py
 ```
@@ -410,7 +410,7 @@ find $(dirname $(which qmd))/../ -name "vec0.so" 2>/dev/null
 
 # Override manually
 export SQLITE_VEC_PATH="/path/to/vec0.so"
-mnemosyne embed --limit 5
+kairix embed --limit 5
 ```
 
 ### `SchemaVersionError: missing columns`
@@ -443,7 +443,7 @@ sqlite3 ~/.cache/qmd/index.sqlite \
 
 # If 0 vectors: run full re-embed
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" AZURE_OPENAI_API_KEY="$APIKEY" \
-mnemosyne embed --force
+kairix embed --force
 ```
 
 ### `Dimension mismatch` errors in embed log
@@ -464,10 +464,10 @@ crontab -l | grep qmd
 crontab -l
 
 # Check log for last run
-tail -20 /data/mnemosyne/logs/entity-relation-seed.log
+tail -20 /data/kairix/logs/entity-relation-seed.log
 
 # Run manually to debug
-/opt/mnemosyne/cron-scripts/entity-relation-seed.sh
+/opt/kairix/cron-scripts/entity-relation-seed.sh
 ```
 
 ### Briefing output is empty or incoherent
@@ -477,10 +477,10 @@ tail -20 /data/mnemosyne/logs/entity-relation-seed.log
 ls /data/workspaces/<agent>/memory/ | tail -5
 
 # Check entity graph has content
-mnemosyne entity list
+kairix entity list
 
 # Run briefing with debug output
-MNEMOSYNE_LOG_QUERIES=1 mnemosyne brief <agent> --budget 5000
+KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 ```
 
 ---
