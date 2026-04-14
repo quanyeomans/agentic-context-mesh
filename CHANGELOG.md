@@ -27,7 +27,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `kairix/mcp/server.py` `tool_entity()`: entities.db fallback removed; Neo4j miss returns `{"error": "Entity not found: <name>"}` directly
 - `kairix/briefing/sources.py` `fetch_recent_decisions()`: entities.db query block removed; decisions sourced from vault only
 
-### Benchmark (R17 — 2026-04-14, 95 curated queries)
+### Benchmark (v0.9.0, 95 curated queries)
 - entity NDCG 0.811 → **0.714** (vault evolution — new content Apr 13–14 shifted gold ranks; no-Neo4j baseline confirmed identical 0.714, ruling out code regression)
 - keyword: 0.616 · procedural: 0.609 · temporal: 0.540 · multi_hop: 0.526 · semantic: 0.501
 - **Overall NDCG@10: 0.587** · Hit@5: 0.821 · MRR@10: 0.679
@@ -45,7 +45,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **TMP-7**: `vector_search_bytes()` now fetches `k × 4` candidates when a date filter is active. `VECTOR_DEFAULT_K=10` was too small for narrow date windows (e.g., "this week") — after force re-embed populated `chunk_date`, the top-10 candidates rarely included docs from a 7-day window, causing vec_count=0 for relative temporal queries.
 - **KW-1**: All intents now dispatch BM25 + vector in parallel. Previously keyword intent ran BM25-only, causing vector-only docs to miss entirely. Keyword NDCG: 0.48 → **0.62** (+0.110).
 
-### Benchmark (R13 — 2026-04-13, 95 curated queries)
+### Benchmark (v0.8.1, 95 curated queries)
 - keyword NDCG: 0.48 → **0.616** (hybrid fix)
 - entity: **0.811** · procedural: 0.609 · temporal: 0.540 · multi_hop: 0.526 · semantic: 0.501
 - **Overall NDCG@10: 0.603** · Hit@5: 0.821 · MRR@10: 0.669
@@ -64,7 +64,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **TMP-1**: `chunk_date` column in `content_vectors` — idempotent migration via `schema.py:ensure_vec_table`. Stores the date extracted from each chunk's source document.
-- **TMP-1**: `mnemosyne/embed/date_extract.py` — date extraction at embed time from (1) frontmatter `date`/`created`/`updated`/`created_at` fields (YYYY-MM-DD), (2) YYYY-MM year-month fields (mapped to first of month), (3) filename pattern `YYYY-MM-DD.md`. 24 tests.
+- **TMP-1**: `kairix/embed/date_extract.py` — date extraction at embed time from (1) frontmatter `date`/`created`/`updated`/`created_at` fields (YYYY-MM-DD), (2) YYYY-MM year-month fields (mapped to first of month), (3) filename pattern `YYYY-MM-DD.md`. 24 tests.
 - **TMP-2**: `get_date_filtered_paths(db, start, end)` in `embed/schema.py` — returns `frozenset[str]` of document paths with `chunk_date` in the given window. Used by `hybrid.py` for TEMPORAL intent date-range filtering.
 - **TMP-2**: `is_relative_temporal(query)` in `temporal/rewriter.py` — returns `True` for relative temporal expressions (`last N days/weeks/months`, `recently`, `yesterday`, `today`, `this week/month`). Date filtering is only applied for relative expressions — absolute date references (`March 2026`, `2026-03-09`) query `about` a time period and must not be filtered by chunk_date.
 - **TMP-2**: Date-filtered retrieval in `hybrid.py` — BM25 results post-filtered via `_path_from_file_uri()` + `date_filter_paths`; vector results post-filtered directly on `path`. Both fallback gracefully (no filter applied) when `date_filter_paths` is `None` or empty.
@@ -73,31 +73,31 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **TMP-5b**: YYYY-MM year-month frontmatter pattern in `date_extract.py` — maps `date: 2025-11` to `2025-11-01`. 6 additional tests.
 
 ### Fixed
-- `mnemosyne/embed/embed.py` — replaced hardcoded Key Vault name in error messages with `$MNEMOSYNE_KV_NAME` env var reference.
+- `kairix/embed/embed.py` — replaced hardcoded Key Vault name in error messages with `$KAIRIX_KV_NAME` env var reference.
 
-### Benchmark (R5 — 2026-04-10, 83 curated queries)
+### Benchmark (v0.7.0, 83 curated queries)
 - temporal NDCG: 0.369 → **0.382** (TMP-2 date filtering for relative temporal expressions)
 - entity: 0.751 · multi_hop: 0.549 · procedural: 0.564 · semantic: 0.519 · keyword: 0.439
 - **Overall NDCG@10: 0.5569** · Hit@5: 0.84 · MRR: 0.67
 
-## [0.6.0] - 2026-04-07 — R1: Post-Refactor Benchmark + O-2 Enrichment
+## [0.6.0] - 2026-04-07 — Post-Refactor Benchmark + Relationship Enrichment
 
 ### Added
 - O-2: `scripts/seed-entity-relations.py` LLM-typed relationship enrichment via GPT-4o-mini batch classifier
 - O-2: Nightly cron (`0 3 * * * AEST`) — entity extract + relationship seed, Azure KV secret fetch
 - O-2: `cron-scripts/cron-registry.json` entry for `entity-relation-seed`
-- R1: `scripts/build-eval-gold.py` — rebuilds v2-real-world.yaml from scratch using live mnemosyne search + LLM judge
-- R1: `suites/v2-real-world.yaml` — fully rebuilt gold suite (263 cases from 388 queries; collection-relative path format)
-- R1 benchmark results: NDCG@10 **0.7756** (entity 0.823, recall 0.788, multi_hop 0.728, temporal 0.810, conceptual 0.804, keyword 0.800, procedural 0.389)
+- `scripts/build-eval-gold.py` — rebuilds benchmark gold suite from live search + LLM judge
+- `suites/v2-real-world.yaml` — fully rebuilt gold suite (263 cases; collection-relative path format)
+- Benchmark results: NDCG@10 **0.7756** (entity 0.823, recall 0.788, multi_hop 0.728, temporal 0.810, conceptual 0.804, keyword 0.800, procedural 0.389)
 - OPERATIONS.md: comprehensive deployment guide (Azure prerequisites, Key Vault secrets, first-run sequence, cron setup, monitoring, troubleshooting)
 
 ### Fixed
 - ADR-M08: Embed batch retry on QMD-induced dimension mismatch — `ensure_vec_table(db, actual_dims)` called per-batch on dimension error, retries once; handles `qmd-reindex-6h` cron overwriting `vectors_vec` mid-run
 - Hourly embed cron: now fetches `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_API_KEY` from Azure Key Vault at runtime (managed identity)
-- Gold suite paths: rebuilt to collection-relative format (matching `mnemosyne search` output) after vault refactor broke 196/554 paths
+- Gold suite paths: rebuilt to collection-relative format (matching `kairix search` output) after vault refactor broke 196/554 paths
 
 ### Benchmark
-- R1 (post-refactor): NDCG@10 **0.7756** on 263-case suite (vault refactor fully indexed, gold paths rebuilt)
+- NDCG@10 **0.7756** on 263-case suite (vault refactor fully indexed, gold paths rebuilt)
 - Entity graph: 1160 entities, 112 typed relationships seeded
 - Phase 8 target: procedural NDCG ≥ 0.55 (current 0.389)
 
@@ -121,7 +121,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Phase 5: Replaced synthetic benchmark with real agent usage queries mined from server logs
 - Phase 5: NDCG@10 scoring (was weighted category averages) — 134-case real-world suite
-- Phase 6: Temporal routing fix — temporal queries routed to `mnemosyne temporal query` before hybrid search
+- Phase 6: Temporal routing fix — temporal queries routed to `kairix temporal query` before hybrid search
 - Phase 6: Multi-hop pattern improvements — intermediate result reranking, entity bridging
 - Phase 6: Suite expanded to 252 cases; multi-category NDCG scoring
 
@@ -136,7 +136,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - O-1: Multi-hop QueryPlanner — GPT-4o-mini decomposes complex queries into sub-queries, parallel BM25+vector dispatch, result synthesis
 - O-1: Entity graph seeded from vault-entities collection; entity boost wired into planner context injection
-- O-1: `mnemosyne entity extract --changed` incremental extraction pipeline
+- O-1: `kairix entity extract --changed` incremental extraction pipeline
 - O-1: `scripts/seed-entity-relations.py` (pattern-matching v1 — superseded by O-2 LLM classifier)
 
 ### Benchmark
@@ -165,11 +165,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.4.0] - 2026-03-23 — Phase 3: Briefing + Classification
 
 ### Added
-- Phase 3: `mnemosyne brief <agent>` — 8-step concurrent briefing pipeline synthesises ~800-token session context from memory logs, entity stubs, rules, decisions, and hybrid search via GPT-4o-mini
-- Phase 3: `mnemosyne classify "<content>"` — two-stage auto-classification (rule-based first, LLM fallback) routes new writes to the correct vault file with confidence score
-- `mnemosyne/_azure.py`: `chat_completion()` for GPT-4o-mini synthesis calls
-- `mnemosyne/briefing/`: pipeline.py, sources.py, synthesiser.py, writer.py, cli.py — 48 tests
-- `mnemosyne/classify/`: rules.py, judge.py, router.py, cli.py — 83 tests
+- Phase 3: `kairix brief <agent>` — 8-step concurrent briefing pipeline synthesises ~800-token session context from memory logs, entity stubs, rules, decisions, and hybrid search via GPT-4o-mini
+- Phase 3: `kairix classify "<content>"` — two-stage auto-classification (rule-based first, LLM fallback) routes new writes to the correct vault file with confidence score
+- `kairix/_azure.py`: `chat_completion()` for GPT-4o-mini synthesis calls
+- `kairix/briefing/`: pipeline.py, sources.py, synthesiser.py, writer.py, cli.py — 48 tests
+- `kairix/classify/`: rules.py, judge.py, router.py, cli.py — 83 tests
 - Benchmark suite v1.1: CL01–CL04 classification cases; classification scoring in runner
 - WORK-BREAKDOWN.md: implementation sequence, task breakdown, open questions
 - Phase 2.5 PRD section: entity benchmark repair specification and approach
@@ -179,7 +179,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - LLM judge KV secret name: `azure-openai-gpt4o-mini-deployment` (was `azure-openai-deployment` — silent 0.0 scoring on all LLM-judged benchmark cases)
 - RRF path dedup: `_canonical_path()` strips `qmd://collection-name/` prefix so BM25 and vector results for vault-entities stubs now merge correctly in fused dict
 - Entity benchmark gold paths: E01–E06 now have `gold_path` + `score_method: exact` (was `null`/`llm` — LLM judge had no ground truth, scored 0.2–0.4 on tangential docs)
-- Entity stub content: alice-chen.md, acme-corp.md, platform.md enriched to 650–750 words; project-x.md to 490 words
+- Entity stub content: jordan-blake.md, acme-corp.md, platform.md enriched to 650–750 words; project-x.md to 490 words
 
 ### Benchmark
 - Phase 3 gate (≥0.750): **PASS** — 0.762 weighted total
@@ -193,7 +193,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.3.0] - 2026-03-23 — Phase 2.5: Entity Benchmark Repair
 
 ### Added
-- Phase 2.5 entity stub enrichment: alice-chen.md, acme-corp.md, platform.md, project-x.md enriched to ≥500 words
+- Phase 2.5 entity stub enrichment: jordan-blake.md, acme-corp.md, platform.md, project-x.md enriched to ≥500 words
 - Gold paths added to entity benchmark cases E01–E06
 
 ### Fixed
@@ -210,10 +210,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Phase 1: RRF fusion + entity boost
 - Phase 1: token budget enforcer (L0/L1/L2 tiers)
 - Phase 1: hybrid orchestrator + parallel dispatch
-- Phase 1: mnemosyne search CLI
+- Phase 1: kairix search CLI
 - Phase 1b: entities.db schema + migration system
 - Phase 1b: entity graph (write, lookup, mentions, relationships)
-- Phase 1b: mnemosyne entity CLI
+- Phase 1b: kairix entity CLI
 - Benchmark CLI: YAML suite format, validate/run/compare/init commands
 - Generalised benchmark framework SPEC.md
 - CI: 4-stage pipeline, mypy strict, ruff, bandit, pip-audit, Dependabot
@@ -222,7 +222,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - sqlite-vec CTE pattern: MATCH must be primary table in inner CTE
 - Collection scope: _SHARED_COLLECTIONS was missing vault (93% of content)
-- Benchmark gold-pair validity: R03/R04/R06/R07/R08 replaced with valid pairs
+- Benchmark gold-pair validity: several benchmark gold pairs replaced with valid pairs
 
 ## [0.1.0] - 2026-03-22
 
@@ -231,7 +231,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Phase 0: schema validation + sqlite-vec extension loading
 - Phase 0: staging table pattern for vec0 upserts
 - Phase 0: recall gate (5/5 known-doc queries post-embed)
-- Phase 0: mnemosyne embed CLI
+- Phase 0: kairix embed CLI
 - Phase 0: 50-query benchmark runner (BM25 baseline: 0.5054)
 - PRD v3.0 (68KB, 5 phases, 10 ADRs, benchmark gates)
 - qmd_azure_embed shim for backwards compatibility

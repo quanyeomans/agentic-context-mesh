@@ -249,8 +249,8 @@ class TestNormaliseFtsQuery:
         assert "we" not in result
         assert "know" not in result
         assert "about" not in result
-        assert "alice" in result.lower()
-        assert "chen" in result.lower()
+        assert "jordan" in result.lower()
+        assert "blake" in result.lower()
 
     def test_replaces_hyphens_with_spaces(self) -> None:
         result = _normalise_fts_query("project-x")

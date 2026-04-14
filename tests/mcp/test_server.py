@@ -21,18 +21,19 @@ from kairix.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline
 
 @pytest.mark.unit
 def test_tool_search_returns_expected_shape() -> None:
+    mock_budgeted = SimpleNamespace(
+        result=SimpleNamespace(path="notes/foo.md", boosted_score=0.9),
+        content="some text here",
+        token_estimate=10,
+    )
     mock_result = SimpleNamespace(
         query="test query",
         intent=SimpleNamespace(value="semantic"),
-        results=[SimpleNamespace(path="notes/foo.md", score=0.9, text="some text here", tokens=10)],
+        results=[mock_budgeted],
         total_tokens=10,
         latency_ms=42.5,
         error="",
     )
-
-    with patch("kairix.mcp.server.tool_search") as _:
-        # Test the logic directly by calling with a mocked search
-        pass
 
     with patch("kairix.search.hybrid.search", return_value=mock_result):
         result = tool_search(query="test query", agent=None, scope="shared+agent", budget=3000)
@@ -76,17 +77,22 @@ def test_tool_search_passes_agent_and_scope() -> None:
         error="",
     )
     with patch("kairix.search.hybrid.search", return_value=mock_result) as mock_search:
-        tool_search(query="q", agent="shape", scope="agent", budget=1000)
-        mock_search.assert_called_once_with(query="q", agent="shape", scope="agent", budget=1000)
+        tool_search(query="q", agent="builder", scope="agent", budget=1000)
+        mock_search.assert_called_once_with(query="q", agent="builder", scope="agent", budget=1000)
 
 
 @pytest.mark.unit
 def test_tool_search_result_snippet_truncated() -> None:
     long_text = "x" * 1000
+    mock_budgeted = SimpleNamespace(
+        result=SimpleNamespace(path="a.md", boosted_score=0.5),
+        content=long_text,
+        token_estimate=50,
+    )
     mock_result = SimpleNamespace(
         query="q",
         intent=SimpleNamespace(value="semantic"),
-        results=[SimpleNamespace(path="a.md", score=0.5, text=long_text, tokens=50)],
+        results=[mock_budgeted],
         total_tokens=50,
         latency_ms=5.0,
         error="",
@@ -167,32 +173,30 @@ def test_tool_entity_neo4j_exception_returns_error() -> None:
 
 @pytest.mark.unit
 def test_tool_prep_l0() -> None:
-    mock_result = SimpleNamespace(summary="Brief context summary.", tokens=42)
-
-    with patch("kairix.summaries.generate.generate_l0", return_value=mock_result):
+    summary_text = "Brief context summary."
+    with patch("kairix._azure.chat_completion", return_value=summary_text):
         result = tool_prep(query="What did we discuss last quarter?", tier="l0")
 
     assert result["tier"] == "l0"
-    assert result["summary"] == "Brief context summary."
-    assert result["tokens"] == 42
+    assert result["summary"] == summary_text
+    assert result["tokens"] == len(summary_text) // 4
     assert result["error"] == ""
 
 
 @pytest.mark.unit
 def test_tool_prep_l1() -> None:
-    mock_result = SimpleNamespace(summary="Detailed context summary.", tokens=800)
-
-    with patch("kairix.summaries.generate.generate_l1", return_value=mock_result):
-        result = tool_prep(query="Explain our Acme engagement", tier="l1")
+    summary_text = "Detailed context summary about the engagement."
+    with patch("kairix._azure.chat_completion", return_value=summary_text):
+        result = tool_prep(query="Explain our test engagement", tier="l1")
 
     assert result["tier"] == "l1"
-    assert result["tokens"] == 800
+    assert result["tokens"] == len(summary_text) // 4
     assert result["error"] == ""
 
 
 @pytest.mark.unit
 def test_tool_prep_error_handled() -> None:
-    with patch("kairix.summaries.generate.generate_l0", side_effect=RuntimeError("llm unavailable")):
+    with patch("kairix._azure.chat_completion", side_effect=RuntimeError("llm unavailable")):
         result = tool_prep(query="anything", tier="l0")
 
     assert result["summary"] == ""
@@ -201,13 +205,12 @@ def test_tool_prep_error_handled() -> None:
 
 @pytest.mark.unit
 def test_tool_prep_default_tier_is_l0() -> None:
-    mock_result = SimpleNamespace(summary="ok", tokens=10)
-
-    with patch("kairix.summaries.generate.generate_l0", return_value=mock_result) as mock_l0:
-        with patch("kairix.summaries.generate.generate_l1") as mock_l1:
-            tool_prep(query="q")
-            mock_l0.assert_called_once()
-            mock_l1.assert_not_called()
+    with patch("kairix._azure.chat_completion", return_value="ok") as mock_chat:
+        tool_prep(query="q")
+        mock_chat.assert_called_once()
+        # l0 uses max_tokens=150
+        _, kwargs = mock_chat.call_args
+        assert kwargs.get("max_tokens") == 150
 
 
 # ---------------------------------------------------------------------------

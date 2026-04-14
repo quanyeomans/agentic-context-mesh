@@ -18,11 +18,11 @@ Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval 
 
 ---
 
-## Current state — v0.9.0 (R17, 2026-04-14)
+## Current state — v0.9.0
 
 **NDCG@10 0.587** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance gold labels). **Hit@5 0.821** — a relevant document in the top 5 for 82% of queries.
 
-The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EVALUATION.md](EVALUATION.md) for methodology details and full score trajectory.
+The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EVALUATION.md](EVALUATION.md) for methodology and scoring interpretation.
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -54,7 +54,7 @@ The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EV
 | Local/offline embedding | 🔲 Planned | `EmbedProvider` abstraction; Ollama + sentence-transformers adapters |
 | REST API server mode | 🔲 Planned | FastAPI server mode exposing search, entity, and briefing as HTTP endpoints |
 
-**Benchmark category breakdown (R17, 95-case suite, NDCG@10):**
+**Benchmark category breakdown (95-case suite, NDCG@10):**
 
 | Category | NDCG@10 | Notes |
 |---|---|---|

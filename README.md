@@ -125,7 +125,7 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 
 **Suite:** 95 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~2,800 documents (11,316 vectors at 1536-dim).
 
-### Current results (R17 — 2026-04-14)
+### Current results (v0.9.0)
 
 | Category | NDCG@10 | Notes |
 |---|---|---|
@@ -138,16 +138,6 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 | **Overall** | **0.587** | **Hit@5 0.821, MRR@10 0.679** |
 
 Production RAG systems on heterogeneous personal knowledge typically score 0.55–0.70 on strict curated suites.
-
-### Score trajectory
-
-| Run | NDCG@10 | Cases | Notes |
-|---|---|---|---|
-| BM25 baseline | 0.389 | 43 | Pre-vector baseline; synthetic suite |
-| R1 post-refactor | 0.7756 | 263 | Full gold rebuild |
-| R9 | 0.569 | 95 | Pre-hybrid-fix |
-| R13 | 0.603 | 95 | Keyword hybrid fix (+0.110 keyword) |
-| **R17** | **0.587** | **95** | Post vault-evolution; Sprint 7 Neo4j |
 
 ---
 
@@ -211,7 +201,7 @@ kairix search "decisions made last week" --agent shape --budget 3000
 ```bash
 kairix entity list
 kairix entity lookup "alice chen"
-kairix entity write --name "Alice Chen" --type person
+kairix entity write --name "Jordan Blake" --type person
 kairix entity extract --collection <your-entities-collection>
 ```
 

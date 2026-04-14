@@ -134,7 +134,7 @@ sudo chown -R <service-user>:<service-user> /data/kairix /data/workspaces
 ```
 
 Kairix expects:
-- `/data/obsidian-vault/` — vault root (QMD indexes this; set your actual vault path via `KAIRIX_VAULT_ROOT`)
+- `/path/to/vault/` — vault root (QMD indexes this; set your actual vault path via `KAIRIX_VAULT_ROOT`)
 - `/data/kairix/briefing/` — session briefings output directory
 - `/data/kairix/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `/data/workspaces/<agent>/memory/` — agent memory logs (required for briefing pipeline)
@@ -177,7 +177,7 @@ The expected layout on the VM:
   secrets/            ← optional: pre-fetched secrets for non-Docker deployments
 ```
 
-For TC deployments: operator config lives in the private `tc-agent-zone` repo, not in this repo. That separation keeps private vault paths, benchmark suites, and entity definitions out of the public kairix codebase.
+For production deployments: operator config (service.env, private benchmark suites) should live in a separate private configuration repo, not in the kairix package.
 
 ### Upgrading
 
@@ -197,7 +197,6 @@ The kairix wrapper (`scripts/kairix-wrapper.sh`) loads `service.env` and `/run/s
 ### Automated (recommended)
 
 ```bash
-cd /data/tools/qmd-azure-embed
 bash scripts/deploy-vm.sh
 ```
 
@@ -212,15 +211,15 @@ sudo cp scripts/kairix-wrapper.sh /opt/kairix/bin/kairix-wrapper.sh
 sudo chmod 755 /opt/kairix/bin/kairix-wrapper.sh
 
 # Create or update the symlink (replace existing if it points to raw Python binary)
-sudo ln -sf /opt/kairix/bin/kairix-wrapper.sh /opt/openclaw/bin/kairix
+sudo ln -sf /opt/kairix/bin/kairix-wrapper.sh /usr/local/bin/kairix
 
 # Add to PATH for all sessions
-sudo bash -c 'echo "export PATH=/opt/openclaw/bin:\$PATH" > /etc/profile.d/kairix.sh'
+sudo bash -c 'echo "export PATH=/usr/local/bin:\$PATH" > /etc/profile.d/kairix.sh'
 sudo chmod 644 /etc/profile.d/kairix.sh
 
 # Verify the symlink points to the wrapper (not the Python binary)
-ls -la /opt/openclaw/bin/kairix
-readlink /opt/openclaw/bin/kairix
+ls -la /usr/local/bin/kairix
+readlink /usr/local/bin/kairix
 # Should show: /opt/kairix/bin/kairix-wrapper.sh
 ```
 
@@ -317,7 +316,7 @@ Expected: `vec_count > 0` and 3–5 results with file paths. If `vec_failed: tru
 ### Step 7: Populate the entity graph
 
 ```bash
-kairix vault crawl --vault-root /data/obsidian-vault
+kairix vault crawl --vault-root /path/to/vault
 kairix curator health   # should report entity counts
 ```
 
@@ -336,7 +335,7 @@ Output written to `/data/kairix/briefing/builder-latest.md`. Verify it's non-emp
 ### Step 9: Install agent usage guide
 
 ```bash
-kairix onboard guide --vault-root /data/obsidian-vault
+kairix onboard guide --vault-root /path/to/vault
 kairix embed --changed   # make the guide searchable
 ```
 
@@ -405,7 +404,7 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key | From Key Vault `azure-openai-api-key` |
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `azure-openai-endpoint` |
 | `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment name | From Key Vault `azure-openai-embedding-deployment` |
-| `KAIRIX_VAULT_ROOT` | Path to Obsidian vault | `/data/obsidian-vault` |
+| `KAIRIX_VAULT_ROOT` | Path to Obsidian vault | `/path/to/vault` |
 | `KAIRIX_DATA_DIR` | Data directory for logs | `/data/kairix` |
 | `KAIRIX_WORKSPACE_ROOT` | Agent memory log root | `/data/workspaces` |
 | `KAIRIX_NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
@@ -472,14 +471,14 @@ kairix is not on PATH for the current session.
 
 ```bash
 # Quick fix for current session
-export PATH=/opt/openclaw/bin:$PATH
+export PATH=/usr/local/bin:$PATH
 kairix --help
 
 # Permanent fix: run the deploy script
 bash scripts/deploy-vm.sh
 
 # Or manually check where the symlink is
-ls -la /opt/openclaw/bin/kairix
+ls -la /usr/local/bin/kairix
 ```
 
 For agent exec contexts specifically (agents running commands via shell), ensure `/etc/profile.d/kairix.sh` exists and contains the PATH export. Non-login shells don't source `/etc/profile.d/` automatically — the cron wrapper or agent exec script must `source /etc/profile.d/kairix.sh` or set PATH explicitly.
@@ -493,8 +492,8 @@ Azure credentials aren't loaded for the kairix process.
 kairix onboard check
 
 # Most common cause: symlink points to raw Python binary
-ls -la /opt/openclaw/bin/kairix
-readlink /opt/openclaw/bin/kairix
+ls -la /usr/local/bin/kairix
+readlink /usr/local/bin/kairix
 # If this shows .venv/bin/kairix, the wrapper isn't installed:
 bash scripts/deploy-vm.sh
 

@@ -2,7 +2,7 @@
 
 **Status:** Planned — not yet started  
 **Target version:** v1.0.0  
-**Primary motivation:** Semantic NDCG@10 is 0.501 (R17) — the weakest retrieval category. Cross-encoder re-ranking is the established intervention for lifting semantic precision without changing the retrieval pipeline.
+**Primary motivation:** Semantic NDCG@10 is 0.501 (current baseline) — the weakest retrieval category. Cross-encoder re-ranking is the established intervention for lifting semantic precision without changing the retrieval pipeline.
 
 ---
 
@@ -10,7 +10,7 @@
 
 Hybrid BM25 + vector search with RRF fusion returns good candidates but ranks them by a surrogate signal (RRF score). For semantic queries — abstract conceptual questions with no exact term overlap — the top RRF result is often only the second or third most relevant document. A cross-encoder reads (query, document) pairs jointly and produces a direct relevance score, which makes it a much stronger ranker than RRF for these cases.
 
-Current category scores (R17):
+Current category scores (v0.9.0):
 - Semantic: **0.501** — the floor we're targeting
 - Multi-hop: 0.526 — secondary beneficiary
 - All other categories at ≥ 0.540 — these should not regress
@@ -215,7 +215,7 @@ Coverage target: `kairix/search/rerank.py` ≥ 85% (per ENGINEERING.md `search/`
 
 1. Implement `rerank.py` + `FusedResult.rerank_score` field — all tests pass
 2. Wire `--rerank` flag to CLI and MCP server (off by default)
-3. Run R18 benchmark with `--rerank` on the 95-case VM suite:
+3. Re-run benchmark with `--rerank` on the 95-case VM suite:
    - Measure per-category delta; expect semantic ≥ +0.05, no category to regress
    - Capture latency: p50 and p95 for `kairix search` with and without `--rerank`
 4. If semantic NDCG improves and latency p95 < 500ms: set `RERANK_DEFAULT = True`, update EVALUATION.md
@@ -229,9 +229,9 @@ Coverage target: `kairix/search/rerank.py` ≥ 85% (per ENGINEERING.md `search/`
 |---|---|
 | Semantic NDCG@10 | ≥ 0.560 (was 0.501) |
 | Overall NDCG@10 | ≥ 0.610 (was 0.587) |
-| No category regression | All categories ≥ R17 baseline |
+| No category regression | All categories ≥ v0.9.0 baseline |
 | Latency (rerank=True, p95) | < 500ms on VM hardware |
-| Latency (rerank=False) | Unchanged from R17 baseline |
+| Latency (rerank=False) | Unchanged from v0.9.0 baseline |
 
 ---
 

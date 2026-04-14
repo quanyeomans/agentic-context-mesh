@@ -26,16 +26,16 @@ kairix search "<your query>" --agent <your-agent-name>
 
 Examples:
 ```bash
-kairix search "what decisions were made about the Azure connector" --agent shape
-kairix search "Three Cubes advisory positioning" --agent shape --budget 3000
+kairix search "what decisions were made about the Azure connector" --agent builder
+kairix search "knowledge management positioning" --agent builder --budget 3000
 kairix search "how do I run the embedding pipeline" --agent builder
-kairix search "what happened last week" --agent shape
-kairix search "tell me about Bupa" --agent shape
+kairix search "what happened last week" --agent builder
+kairix search "tell me about Acme Corp" --agent builder
 ```
 
 **If kairix is not on PATH** (you get `command not found`):
 ```bash
-/opt/openclaw/bin/kairix search "<query>" --agent <name>
+/usr/local/bin/kairix search "<query>" --agent <name>
 ```
 
 ---
@@ -132,8 +132,8 @@ Output written to `/data/kairix/briefing/<agent>-latest.md`.
 
 ### entity — entity graph lookup
 ```bash
-kairix entity lookup "Alice Chen"
-kairix entity lookup "Bupa"
+kairix entity lookup "Jordan Blake"
+kairix entity lookup "Acme"
 ```
 Returns entity summary, type, vault_path, and related documents.
 
@@ -146,8 +146,8 @@ Reports: entity counts, synthesis failures (no summary), missing vault_paths.
 
 ### vault crawl — populate entity graph from vault
 ```bash
-kairix vault crawl --vault-root /data/obsidian-vault
-kairix vault crawl --vault-root /data/obsidian-vault --dry-run
+kairix vault crawl --vault-root /path/to/vault
+kairix vault crawl --vault-root /path/to/vault --dry-run
 ```
 Run after adding new organisation or person stubs to the vault.
 
@@ -177,7 +177,7 @@ kairix timeline query "decisions last week"
 
 ### wikilinks — inject entity links
 ```bash
-kairix wikilinks inject --vault /data/obsidian-vault
+kairix wikilinks inject --vault /path/to/vault
 ```
 
 ### benchmark — retrieval quality testing
@@ -195,17 +195,17 @@ kairix benchmark run --suite suites/example.yaml
 kairix brief shape
 
 # Then search for session-specific context
-kairix search "current status of [project]" --agent shape
-kairix search "outstanding items from last week" --agent shape
+kairix search "current status of [project]" --agent builder
+kairix search "outstanding items from last week" --agent builder
 ```
 
 ### Researching an entity
 ```bash
 # Start with entity lookup for curated summary
-kairix entity lookup "Bupa"
+kairix entity lookup "Acme"
 
 # Follow up with related vault docs
-kairix search "Bupa engagement history and decisions" --agent shape
+kairix search "Acme engagement history and decisions" --agent builder
 ```
 
 ### Checking a decision or pattern
@@ -216,14 +216,14 @@ kairix search "engineering pattern for [approach]" --agent builder
 
 ### Temporal research
 ```bash
-kairix search "what decisions were made last month" --agent shape
-kairix search "recent activity on the Azure connector" --agent shape
+kairix search "what decisions were made last month" --agent builder
+kairix search "recent activity on the Azure connector" --agent builder
 # Use explicit relative time language for best results
 ```
 
 ### Multi-hop / cross-entity
 ```bash
-kairix search "connection between Shape and Avanade on the platform project" --agent shape
+kairix search "connection between Acme and TechCorp on the platform project" --agent builder
 ```
 
 ---
@@ -245,7 +245,7 @@ Set with `--budget N`. The budget caps total tokens returned, not the number of 
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `command not found` | kairix not on PATH | Use `/opt/openclaw/bin/kairix` or run `scripts/deploy-vm.sh` |
+| `command not found` | kairix not on PATH | Use `/usr/local/bin/kairix` or run `scripts/deploy-vm.sh` |
 | `vec_failed: true` | Azure credentials not loaded | Run `kairix onboard check`; fix secrets_loaded issue |
 | 0 results, no error | Vault not embedded | Run `kairix embed --limit 20` to test |
 | Results are all from one section | Scope issue | Check `--agent` flag is correct |

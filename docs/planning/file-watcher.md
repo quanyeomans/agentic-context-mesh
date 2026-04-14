@@ -249,16 +249,16 @@ kairix-watcher:
   build:
     context: ..
     dockerfile: Dockerfile
-  command: ["kairix", "watch", "--vault-root", "/data/obsidian-vault"]
+  command: ["kairix", "watch", "--vault-root", "/path/to/vault"]
   depends_on:
     vault-agent:
       condition: service_healthy
   environment:
-    KAIRIX_VAULT_ROOT: ${KAIRIX_VAULT_ROOT:-/data/obsidian-vault}
+    KAIRIX_VAULT_ROOT: ${KAIRIX_VAULT_ROOT:-/path/to/vault}
     KAIRIX_DATA_DIR: ${KAIRIX_DATA_DIR:-/data/kairix}
   volumes:
     - kairix-secrets:/run/secrets:ro
-    - ${KAIRIX_VAULT_ROOT:-/data/obsidian-vault}:/data/obsidian-vault:ro
+    - ${KAIRIX_VAULT_ROOT:-/path/to/vault}:/path/to/vault:ro
     - ${KAIRIX_DATA_DIR:-/data/kairix}:/data/kairix
   restart: unless-stopped
 ```
@@ -312,7 +312,7 @@ Coverage target: `kairix/watcher/` ≥ 80% (per ENGINEERING.md general module ta
 1. Implement `kairix/watcher/daemon.py` and `kairix/watcher/cli.py` with full test coverage
 2. Add `watchfiles>=0.21` to `pyproject.toml`; run `pip-audit` to confirm no CVEs
 3. Wire `kairix watch` subcommand into `kairix/cli.py`
-4. Deploy to VM as a manual foreground process (`kairix watch --vault-root /data/obsidian-vault`) to verify event capture
+4. Deploy to VM as a manual foreground process (`kairix watch --vault-root /path/to/vault`) to verify event capture
 5. Measure time from vault write to search availability (target: < 5 seconds)
 6. Add to `docker-compose.yml` as `kairix-watcher` service
 7. Reduce cron interval from 60s to 10 minutes (safety net only)
