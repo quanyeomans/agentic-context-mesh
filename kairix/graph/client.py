@@ -17,6 +17,11 @@ import os
 from typing import Any
 
 from kairix.graph.models import GraphEdge, OrganisationNode, OutcomeNode, PersonNode
+from kairix.secrets import load_secrets as _load_secrets
+
+# Load vault-agent sidecar secrets before env-var reads.
+# No-op when /run/secrets/kairix.env is absent (local dev, CI).
+_load_secrets()
 
 logger = logging.getLogger(__name__)
 

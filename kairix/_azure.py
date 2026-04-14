@@ -37,6 +37,12 @@ from functools import lru_cache
 
 import requests
 
+from kairix.secrets import load_secrets as _load_secrets
+
+# Load vault-agent sidecar secrets before any env-var reads.
+# No-op when /run/secrets/kairix.env is absent (local dev, CI).
+_load_secrets()
+
 logger = logging.getLogger(__name__)
 
 # Azure OpenAI embedding dimensions
