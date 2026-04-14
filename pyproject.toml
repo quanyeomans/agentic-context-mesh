@@ -73,7 +73,6 @@ omit = [
     # Neo4j graph layer — requires live Neo4j instance; not available in CI
     "kairix/graph/*",
     # Pipeline orchestrators — thin wrappers over individually-tested modules
-    "kairix/entities/pipeline.py",
     "kairix/temporal/index.py",
     "kairix/wikilinks/audit.py",
 ]

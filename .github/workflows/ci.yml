@@ -135,8 +135,6 @@ jobs:
         run: |
           pytest tests/ -m integration -v --tb=short --maxfail=3
         # maxfail=3: engineering hub "stop on >3 failures"
-        env:
-          KAIRIX_TEST_DB: /tmp/kairix-test-${{ github.run_id }}.sqlite
 
       - name: Verify backwards compatibility (qmd_azure_embed shim)
         # Ensure legacy entry point still works after refactor

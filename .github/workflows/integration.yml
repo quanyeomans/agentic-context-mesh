@@ -95,8 +95,6 @@ jobs:
             -v --tb=short \
             --maxfail=3 \
             --timeout=60
-        env:
-          KAIRIX_TEST_DB: /tmp/kairix-ci-${{ github.run_id }}.sqlite
 
       - name: Verify backwards compat shim
         run: |
