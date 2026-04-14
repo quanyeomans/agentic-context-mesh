@@ -2,7 +2,7 @@
 
 Step-by-step deployment and operations guide for Kairix on a server. This document is the single source of truth for getting a new deployment running and keeping it healthy.
 
-For design rationale see [PRD.md](PRD.md). For benchmark methodology see [EVALUATION.md](EVALUATION.md). For QMD schema compatibility see [QMD_COMPAT.md](QMD_COMPAT.md).
+For design rationale see [PRD.md](PRD.md). For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 
 ---
 
@@ -120,7 +120,7 @@ qmd status
 export SQLITE_VEC_PATH="/path/to/vec0.so"
 ```
 
-See [QMD_COMPAT.md](QMD_COMPAT.md) for compatible QMD versions and schema details.
+The sqlite-vec extension is discovered automatically from QMD's `node_modules` directory.
 
 ### 4. Infrastructure Directories
 
@@ -314,38 +314,11 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 
 ## Running the Benchmark
 
-The v2-real-world benchmark suite measures retrieval quality across 263 real queries from agent session logs.
-
 ```bash
-cd /data/tools/qmd-azure-embed
-
-# Run R1 benchmark (results saved to vault benchmark-results/ folder)
-.venv/bin/python scripts/run-benchmark-v2.py R2-description \
-  --suite suites/v2-real-world.yaml
-
-# View latest results
-tail -30 /data/kairix/logs/benchmark.log
+kairix benchmark run --suite suites/example.yaml
 ```
 
-**Current scores (R1, 2026-04-07):**
-
-| Category | NDCG@10 | Target |
-|---|---|---|
-| semantic | 0.831 | ≥ 0.80 ✅ |
-| entity | 0.763 | ≥ 0.70 ✅ |
-| keyword | 0.791 | ≥ 0.75 ✅ |
-| multi_hop | 0.585 | ≥ 0.65 🟡 |
-| procedural | 0.389 | ≥ 0.55 🔴 |
-| temporal | 0.378 | ≥ 0.55 🔴 |
-| **overall** | **0.7756** | **≥ 0.74 ✅** |
-
-To rebuild gold paths after a large vault restructure:
-```bash
-AZURE_OPENAI_ENDPOINT="$ENDPOINT" AZURE_OPENAI_API_KEY="$APIKEY" \
-PYTHONUNBUFFERED=1 .venv/bin/python -u scripts/build-eval-gold.py \
-  > /data/kairix/logs/build-eval-gold.log 2>&1 &
-```
-This takes ~80 minutes and costs ~$0.27 for 388 queries.
+See [EVALUATION.md](EVALUATION.md) for current scores, benchmark methodology, and the graded relevance scoring format.
 
 ---
 
@@ -513,7 +486,7 @@ cd /data/tools/qmd-azure-embed
 # QMD_TESTED_VERSION in mnemosyne/embed/schema.py
 ```
 
-See [QMD_COMPAT.md](QMD_COMPAT.md) for the full upgrade procedure.
+Run compatibility tests (`pytest tests/ -k "schema" -v`) after upgrading QMD to verify schema alignment.
 
 ---
 
