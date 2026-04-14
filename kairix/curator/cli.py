@@ -3,7 +3,7 @@ Curator agent CLI for Kairix.
 
 Usage:
   kairix curator health [--format text|json] [--output FILE]
-                        [--staleness-days N] [--no-neo4j]
+                        [--staleness-days N]
 
 Exit code is always 0 — health issues are surfaced via the report, not the
 exit code, so callers (cron, OpenClaw, CI) do not see spurious failures.
@@ -22,23 +22,11 @@ def _health_cmd(args: argparse.Namespace) -> None:
         format_report_text,
         run_health_check,
     )
-    from kairix.entities.schema import open_entities_db
+    from kairix.graph.client import get_client
 
-    db = open_entities_db()
+    neo4j_client = get_client()
 
-    neo4j_client = None
-    if not args.no_neo4j:
-        try:
-            from kairix.graph.client import get_client
-
-            client = get_client()
-            if client.available:
-                neo4j_client = client
-        except Exception:
-            pass  # Neo4j unavailable — health check proceeds without graph counts
-
-    report = run_health_check(db, neo4j_client=neo4j_client, staleness_days=args.staleness_days)
-    db.close()
+    report = run_health_check(neo4j_client, staleness_days=args.staleness_days)
 
     output = format_report_json(report) if args.format == "json" else format_report_text(report)
 
@@ -83,13 +71,6 @@ def main(argv: list[str] | None = None) -> None:
         dest="staleness_days",
         metavar="N",
         help="Flag entities with no activity for N days as stale (default: 90)",
-    )
-    health_parser.add_argument(
-        "--no-neo4j",
-        action="store_true",
-        default=False,
-        dest="no_neo4j",
-        help="Skip Neo4j availability check",
     )
     health_parser.set_defaults(func=_health_cmd)
 
