@@ -67,7 +67,7 @@ def release_lock(lock_fh: IO[str]) -> None:
         fcntl.flock(lock_fh, fcntl.LOCK_UN)
         lock_fh.close()
         LOCKFILE.unlink(missing_ok=True)
-    except OSError:
+    except (OSError, ValueError):
         pass
 
 
@@ -114,7 +114,6 @@ def cmd_embed(args: argparse.Namespace) -> int:
 
     except Exception as e:
         logging.exception(f"Embed failed: {e}")
-        release_lock(lock_fh)
         return 2
     finally:
         release_lock(lock_fh)
