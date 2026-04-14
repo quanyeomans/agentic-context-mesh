@@ -47,6 +47,8 @@ class OrganisationNode:
     industry: list[str] = field(default_factory=list)
     geography: list[str] = field(default_factory=list)
     stakeholder_personas: list[str] = field(default_factory=list)
+    focus_areas: list[str] = field(default_factory=list)
+    key_platforms: list[str] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)
 
     def to_neo4j_props(self) -> dict:
@@ -59,6 +61,8 @@ class OrganisationNode:
             "industry": self.industry,
             "geography": self.geography,
             "stakeholder_personas": self.stakeholder_personas,
+            "focus_areas": self.focus_areas,
+            "key_platforms": self.key_platforms,
             "aliases": self.aliases,
         }
 
