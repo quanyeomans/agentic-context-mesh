@@ -318,7 +318,7 @@ def build_server() -> Any:
     Install via: pip install kairix[agents]
     """
     try:
-        from mcp.server.fastmcp import FastMCP  # type: ignore[import,import-untyped]
+        from mcp.server.fastmcp import FastMCP
     except ImportError as exc:
         raise ImportError(
             "The 'mcp' package is required to run the MCP server. "

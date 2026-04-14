@@ -94,8 +94,11 @@ def crawl(
                 continue
             org_id = _to_slug(org_dir.name)
             # Canonical note: {OrgDir}/{OrgDir}.md (index file)
-            canonical: Path | None = org_dir / f"{org_dir.name}.md"
-            if not canonical.exists():
+            index_md = org_dir / f"{org_dir.name}.md"
+            canonical: Path | None
+            if index_md.exists():
+                canonical = index_md
+            else:
                 # Fall back to any .md file in the directory
                 mds = list(org_dir.glob("*.md"))
                 canonical = mds[0] if mds else None
