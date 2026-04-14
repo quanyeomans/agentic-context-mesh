@@ -125,14 +125,12 @@ def cmd_guide(args: argparse.Namespace) -> int:
             vault_path / "shared" / "kairix-usage.md",
             vault_path / "agent-knowledge" / "shared" / "kairix-usage.md",
         ]
-        dest = None
+        dest_or_none: Path | None = None
         for c in candidates:
             if c.parent.exists():
-                dest = c
+                dest_or_none = c
                 break
-        if dest is None:
-            # Fall back to vault root
-            dest = vault_path / "kairix-usage.md"
+        dest = dest_or_none if dest_or_none is not None else vault_path / "kairix-usage.md"
 
     if args.dry_run:
         print(f"Would install agent usage guide:")

@@ -181,7 +181,7 @@ def check_vault_root_configured() -> CheckResult:
 def check_vector_search_working() -> CheckResult:
     """Vector search returns results with vec_count > 0 (not BM25-only fallback)."""
     try:
-        from kairix.search.hybrid import search  # type: ignore[import]
+        from kairix.search.hybrid import search
 
         result = search(query="knowledge management", budget=500)
 
@@ -243,7 +243,7 @@ def check_vector_search_working() -> CheckResult:
 def check_neo4j_reachable() -> CheckResult:
     """Neo4j is reachable and contains entities."""
     try:
-        from kairix.graph.client import get_client  # type: ignore[import]
+        from kairix.graph.client import get_client
 
         client = get_client()
         if not getattr(client, "available", False):

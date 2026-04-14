@@ -23,7 +23,10 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kairix.graph.models import OrganisationNode
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +94,7 @@ def crawl(
                 continue
             org_id = _to_slug(org_dir.name)
             # Canonical note: {OrgDir}/{OrgDir}.md (index file)
-            canonical = org_dir / f"{org_dir.name}.md"
+            canonical: Path | None = org_dir / f"{org_dir.name}.md"
             if not canonical.exists():
                 # Fall back to any .md file in the directory
                 mds = list(org_dir.glob("*.md"))
@@ -136,7 +139,7 @@ def crawl(
             org_raw = str(fm.get("org") or fm.get("organisation") or "")
             org_id = _resolve_org_id(org_raw, orgs) if org_raw else ""
 
-            node = PersonNode(
+            person_node = PersonNode(
                 id=person_id,
                 name=fm.get("name") or _to_display_name(md_file.stem),
                 org=org_id,
@@ -147,12 +150,12 @@ def crawl(
                 interests=_as_list(fm.get("interests")),
                 aliases=_as_list(fm.get("aliases")),
             )
-            persons[person_id] = node
+            persons[person_id] = person_node
             report.persons_found += 1
-            logger.debug("person: %s (%s)", node.name, vault_path)
+            logger.debug("person: %s (%s)", person_node.name, vault_path)
 
             if not dry_run:
-                if neo4j_client.upsert_person(node):
+                if neo4j_client.upsert_person(person_node):
                     report.persons_upserted += 1
                 else:
                     report.errors.append(f"Failed to upsert person: {person_id}")
@@ -183,17 +186,17 @@ def crawl(
 
             from kairix.graph.models import OutcomeNode
 
-            node = OutcomeNode(
+            outcome_node = OutcomeNode(
                 id=outcome_id,
                 name=fm.get("name") or _to_display_name(md_file.stem),
                 domain=str(fm.get("domain") or ""),
                 vault_path=vault_path,
             )
             report.outcomes_found += 1
-            logger.debug("outcome: %s (%s)", node.name, vault_path)
+            logger.debug("outcome: %s (%s)", outcome_node.name, vault_path)
 
             if not dry_run:
-                if neo4j_client.upsert_outcome(node):
+                if neo4j_client.upsert_outcome(outcome_node):
                     report.outcomes_upserted += 1
                 else:
                     report.errors.append(f"Failed to upsert outcome: {outcome_id}")
@@ -284,16 +287,14 @@ def _as_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _resolve_org_id(org_raw: str, orgs: dict[str, OrganisationNode]) -> str:
+def _resolve_org_id(org_raw: str, orgs: dict[str, "OrganisationNode"]) -> str:
     """Find an org id by name or partial match in the discovered orgs dict."""
-    from kairix.graph.models import OrganisationNode  # avoid circular at module level
-
     slug = _to_slug(org_raw)
     if slug in orgs:
-        return orgs[slug].id
+        return str(orgs[slug].id)
     # Partial match: org_raw is a substring of a known org name
     org_raw_lower = org_raw.lower()
     for key, node in orgs.items():
         if org_raw_lower in node.name.lower() or org_raw_lower in key:
-            return node.id
+            return str(node.id)
     return ""

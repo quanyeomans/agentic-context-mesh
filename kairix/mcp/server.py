@@ -60,10 +60,10 @@ def tool_search(
             "intent": result.intent.value if hasattr(result.intent, "value") else str(result.intent),
             "results": [
                 {
-                    "path": r.path,
-                    "score": r.score,
-                    "snippet": r.text[:500] if hasattr(r, "text") else "",
-                    "tokens": r.tokens if hasattr(r, "tokens") else 0,
+                    "path": r.result.path,
+                    "score": r.result.boosted_score,
+                    "snippet": r.content[:500],
+                    "tokens": r.token_estimate,
                 }
                 for r in result.results
             ],
@@ -139,18 +139,25 @@ def tool_prep(
         dict with keys: query, tier, summary, tokens, error.
     """
     try:
-        from kairix.summaries.generate import generate_l0, generate_l1
+        from kairix._azure import chat_completion
 
-        if tier == "l1":
-            result = generate_l1(query=query, agent=agent)
-        else:
-            result = generate_l0(query=query, agent=agent)
-
+        max_tokens = 150 if tier == "l0" else 600
+        system = (
+            "You are a concise knowledge assistant. "
+            "Summarise what is known about the topic in 2-3 sentences."
+            if tier == "l0"
+            else "You are a knowledge assistant. Provide a structured overview of the topic."
+        )
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"Topic: {query}"},
+        ]
+        summary = chat_completion(messages, max_tokens=max_tokens)
         return {
             "query": query,
             "tier": tier,
-            "summary": result.summary if hasattr(result, "summary") else str(result),
-            "tokens": result.tokens if hasattr(result, "tokens") else 0,
+            "summary": summary,
+            "tokens": len(summary) // 4,
             "error": "",
         }
     except Exception as exc:
@@ -180,8 +187,17 @@ def tool_timeline(
     try:
         from kairix.temporal.rewriter import is_relative_temporal, rewrite_temporal_query
 
+        from datetime import date as _date
+
+        anchor: _date | None = None
+        if anchor_date:
+            try:
+                anchor = _date.fromisoformat(anchor_date)
+            except ValueError:
+                pass
+
         is_temporal = is_relative_temporal(query)
-        rewritten = rewrite_temporal_query(query=query, anchor_date=anchor_date) if is_temporal else query
+        rewritten = rewrite_temporal_query(query=query, reference_date=anchor) if is_temporal else query
 
         # Extract time window if temporal
         time_window: dict[str, str] = {}
@@ -189,11 +205,11 @@ def tool_timeline(
             try:
                 from kairix.temporal.rewriter import extract_time_window
 
-                window = extract_time_window(query=query, anchor_date=anchor_date)
-                if window:
+                start, end = extract_time_window(query=query, reference_date=anchor)
+                if start or end:
                     time_window = {
-                        "start": str(window.start) if hasattr(window, "start") else "",
-                        "end": str(window.end) if hasattr(window, "end") else "",
+                        "start": str(start) if start else "",
+                        "end": str(end) if end else "",
                     }
             except Exception:
                 pass
@@ -302,7 +318,7 @@ def build_server() -> Any:
     Install via: pip install kairix[agents]
     """
     try:
-        from mcp.server.fastmcp import FastMCP  # type: ignore[import-untyped]
+        from mcp.server.fastmcp import FastMCP  # type: ignore[import,import-untyped]
     except ImportError as exc:
         raise ImportError(
             "The 'mcp' package is required to run the MCP server. "
