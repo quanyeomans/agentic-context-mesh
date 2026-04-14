@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> None:
     check_p = sub.add_parser("check", help="Check new content for contradictions")
     check_p.add_argument("content", help="New content to check (raw text or claim)")
     check_p.add_argument("--top-k", type=int, default=5, help="Documents to compare against (default 5)")
-    check_p.add_argument("--threshold", type=float, default=0.6, help="Minimum contradiction score 0–1 (default 0.6)")
+    check_p.add_argument("--threshold", type=float, default=0.6, help="Minimum contradiction score 0-1 (default 0.6)")
     check_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     check_p.add_argument("--agent", default="shared", help="Agent scope for search (default shared)")
 
@@ -46,18 +46,20 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     if args.format == "json":
-        print(json.dumps(
-            [
-                {
-                    "doc_path": r.doc_path,
-                    "score": round(r.score, 4),
-                    "reason": r.reason,
-                    "snippet": r.snippet,
-                }
-                for r in results
-            ],
-            indent=2,
-        ))
+        print(
+            json.dumps(
+                [
+                    {
+                        "doc_path": r.doc_path,
+                        "score": round(r.score, 4),
+                        "reason": r.reason,
+                        "snippet": r.snippet,
+                    }
+                    for r in results
+                ],
+                indent=2,
+            )
+        )
     else:
         if not results:
             print(f"No contradictions found (top_k={args.top_k}, threshold={args.threshold})")

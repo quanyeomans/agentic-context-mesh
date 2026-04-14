@@ -7,7 +7,7 @@ All Neo4j calls are mocked. Filesystem is provided via tmp_path.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,7 +19,6 @@ from kairix.vault.crawler import (
     _to_slug,
     crawl,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -298,7 +297,7 @@ def test_crawl_ignores_wikilinks_to_unknown_entities(tmp_path: Path) -> None:
     _write(docs / "notes.md", "Reference to [[SomeUnknownOrg]] in passing.")
 
     client = _make_neo4j()
-    report = crawl(vault_root=tmp_path, neo4j_client=client)
+    crawl(vault_root=tmp_path, neo4j_client=client)
 
     edge_calls = [c[0][0] for c in client.upsert_edge.call_args_list]
     mentions = [e for e in edge_calls if e.kind.value == "MENTIONS"]

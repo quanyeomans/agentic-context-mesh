@@ -281,6 +281,7 @@ def test_format_interpretation_returns_string() -> None:
     assert isinstance(output, str)
     assert len(output) > 50
 
+
 # ---------------------------------------------------------------------------
 # NDCG@10 helpers
 # ---------------------------------------------------------------------------
@@ -289,6 +290,7 @@ def test_format_interpretation_returns_string() -> None:
 @pytest.mark.unit
 def test_dcg_perfect_relevance() -> None:
     import math
+
     expected = 2 / math.log2(2) + 1 / math.log2(3)
     assert _dcg([2, 1, 0], k=3) == pytest.approx(expected)
 
@@ -301,6 +303,7 @@ def test_dcg_empty_relevances() -> None:
 @pytest.mark.unit
 def test_dcg_k_truncates() -> None:
     import math
+
     assert _dcg([2, 1, 1], k=1) == pytest.approx(2 / math.log2(2))
 
 
@@ -308,6 +311,7 @@ def test_dcg_k_truncates() -> None:
 def test_ideal_dcg_sorts_by_relevance() -> None:
     gold = [{"path": "a.md", "relevance": 1}, {"path": "b.md", "relevance": 2}]
     import math
+
     expected = 2 / math.log2(2) + 1 / math.log2(3)
     assert _ideal_dcg(gold, k=10) == pytest.approx(expected)
 
@@ -349,6 +353,7 @@ def test_ndcg_score_case_insensitive() -> None:
 @pytest.mark.unit
 def test_ndcg_score_known_value() -> None:
     import math
+
     gold = [
         {"path": "a.md", "relevance": 2},
         {"path": "b.md", "relevance": 1},

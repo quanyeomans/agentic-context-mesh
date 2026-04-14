@@ -13,7 +13,6 @@ import pytest
 
 from kairix.secrets import load_secrets
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -171,6 +170,7 @@ def test_returns_zero_on_permission_error(tmp_path, monkeypatch) -> None:
     path = _write_secrets(tmp_path, "X=1\n")
     # Make the file unreadable
     import os as _os
+
     _os.chmod(path, 0o000)
     try:
         count = load_secrets(path)

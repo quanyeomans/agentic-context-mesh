@@ -17,7 +17,6 @@ from kairix.contradict.detector import (
     check_contradiction,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -40,6 +39,7 @@ def _make_sr(bundles: list) -> MagicMock:
 
 def _llm_response(score: float, reason: str = "test reason") -> str:
     import json
+
     return json.dumps({"score": score, "reason": reason})
 
 
@@ -59,14 +59,14 @@ def test_parse_llm_response_valid_json() -> None:
 @pytest.mark.unit
 def test_parse_llm_response_clamps_above_1() -> None:
     raw = '{"score": 1.5, "reason": "extreme"}'
-    score, reason = _parse_llm_response(raw)
+    score, _reason = _parse_llm_response(raw)
     assert score == pytest.approx(1.0)
 
 
 @pytest.mark.unit
 def test_parse_llm_response_clamps_below_0() -> None:
     raw = '{"score": -0.3, "reason": "negative"}'
-    score, reason = _parse_llm_response(raw)
+    score, _reason = _parse_llm_response(raw)
     assert score == pytest.approx(0.0)
 
 
@@ -87,13 +87,13 @@ def test_parse_llm_response_empty_string() -> None:
 
 @pytest.mark.unit
 def test_parse_llm_response_no_json() -> None:
-    score, reason = _parse_llm_response("no json here at all")
+    score, _reason = _parse_llm_response("no json here at all")
     assert score is None
 
 
 @pytest.mark.unit
 def test_parse_llm_response_malformed_json() -> None:
-    score, reason = _parse_llm_response("{score: not valid json}")
+    score, _reason = _parse_llm_response("{score: not valid json}")
     assert score is None
 
 
@@ -109,14 +109,14 @@ def test_parse_llm_response_extracts_from_preamble() -> None:
 @pytest.mark.unit
 def test_parse_llm_response_missing_score_key() -> None:
     raw = '{"reason": "no score key"}'
-    score, reason = _parse_llm_response(raw)
+    score, _reason = _parse_llm_response(raw)
     assert score is None
 
 
 @pytest.mark.unit
 def test_parse_llm_response_non_numeric_score() -> None:
     raw = '{"score": "high", "reason": "non-numeric"}'
-    score, reason = _parse_llm_response(raw)
+    score, _reason = _parse_llm_response(raw)
     assert score is None
 
 

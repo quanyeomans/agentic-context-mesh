@@ -9,7 +9,6 @@ Never raises — returns a VaultHealthReport on any failure.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,8 +17,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Node property completeness thresholds
-_MIN_SUMMARY_LENGTH = 50     # chars — nodes shorter than this count as missing
-_STALE_DAYS = 90             # days without updated_at change = stale
+_MIN_SUMMARY_LENGTH = 50  # chars — nodes shorter than this count as missing
+_STALE_DAYS = 90  # days without updated_at change = stale
 
 
 @dataclass
@@ -113,8 +112,7 @@ def run_vault_health(
     # ── Property completeness ─────────────────────────────────────────────────
     try:
         rows = neo4j_client.cypher(
-            "MATCH (n:Organisation) WHERE n.vault_path IS NULL OR n.vault_path = '' "
-            "RETURN COUNT(n) AS cnt"
+            "MATCH (n:Organisation) WHERE n.vault_path IS NULL OR n.vault_path = '' RETURN COUNT(n) AS cnt"
         )
         if rows:
             report.orgs_missing_vault_path = int(rows[0].get("cnt", 0))
@@ -123,8 +121,7 @@ def run_vault_health(
 
     try:
         rows = neo4j_client.cypher(
-            "MATCH (n:Person) WHERE n.vault_path IS NULL OR n.vault_path = '' "
-            "RETURN COUNT(n) AS cnt"
+            "MATCH (n:Person) WHERE n.vault_path IS NULL OR n.vault_path = '' RETURN COUNT(n) AS cnt"
         )
         if rows:
             report.persons_missing_vault_path = int(rows[0].get("cnt", 0))
@@ -133,8 +130,7 @@ def run_vault_health(
 
     try:
         rows = neo4j_client.cypher(
-            "MATCH (n:Organisation) WHERE n.summary IS NULL OR size(n.summary) < $min_len "
-            "RETURN COUNT(n) AS cnt",
+            "MATCH (n:Organisation) WHERE n.summary IS NULL OR size(n.summary) < $min_len RETURN COUNT(n) AS cnt",
             {"min_len": _MIN_SUMMARY_LENGTH},
         )
         if rows:
@@ -144,8 +140,7 @@ def run_vault_health(
 
     try:
         rows = neo4j_client.cypher(
-            "MATCH (n:Person) WHERE n.summary IS NULL OR size(n.summary) < $min_len "
-            "RETURN COUNT(n) AS cnt",
+            "MATCH (n:Person) WHERE n.summary IS NULL OR size(n.summary) < $min_len RETURN COUNT(n) AS cnt",
             {"min_len": _MIN_SUMMARY_LENGTH},
         )
         if rows:
@@ -174,9 +169,7 @@ def run_vault_health(
             f"{report.orgs_missing_vault_path} organisation(s) missing vault_path — re-run vault crawl"
         )
     if report.persons_missing_vault_path > 0:
-        report.issues.append(
-            f"{report.persons_missing_vault_path} person(s) missing vault_path — re-run vault crawl"
-        )
+        report.issues.append(f"{report.persons_missing_vault_path} person(s) missing vault_path — re-run vault crawl")
 
     return report
 

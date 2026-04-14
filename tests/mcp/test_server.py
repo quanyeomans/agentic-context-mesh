@@ -14,7 +14,6 @@ import pytest
 
 from kairix.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline
 
-
 # ---------------------------------------------------------------------------
 # tool_search
 # ---------------------------------------------------------------------------
@@ -25,9 +24,7 @@ def test_tool_search_returns_expected_shape() -> None:
     mock_result = SimpleNamespace(
         query="test query",
         intent=SimpleNamespace(value="semantic"),
-        results=[
-            SimpleNamespace(path="notes/foo.md", score=0.9, text="some text here", tokens=10)
-        ],
+        results=[SimpleNamespace(path="notes/foo.md", score=0.9, text="some text here", tokens=10)],
         total_tokens=10,
         latency_ms=42.5,
         error="",
@@ -110,7 +107,13 @@ def test_tool_entity_neo4j_primary() -> None:
     mock_neo4j = MagicMock()
     mock_neo4j.available = True
     mock_neo4j.cypher.return_value = [
-        {"id": "bupa", "name": "Bupa", "type": "Organisation", "summary": "A health org", "vault_path": "02-Areas/00-Clients/Bupa/Bupa.md"}
+        {
+            "id": "bupa",
+            "name": "Bupa",
+            "type": "Organisation",
+            "summary": "A health org",
+            "vault_path": "02-Areas/00-Clients/Bupa/Bupa.md",
+        }
     ]
 
     with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
@@ -214,9 +217,13 @@ def test_tool_prep_default_tier_is_l0() -> None:
 
 @pytest.mark.unit
 def test_tool_timeline_temporal_query() -> None:
+    rewritten = "what happened 2026-04-06..2026-04-13"
     with patch("kairix.temporal.rewriter.is_relative_temporal", return_value=True):
-        with patch("kairix.temporal.rewriter.rewrite_temporal_query", return_value="what happened 2026-04-06..2026-04-13"):
-            with patch("kairix.temporal.rewriter.extract_time_window", return_value=SimpleNamespace(start="2026-04-06", end="2026-04-13")):
+        with patch("kairix.temporal.rewriter.rewrite_temporal_query", return_value=rewritten):
+            with patch(
+                "kairix.temporal.rewriter.extract_time_window",
+                return_value=("2026-04-06", "2026-04-13"),
+            ):
                 result = tool_timeline(query="what happened last week")
 
     assert result["is_temporal"] is True

@@ -479,8 +479,6 @@ def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) ->
     assert result is None
 
 
-
-
 def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) -> None:
     """search() with TEMPORAL intent calls temporal rewriting (mocked)."""
     from kairix.search.bm25 import BM25Result

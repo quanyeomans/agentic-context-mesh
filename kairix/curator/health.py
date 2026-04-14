@@ -104,8 +104,7 @@ def run_health_check(
     total_entities = 0
     try:
         rows = neo4j_client.cypher(
-            f"MATCH (n) WHERE labels(n)[0] IN {label_filter} "
-            "RETURN labels(n)[0] AS label, COUNT(*) AS cnt"
+            f"MATCH (n) WHERE labels(n)[0] IN {label_filter} RETURN labels(n)[0] AS label, COUNT(*) AS cnt"
         )
         for r in rows:
             label = r.get("label")

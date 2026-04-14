@@ -485,9 +485,7 @@ def run_benchmark(
         elif case.score_method == "fuzzy":
             score = _fuzzy_match(paths, case.gold_path or "")
         elif case.score_method == "ndcg":
-            effective_gold = case.gold_paths or (
-                [{"path": case.gold_path, "relevance": 2}] if case.gold_path else []
-            )
+            effective_gold = case.gold_paths or ([{"path": case.gold_path, "relevance": 2}] if case.gold_path else [])
             score = _ndcg_score(paths, effective_gold, k=10)
             ndcg_detail = {
                 "hit_at_5": _hit_at_k(paths, effective_gold, k=5),
@@ -550,7 +548,9 @@ def run_benchmark(
     # Aggregate NDCG-specific metrics across ndcg-scored cases
     ndcg_cases = [c for c in case_results if c.get("score_method") == "ndcg"]
     ndcg_at_10 = round(sum(c["score"] for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
-    hit_rate_at_5 = round(sum(float(c.get("hit_at_5", 0)) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
+    hit_rate_at_5 = (
+        round(sum(float(c.get("hit_at_5", 0)) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
+    )
     mrr_at_10 = round(sum(c.get("rr", 0.0) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
 
     result = BenchmarkResult(

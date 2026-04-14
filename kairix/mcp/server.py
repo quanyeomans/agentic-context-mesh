@@ -143,8 +143,7 @@ def tool_prep(
 
         max_tokens = 150 if tier == "l0" else 600
         system = (
-            "You are a concise knowledge assistant. "
-            "Summarise what is known about the topic in 2-3 sentences."
+            "You are a concise knowledge assistant. Summarise what is known about the topic in 2-3 sentences."
             if tier == "l0"
             else "You are a knowledge assistant. Provide a structured overview of the topic."
         )
@@ -185,9 +184,9 @@ def tool_timeline(
         time_window (dict with start/end), error.
     """
     try:
-        from kairix.temporal.rewriter import is_relative_temporal, rewrite_temporal_query
-
         from datetime import date as _date
+
+        from kairix.temporal.rewriter import is_relative_temporal, rewrite_temporal_query
 
         anchor: _date | None = None
         if anchor_date:
@@ -212,7 +211,7 @@ def tool_timeline(
                         "end": str(end) if end else "",
                     }
             except Exception:
-                pass
+                logger.debug("extract_time_window failed", exc_info=True)
 
         return {
             "original_query": query,
@@ -253,6 +252,7 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
         guide_path = Path(__file__).parent.parent.parent / "docs" / "agent-usage-guide.md"
         if not guide_path.exists():
             import kairix as _kairix
+
             guide_path = Path(_kairix.__file__).parent.parent / "docs" / "agent-usage-guide.md"
 
         if not guide_path.exists():
@@ -293,7 +293,7 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
 
         if not sections:
             # Fallback: search for topic keyword in full text
-            matching_lines = [l for l in lines if topic_lower in l.lower()]
+            matching_lines = [ln for ln in lines if topic_lower in ln.lower()]
             content = "\n".join(matching_lines[:30]) if matching_lines else full_text[:2000]
         else:
             content = "\n\n".join(sections)
@@ -321,8 +321,7 @@ def build_server() -> Any:
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:
         raise ImportError(
-            "The 'mcp' package is required to run the MCP server. "
-            "Install it with: pip install 'kairix[agents]'"
+            "The 'mcp' package is required to run the MCP server. Install it with: pip install 'kairix[agents]'"
         ) from exc
 
     server = FastMCP("kairix")

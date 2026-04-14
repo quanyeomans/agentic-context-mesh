@@ -19,7 +19,6 @@ from kairix.curator.health import (
     run_health_check,
 )
 
-
 # ---------------------------------------------------------------------------
 # Mock Neo4j client
 # ---------------------------------------------------------------------------
@@ -131,9 +130,7 @@ def test_counts_entities_by_type() -> None:
 
 @pytest.mark.unit
 def test_synthesis_failure_detected() -> None:
-    client = _MockNeo4jClient(
-        synthesis_failures=[_entity_row("no-summary", label="Person")]
-    )
+    client = _MockNeo4jClient(synthesis_failures=[_entity_row("no-summary", label="Person")])
     report = run_health_check(client)
     assert any(i.entity_id == "no-summary" for i in report.synthesis_failures)
     assert report.synthesis_failures[0].detail == "no summary"
@@ -167,9 +164,7 @@ def test_multiple_synthesis_failures() -> None:
 
 @pytest.mark.unit
 def test_missing_vault_path_detected() -> None:
-    client = _MockNeo4jClient(
-        missing_vault_path=[_entity_row("no-path", label="Organisation")]
-    )
+    client = _MockNeo4jClient(missing_vault_path=[_entity_row("no-path", label="Organisation")])
     report = run_health_check(client)
     assert any(i.entity_id == "no-path" for i in report.missing_vault_path)
     assert report.missing_vault_path[0].detail == "vault_path not set"
@@ -189,9 +184,7 @@ def test_no_missing_vault_path_when_empty() -> None:
 
 @pytest.mark.unit
 def test_stale_entity_detected() -> None:
-    client = _MockNeo4jClient(
-        stale_entities=[_entity_row("stale", last_seen="2025-09-01T00:00:00Z")]
-    )
+    client = _MockNeo4jClient(stale_entities=[_entity_row("stale", last_seen="2025-09-01T00:00:00Z")])
     report = run_health_check(client, staleness_days=90)
     assert any(i.entity_id == "stale" for i in report.stale_entities)
     assert "2025-09-01" in report.stale_entities[0].detail

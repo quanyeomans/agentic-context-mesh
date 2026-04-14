@@ -28,7 +28,7 @@ _CONTRADICTION_PROMPT = (
     "mutually exclusive states). Incidental differences or missing context "
     "do NOT constitute contradictions.\n\n"
     "Reply with ONLY a JSON object: "
-    '{{\"score\": <0.0-1.0>, \"reason\": \"<one sentence>\"}}'
+    '{{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
 )
 
 
@@ -37,9 +37,9 @@ class ContradictionResult:
     """A single detected contradiction between new content and an existing document."""
 
     doc_path: str
-    score: float      # 0.0–1.0; higher = stronger contradiction
-    reason: str       # LLM one-sentence explanation
-    snippet: str      # excerpt from the existing document
+    score: float  # 0.0-1.0; higher = stronger contradiction
+    reason: str  # LLM one-sentence explanation
+    snippet: str  # excerpt from the existing document
 
 
 def check_contradiction(
@@ -57,7 +57,7 @@ def check_contradiction(
         llm:       An LLMBackend instance (must implement `chat(messages)`).
         agent:     Agent scope for collection selection (default "shared").
         top_k:     How many similar documents to compare against.
-        threshold: Minimum contradiction score (0.0–1.0) to include in results.
+        threshold: Minimum contradiction score (0.0-1.0) to include in results.
 
     Returns:
         List of ContradictionResult, sorted by score descending.

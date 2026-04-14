@@ -12,6 +12,7 @@ Usage:
   kairix onboard guide --vault-root /data/obsidian-vault
   kairix onboard verify --agent builder
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,7 +20,6 @@ import json
 import os
 import sys
 from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # check subcommand
@@ -106,6 +106,7 @@ def cmd_guide(args: argparse.Namespace) -> int:
     if not guide_src.exists():
         # Fallback: look relative to the installed package
         import kairix
+
         pkg_root = Path(kairix.__file__).parent.parent
         guide_src = pkg_root / "docs" / "agent-usage-guide.md"
 
@@ -133,7 +134,7 @@ def cmd_guide(args: argparse.Namespace) -> int:
         dest = dest_or_none if dest_or_none is not None else vault_path / "kairix-usage.md"
 
     if args.dry_run:
-        print(f"Would install agent usage guide:")
+        print("Would install agent usage guide:")
         print(f"  Source: {guide_src}")
         print(f"  Dest:   {dest}")
         return 0
@@ -192,17 +193,13 @@ def main(argv: list[str] | None = None) -> None:
     p_check.add_argument("--json", action="store_true", help="Output as JSON")
 
     # guide
-    p_guide = sub.add_parser(
-        "guide", help="Install the agent usage guide into the vault"
-    )
+    p_guide = sub.add_parser("guide", help="Install the agent usage guide into the vault")
     p_guide.add_argument("--vault-root", help="Path to vault root (default: KAIRIX_VAULT_ROOT)")
     p_guide.add_argument("--output", help="Override destination file path")
     p_guide.add_argument("--dry-run", action="store_true", help="Show what would be installed without writing")
 
     # verify
-    p_verify = sub.add_parser(
-        "verify", help="Run acceptance tests against live deployment"
-    )
+    p_verify = sub.add_parser("verify", help="Run acceptance tests against live deployment")
     p_verify.add_argument("--agent", default="builder", help="Agent name for scoped tests")
     p_verify.add_argument("--json", action="store_true", help="Output as JSON")
 

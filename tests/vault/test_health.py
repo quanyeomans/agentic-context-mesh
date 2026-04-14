@@ -12,7 +12,6 @@ import pytest
 
 from kairix.vault.health import VaultHealthReport, format_health_text, run_vault_health
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

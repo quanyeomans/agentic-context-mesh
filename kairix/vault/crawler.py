@@ -290,7 +290,7 @@ def _as_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _resolve_org_id(org_raw: str, orgs: dict[str, "OrganisationNode"]) -> str:
+def _resolve_org_id(org_raw: str, orgs: dict[str, OrganisationNode]) -> str:
     """Find an org id by name or partial match in the discovered orgs dict."""
     slug = _to_slug(org_raw)
     if slug in orgs:

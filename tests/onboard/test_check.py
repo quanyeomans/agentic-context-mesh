@@ -4,10 +4,9 @@ Tests for kairix.onboard.check — deployment health checks.
 All tests use monkeypatch and tmp_path to isolate environment and filesystem.
 No external services required.
 """
+
 from __future__ import annotations
 
-import os
-import stat
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -24,7 +23,6 @@ from kairix.onboard.check import (
     check_wrapper_installed,
     run_all_checks,
 )
-
 
 # ---------------------------------------------------------------------------
 # check_kairix_on_path
@@ -96,7 +94,7 @@ def test_secrets_loaded_both_present(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://myresource.cognitiveservices.azure.com/")
     result = check_secrets_loaded()
     assert result.ok
-    assert "sk-test-" in result.detail   # masked key
+    assert "sk-test-" in result.detail  # masked key
     assert "myresource" in result.detail
 
 
@@ -181,10 +179,13 @@ def _make_search_result(vec_count: int = 5, bm25_count: int = 3, vec_failed: boo
 @pytest.mark.unit
 def test_vector_search_working_ok() -> None:
     mock_result = _make_search_result(vec_count=4, bm25_count=2)
-    with patch("kairix.onboard.check.check_vector_search_working.__module__"), \
-         patch("kairix.search.hybrid.search", return_value=mock_result):
+    with (
+        patch("kairix.onboard.check.check_vector_search_working.__module__"),
+        patch("kairix.search.hybrid.search", return_value=mock_result),
+    ):
         # Call with the patch active
         import kairix.onboard.check as mod
+
         with patch.object(mod, "check_vector_search_working", wraps=mod.check_vector_search_working):
             # Direct import approach
             pass

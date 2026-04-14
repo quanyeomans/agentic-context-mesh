@@ -38,7 +38,7 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
                 if m.get("id") and m["id"] not in seen_ids:
                     seen_ids.add(m["id"])
                     found_entities.append(m)
-        except Exception:
+        except Exception:  # noqa: S112
             continue
 
     if not found_entities:
@@ -55,7 +55,7 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
             rel_names = [r.get("name") for r in related[:4] if r.get("name") and r.get("name") != ename]
             if rel_names:
                 context_parts.append(f"- {ename} → {', '.join(rel_names)}")
-        except Exception:
+        except Exception:  # noqa: S112
             continue
 
     return "\n".join(context_parts) if len(context_parts) > 1 else None

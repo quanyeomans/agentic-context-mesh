@@ -15,13 +15,12 @@ Failure modes:
   - Checks never raise; exceptions are caught and surfaced as failed CheckResult.
   - Checks that require live external services (Neo4j, Azure KV) degrade gracefully.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import shutil
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -154,10 +153,7 @@ def check_vault_root_configured() -> CheckResult:
             name="vault_root_configured",
             ok=False,
             detail="KAIRIX_VAULT_ROOT is not set",
-            fix=(
-                "Set KAIRIX_VAULT_ROOT in /opt/kairix/service.env:\n"
-                "  KAIRIX_VAULT_ROOT=/data/obsidian-vault"
-            ),
+            fix=("Set KAIRIX_VAULT_ROOT in /opt/kairix/service.env:\n  KAIRIX_VAULT_ROOT=/data/obsidian-vault"),
         )
     p = Path(vault_root)
     if not p.exists():
@@ -166,8 +162,8 @@ def check_vault_root_configured() -> CheckResult:
             ok=False,
             detail=f"KAIRIX_VAULT_ROOT directory does not exist: {vault_root}",
             fix=(
-                f"Create the directory or update KAIRIX_VAULT_ROOT in /opt/kairix/service.env.\n"
-                f"If your vault is at a different path, set: KAIRIX_VAULT_ROOT=/your/vault/path"
+                "Create the directory or update KAIRIX_VAULT_ROOT in /opt/kairix/service.env.\n"
+                "If your vault is at a different path, set: KAIRIX_VAULT_ROOT=/your/vault/path"
             ),
         )
     md_count = sum(1 for _ in p.rglob("*.md") if not _.name.startswith("."))
@@ -194,7 +190,10 @@ def check_vector_search_working() -> CheckResult:
             return CheckResult(
                 name="vector_search_working",
                 ok=False,
-                detail=f"Vector search failed (vec_failed=True). Results: {result_count} (BM25 only). bm25={bm25_count}, vec=0",
+                detail=(
+                    f"Vector search failed (vec_failed=True). "
+                    f"Results: {result_count} (BM25 only). bm25={bm25_count}, vec=0"
+                ),
                 fix=(
                     "Vector search failure usually means Azure credentials aren't loaded.\n"
                     "Check: kairix onboard check  — look at secrets_loaded result.\n"
