@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -21,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 _VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault"))
 _WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces"))
-_ENTITIES_DB = Path(os.environ.get("KAIRIX_ENTITIES_DB", "/data/kairix/entities.db"))
 _MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", "/data/workspaces"))
 
 # Approximate token estimator: words * 1.3
@@ -205,7 +203,7 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300) -> str:
 
 def fetch_recent_decisions(agent: str, max_tokens: int = 400) -> str:
     """
-    Fetch decisions from last 30 days from decisions.md and entities.db.
+    Fetch decisions from last 30 days from decisions.md.
     Returns empty string on failure.
     """
     try:
@@ -222,37 +220,6 @@ def fetch_recent_decisions(agent: str, max_tokens: int = 400) -> str:
                 parts.append(f"### decisions.md\n{content}")
             except Exception as e:
                 logger.warning("sources: error reading decisions.md — %s", e)
-
-        # entities.db entity_facts
-        if _ENTITIES_DB.exists():
-            try:
-                conn = sqlite3.connect(str(_ENTITIES_DB))
-                try:
-                    # Look for decision facts in last 30 days
-                    cutoff = (date.today() - timedelta(days=30)).isoformat()
-                    cursor = conn.execute(
-                        """
-                        SELECT ef.fact_type, ef.fact_value, ef.created_at
-                        FROM entity_facts ef
-                        WHERE (ef.fact_type LIKE '%decision%'
-                               OR ef.fact_value LIKE '%decided%'
-                               OR ef.fact_value LIKE '%rationale%')
-                          AND ef.created_at >= ?
-                        ORDER BY ef.created_at DESC
-                        LIMIT 10
-                        """,
-                        (cutoff,),
-                    )
-                    rows = cursor.fetchall()
-                    if rows:
-                        db_lines = [f"- [{row[2][:10]}] {row[0]}: {row[1]}" for row in rows]
-                        parts.append("### entity_facts (decisions)\n" + "\n".join(db_lines))
-                except sqlite3.OperationalError as e:
-                    logger.debug("sources: entities.db query failed — %s", e)
-                finally:
-                    conn.close()
-            except Exception as e:
-                logger.warning("sources: entities.db access failed — %s", e)
 
         if not parts:
             return ""

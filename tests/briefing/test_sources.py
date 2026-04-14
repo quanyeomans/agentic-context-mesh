@@ -195,9 +195,8 @@ class TestFetchRecentDecisions:
 
         assert "ADR" in result or "decision" in result.lower()
 
-    def test_handles_missing_entities_db(self, tmp_path):
-        # Should not raise when entities.db doesn't exist
-        fake_db = tmp_path / "nonexistent.db"
-        with patch("kairix.briefing.sources._ENTITIES_DB", fake_db):
+    def test_returns_empty_when_no_decisions_file(self, tmp_path):
+        # Should return empty string when decisions.md doesn't exist
+        with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
             result = fetch_recent_decisions("builder")
         assert isinstance(result, str)

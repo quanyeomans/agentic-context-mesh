@@ -123,64 +123,36 @@ def test_tool_entity_neo4j_primary() -> None:
 
 
 @pytest.mark.unit
-def test_tool_entity_neo4j_not_found_falls_back() -> None:
+def test_tool_entity_neo4j_not_found_returns_error() -> None:
+    """When Neo4j returns empty results, entity not found error is returned."""
     mock_neo4j = MagicMock()
     mock_neo4j.available = True
     mock_neo4j.cypher.return_value = []  # not found in Neo4j
 
-    mock_entity = SimpleNamespace(
-        id=42,
-        name="Felicity Herron",
-        entity_type="person",
-        summary="CTO at Bupa",
-        vault_path="02-Areas/Network/People-Notes/felicity-herron.md",
-    )
-
     with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
-        with patch("kairix.entities.graph.entity_lookup", return_value=mock_entity):
-            with patch("kairix.entities.schema.open_entities_db", return_value=MagicMock()):
-                result = tool_entity(name="Felicity Herron")
-
-    assert result["name"] == "Felicity Herron"
-    assert result["error"] == ""
-
-
-@pytest.mark.unit
-def test_tool_entity_not_found_returns_error() -> None:
-    mock_neo4j = MagicMock()
-    mock_neo4j.available = True
-    mock_neo4j.cypher.return_value = []
-
-    with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
-        with patch("kairix.entities.graph.entity_lookup", return_value=None):
-            with patch("kairix.entities.schema.open_entities_db", return_value=MagicMock()):
-                result = tool_entity(name="Unknown Entity")
+        result = tool_entity(name="Unknown Entity")
 
     assert result["id"] == ""
     assert "not found" in result["error"].lower()
 
 
 @pytest.mark.unit
-def test_tool_entity_neo4j_unavailable_falls_back() -> None:
+def test_tool_entity_neo4j_unavailable_returns_error() -> None:
+    """When Neo4j is unavailable, entity not found is returned (no DB fallback)."""
     mock_neo4j = MagicMock()
     mock_neo4j.available = False
 
-    mock_entity = SimpleNamespace(id=1, name="Test", entity_type="concept", summary="", vault_path="")
-
     with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
-        with patch("kairix.entities.graph.entity_lookup", return_value=mock_entity):
-            with patch("kairix.entities.schema.open_entities_db", return_value=MagicMock()):
-                result = tool_entity(name="Test")
+        result = tool_entity(name="Test")
 
-    assert result["name"] == "Test"
-    assert result["error"] == ""
+    assert result["error"] != ""
 
 
 @pytest.mark.unit
-def test_tool_entity_total_failure_returns_error() -> None:
+def test_tool_entity_neo4j_exception_returns_error() -> None:
+    """When Neo4j raises, entity not found is returned."""
     with patch("kairix.graph.client.get_client", side_effect=RuntimeError("no neo4j")):
-        with patch("kairix.entities.schema.open_entities_db", side_effect=RuntimeError("no db")):
-            result = tool_entity(name="Anything")
+        result = tool_entity(name="Anything")
 
     assert result["error"] != ""
 

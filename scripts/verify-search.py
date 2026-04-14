@@ -102,35 +102,33 @@ def check_search(
     )
 
 
-def check_curator_health(db_path: str) -> CheckResult:
-    """Check 7: call run_health_check directly and verify ok=True."""
+def check_curator_health() -> CheckResult:
+    """Check 7: call run_health_check via Neo4j and verify ok=True."""
     t0 = time.time()
     try:
-        import sqlite3
-        os.environ["KAIRIX_TEST_DB"] = db_path
         from kairix.curator.health import run_health_check
-        from kairix.entities.schema import open_entities_db
+        from kairix.graph.client import get_client
 
-        db = open_entities_db()
-        report = run_health_check(db, neo4j_client=None, staleness_days=180)
-        db.close()
+        neo4j_client = get_client()
+        report = run_health_check(neo4j_client, staleness_days=180)
         latency_ms = (time.time() - t0) * 1000
-        # Pass if vault paths and staleness are clear — synthesis failures from entities
-        # with no stub file are expected and not treated as a blocker here.
         structural_ok = (
-            len(report.missing_vault_path) == 0
+            report.neo4j_available
+            and len(report.missing_vault_path) == 0
             and len(report.stale_entities) == 0
             and report.total_entities > 0
         )
         note = ""
-        if not structural_ok:
+        if not report.neo4j_available:
+            note = "Neo4j unavailable"
+        elif not structural_ok:
             note = "issues: {} synth failures, {} missing vault, {} stale".format(
                 len(report.synthesis_failures),
                 len(report.missing_vault_path),
                 len(report.stale_entities),
             )
         elif report.synthesis_failures:
-            note = "{} synth failures (no stub file — expected)".format(len(report.synthesis_failures))
+            note = "{} synth failures (no summary — expected)".format(len(report.synthesis_failures))
         return CheckResult(
             name="curator-health",
             intent=None,
@@ -171,13 +169,6 @@ def main() -> None:
     parser.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
     parser.add_argument("--output", default=None, help="Write results to FILE")
     parser.add_argument(
-        "--db",
-        default=str(
-            Path(os.environ.get("KAIRIX_DATA_DIR", "/data/mnemosyne")) / "entities.db"
-        ),
-        help="Path to entities.db for curator health check",
-    )
-    parser.add_argument(
         "--kairix-bin",
         default=str(Path(__file__).parent.parent / ".venv" / "bin" / "kairix"),
         help="Path to kairix CLI binary",
@@ -203,7 +194,7 @@ def main() -> None:
         r = check_search(name, query, expected_intent, min_results, args.agent, kairix_bin)
         results.append(r)
 
-    results.append(check_curator_health(args.db))
+    results.append(check_curator_health())
 
     passed = sum(1 for r in results if r.passed)
     total = len(results)

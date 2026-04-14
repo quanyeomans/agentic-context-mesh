@@ -116,28 +116,9 @@ def tool_entity(
                     "error": "",
                 }
     except Exception as exc:
-        logger.debug("mcp.entity neo4j lookup failed, trying entities.db: %s", exc)
+        logger.warning("mcp.entity neo4j lookup failed: %s", exc)
 
-    # Fallback: entities.db
-    try:
-        from kairix.entities.graph import entity_lookup
-        from kairix.entities.schema import open_entities_db
-
-        db = open_entities_db()
-        result = entity_lookup(name=name, db=db)
-        if result is None:
-            return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": f"Entity not found: {name}"}
-        return {
-            "id": str(result.id),
-            "name": result.name,
-            "type": result.entity_type,
-            "summary": result.summary or "",
-            "vault_path": result.vault_path or "",
-            "error": "",
-        }
-    except Exception as exc:
-        logger.warning("mcp.entity failed: %s", exc)
-        return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": str(exc)}
+    return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": f"Entity not found: {name}"}
 
 
 def tool_prep(
