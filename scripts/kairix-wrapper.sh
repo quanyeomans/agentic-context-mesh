@@ -31,16 +31,21 @@ set -euo pipefail
 
 KAIRIX_VENV="${KAIRIX_VENV:-/opt/kairix/.venv}"
 SERVICE_ENV="${KAIRIX_SERVICE_ENV:-/opt/kairix/service.env}"
-SECRETS_FILE="${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 REAL_BIN="${KAIRIX_VENV}/bin/kairix"
 
 # Step 1: Load service env (paths, KV name — non-secret config)
+# MUST happen before SECRETS_FILE is resolved so that KAIRIX_SECRETS_FILE
+# set in service.env takes effect (e.g. pointing to /opt/kairix/secrets.env
+# on non-Docker deployments instead of the Docker-sidecar default).
 if [[ -f "$SERVICE_ENV" ]]; then
     set -a
     # shellcheck source=/dev/null
     source "$SERVICE_ENV"
     set +a
 fi
+
+# Resolve secrets file AFTER service.env so operator can override via KAIRIX_SECRETS_FILE
+SECRETS_FILE="${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 
 # Step 2: Load pre-fetched secrets (vault-agent tmpfs or deploy-fetched)
 # Same priority semantics as kairix.secrets.load_secrets(): existing env never overwritten.
