@@ -27,11 +27,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kairix.embed.schema import get_qmd_db_path, load_sqlite_vec
+from kairix.graph.client import get_client as _get_neo4j
 from kairix.llm import get_default_backend as _get_llm
 from kairix.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
 from kairix.search.budget import BudgetedResult, apply_budget
 from kairix.search.intent import QueryIntent, classify
-from kairix.search.rrf import FusedResult, entity_boost, procedural_boost, rrf
+from kairix.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, rrf
 from kairix.search.vector import VecResult, vector_search_bytes
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,6 @@ def embed_text_as_bytes(text: str) -> bytes | None:
 # ---------------------------------------------------------------------------
 
 SEARCH_LOG_PATH = Path(os.environ.get("KAIRIX_SEARCH_LOG", "/data/kairix/logs/search.jsonl"))
-ENTITIES_DB_PATH = Path(os.environ.get("KAIRIX_ENTITIES_DB", "/data/kairix/entities.db"))
 
 # Query logging (privacy-sensitive — disabled by default)
 _LOG_QUERIES: bool = os.getenv("KAIRIX_LOG_QUERIES", "0") == "1"
@@ -159,17 +159,6 @@ def _open_vec_db() -> sqlite3.Connection | None:
         return None
 
 
-def _open_entities_db() -> sqlite3.Connection | None:
-    """Open entities.db. Returns None if unavailable."""
-    try:
-        if not ENTITIES_DB_PATH.exists():
-            return None
-        return sqlite3.connect(str(ENTITIES_DB_PATH))
-    except Exception as e:
-        logger.debug("hybrid: cannot open entities.db — %s", e)
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Search pipeline
 # ---------------------------------------------------------------------------
@@ -258,8 +247,8 @@ def search(
             logger.warning("hybrid: temporal rewriting failed — %s", _e)
             active_query = query
 
-    # Open entities DB early — used by both planner (context injection) and entity_boost
-    entities_db = _open_entities_db()
+    # Neo4j client — used by planner (entity context) and entity_boost
+    neo4j_client = _get_neo4j()
 
     # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
@@ -267,7 +256,7 @@ def search(
             from kairix.search.planner import QueryPlanner
 
             planner = QueryPlanner()
-            sub_queries = planner.decompose(query, entities_db=entities_db)
+            sub_queries = planner.decompose(query, neo4j_client=neo4j_client)
             if True:
                 logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
 
@@ -384,16 +373,11 @@ def search(
     # Fuse results
     fused: list[FusedResult] = rrf(bm25_results, vec_results)
 
-    # Entity boosting
-    if entities_db is not None:
-        try:
-            fused = entity_boost(fused, entities_db)
-        except Exception as _eb_e:
-            logger.warning("hybrid: entity_boost failed — %s", _eb_e)
-        finally:
-            entities_db.close()
-    elif entities_db is not None:
-        entities_db.close()
+    # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
+    try:
+        fused = entity_boost_neo4j(fused, neo4j_client)
+    except Exception as _eb_e:
+        logger.warning("hybrid: entity_boost_neo4j failed — %s", _eb_e)
 
     # Procedural boosting for PROCEDURAL intent
     if intent == QueryIntent.PROCEDURAL:

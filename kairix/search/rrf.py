@@ -36,6 +36,7 @@ import math
 import re
 import sqlite3
 from dataclasses import dataclass
+from pathlib import Path
 
 from kairix.search.bm25 import BM25Result
 from kairix.search.vector import VecResult
@@ -317,6 +318,86 @@ def _entity_boost_impl(
             r.boosted_score = r.rrf_score
 
     # Re-sort by boosted score
+    return sorted(results, key=lambda r: r.boosted_score, reverse=True)
+
+
+def entity_boost_neo4j(
+    results: list[FusedResult],
+    neo4j_client: object,
+    boost_factor: float = ENTITY_BOOST_FACTOR,
+    cap: float = ENTITY_BOOST_CAP,
+) -> list[FusedResult]:
+    """
+    Boost entity canonical notes and entity-directory documents using Neo4j.
+
+    Queries Neo4j for entity vault_paths and their MENTIONS in-degree.
+    Documents matching an entity vault_path or living inside an entity directory
+    receive a log-scaled boost proportional to the entity's in-degree.
+
+    Falls back to returning unmodified results if Neo4j is unavailable or empty.
+    Never raises.
+    """
+    if not results:
+        return results
+
+    client = neo4j_client
+    if client is None or not getattr(client, "available", False):
+        for r in results:
+            r.boosted_score = r.rrf_score
+        return results
+
+    try:
+        rows = client.cypher(  # type: ignore[union-attr]
+            "MATCH (n) WHERE n.vault_path IS NOT NULL AND n.vault_path <> '' "
+            "OPTIONAL MATCH ()-[:MENTIONS]->(n) "
+            "RETURN n.vault_path AS vault_path, count(*) AS in_degree"
+        )
+    except Exception as e:
+        logger.warning("entity_boost_neo4j: cypher failed — %s", e)
+        for r in results:
+            r.boosted_score = r.rrf_score
+        return results
+
+    if not rows:
+        for r in results:
+            r.boosted_score = r.rrf_score
+        return results
+
+    # Build lookup: lowercased path → in_degree, and dir prefix → max in_degree
+    path_in_degree: dict[str, int] = {}
+    dir_in_degree: dict[str, int] = {}
+    for row in rows:
+        vp = str(row["vault_path"]).lower().replace("\\", "/")
+        in_deg = int(row.get("in_degree") or 0)
+        path_in_degree[vp] = in_deg
+        parent = str(Path(vp).parent).lower().replace("\\", "/")
+        if parent not in (".", ""):
+            dir_in_degree[parent] = max(dir_in_degree.get(parent, 0), in_deg)
+
+    if not path_in_degree:
+        for r in results:
+            r.boosted_score = r.rrf_score
+        return results
+
+    max_in_degree = max(path_in_degree.values()) or 1
+
+    for r in results:
+        path_lower = r.path.lower().replace("\\", "/")
+        in_deg = path_in_degree.get(path_lower, 0)
+        if in_deg == 0:
+            # Half-boost for files under an entity directory
+            for dir_prefix, dir_deg in dir_in_degree.items():
+                if path_lower.startswith(dir_prefix + "/"):
+                    in_deg = max(in_deg, dir_deg // 2)
+                    break
+        r.entity_mention_count = in_deg
+        if in_deg > 0:
+            normalised = in_deg / max_in_degree
+            boost_amount = min(boost_factor * math.log1p(normalised * 10), cap - 1.0)
+            r.boosted_score = r.rrf_score * (1.0 + boost_amount)
+        else:
+            r.boosted_score = r.rrf_score
+
     return sorted(results, key=lambda r: r.boosted_score, reverse=True)
 
 

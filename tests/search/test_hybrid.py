@@ -140,7 +140,7 @@ def test_search_returns_search_result_type() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("test query")
     assert isinstance(result, SearchResult)
@@ -155,7 +155,7 @@ def test_search_returns_bm25_results_when_vec_fails() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("test semantic query about memory systems")
 
@@ -174,7 +174,7 @@ def test_search_fuses_both_lists() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
         patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("test semantic query about knowledge retrieval")
 
@@ -195,7 +195,7 @@ def test_search_keyword_intent_runs_hybrid() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[_vec_result()]) as mock_vec,
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent
 
@@ -212,7 +212,7 @@ def test_search_logs_event(tmp_path: Path) -> None:
         patch("kairix.search.hybrid.SEARCH_LOG_PATH", log_file),
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         search("test query about rules")
 
@@ -233,7 +233,7 @@ def test_search_log_directory_created(tmp_path: Path) -> None:
         patch("kairix.search.hybrid.SEARCH_LOG_PATH", log_file),
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         search("another query")
 
@@ -247,7 +247,7 @@ def test_search_records_latency() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("latency test")
 
@@ -261,7 +261,7 @@ def test_search_intent_is_classified() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("how to fetch a Key Vault secret")
 
@@ -358,7 +358,7 @@ def test_search_keyword_uses_both_bm25_and_vector() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
         patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent
 
@@ -378,7 +378,7 @@ def test_search_keyword_vec_only_when_bm25_empty() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent — BM25 returns nothing
 
@@ -393,7 +393,7 @@ def test_search_result_has_fallback_used_field() -> None:
         patch("kairix.search.hybrid.bm25_search", return_value=[]),
         patch("kairix.search.hybrid._run_vector_search", return_value=[]),
         patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("anything")
 
@@ -479,14 +479,6 @@ def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) ->
     assert result is None
 
 
-def test_open_entities_db_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """_open_entities_db() returns None when entities.db does not exist."""
-
-    from kairix.search import hybrid as hybrid_mod
-
-    monkeypatch.setattr(hybrid_mod, "ENTITIES_DB_PATH", tmp_path / "nonexistent.db")
-    result = hybrid_mod._open_entities_db()
-    assert result is None
 
 
 def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -501,7 +493,7 @@ def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) 
         patch("kairix.search.intent.classify", return_value=QueryIntent.TEMPORAL),
         patch("kairix.search.bm25.bm25_search", return_value=bm25_items),
         patch("kairix.search.hybrid._open_vec_db", return_value=None),
-        patch("kairix.search.hybrid._open_entities_db", return_value=None),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
         patch(
             "kairix.temporal.rewriter.rewrite_temporal_query",
             return_value="recent session logs",

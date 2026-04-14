@@ -13,12 +13,53 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _neo4j_graph_context(query: str, client: object) -> str | None:
+    """
+    Build an entity relationship context string from Neo4j for use in the
+    decompose LLM prompt. Finds entities mentioned in the query and returns
+    their direct relationships as a short text block.
+
+    Returns None if no relevant entities are found.
+    """
+    words = [w.strip(".,;:?!\"'") for w in query.split() if len(w.strip(".,;:?!\"'")) > 3]
+    found_entities: list[dict] = []
+    seen_ids: set[str] = set()
+    for word in words[:6]:
+        try:
+            matches = client.find_by_name(word)  # type: ignore[union-attr]
+            for m in matches[:2]:
+                if m.get("id") and m["id"] not in seen_ids:
+                    seen_ids.add(m["id"])
+                    found_entities.append(m)
+        except Exception:
+            continue
+
+    if not found_entities:
+        return None
+
+    context_parts = ["Known entities related to this query:"]
+    for entity in found_entities[:3]:
+        eid = entity.get("id")
+        ename = entity.get("name", eid)
+        if not eid:
+            continue
+        try:
+            related = client.related_entities(eid, max_hops=1)  # type: ignore[union-attr]
+            rel_names = [r.get("name") for r in related[:4] if r.get("name") and r.get("name") != ename]
+            if rel_names:
+                context_parts.append(f"- {ename} → {', '.join(rel_names)}")
+        except Exception:
+            continue
+
+    return "\n".join(context_parts) if len(context_parts) > 1 else None
+
 
 _DECOMPOSE_PROMPT = (
     "You decompose complex queries into 2-3 focused sub-queries for document retrieval. "
@@ -52,7 +93,7 @@ class QueryPlanner:
     embeddings, no extra SDK dependencies.
     """
 
-    def decompose(self, query: str, entities_db: sqlite3.Connection | None = None) -> list[str]:
+    def decompose(self, query: str, neo4j_client: object | None = None) -> list[str]:
         """
         Decompose a complex query into 2-3 focused sub-queries.
 
@@ -65,13 +106,11 @@ class QueryPlanner:
             chat_completion = _get_llm().chat
             # Inject entity graph context when available
             ctx = None
-            if entities_db is not None:
+            if neo4j_client is not None and getattr(neo4j_client, "available", False):
                 try:
-                    from kairix.entities.graph import graph_context
-
-                    ctx = graph_context(query, entities_db)
+                    ctx = _neo4j_graph_context(query, neo4j_client)
                 except Exception:
-                    logger.debug("planner: entity graph context unavailable")
+                    logger.debug("planner: Neo4j graph context unavailable")
             if ctx:
                 prompt = _DECOMPOSE_PROMPT_WITH_CONTEXT.format(entity_context=ctx, query=query)
                 logger.debug("planner: injecting entity context into decompose prompt")

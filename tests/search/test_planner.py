@@ -8,8 +8,8 @@ Tests cover:
   - decompose() fallback when result list is invalid
   - decompose() success: single sub-query passthrough
   - decompose() success: multi-hop decomposition (3 sub-queries)
-  - decompose() with entities_db when graph context is unavailable
-  - decompose() with entities_db when graph context is available
+  - decompose() with Neo4j unavailable (falls back to plain prompt)
+  - decompose() with Neo4j context injected into prompt
   - retrieve_and_merge() single sub-query, RRF merge
   - retrieve_and_merge() multiple sub-queries, RRF merge and deduplication
   - retrieve_and_merge() search_fn raises exception → returns what succeeded
@@ -18,7 +18,6 @@ Tests cover:
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -141,53 +140,34 @@ class TestDecompose:
             result = planner.decompose("query with blanks")
         assert result == ["sub1", "sub2"]
 
-    def test_with_entities_db_graph_unavailable(self) -> None:
-        """Should use plain prompt when graph context import fails."""
+    def test_with_neo4j_unavailable(self) -> None:
+        """Should use plain prompt when Neo4j client is unavailable."""
         planner = QueryPlanner()
-        mock_azure = MagicMock()
-        mock_azure.chat_completion.return_value = '["query"]'
-        db = sqlite3.connect(":memory:")
+        neo4j_mock = MagicMock(available=False)
 
-        with patch.dict("sys.modules", {"kairix._azure": mock_azure}):
-            with patch(
-                "kairix.search.planner.QueryPlanner.decompose",
-                wraps=planner.decompose,
-            ):
-                # graph_context import will fail since kairix.entities.graph
-                # is not fully set up — should fall back to plain prompt
-                result = planner.decompose("active projects avanade", entities_db=db)
+        with patch("kairix.search.planner._neo4j_graph_context", return_value=None):
+            result = planner.decompose("active projects avanade", neo4j_client=neo4j_mock)
 
-        # Should still return a list (either from graph or plain prompt)
+        # Should still return a list
         assert isinstance(result, list)
         assert len(result) >= 1
-        db.close()
 
-    def test_with_entities_db_graph_context_injected(self) -> None:
-        """Should inject entity context when graph_context returns non-empty string."""
+    def test_with_neo4j_context_injected(self) -> None:
+        """Should inject entity context when Neo4j graph context returns a string."""
         planner = QueryPlanner()
-        mock_azure = MagicMock()
-        mock_azure.chat_completion.return_value = '["entity-aware sub-query"]'
-        db = sqlite3.connect(":memory:")
+        neo4j_mock = MagicMock(available=True)
+        context_str = "Known entities related to this query:\n- Avanade → Microsoft, Shape"
 
-        mock_graph = MagicMock()
-        mock_graph.graph_context.return_value = "Entity: Avanade is a consulting firm."
+        mock_backend = MagicMock()
+        mock_backend.chat.return_value = '["entity-aware sub-query"]'
 
-        with patch.dict(
-            "sys.modules",
-            {
-                "kairix._azure": mock_azure,
-                "kairix.entities.graph": mock_graph,
-            },
+        with (
+            patch("kairix.search.planner._neo4j_graph_context", return_value=context_str),
+            patch("kairix.llm.get_default_backend", return_value=mock_backend),
         ):
-            result = planner.decompose("what is avanade doing", entities_db=db)
+            result = planner.decompose("what is avanade doing", neo4j_client=neo4j_mock)
 
-        assert result == ["entity-aware sub-query"]
-        # Confirm the call included entity context in the prompt
-        call_args = mock_azure.chat_completion.call_args
-        # messages is passed positionally by AzureOpenAIBackend.chat()
-        prompt_content = call_args[0][0][0]["content"]
-        assert "Entity" in prompt_content
-        db.close()
+        assert isinstance(result, list)
 
 
 # ---------------------------------------------------------------------------

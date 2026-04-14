@@ -48,7 +48,7 @@ def _make_search_mock(budgeted_results: list[BudgetedResult]) -> dict:
         "kairix.search.hybrid.bm25_search": MagicMock(return_value=[]),
         "kairix.search.hybrid._run_vector_search": MagicMock(return_value=[]),
         "kairix.search.hybrid.rrf": MagicMock(return_value=[]),
-        "kairix.search.hybrid._open_entities_db": MagicMock(return_value=None),
+        "kairix.search.hybrid._get_neo4j": MagicMock(return_value=type("C", (), {"available": False})()),
         "kairix.search.hybrid.apply_budget": MagicMock(return_value=budgeted_results),
         "kairix.search.hybrid._log_search_event": MagicMock(),  # don't touch search.jsonl
     }
@@ -102,7 +102,7 @@ class TestQueryLoggingDisabled:
             patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
             patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
             patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
-            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
             patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
             patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
@@ -134,7 +134,7 @@ class TestQueryLoggingEnabled:
             patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
             patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
             patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
-            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
             patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
             patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
@@ -170,7 +170,7 @@ class TestQueryLoggingEnabled:
             patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
             patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
             patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
-            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
             patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
             patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
@@ -202,7 +202,7 @@ class TestQueryLoggingEnabled:
             patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
             patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
             patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
-            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
             patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
             patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
@@ -226,7 +226,7 @@ class TestQueryLoggingEnabled:
             patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
             patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
             patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
-            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
             patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
             patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         ):
@@ -250,7 +250,7 @@ class TestQueryLoggingEnabled:
             patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
             patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
             patch("kairix.search.hybrid.rrf", mocks["kairix.search.hybrid.rrf"]),
-            patch("kairix.search.hybrid._open_entities_db", mocks["kairix.search.hybrid._open_entities_db"]),
+            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
             patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
             patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
         )

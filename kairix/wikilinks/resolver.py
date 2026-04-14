@@ -259,16 +259,67 @@ def _extract_aliases(entity_name: str, link: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Neo4j loader
+# ---------------------------------------------------------------------------
+
+
+def load_entities_from_neo4j() -> list[WikiEntity]:
+    """
+    Load entities with vault_path from the Neo4j graph.
+
+    Queries Organisation and Person nodes. Returns empty list if Neo4j is
+    unavailable or has no entities with vault_path populated.
+    """
+    try:
+        from kairix.graph.client import get_client
+
+        client = get_client()
+        if not client.available:
+            return []
+
+        entities: list[WikiEntity] = []
+        for label in ("Organisation", "Person"):
+            rows = client.cypher(
+                f"MATCH (n:{label}) WHERE n.vault_path IS NOT NULL AND n.vault_path <> '' "
+                "RETURN n.id AS id, n.name AS name, n.aliases AS aliases, "
+                "n.vault_path AS vault_path"
+            )
+            for row in rows:
+                name: str = str(row["name"])
+                vault_path: str = str(row["vault_path"])
+                aliases: list[str] = list(row.get("aliases") or [])
+                link = _make_link(name)
+                entities.append(
+                    WikiEntity(
+                        name=name,
+                        aliases=aliases,
+                        vault_path=vault_path,
+                        link=link,
+                        entity_type=label.lower(),
+                    )
+                )
+        return entities
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Unified loader
 # ---------------------------------------------------------------------------
 
 
 def get_entities(prefer_db: bool = True) -> list[WikiEntity]:
     """
-    Load entities from DB (preferred) or bootstrap index (fallback).
+    Load entities from Neo4j (preferred), then entities.db, then bootstrap index.
 
-    Falls back to bootstrap if DB has fewer than _DB_THRESHOLD entities with vault_path.
+    Falls back through the chain until a source returns at least _DB_THRESHOLD entities.
     """
+    # Try Neo4j first
+    neo4j_entities = load_entities_from_neo4j()
+    if len(neo4j_entities) >= _DB_THRESHOLD:
+        return neo4j_entities
+
+    # Try SQLite entities.db
     if prefer_db:
         db_entities = load_entities_from_db()
         if len(db_entities) >= _DB_THRESHOLD:
