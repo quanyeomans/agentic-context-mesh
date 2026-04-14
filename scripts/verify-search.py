@@ -8,7 +8,7 @@ Check 7 calls kairix.curator.health directly.
 
 Usage:
     .venv/bin/python3 scripts/verify-search.py [--agent AGENT] [--json] [--output FILE]
-    .venv/bin/python3 scripts/verify-search.py --entity-a OpenClaw --entity-b Avanade
+    .venv/bin/python3 scripts/verify-search.py --entity-a "Acme Corp" --entity-b "TechCorp"
 """
 
 from __future__ import annotations
@@ -159,12 +159,12 @@ def check_curator_health() -> CheckResult:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Acceptance verification for kairix search")
-    parser.add_argument("--agent", default="shape", help="Agent name for collection scoping")
+    parser.add_argument("--agent", default="shared", help="Agent name for collection scoping")
     parser.add_argument(
-        "--entity-a", default="OpenClaw", help="Known entity name for ENTITY check"
+        "--entity-a", default="Acme Corp", help="Known entity name for ENTITY check"
     )
     parser.add_argument(
-        "--entity-b", default="Avanade", help="Second known entity for MULTI_HOP check"
+        "--entity-b", default="TechCorp", help="Second known entity for MULTI_HOP check"
     )
     parser.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
     parser.add_argument("--output", default=None, help="Write results to FILE")
