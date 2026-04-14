@@ -1,0 +1,158 @@
+# Example benchmark suite for Mnemosyne
+#
+# This file shows the format for a benchmark suite. Your actual suite (v2-real-world.yaml)
+# contains vault-specific gold paths and queries — it lives outside the repo (.gitignore'd).
+#
+# Generate your own suite from your vault:
+#   python scripts/build-eval-gold.py \
+#     --queries queries.jsonl \
+#     --output suites/my-suite.yaml \
+#     --agent builder
+#
+# Or write cases manually as shown below.
+#
+# Score methods:
+#   exact — gold_path must appear in top-5 results (path substring match)
+#   ndcg  — NDCG@10 with LLM-as-judge relevance grading (0/1/2)
+
+meta:
+  name: example
+  version: '1.0'
+  instrument: mnemosyne-hybrid
+  description: Example suite — replace with your vault-specific cases
+
+cases:
+
+  # --- Recall: exact document retrieval ---
+  - id: R01
+    query: "engineering patterns and conventions"
+    category: recall
+    score_method: exact
+    gold_paths:
+      - path: "04-Agent-Knowledge/builder/patterns.md"
+        relevance: 2
+
+  # --- Entity: named entity lookup ---
+  - id: E01
+    query: "who is responsible for the platform infrastructure"
+    category: entity
+    score_method: exact
+    gold_paths:
+      - path: "vault-entities/person/alice-chen.md"
+        relevance: 2
+
+  # --- Temporal: date-sensitive query ---
+  - id: T01
+    query: "decisions made last week"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "04-Agent-Knowledge/builder/decisions.md"
+        relevance: 2
+
+  # --- Conceptual: semantic retrieval ---
+  - id: C01
+    query: "how does the authentication system work"
+    category: conceptual
+    score_method: ndcg
+    gold_paths:
+      - path: "02-Areas/Platform/auth-design.md"
+        relevance: 2
+
+  # --- Multi-hop: requires connecting multiple documents ---
+  - id: M01
+    query: "what projects does the platform team own and what are their current statuses"
+    category: multi_hop
+    score_method: ndcg
+    gold_paths:
+      - path: "02-Areas/Platform/projects.md"
+        relevance: 2
+      - path: "02-Areas/Platform/status.md"
+        relevance: 1
+
+  # --- Procedural: how-to retrieval ---
+  - id: P01
+    query: "how do I add a new agent to the system"
+    category: procedural
+    score_method: ndcg
+    gold_paths:
+      - path: "02-Areas/Platform/runbooks/how-to-add-new-agent.md"
+        relevance: 2
+
+  # --- Temporal: expanded cases (TMP-6) ---
+  # Absolute date queries — pinpoint specific events by date.
+  # These should NOT use date-range filtering (the query is ABOUT a date, not scoped to it).
+
+  - id: T02
+    query: "platform incident 2026-04-07 root cause"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "agent-memory/builder/2026-04-07.md"
+        relevance: 2
+    notes: "Absolute date — retrieves the daily log for that date"
+
+  - id: T03
+    query: "architecture decisions March 2026"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "02-Areas/Platform/decisions/2026-03-architecture-review.md"
+        relevance: 2
+    notes: "Month-scoped query — documents about that month's decisions"
+
+  - id: T04
+    query: "2026-04-08 agent sandbox configuration"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "agent-memory/builder/2026-04-08.md"
+        relevance: 2
+      - path: "02-Areas/Platform/runbooks/sandbox-config.md"
+        relevance: 1
+    notes: "Absolute date + topic — combine date anchor with subject matter"
+
+  - id: T05
+    query: "what was changed in the search pipeline on 2026-04-10"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "agent-memory/consultant/2026-04-10.md"
+        relevance: 2
+    notes: "Explicit date query — looks for log from that exact date"
+
+  # --- Temporal: relative expressions ---
+  # These SHOULD apply date-range filtering (documents written in the window).
+
+  - id: T06
+    query: "recent shape agent work this week"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "agent-memory/shape/2026-04-09.md"
+        relevance: 2
+      - path: "agent-memory/shape/2026-04-08.md"
+        relevance: 2
+    notes: "Relative temporal — 'this week' gates results to recent memory files"
+
+  - id: T07
+    query: "what did the builder agent work on last week"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "agent-memory/builder/2026-04-06.md"
+        relevance: 2
+      - path: "agent-memory/builder/2026-04-03.md"
+        relevance: 1
+    notes: "Relative temporal — 'last week' date filter applied"
+
+  - id: T08
+    query: "recently completed platform work last few days"
+    category: temporal
+    score_method: ndcg
+    gold_paths:
+      - path: "agent-memory/shape/2026-04-08.md"
+        relevance: 2
+      - path: "agent-memory/builder/2026-04-08.md"
+        relevance: 1
+    notes: "Relative temporal — 'last few days' with agent memory scope"

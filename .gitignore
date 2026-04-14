@@ -1,0 +1,48 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Cross-model review artefacts
+.reviews/
+
+# Benchmark result JSON files (contain vault snippets)
+benchmark-results/*.json
+
+# Live database file — not a repo artefact
+entities.db
+
+# Backup files from recall_check scaffolding
+*.bak-*
+*.bak
+
+# Stray cache directory (created by run-command agent context)
+None/
+
+# Benchmark suites contain vault-specific gold paths and query content
+# generated from your personal knowledge base — not suitable for public repos.
+# Generate your own with: scripts/build-eval-gold.py (in your operational fork)
+# See suites/example.yaml for the format.
+suites/v2-real-world.yaml
+suites/*.yaml
+!suites/example.yaml
+
+# Benchmark gold-build scripts contain vault-specific paths — these live in operational forks.
+# Generic entity quality tooling scripts (prune-entities.py, validate-entity-stubs.py) are public.
+scripts/build-eval-gold.py
+scripts/mine-eval-queries.py
+scripts/benchmark-path-audit.py
+
+# Local environment files — copy env.example and fill in your values
+# Never commit files with real credentials or infrastructure names
+.env
+*.env
+!env.example
+PRD.md

@@ -1,0 +1,87 @@
+services:
+
+  # ── vault-agent ──────────────────────────────────────────────────────────────
+  # Sidecar: fetches secrets from Azure Key Vault and writes them to a shared
+  # tmpfs volume as /run/secrets/kairix.env. kairix reads this file at startup
+  # via kairix.secrets.load_secrets(). Refreshes every REFRESH_INTERVAL_SECONDS.
+  vault-agent:
+    build: ./vault-agent
+    environment:
+      KAIRIX_KV_NAME: ${KAIRIX_KV_NAME}
+      REFRESH_INTERVAL_SECONDS: ${REFRESH_INTERVAL_SECONDS:-3600}
+      # Service principal auth (alternative to Managed Identity)
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+    volumes:
+      - kairix-secrets:/run/secrets
+    restart: unless-stopped
+    healthcheck:
+      # Healthy once /run/secrets/.ready exists (written after first successful fetch)
+      test: ["CMD", "test", "-f", "/run/secrets/.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60        # Allow up to 5 minutes for initial Key Vault fetch
+      start_period: 10s
+
+  # ── kairix ───────────────────────────────────────────────────────────────────
+  # Main application. Waits for vault-agent to be healthy before starting so
+  # that /run/secrets/kairix.env is available on first import of kairix._azure
+  # or kairix.graph.client.
+  kairix:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      vault-agent:
+        condition: service_healthy
+    environment:
+      # Required path config (not secrets — these go in .env)
+      KAIRIX_VAULT_ROOT: ${KAIRIX_VAULT_ROOT:-/data/obsidian-vault}
+      KAIRIX_WORKSPACE_ROOT: ${KAIRIX_WORKSPACE_ROOT:-/data/workspaces}
+      KAIRIX_DATA_DIR: ${KAIRIX_DATA_DIR:-/data/kairix}
+      KAIRIX_NEO4J_URI: ${KAIRIX_NEO4J_URI:-bolt://neo4j:7687}
+      KAIRIX_NEO4J_USER: ${KAIRIX_NEO4J_USER:-neo4j}
+      KAIRIX_KV_NAME: ${KAIRIX_KV_NAME}
+      LOG_DIR: /data/kairix/logs
+    volumes:
+      - kairix-secrets:/run/secrets:ro
+      - ${KAIRIX_VAULT_ROOT:-/data/obsidian-vault}:/data/obsidian-vault:ro
+      - ${KAIRIX_DATA_DIR:-/data/kairix}:/data/kairix
+    restart: unless-stopped
+
+  # ── neo4j ────────────────────────────────────────────────────────────────────
+  # Graph database for entity relationships and wikilink graph.
+  # Password sourced from KAIRIX_NEO4J_PASSWORD in .env (or secrets file on VM).
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/${KAIRIX_NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: 256m
+      NEO4J_dbms_memory_heap_max__size: 512m
+    ports:
+      - "7687:7687"   # Bolt
+      - "7474:7474"   # Browser (disable in production)
+    volumes:
+      - neo4j-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+
+volumes:
+  kairix-secrets:
+    # tmpfs: in-memory only, never written to disk
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1m,mode=0700"
+
+  neo4j-data:
+    driver: local

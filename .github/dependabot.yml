@@ -1,0 +1,52 @@
+version: 2
+
+updates:
+  # Python dependencies (pip)
+  # Engineering hub: "No known CVEs with patches available. Update within 1 week."
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: "Australia/Sydney"
+    open-pull-requests-limit: 5
+    reviewers:
+      - quanyeomans
+    labels:
+      - dependency
+      - automated
+    commit-message:
+      prefix: "chore(deps)"
+    # Group minor/patch updates to reduce PR noise
+    groups:
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "mypy*"
+          - "ruff"
+          - "bandit"
+          - "pip-audit"
+          - "coverage*"
+          - "types-*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: "Australia/Sydney"
+    open-pull-requests-limit: 3
+    reviewers:
+      - quanyeomans
+    labels:
+      - dependency
+      - automated
+      - github-actions
+    commit-message:
+      prefix: "chore(actions)"

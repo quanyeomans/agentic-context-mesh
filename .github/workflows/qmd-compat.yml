@@ -1,0 +1,133 @@
+name: QMD Schema Compatibility
+
+# Weekly check that QMD's live schema still matches mnemosyne/embed/schema.py expectations.
+# Opens a GitHub issue automatically if drift is detected.
+# Engineering hub: "Dependency analysis: daily scans before deploy."
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"  # Monday 02:00 UTC
+  workflow_dispatch:     # Manual trigger for ad-hoc checks
+
+jobs:
+  schema-compat:
+    name: QMD schema drift check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Install QMD
+        run: |
+          npm install -g qmd 2>/dev/null || \
+          npx --yes qmd --version
+        continue-on-error: false
+
+      - name: Run schema compatibility check
+        id: compat
+        run: |
+          python -c "
+          import subprocess, json, sys, sqlite3, tempfile, os
+          from pathlib import Path
+
+          # Initialise a fresh QMD index to inspect live schema
+          with tempfile.TemporaryDirectory() as tmpdir:
+              vault = Path(tmpdir) / 'vault'
+              vault.mkdir()
+              (vault / 'test.md').write_text('# Test\nContent.')
+
+              result = subprocess.run(
+                  ['qmd', 'update', '--collection', 'test', '--path', str(vault)],
+                  capture_output=True, text=True, cwd=tmpdir
+              )
+              if result.returncode != 0:
+                  print('QMD update failed:', result.stderr, file=sys.stderr)
+                  sys.exit(1)
+
+              db_path = Path.home() / '.cache/qmd/index.sqlite'
+              if not db_path.exists():
+                  print('No QMD DB found after update — unexpected.', file=sys.stderr)
+                  sys.exit(1)
+
+              db = sqlite3.connect(str(db_path))
+
+              # Check expected tables and columns
+              expected = {
+                  'content':  {'hash', 'doc', 'created_at'},
+                  'documents': {'id', 'collection', 'path', 'title', 'hash', 'created_at', 'modified_at', 'active'},
+                  'content_vectors': {'hash', 'seq', 'pos', 'model', 'embedded_at'},
+              }
+
+              drift = []
+              for table, expected_cols in expected.items():
+                  try:
+                      rows = db.execute(f'PRAGMA table_info({table})').fetchall()
+                      actual_cols = {row[1] for row in rows}
+                      missing = expected_cols - actual_cols
+                      extra = actual_cols - expected_cols
+                      if missing:
+                          drift.append(f'{table}: missing columns {missing}')
+                      if extra:
+                          drift.append(f'{table}: unexpected columns {extra} (may be OK)')
+                  except Exception as e:
+                      drift.append(f'{table}: error reading schema — {e}')
+
+              db.close()
+
+          if drift:
+              print('DRIFT_DETECTED')
+              for d in drift:
+                  print(f'  - {d}')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('drift=true\n')
+                  f.write(f'details={chr(10).join(drift)}\n')
+              sys.exit(0)  # Don't fail the step — report via issue
+          else:
+              print('Schema OK — no drift detected.')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('drift=false\n')
+          "
+
+      - name: Open GitHub issue on drift
+        if: steps.compat.outputs.drift == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const details = `${{ steps.compat.outputs.details }}`;
+            const title = `QMD schema drift detected — ${new Date().toISOString().slice(0,10)}`;
+
+            // Check if an open issue already exists for this
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'qmd-compat'
+            });
+
+            const existingIssue = issues.data.find(i => i.title.includes('QMD schema drift'));
+            if (existingIssue) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: `Weekly check update (${new Date().toISOString().slice(0,10)}):\n\n\`\`\`\n${details}\n\`\`\``
+              });
+              console.log(`Updated existing issue #${existingIssue.number}`);
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: `## QMD Schema Drift Detected\n\nThe weekly schema compatibility check found that the live QMD schema no longer matches \`mnemosyne/embed/schema.py\` expectations.\n\n**Details:**\n\`\`\`\n${details}\n\`\`\`\n\n**Action required:**\n1. Install the new QMD version locally\n2. Run \`mnemosyne embed --limit 0\` to confirm the error\n3. Update \`mnemosyne/embed/schema.py\` with the new column names\n4. Update \`QMD_TESTED_VERSION\` in \`pyproject.toml\`\n5. Run full test suite and benchmark before merging\n\n**Reference:** See \`QMD_COMPAT.md\` for schema documentation and known constraints.`,
+                labels: ['qmd-compat', 'dependency']
+              });
+              console.log('Created new drift issue.');
+            }

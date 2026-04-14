@@ -1,0 +1,271 @@
+---
+type: reference
+scope: shared
+tags: [kairix, agent-knowledge, search, retrieval]
+---
+
+# Kairix Agent Usage Guide
+
+This guide is for AI agents using kairix to search and retrieve knowledge from the shared vault. Read it before your first session, and use it as a reference when queries return unexpected results.
+
+---
+
+## What kairix is
+
+Kairix is the retrieval layer between you and the team's knowledge base. It indexes the vault (Obsidian markdown files), runs hybrid search (BM25 + vector), and returns ranked snippets within a token budget. It understands query intent — so a question about "what happened last week" gets different treatment than "what is the engineering pattern for retries".
+
+You do not need to use basic keyword search. Kairix routes your query to the right retrieval strategy automatically.
+
+---
+
+## How to call kairix
+
+```bash
+kairix search "<your query>" --agent <your-agent-name>
+```
+
+Examples:
+```bash
+kairix search "what decisions were made about the Azure connector" --agent builder
+kairix search "knowledge management positioning" --agent builder --budget 3000
+kairix search "how do I run the embedding pipeline" --agent builder
+kairix search "what happened last week" --agent builder
+kairix search "tell me about Acme Corp" --agent builder
+```
+
+**If kairix is not on PATH** (you get `command not found`):
+```bash
+/usr/local/bin/kairix search "<query>" --agent <name>
+```
+
+---
+
+## Flags that matter
+
+| Flag | Default | When to use |
+|---|---|---|
+| `--agent <name>` | None | Always — scopes results to your agent's collections + shared |
+| `--budget <tokens>` | 5000 | Reduce if context window is tight; 2000–3000 is usually enough |
+| `--json` | Off | Machine-readable output — use when parsing results programmatically |
+
+---
+
+## How intent routing works
+
+Kairix classifies your query before running search. The classification changes which retrieval strategy fires:
+
+| Intent | Triggered by | What happens |
+|---|---|---|
+| **keyword** | Version strings, error codes, file names, proper nouns | BM25 + vector in parallel; exact terms weighted highly |
+| **entity** | "tell me about X", "what has Y been working on", person/org names | Entity graph lookup + ranked vault docs |
+| **temporal** | "last week", "decisions in March", "what happened recently" | Date-filtered retrieval; only docs with `chunk_date` in the window |
+| **procedural** | "how do I", "what are the steps to", runbook queries | Path-weighted re-rank; step-relevant docs ranked above background |
+| **multi_hop** | "connection between X and Y", "how does A relate to B" | Query decomposed into sub-queries, results fused |
+| **semantic** | Abstract conceptual questions | Pure vector search; no exact-term requirement |
+
+**You don't need to worry about this.** It's automatic. But if a query returns poor results, knowing the intent can help you rephrase it.
+
+---
+
+## What good results look like
+
+A healthy search result in JSON format (`--json`) has:
+```json
+{
+  "intent": "entity",
+  "results": [...],
+  "vec_count": 4,
+  "bm25_count": 3,
+  "vec_failed": false,
+  "total_tokens": 1823
+}
+```
+
+Key fields to check:
+- `vec_failed: false` — vector search is working. If `true`, you're on BM25-only.
+- `vec_count > 0` — vectors returned. If 0 with `vec_failed: false`, the query had no semantic matches.
+- `results` — list of ranked documents with `path`, `score`, and `snippet`
+
+---
+
+## What to do when results are poor
+
+### vec_failed=true (vector search broken)
+This means Azure credentials aren't loaded. Every search falls back to BM25-only, which misses semantic matches.
+
+**Do not proceed with a session on BM25-only retrieval.** Flag it and run:
+```bash
+kairix onboard check
+```
+
+This will tell you exactly which credential is missing and how to fix it.
+
+### 0 results
+Try rephrasing more specifically, or check if the relevant vault section has been embedded:
+```bash
+kairix search "the exact title of a document you know exists" --agent builder
+```
+If known documents don't appear, the vault may need a re-embed.
+
+### Results seem off-topic
+The intent classifier may have routed incorrectly. Try rephrasing:
+- For entity queries: "tell me about [name]" or "what do we know about [organisation]"
+- For temporal queries: include explicit relative time language ("last week", "this month", "recent")
+- For procedural queries: start with "how do I" or "what are the steps"
+
+---
+
+## All subcommands
+
+### search — the main tool
+```bash
+kairix search "<query>" --agent <name> [--budget N] [--json]
+```
+
+### brief — session briefing synthesis
+Generates a ~800-token briefing synthesising relevant vault content for the start of a session.
+```bash
+kairix brief <agent-name>
+kairix brief shape --budget 5000
+```
+Output written to `/data/kairix/briefing/<agent>-latest.md`.
+
+### entity — entity graph lookup
+```bash
+kairix entity lookup "Jordan Blake"
+kairix entity lookup "Acme"
+```
+Returns entity summary, type, vault_path, and related documents.
+
+### curator health — entity graph health check
+```bash
+kairix curator health
+kairix curator health --json
+```
+Reports: entity counts, synthesis failures (no summary), missing vault_paths.
+
+### vault crawl — populate entity graph from vault
+```bash
+kairix vault crawl --vault-root /path/to/vault
+kairix vault crawl --vault-root /path/to/vault --dry-run
+```
+Run after adding new organisation or person stubs to the vault.
+
+### classify — route new knowledge to the right vault location
+```bash
+kairix classify "We decided to use PostgreSQL for the jobs table"
+# → type: decision, destination: decisions.md, confidence: 0.95
+```
+
+### contradict — check new content against vault knowledge
+```bash
+kairix contradict check "We use PostgreSQL for all persistence" --top-k 5
+```
+Returns contradicting vault documents with conflict scores.
+
+### onboard check — deployment diagnostics
+```bash
+kairix onboard check
+kairix onboard check --json
+```
+Run this if search is behaving unexpectedly. Reports: PATH, wrapper, secrets, vault root, vector search, Neo4j.
+
+### timeline — temporal query tools
+```bash
+kairix timeline query "decisions last week"
+```
+
+### wikilinks — inject entity links
+```bash
+kairix wikilinks inject --vault /path/to/vault
+```
+
+### benchmark — retrieval quality testing
+```bash
+kairix benchmark run --suite suites/example.yaml
+```
+
+---
+
+## Common agent session patterns
+
+### Session start (standard)
+```bash
+# Pull a briefing for context before the session
+kairix brief shape
+
+# Then search for session-specific context
+kairix search "current status of [project]" --agent builder
+kairix search "outstanding items from last week" --agent builder
+```
+
+### Researching an entity
+```bash
+# Start with entity lookup for curated summary
+kairix entity lookup "Acme"
+
+# Follow up with related vault docs
+kairix search "Acme engagement history and decisions" --agent builder
+```
+
+### Checking a decision or pattern
+```bash
+kairix search "how we decided to handle [topic]" --agent builder
+kairix search "engineering pattern for [approach]" --agent builder
+```
+
+### Temporal research
+```bash
+kairix search "what decisions were made last month" --agent builder
+kairix search "recent activity on the Azure connector" --agent builder
+# Use explicit relative time language for best results
+```
+
+### Multi-hop / cross-entity
+```bash
+kairix search "connection between Acme and TechCorp on the platform project" --agent builder
+```
+
+---
+
+## Token budget guidance
+
+| Use case | Recommended budget |
+|---|---|
+| Session-start context | 5000 (default) |
+| Quick fact lookup | 2000 |
+| Deep research | 8000–10000 |
+| Briefing synthesis context | 5000 |
+
+Set with `--budget N`. The budget caps total tokens returned, not the number of documents. Kairix ranks documents and returns as many as fit.
+
+---
+
+## Troubleshooting quick reference
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `command not found` | kairix not on PATH | Use `/usr/local/bin/kairix` or run `scripts/deploy-vm.sh` |
+| `vec_failed: true` | Azure credentials not loaded | Run `kairix onboard check`; fix secrets_loaded issue |
+| 0 results, no error | Vault not embedded | Run `kairix embed --limit 20` to test |
+| Results are all from one section | Scope issue | Check `--agent` flag is correct |
+| Entity lookup returns nothing | Entity not in Neo4j | Run `kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT` |
+| Temporal query returns non-temporal docs | Relative time phrase not detected | Use "last N days/weeks", "this month", "yesterday", "recently" |
+| BM25-only (vec_count=0) with valid creds | sqlite-vec extension not loaded | Set `SQLITE_VEC_PATH` or run `kairix onboard check` |
+
+---
+
+## Getting help
+
+```bash
+kairix onboard check           # full deployment diagnostics
+kairix --help                  # subcommand list
+kairix search --help           # search-specific flags
+```
+
+If the diagnostics pass but results are still poor, run a benchmark to establish a baseline:
+```bash
+kairix benchmark run --suite suites/example.yaml --agent <name>
+```
+
+This guide is installed at `04-Agent-Knowledge/shared/kairix-usage.md` in the vault and is searchable via `kairix search "how do I use kairix"`.
