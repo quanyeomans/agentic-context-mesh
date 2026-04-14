@@ -6,13 +6,49 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-14 — Sprint 7: Neo4j-native entity system + Docker sidecar secrets
+
+### Added
+- **W2**: Curator health (`kairix curator health`) rewritten to query Neo4j exclusively via Cypher. Reports entity counts, synthesis failures, missing vault_paths, and stale entities entirely from the graph — no SQLite dependency. `--no-neo4j` flag removed; client unavailability returns a graceful empty report.
+- **W3**: entities.db retired (ADR-014). `kairix/entities/` package deleted in full. Neo4j is the sole canonical entity store. `kairix entity` CLI subcommand removed. All product code (`mcp/server.py`, `briefing/sources.py`, `curator/`) updated to use Neo4j queries only.
+- **W4**: Docker sidecar secrets via Azure Key Vault. New `docker/vault-agent/` service: fetches five KV secrets at startup via `DefaultAzureCredential`, writes to tmpfs volume `/run/secrets/kairix.env` (chmod 600), signals readiness via `/run/secrets/.ready`. `kairix` service waits for `vault-agent: service_healthy` before starting.
+- **W4**: `kairix/secrets.py` — `load_secrets(path)` reads a `KEY=VALUE` file into env vars without overwriting existing values. Called at module import in `kairix/_azure.py` and `kairix/graph/client.py`. Priority: existing env vars > sidecar secrets > KV subprocess calls.
+- **W4**: `docker/docker-compose.yml` — three-service compose: vault-agent, kairix, neo4j:5-community. tmpfs secrets volume (`size=1m, mode=0700`) — secrets never written to disk.
+- **W4**: `docker/.env.example` — template for `KAIRIX_KV_NAME`, Azure service principal, path mounts, and Neo4j config.
+
+### Removed
+- `kairix/entities/` — entire package (\_\_init\_\_.py, cli.py, schema.py, graph.py, extract.py, pipeline.py, reconcile.py, resolver.py, stop\_entities.py, migrations/001\_initial.sql)
+- `tests/entities/` — all entity unit and integration tests
+- `KAIRIX_TEST_DB` env var from CI workflows (no longer needed)
+- `kairix entity` CLI subcommand
+
+### Changed
+- `kairix curator health` now requires a live Neo4j connection; `--no-neo4j` flag no longer accepted
+- `kairix/mcp/server.py` `tool_entity()`: entities.db fallback removed; Neo4j miss returns `{"error": "Entity not found: <name>"}` directly
+- `kairix/briefing/sources.py` `fetch_recent_decisions()`: entities.db query block removed; decisions sourced from vault only
+
+### Benchmark (R17 — 2026-04-14, 95 curated queries)
+- entity NDCG 0.811 → **0.714** (vault evolution — new content Apr 13–14 shifted gold ranks; no-Neo4j baseline confirmed identical 0.714, ruling out code regression)
+- keyword: 0.616 · procedural: 0.609 · temporal: 0.540 · multi_hop: 0.526 · semantic: 0.501
+- **Overall NDCG@10: 0.587** · Hit@5: 0.821 · MRR@10: 0.679
+
+---
+
+## [0.8.1] - 2026-04-13 — Sprint 5–6: Benchmark Infrastructure + Entity Enrichment
+
 ### Added
 - **CA-1**: `kairix curator health` — Curator agent health check CLI. Checks entities.db for synthesis failures (no summary), missing vault paths, and stale entities (configurable threshold, default 90 days). Reports Neo4j node counts when available. Output: vault-ready Markdown or JSON. Part of the Curator agent (ADR-003: plain Python, no framework dependency).
-- **P1-2**: `mnemosyne/llm/` — `LLMBackend` protocol with `chat()`, `embed()`, `embed_as_bytes()` methods. `AzureOpenAIBackend` and `AnthropicBackend` (stub) implementations. `get_default_backend()` returns `AzureOpenAIBackend`. All product code now receives `LLMBackend` via dependency injection rather than importing backends directly.
-- **P1-3**: Repo boundary — all direct `mnemosyne._azure` imports removed from product code. `hybrid.py` acquires embed via `_get_llm().embed_as_bytes()`. `search/planner.py` acquires chat via `_get_llm().chat()`. No module-level `mnemosyne._azure` imports remain outside `mnemosyne/llm/backends.py`.
+- **P1-2**: `kairix/llm/` — `LLMBackend` protocol with `chat()`, `embed()`, `embed_as_bytes()` methods. `AzureOpenAIBackend` and `AnthropicBackend` (stub) implementations. `get_default_backend()` returns `AzureOpenAIBackend`. All product code now receives `LLMBackend` via dependency injection rather than importing backends directly.
+- **P1-3**: Repo boundary — all direct `kairix._azure` imports removed from product code. `hybrid.py` acquires embed via `_get_llm().embed_as_bytes()`. `search/planner.py` acquires chat via `_get_llm().chat()`. No module-level `kairix._azure` imports remain outside `kairix/llm/backends.py`.
 
 ### Fixed
 - **TMP-7**: `vector_search_bytes()` now fetches `k × 4` candidates when a date filter is active. `VECTOR_DEFAULT_K=10` was too small for narrow date windows (e.g., "this week") — after force re-embed populated `chunk_date`, the top-10 candidates rarely included docs from a 7-day window, causing vec_count=0 for relative temporal queries.
+- **KW-1**: All intents now dispatch BM25 + vector in parallel. Previously keyword intent ran BM25-only, causing vector-only docs to miss entirely. Keyword NDCG: 0.48 → **0.62** (+0.110).
+
+### Benchmark (R13 — 2026-04-13, 95 curated queries)
+- keyword NDCG: 0.48 → **0.616** (hybrid fix)
+- entity: **0.811** · procedural: 0.609 · temporal: 0.540 · multi_hop: 0.526 · semantic: 0.501
+- **Overall NDCG@10: 0.603** · Hit@5: 0.821 · MRR@10: 0.669
 
 ## [0.8.0] - 2026-04-11 — Sprint 4: CRM Interaction Chunker + Temporal Benchmark Expansion
 
