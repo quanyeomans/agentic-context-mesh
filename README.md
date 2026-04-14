@@ -2,7 +2,7 @@
 
 Private, on-infrastructure contextual retrieval for human-agent teams. Your knowledge stays on your servers. Your agents and teammates query the same indexed knowledge base.
 
-**NDCG@10 0.5686** on an 83-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.874** · **MRR@10 0.673**.
+**NDCG@10 0.587** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.821** · **MRR@10 0.679**.
 
 ---
 
@@ -123,33 +123,31 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 
 ## Benchmark Results
 
-**Suite:** 83 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~3,200 documents.
+**Suite:** 95 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~2,800 documents (11,316 vectors at 1536-dim).
 
-### Current results (R10 — 2026-04-10)
+### Current results (R17 — 2026-04-14)
 
-| Category | NDCG@10 | Cases | Notes |
-|---|---|---|---|
-| entity | 0.751 | 14 | Entity graph + alias resolution |
-| multi_hop | 0.549 | 10 | QueryPlanner, entity-aware sub-query decomposition |
-| procedural | 0.564 | 30 | Path boost for how-to/runbook queries |
-| semantic | 0.519 | 13 | Vector search carrying semantic load |
-| temporal | 0.535 | 8 | Date-filtered retrieval (TMP-2) |
-| keyword | 0.439 | 8 | BM25 baseline |
-| **Overall** | **0.5686** | **83** | Hit@5 0.874, MRR@10 0.673 |
+| Category | NDCG@10 | Notes |
+|---|---|---|
+| entity | 0.714 | Neo4j entity graph + alias resolution |
+| keyword | 0.616 | Full hybrid BM25 + vector |
+| procedural | 0.609 | Path boost for how-to/runbook queries |
+| temporal | 0.540 | Date-filtered retrieval |
+| multi_hop | 0.526 | QueryPlanner, entity-aware sub-query decomposition |
+| semantic | 0.501 | Vector search; cross-encoder re-ranking on roadmap |
+| **Overall** | **0.587** | **Hit@5 0.821, MRR@10 0.679** |
 
-Production RAG systems on heterogeneous personal knowledge typically score 0.45–0.65 on strict curated suites.
+Production RAG systems on heterogeneous personal knowledge typically score 0.55–0.70 on strict curated suites.
 
 ### Score trajectory
 
 | Run | NDCG@10 | Cases | Notes |
 |---|---|---|---|
 | BM25 baseline | 0.389 | 43 | Pre-vector baseline; synthetic suite |
-| Hybrid Phase 4 | 0.6658 | 43 | First hybrid; synthetic suite |
-| Phase 5 real-world | 0.3203 | 134 | First real-world suite; instrument issues |
-| Phase 7-B 1536-dim | 0.7545 | 252 | Confirmed 1536-dim |
 | R1 post-refactor | 0.7756 | 263 | Full gold rebuild |
-| R9 procedural boost | 0.5449 | 83 | Real-world curated suite |
-| **R10** | **0.5686** | **83** | NDCG/Hit@5/MRR alignment; temporal +0.015 |
+| R9 | 0.569 | 95 | Pre-hybrid-fix |
+| R13 | 0.603 | 95 | Keyword hybrid fix (+0.110 keyword) |
+| **R17** | **0.587** | **95** | Post vault-evolution; Sprint 7 Neo4j |
 
 ---
 
@@ -267,7 +265,7 @@ kairix contradict check "$(cat new-decision.md)" --threshold 0.7 --format json
 ### Curator health
 
 ```bash
-kairix curator health          # entity graph health (Neo4j primary, entities.db fallback)
+kairix curator health          # entity graph health (Neo4j)
 kairix curator health --json
 ```
 

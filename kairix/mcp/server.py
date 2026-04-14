@@ -1,11 +1,12 @@
 """
 kairix.mcp.server — MCP server exposing kairix tools to MCP-compatible agents.
 
-Provides four tools:
-  search    Hybrid BM25 + vector search over the vault
-  entity    Entity lookup from Neo4j / entities.db
-  prep      Context preparation: tiered L0/L1 summary generation
-  timeline  Temporal query rewriting + date-aware retrieval
+Provides five tools:
+  search       Hybrid BM25 + vector search over the vault
+  entity       Entity lookup from Neo4j
+  prep         Context preparation: tiered L0/L1 summary generation
+  timeline     Temporal query rewriting + date-aware retrieval
+  usage_guide  Return the kairix agent usage guide (self-documentation)
 
 The server uses FastMCP (from the ``mcp`` package). Install via:
     pip install kairix[agents]
@@ -215,6 +216,79 @@ def tool_timeline(
         }
 
 
+def tool_usage_guide(topic: str = "") -> dict[str, Any]:
+    """
+    Return the kairix agent usage guide, or a section of it filtered by topic.
+
+    Use this tool when you are unsure how to use kairix, when a search returns
+    unexpected results, or when you want to understand a specific feature.
+
+    Args:
+        topic: Optional topic filter (e.g. "temporal", "entity", "troubleshoot",
+               "intent", "budget"). Empty string returns the full guide.
+
+    Returns:
+        dict with keys: topic, content (markdown string), error.
+    """
+    try:
+        from pathlib import Path
+
+        # Find the guide relative to this file's package root
+        guide_path = Path(__file__).parent.parent.parent / "docs" / "agent-usage-guide.md"
+        if not guide_path.exists():
+            import kairix as _kairix
+            guide_path = Path(_kairix.__file__).parent.parent / "docs" / "agent-usage-guide.md"
+
+        if not guide_path.exists():
+            return {
+                "topic": topic,
+                "content": "",
+                "error": "Usage guide not found. Run: kairix onboard guide --vault-root <path>",
+            }
+
+        full_text = guide_path.read_text(encoding="utf-8")
+
+        if not topic:
+            return {"topic": "", "content": full_text, "error": ""}
+
+        # Filter to sections matching the topic (heading-level search)
+        topic_lower = topic.lower()
+        lines = full_text.splitlines()
+        sections: list[str] = []
+        in_section = False
+        current: list[str] = []
+
+        for line in lines:
+            is_heading = line.startswith("## ") or line.startswith("### ")
+            if is_heading:
+                if in_section and current:
+                    sections.append("\n".join(current))
+                    current = []
+                if topic_lower in line.lower():
+                    in_section = True
+                    current = [line]
+                else:
+                    in_section = False
+            elif in_section:
+                current.append(line)
+
+        if in_section and current:
+            sections.append("\n".join(current))
+
+        if not sections:
+            # Fallback: search for topic keyword in full text
+            matching_lines = [l for l in lines if topic_lower in l.lower()]
+            content = "\n".join(matching_lines[:30]) if matching_lines else full_text[:2000]
+        else:
+            content = "\n\n".join(sections)
+
+        return {"topic": topic, "content": content, "error": ""}
+
+    except Exception as exc:
+        logger.warning("mcp.usage_guide failed: %s", exc)
+        return {"topic": topic, "content": "", "error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # FastMCP server — only constructed when mcp package is available
 # ---------------------------------------------------------------------------
@@ -261,5 +335,10 @@ def build_server() -> Any:
     def timeline(query: str, anchor_date: str | None = None) -> dict[str, Any]:
         """Temporal query rewriting + date-aware retrieval."""
         return tool_timeline(query=query, anchor_date=anchor_date)
+
+    @server.tool()
+    def usage_guide(topic: str = "") -> dict[str, Any]:
+        """Return the kairix agent usage guide. Call this when unsure how to use kairix."""
+        return tool_usage_guide(topic=topic)
 
     return server

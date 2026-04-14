@@ -1,0 +1,218 @@
+"""
+kairix.onboard.cli — `kairix onboard` subcommand.
+
+Subcommands:
+  check   Run all deployment health checks and report status.
+  guide   Install the agent usage guide into the vault's shared knowledge base.
+  verify  Run the acceptance test suite against the live deployment.
+
+Usage:
+  kairix onboard check
+  kairix onboard check --json
+  kairix onboard guide --vault-root /data/obsidian-vault
+  kairix onboard verify --agent builder
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# check subcommand
+# ---------------------------------------------------------------------------
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    from kairix.onboard.check import run_all_checks
+
+    results = run_all_checks()
+    passed = sum(1 for r in results if r.ok)
+    total = len(results)
+    all_ok = passed == total
+
+    if args.json:
+        output = {
+            "ok": all_ok,
+            "passed": passed,
+            "total": total,
+            "checks": [
+                {
+                    "name": r.name,
+                    "ok": r.ok,
+                    "detail": r.detail,
+                    "fix": r.fix,
+                }
+                for r in results
+            ],
+        }
+        print(json.dumps(output, indent=2))
+        return 0 if all_ok else 1
+
+    # Human-readable output
+    print()
+    print("kairix deployment check")
+    print("─" * 50)
+    for r in results:
+        icon = "✓" if r.ok else "✗"
+        print(f"  {icon} {r.name}")
+        print(f"    {r.detail}")
+        if not r.ok and r.fix:
+            for line in r.fix.strip().splitlines():
+                print(f"      {line}")
+        print()
+
+    print("─" * 50)
+    if all_ok:
+        print(f"  All {total} checks passed")
+        print()
+        print("  kairix is fully operational. Try:")
+        print('  kairix search "what are our engineering standards" --agent builder')
+    else:
+        failed = total - passed
+        print(f"  {passed}/{total} checks passed — {failed} failed")
+        print()
+        print("  Fix the ✗ items above, then re-run: kairix onboard check")
+        print()
+        print("  Common first fix: run scripts/deploy-vm.sh to install the wrapper")
+        print("  and ensure kairix is on PATH for agent exec contexts.")
+    print()
+
+    return 0 if all_ok else 1
+
+
+# ---------------------------------------------------------------------------
+# guide subcommand
+# ---------------------------------------------------------------------------
+
+
+def cmd_guide(args: argparse.Namespace) -> int:
+    """Install the agent usage guide into the vault's shared knowledge base."""
+    vault_root = args.vault_root or os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
+    if not vault_root:
+        print("Error: --vault-root is required (or set KAIRIX_VAULT_ROOT)", file=sys.stderr)
+        return 1
+
+    vault_path = Path(vault_root)
+    if not vault_path.exists():
+        print(f"Error: vault root does not exist: {vault_root}", file=sys.stderr)
+        return 1
+
+    # Find the guide source in the kairix package
+    guide_src = Path(__file__).parent.parent.parent / "docs" / "agent-usage-guide.md"
+    if not guide_src.exists():
+        # Fallback: look relative to the installed package
+        import kairix
+        pkg_root = Path(kairix.__file__).parent.parent
+        guide_src = pkg_root / "docs" / "agent-usage-guide.md"
+
+    if not guide_src.exists():
+        print(f"Error: agent usage guide not found at {guide_src}", file=sys.stderr)
+        print("Check your kairix installation is complete.", file=sys.stderr)
+        return 1
+
+    # Target: vault/04-Agent-Knowledge/shared/kairix-usage.md (standard PARA path)
+    # Allow override via --output
+    if args.output:
+        dest = Path(args.output)
+    else:
+        # Try to find the shared knowledge directory
+        candidates = [
+            vault_path / "04-Agent-Knowledge" / "shared" / "kairix-usage.md",
+            vault_path / "shared" / "kairix-usage.md",
+            vault_path / "agent-knowledge" / "shared" / "kairix-usage.md",
+        ]
+        dest = None
+        for c in candidates:
+            if c.parent.exists():
+                dest = c
+                break
+        if dest is None:
+            # Fall back to vault root
+            dest = vault_path / "kairix-usage.md"
+
+    if args.dry_run:
+        print(f"Would install agent usage guide:")
+        print(f"  Source: {guide_src}")
+        print(f"  Dest:   {dest}")
+        return 0
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"Agent usage guide installed at: {dest}")
+    print()
+    print("Agents can now find this guide via:")
+    print('  kairix search "how do I use kairix" --agent <name>')
+    print()
+    print("Re-embed to make the guide searchable:")
+    print("  kairix embed --changed")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# verify subcommand
+# ---------------------------------------------------------------------------
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Run the acceptance test suite against the live deployment."""
+    script = Path(__file__).parent.parent.parent / "scripts" / "verify-search.py"
+    if not script.exists():
+        print(f"Error: verify-search.py not found at {script}", file=sys.stderr)
+        return 1
+
+    import subprocess
+
+    cmd = [sys.executable, str(script)]
+    if args.agent:
+        cmd += ["--agent", args.agent]
+    if args.json:
+        cmd += ["--json"]
+
+    result = subprocess.run(cmd)
+    return result.returncode
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="kairix onboard",
+        description="Deployment diagnostics and agent onboarding tools.",
+    )
+    sub = parser.add_subparsers(dest="subcommand", required=True)
+
+    # check
+    p_check = sub.add_parser("check", help="Run all deployment health checks")
+    p_check.add_argument("--json", action="store_true", help="Output as JSON")
+
+    # guide
+    p_guide = sub.add_parser(
+        "guide", help="Install the agent usage guide into the vault"
+    )
+    p_guide.add_argument("--vault-root", help="Path to vault root (default: KAIRIX_VAULT_ROOT)")
+    p_guide.add_argument("--output", help="Override destination file path")
+    p_guide.add_argument("--dry-run", action="store_true", help="Show what would be installed without writing")
+
+    # verify
+    p_verify = sub.add_parser(
+        "verify", help="Run acceptance tests against live deployment"
+    )
+    p_verify.add_argument("--agent", default="builder", help="Agent name for scoped tests")
+    p_verify.add_argument("--json", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args(argv)
+
+    if args.subcommand == "check":
+        sys.exit(cmd_check(args))
+    elif args.subcommand == "guide":
+        sys.exit(cmd_guide(args))
+    elif args.subcommand == "verify":
+        sys.exit(cmd_verify(args))

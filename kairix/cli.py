@@ -8,6 +8,7 @@ Subcommands:
   contradict  Contradiction detection: check new content against vault knowledge
   vault       Vault operations: crawl entities into Neo4j, health check
   mcp         MCP server: expose search/entity/prep/timeline as MCP tools
+  onboard     Deployment diagnostics and agent onboarding (check, guide, verify)
   timeline    Temporal query rewriting + date-aware retrieval
   summarise   L0/L1 tiered context generation
   classify    Auto-classify memory writes
@@ -87,6 +88,11 @@ def main() -> None:
         from kairix.mcp.cli import main as mcp_main
 
         mcp_main(sys.argv[2:])
+
+    elif cmd == "onboard":
+        from kairix.onboard.cli import main as onboard_main
+
+        onboard_main(sys.argv[2:])
 
     else:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)

@@ -39,7 +39,8 @@ source .env && kairix search "test query" --agent builder
 |---|---|
 | `KAIRIX_KV_NAME` | Your Azure Key Vault name |
 | `KAIRIX_VAULT_ROOT` | Path to your Obsidian vault |
-| `KAIRIX_DATA_DIR` | Where entities.db and logs go |
+| `KAIRIX_DATA_DIR` | Where logs and data files go |
+| `KAIRIX_WORKSPACE_ROOT` | Agent memory log root (e.g. `/data/workspaces`) |
 | `LOG_DIR` | Where deploy.sh and cron wrappers write logs |
 
 See `env.example` for the complete variable reference.
@@ -56,7 +57,7 @@ You need an Azure subscription with the following resources:
 - Deployment: `text-embedding-3-large` (1536-dim, for embedding)
 - Deployment: `gpt-4o-mini` (for briefing, classification, entity extraction)
 
-**Azure Key Vault** — set `KV_NAME` env var to your vault name (e.g. `my-project-kv`)
+**Azure Key Vault** — set `KAIRIX_KV_NAME` env var to your vault name (e.g. `my-project-kv`)
 - Used to store API credentials at runtime — credentials are never hardcoded or stored in env files
 
 Create the following secrets in Key Vault:
@@ -67,16 +68,17 @@ Create the following secrets in Key Vault:
 | `azure-openai-api-key` | Your Azure OpenAI API key |
 | `azure-openai-embedding-deployment` | `text-embedding-3-large` (or your deployment name) |
 | `azure-openai-gpt4o-mini-deployment` | `gpt-4o-mini` (or your deployment name) |
+| `kairix-neo4j-password` | Your Neo4j password |
 
 ```bash
 # Create secrets (run once, from a machine with Key Vault access)
-az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-endpoint \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint \
   --value "https://your-resource.cognitiveservices.azure.com/"
-az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-api-key \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key \
   --value "your-api-key"
-az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-embedding-deployment \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-embedding-deployment \
   --value "text-embedding-3-large"
-az keyvault secret set --vault-name ${KV_NAME} --name azure-openai-gpt4o-mini-deployment \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-gpt4o-mini-deployment \
   --value "gpt-4o-mini"
 ```
 
@@ -91,12 +93,12 @@ The VM running Kairix must be able to authenticate to Azure Key Vault. Two optio
 
 ```bash
 # Verify managed identity auth is working
-az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-endpoint --query value -o tsv
+az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint --query value -o tsv
 ```
 
 **Option B: Service Principal**
 - Create a service principal with Key Vault Secrets User access
-- Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` in the service env file (e.g. `/opt/<service-user>/env/service.env`)
+- Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` in the service env file
 - Or use `az login --service-principal` in the deploy script
 
 ### 3. QMD Installed and Running
@@ -120,8 +122,6 @@ qmd status
 export SQLITE_VEC_PATH="/path/to/vec0.so"
 ```
 
-The sqlite-vec extension is discovered automatically from QMD's `node_modules` directory.
-
 ### 4. Infrastructure Directories
 
 Create the required directories on the VM before first run:
@@ -129,12 +129,12 @@ Create the required directories on the VM before first run:
 ```bash
 sudo mkdir -p /data/kairix/briefing
 sudo mkdir -p /data/kairix/logs
-sudo chown -R <service-user>:<service-user> /data/kairix
+sudo mkdir -p /data/workspaces
+sudo chown -R <service-user>:<service-user> /data/kairix /data/workspaces
 ```
 
 Kairix expects:
-- `/data/obsidian-vault/` — vault root (QMD indexes this; set your actual vault path via `VAULT_ROOT` if different)
-- `/data/kairix/entities.db` — entity graph (created automatically on first run)
+- `/data/obsidian-vault/` — vault root (QMD indexes this; set your actual vault path via `KAIRIX_VAULT_ROOT`)
 - `/data/kairix/briefing/` — session briefings output directory
 - `/data/kairix/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `/data/workspaces/<agent>/memory/` — agent memory logs (required for briefing pipeline)
@@ -158,18 +158,81 @@ python3 -m venv .venv
 
 ---
 
+## Wrapper Script and PATH Setup
+
+**This is required for agents.** If you skip this, agents calling `kairix` will get either "command not found" or vector search failures (BM25-only fallback) because the raw Python binary has no environment loaded.
+
+The kairix wrapper (`scripts/kairix-wrapper.sh`) loads `service.env` and `/run/secrets/kairix.env` before exec'ing the real binary. The system symlink must point to the wrapper, not the Python binary.
+
+### Automated (recommended)
+
+```bash
+cd /data/tools/qmd-azure-embed
+bash scripts/deploy-vm.sh
+```
+
+This installs the wrapper, creates/updates the symlink, and sets up `/etc/profile.d/kairix.sh` so every shell and agent exec context has kairix on PATH.
+
+### Manual
+
+```bash
+# Install wrapper
+sudo mkdir -p /opt/kairix/bin
+sudo cp scripts/kairix-wrapper.sh /opt/kairix/bin/kairix-wrapper.sh
+sudo chmod 755 /opt/kairix/bin/kairix-wrapper.sh
+
+# Create or update the symlink (replace existing if it points to raw Python binary)
+sudo ln -sf /opt/kairix/bin/kairix-wrapper.sh /opt/openclaw/bin/kairix
+
+# Add to PATH for all sessions
+sudo bash -c 'echo "export PATH=/opt/openclaw/bin:\$PATH" > /etc/profile.d/kairix.sh'
+sudo chmod 644 /etc/profile.d/kairix.sh
+
+# Verify the symlink points to the wrapper (not the Python binary)
+ls -la /opt/openclaw/bin/kairix
+readlink /opt/openclaw/bin/kairix
+# Should show: /opt/kairix/bin/kairix-wrapper.sh
+```
+
+### Verify wrapper is working
+
+```bash
+kairix onboard check
+```
+
+All checks should pass. Specifically look for `wrapper_installed: ✓` and `secrets_loaded: ✓`. If `vec_failed: true` appears in the vector search check, the wrapper isn't loading secrets — check that `service.env` has `KAIRIX_KV_NAME` set.
+
+---
+
 ## First-Run Sequence
 
 Run these in order on a fresh deployment. Each step must succeed before the next.
 
-### Step 1: Verify Azure credentials
+### Step 1: Deploy wrapper and PATH
 
 ```bash
-source /opt/<service-user>/env/service.env
+bash scripts/deploy-vm.sh
+```
 
-ENDPOINT=$(az keyvault secret show --vault-name ${KV_NAME} \
+Or follow the manual steps in [Wrapper Script and PATH Setup](#wrapper-script-and-path-setup).
+
+### Step 2: Populate service.env
+
+```bash
+# If service.env doesn't exist yet
+cp env.example /opt/kairix/service.env
+nano /opt/kairix/service.env
+# Set: KAIRIX_KV_NAME, KAIRIX_VAULT_ROOT, KAIRIX_DATA_DIR, KAIRIX_WORKSPACE_ROOT
+```
+
+### Step 3: Verify Azure credentials
+
+```bash
+source /opt/kairix/service.env
+
+ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
   --name azure-openai-endpoint --query value -o tsv)
-APIKEY=$(az keyvault secret show --vault-name ${KV_NAME} \
+APIKEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
   --name azure-openai-api-key --query value -o tsv)
 
 echo "Endpoint: ${ENDPOINT:0:40}..."
@@ -178,7 +241,7 @@ echo "Key: ${APIKEY:0:8}..."
 
 Both must return values. If either is empty, check Azure CLI auth and Key Vault access policy.
 
-### Step 2: Run a test embed (first 20 chunks)
+### Step 4: Run a test embed (first 20 chunks)
 
 ```bash
 cd /data/tools/qmd-azure-embed
@@ -199,7 +262,7 @@ INFO  Done — embedded=20 failed=0 duration=12s cost=$0.0005
 
 If you see `SchemaVersionError` or `sqlite-vec extension load failed`, see [Troubleshooting](#troubleshooting).
 
-### Step 3: Full vault embed
+### Step 5: Full vault embed
 
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
@@ -215,34 +278,43 @@ tail -f /data/kairix/logs/embed.log
 
 Done when you see: `Done — embedded=N failed=0`
 
-### Step 4: Verify search works
+### Step 6: Verify search works
 
 ```bash
-.venv/bin/kairix search "what are our engineering standards" --agent builder
+kairix search "what are our engineering standards" --agent builder --json
 ```
 
-Expected: 3–5 results with file paths and relevance snippets. If you get 0 results, the embed didn't complete or the QMD index path is wrong.
+Expected: `vec_count > 0` and 3–5 results with file paths. If `vec_failed: true`, the wrapper isn't loading credentials — run `kairix onboard check`.
 
-### Step 5: Seed the entity graph
+### Step 7: Populate the entity graph
 
 ```bash
-.venv/bin/kairix entity extract --changed
-.venv/bin/kairix entity list   # should report entity count
+kairix vault crawl --vault-root /data/obsidian-vault
+kairix curator health   # should report entity counts
 ```
 
-Expected: entity count ≥ 100 for a typical vault. The entity extraction runs LLM calls for named entity recognition — requires Azure credentials.
+Expected: entity count ≥ 50 for a typical vault.
 
-### Step 6: Test briefing
+### Step 8: Test briefing
 
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-.venv/bin/kairix brief builder
+kairix brief builder
 ```
 
 Output written to `/data/kairix/briefing/builder-latest.md`. Verify it's non-empty and coherent.
 
-### Step 7: Register cron jobs
+### Step 9: Install agent usage guide
+
+```bash
+kairix onboard guide --vault-root /data/obsidian-vault
+kairix embed --changed   # make the guide searchable
+```
+
+This installs `docs/agent-usage-guide.md` into the vault's shared knowledge base so agents can search for kairix usage instructions.
+
+### Step 10: Register cron jobs
 
 See [Cron Scheduling](#cron-scheduling) below.
 
@@ -257,23 +329,23 @@ Two recurring jobs are required for a production deployment.
 Runs kairix embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed.
 
 ```cron
-15 * * * * source /opt/<service-user>/env/service.env \
-  && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
-  && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
+15 * * * * source /opt/kairix/service.env \
+  && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
+  && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
   && cd /data/tools/qmd-azure-embed \
   && .venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1
 ```
 
 ### Nightly entity + relationship seed (03:00 AEST / 17:00 UTC)
 
-Runs incremental entity extraction and relationship seeding. Uses GPT-4o-mini for relationship classification.
+Runs vault crawler and relationship seeding. Uses GPT-4o-mini for relationship classification.
 
 ```cron
 0 17 * * * /opt/kairix/cron-scripts/entity-relation-seed.sh >> /data/kairix/logs/entity-relation-seed.log 2>&1
 ```
 
 The shell script (`entity-relation-seed.sh`) handles Key Vault credential fetching and runs:
-1. `kairix entity extract --changed`
+1. `kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT`
 2. `python scripts/seed-entity-relations.py`
 
 Add both crons with `crontab -e` as the `<service-user>` service user.
@@ -306,8 +378,12 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `AZURE_OPENAI_API_KEY` | Azure OpenAI API key | From Key Vault `azure-openai-api-key` |
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `azure-openai-endpoint` |
 | `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment name | From Key Vault `azure-openai-embedding-deployment` |
-| `VAULT_ROOT` | Path to Obsidian vault | `/data/obsidian-vault` |
-| `KAIRIX_LOG_QUERIES` | Set to `1` to log all search queries to `queries.jsonl` | Off |
+| `KAIRIX_VAULT_ROOT` | Path to Obsidian vault | `/data/obsidian-vault` |
+| `KAIRIX_DATA_DIR` | Data directory for logs | `/data/kairix` |
+| `KAIRIX_WORKSPACE_ROOT` | Agent memory log root | `/data/workspaces` |
+| `KAIRIX_NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
+| `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
+| `KAIRIX_LOG_QUERIES` | Set to `1` to log all search queries | Off |
 | `SQLITE_VEC_PATH` | Override sqlite-vec `.so` path | Auto-discovered from QMD node_modules |
 
 ---
@@ -333,18 +409,21 @@ grep "Done —" /data/kairix/logs/embed.log | tail -3
 # No dimension mismatch errors (would indicate QMD cron conflict)
 grep -i "dimension mismatch" /data/kairix/logs/embed.log | tail -5
 
-# Entity extraction ran cleanly
+# Entity crawler ran cleanly
 tail -5 /data/kairix/logs/entity-relation-seed.log
 
 # Vector count is stable or growing
 qmd status
+
+# Entity graph health
+kairix curator health
 ```
 
 ### Key metrics to track
 
 - **Vector count:** Should grow as vault grows. Sudden drop indicates QMD reindex issue.
-- **Entity count:** Grows as new entity stubs are written. Check with `kairix entity list`.
-- **Relationship count:** Grows as nightly seed runs. Check with sqlite CLI: `sqlite3 /data/kairix/entities.db "SELECT COUNT(*) FROM entity_relationships;"`
+- **Entity count:** Grows as new entity stubs are added and vault crawler runs. Check with `kairix curator health`.
+- **Entity graph density:** Growing node/relationship counts improve entity-aware retrieval.
 - **Recall gate:** Post-embed recall check in embed log — should be ≥ 4/5. If < 4/5, run `kairix embed --force`.
 
 ### Enabling query logging
@@ -360,6 +439,44 @@ export KAIRIX_LOG_QUERIES=1
 
 ## Troubleshooting
 
+### `kairix: command not found`
+
+kairix is not on PATH for the current session.
+
+```bash
+# Quick fix for current session
+export PATH=/opt/openclaw/bin:$PATH
+kairix --help
+
+# Permanent fix: run the deploy script
+bash scripts/deploy-vm.sh
+
+# Or manually check where the symlink is
+ls -la /opt/openclaw/bin/kairix
+```
+
+For agent exec contexts specifically (agents running commands via shell), ensure `/etc/profile.d/kairix.sh` exists and contains the PATH export. Non-login shells don't source `/etc/profile.d/` automatically — the cron wrapper or agent exec script must `source /etc/profile.d/kairix.sh` or set PATH explicitly.
+
+### `vec_failed: true` — Vector search broken, BM25 only
+
+Azure credentials aren't loaded for the kairix process.
+
+```bash
+# Diagnose
+kairix onboard check
+
+# Most common cause: symlink points to raw Python binary
+ls -la /opt/openclaw/bin/kairix
+readlink /opt/openclaw/bin/kairix
+# If this shows .venv/bin/kairix, the wrapper isn't installed:
+bash scripts/deploy-vm.sh
+
+# Alternative: verify manually
+which kairix
+head -1 $(which kairix)
+# Should show: #!/usr/bin/env bash  (not #!/path/to/python)
+```
+
 ### `AZURE_OPENAI_API_KEY not set`
 
 The embed or briefing command can't find Azure credentials.
@@ -367,7 +484,7 @@ The embed or briefing command can't find Azure credentials.
 ```bash
 # Check Key Vault auth
 az account show
-az keyvault secret show --vault-name ${KV_NAME} --name azure-openai-api-key --query value -o tsv
+az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key --query value -o tsv
 ```
 
 If `az account show` fails, run `az login` or check the VM's managed identity assignment.
@@ -430,6 +547,21 @@ crontab -l | grep qmd
 # Schedule embed cron to run just after QMD reindex, not during it
 ```
 
+### Neo4j unavailable
+
+kairix degrades gracefully — entity boost and multi-hop queries are disabled, but search still works.
+
+```bash
+# Check Neo4j is running
+systemctl status neo4j
+
+# Check connection settings
+echo $KAIRIX_NEO4J_URI   # should be bolt://localhost:7687
+
+# Populate entity graph after fixing
+kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
+```
+
 ### Nightly entity extraction not running
 
 ```bash
@@ -450,7 +582,7 @@ tail -20 /data/kairix/logs/entity-relation-seed.log
 ls /data/workspaces/<agent>/memory/ | tail -5
 
 # Check entity graph has content
-kairix entity list
+kairix curator health
 
 # Run briefing with debug output
 KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
@@ -460,7 +592,7 @@ KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 
 ## Upgrading
 
-### Upgrading Mnemosyne
+### Upgrading Kairix
 
 ```bash
 cd /data/tools/qmd-azure-embed
@@ -469,9 +601,10 @@ git pull origin main
 
 # Run tests to verify
 .venv/bin/pytest tests/ -m "not e2e" -q
-```
 
-No schema migrations are required between minor versions. The entities.db schema is versioned and validated at startup.
+# Re-run deploy to update wrapper if scripts/kairix-wrapper.sh changed
+bash scripts/deploy-vm.sh --no-pull
+```
 
 ### Upgrading QMD
 
@@ -483,10 +616,8 @@ cd /data/tools/qmd-azure-embed
 
 # If tests pass, update the version references
 # qmd-tested-version in pyproject.toml
-# QMD_TESTED_VERSION in mnemosyne/embed/schema.py
+# QMD_TESTED_VERSION in kairix/embed/schema.py
 ```
-
-Run compatibility tests (`pytest tests/ -k "schema" -v`) after upgrading QMD to verify schema alignment.
 
 ---
 
@@ -498,6 +629,6 @@ Vault content is sent to Azure OpenAI (Australia East) for:
 - **Entity extraction:** Entity stub content sent to `gpt-4o-mini` for NER
 - **Relationship classification:** Relationship text sent to `gpt-4o-mini`
 
-No vault content is stored externally beyond the duration of the API request. All vectors, entity data, and briefings live in SQLite on your own infrastructure.
+No vault content is stored externally beyond the duration of the API request. All vectors, entity data, and briefings live in SQLite and Neo4j on your own infrastructure.
 
 See [SECURITY.md](SECURITY.md) for the full data handling and secret management policy.
