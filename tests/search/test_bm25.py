@@ -243,7 +243,7 @@ def test_bm25_result_typeddict_fields() -> None:
 
 class TestNormaliseFtsQuery:
     def test_removes_stop_words(self) -> None:
-        result = _normalise_fts_query("what do we know about Alice Chen")
+        result = _normalise_fts_query("what do we know about Jordan Blake")
         assert "what" not in result
         assert "do" not in result
         assert "we" not in result

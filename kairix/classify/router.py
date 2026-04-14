@@ -54,7 +54,7 @@ def resolve_target_path(
                              semantic-decision, semantic-fact, entity.
         date:                Date string (YYYY-MM-DD) for episodic. Defaults to today.
         entity_type:         Entity type subfolder for entity classification (e.g. "person").
-        entity_slug:         Slug for entity file (e.g. "alice-chen").
+        entity_slug:         Slug for entity file (e.g. "jordan-blake").
 
     Returns:
         Absolute path string.

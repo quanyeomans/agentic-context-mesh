@@ -48,22 +48,22 @@ def _make_neo4j(available: bool = True) -> MagicMock:
 
 @pytest.mark.unit
 def test_to_slug_basic() -> None:
-    assert _to_slug("Bupa Australia") == "bupa-australia"
+    assert _to_slug("Acme Australia") == "acme-australia"
 
 
 @pytest.mark.unit
 def test_to_slug_hyphens_preserved() -> None:
-    assert _to_slug("simon-birch") == "simon-birch"
+    assert _to_slug("test-person") == "test-person"
 
 
 @pytest.mark.unit
 def test_to_slug_special_chars() -> None:
-    assert _to_slug("Three Cubes Ventures!") == "three-cubes-ventures"
+    assert _to_slug("Example Ventures!") == "example-ventures"
 
 
 @pytest.mark.unit
 def test_to_display_name() -> None:
-    assert _to_display_name("bupa-australia") == "Bupa Australia"
+    assert _to_display_name("acme-australia") == "Acme Australia"
 
 
 @pytest.mark.unit
@@ -85,10 +85,10 @@ def test_as_list_list() -> None:
 def test_parse_frontmatter_valid(tmp_path: Path) -> None:
     md = _write(
         tmp_path / "test.md",
-        "---\nname: Bupa\ntier: client\n---\n# Body",
+        "---\nname: Acme\ntier: client\n---\n# Body",
     )
     fm = _parse_frontmatter(md)
-    assert fm["name"] == "Bupa"
+    assert fm["name"] == "Acme"
     assert fm["tier"] == "client"
 
 
@@ -129,8 +129,8 @@ def test_crawl_report_not_ok_with_errors() -> None:
 
 @pytest.mark.unit
 def test_crawl_finds_org_from_client_dir(tmp_path: Path) -> None:
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Bupa"
-    _write(org_dir / "Bupa.md", "---\nname: Bupa\ntier: client\n---\n# Bupa")
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Acme"
+    _write(org_dir / "Acme.md", "---\nname: Acme\ntier: client\n---\n# Acme")
 
     client = _make_neo4j()
     report = crawl(vault_root=tmp_path, neo4j_client=client)
@@ -139,14 +139,14 @@ def test_crawl_finds_org_from_client_dir(tmp_path: Path) -> None:
     assert report.organisations_upserted == 1
     client.upsert_organisation.assert_called_once()
     node = client.upsert_organisation.call_args[0][0]
-    assert node.id == "bupa"
-    assert node.name == "Bupa"
+    assert node.id == "acme"
+    assert node.name == "Acme"
 
 
 @pytest.mark.unit
 def test_crawl_dry_run_does_not_call_upsert(tmp_path: Path) -> None:
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Bupa"
-    _write(org_dir / "Bupa.md", "---\nname: Bupa\n---")
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Acme"
+    _write(org_dir / "Acme.md", "---\nname: Acme\n---")
 
     client = _make_neo4j()
     report = crawl(vault_root=tmp_path, neo4j_client=client, dry_run=True)
@@ -213,24 +213,24 @@ def test_crawl_finds_person_from_people_notes(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_crawl_person_resolves_org(tmp_path: Path) -> None:
     # Org must exist first so resolve works
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Bupa"
-    _write(org_dir / "Bupa.md", "---\nname: Bupa\n---")
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Acme"
+    _write(org_dir / "Acme.md", "---\nname: Acme\n---")
 
     people = tmp_path / "02-Areas" / "Network" / "People-Notes"
-    _write(people / "sarah-jones.md", "---\nname: Sarah Jones\norg: Bupa\n---")
+    _write(people / "test-person-two.md", "---\nname: Test Person\norg: Acme\n---")
 
     client = _make_neo4j()
     crawl(vault_root=tmp_path, neo4j_client=client)
 
     person_node = client.upsert_person.call_args[0][0]
-    assert person_node.org == "bupa"
+    assert person_node.org == "acme"
 
     # WORKS_AT edge should have been created
     edge_calls = [c[0][0] for c in client.upsert_edge.call_args_list]
     works_at = [e for e in edge_calls if e.kind.value == "WORKS_AT"]
     assert len(works_at) == 1
-    assert works_at[0].from_id == "sarah-jones"
-    assert works_at[0].to_id == "bupa"
+    assert works_at[0].from_id == "test-person-two"
+    assert works_at[0].to_id == "acme"
 
 
 @pytest.mark.unit
@@ -275,12 +275,12 @@ def test_crawl_finds_outcome(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_crawl_creates_mentions_edge_for_wikilink(tmp_path: Path) -> None:
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Bupa"
-    _write(org_dir / "Bupa.md", "---\nname: Bupa\n---")
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Acme"
+    _write(org_dir / "Acme.md", "---\nname: Acme\n---")
 
-    # A document that wikilinks [[Bupa]]
+    # A document that wikilinks [[Acme]]
     docs = tmp_path / "01-Projects"
-    _write(docs / "insurance-analysis.md", "We worked with [[Bupa]] on their digital strategy.")
+    _write(docs / "insurance-analysis.md", "We worked with [[Acme]] on their digital strategy.")
 
     client = _make_neo4j()
     crawl(vault_root=tmp_path, neo4j_client=client)
@@ -288,7 +288,7 @@ def test_crawl_creates_mentions_edge_for_wikilink(tmp_path: Path) -> None:
     edge_calls = [c[0][0] for c in client.upsert_edge.call_args_list]
     mentions = [e for e in edge_calls if e.kind.value == "MENTIONS"]
     assert len(mentions) >= 1
-    assert any(e.to_id == "bupa" for e in mentions)
+    assert any(e.to_id == "acme" for e in mentions)
 
 
 @pytest.mark.unit
@@ -319,21 +319,21 @@ def test_crawl_nonexistent_vault_root_returns_error() -> None:
 
 @pytest.mark.unit
 def test_crawl_upsert_failure_recorded_in_errors(tmp_path: Path) -> None:
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Bupa"
-    _write(org_dir / "Bupa.md", "---\nname: Bupa\n---")
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Acme"
+    _write(org_dir / "Acme.md", "---\nname: Acme\n---")
 
     client = _make_neo4j()
     client.upsert_organisation.return_value = False  # simulate failure
 
     report = crawl(vault_root=tmp_path, neo4j_client=client)
     assert len(report.errors) > 0
-    assert any("bupa" in e for e in report.errors)
+    assert any("acme" in e for e in report.errors)
 
 
 @pytest.mark.unit
 def test_crawl_neo4j_unavailable_dry_run_still_counts(tmp_path: Path) -> None:
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Bupa"
-    _write(org_dir / "Bupa.md", "---\nname: Bupa\n---")
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "Acme"
+    _write(org_dir / "Acme.md", "---\nname: Acme\n---")
 
     client = _make_neo4j(available=False)
     report = crawl(vault_root=tmp_path, neo4j_client=client, dry_run=True)

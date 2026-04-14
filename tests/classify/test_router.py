@@ -108,8 +108,8 @@ class TestSemanticFactRouting:
 
 class TestEntityRouting:
     def test_entity_person(self):
-        path = resolve_target_path("builder", "entity", entity_type="person", entity_slug="alice-chen")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/entities/person/alice-chen.md"
+        path = resolve_target_path("builder", "entity", entity_type="person", entity_slug="jordan-blake")
+        assert path == "/data/obsidian-vault/04-Agent-Knowledge/entities/person/jordan-blake.md"
 
     def test_entity_organisation(self):
         path = resolve_target_path("builder", "entity", entity_type="organisation", entity_slug="triad-consulting")

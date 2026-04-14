@@ -29,7 +29,7 @@ Types:
 - semantic-fact: An infrastructure or configuration fact (IPs, versions, endpoints, specs).
   Example: "Azure endpoint: https://xxx.openai.azure.com/ — version: 2024-02-01"
 - entity: A profile or description of a named entity (person, org, project, concept).
-  Example: "Alice Chen: CTO of Acme Corp. Based in Singapore."
+  Example: "Jordan Blake: CTO of Acme Corp. Based in Singapore."
 
 Return JSON only:
 {"type": "<type>", "confidence": <0.0-1.0>, "reason": "<brief explanation>"}

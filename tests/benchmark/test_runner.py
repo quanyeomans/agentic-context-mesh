@@ -70,13 +70,13 @@ def test_exact_match_is_case_insensitive() -> None:
 
 
 def test_fuzzy_match_returns_1_for_suffix_match() -> None:
-    paths = ["04-Agent-Knowledge/entities/alice-chen.md"]
-    assert _fuzzy_match(paths, "entities/alice-chen.md") == 1.0
+    paths = ["04-Agent-Knowledge/entities/jordan-blake.md"]
+    assert _fuzzy_match(paths, "entities/jordan-blake.md") == 1.0
 
 
 def test_fuzzy_match_returns_0_for_no_match() -> None:
     paths = ["totally/unrelated/file.md"]
-    assert _fuzzy_match(paths, "entities/alice-chen.md") == 0.0
+    assert _fuzzy_match(paths, "entities/jordan-blake.md") == 0.0
 
 
 def test_fuzzy_match_returns_0_for_empty_gold() -> None:

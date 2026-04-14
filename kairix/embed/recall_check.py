@@ -33,7 +33,7 @@ RECALL_LOG = Path.home() / ".cache" / "qmd" / "recall-check.json"
 DEFAULT_RECALL_QUERIES = [
     ("R01", "Arize Phoenix observability recommendation", "arize-observability-research"),
     ("R03", "SPF record duplicate permerror DNS", "shared/facts"),
-    ("R04", "Alice Chen voice profile writing style", "alice-chen-voice-profile"),
+    ("R04", "Jordan Blake voice profile writing style", "jordan-blake-voice-profile"),
     ("R05", "QMD SQLite WAL lock crash root cause", "shared/facts"),
     ("R12", "NemoClaw analysis OpenShell verdict", "nemoclaw-analysis"),
 ]

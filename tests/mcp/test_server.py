@@ -108,19 +108,19 @@ def test_tool_entity_neo4j_primary() -> None:
     mock_neo4j.available = True
     mock_neo4j.cypher.return_value = [
         {
-            "id": "bupa",
-            "name": "Bupa",
+            "id": "acme",
+            "name": "Acme",
             "type": "Organisation",
             "summary": "A health org",
-            "vault_path": "02-Areas/00-Clients/Bupa/Bupa.md",
+            "vault_path": "02-Areas/00-Clients/Acme/Acme.md",
         }
     ]
 
     with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
-        result = tool_entity(name="Bupa")
+        result = tool_entity(name="Acme")
 
-    assert result["id"] == "bupa"
-    assert result["name"] == "Bupa"
+    assert result["id"] == "acme"
+    assert result["name"] == "Acme"
     assert result["type"] == "Organisation"
     assert result["error"] == ""
 
@@ -183,7 +183,7 @@ def test_tool_prep_l1() -> None:
     mock_result = SimpleNamespace(summary="Detailed context summary.", tokens=800)
 
     with patch("kairix.summaries.generate.generate_l1", return_value=mock_result):
-        result = tool_prep(query="Explain our Bupa engagement", tier="l1")
+        result = tool_prep(query="Explain our Acme engagement", tier="l1")
 
     assert result["tier"] == "l1"
     assert result["tokens"] == 800
@@ -236,10 +236,10 @@ def test_tool_timeline_temporal_query() -> None:
 @pytest.mark.unit
 def test_tool_timeline_non_temporal_query() -> None:
     with patch("kairix.temporal.rewriter.is_relative_temporal", return_value=False):
-        result = tool_timeline(query="tell me about Bupa")
+        result = tool_timeline(query="tell me about Acme")
 
     assert result["is_temporal"] is False
-    assert result["rewritten_query"] == "tell me about Bupa"
+    assert result["rewritten_query"] == "tell me about Acme"
     assert result["time_window"] == {}
     assert result["error"] == ""
 

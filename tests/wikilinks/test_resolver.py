@@ -50,7 +50,7 @@ SYNTHETIC_BOOTSTRAP = """\
 
 | Entity | Link | Vault Path |
 |---|---|---|
-| Alice Chen | `[[AliceChen]]` | `02-Areas/People/AliceChen/` |
+| Jordan Blake | `[[JordanBlake]]` | `02-Areas/People/JordanBlake/` |
 | Sam Rivera | `[[SamRivera]]` | `02-Areas/People/SamRivera/` |
 
 ## Active Projects
@@ -127,15 +127,15 @@ def synthetic_db(tmp_path: Path) -> str:
             None,
         ),
         (
-            "alice-chen",
-            "Alice Chen",
+            "jordan-blake",
+            "Jordan Blake",
             "person",
             "path",
             "active",
             "shared",
             "2024-01-01",
             "2024-01-01",
-            "02-Areas/People/AliceChen/",
+            "02-Areas/People/JordanBlake/",
             None,
         ),
         (

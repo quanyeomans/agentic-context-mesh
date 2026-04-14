@@ -26,7 +26,7 @@ QMD_BIN = Path(os.environ.get("QMD_BINARY_PATH", f"{_DATA_DIR}/workspace/.tools/
 
 # Known gold: (query, fragment that must appear in top-3 vsearch results)
 GOLD_QUERIES = [
-    ("Alice Chen voice profile", "alice-chen-voice-profile"),
+    ("Jordan Blake voice profile", "jordan-blake-voice-profile"),
     ("Arize Phoenix observability", "arize-observability-research"),
     ("SPF record duplicate permerror", "shared/rules"),
     ("QMD SQLite lock crash", "shared/facts"),

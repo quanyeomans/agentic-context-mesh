@@ -146,7 +146,7 @@ class TestDecompose:
         neo4j_mock = MagicMock(available=False)
 
         with patch("kairix.search.planner._neo4j_graph_context", return_value=None):
-            result = planner.decompose("active projects avanade", neo4j_client=neo4j_mock)
+            result = planner.decompose("active projects techcorp", neo4j_client=neo4j_mock)
 
         # Should still return a list
         assert isinstance(result, list)
@@ -156,7 +156,7 @@ class TestDecompose:
         """Should inject entity context when Neo4j graph context returns a string."""
         planner = QueryPlanner()
         neo4j_mock = MagicMock(available=True)
-        context_str = "Known entities related to this query:\n- Avanade → Microsoft, Shape"
+        context_str = "Known entities related to this query:\n- TechCorp → Microsoft, BuilderCo"
 
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["entity-aware sub-query"]'
@@ -165,7 +165,7 @@ class TestDecompose:
             patch("kairix.search.planner._neo4j_graph_context", return_value=context_str),
             patch("kairix.llm.get_default_backend", return_value=mock_backend),
         ):
-            result = planner.decompose("what is avanade doing", neo4j_client=neo4j_mock)
+            result = planner.decompose("what is techcorp doing", neo4j_client=neo4j_mock)
 
         assert isinstance(result, list)
 

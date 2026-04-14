@@ -65,7 +65,7 @@ class TestFetchMemoryLogs:
             "## Session\n"
             "[pending] Fix the RRF bug\n"
             "[blocked] Waiting for Azure quota\n"
-            "[action: send summary to Shape]\n"
+            "[action: send summary to BuilderCo]\n"
             "Normal log entry\n"
         )
         (memory_dir / f"{today.isoformat()}.md").write_text(content)

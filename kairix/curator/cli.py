@@ -6,7 +6,7 @@ Usage:
                         [--staleness-days N]
 
 Exit code is always 0 — health issues are surfaced via the report, not the
-exit code, so callers (cron, OpenClaw, CI) do not see spurious failures.
+exit code, so callers (cron, agents, CI) do not see spurious failures.
 """
 
 from __future__ import annotations

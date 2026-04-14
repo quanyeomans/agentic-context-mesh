@@ -22,10 +22,10 @@ CASES: list[tuple[str, QueryIntent]] = [
     ("show me items completed on 2026-03-22", QueryIntent.TEMPORAL),
     ("what happened over the last 30 days", QueryIntent.TEMPORAL),
     # --- ENTITY (4 cases) ---
-    ("tell me about Alice Chen", QueryIntent.ENTITY),
+    ("tell me about Jordan Blake", QueryIntent.ENTITY),
     ("what has Builder done", QueryIntent.ENTITY),
-    ("what do we know about Shape", QueryIntent.ENTITY),
-    ("who is Alice Chen", QueryIntent.ENTITY),
+    ("what do we know about BuilderCo", QueryIntent.ENTITY),
+    ("who is Jordan Blake", QueryIntent.ENTITY),
     # --- PROCEDURAL (4 cases) ---
     ("how to fetch a Key Vault secret", QueryIntent.PROCEDURAL),
     ("how do I handle a merge conflict", QueryIntent.PROCEDURAL),
@@ -94,7 +94,7 @@ def test_classify_returns_query_intent_enum() -> None:
 def test_temporal_beats_entity() -> None:
     """TEMPORAL takes priority over ENTITY signals in the same query."""
     # "tell me about" is ENTITY but "recently" is TEMPORAL → TEMPORAL wins
-    result = classify("tell me about what Shape did recently")
+    result = classify("tell me about what BuilderCo did recently")
     assert result == QueryIntent.TEMPORAL
 
 
