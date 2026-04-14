@@ -143,17 +143,47 @@ Kairix expects:
 
 ## Installation
 
-```bash
-# Clone to the VM
-git clone https://github.com/quanyeomans/agentic-context-mesh /data/tools/qmd-azure-embed
-cd /data/tools/qmd-azure-embed
+Kairix is installed as a pip package — the source repo is not required on the VM.
 
-# Create virtualenv and install
-python3 -m venv .venv
-.venv/bin/pip install -e .
+```bash
+# One-line deploy (downloads and runs deploy-vm.sh from the public repo)
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)
+```
+
+This creates `/opt/kairix/.venv/`, installs kairix into it, installs the wrapper script, and creates the `/usr/local/bin/kairix` symlink. After this, `kairix --help` works from any shell.
+
+**Manual install (alternative):**
+
+```bash
+# Create venv and install
+python3 -m venv /opt/kairix/.venv
+/opt/kairix/.venv/bin/pip install git+https://github.com/quanyeomans/agentic-context-mesh
 
 # Verify
-.venv/bin/kairix --help
+/opt/kairix/.venv/bin/kairix --help
+```
+
+### Operator configuration
+
+Kairix itself is the retrieval engine. Operator-specific configuration (vault paths, Azure credentials, agent names, private benchmark suites) is kept separately — **not inside the kairix source tree**.
+
+The expected layout on the VM:
+```
+/opt/kairix/
+  .venv/              ← kairix package installed here
+  bin/
+    kairix-wrapper.sh ← env loader; /usr/local/bin/kairix symlinks here
+  service.env         ← operator config (KAIRIX_KV_NAME, KAIRIX_VAULT_ROOT, etc.)
+  secrets/            ← optional: pre-fetched secrets for non-Docker deployments
+```
+
+For TC deployments: operator config lives in the private `tc-agent-zone` repo, not in this repo. That separation keeps private vault paths, benchmark suites, and entity definitions out of the public kairix codebase.
+
+### Upgrading
+
+```bash
+/opt/kairix/.venv/bin/pip install --upgrade git+https://github.com/quanyeomans/agentic-context-mesh
+kairix onboard check   # verify after upgrade
 ```
 
 ---
@@ -244,11 +274,9 @@ Both must return values. If either is empty, check Azure CLI auth and Key Vault 
 ### Step 4: Run a test embed (first 20 chunks)
 
 ```bash
-cd /data/tools/qmd-azure-embed
-
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-.venv/bin/kairix embed --limit 20
+kairix embed --limit 20
 ```
 
 Expected output:
@@ -267,7 +295,7 @@ If you see `SchemaVersionError` or `sqlite-vec extension load failed`, see [Trou
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-nohup .venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1 &
+nohup kairix embed >> /data/kairix/logs/embed.log 2>&1 &
 echo "PID: $!"
 ```
 
@@ -332,8 +360,7 @@ Runs kairix embed incrementally — only embeds files modified since the last ru
 15 * * * * source /opt/kairix/service.env \
   && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
   && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
-  && cd /data/tools/qmd-azure-embed \
-  && .venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1
+  && /opt/kairix/.venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1
 ```
 
 ### Nightly entity + relationship seed (03:00 AEST / 17:00 UTC)
@@ -595,28 +622,32 @@ KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 ### Upgrading Kairix
 
 ```bash
-cd /data/tools/qmd-azure-embed
-git pull origin main
-.venv/bin/pip install -e .
+# Upgrade to latest
+/opt/kairix/.venv/bin/pip install --upgrade git+https://github.com/quanyeomans/agentic-context-mesh
 
-# Run tests to verify
-.venv/bin/pytest tests/ -m "not e2e" -q
+# Or pin to a specific version tag
+/opt/kairix/.venv/bin/pip install git+https://github.com/quanyeomans/agentic-context-mesh@v0.9.0
 
-# Re-run deploy to update wrapper if scripts/kairix-wrapper.sh changed
-bash scripts/deploy-vm.sh --no-pull
+# Verify
+kairix onboard check
+```
+
+If the wrapper script has changed in the new version, re-run:
+```bash
+bash scripts/deploy-vm.sh --skip-smoke   # re-downloads and re-installs wrapper
 ```
 
 ### Upgrading QMD
 
 ```bash
 # Check QMD changelog for schema changes first
-# Then run compatibility tests
-cd /data/tools/qmd-azure-embed
-.venv/bin/pytest tests/ -k "schema" -v
+# Then run compatibility tests from the kairix source (clone temporarily if needed)
+git clone --depth=1 https://github.com/quanyeomans/agentic-context-mesh /tmp/kairix-src
+cd /tmp/kairix-src
+/opt/kairix/.venv/bin/pytest tests/ -k "schema" -v
 
-# If tests pass, update the version references
-# qmd-tested-version in pyproject.toml
-# QMD_TESTED_VERSION in kairix/embed/schema.py
+# If tests pass, the upgrade is compatible
+rm -rf /tmp/kairix-src
 ```
 
 ---

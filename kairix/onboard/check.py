@@ -86,9 +86,10 @@ def check_wrapper_installed() -> CheckResult:
                 detail=f"kairix symlink points to raw Python binary: {resolved}",
                 fix=(
                     "The symlink should point to kairix-wrapper.sh, not the Python binary.\n"
-                    "Run: bash scripts/deploy-vm.sh\n"
+                    "Run the deploy script to fix:\n"
+                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)\n"
                     "This installs the wrapper at /opt/kairix/bin/kairix-wrapper.sh\n"
-                    "and updates the symlink to point to it."
+                    "and updates /usr/local/bin/kairix to point to it."
                 ),
             )
         if first_line.startswith("#!") and ("bash" in first_line or "sh" in first_line):
