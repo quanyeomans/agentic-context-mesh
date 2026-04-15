@@ -31,7 +31,9 @@ class BenchmarkCase:
     score_method: str  # exact|fuzzy|llm|classification|ndcg
     notes: str | None = None
     expected_type: str | None = None  # for classification score_method
-    gold_paths: list[dict] | None = None  # for ndcg: [{path, relevance}] graded relevance 0-2
+    gold_paths: list[dict] | None = None  # for ndcg: [{path, relevance}] graded relevance 0-2 (path-based)
+    gold_title: str | None = None  # stable note title for exact/fuzzy cases (path-agnostic)
+    gold_titles: list[dict] | None = None  # for ndcg: [{title, relevance}] graded relevance 0-2 (title-based)
 
 
 @dataclass
@@ -97,7 +99,9 @@ def load_suite(path: str) -> BenchmarkSuite:
         score_method = raw_case.get("score_method")
         notes = raw_case.get("notes")
         expected_type = raw_case.get("expected_type")
-        gold_paths = raw_case.get("gold_paths")  # list of {path, relevance} for ndcg
+        gold_paths = raw_case.get("gold_paths")  # list of {path, relevance} for ndcg (path-based)
+        gold_title = raw_case.get("gold_title")  # stable note title for exact/fuzzy (title-based)
+        gold_titles = raw_case.get("gold_titles")  # list of {title, relevance} for ndcg (title-based)
 
         # Required fields
         if not case_id:
@@ -118,15 +122,36 @@ def load_suite(path: str) -> BenchmarkSuite:
                 f"must be one of {sorted(VALID_SCORE_METHODS)}"
             )
 
-        # For recall cases, gold_path should be set
-        if category == "recall" and not gold_path and not errors:
-            errors.append(f"Case [{i}] ({case_id}): recall cases must have a gold_path")
+        # Validate gold_titles entries: each must have 'title' (str) and 'relevance' (int 0-2)
+        if gold_titles and isinstance(gold_titles, list):
+            for j, gt in enumerate(gold_titles):
+                if not isinstance(gt, dict):
+                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] must be a mapping")
+                elif "title" not in gt:
+                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'title'")
+                elif "relevance" not in gt:
+                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'relevance'")
+                elif gt["relevance"] not in (0, 1, 2):
+                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2")
 
-        # If gold_paths provided but gold_path is absent, derive from highest-relevance entry
-        if gold_paths and isinstance(gold_paths, list) and not gold_path:
-            best = max(gold_paths, key=lambda g: g.get("relevance", 0), default=None)
-            if best:
-                gold_path = best.get("path")
+        # For recall cases, require gold_path, gold_paths, gold_title, or gold_titles
+        if category == "recall" and not gold_path and not gold_paths and not gold_title and not gold_titles:
+            if not errors:
+                errors.append(f"Case [{i}] ({case_id}): recall cases must have gold_path, gold_title, or a gold list")
+
+        # Derive gold_path for backwards compat (used in case output JSON and path-based validate_suite)
+        # Priority: explicit gold_path > highest-relevance gold_paths entry > highest-relevance gold_titles entry
+        if not gold_path:
+            if gold_paths and isinstance(gold_paths, list):
+                best = max(gold_paths, key=lambda g: g.get("relevance", 0), default=None)
+                if best:
+                    gold_path = best.get("path")
+            elif gold_titles and isinstance(gold_titles, list):
+                best_t = max(gold_titles, key=lambda g: g.get("relevance", 0), default=None)
+                if best_t:
+                    gold_path = best_t.get("title")  # title as path-equivalent for display
+            elif gold_title:
+                gold_path = gold_title
 
         if not errors or (case_id and category and query and score_method):
             cases.append(
@@ -139,6 +164,8 @@ def load_suite(path: str) -> BenchmarkSuite:
                     notes=str(notes) if notes else None,
                     expected_type=str(expected_type) if expected_type else None,
                     gold_paths=gold_paths if isinstance(gold_paths, list) else None,
+                    gold_title=str(gold_title) if gold_title else None,
+                    gold_titles=gold_titles if isinstance(gold_titles, list) else None,
                 )
             )
 
@@ -175,25 +202,40 @@ def validate_suite(
     """
     errors: list[str] = []
 
-    # Collect all gold paths from recall cases
-    gold_paths: list[tuple[str, str]] = [
-        (case.id, case.gold_path) for case in suite.cases if case.gold_path and case.category == "recall"
+    # Collect gold paths from recall cases that use path-based identity
+    path_based_recall: list[tuple[str, str]] = [
+        (case.id, case.gold_path)
+        for case in suite.cases
+        if case.gold_path and case.category == "recall" and not case.gold_title and not case.gold_titles
     ]
 
-    # Check for duplicate gold paths
+    # Check for duplicate gold paths (path-based recall only)
     seen_gold: dict[str, str] = {}
-    for case_id, gp in gold_paths:
+    for case_id, gp in path_based_recall:
         gp_lower = gp.lower()
         if gp_lower in seen_gold:
             errors.append(f"Duplicate gold_path: {gp!r} used by both {seen_gold[gp_lower]!r} and {case_id!r}")
         else:
             seen_gold[gp_lower] = case_id
 
-    # Check gold paths exist in the QMD index
-    for case_id, gp in gold_paths:
+    # Check gold paths exist in the QMD index (path-based only; title-based is path-agnostic)
+    for case_id, gp in path_based_recall:
         if not _gold_path_in_index(db, gp):
             msg = f"Case {case_id!r}: gold_path {gp!r} not found in QMD index"
             errors.append(msg)
+
+    # Check for duplicate gold_title values across recall cases
+    seen_titles: dict[str, str] = {}
+    for case in suite.cases:
+        if case.gold_title and case.category == "recall":
+            title_lower = case.gold_title.lower()
+            if title_lower in seen_titles:
+                errors.append(
+                    f"Duplicate gold_title: {case.gold_title!r} used by both "
+                    f"{seen_titles[title_lower]!r} and {case.id!r}"
+                )
+            else:
+                seen_titles[title_lower] = case.id
 
     return errors
 

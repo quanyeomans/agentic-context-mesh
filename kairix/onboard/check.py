@@ -109,39 +109,91 @@ def check_wrapper_installed() -> CheckResult:
         )
 
 
+_REQUIRED_SECRETS = ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT")
+_SECRETS_FILE_PROBE_PATHS = (
+    "/run/secrets/kairix.env",
+    "/opt/kairix/secrets.env",
+)
+
+
+def _secrets_file_keys_present(path: Path, keys: tuple[str, ...]) -> set[str]:
+    """Return the subset of *keys* found as KEY= entries in a secrets file."""
+    found: set[str] = set()
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k = line.split("=", 1)[0].strip()
+            if k in keys:
+                found.add(k)
+    except OSError:
+        pass
+    return found
+
+
 def check_secrets_loaded() -> CheckResult:
-    """Azure OpenAI credentials are available in the environment."""
+    """Azure OpenAI credentials are available in the environment or a secrets file."""
     api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
     endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 
-    missing = []
-    if not api_key:
-        missing.append("AZURE_OPENAI_API_KEY")
-    if not endpoint:
-        missing.append("AZURE_OPENAI_ENDPOINT")
+    # Tier 1 — credentials in process environment (wrapper loaded them)
+    if api_key and endpoint:
+        masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
+        return CheckResult(
+            name="secrets_loaded",
+            ok=True,
+            detail=f"Azure credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
+        )
 
-    if missing:
+    # Tier 2 — probe secrets file directly (credentials present but not yet in env;
+    # load_secrets() is called lazily on first kairix._azure import)
+    secrets_file_env = os.environ.get("KAIRIX_SECRETS_FILE", "")
+    probe_paths: tuple[str, ...] = (
+        (secrets_file_env, *_SECRETS_FILE_PROBE_PATHS) if secrets_file_env else _SECRETS_FILE_PROBE_PATHS
+    )
+    for probe in probe_paths:
+        p = Path(probe)
+        if not p.exists():
+            continue
+        found = _secrets_file_keys_present(p, _REQUIRED_SECRETS)
+        missing_in_file = [k for k in _REQUIRED_SECRETS if k not in found]
+        if not missing_in_file:
+            return CheckResult(
+                name="secrets_loaded",
+                ok=True,
+                detail=(
+                    f"Secrets file found at {probe} — credentials will be active on first search call. "
+                    f"Run `kairix search` to confirm."
+                ),
+            )
+        # File exists but is missing keys — give specific guidance
         return CheckResult(
             name="secrets_loaded",
             ok=False,
-            detail=f"Missing Azure credentials: {', '.join(missing)}",
+            detail=f"Secrets file at {probe} is missing required keys: {', '.join(missing_in_file)}",
             fix=(
-                "Secrets should be loaded automatically by the kairix wrapper.\n"
-                "Check that:\n"
-                "  1. /opt/kairix/service.env has KAIRIX_KV_NAME set\n"
-                "  2. /run/secrets/kairix.env exists (Docker sidecar) OR\n"
-                "     Azure CLI is authenticated (az account show works)\n"
-                "  3. The symlink points to kairix-wrapper.sh, not the Python binary\n"
-                "Run: kairix onboard check  for full diagnostics"
+                f"Add the missing keys to {probe}:\n"
+                + "".join(f"  {k}=<value>\n" for k in missing_in_file)
+                + "Fetch from Azure Key Vault:\n"
+                "  az keyvault secret show --vault-name <kv> --name azure-openai-api-key --query value -o tsv"
             ),
         )
 
-    # Mask the key in output
-    masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
+    # Tier 3 — nothing found
+    missing_env = [k for k in _REQUIRED_SECRETS if not os.environ.get(k)]
+    default_path = _SECRETS_FILE_PROBE_PATHS[-1]
     return CheckResult(
         name="secrets_loaded",
-        ok=True,
-        detail=f"Azure credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
+        ok=False,
+        detail=f"Azure credentials not found in environment or secrets file: {', '.join(missing_env)}",
+        fix=(
+            f"Create {default_path} with:\n"
+            "  AZURE_OPENAI_API_KEY=<value>\n"
+            "  AZURE_OPENAI_ENDPOINT=<value>\n"
+            "Or ensure the kairix wrapper (not the raw Python binary) is on PATH.\n"
+            "Verify: head -1 $(which kairix)  — should show #!/usr/bin/env bash"
+        ),
     )
 
 

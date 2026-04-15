@@ -23,11 +23,17 @@ from kairix.benchmark.runner import (
     _exact_match,
     _fuzzy_match,
     _hit_at_k,
+    _hit_at_k_by_title,
     _ideal_dcg,
     _llm_judge,
     _ndcg_score,
+    _ndcg_score_by_title,
+    _normalise_title,
     _reciprocal_rank,
+    _reciprocal_rank_by_title,
     _score_tier,
+    _stem_from_path,
+    _title_in_retrieved,
     format_interpretation,
 )
 
@@ -401,3 +407,186 @@ def test_reciprocal_rank_second_position() -> None:
 def test_reciprocal_rank_not_found() -> None:
     gold = [{"path": "x.md", "relevance": 1}]
     assert _reciprocal_rank(["a.md", "b.md"], gold, k=10) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Title-based helpers — _normalise_title, _stem_from_path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_normalise_title_spaces_to_hyphens() -> None:
+    assert _normalise_title("Jordan Blake") == "jordan-blake"
+
+
+@pytest.mark.unit
+def test_normalise_title_underscores_to_hyphens() -> None:
+    assert _normalise_title("some_slug") == "some-slug"
+
+
+@pytest.mark.unit
+def test_normalise_title_idempotent() -> None:
+    assert _normalise_title("already-normalised") == "already-normalised"
+
+
+@pytest.mark.unit
+def test_normalise_title_mixed_separators() -> None:
+    assert _normalise_title("foo  bar--baz") == "foo-bar-baz"
+
+
+@pytest.mark.unit
+def test_normalise_title_strips_leading_trailing_hyphens() -> None:
+    assert _normalise_title("-leading-trailing-") == "leading-trailing"
+
+
+@pytest.mark.unit
+def test_stem_from_path_simple_filename() -> None:
+    assert _stem_from_path("patterns.md") == "patterns"
+
+
+@pytest.mark.unit
+def test_stem_from_path_deep_vault_path() -> None:
+    assert _stem_from_path("02-Areas/00-Clients/Acme-Corp/Acme-Corp.md") == "acme-corp"
+
+
+@pytest.mark.unit
+def test_stem_from_path_entity_path() -> None:
+    assert _stem_from_path("entities/person/jordan-blake.md") == "jordan-blake"
+
+
+@pytest.mark.unit
+def test_stem_from_path_dated_log() -> None:
+    assert _stem_from_path("agent-memory/builder/2026-04-10.md") == "2026-04-10"
+
+
+# ---------------------------------------------------------------------------
+# _title_in_retrieved
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_title_in_retrieved_exact_match() -> None:
+    paths = ["02-Areas/00-Clients/Acme-Corp/Acme-Corp.md", "other/doc.md"]
+    assert _title_in_retrieved("Acme Corp", paths, top_k=5) is True
+
+
+@pytest.mark.unit
+def test_title_in_retrieved_entity_slug_match() -> None:
+    paths = ["entities/person/jordan-blake.md"]
+    assert _title_in_retrieved("jordan-blake", paths, top_k=5) is True
+
+
+@pytest.mark.unit
+def test_title_in_retrieved_no_match() -> None:
+    paths = ["some/unrelated/doc.md"]
+    assert _title_in_retrieved("jordan-blake", paths, top_k=5) is False
+
+
+@pytest.mark.unit
+def test_title_in_retrieved_respects_top_k() -> None:
+    # Gold title is at position 3, but top_k=2 — must not match
+    paths = ["a.md", "b.md", "entities/person/jordan-blake.md"]
+    assert _title_in_retrieved("jordan-blake", paths, top_k=2) is False
+
+
+@pytest.mark.unit
+def test_title_in_retrieved_case_insensitive() -> None:
+    paths = ["Vault/JORDAN-BLAKE.md"]
+    assert _title_in_retrieved("Jordan Blake", paths, top_k=5) is True
+
+
+# ---------------------------------------------------------------------------
+# _ndcg_score_by_title
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_ndcg_by_title_perfect_retrieval() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 2}]
+    retrieved = ["entities/person/jordan-blake.md", "other/doc.md"]
+    assert _ndcg_score_by_title(retrieved, gold, k=10) == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_ndcg_by_title_partial_retrieval() -> None:
+    gold = [
+        {"title": "jordan-blake", "relevance": 2},
+        {"title": "team-overview", "relevance": 1},
+    ]
+    # Only second gold retrieved; first (highest relevance) not found → NDCG < 1
+    retrieved = ["shared/team-overview.md", "other/doc.md"]
+    score = _ndcg_score_by_title(retrieved, gold, k=10)
+    assert 0.0 < score < 1.0
+
+
+@pytest.mark.unit
+def test_ndcg_by_title_miss() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 2}]
+    retrieved = ["some/unrelated/doc.md"]
+    assert _ndcg_score_by_title(retrieved, gold, k=10) == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+def test_ndcg_by_title_empty_gold() -> None:
+    assert _ndcg_score_by_title(["doc.md"], [], k=10) == pytest.approx(0.0)
+
+
+@pytest.mark.unit
+def test_ndcg_by_title_file_moved_still_matches() -> None:
+    """Score is unaffected by vault reorganisation — title is the stable identity."""
+    gold = [{"title": "patterns", "relevance": 2}]
+    # Same note, different folder
+    original_path = ["04-Agent-Knowledge/builder/patterns.md"]
+    moved_path = ["Archive/old-knowledge/patterns.md"]
+    assert _ndcg_score_by_title(original_path, gold, k=10) == pytest.approx(
+        _ndcg_score_by_title(moved_path, gold, k=10)
+    )
+
+
+# ---------------------------------------------------------------------------
+# _hit_at_k_by_title
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_hit_at_k_by_title_true() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 1}]
+    assert _hit_at_k_by_title(["entities/person/jordan-blake.md"], gold, k=5) is True
+
+
+@pytest.mark.unit
+def test_hit_at_k_by_title_false_beyond_k() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 1}]
+    paths = ["a.md", "b.md", "entities/person/jordan-blake.md"]
+    assert _hit_at_k_by_title(paths, gold, k=2) is False
+
+
+@pytest.mark.unit
+def test_hit_at_k_by_title_excludes_zero_relevance() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 0}]
+    assert _hit_at_k_by_title(["entities/person/jordan-blake.md"], gold, k=5) is False
+
+
+# ---------------------------------------------------------------------------
+# _reciprocal_rank_by_title
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_by_title_first_position() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 1}]
+    paths = ["entities/person/jordan-blake.md", "other.md"]
+    assert _reciprocal_rank_by_title(paths, gold, k=10) == pytest.approx(1.0)
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_by_title_second_position() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 1}]
+    paths = ["other.md", "entities/person/jordan-blake.md"]
+    assert _reciprocal_rank_by_title(paths, gold, k=10) == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_reciprocal_rank_by_title_not_found() -> None:
+    gold = [{"title": "jordan-blake", "relevance": 1}]
+    assert _reciprocal_rank_by_title(["unrelated.md"], gold, k=10) == pytest.approx(0.0)
