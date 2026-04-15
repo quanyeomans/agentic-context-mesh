@@ -593,3 +593,135 @@ def test_run_benchmark_saves_json_to_output_dir(tmp_path: Path) -> None:
     assert "diagnostics" in saved
     assert "cases" in saved
     assert saved["meta"]["system"] == "bm25"
+
+
+# ---------------------------------------------------------------------------
+# gold_titles — suite loading and validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_load_suite_parses_gold_titles(tmp_path: Path) -> None:
+    """gold_titles field is parsed into BenchmarkCase.gold_titles list."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          name: test
+          version: "1.0"
+        cases:
+          - id: E01
+            category: entity
+            query: "who is Jordan Blake"
+            score_method: ndcg
+            gold_titles:
+              - title: jordan-blake
+                relevance: 2
+              - title: team-overview
+                relevance: 1
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+    assert len(suite.cases) == 1
+    case = suite.cases[0]
+    assert case.gold_titles is not None
+    assert len(case.gold_titles) == 2
+    assert case.gold_titles[0]["title"] == "jordan-blake"
+    assert case.gold_titles[0]["relevance"] == 2
+
+
+@pytest.mark.unit
+def test_gold_title_field_parsed(tmp_path: Path) -> None:
+    """gold_title (single) is parsed for exact/fuzzy cases."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          name: test
+          version: "1.0"
+        cases:
+          - id: R01
+            category: recall
+            query: "engineering patterns"
+            score_method: exact
+            gold_title: patterns
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+    assert suite.cases[0].gold_title == "patterns"
+    # gold_path derived from gold_title for backwards compat
+    assert suite.cases[0].gold_path == "patterns"
+
+
+@pytest.mark.unit
+def test_gold_title_validated_requires_title_and_relevance(tmp_path: Path) -> None:
+    """A gold_titles entry missing 'title' raises ValueError."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          name: test
+          version: "1.0"
+        cases:
+          - id: E01
+            category: entity
+            query: "who is Jordan Blake"
+            score_method: ndcg
+            gold_titles:
+              - relevance: 2
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    with pytest.raises(ValueError, match="title"):
+        load_suite(str(p))
+
+
+@pytest.mark.unit
+def test_duplicate_gold_titles_detected(tmp_path: Path, in_memory_db: sqlite3.Connection) -> None:
+    """Same gold_title used in two recall cases → validation error."""
+    suite = BenchmarkSuite(
+        meta={"name": "test", "version": "1.0"},
+        cases=[
+            BenchmarkCase(
+                id="R01", category="recall", query="q1",
+                gold_path="patterns", score_method="exact",
+                gold_title="patterns",
+            ),
+            BenchmarkCase(
+                id="R02", category="recall", query="q2",
+                gold_path="patterns", score_method="exact",
+                gold_title="patterns",
+            ),
+        ],
+    )
+    errors = validate_suite(suite, in_memory_db, strict=True)
+    assert any("Duplicate gold_title" in e for e in errors)
+
+
+@pytest.mark.unit
+def test_gold_titles_highest_relevance_derives_gold_path(tmp_path: Path) -> None:
+    """gold_path auto-derived from the highest-relevance gold_titles entry."""
+    content = textwrap.dedent(
+        """\
+        meta:
+          name: test
+          version: "1.0"
+        cases:
+          - id: M01
+            category: multi_hop
+            query: "projects and their status"
+            score_method: ndcg
+            gold_titles:
+              - title: status
+                relevance: 1
+              - title: projects
+                relevance: 2
+        """
+    )
+    p = tmp_path / "suite.yaml"
+    p.write_text(content)
+    suite = load_suite(str(p))
+    # gold_path derived from the relevance-2 entry
+    assert suite.cases[0].gold_path == "projects"

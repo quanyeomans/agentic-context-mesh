@@ -33,33 +33,51 @@ The benchmark categories map directly to the use cases Kairix is built for:
 
 **Procedural knowledge** — agents querying runbooks, standards, and how-to guides get step-relevant content ranked above generic background material. The 0.609 procedural score reflects path-weighted re-ranking working as intended.
 
-**Keyword accuracy** — error codes, version strings, file paths, and proper nouns return precise results. The v0.8.1 hybrid fix (all intents run BM25 + vector in parallel) improved keyword NDCG from 0.48 → 0.62.
+**Keyword accuracy** — error codes, version strings, file paths, and proper nouns return precise results. The hybrid search design (BM25 + vector in parallel for all intents) delivers keyword NDCG of 0.616.
 
 ---
 
 ## Methodology
 
-### Suite
+### Document identity
 
-Cases are defined in `suites/example.yaml`. Each specifies a query, expected gold documents, and a graded relevance score:
+Relevance judgments follow the TREC qrels convention: gold documents are identified by their stable note title (the filename stem), not by filesystem path. This is the same stable identifier that Obsidian wikilinks use — `[[Acme Corp]]` links to `Acme Corp.md` regardless of which folder the file sits in.
+
+A retrieved document is considered a match when its filename stem normalises to the gold title. The normalisation is deterministic: lowercase, with spaces, underscores, and hyphens consolidated into a single hyphen. This means:
+
+- `02-Areas/00-Clients/Acme-Corp/Acme-Corp.md` matches gold title `Acme Corp`
+- `Archive/acme-corp.md` matches the same gold title
+- Moving or reorganising a note does not affect its benchmark score
+
+This design means the benchmark measures retrieval quality rather than path accuracy, and suite files remain valid as the vault evolves.
+
+### Suite format
+
+Cases are defined in `suites/example.yaml`. Each specifies a query, the expected relevant documents by title, and a graded relevance score:
 
 ```yaml
 - id: E-01
   category: entity
   query: "Jordan Blake role and responsibilities"
-  gold_paths:
-    - path: entities/person/jordan-blake.md
-      relevance: 2
-    - path: shared/team-overview.md
-      relevance: 1
   score_method: ndcg
+  gold_titles:
+    - title: jordan-blake
+      relevance: 2
+    - title: team-overview
+      relevance: 1
 ```
 
-Gold paths use collection-relative format — collection prefixes are stripped so paths match `kairix search` output.
+Relevance scale: **2** = directly answers the query; **1** = partially relevant; **0** = not relevant (implicit for any document not listed).
 
-### Scoring
+Suites that pre-date the title-based format use `gold_paths` (filesystem paths) and continue to work — path matching is retained as a fallback so existing suites do not need to be rewritten.
 
-NDCG@10 with graded relevance is the primary metric. It rewards retrieving highly relevant documents at top positions and penalises ranking partially relevant documents above highly relevant ones.
+### Metrics
+
+**NDCG@10** (primary) rewards retrieving highly relevant documents at top positions and penalises ranking partially relevant documents above highly relevant ones. A perfect score of 1.0 means every relevant document appeared at the highest possible position, in relevance order.
+
+**Hit@5** — the fraction of queries where at least one relevant document (relevance ≥ 1) appears in the top 5 results. Measures broad coverage independent of ranking order.
+
+**MRR@10** (Mean Reciprocal Rank) — the average of 1/rank of the first relevant document across queries. Measures how quickly the system surfaces any relevant result.
 
 | NDCG@10 | Interpretation |
 |---|---|

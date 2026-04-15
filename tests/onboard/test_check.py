@@ -14,6 +14,7 @@ import pytest
 
 from kairix.onboard.check import (
     CheckResult,
+    _secrets_file_keys_present,
     check_agent_knowledge_populated,
     check_kairix_on_path,
     check_neo4j_reachable,
@@ -125,6 +126,97 @@ def test_secrets_loaded_both_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not result.ok
     assert "AZURE_OPENAI_API_KEY" in result.detail
     assert "AZURE_OPENAI_ENDPOINT" in result.detail
+
+
+# ---------------------------------------------------------------------------
+# _secrets_file_keys_present helper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_secrets_file_keys_present_finds_keys(tmp_path: Path) -> None:
+    secrets = tmp_path / "kairix.env"
+    secrets.write_text("AZURE_OPENAI_API_KEY=sk-test\nAZURE_OPENAI_ENDPOINT=https://example.com/\n")
+    found = _secrets_file_keys_present(secrets, ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"))
+    assert found == {"AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"}
+
+
+@pytest.mark.unit
+def test_secrets_file_keys_present_skips_comments(tmp_path: Path) -> None:
+    secrets = tmp_path / "kairix.env"
+    secrets.write_text("# AZURE_OPENAI_API_KEY=commented-out\nAZURE_OPENAI_ENDPOINT=https://example.com/\n")
+    found = _secrets_file_keys_present(secrets, ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"))
+    assert found == {"AZURE_OPENAI_ENDPOINT"}
+    assert "AZURE_OPENAI_API_KEY" not in found
+
+
+@pytest.mark.unit
+def test_secrets_file_keys_present_missing_file() -> None:
+    found = _secrets_file_keys_present(Path("/nonexistent/path/kairix.env"), ("AZURE_OPENAI_API_KEY",))
+    assert found == set()
+
+
+# ---------------------------------------------------------------------------
+# check_secrets_loaded — two-tier logic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_secrets_loaded_file_has_both_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Env vars absent but secrets file contains both keys → ok=True."""
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    secrets = tmp_path / "kairix.env"
+    secrets.write_text("AZURE_OPENAI_API_KEY=sk-test\nAZURE_OPENAI_ENDPOINT=https://example.com/\n")
+    monkeypatch.setenv("KAIRIX_SECRETS_FILE", str(secrets))
+    result = check_secrets_loaded()
+    assert result.ok
+    assert str(secrets) in result.detail
+
+
+@pytest.mark.unit
+def test_secrets_loaded_file_missing_endpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Secrets file present but missing AZURE_OPENAI_ENDPOINT → ok=False with specific detail."""
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    secrets = tmp_path / "kairix.env"
+    secrets.write_text("AZURE_OPENAI_API_KEY=sk-test\n")
+    monkeypatch.setenv("KAIRIX_SECRETS_FILE", str(secrets))
+    result = check_secrets_loaded()
+    assert not result.ok
+    assert "AZURE_OPENAI_ENDPOINT" in result.detail
+    assert result.fix is not None
+
+
+@pytest.mark.unit
+def test_secrets_loaded_no_file_no_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No env vars and no accessible secrets file → ok=False with file creation guidance."""
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.setenv("KAIRIX_SECRETS_FILE", "/nonexistent/kairix.env")
+    result = check_secrets_loaded()
+    assert not result.ok
+    assert result.fix is not None
+    assert "AZURE_OPENAI_API_KEY" in result.fix
+
+
+@pytest.mark.unit
+def test_secrets_loaded_kairix_secrets_file_env_honoured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """KAIRIX_SECRETS_FILE override is probed before default paths."""
+    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    custom = tmp_path / "custom-secrets.env"
+    custom.write_text("AZURE_OPENAI_API_KEY=sk-custom\nAZURE_OPENAI_ENDPOINT=https://custom.example.com/\n")
+    monkeypatch.setenv("KAIRIX_SECRETS_FILE", str(custom))
+    result = check_secrets_loaded()
+    assert result.ok
+    assert str(custom) in result.detail
 
 
 # ---------------------------------------------------------------------------
