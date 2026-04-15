@@ -303,10 +303,13 @@ def check_neo4j_reachable() -> CheckResult:
                 ok=False,
                 detail="Neo4j client unavailable (KAIRIX_NEO4J_URI not set or connection refused)",
                 fix=(
-                    "Set KAIRIX_NEO4J_URI in /opt/kairix/service.env:\n"
+                    "Install Neo4j:\n"
+                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install-neo4j.sh)\n"
+                    "Or run with Docker:\n"
+                    "  docker run -d --name neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/changeme neo4j:5-community\n"
+                    "Then set KAIRIX_NEO4J_URI in /opt/kairix/service.env:\n"
                     "  KAIRIX_NEO4J_URI=bolt://localhost:7687\n"
-                    "Ensure Neo4j is running: systemctl status neo4j\n"
-                    "Without Neo4j: entity boost and multi-hop queries are degraded."
+                    "Neo4j is optional — entity boost and multi-hop queries are degraded without it."
                 ),
             )
 

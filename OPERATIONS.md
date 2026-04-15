@@ -122,9 +122,42 @@ qmd status
 export SQLITE_VEC_PATH="/path/to/vec0.so"
 ```
 
-### 4. Infrastructure Directories
+### 4. Neo4j (optional — entity graph)
 
-Create the required directories on the VM before first run:
+Neo4j Community Edition powers entity boost, alias resolution, and multi-hop query planning. All other kairix features work without it.
+
+Neo4j Community Edition is licensed under **GPL v3**. Kairix communicates via the Bolt protocol using the Apache 2.0 Python driver — no GPL3 code is bundled with kairix.
+
+**Install:**
+
+```bash
+# Install script (Docker default; --apt option also available)
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install-neo4j.sh)
+
+# Or quick Docker start (no install script):
+docker run -d --name neo4j -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/changeme \
+  neo4j:5-community
+```
+
+After installing, set in `service.env` or `/opt/kairix/service.env`:
+```
+KAIRIX_NEO4J_URI=bolt://localhost:7687
+KAIRIX_NEO4J_USER=neo4j
+KAIRIX_NEO4J_PASSWORD=<your-password>
+```
+
+For managed deployments where the password is stored in Azure Key Vault as `kairix-neo4j-password`, `kairix-fetch-secrets.service` populates `KAIRIX_NEO4J_PASSWORD` in `/run/secrets/kairix.env` automatically.
+
+Verify Neo4j is reachable:
+```bash
+kairix onboard check
+# → neo4j_reachable: ✓  Neo4j reachable — N nodes in graph
+```
+
+### 5. Infrastructure Directories
+
+Create the required directories before first run:
 
 ```bash
 sudo mkdir -p /data/kairix/briefing
@@ -157,9 +190,9 @@ This creates `/opt/kairix/.venv/`, installs kairix into it, installs the wrapper
 ```bash
 # Create venv and install (core)
 python3 -m venv /opt/kairix/.venv
-/opt/kairix/.venv/bin/pip install git+https://github.com/quanyeomans/agentic-context-mesh
+/opt/kairix/.venv/bin/pip install kairix
 
-# With Neo4j entity graph support (recommended)
+# With Neo4j entity graph support (recommended for full feature set)
 /opt/kairix/.venv/bin/pip install "kairix[neo4j]"
 
 # With MCP server for agent integration
@@ -357,30 +390,44 @@ See [Cron Scheduling](#cron-scheduling) below.
 
 Two recurring jobs are required for a production deployment.
 
+### Secrets in cron jobs
+
+Cron jobs must source credentials from the tmpfs secrets file populated by `kairix-fetch-secrets.service` — do not fetch secrets inline in cron entries.
+
+```bash
+# Correct pattern — source the secrets file written by kairix-fetch-secrets.service
+source "${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
+kairix embed
+
+# Wrong — fetches secrets inline, requires az CLI auth per-run, leaks into cron logs
+export AZURE_OPENAI_API_KEY=$(az keyvault secret show ...)
+```
+
+For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](SECURITY.md) for setup detail.
+
 ### Hourly embed (new vault files)
 
 Runs kairix embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed.
 
 ```cron
-15 * * * * source /opt/kairix/service.env \
-  && export AZURE_OPENAI_ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint --query value -o tsv 2>/dev/null) \
-  && export AZURE_OPENAI_API_KEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key --query value -o tsv 2>/dev/null) \
-  && /opt/kairix/.venv/bin/kairix embed >> /data/kairix/logs/embed.log 2>&1
+15 * * * * /opt/kairix/cron/kairix-embed.sh >> /data/kairix/logs/embed.log 2>&1
 ```
+
+`/opt/kairix/cron/kairix-embed.sh` sources `/run/secrets/kairix.env` then runs `kairix embed`. This script is deployed by `apply-kairix-config.sh` on managed deployments.
 
 ### Nightly entity + relationship seed (03:00 AEST / 17:00 UTC)
 
 Runs vault crawler and relationship seeding. Uses GPT-4o-mini for relationship classification.
 
 ```cron
-0 17 * * * /opt/kairix/cron-scripts/entity-relation-seed.sh >> /data/kairix/logs/entity-relation-seed.log 2>&1
+0 17 * * * /opt/kairix/cron/entity-relation-seed.sh >> /data/kairix/logs/entity-relation-seed.log 2>&1
 ```
 
-The shell script (`entity-relation-seed.sh`) handles Key Vault credential fetching and runs:
+The shell script (`entity-relation-seed.sh`) sources `/run/secrets/kairix.env` and runs:
 1. `kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT`
-2. `python scripts/seed-entity-relations.py`
+2. `python /opt/kairix/scripts/seed-entity-relations.py`
 
-Add both crons with `crontab -e` as the `<service-user>` service user.
+Add both crons with `crontab -e` as the service user.
 
 ### Verifying cron jobs are registered
 
@@ -628,10 +675,10 @@ KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 
 ```bash
 # Upgrade to latest
-/opt/kairix/.venv/bin/pip install --upgrade git+https://github.com/quanyeomans/agentic-context-mesh
+/opt/kairix/.venv/bin/pip install --upgrade kairix
 
-# Or pin to a specific version tag
-/opt/kairix/.venv/bin/pip install git+https://github.com/quanyeomans/agentic-context-mesh@v0.9.0
+# Or pin to a specific version
+/opt/kairix/.venv/bin/pip install "kairix==0.9.1"
 
 # Verify
 kairix onboard check
