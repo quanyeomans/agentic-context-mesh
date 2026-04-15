@@ -378,6 +378,11 @@ def format_interpretation(result: BenchmarkResult) -> str:
     lines.append("BENCHMARK RESULTS")
     lines.append("=" * 60)
     lines.append(f"Weighted total: {wt:.3f}  [{tier}]")
+    ndcg = result.summary.get("ndcg_at_10")
+    hit5 = result.summary.get("hit_rate_at_5")
+    mrr = result.summary.get("mrr_at_10")
+    if ndcg is not None:
+        lines.append(f"NDCG@10:       {ndcg:.3f}  (Hit@5: {hit5:.3f}  MRR@10: {mrr:.3f})")
     lines.append("")
     lines.append("Category breakdown:")
     cat_scores = result.summary["category_scores"]

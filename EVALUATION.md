@@ -94,6 +94,23 @@ Typical RAG systems on heterogeneous personal knowledge score 0.55–0.70 on hel
 kairix benchmark run --suite suites/example.yaml
 ```
 
+The CLI output reports both the **weighted total** (category-weighted average used for phase gates) and **NDCG@10** (the standard IR metric, computed per-case and averaged across all `ndcg`-scored cases):
+
+```
+============================================================
+BENCHMARK RESULTS
+============================================================
+Weighted total: 0.587  [Solid]
+NDCG@10:       0.587  (Hit@5: 0.720  MRR@10: 0.650)
+
+Category breakdown:
+  temporal     0.513  (weight 10%, n=8)  ...
+  entity       0.697  (weight 20%, n=12) ...
+  ...
+```
+
+NDCG@10 is the number to report and track across releases. The weighted total drives phase gate pass/fail.
+
 The public example suite (`suites/example.yaml`) contains anonymised, domain-neutral cases. The real-world scores above were measured against a private vault-specific suite that cannot be published.
 
 ---

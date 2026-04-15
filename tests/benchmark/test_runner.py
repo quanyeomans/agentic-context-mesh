@@ -590,3 +590,49 @@ def test_reciprocal_rank_by_title_second_position() -> None:
 def test_reciprocal_rank_by_title_not_found() -> None:
     gold = [{"title": "jordan-blake", "relevance": 1}]
     assert _reciprocal_rank_by_title(["unrelated.md"], gold, k=10) == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# format_interpretation — NDCG display
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_format_interpretation_shows_ndcg_when_present() -> None:
+    result = BenchmarkResult(
+        meta={"suite_name": "test-suite", "system": "hybrid", "date": "2026-04-15", "n_cases": 5},
+        summary={
+            "weighted_total": 0.55,
+            "category_scores": {"recall": 0.60, "entity": 0.70},
+            "gates": {"phase1": False, "phase2": False, "phase3": False},
+            "ndcg_at_10": 0.587,
+            "hit_rate_at_5": 0.720,
+            "mrr_at_10": 0.650,
+        },
+        diagnostics={},
+        cases=[],
+    )
+    output = format_interpretation(result)
+    assert "NDCG@10" in output
+    assert "0.587" in output
+    assert "Hit@5" in output
+    assert "MRR@10" in output
+
+
+@pytest.mark.unit
+def test_format_interpretation_omits_ndcg_section_when_absent() -> None:
+    result = BenchmarkResult(
+        meta={"suite_name": "test-suite", "system": "hybrid", "date": "2026-04-15", "n_cases": 3},
+        summary={
+            "weighted_total": 0.70,
+            "category_scores": {"recall": 0.75},
+            "gates": {"phase1": True, "phase2": False, "phase3": False},
+            "ndcg_at_10": None,
+            "hit_rate_at_5": None,
+            "mrr_at_10": None,
+        },
+        diagnostics={},
+        cases=[],
+    )
+    output = format_interpretation(result)
+    assert "NDCG@10" not in output

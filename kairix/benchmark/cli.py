@@ -174,6 +174,12 @@ def cmd_compare(args: argparse.Namespace) -> int:
     delta = b_sum.get("weighted_total", 0) - a_sum.get("weighted_total", 0)
     direction = "▲" if delta > 0 else ("▼" if delta < 0 else "=")
     print(f"\n  Delta: {direction} {abs(delta):.3f}")
+    a_ndcg = a_sum.get("ndcg_at_10")
+    b_ndcg = b_sum.get("ndcg_at_10")
+    if a_ndcg is not None and b_ndcg is not None:
+        ndcg_delta = b_ndcg - a_ndcg
+        ndcg_dir = "▲" if ndcg_delta > 0 else ("▼" if ndcg_delta < 0 else "=")
+        print(f"  NDCG@10 delta: {ndcg_dir} {abs(ndcg_delta):.3f}  (A={a_ndcg:.3f}  B={b_ndcg:.3f})")
     print("")
     print(f"  {'Category':12}  {'A':>6}  {'B':>6}  {'Δ':>6}")
     print(f"  {'-' * 12}  {'-' * 6}  {'-' * 6}  {'-' * 6}")
