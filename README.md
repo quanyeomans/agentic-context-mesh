@@ -125,7 +125,7 @@ See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md)
 
 **Suite:** 95 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~2,800 documents (11,316 vectors at 1536-dim).
 
-### Current results (v0.9.0)
+### Current results (v0.9.1)
 
 | Category | NDCG@10 | Notes |
 |---|---|---|
@@ -157,21 +157,20 @@ See [OPERATIONS.md](OPERATIONS.md) for full infrastructure setup, cron configura
 ## Install
 
 ```bash
-git clone https://github.com/quanyeomans/agentic-context-mesh /opt/kairix
-cd /opt/kairix
-python3 -m venv .venv
-.venv/bin/pip install -e .
+# Core install
+pip install kairix
 
-# Optional: MCP server support
-.venv/bin/pip install -e '.[agents]'
+# With Neo4j entity graph support (recommended for full feature set)
+pip install "kairix[neo4j]"
+
+# With MCP server for agent integration
+pip install "kairix[agents]"
 ```
 
-Copy and fill in your environment configuration:
+For VM deployment, use the deploy script to install the wrapper and PATH setup:
 
 ```bash
-cp env.example service.env
-# edit service.env with your Azure endpoint, key vault name, vault paths
-source service.env
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)
 ```
 
 Then follow the [OPERATIONS.md first-run sequence](OPERATIONS.md#first-run-sequence).
@@ -313,4 +312,4 @@ Vault content is sent to Azure OpenAI for embedding and synthesis only. No data 
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).
