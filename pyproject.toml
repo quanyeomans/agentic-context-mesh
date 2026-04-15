@@ -20,6 +20,10 @@ agents = [
     # MCP server (Model Context Protocol — exposes kairix tools to agents)
     "mcp>=1.0",
 ]
+neo4j = [
+    # Neo4j Python driver — required for entity graph, multi-hop queries, and curator health
+    "neo4j>=5.0,<6.0",
+]
 dev = [
     # Test runner
     "pytest>=8.0",

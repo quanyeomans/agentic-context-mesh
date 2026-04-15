@@ -155,9 +155,15 @@ This creates `/opt/kairix/.venv/`, installs kairix into it, installs the wrapper
 **Manual install (alternative):**
 
 ```bash
-# Create venv and install
+# Create venv and install (core)
 python3 -m venv /opt/kairix/.venv
 /opt/kairix/.venv/bin/pip install git+https://github.com/quanyeomans/agentic-context-mesh
+
+# With Neo4j entity graph support (recommended)
+/opt/kairix/.venv/bin/pip install "kairix[neo4j]"
+
+# With MCP server for agent integration
+/opt/kairix/.venv/bin/pip install "kairix[agents]"
 
 # Verify
 /opt/kairix/.venv/bin/kairix --help
