@@ -17,7 +17,7 @@ import yaml
 # ---------------------------------------------------------------------------
 
 VALID_CATEGORIES = frozenset(
-    {"recall", "temporal", "entity", "conceptual", "multi_hop", "procedural", "classification"}
+    {"recall", "temporal", "entity", "conceptual", "multi_hop", "procedural", "classification", "semantic", "keyword"}
 )
 VALID_SCORE_METHODS = frozenset({"exact", "fuzzy", "llm", "classification", "ndcg"})
 
