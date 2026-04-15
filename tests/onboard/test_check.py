@@ -162,9 +162,7 @@ def test_secrets_file_keys_present_missing_file() -> None:
 
 
 @pytest.mark.unit
-def test_secrets_loaded_file_has_both_keys(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_secrets_loaded_file_has_both_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Env vars absent but secrets file contains both keys → ok=True."""
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
@@ -177,9 +175,7 @@ def test_secrets_loaded_file_has_both_keys(
 
 
 @pytest.mark.unit
-def test_secrets_loaded_file_missing_endpoint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_secrets_loaded_file_missing_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Secrets file present but missing AZURE_OPENAI_ENDPOINT → ok=False with specific detail."""
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
@@ -205,9 +201,7 @@ def test_secrets_loaded_no_file_no_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_secrets_loaded_kairix_secrets_file_env_honoured(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_secrets_loaded_kairix_secrets_file_env_honoured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """KAIRIX_SECRETS_FILE override is probed before default paths."""
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)

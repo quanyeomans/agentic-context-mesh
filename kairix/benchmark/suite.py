@@ -132,16 +132,12 @@ def load_suite(path: str) -> BenchmarkSuite:
                 elif "relevance" not in gt:
                     errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'relevance'")
                 elif gt["relevance"] not in (0, 1, 2):
-                    errors.append(
-                        f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2"
-                    )
+                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2")
 
         # For recall cases, require gold_path, gold_paths, gold_title, or gold_titles
         if category == "recall" and not gold_path and not gold_paths and not gold_title and not gold_titles:
             if not errors:
-                errors.append(
-                    f"Case [{i}] ({case_id}): recall cases must have gold_path, gold_title, or a gold list"
-                )
+                errors.append(f"Case [{i}] ({case_id}): recall cases must have gold_path, gold_title, or a gold list")
 
         # Derive gold_path for backwards compat (used in case output JSON and path-based validate_suite)
         # Priority: explicit gold_path > highest-relevance gold_paths entry > highest-relevance gold_titles entry

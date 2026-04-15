@@ -555,8 +555,8 @@ def run_benchmark(
                 }
             else:
                 # Path-based fallback: backwards compat for suites without gold_titles
-                effective_gold = (
-                    case.gold_paths or ([{"path": case.gold_path, "relevance": 2}] if case.gold_path else [])
+                effective_gold = case.gold_paths or (
+                    [{"path": case.gold_path, "relevance": 2}] if case.gold_path else []
                 )
                 score = _ndcg_score(paths, effective_gold, k=10)
                 ndcg_detail = {

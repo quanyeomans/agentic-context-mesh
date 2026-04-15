@@ -685,13 +685,19 @@ def test_duplicate_gold_titles_detected(tmp_path: Path, in_memory_db: sqlite3.Co
         meta={"name": "test", "version": "1.0"},
         cases=[
             BenchmarkCase(
-                id="R01", category="recall", query="q1",
-                gold_path="patterns", score_method="exact",
+                id="R01",
+                category="recall",
+                query="q1",
+                gold_path="patterns",
+                score_method="exact",
                 gold_title="patterns",
             ),
             BenchmarkCase(
-                id="R02", category="recall", query="q2",
-                gold_path="patterns", score_method="exact",
+                id="R02",
+                category="recall",
+                query="q2",
+                gold_path="patterns",
+                score_method="exact",
                 gold_title="patterns",
             ),
         ],
