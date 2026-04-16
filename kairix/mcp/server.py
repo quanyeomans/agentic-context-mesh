@@ -81,7 +81,7 @@ def tool_entity(
     action: str = "lookup",
 ) -> dict[str, Any]:
     """
-    Entity lookup from Neo4j (primary) or entities.db (fallback).
+    Entity lookup from Neo4j.
 
     Args:
         name:   Entity name or id to look up.
@@ -338,7 +338,7 @@ def build_server() -> Any:
 
     @server.tool()
     def entity(name: str, action: str = "lookup") -> dict[str, Any]:
-        """Entity lookup from Neo4j / entities.db."""
+        """Entity lookup from Neo4j."""
         return tool_entity(name=name, action=action)
 
     @server.tool()

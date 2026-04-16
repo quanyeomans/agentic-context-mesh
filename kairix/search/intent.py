@@ -1,5 +1,5 @@
 """
-Query intent classifier for the Mnemosyne hybrid search pipeline.
+Query intent classifier for the kairix hybrid search pipeline.
 
 Classifies a query string into one of five intent types. Pure function — no I/O,
 no external dependencies. Rule-based with defined priority order.

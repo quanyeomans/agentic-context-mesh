@@ -1,5 +1,5 @@
 """
-Wikilink injection CLI for Mnemosyne.
+Wikilink injection CLI for kairix.
 
 Usage:
   kairix wikilinks inject --changed            inject files modified since last run
@@ -73,7 +73,7 @@ def _inject_cmd(argv: list[str]) -> None:
 
     entities = get_entities()
     if not entities:
-        print("⚠️  No entities loaded — check entities.db and bootstrap index.", file=sys.stderr)
+        print("⚠️  No entities loaded — check Neo4j connection and bootstrap index.", file=sys.stderr)
         sys.exit(1)
 
     print(f"Loaded {len(entities)} entities.")
@@ -216,7 +216,7 @@ def _status_cmd(argv: list[str]) -> None:
     last_run = _read_last_run()
     log_entries = _read_log_entries()
 
-    print("🔗 Mnemosyne Wikilinks Status")
+    print("🔗 kairix Wikilinks Status")
     print("─" * 40)
     print(f"Entities loaded:    {len(entities)}")
     print(f"Last run:           {_fmt_ts(last_run) if last_run else 'never'}")

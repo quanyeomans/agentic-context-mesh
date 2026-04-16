@@ -23,7 +23,7 @@ from kairix.search.hybrid import SearchResult, search
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="kairix search",
-        description="Hybrid BM25 + vector search over the Mnemosyne vault.",
+        description="Hybrid BM25 + vector search over the kairix vault.",
     )
     parser.add_argument("query", help="Search query string")
     parser.add_argument("--agent", default=None, help="Agent name for collection scoping")

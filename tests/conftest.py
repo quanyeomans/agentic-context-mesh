@@ -1,0 +1,71 @@
+"""
+Shared pytest fixtures for the kairix test suite.
+
+Fixture hierarchy:
+  no_azure_calls (autouse, all non-e2e tests) — blocks accidental Azure API calls
+  fake_llm_backend — FakeLLM satisfying LLMBackend Protocol
+  neo4j_client — FakeNeo4jClient satisfying Neo4jClient interface
+  search_db / seeded_search_db — sqlite-vec search index fixtures
+
+BDD step modules must be declared as pytest_plugins at the root conftest level
+(pytest restriction: pytest_plugins in sub-conftest files is not supported).
+"""
+import pytest
+
+# BDD step definition modules — registered here so pytest-bdd can discover them
+# across the entire test run.
+pytest_plugins = [
+    "tests.bdd.steps.search_steps",
+    "tests.bdd.steps.curator_steps",
+]
+
+from tests.fixtures.embeddings import fake_embedding, fake_embedding_bytes
+from tests.fixtures.neo4j_mock import FakeNeo4jClient
+
+
+@pytest.fixture(autouse=True)
+def no_azure_calls(monkeypatch, request):
+    """Block accidental Azure API calls in all tests except those marked e2e.
+
+    Sets KAIRIX_EMBED_BACKEND=fake so any code that reads this env var
+    will use the fake backend. Tests marked @pytest.mark.e2e must set
+    KAIRIX_E2E=1 in the environment to confirm intent.
+    """
+    if "e2e" not in request.keywords:
+        monkeypatch.setenv("KAIRIX_EMBED_BACKEND", "fake")
+        monkeypatch.delenv("KAIRIX_AZURE_API_KEY", raising=False)
+        monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+
+
+@pytest.fixture
+def neo4j_client():
+    """FakeNeo4jClient with default test entities. No real Neo4j connection."""
+    return FakeNeo4jClient()
+
+
+@pytest.fixture
+def neo4j_client_empty():
+    """FakeNeo4jClient with no entities."""
+    return FakeNeo4jClient(entities=[])
+
+
+@pytest.fixture
+def fake_llm_backend():
+    """Fake LLMBackend satisfying the Protocol. No Azure calls."""
+    import struct
+
+    class FakeLLM:
+        def chat(self, messages: list, max_tokens: int = 800) -> str:
+            return "fake response"
+
+        def embed(self, text: str) -> list[float]:
+            return fake_embedding(seed=hash(text) % 1000)
+
+        def embed_as_bytes(self, text: str) -> bytes | None:
+            vec = self.embed(text)
+            return struct.pack(f"{len(vec)}f", *vec)
+
+        def dimension(self) -> int:
+            return 1536
+
+    return FakeLLM()

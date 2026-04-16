@@ -249,8 +249,8 @@ def rewrite_temporal_query(
     as explicit tokens so BM25/vector search can match dated documents.
 
     Example:
-      "what was completed last week on Mnemosyne"
-      → "what was completed last week on Mnemosyne 2026-03-16 to 2026-03-22"
+      "what was completed last week on kairix"
+      → "what was completed last week on kairix 2026-03-16 to 2026-03-22"
 
     If no temporal expression is found, the query is returned unchanged.
 

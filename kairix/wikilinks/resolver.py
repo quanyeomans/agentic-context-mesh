@@ -1,24 +1,22 @@
 """
-Entity → wikilink resolution for Mnemosyne.
+Entity → wikilink resolution for kairix.
 
-Loads WikiEntity records from entities.db (preferred) or the bootstrap
+Loads WikiEntity records from Neo4j (preferred) or the bootstrap
 wikilink-entity-index.md (fallback).
 
 Entity sources:
-  Primary: /data/kairix/entities.db  (vault_path column, v2 schema)
+  Primary: Neo4j graph (Organisation and Person nodes with vault_path)
   Fallback: <vault-root>/agent-knowledge/shared/wikilink-entity-index.md
 """
 
 from __future__ import annotations
 
 import re
-import sqlite3
 from dataclasses import dataclass
 
-DEFAULT_DB_PATH = "/data/kairix/entities.db"
 DEFAULT_BOOTSTRAP_PATH = "<vault-root>/agent-knowledge/shared/wikilink-entity-index.md"
 
-# Minimum number of DB entities with vault_path required before we prefer DB
+# Minimum number of entities with vault_path required before we prefer the primary source
 _DB_THRESHOLD = 5
 
 
@@ -41,94 +39,6 @@ class WikiEntity:
                 seen.add(term)
                 result.append(term)
         return result
-
-
-# ---------------------------------------------------------------------------
-# DB loader
-# ---------------------------------------------------------------------------
-
-
-def load_entities_from_db(db_path: str = DEFAULT_DB_PATH) -> list[WikiEntity]:
-    """
-    Load entities with vault_path from entities.db.
-
-    Canonical entities (canonical_id IS NULL) with a vault_path are loaded as
-    primary WikiEntity entries.  Alias entities (canonical_id IS NOT NULL) are
-    merged into their canonical's aliases list so that alias surface forms
-    trigger the canonical [[link]] in vault files.
-
-    Returns empty list if the DB is unavailable or has no matching rows.
-    """
-    try:
-        db = sqlite3.connect(db_path)
-        db.row_factory = sqlite3.Row
-        # Check schema has vault_path column (v2+)
-        cols = {row[1] for row in db.execute("PRAGMA table_info(entities)").fetchall()}
-        if "vault_path" not in cols:
-            db.close()
-            return []
-
-        has_canonical_id = "canonical_id" in cols
-
-        if has_canonical_id:
-            # Load canonical entities (vault_path set, canonical_id NULL or missing)
-            canonical_rows = db.execute(
-                """
-                SELECT id, name, type, vault_path
-                FROM entities
-                WHERE vault_path IS NOT NULL AND vault_path != ''
-                  AND canonical_id IS NULL
-                """
-            ).fetchall()
-
-            # Load alias entities (canonical_id IS NOT NULL)
-            alias_rows = db.execute(
-                """
-                SELECT name, canonical_id
-                FROM entities
-                WHERE canonical_id IS NOT NULL
-                """
-            ).fetchall()
-        else:
-            # Older schema without canonical_id — load all with vault_path
-            canonical_rows = db.execute(
-                """
-                SELECT id, name, type, vault_path
-                FROM entities
-                WHERE vault_path IS NOT NULL AND vault_path != ''
-                """
-            ).fetchall()
-            alias_rows = []
-
-        db.close()
-    except Exception:
-        return []
-
-    # Build map: canonical_id → list of alias names
-    alias_map: dict[str, list[str]] = {}
-    for arow in alias_rows:
-        cid = str(arow["canonical_id"])
-        alias_map.setdefault(cid, []).append(arow["name"])
-
-    entities: list[WikiEntity] = []
-    for row in canonical_rows:
-        name: str = row["name"]
-        entity_id: str = row["id"]
-        entity_type: str = row["type"] or "unknown"
-        vault_path: str = row["vault_path"]
-        link = _make_link(name)
-        # Attach any alias names from alias_map
-        aliases = alias_map.get(entity_id, [])
-        entities.append(
-            WikiEntity(
-                name=name,
-                aliases=aliases,
-                vault_path=vault_path,
-                link=link,
-                entity_type=entity_type,
-            )
-        )
-    return entities
 
 
 def _make_link(name: str) -> str:
@@ -263,6 +173,13 @@ def _extract_aliases(entity_name: str, link: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _neo4j_get_client() -> object:
+    """Thin wrapper around graph.get_client() — isolated here for test monkeypatching."""
+    from kairix.graph.client import get_client
+
+    return get_client()
+
+
 def load_entities_from_neo4j() -> list[WikiEntity]:
     """
     Load entities with vault_path from the Neo4j graph.
@@ -271,9 +188,7 @@ def load_entities_from_neo4j() -> list[WikiEntity]:
     unavailable or has no entities with vault_path populated.
     """
     try:
-        from kairix.graph.client import get_client
-
-        client = get_client()
+        client = _neo4j_get_client()
         if not client.available:
             return []
 
@@ -308,22 +223,17 @@ def load_entities_from_neo4j() -> list[WikiEntity]:
 # ---------------------------------------------------------------------------
 
 
-def get_entities(prefer_db: bool = True) -> list[WikiEntity]:
+def get_entities() -> list[WikiEntity]:
     """
-    Load entities from Neo4j (preferred), then entities.db, then bootstrap index.
+    Load entities from Neo4j (preferred), then bootstrap index.
 
-    Falls back through the chain until a source returns at least _DB_THRESHOLD entities.
+    Falls back to the bootstrap index if Neo4j is unavailable or returns
+    fewer than _DB_THRESHOLD entities with vault_path populated.
     """
     # Try Neo4j first
     neo4j_entities = load_entities_from_neo4j()
     if len(neo4j_entities) >= _DB_THRESHOLD:
         return neo4j_entities
-
-    # Try SQLite entities.db
-    if prefer_db:
-        db_entities = load_entities_from_db()
-        if len(db_entities) >= _DB_THRESHOLD:
-            return db_entities
 
     # Fallback to bootstrap
     return load_entities_from_bootstrap()

@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """
-prune-entities.py — Remove stale/noise entities from entities.db.
+prune-entities.py — Remove stale/noise entity nodes from Neo4j.
 
-An entity is stale if its vault stub file no longer exists on disk,
-or if its frequency is 0 (never mentioned in the vault).
+An entity node is stale if its vault_path property points to a file that no
+longer exists on disk, or if it has no vault_path and no summary (never enriched).
 
-This script implements the stubs-as-source-of-truth pattern (ADR: entity pipeline
-inversion): the entities DB should reflect exactly what is curated in vault stubs.
-Entities that were auto-extracted or whose stub was deleted are candidates for removal.
+Implements the stubs-as-source-of-truth pattern: the graph should reflect what
+is curated in vault stubs. Nodes whose stub was deleted are candidates for removal.
 
 Usage:
-    python scripts/prune-entities.py [--vault-root PATH] [--db-path PATH] [--execute]
+    python scripts/prune-entities.py [--vault-root PATH] [--execute]
 
 Defaults:
-    --vault-root  $MNEMOSYNE_VAULT_ROOT or /path/to/vault
-    --db-path     $MNEMOSYNE_ENTITIES_DB or /path/to/entities.db
+    --vault-root  $KAIRIX_VAULT_ROOT or /data/obsidian-vault
     --execute     dry-run by default (omit flag to preview only)
 """
 
@@ -22,38 +20,33 @@ from __future__ import annotations
 
 import argparse
 import os
-import sqlite3
 import sys
 from pathlib import Path
-from typing import NamedTuple
+from dataclasses import dataclass
 
 
-class EntityRow(NamedTuple):
-    id: int
+@dataclass
+class EntityNode:
+    id: str
     name: str
-    type: str
-    markdown_path: str | None
-    frequency: int
+    label: str
+    vault_path: str | None
+    summary: str | None
 
 
 class PruneReason:
     FILE_MISSING = "file_missing"
-    ZERO_FREQUENCY = "zero_frequency"
+    NO_STUB_NO_SUMMARY = "no_stub_no_summary"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Prune stale/noise entities from entities.db.",
+        description="Prune stale/noise entity nodes from Neo4j.",
     )
     parser.add_argument(
         "--vault-root",
-        default=os.environ.get("MNEMOSYNE_VAULT_ROOT", "/path/to/vault"),
-        help="Root of the Obsidian vault (default: $MNEMOSYNE_VAULT_ROOT)",
-    )
-    parser.add_argument(
-        "--db-path",
-        default=os.environ.get("MNEMOSYNE_ENTITIES_DB", "/path/to/entities.db"),
-        help="Path to entities.db (default: $MNEMOSYNE_ENTITIES_DB)",
+        default=os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault"),
+        help="Root of the Obsidian vault (default: $KAIRIX_VAULT_ROOT)",
     )
     parser.add_argument(
         "--execute",
@@ -64,156 +57,140 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_active_entities(db: sqlite3.Connection) -> list[EntityRow]:
-    """Load all active entities from the database."""
-    cursor = db.execute(
-        "SELECT id, name, type, markdown_path, frequency FROM entities WHERE status='active'"
+def load_entity_nodes(neo4j_client: object) -> list[EntityNode]:
+    """Load all entity nodes from Neo4j."""
+    labels = ("Organisation", "Person", "Outcome", "Concept", "Project")
+    label_filter = "['" + "','".join(labels) + "']"
+    rows = neo4j_client.cypher(  # type: ignore[attr-defined]
+        f"MATCH (n) WHERE labels(n)[0] IN {label_filter} "
+        "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label, "
+        "n.vault_path AS vault_path, n.summary AS summary"
     )
-    rows = cursor.fetchall()
-    return [EntityRow(id=r[0], name=r[1], type=r[2], markdown_path=r[3], frequency=r[4]) for r in rows]
+    return [
+        EntityNode(
+            id=str(r.get("id") or ""),
+            name=str(r.get("name") or ""),
+            label=str(r.get("label") or "unknown"),
+            vault_path=r.get("vault_path") or None,
+            summary=r.get("summary") or None,
+        )
+        for r in rows
+    ]
 
 
 def classify_entities(
-    entities: list[EntityRow],
+    entities: list[EntityNode],
     vault_root: str,
-) -> tuple[list[tuple[EntityRow, str]], list[EntityRow]]:
-    """
-    Classify entities into delete candidates and keepers.
-
-    An entity is stale if:
-    - Its markdown_path does not exist on disk (stub was deleted or never created)
-    - Its frequency is 0 (never mentioned in the vault)
-
-    Returns:
-        (to_delete, to_keep)
-    """
-    to_delete: list[tuple[EntityRow, str]] = []
-    to_keep: list[EntityRow] = []
-
+) -> tuple[list[tuple[EntityNode, str]], list[EntityNode]]:
+    """Classify nodes into delete candidates and keepers."""
+    to_delete: list[tuple[EntityNode, str]] = []
+    to_keep: list[EntityNode] = []
     vault = Path(vault_root)
 
     for entity in entities:
-        if entity.markdown_path:
-            stub_path = vault / entity.markdown_path
+        if entity.vault_path:
+            stub_path = vault / entity.vault_path
             if not stub_path.exists():
                 to_delete.append((entity, PruneReason.FILE_MISSING))
                 continue
-
-        if entity.frequency == 0:
-            to_delete.append((entity, PruneReason.ZERO_FREQUENCY))
-        else:
-            to_keep.append(entity)
+        elif not entity.summary:
+            to_delete.append((entity, PruneReason.NO_STUB_NO_SUMMARY))
+            continue
+        to_keep.append(entity)
 
     return to_delete, to_keep
 
 
 def print_dry_run_report(
-    to_delete: list[tuple[EntityRow, str]],
-    to_keep: list[EntityRow],
+    to_delete: list[tuple[EntityNode, str]],
+    to_keep: list[EntityNode],
 ) -> None:
-    """Print a dry-run report without making any changes."""
     total = len(to_delete) + len(to_keep)
-    print(f"\nEntities scanned:  {total}")
-    print(f"  To delete:       {len(to_delete)}")
-    print(f"  To keep:         {len(to_keep)}")
+    print(f"\nEntity nodes scanned: {total}")
+    print(f"  To delete:          {len(to_delete)}")
+    print(f"  To keep:            {len(to_keep)}")
 
     if to_delete:
-        print("\n--- ENTITIES TO DELETE ---")
+        print("\n--- NODES TO DELETE ---")
         col_name = max((len(e.name) for e, _ in to_delete), default=4)
-        col_type = max((len(e.type or "") for e, _ in to_delete), default=4)
-        header = f"  {'NAME':<{col_name}}  {'TYPE':<{col_type}}  REASON"
-        print(header)
+        col_type = max((len(e.label) for e, _ in to_delete), default=4)
+        print(f"  {'NAME':<{col_name}}  {'TYPE':<{col_type}}  REASON")
         print("  " + "-" * (col_name + col_type + 10))
-        for entity, reason in sorted(to_delete, key=lambda x: (x[1], x[0].type or "", x[0].name)):
-            print(f"  {entity.name:<{col_name}}  {entity.type or '':<{col_type}}  {reason}")
+        for entity, reason in sorted(to_delete, key=lambda x: (x[1], x[0].label, x[0].name)):
+            print(f"  {entity.name:<{col_name}}  {entity.label:<{col_type}}  {reason}")
 
     if to_keep:
-        print("\n--- ENTITIES TO KEEP ---")
+        print("\n--- NODES TO KEEP ---")
         col_name = max((len(e.name) for e in to_keep), default=4)
-        col_type = max((len(e.type or "") for e in to_keep), default=4)
-        header = f"  {'NAME':<{col_name}}  {'TYPE':<{col_type}}  FREQUENCY"
-        print(header)
-        print("  " + "-" * (col_name + col_type + 12))
-        for entity in sorted(to_keep, key=lambda e: (-e.frequency, e.type or "", e.name)):
-            print(f"  {entity.name:<{col_name}}  {entity.type or '':<{col_type}}  {entity.frequency}")
+        col_type = max((len(e.label) for e in to_keep), default=4)
+        print(f"  {'NAME':<{col_name}}  {'TYPE':<{col_type}}")
+        print("  " + "-" * (col_name + col_type + 4))
+        for entity in sorted(to_keep, key=lambda e: (e.label, e.name)):
+            print(f"  {entity.name:<{col_name}}  {entity.label:<{col_type}}")
 
     print("\nRun with --execute to apply deletions.")
 
 
-def cascade_delete_entity(db: sqlite3.Connection, entity_id: int) -> None:
-    """Delete an entity and all related rows in cascade order."""
-    db.execute("DELETE FROM entity_mentions WHERE entity_id = ?", (entity_id,))
-    db.execute(
-        "DELETE FROM entity_relationships WHERE entity_a_id = ? OR entity_b_id = ?",
-        (entity_id, entity_id),
-    )
-    db.execute("DELETE FROM entity_facts WHERE entity_id = ?", (entity_id,))
-    db.execute("DELETE FROM entities WHERE id = ?", (entity_id,))
-
-
 def execute_pruning(
-    db: sqlite3.Connection,
-    to_delete: list[tuple[EntityRow, str]],
+    neo4j_client: object,
+    to_delete: list[tuple[EntityNode, str]],
     total_before: int,
 ) -> None:
-    """Apply cascade deletions and print a summary."""
-    print(f"\nDeleting {len(to_delete)} entities...")
-
+    print(f"\nDeleting {len(to_delete)} entity nodes...")
+    deleted = 0
     for entity, reason in to_delete:
-        print(f"  Deleting: {entity.name!r} ({entity.type}) — {reason}")
-        cascade_delete_entity(db, entity.id)
+        if not entity.id:
+            print(f"  SKIP (no id): {entity.name!r} — {reason}")
+            continue
+        try:
+            neo4j_client.cypher(  # type: ignore[attr-defined]
+                "MATCH (n {id: $id}) DETACH DELETE n",
+                {"id": entity.id},
+            )
+            print(f"  Deleted: {entity.name!r} ({entity.label}) — {reason}")
+            deleted += 1
+        except Exception as exc:
+            print(f"  ERROR deleting {entity.name!r}: {exc}", file=sys.stderr)
 
-    db.commit()
-
-    cursor = db.execute("SELECT COUNT(*) FROM entities WHERE status='active'")
-    count_after = cursor.fetchone()[0]
-
-    print(f"\nDone. Entities: {total_before} → {count_after}.")
-    print("Run `mnemosyne entity extract --from-stubs` to re-seed.")
+    print(f"\nDone. Deleted {deleted} / {total_before} nodes.")
+    print("Run `kairix curator health` to verify graph state.")
 
 
 def main() -> None:
     args = parse_args()
 
+    sys.path.insert(0, str(Path(__file__).parent.parent))
     try:
-        db_path = args.db_path
-        vault_root = args.vault_root
-
-        if not Path(db_path).exists():
-            print(f"ERROR: Database not found: {db_path}", file=sys.stderr)
-            sys.exit(1)
-
-        db = sqlite3.connect(db_path)
-        db.execute("PRAGMA foreign_keys = ON")
-        db.row_factory = sqlite3.Row
-
-        print(f"Database:   {db_path}")
-        print(f"Vault root: {vault_root}")
-        print(f"Mode:       {'EXECUTE' if args.execute else 'DRY-RUN'}")
-
-        entities = load_active_entities(db)
-        total_before = len(entities)
-
-        if total_before == 0:
-            print("\nNo active entities found. Nothing to do.")
-            db.close()
-            return
-
-        to_delete, to_keep = classify_entities(entities, vault_root)
-
-        if args.execute:
-            if not to_delete:
-                print(f"\nNo stale entities found. All {total_before} entities are healthy.")
-            else:
-                execute_pruning(db, to_delete, total_before)
-        else:
-            print_dry_run_report(to_delete, to_keep)
-
-        db.close()
-
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        from kairix.graph.client import get_client
+    except ImportError as exc:
+        print(f"ERROR: could not import kairix.graph.client — {exc}", file=sys.stderr)
+        print("Ensure kairix[neo4j] is installed.", file=sys.stderr)
         sys.exit(1)
+
+    neo4j = get_client()
+    if not neo4j.available:
+        print("ERROR: Neo4j is unavailable. Check KAIRIX_NEO4J_URI / KAIRIX_NEO4J_PASSWORD.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Vault root: {args.vault_root}")
+    print(f"Mode:       {'EXECUTE' if args.execute else 'DRY-RUN'}")
+
+    entities = load_entity_nodes(neo4j)
+    total_before = len(entities)
+
+    if total_before == 0:
+        print("\nNo entity nodes found in Neo4j. Nothing to do.")
+        return
+
+    to_delete, to_keep = classify_entities(entities, args.vault_root)
+
+    if args.execute:
+        if not to_delete:
+            print(f"\nNo stale nodes found. All {total_before} nodes are healthy.")
+        else:
+            execute_pruning(neo4j, to_delete, total_before)
+    else:
+        print_dry_run_report(to_delete, to_keep)
 
 
 if __name__ == "__main__":

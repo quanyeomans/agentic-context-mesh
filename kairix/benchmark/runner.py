@@ -1,5 +1,5 @@
 """
-Benchmark runner for Mnemosyne retrieval quality evaluation.
+Benchmark runner for kairix retrieval quality evaluation.
 
 Runs a BenchmarkSuite against a configured retrieval system and produces
 per-category and weighted-total scores.
@@ -359,7 +359,7 @@ def _category_diagnosis(category: str, score: float) -> str:
     diagnoses = {
         "recall": "❌ semantic matching not finding exact docs — check vector index freshness",
         "temporal": "❌ temporal weakness is likely an ingestion problem — date-aware chunking needed (Phase 2)",
-        "entity": "❌ entity graph may be empty — seed entities.db with `kairix entity write`",
+        "entity": "❌ entity graph may be empty — seed entities via kairix entity suggest/validate",
         "conceptual": "❌ abstract queries not resolving — check intent classifier routing",
         "multi_hop": "❌ multi-hop requires connected retrieval — Phase 3 planning layer",
         "procedural": "❌ procedural docs not surfacing — check collection scope",

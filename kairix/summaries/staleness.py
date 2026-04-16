@@ -1,5 +1,5 @@
 """
-Staleness tracking for Mnemosyne summaries.
+Staleness tracking for kairix summaries.
 
 Maintains summaries.db — a sqlite database that records L0/L1 summaries
 alongside the source file mtime at generation time. A summary is stale

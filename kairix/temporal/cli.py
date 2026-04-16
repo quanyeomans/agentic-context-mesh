@@ -6,7 +6,7 @@ Usage:
   kairix timeline --help
 
 Examples:
-  kairix timeline "what was completed last week on Mnemosyne"
+  kairix timeline "what was completed last week on kairix"
   kairix timeline "what happened in March 2026" --since 2026-03-01 --until 2026-03-31
   kairix timeline "recent Bower Bird changes" --limit 10
 """
@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  kairix timeline "what was completed last week on Mnemosyne"
+  kairix timeline "what was completed last week on kairix"
   kairix timeline "what happened in March 2026" --since 2026-03-01 --until 2026-03-31
   kairix timeline "recent Bower Bird changes" --limit 10
 """,

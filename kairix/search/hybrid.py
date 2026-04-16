@@ -1,11 +1,11 @@
 """
-Hybrid search orchestrator for the Mnemosyne pipeline.
+Hybrid search orchestrator for the kairix pipeline.
 
 Orchestrates the full search pipeline:
   1. Classify query intent
   2. Dispatch BM25 and vector search in parallel (ThreadPoolExecutor)
   3. Fuse results with RRF
-  4. Apply entity boosting (if entities.db available)
+  4. Apply entity boosting via Neo4j graph
   5. Apply token budget
   6. Log retrieval event
 
@@ -179,7 +179,7 @@ def search(
       2. Determine collections
       3. Dispatch BM25 + vector in parallel (ThreadPoolExecutor)
       4. Fuse with RRF
-      5. Entity boost (if entities.db available)
+      5. Entity boost via Neo4j graph
       6. Apply token budget
       7. Log event
 

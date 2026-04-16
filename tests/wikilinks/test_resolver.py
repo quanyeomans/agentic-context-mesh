@@ -3,24 +3,25 @@ Tests for kairix.wikilinks.resolver
 
 Covers:
 - load_entities_from_bootstrap(): parses a synthetic index file (tmp_path fixture)
-- load_entities_from_db(): loads from a synthetic SQLite DB (tmp_path fixture)
-- get_entities(): DB-prefer / fallback logic via monkeypatch
+- load_entities_from_neo4j(): loads from a mock Neo4j client
+- get_entities(): Neo4j-prefer / fallback logic via monkeypatch
 
-All tests are fully self-contained — no real vault or DB required.
+All tests are fully self-contained — no real vault or Neo4j required.
 """
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from kairix.wikilinks.resolver import (
     WikiEntity,
+    _neo4j_get_client,  # noqa: F401 — imported to confirm it exists for monkeypatching
     get_entities,
     load_entities_from_bootstrap,
-    load_entities_from_db,
+    load_entities_from_neo4j,
 )
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,15 @@ SYNTHETIC_BOOTSTRAP = """\
 | Relay Framework | `[[RelayFramework]]` | `05-Knowledge/Frameworks/RelayFramework/` |
 """
 
+_NEO4J_ROWS = [
+    {"id": "acme-health", "name": "Acme Corp", "aliases": ["Acme"], "vault_path": "02-Areas/Clients/Acme-Corp/"},
+    {"id": "zenith-energy", "name": "Zenith Ltd", "aliases": [], "vault_path": "02-Areas/Clients/Zenith-Ltd/"},
+    {"id": "nexus-digital", "name": "Nexus Digital", "aliases": [], "vault_path": "02-Areas/Work/Orgs/NexusDigital/"},
+    {"id": "jordan-blake", "name": "Jordan Blake", "aliases": [], "vault_path": "02-Areas/People/JordanBlake/"},
+    {"id": "project-atlas", "name": "Project Atlas", "aliases": [], "vault_path": "01-Projects/Atlas/"},
+    {"id": "triad-method", "name": "Triad Method", "aliases": [], "vault_path": "05-Knowledge/Frameworks/TriadMethod/"},
+]
+
 
 @pytest.fixture()
 def bootstrap_file(tmp_path: Path) -> str:
@@ -77,101 +87,12 @@ def bootstrap_file(tmp_path: Path) -> str:
     return str(p)
 
 
-@pytest.fixture()
-def synthetic_db(tmp_path: Path) -> str:
-    """Create a synthetic entities.db with vault_path column (v2 schema)."""
-    db_path = str(tmp_path / "entities.db")
-    db = sqlite3.connect(db_path)
-    db.execute(
-        "CREATE TABLE entities ("
-        "id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, "
-        "markdown_path TEXT NOT NULL, status TEXT DEFAULT 'active', "
-        "agent_scope TEXT DEFAULT 'shared', "
-        "created_at TEXT, updated_at TEXT, vault_path TEXT, canonical_id TEXT)"
-    )
-    rows = [
-        (
-            "acme-health",
-            "Acme Corp",
-            "client",
-            "path",
-            "active",
-            "shared",
-            "2024-01-01",
-            "2024-01-01",
-            "02-Areas/Clients/Acme-Corp/",
-            None,
-        ),
-        (
-            "zenith-energy",
-            "Zenith Ltd",
-            "client",
-            "path",
-            "active",
-            "shared",
-            "2024-01-01",
-            "2024-01-01",
-            "02-Areas/Clients/Zenith-Ltd/",
-            None,
-        ),
-        (
-            "nexus-digital",
-            "Nexus Digital",
-            "organisation",
-            "path",
-            "active",
-            "shared",
-            "2024-01-01",
-            "2024-01-01",
-            "02-Areas/Work/Orgs/NexusDigital/",
-            None,
-        ),
-        (
-            "jordan-blake",
-            "Jordan Blake",
-            "person",
-            "path",
-            "active",
-            "shared",
-            "2024-01-01",
-            "2024-01-01",
-            "02-Areas/People/JordanBlake/",
-            None,
-        ),
-        (
-            "project-atlas",
-            "Project Atlas",
-            "project",
-            "path",
-            "active",
-            "shared",
-            "2024-01-01",
-            "2024-01-01",
-            "01-Projects/Atlas/",
-            None,
-        ),
-        (
-            "triad-method",
-            "Triad Method",
-            "framework",
-            "path",
-            "active",
-            "shared",
-            "2024-01-01",
-            "2024-01-01",
-            "05-Knowledge/Frameworks/TriadMethod/",
-            None,
-        ),
-        # Alias row — canonical_id points to acme-health
-        ("acme-alias", "Acme", "client", "path", "active", "shared", "2024-01-01", "2024-01-01", None, "acme-health"),
-    ]
-    db.executemany(
-        "INSERT INTO entities VALUES (?,?,?,?,?,?,?,?,?,?)",
-        rows,
-    )
-    db.commit()
-    db.close()
-    return db_path
+def _make_neo4j_client(rows: list[dict] | None = None) -> MagicMock:
+    """Create a mock Neo4j client returning the given entity rows."""
+    client = MagicMock()
+    client.available = True
+    client.cypher.return_value = rows if rows is not None else _NEO4J_ROWS
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -235,73 +156,72 @@ def test_bootstrap_no_header_rows(bootstrap_file: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# load_entities_from_db
+# load_entities_from_neo4j
 # ---------------------------------------------------------------------------
 
 
-def test_db_load_returns_canonicals(synthetic_db: str) -> None:
-    """load_entities_from_db() returns canonical entities (canonical_id IS NULL)."""
-    entities = load_entities_from_db(synthetic_db)
+def test_neo4j_load_returns_entities(monkeypatch: pytest.MonkeyPatch) -> None:
+    """load_entities_from_neo4j() returns WikiEntity objects from Neo4j rows.
+
+    The loader calls cypher() twice (once per label — Organisation, Person),
+    so we use side_effect to give each call distinct rows.
+    """
+    import kairix.wikilinks.resolver as resolver_mod
+
+    org_rows = _NEO4J_ROWS[:4]  # organisations
+    person_rows = _NEO4J_ROWS[4:]  # people/projects
+    client = MagicMock()
+    client.available = True
+    client.cypher.side_effect = [org_rows, person_rows]
+    monkeypatch.setattr(resolver_mod, "_neo4j_get_client", lambda: client)
+
+    entities = load_entities_from_neo4j()
+    assert len(entities) == len(_NEO4J_ROWS)
     names = [e.name for e in entities]
     assert "Acme Corp" in names
-    assert "Zenith Ltd" in names
-    assert len(entities) == 6  # 6 canonical rows, alias row excluded
+    assert "Jordan Blake" in names
 
 
-def test_db_load_merges_aliases(synthetic_db: str) -> None:
-    """Alias rows (canonical_id IS NOT NULL) are merged into their canonical's aliases."""
-    entities = load_entities_from_db(synthetic_db)
-    acme = next((e for e in entities if e.name == "Acme Corp"), None)
-    assert acme is not None
-    # 'Acme' alias should appear in triggers
-    assert "Acme" in acme.all_triggers()
+def test_neo4j_load_returns_empty_when_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """load_entities_from_neo4j() returns [] when Neo4j is unavailable."""
+    import kairix.wikilinks.resolver as resolver_mod
 
+    client = MagicMock()
+    client.available = False
+    monkeypatch.setattr(resolver_mod, "_neo4j_get_client", lambda: client)
 
-def test_db_load_skips_entities_without_vault_path(tmp_path: Path) -> None:
-    """load_entities_from_db() skips entities with no vault_path."""
-    db_path = str(tmp_path / "test.db")
-    db = sqlite3.connect(db_path)
-    db.execute(
-        "CREATE TABLE entities (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, "
-        "markdown_path TEXT NOT NULL, status TEXT DEFAULT 'active', agent_scope TEXT DEFAULT 'shared', "
-        "created_at TEXT, updated_at TEXT, vault_path TEXT)"
-    )
-    db.execute(
-        "INSERT INTO entities VALUES "
-        "('e1', 'Acme Corp', 'client', 'path', 'active', 'shared', "
-        "'2024', '2024', '02-Areas/Clients/Acme-Corp/')"
-    )
-    db.execute(
-        "INSERT INTO entities VALUES ('e2', 'NullPath', 'client', 'path', 'active', 'shared', '2024', '2024', NULL)"
-    )
-    db.commit()
-    db.close()
-
-    entities = load_entities_from_db(db_path)
-    names = [e.name for e in entities]
-    assert "Acme Corp" in names
-    assert "NullPath" not in names
-
-
-def test_db_load_returns_empty_for_missing_db() -> None:
-    """load_entities_from_db() returns [] if DB file doesn't exist."""
-    entities = load_entities_from_db("/nonexistent/path/entities.db")
+    entities = load_entities_from_neo4j()
     assert entities == []
 
 
-def test_db_load_returns_empty_without_vault_path_column(tmp_path: Path) -> None:
-    """load_entities_from_db() returns [] if vault_path column is missing (v1 schema)."""
-    db_path = str(tmp_path / "v1.db")
-    db = sqlite3.connect(db_path)
-    db.execute(
-        "CREATE TABLE entities (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
-        "type TEXT NOT NULL, markdown_path TEXT NOT NULL)"
-    )
-    db.execute("INSERT INTO entities VALUES ('e1', 'Acme Corp', 'client', 'path')")
-    db.commit()
-    db.close()
+def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Aliases list from Neo4j row is included in all_triggers()."""
+    import kairix.wikilinks.resolver as resolver_mod
 
-    entities = load_entities_from_db(db_path)
+    row = {"id": "acme", "name": "Acme Corp", "aliases": ["Acme", "AH"], "vault_path": "02-Areas/Clients/Acme/"}
+    # side_effect: first call (Organisation) returns the row, second (Person) returns []
+    client = MagicMock()
+    client.available = True
+    client.cypher.side_effect = [[row], []]
+    monkeypatch.setattr(resolver_mod, "_neo4j_get_client", lambda: client)
+
+    entities = load_entities_from_neo4j()
+    assert len(entities) == 1
+    triggers = entities[0].all_triggers()
+    assert "Acme" in triggers
+    assert "AH" in triggers
+
+
+def test_neo4j_load_returns_empty_on_cypher_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """load_entities_from_neo4j() returns [] on any cypher exception."""
+    import kairix.wikilinks.resolver as resolver_mod
+
+    client = MagicMock()
+    client.available = True
+    client.cypher.side_effect = RuntimeError("connection error")
+    monkeypatch.setattr(resolver_mod, "_neo4j_get_client", lambda: client)
+
+    entities = load_entities_from_neo4j()
     assert entities == []
 
 
@@ -310,77 +230,66 @@ def test_db_load_returns_empty_without_vault_path_column(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_get_entities_uses_db_when_sufficient(
-    synthetic_db: str,
+def test_get_entities_uses_neo4j_when_sufficient(
     bootstrap_file: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """get_entities() uses DB when it has >= 5 entities with vault_path."""
+    """get_entities() uses Neo4j when it returns >= 5 entities with vault_path."""
     import kairix.wikilinks.resolver as resolver_mod
 
-    monkeypatch.setattr(resolver_mod, "load_entities_from_db", lambda: load_entities_from_db(synthetic_db))
+    monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: [
+        WikiEntity(name=r["name"], aliases=r["aliases"], vault_path=r["vault_path"],
+                   link=f"[[{r['name']}]]", entity_type="organisation")
+        for r in _NEO4J_ROWS
+    ])
     monkeypatch.setattr(
         resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
     )
 
-    entities = get_entities(prefer_db=True)
+    entities = get_entities()
     names = [e.name for e in entities]
     assert "Acme Corp" in names
-    # Should have exactly the 6 DB canonicals, not the 12 bootstrap entries
+    # Should have exactly the 6 Neo4j entities, not the 12 bootstrap entries
     assert len(entities) == 6
 
 
-def test_get_entities_falls_back_to_bootstrap_when_db_sparse(
+def test_get_entities_falls_back_to_bootstrap_when_neo4j_sparse(
     bootstrap_file: str,
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """get_entities() falls back to bootstrap when DB has < 5 entities with vault_path."""
-    # Sparse DB with only 2 entities
-    sparse_db = str(tmp_path / "sparse.db")
-    db = sqlite3.connect(sparse_db)
-    db.execute(
-        "CREATE TABLE entities (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, "
-        "markdown_path TEXT NOT NULL, status TEXT DEFAULT 'active', agent_scope TEXT DEFAULT 'shared', "
-        "created_at TEXT, updated_at TEXT, vault_path TEXT)"
-    )
-    db.execute(
-        "INSERT INTO entities VALUES "
-        "('e1', 'Acme Corp', 'client', 'path', 'active', 'shared', "
-        "'2024', '2024', '02-Areas/Clients/Acme-Corp/')"
-    )
-    db.execute(
-        "INSERT INTO entities VALUES "
-        "('e2', 'Zenith Ltd', 'client', 'path', 'active', 'shared', "
-        "'2024', '2024', '02-Areas/Clients/Zenith-Ltd/')"
-    )
-    db.commit()
-    db.close()
-
+    """get_entities() falls back to bootstrap when Neo4j returns < 5 entities."""
     import kairix.wikilinks.resolver as resolver_mod
 
-    monkeypatch.setattr(resolver_mod, "load_entities_from_db", lambda: load_entities_from_db(sparse_db))
+    # Only 2 entities from Neo4j — below _DB_THRESHOLD of 5
+    sparse_rows = [
+        WikiEntity(name="Acme Corp", aliases=[], vault_path="02-Areas/Clients/Acme-Corp/",
+                   link="[[Acme-Corp]]", entity_type="organisation"),
+        WikiEntity(name="Zenith Ltd", aliases=[], vault_path="02-Areas/Clients/Zenith-Ltd/",
+                   link="[[Zenith-Ltd]]", entity_type="organisation"),
+    ]
+    monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: sparse_rows)
     monkeypatch.setattr(
         resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
     )
 
-    entities = get_entities(prefer_db=True)
+    entities = get_entities()
     # Should have fallen back to bootstrap (12 entries)
     assert len(entities) >= 10, f"Expected fallback to bootstrap, got {len(entities)} entities"
 
 
-def test_get_entities_no_prefer_db_uses_bootstrap(
+def test_get_entities_falls_back_to_bootstrap_when_neo4j_unavailable(
     bootstrap_file: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """get_entities(prefer_db=False) returns bootstrap entities directly."""
+    """get_entities() falls back to bootstrap when Neo4j is completely unavailable."""
     import kairix.wikilinks.resolver as resolver_mod
 
+    monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: [])
     monkeypatch.setattr(
         resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
     )
 
-    entities = get_entities(prefer_db=False)
+    entities = get_entities()
     assert len(entities) >= 10
     names = [e.name for e in entities]
     assert "Acme Corp" in names

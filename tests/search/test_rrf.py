@@ -12,7 +12,6 @@ Tests cover:
   - entity_boost boost sorting
 """
 
-import sqlite3
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,7 +22,7 @@ from kairix.search.rrf import (
     PROCEDURAL_BOOST_FACTOR,
     RRF_K,
     FusedResult,
-    entity_boost,
+    entity_boost_neo4j,
     procedural_boost,
     rrf,
 )
@@ -196,21 +195,22 @@ def test_rrf_boosted_score_equals_rrf_score_initially() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_db(path_mentions: dict[str, int]) -> MagicMock:
-    """Create a mock entities.db that returns mention counts for given paths."""
-    rows = [(path, count) for path, count in path_mentions.items()]
-    mock_db = MagicMock(spec=sqlite3.Connection)
-    mock_db.execute.return_value.fetchall.return_value = rows
-    return mock_db
+def _make_mock_neo4j(path_in_degree: dict[str, int]) -> MagicMock:
+    """Create a mock Neo4j client that returns in-degree counts for given paths."""
+    rows = [{"vault_path": path, "in_degree": count} for path, count in path_in_degree.items()]
+    mock = MagicMock()
+    mock.available = True
+    mock.cypher.return_value = rows
+    return mock
 
 
 @pytest.mark.unit
 def test_entity_boost_formula_correctness() -> None:
     """Boost formula: normalised count used; single doc with mentions gets > base score."""
     results = rrf([_bm25("/doc.md")], [])
-    mock_db = _make_mock_db({"/doc.md": 5})
+    mock_neo4j = _make_mock_neo4j({"/doc.md": 5})
 
-    boosted = entity_boost(results, mock_db)
+    boosted = entity_boost_neo4j(results, mock_neo4j)
 
     # With normalised boost: single doc is max, normalised=1.0
     # boost_amount = min(factor * log1p(1.0 * 10), cap-1) = min(0.20 * log(11), 1.0)
@@ -224,9 +224,9 @@ def test_entity_boost_cap_enforced() -> None:
     """Boost is capped at ENTITY_BOOST_CAP - 1."""
     results = rrf([_bm25("/doc.md")], [])
     # Very high mention count should be capped
-    mock_db = _make_mock_db({"/doc.md": 100_000})
+    mock_neo4j = _make_mock_neo4j({"/doc.md": 100_000})
 
-    boosted = entity_boost(results, mock_db)
+    boosted = entity_boost_neo4j(results, mock_neo4j)
 
     max_multiplier = ENTITY_BOOST_CAP  # 2.0
     assert boosted[0].boosted_score <= results[0].rrf_score * max_multiplier + 1e-10
@@ -236,9 +236,9 @@ def test_entity_boost_cap_enforced() -> None:
 def test_entity_boost_zero_mentions_no_change() -> None:
     """Document with 0 mentions has boosted_score == rrf_score."""
     results = rrf([_bm25("/doc.md")], [])
-    mock_db = _make_mock_db({})  # no mentions
+    mock_neo4j = _make_mock_neo4j({})  # no mentions
 
-    boosted = entity_boost(results, mock_db)
+    boosted = entity_boost_neo4j(results, mock_neo4j)
 
     assert abs(boosted[0].boosted_score - boosted[0].rrf_score) < 1e-10
 
@@ -252,23 +252,24 @@ def test_entity_boost_resorts_results() -> None:
     assert results[0].path == "/second.md"
 
     # Boost "/first.md" heavily
-    mock_db = _make_mock_db({"/first.md": 1000})
-    boosted = entity_boost(results, mock_db)
+    mock_neo4j = _make_mock_neo4j({"/first.md": 1000})
+    boosted = entity_boost_neo4j(results, mock_neo4j)
 
     # "/first.md" should now be first due to boost
     assert boosted[0].path == "/first.md"
 
 
 @pytest.mark.unit
-def test_entity_boost_returns_unmodified_on_operational_error() -> None:
-    """OperationalError (table doesn't exist) → returns unmodified results."""
+def test_entity_boost_returns_unmodified_on_cypher_error() -> None:
+    """Cypher failure → returns results with boosted_score == rrf_score."""
     results = rrf([_bm25("/doc.md")], [])
     original_score = results[0].rrf_score
 
-    mock_db = MagicMock(spec=sqlite3.Connection)
-    mock_db.execute.side_effect = sqlite3.OperationalError("no such table: entity_mentions")
+    mock_neo4j = MagicMock()
+    mock_neo4j.available = True
+    mock_neo4j.cypher.side_effect = RuntimeError("connection lost")
 
-    boosted = entity_boost(results, mock_db)
+    boosted = entity_boost_neo4j(results, mock_neo4j)
 
     assert len(boosted) == 1
     assert boosted[0].rrf_score == original_score
@@ -276,12 +277,12 @@ def test_entity_boost_returns_unmodified_on_operational_error() -> None:
 
 @pytest.mark.unit
 def test_entity_boost_returns_unmodified_on_unexpected_error() -> None:
-    """Any unexpected exception → returns unmodified results."""
+    """Neo4j unavailable → returns results with boosted_score == rrf_score."""
     results = rrf([_bm25("/doc.md")], [])
-    mock_db = MagicMock(spec=sqlite3.Connection)
-    mock_db.execute.side_effect = RuntimeError("unexpected")
+    mock_neo4j = MagicMock()
+    mock_neo4j.available = False
 
-    boosted = entity_boost(results, mock_db)
+    boosted = entity_boost_neo4j(results, mock_neo4j)
     assert len(boosted) == 1
 
 
@@ -368,15 +369,16 @@ def test_procedural_boost_procedure_prefix_boosted() -> None:
 @pytest.mark.unit
 def test_entity_boost_empty_results() -> None:
     """Empty results list → []."""
-    mock_db = MagicMock(spec=sqlite3.Connection)
-    assert entity_boost([], mock_db) == []
+    mock_neo4j = MagicMock()
+    mock_neo4j.available = True
+    assert entity_boost_neo4j([], mock_neo4j) == []
 
 
 @pytest.mark.unit
 def test_entity_boost_mention_count_stored_on_result() -> None:
-    """entity_mention_count is populated from DB query."""
+    """entity_mention_count is populated from Neo4j query."""
     results = rrf([_bm25("/doc.md")], [])
-    mock_db = _make_mock_db({"/doc.md": 7})
+    mock_neo4j = _make_mock_neo4j({"/doc.md": 7})
 
-    boosted = entity_boost(results, mock_db)
+    boosted = entity_boost_neo4j(results, mock_neo4j)
     assert boosted[0].entity_mention_count == 7
