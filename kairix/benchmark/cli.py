@@ -25,7 +25,7 @@ _QMD_DB = Path.home() / ".cache" / "qmd" / "index.sqlite"
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="kairix benchmark",
-        description="Retrieval quality benchmark for Mnemosyne.",
+        description="Retrieval quality benchmark for kairix.",
     )
     sub = parser.add_subparsers(dest="subcommand", required=True)
 

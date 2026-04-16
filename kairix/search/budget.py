@@ -1,5 +1,5 @@
 """
-Token budget enforcer for the Mnemosyne hybrid search pipeline.
+Token budget enforcer for the kairix hybrid search pipeline.
 
 Applies a hard token cap to search results, assigning each result a tier:
   L0 — abstract only (~100 tokens); not yet generated in Phase 1

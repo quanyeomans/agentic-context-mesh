@@ -1,5 +1,5 @@
 """
-8-step briefing pipeline for Mnemosyne session briefings.
+8-step briefing pipeline for kairix session briefings.
 
 Steps:
   1. Recent memory log files (last 7 days, tagged items)

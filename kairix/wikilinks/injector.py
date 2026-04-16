@@ -1,5 +1,5 @@
 """
-First-mention [[wikilink]] injection for Mnemosyne.
+First-mention [[wikilink]] injection for kairix.
 
 Injects [[wikilinks]] on the first meaningful mention of each known entity
 in agent-written vault markdown files.

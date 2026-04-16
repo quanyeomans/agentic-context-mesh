@@ -1,7 +1,7 @@
 """
 kairix.llm — LLM backend abstraction layer.
 
-Provides a ``LLMBackend`` protocol so Mnemosyne components can call
+Provides a ``LLMBackend`` protocol so kairix components can call
 chat/embed APIs without a hard dependency on any specific provider.
 
 Built-in backends:

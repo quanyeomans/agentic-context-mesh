@@ -1,5 +1,5 @@
 """
-Wikilink audit functions for Mnemosyne.
+Wikilink audit functions for kairix.
 
 Provides:
 - find_broken_links(): vault wikilinks pointing to non-existent paths

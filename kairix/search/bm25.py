@@ -1,5 +1,5 @@
 """
-BM25 search wrapper for the Mnemosyne hybrid search pipeline.
+BM25 search wrapper for the kairix hybrid search pipeline.
 
 Runs `qmd search --json` as a subprocess and returns structured results.
 Never raises — returns [] on any failure (timeout, parse error, empty).

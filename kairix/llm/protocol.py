@@ -1,7 +1,7 @@
 """
 LLMBackend protocol — provider-agnostic interface for chat and embedding.
 
-All Mnemosyne code that calls an LLM should accept a ``LLMBackend`` rather
+All kairix code that calls an LLM should accept a ``LLMBackend`` rather
 than importing ``kairix._azure`` directly.  This decouples the engine
 from the Azure-specific implementation and enables:
 

@@ -40,6 +40,7 @@ Master registry of all kairix operational procedures and incident runbooks.
 | [how-to-onboard-new-installation](how-to-onboard-new-installation.md) | New install checklist: symlinks, GGUF conflict detection, credential method, dimension check |
 | [how-to-run-benchmark](how-to-run-benchmark.md) | Benchmark suite, before/after comparison, promotion gate |
 | [how-to-debug-search-ranking](how-to-debug-search-ranking.md) | Query intent dispatch, RRF weights, category-specific tuning |
+| [how-to-migrate-entity-store](how-to-migrate-entity-store.md) | Migrate from entities.db (SQLite) to Neo4j as canonical entity store (v0.9.2+) |
 
 ---
 

@@ -1,5 +1,5 @@
 """
-Multi-hop query planning for the Mnemosyne hybrid search pipeline.
+Multi-hop query planning for the kairix hybrid search pipeline.
 
 Decomposes complex queries into 2-3 focused sub-queries via GPT-4o-mini
 (using the existing kairix._azure.chat_completion — no extra dependencies),

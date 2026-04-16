@@ -1,5 +1,5 @@
 """
-Vector search wrapper for the Mnemosyne hybrid search pipeline.
+Vector search wrapper for the kairix hybrid search pipeline.
 
 Uses the CTE pattern established in Phase 0 recall_check.py:_vsearch_direct.
 Queries the sqlite-vec virtual table via a JOIN CTE to avoid direct vec0 bugs.

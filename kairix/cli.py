@@ -4,6 +4,7 @@ kairix — contextual intelligence layer for QMD + Obsidian agent stacks.
 Subcommands:
   embed       Embed vault documents into QMD sqlite-vec (text-embedding-3-large)
   search      Hybrid search: BM25 + vector via RRF
+  entity      Entity management: suggest (NER), validate (Wikidata)
   curator     Curator agent: entity health monitoring and enrichment (CA-1)
   contradict  Contradiction detection: check new content against vault knowledge
   vault       Vault operations: crawl entities into Neo4j, health check
@@ -33,6 +34,11 @@ def main() -> None:
         from kairix.embed.cli import main as embed_main
 
         embed_main()
+
+    elif cmd == "entity":
+        from kairix.entities.cli import main as entity_main
+
+        sys.exit(entity_main(sys.argv[2:]))
 
     elif cmd == "curator":
         from kairix.curator.cli import main as curator_main

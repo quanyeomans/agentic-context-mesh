@@ -1,5 +1,5 @@
 """
-Shared Azure OpenAI client for the Mnemosyne pipeline.
+Shared Azure OpenAI client for the kairix pipeline.
 
 Provides:
   - embed_text(text: str) -> list[float]

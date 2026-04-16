@@ -1,5 +1,5 @@
 """
-Rule-based classifier for Mnemosyne memory writes.
+Rule-based classifier for kairix memory writes.
 
 Rules in priority order (first match wins):
   1. Starts with ## [HH:MM] or ## \\d{2}:\\d{2}  → episodic

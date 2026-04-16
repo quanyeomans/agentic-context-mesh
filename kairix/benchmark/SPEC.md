@@ -1,4 +1,4 @@
-# Mnemosyne Benchmark Framework — Design Spec
+# kairix Benchmark Framework — Design Spec
 
 **Version:** 1.0  
 **Status:** Draft — pending Phase 1 validation  
@@ -26,7 +26,7 @@ This is **not** a research benchmark. It's an operational tool for ongoing quali
 Each agent defines a test suite as a YAML file:
 
 ```yaml
-# ~/.mnemosyne/benchmark/<agent-name>/suite.yaml
+# ~/.kairix/benchmark/<agent-name>/suite.yaml
 meta:
   agent: builder
   collections:            # QMD collections this agent actually uses
@@ -99,21 +99,21 @@ A `recall` case is valid if and only if:
 
 ```bash
 # Run against the default retrieval system
-mnemosyne benchmark run --suite ~/.mnemosyne/benchmark/builder/suite.yaml
+kairix benchmark run --suite ~/.kairix/benchmark/builder/suite.yaml
 
 # Run against a specific system (for comparison)
-mnemosyne benchmark run --suite suite.yaml --system bm25
-mnemosyne benchmark run --suite suite.yaml --system hybrid
-mnemosyne benchmark run --suite suite.yaml --system vector
+kairix benchmark run --suite suite.yaml --system bm25
+kairix benchmark run --suite suite.yaml --system hybrid
+kairix benchmark run --suite suite.yaml --system vector
 
 # Validate suite (check gold paths exist, no duplicates)
-mnemosyne benchmark validate --suite suite.yaml
+kairix benchmark validate --suite suite.yaml
 
 # Compare two result files
-mnemosyne benchmark compare results/B0-bm25.json results/B1-hybrid.json
+kairix benchmark compare results/B0-bm25.json results/B1-hybrid.json
 
 # Generate suite template for an agent
-mnemosyne benchmark init --agent builder --collections vault,knowledge-builder
+kairix benchmark init --agent builder --collections vault,knowledge-builder
 ```
 
 ---
@@ -180,7 +180,7 @@ The report includes a plain-language interpretation section:
 
 **Temporal < 0.50:** Root cause is almost always ingestion structure, not retrieval quality. Board files and daily logs are stored as undifferentiated blobs. Fix: enable date-aware chunking in the temporal module.
 
-**Entity < 0.55:** Entity graph either empty or not being used for boosting. Fix: populate entities.db for your key people/projects, enable entity boosting in the search pipeline.
+**Entity < 0.55:** Entity graph either empty or not being used for boosting. Fix: seed entities into Neo4j with kairix entity suggest/validate, enable entity boosting in the search pipeline.
 
 **Conceptual < 0.55:** Hybrid RRF balance may be wrong. Try tuning RRF k (30/60/90). If BM25 alone scores higher on conceptual, the vector component is hurting.
 
@@ -213,7 +213,7 @@ For agent owners writing their first suite:
 ### Step 1: List your collections
 
 ```bash
-mnemosyne benchmark init --agent <your-agent> --collections <list>
+kairix benchmark init --agent <your-agent> --collections <list>
 # Generates a template suite.yaml with 2 example cases per category
 ```
 
@@ -221,9 +221,9 @@ mnemosyne benchmark init --agent <your-agent> --collections <list>
 
 For each case:
 1. Pick a document you know should be the top result for a specific query
-2. Verify it's in the index: `mnemosyne benchmark validate --check-path "<path>"`
+2. Verify it's in the index: `kairix benchmark validate --check-path "<path>"`
 3. Write a query that is specific to that document (not generic)
-4. Test it: `mnemosyne search "<query>" --agent <agent> --json | jq '.results[0].path'`
+4. Test it: `kairix search "<query>" --agent <agent> --json | jq '.results[0].path'`
 5. If the gold doc comes back in top-3, it's a valid case. Add it.
 
 ### Step 3: Add LLM-judged cases
@@ -236,7 +236,7 @@ Bad LLM-judged cases: hypothetical ("what would we do if..."), too broad ("tell 
 ### Step 4: Validate and commit
 
 ```bash
-mnemosyne benchmark validate --suite suite.yaml
+kairix benchmark validate --suite suite.yaml
 # Outputs: N valid cases, M invalid (with reasons), estimated run time
 ```
 
@@ -261,6 +261,6 @@ Commit your suite to the repo. It becomes the regression baseline.
 | Phase | Deliverable |
 |---|---|
 | Phase 1 | Manual YAML suites for Builder and Shape. Runner as Python script. |
-| Phase 2 | `mnemosyne benchmark` CLI with validate/run/compare subcommands. |
+| Phase 2 | `kairix benchmark` CLI with validate/run/compare subcommands. |
 | Phase 3 | Automated weekly cron. Regression alerts when score drops >5%. Results committed to repo. |
-| Phase 4 | `mnemosyne benchmark init` generator. Multi-agent aggregate report. |
+| Phase 4 | `kairix benchmark init` generator. Multi-agent aggregate report. |

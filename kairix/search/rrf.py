@@ -1,6 +1,6 @@
 """
 Reciprocal Rank Fusion (RRF) + entity boosting + procedural boosting for the
-Mnemosyne search pipeline.
+kairix search pipeline.
 
 RRF combines BM25 and vector search result lists into a single ranked list.
 Entity boosting increases scores for documents that have known entity mentions,
@@ -34,7 +34,6 @@ All functions return [] on empty inputs. Never raise.
 import logging
 import math
 import re
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -200,125 +199,8 @@ def _rrf_impl(
 
 
 # ---------------------------------------------------------------------------
-# Entity boosting
+# Entity boosting (Neo4j)
 # ---------------------------------------------------------------------------
-
-
-def entity_boost(
-    results: list[FusedResult],
-    db: sqlite3.Connection,
-    boost_factor: float = ENTITY_BOOST_FACTOR,
-    cap: float = ENTITY_BOOST_CAP,
-) -> list[FusedResult]:
-    """
-    Boost documents that have entity_mentions entries in entities.db.
-
-    Boost formula:
-      multiplier = 1 + min(boost_factor * log(1 + mention_count), cap - 1)
-      boosted_score = rrf_score * multiplier
-
-    Args:
-        results:       List of FusedResult (from rrf()).
-        db:            Open sqlite3.Connection to entities.db.
-        boost_factor:  ENTITY_BOOST_FACTOR (default 0.20).
-        cap:           ENTITY_BOOST_CAP (default 2.0).
-
-    Returns:
-        Results sorted by boosted_score descending.
-        Returns results unmodified if entities.db is unavailable.
-        Never raises.
-    """
-    if not results:
-        return results
-
-    try:
-        return _entity_boost_impl(results, db, boost_factor, cap)
-    except Exception as e:
-        logger.warning("entity_boost: error querying entities.db — %s — returning unmodified results", e)
-        return results
-
-
-def _entity_boost_impl(
-    results: list[FusedResult],
-    db: sqlite3.Connection,
-    boost_factor: float,
-    cap: float,
-) -> list[FusedResult]:
-    """Implementation of entity boosting — called from entity_boost() with error boundary."""
-    # Collect all document paths
-    paths = [r.path for r in results]
-    if not paths:
-        return results
-
-    # Path normalisation: entity_mentions stores absolute vault paths with original
-    # casing (e.g. /path/to/vault/01-folder/Foo Bar/file.md) while QMD
-    # search results use lowercase relative paths with hyphens
-    # (e.g. 01-projects/foo-bar/file.md).
-    def _to_qmd_path(uri: str) -> str:
-        import os as _os
-
-        vault_root = _os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault")
-        vault_prefix = f"{vault_root}/"
-        if uri.startswith(vault_prefix):
-            return uri[len(vault_prefix) :].lower().replace(" ", "-")
-        return uri.lower()
-
-    # Query entity_mentions scoped to the result paths only.
-    # This is critical: we must NOT scan the whole entity_mentions table and
-    # build a global mention count, because index/reference files (e.g.
-    # facts.md, wikilink-entity-index.md) accumulate hundreds of cross-entity
-    # mentions and would be rocket-boosted to the top of every search.
-    #
-    # Instead: only boost a result document if it has entity_mentions entries,
-    # and compare only within the candidate set that already passed BM25/vector
-    # relevance filtering.  This preserves the original intent (signal that a
-    # doc is entity-rich relative to the query) without promoting index files.
-    try:
-        # Build reverse lookup: qmd_path → original doc_uri candidates
-        # We scan entity_mentions for any doc_uri that normalises to one of our paths.
-        # Using GLOB/LIKE on the whole table is too slow; instead fetch all and filter in Python.
-        # entity_mentions has ~22k rows — acceptable for an in-memory scan.
-        rows = db.execute(
-            "SELECT doc_uri, SUM(mention_count) as total_mentions FROM entity_mentions GROUP BY doc_uri",
-        ).fetchall()
-    except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
-        logger.debug("entity_boost: entity_mentions unavailable — %s", e)
-        return results
-
-    # Build normalised lookup restricted to our candidate paths only
-    path_set = set(paths)
-    mention_counts: dict[str, int] = {}
-    for doc_uri, total in rows:
-        qmd_path = _to_qmd_path(doc_uri)
-        if qmd_path in path_set:
-            mention_counts[qmd_path] = mention_counts.get(qmd_path, 0) + int(total)
-
-    if not mention_counts:
-        # No entity mentions for any result — skip boost, return as-is
-        for r in results:
-            r.boosted_score = r.rrf_score
-        return results
-
-    # Normalise counts relative to max in this result set (not absolute).
-    # A doc with 5 mentions in a set where max=10 gets the same relative boost
-    # as 50 mentions in a set where max=100.  This prevents index files from
-    # dominating when they happen to appear in results.
-    max_count = max(mention_counts.values()) if mention_counts else 1
-
-    # Apply boost using normalised count (0.0-1.0 range)
-    for r in results:
-        raw_count = mention_counts.get(r.path, 0)
-        r.entity_mention_count = raw_count
-        if raw_count > 0:
-            normalised = raw_count / max_count
-            boost_amount = min(boost_factor * math.log1p(normalised * 10), cap - 1.0)
-            multiplier = 1.0 + boost_amount
-            r.boosted_score = r.rrf_score * multiplier
-        else:
-            r.boosted_score = r.rrf_score
-
-    # Re-sort by boosted score
-    return sorted(results, key=lambda r: r.boosted_score, reverse=True)
 
 
 def entity_boost_neo4j(

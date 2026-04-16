@@ -1,5 +1,5 @@
 """
-Tier router for the Mnemosyne search pipeline.
+Tier router for the kairix search pipeline.
 
 load_tiered_content() selects the appropriate content representation
 (L0 abstract, L1 overview, or full file text) based on a token budget

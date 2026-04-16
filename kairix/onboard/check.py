@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -386,6 +387,49 @@ def check_agent_knowledge_populated() -> CheckResult:
     )
 
 
+def check_mcp_service() -> CheckResult:
+    """kairix-mcp.service is active (systemd)."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "kairix-mcp.service"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        state = result.stdout.strip()
+        if state == "active":
+            return CheckResult(
+                name="mcp_service",
+                ok=True,
+                detail="kairix-mcp.service is active",
+            )
+        return CheckResult(
+            name="mcp_service",
+            ok=False,
+            detail=f"kairix-mcp.service state: {state or '(unknown)'}",
+            fix=(
+                "Start the MCP service:\n"
+                "  sudo systemctl enable --now kairix-mcp.service\n"
+                "If the unit is not installed, run apply-kairix-config.sh first.\n"
+                "Check logs: journalctl -u kairix-mcp.service -n 30"
+            ),
+        )
+    except FileNotFoundError:
+        return CheckResult(
+            name="mcp_service",
+            ok=False,
+            detail="systemctl not found — not a systemd host",
+            fix="kairix-mcp.service requires a systemd Linux host (not macOS or Docker without systemd).",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="mcp_service",
+            ok=False,
+            detail=f"Could not query kairix-mcp.service: {exc}",
+            fix="Check systemd is running and this process has permission to query service state.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Run all checks
 # ---------------------------------------------------------------------------
@@ -399,6 +443,7 @@ ALL_CHECKS = [
     check_vector_search_working,
     check_neo4j_reachable,
     check_agent_knowledge_populated,
+    check_mcp_service,
 ]
 
 

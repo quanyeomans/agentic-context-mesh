@@ -1,0 +1,37 @@
+[Unit]
+Description=Kairix MCP Server
+Documentation=https://github.com/quanyeomans/agentic-context-mesh
+After=network.target neo4j.service
+Wants=neo4j.service
+
+[Service]
+Type=simple
+User=${KAIRIX_USER}
+Group=${KAIRIX_USER}
+WorkingDirectory=${KAIRIX_DATA_DIR}
+EnvironmentFile=${KAIRIX_SERVICE_ENV:-/opt/kairix/service.env}
+
+# Load runtime secrets (Neo4j password, Azure key)
+ExecStartPre=/bin/bash -c 'test -f /run/secrets/kairix.env && source /run/secrets/kairix.env || true'
+
+ExecStart=${KAIRIX_VENV}/bin/kairix mcp serve \
+    --host 127.0.0.1 \
+    --port 7443
+
+# Restart policy — restart on failure, not on clean stop
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=30
+TimeoutStopSec=15
+
+# Resource limits
+LimitNOFILE=65536
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=${KAIRIX_DATA_DIR}
+
+[Install]
+WantedBy=multi-user.target
