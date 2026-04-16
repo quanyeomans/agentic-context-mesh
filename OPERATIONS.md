@@ -413,7 +413,7 @@ Runs kairix embed incrementally — only embeds files modified since the last ru
 15 * * * * /opt/kairix/cron/kairix-embed.sh >> /data/kairix/logs/embed.log 2>&1
 ```
 
-`/opt/kairix/cron/kairix-embed.sh` sources `/run/secrets/kairix.env` then runs `kairix embed`. This script is deployed by `apply-kairix-config.sh` on managed deployments.
+`/opt/kairix/cron/kairix-embed.sh` sources `/run/secrets/kairix.env` then runs `kairix embed`. Source script: [`scripts/cron/kairix-embed.sh`](scripts/cron/kairix-embed.sh)
 
 ### Nightly entity + relationship seed (03:00 AEST / 17:00 UTC)
 
@@ -626,6 +626,35 @@ crontab -l | grep qmd
 # Schedule embed cron to run just after QMD reindex, not during it
 ```
 
+### GGUF/QMD embedding conflict
+
+If another tool (e.g. OpenClaw or a custom QMD wrapper) runs `qmd embed` as a cron job, it overwrites kairix's Azure vectors (`text-embedding-3-large`, 1536-dim) with GGUF local vectors (`float[768]`). This causes `Dimension mismatch` errors on the next kairix embed run, or `vec=0` results after an apparent successful embed.
+
+**Detect:**
+```bash
+# Check for mixed embedding models in content_vectors
+sqlite3 ~/.cache/qmd/index.sqlite \
+  "SELECT model, COUNT(*) FROM content_vectors GROUP BY model;"
+# If you see two models, the conflict is active
+
+# Scan integration cron directories for uncommented qmd embed calls
+for dir in /opt/openclaw/cron /usr/local/openclaw/cron; do
+  [[ -d "$dir" ]] || continue
+  grep -rl 'qmd embed' "$dir" 2>/dev/null | while read -r f; do
+    grep -v '^\s*#' "$f" | grep -qP "(?<!['\"])qmd\s+embed" && echo "CONFLICT: $f"
+  done
+done
+```
+
+**Fix:**
+1. Remove or comment out the `qmd embed` call from the offending script — `qmd update` (BM25/FTS reindex) is fine to keep; only `qmd embed` causes the conflict
+2. Force-rebuild Azure vectors: `kairix embed --force`
+3. Verify: `sqlite3 ~/.cache/qmd/index.sqlite "SELECT model, COUNT(*) FROM content_vectors GROUP BY model;"` should show only `text-embedding-3-large`
+
+The `qmd-reindex.sh` cron script (see [scripts/cron/](scripts/cron/)) runs this detection check automatically every 6 hours and warns if it finds a conflict.
+
+See [how-to-fix-binary-symlink.md](docs/runbooks/how-to-fix-binary-symlink.md) if `vec=0` persists after the force re-embed.
+
 ### Neo4j unavailable
 
 kairix degrades gracefully — entity boost and multi-hop queries are disabled, but search still works.
@@ -666,6 +695,10 @@ kairix curator health
 # Run briefing with debug output
 KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 ```
+
+### More detailed runbooks
+
+For deeper diagnostic procedures and less common failure modes, see [`docs/runbooks/INDEX.md`](docs/runbooks/INDEX.md).
 
 ---
 
