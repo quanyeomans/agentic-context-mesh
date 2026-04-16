@@ -67,6 +67,8 @@ _SHARED_COLLECTIONS = [
     "vault-knowledge",  # Generalised knowledge (05-Knowledge)
     "vault-entities",  # Entity knowledge graph — boosted for entity/person/org queries
     "knowledge-shared",
+    "tc-agent-zone",   # Agent configs, skill definitions, runbooks, architecture docs (tc-agent-zone repo)
+    "tc-engineering",  # Engineering standards, Ralph framework, design system, templates (engineering-hub repo)
     # vault-archive excluded from default — search explicitly when historical context needed
     # Add deployment-specific collections via KAIRIX_EXTRA_COLLECTIONS (comma-separated):
     *[c.strip() for c in os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "").split(",") if c.strip()],
