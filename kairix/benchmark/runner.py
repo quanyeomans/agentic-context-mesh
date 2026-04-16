@@ -347,7 +347,13 @@ def _retrieve(
     if system == "hybrid":
         from kairix.search.hybrid import search
 
-        sr = search(query=query, agent=agent, scope="shared+agent", budget=5000)
+        # Use a large budget to avoid the token-budget system truncating results.
+        # The budget allocator loads full document content; with a 5000-token budget,
+        # 3-4 long documents exhaust it before positions 5-10 are filled. For
+        # benchmark scoring we need all fused results ranked by RRF score, not
+        # truncated by context-window budget. 500_000 tokens is effectively unlimited
+        # for a typical 25-result fused set.
+        sr = search(query=query, agent=agent, scope="shared+agent", budget=500_000)
         paths = [b.result.path for b in sr.results]
         snippets = [b.content[:500] for b in sr.results]
         meta = {
