@@ -1,18 +1,21 @@
 """
-Reciprocal Rank Fusion (RRF) + entity boosting + procedural boosting for the
-kairix search pipeline.
+Reciprocal Rank Fusion (RRF) + entity boosting + procedural boosting + temporal
+date boosting for the kairix search pipeline.
 
 RRF combines BM25 and vector search result lists into a single ranked list.
 Entity boosting increases scores for documents that have known entity mentions,
 rewarding documents that are associated with important named entities.
 Procedural boosting re-ranks procedural content (how-to guides, runbooks) for
 PROCEDURAL intent queries where retrieval hits but ranking is weak.
+Temporal date boosting re-ranks documents whose path contains a date string
+matching the queried date, for TEMPORAL intent queries.
 
 Constants:
   RRF_K = 60                      Standard RRF constant (Cormack et al., 2009)
   ENTITY_BOOST_FACTOR = 0.20      Multiplier for log(1 + mention_count)
   ENTITY_BOOST_CAP = 2.0          Maximum boost multiplier (prevents runaway scores)
   PROCEDURAL_BOOST_FACTOR = 1.4   Score multiplier for procedural path patterns
+  TEMPORAL_DATE_BOOST_FACTOR = 1.35  Score multiplier for date-matching path patterns
 
 RRF formula per document:
   score(d) = sum(1 / (k + rank_in_list) for each list containing d)
@@ -26,6 +29,13 @@ Procedural boost:
   Applied post-RRF, after entity boost, for PROCEDURAL intent queries only.
   Multiplies boosted_score by PROCEDURAL_BOOST_FACTOR for documents whose path
   matches procedural content patterns (how-to-*, /runbooks/, runbook-*, procedure*).
+  Zero effect on other intent types.
+
+Temporal date boost:
+  Applied post-RRF, after entity boost, for TEMPORAL intent queries only.
+  Multiplies boosted_score by TEMPORAL_DATE_BOOST_FACTOR for documents whose path
+  contains a date string extracted from the query (YYYY-MM-DD or YYYY-MM).
+  Also boosts recent documents for relative temporal queries ("recent", "last month").
   Zero effect on other intent types.
 
 All functions return [] on empty inputs. Never raise.
@@ -50,6 +60,23 @@ RRF_K: int = 60
 ENTITY_BOOST_FACTOR: float = 0.20
 ENTITY_BOOST_CAP: float = 2.0
 PROCEDURAL_BOOST_FACTOR: float = 1.4
+TEMPORAL_DATE_BOOST_FACTOR: float = 1.35
+
+# ---------------------------------------------------------------------------
+# Temporal date extraction patterns (query-side)
+# ---------------------------------------------------------------------------
+
+# Matches YYYY-MM-DD (e.g. "2026-03-22") in a query
+_QUERY_ISO_DATE_RE: re.Pattern[str] = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
+# Matches YYYY-MM (e.g. "2026-03") — also captures the YYYY-MM prefix of ISO dates
+_QUERY_YEAR_MONTH_RE: re.Pattern[str] = re.compile(r"\b(\d{4}-\d{2})(?:-\d{2})?\b")
+
+# Relative temporal terms that trigger a recency boost instead of a date-match boost
+_RELATIVE_TEMPORAL_RE: re.Pattern[str] = re.compile(
+    r"\b(recent(?:ly)?|last\s+(?:week|month)|yesterday|today|this\s+(?:week|month))\b",
+    re.IGNORECASE,
+)
 
 # ---------------------------------------------------------------------------
 # Procedural path patterns
@@ -336,3 +363,108 @@ def _procedural_boost_impl(
         if any(p.search(r.path) for p in _PROCEDURAL_PATH_PATTERNS):
             r.boosted_score *= boost_factor
     return sorted(results, key=lambda r: r.boosted_score, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Temporal date boosting
+# ---------------------------------------------------------------------------
+
+
+def temporal_date_boost(
+    results: list[FusedResult],
+    query: str,
+    boost_factor: float = TEMPORAL_DATE_BOOST_FACTOR,
+) -> list[FusedResult]:
+    """
+    Boost documents whose path contains a date string matching the queried date
+    for TEMPORAL intent queries.
+
+    Called after entity_boost(), before apply_budget(). Only called when
+    intent == QueryIntent.TEMPORAL — callers are responsible for the guard.
+
+    Boost logic:
+      - If query contains a specific date (YYYY-MM-DD): boost documents whose
+        path contains that exact date string or its YYYY-MM prefix.
+      - If query contains a relative temporal term ("recent", "last week",
+        "last month", "yesterday", "today"): boost documents whose path
+        contains an ISO date from the last 30 days (last week) or 90 days
+        (last month / recent).
+      - Non-matching documents are unaffected.
+
+    Args:
+        results:      List of FusedResult (from rrf(), after entity_boost()).
+        query:        The original (or rewritten) query string.
+        boost_factor: Multiplier for matching paths. Default 1.35.
+
+    Returns:
+        Results re-sorted by boosted_score descending.
+        Returns results unmodified on any error.
+        Never raises.
+    """
+    if not results:
+        return results
+
+    try:
+        return _temporal_date_boost_impl(results, query, boost_factor)
+    except Exception as e:
+        logger.warning("temporal_date_boost: error — %s — returning unmodified results", e)
+        return results
+
+
+def _temporal_date_boost_impl(
+    results: list[FusedResult],
+    query: str,
+    boost_factor: float,
+) -> list[FusedResult]:
+    """Implementation of temporal date boosting — called from temporal_date_boost() with error boundary."""
+    import datetime
+
+    boosted_any = False
+
+    # --- Strategy 1: explicit date in query (YYYY-MM-DD or YYYY-MM) ---
+    iso_match = _QUERY_ISO_DATE_RE.search(query)
+    ym_match = _QUERY_YEAR_MONTH_RE.search(query)
+
+    date_strings: list[str] = []
+    if iso_match:
+        date_strings.append(iso_match.group(1))  # YYYY-MM-DD
+        date_strings.append(iso_match.group(1)[:7])  # YYYY-MM prefix
+    elif ym_match:
+        date_strings.append(ym_match.group(1))  # YYYY-MM
+
+    if date_strings:
+        for r in results:
+            if any(ds in r.path for ds in date_strings):
+                r.boosted_score *= boost_factor
+                boosted_any = True
+        if boosted_any:
+            return sorted(results, key=lambda r: r.boosted_score, reverse=True)
+
+    # --- Strategy 2: relative temporal terms → recency window ---
+    rel_match = _RELATIVE_TEMPORAL_RE.search(query)
+    if rel_match:
+        term = rel_match.group(1).lower().replace(" ", " ")
+        today = datetime.date.today()
+        if "last week" in term or "yesterday" in term or "today" in term:
+            cutoff = today - datetime.timedelta(days=30)
+        else:
+            # "recently", "last month", "this week", "this month"
+            cutoff = today - datetime.timedelta(days=90)
+
+        # Path dates: look for YYYY-MM-DD in the path and compare to cutoff
+        _path_date_re = re.compile(r"(\d{4}-\d{2}-\d{2})")
+        for r in results:
+            path_date_match = _path_date_re.search(r.path)
+            if path_date_match:
+                try:
+                    path_date = datetime.date.fromisoformat(path_date_match.group(1))
+                    if path_date >= cutoff:
+                        r.boosted_score *= boost_factor
+                        boosted_any = True
+                except ValueError:
+                    pass
+
+    if boosted_any:
+        return sorted(results, key=lambda r: r.boosted_score, reverse=True)
+
+    return results
