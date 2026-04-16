@@ -79,6 +79,31 @@ def _ideal_dcg(gold_paths: list[dict], k: int) -> float:
     return _dcg(sorted_rels, k)
 
 
+def _path_relevance(path: str, gold_map: dict[str, float]) -> float:
+    """Return relevance of a retrieved path via exact then suffix match against gold_map."""
+    p = path.lower().replace("\\", "/")
+    if p in gold_map:
+        return gold_map[p]
+    parts = p.split("/")
+    for n in range(1, len(parts)):
+        suffix = "/".join(parts[n:])
+        if suffix in gold_map:
+            return gold_map[suffix]
+    return 0.0
+
+
+def _path_in_set(path: str, gold_set: set[str]) -> bool:
+    """True if path matches any gold entry via exact or suffix match."""
+    p = path.lower().replace("\\", "/")
+    if p in gold_set:
+        return True
+    parts = p.split("/")
+    for n in range(1, len(parts)):
+        if "/".join(parts[n:]) in gold_set:
+            return True
+    return False
+
+
 def _ndcg_score(retrieved: list[str], gold_paths: list[dict], k: int = 10) -> float:
     """Compute NDCG@k given retrieved path list and graded gold list."""
     if not gold_paths:
@@ -87,21 +112,21 @@ def _ndcg_score(retrieved: list[str], gold_paths: list[dict], k: int = 10) -> fl
     if idcg == 0.0:
         return 0.0
     gold_map = {g["path"].lower(): g["relevance"] for g in gold_paths}
-    rels = [gold_map.get(p.lower(), 0) for p in retrieved[:k]]
+    rels = [_path_relevance(p, gold_map) for p in retrieved[:k]]
     return _dcg(rels, k) / idcg
 
 
 def _hit_at_k(retrieved: list[str], gold_paths: list[dict], k: int) -> bool:
     """True if any gold path (any relevance ≥ 1) appears in top-k retrieved."""
     gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
-    return any(p.lower() in gold_set for p in retrieved[:k])
+    return any(_path_in_set(p, gold_set) for p in retrieved[:k])
 
 
 def _reciprocal_rank(retrieved: list[str], gold_paths: list[dict], k: int) -> float:
     """Reciprocal rank of first relevant gold path in top-k (0 if none)."""
     gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
     for i, p in enumerate(retrieved[:k]):
-        if p.lower() in gold_set:
+        if _path_in_set(p, gold_set):
             return 1.0 / (i + 1)
     return 0.0
 
@@ -332,8 +357,17 @@ def _retrieve(
         from kairix.search.bm25 import bm25_search
 
         results = bm25_search(query=query, agent=agent, limit=limit)
-        paths = [r.path for r in results]
-        snippets = [r.snippet or "" for r in results]
+        # BM25Result.file is a qmd:// URI — strip the scheme+collection prefix
+        # to match the bare relative paths stored in gold_paths
+        def _strip_qmd(uri: str) -> str:
+            if uri.startswith("qmd://"):
+                tail = uri[len("qmd://"):]
+                slash = tail.find("/")
+                return tail[slash + 1:] if slash != -1 else tail
+            return uri
+
+        paths = [_strip_qmd(r["file"]) for r in results]
+        snippets = [r.get("snippet") or "" for r in results]
         return paths, snippets, {"system": "bm25"}
 
     else:
