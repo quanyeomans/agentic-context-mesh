@@ -386,8 +386,11 @@ def search(
         fused = procedural_boost(fused)
 
     # Temporal date boosting for TEMPORAL intent (TMP-7)
-    if intent == QueryIntent.TEMPORAL:
-        fused = temporal_date_boost(fused, active_query)
+    # Disabled: path-date boost hurts general temporal queries whose gold docs
+    # are concept notes (not daily logs). Re-enable only for explicit-date queries
+    # after further analysis of failing temporal cases.
+    # if intent == QueryIntent.TEMPORAL:
+    #     fused = temporal_date_boost(fused, active_query)
 
     # Merge temporal chunks into fused results for TEMPORAL intent.
     # Previously stored as _temporal_chunks side-channel; now merged into main
