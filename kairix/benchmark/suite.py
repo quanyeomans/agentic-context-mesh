@@ -34,6 +34,7 @@ class BenchmarkCase:
     gold_paths: list[dict] | None = None  # for ndcg: [{path, relevance}] graded relevance 0-2 (path-based)
     gold_title: str | None = None  # stable note title for exact/fuzzy cases (path-agnostic)
     gold_titles: list[dict] | None = None  # for ndcg: [{title, relevance}] graded relevance 0-2 (title-based)
+    agent: str | None = None  # per-case agent override (builder|shape|consultant|…)
 
 
 @dataclass
@@ -102,6 +103,7 @@ def load_suite(path: str) -> BenchmarkSuite:
         gold_paths = raw_case.get("gold_paths")  # list of {path, relevance} for ndcg (path-based)
         gold_title = raw_case.get("gold_title")  # stable note title for exact/fuzzy (title-based)
         gold_titles = raw_case.get("gold_titles")  # list of {title, relevance} for ndcg (title-based)
+        case_agent = raw_case.get("agent")  # per-case agent override
 
         # Required fields
         if not case_id:
@@ -166,6 +168,7 @@ def load_suite(path: str) -> BenchmarkSuite:
                     gold_paths=gold_paths if isinstance(gold_paths, list) else None,
                     gold_title=str(gold_title) if gold_title else None,
                     gold_titles=gold_titles if isinstance(gold_titles, list) else None,
+                    agent=str(case_agent) if case_agent else None,
                 )
             )
 

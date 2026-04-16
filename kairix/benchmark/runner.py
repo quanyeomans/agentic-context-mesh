@@ -576,7 +576,7 @@ def run_benchmark(
                 paths, snippets, retrieval_meta = _retrieve(
                     query=case.query,
                     system=system,
-                    agent=agent,
+                    agent=case.agent or agent,
                 )
             except Exception as exc:
                 paths, snippets, retrieval_meta = [], [], {"error": str(exc)}
