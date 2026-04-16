@@ -32,7 +32,7 @@ from kairix.llm import get_default_backend as _get_llm
 from kairix.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
 from kairix.search.budget import BudgetedResult, apply_budget
 from kairix.search.intent import QueryIntent, classify
-from kairix.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, rrf
+from kairix.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, rrf, temporal_date_boost
 from kairix.search.vector import VecResult, vector_search_bytes
 
 logger = logging.getLogger(__name__)
@@ -384,6 +384,10 @@ def search(
     # Procedural boosting for PROCEDURAL intent
     if intent == QueryIntent.PROCEDURAL:
         fused = procedural_boost(fused)
+
+    # Temporal date boosting for TEMPORAL intent (TMP-7)
+    if intent == QueryIntent.TEMPORAL:
+        fused = temporal_date_boost(fused, active_query)
 
     # Merge temporal chunks into fused results for TEMPORAL intent.
     # Previously stored as _temporal_chunks side-channel; now merged into main
