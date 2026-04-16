@@ -59,6 +59,13 @@ SCORE_TIERS = [
 
 CATEGORY_FLOOR = 0.50  # per-category minimum for gate pass
 
+# Suite category aliases — v2-real-world.yaml uses "semantic" and "keyword";
+# the runner tracks "recall" and "conceptual". Map them so no cases are dropped.
+CATEGORY_ALIASES: dict[str, str] = {
+    "semantic": "recall",
+    "keyword": "conceptual",
+}
+
 # How many top results to inspect for exact/fuzzy matching
 EXACT_MATCH_TOPK = 5
 FUZZY_MATCH_TOPK = 10
@@ -614,7 +621,7 @@ def run_benchmark(
 
         elapsed_ms = (time.time() - t0) * 1000
 
-        cat = case.category
+        cat = CATEGORY_ALIASES.get(case.category, case.category)
         if cat in category_scores:
             category_scores[cat].append(score)
 
@@ -622,6 +629,7 @@ def run_benchmark(
             {
                 "id": case.id,
                 "category": cat,
+                "original_category": case.category,
                 "query": case.query,
                 "gold_path": case.gold_path,
                 "score_method": case.score_method,
