@@ -157,6 +157,27 @@ def _log_query_event(event: dict) -> None:
         logger.warning("hybrid: failed to write query log — %s", e)
 
 
+def _query_has_temporal_marker(query: str) -> bool:
+    """
+    Return True if the query contains an explicit temporal reference.
+
+    Used to guard temporal chunk injection — prevents memory files being injected
+    for historical/architectural queries ("what changed and why") that trigger
+    TEMPORAL intent but whose gold documents are design docs, not daily logs.
+
+    Explicit markers: ISO dates (YYYY-MM-DD / YYYY-MM) or relative terms
+    (yesterday, today, last week, last month, recently, this week, this month).
+    """
+    import re as _re
+
+    iso_date = _re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
+    rel_term = _re.compile(
+        r"\b(recent(?:ly)?|last\s+(?:week|month)|yesterday|today|this\s+(?:week|month))\b",
+        _re.IGNORECASE,
+    )
+    return bool(iso_date.search(query) or rel_term.search(query))
+
+
 def _open_vec_db() -> sqlite3.Connection | None:
     """Open QMD DB with sqlite-vec extension loaded. Returns None on any failure."""
     try:
@@ -468,9 +489,12 @@ def search(
             logger.warning("hybrid: chunk_date_boost failed — %s", _cbd_e)
 
     # Merge temporal chunks into fused results for TEMPORAL intent.
-    # Previously stored as _temporal_chunks side-channel; now merged into main
-    # results so benchmark and callers see them. (Phase 4B-1 fix 2026-04-05)
-    if temporal_chunks and intent == QueryIntent.TEMPORAL:
+    # Guard: only inject when query has explicit temporal reference (specific date or
+    # relative term like "last week"). Queries like "what changed and why" trigger
+    # TEMPORAL intent but target architecture/decisions docs — not memory files.
+    # Injecting memory files at rrf_score=0.82 for those queries displaces gold docs.
+    # MHQ-1 finding: M07 gold moved from ranks 2,3 to 4,5 due to unconditional injection.
+    if temporal_chunks and intent == QueryIntent.TEMPORAL and _query_has_temporal_marker(active_query):
         seen_paths = {fr.path for fr in fused}
         temporal_fused = []
         for tc in temporal_chunks[:6]:
