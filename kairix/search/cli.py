@@ -17,6 +17,7 @@ Exits 0 on success, 1 on error.
 import argparse
 import json
 
+from kairix.search.config_loader import load_config
 from kairix.search.hybrid import SearchResult, search
 
 
@@ -74,11 +75,13 @@ def _format_result(sr: SearchResult, limit: int) -> str:
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
 
+    cfg = load_config()
     sr = search(
         query=args.query,
         agent=args.agent,
         scope=args.scope,
         budget=args.budget,
+        config=cfg,
     )
 
     if args.as_json:

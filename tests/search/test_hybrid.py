@@ -335,12 +335,12 @@ def test_cli_agent_flag_passed_to_search(capsys: pytest.CaptureFixture) -> None:
     with patch("kairix.search.cli.search", return_value=mock_sr) as mock_search:
         search_cli(["test", "--agent", "shape"])
 
-    mock_search.assert_called_once_with(
-        query="test",
-        agent="shape",
-        scope="shared+agent",
-        budget=3000,
-    )
+    assert mock_search.call_count == 1
+    call_kwargs = mock_search.call_args.kwargs
+    assert call_kwargs["query"] == "test"
+    assert call_kwargs["agent"] == "shape"
+    assert call_kwargs["scope"] == "shared+agent"
+    assert call_kwargs["budget"] == 3000
 
 
 # ---------------------------------------------------------------------------

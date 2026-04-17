@@ -17,15 +17,18 @@ from unittest.mock import MagicMock
 import pytest
 
 from kairix.search.bm25 import BM25Result
+from kairix.search.config import EntityBoostConfig, ProceduralBoostConfig
 from kairix.search.rrf import (
-    ENTITY_BOOST_CAP,
-    PROCEDURAL_BOOST_FACTOR,
     RRF_K,
     FusedResult,
     entity_boost_neo4j,
     procedural_boost,
     rrf,
 )
+
+# Constants kept for backward-compat test math (values from EntityBoostConfig / ProceduralBoostConfig defaults)
+ENTITY_BOOST_CAP = EntityBoostConfig().cap
+PROCEDURAL_BOOST_FACTOR = ProceduralBoostConfig().factor
 from kairix.search.vector import VecResult
 
 # ---------------------------------------------------------------------------
@@ -354,7 +357,7 @@ def test_procedural_boost_empty_input() -> None:
 def test_procedural_boost_custom_factor() -> None:
     """Custom boost_factor is applied correctly."""
     r = _fused("guide/how-to-do-x.md", score=0.5)
-    results = procedural_boost([r], boost_factor=2.0)
+    results = procedural_boost([r], config=ProceduralBoostConfig(factor=2.0))
     assert results[0].boosted_score == pytest.approx(1.0)
 
 

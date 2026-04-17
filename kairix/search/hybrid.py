@@ -31,8 +31,16 @@ from kairix.graph.client import get_client as _get_neo4j
 from kairix.llm import get_default_backend as _get_llm
 from kairix.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
 from kairix.search.budget import BudgetedResult, apply_budget
+from kairix.search.config import RetrievalConfig
 from kairix.search.intent import QueryIntent, classify
-from kairix.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, rrf, temporal_date_boost
+from kairix.search.rrf import (
+    FusedResult,
+    chunk_date_boost,
+    entity_boost_neo4j,
+    procedural_boost,
+    rrf,
+    temporal_date_boost,
+)
 from kairix.search.vector import VecResult, vector_search_bytes
 
 logger = logging.getLogger(__name__)
@@ -161,6 +169,54 @@ def _open_vec_db() -> sqlite3.Connection | None:
         return None
 
 
+def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
+    """
+    Populate FusedResult.chunk_date from the QMD SQLite DB for TMP-7B.
+
+    Does a single SQL query joining content_vectors to documents on hash,
+    then sets r.chunk_date for any results whose path has a non-null chunk_date.
+
+    Safe when DB is unavailable — logs a warning and returns silently.
+    Never raises.
+    """
+    if not fused:
+        return
+
+    paths = [r.path for r in fused if r.path]
+    if not paths:
+        return
+
+    try:
+        db = sqlite3.connect(str(db_path))
+        try:
+            placeholders = ",".join("?" for _ in paths)
+            rows = db.execute(
+                f"SELECT d.path, cv.chunk_date "
+                f"FROM content_vectors cv "
+                f"JOIN documents d ON d.hash = cv.hash "
+                f"WHERE d.path IN ({placeholders}) AND cv.chunk_date IS NOT NULL",
+                paths,
+            ).fetchall()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("hybrid: _enrich_chunk_dates DB query failed — %s", e)
+        return
+
+    if not rows:
+        return
+
+    # Build path → chunk_date map (last non-null value wins for multi-chunk docs)
+    path_to_date: dict[str, str] = {}
+    for path, chunk_date in rows:
+        path_to_date[path] = chunk_date
+
+    for r in fused:
+        cd = path_to_date.get(r.path)
+        if cd:
+            r.chunk_date = cd
+
+
 # ---------------------------------------------------------------------------
 # Search pipeline
 # ---------------------------------------------------------------------------
@@ -172,6 +228,7 @@ def search(
     scope: str = "shared+agent",
     budget: int = 3000,
     _no_multi_hop: bool = False,
+    config: RetrievalConfig | None = None,
 ) -> SearchResult:
     """
     Run the full hybrid search pipeline.
@@ -198,6 +255,8 @@ def search(
         Never raises.
     """
     t_start = time.monotonic()
+
+    cfg = config if config is not None else RetrievalConfig.defaults()
 
     intent = classify(query)
     collections = _collections_for(agent, scope)
@@ -375,22 +434,38 @@ def search(
     # Fuse results
     fused: list[FusedResult] = rrf(bm25_results, vec_results)
 
+    # Populate chunk_date metadata for TMP-7B (only when DB available)
+    try:
+        _enrich_chunk_dates(fused, get_qmd_db_path())
+    except Exception as _cde:
+        logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
+
     # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
     try:
-        fused = entity_boost_neo4j(fused, neo4j_client)
+        fused = entity_boost_neo4j(fused, neo4j_client, config=cfg.entity)
     except Exception as _eb_e:
         logger.warning("hybrid: entity_boost_neo4j failed — %s", _eb_e)
 
     # Procedural boosting for PROCEDURAL intent
     if intent == QueryIntent.PROCEDURAL:
-        fused = procedural_boost(fused)
+        fused = procedural_boost(fused, config=cfg.procedural)
 
-    # Temporal date boosting for TEMPORAL intent (TMP-7)
-    # Disabled: path-date boost hurts general temporal queries whose gold docs
-    # are concept notes (not daily logs). Re-enable only for explicit-date queries
-    # after further analysis of failing temporal cases.
-    # if intent == QueryIntent.TEMPORAL:
-    #     fused = temporal_date_boost(fused, active_query)
+    # Temporal date-path boost for TEMPORAL intent (disabled by default via config —
+    # enable for date-named file corpora via RetrievalConfig.for_daily_log_corpus())
+    if intent == QueryIntent.TEMPORAL:
+        fused = temporal_date_boost(fused, active_query, config=cfg.temporal)
+
+    # Chunk-date proximity boost for TEMPORAL intent (TMP-7B)
+    if intent == QueryIntent.TEMPORAL and cfg.temporal.chunk_date_boost_enabled:
+        import datetime as _dt
+
+        from kairix.temporal.rewriter import extract_time_window
+        try:
+            _start, _end = extract_time_window(active_query, reference_date=_dt.date.today())
+            _query_date = _start or _dt.date.today()
+            fused = chunk_date_boost(fused, _query_date, config=cfg.temporal)
+        except Exception as _cbd_e:
+            logger.warning("hybrid: chunk_date_boost failed — %s", _cbd_e)
 
     # Merge temporal chunks into fused results for TEMPORAL intent.
     # Previously stored as _temporal_chunks side-channel; now merged into main
