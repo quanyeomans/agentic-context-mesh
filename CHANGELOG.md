@@ -6,6 +6,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-04-18 — kairix eval: automated evaluation suite generation
+
+### Added
+- **`kairix eval generate`** — GPL-inspired automated benchmark suite generation. Samples documents from the QMD corpus, prompts gpt-4o-mini to write retrieval queries, runs hybrid search, judges retrieved documents with graded relevance (0/1/2), and outputs a suite YAML. Based on Generative Pseudo Labeling (Wang et al. 2022, NAACL).
+- **`kairix eval enrich`** — converts an existing suite's `gold_path`-based cases to graded `gold_titles`. Runs hybrid search and LLM judge for each case. Preserves all other case fields.
+- **`kairix eval monitor`** — canary regression detection with rolling JSONL log. Flags when weighted NDCG drops >5% vs the 7-day rolling average. Exit code 2 on regression (distinct from exit code 1 hard failure). Designed for integration in `qmd-reindex.sh` after `kairix embed`.
+- **`kairix eval report`** — generates a markdown trend report from the monitor log.
+- **`kairix/eval/judge.py`** — per-document LLM relevance judge (gpt-4o-mini, 0/1/2 rubric, position-bias shuffle, 15-anchor calibration with `JudgeCalibrationError`).
+- **`docs/evaluation-methodology.md`** — methodology with research citations: Cranfield paradigm, GPL, TREC-DL, position bias (Arabzadeh et al. 2024), NDCG formula.
+- **`docs/eval-guide.md`** — user quickstart, command reference, monitoring setup, troubleshooting.
+
+### Fixed
+- Deployment process now uses tagged releases (`@v0.9.3`) rather than `@main` to make explicit which version is installed. `pip install git+...@main` silently skips reinstall when the version string is unchanged.
+
 ## [0.9.2] - 2026-04-15 — NDCG@10 in benchmark CLI output
 
 ### Changed
