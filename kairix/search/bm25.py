@@ -353,7 +353,12 @@ def bm25_search(
         logger.warning("BM25 search: qmd binary not found — %s", e)
         return direct_results
 
-    cmd: list[str] = [binary, "search", "--json", "--limit", str(limit), query]
+    # Sanitize query for QMD/FTS5: hyphens are treated as NOT operators by FTS5,
+    # causing zero results for hyphenated terms (e.g. "vm-tc-openclaw", "FEAT-020").
+    # Replace with spaces to restore AND semantics. Underscores are handled by
+    # FTS5's unicode61 tokenizer (splits on connector punctuation) — no change needed.
+    qmd_query = query.replace("-", " ")
+    cmd: list[str] = [binary, "search", "--json", "--limit", str(limit), qmd_query]
 
     if cli_collections:
         for col in cli_collections:
