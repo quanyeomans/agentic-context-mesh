@@ -100,6 +100,11 @@ def main() -> None:
 
         onboard_main(sys.argv[2:])
 
+    elif cmd == "eval":
+        from kairix.eval.cli import main as eval_main
+
+        eval_main(sys.argv[2:])
+
     else:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)
         sys.exit(1)
