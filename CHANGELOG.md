@@ -2,11 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
+Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
 ## [Unreleased]
 
-## [0.9.3] - 2026-04-18 — kairix eval: automated evaluation suite generation
+## [2026.4.18] - 2026-04-18 — kairix eval: automated evaluation suite generation
 
 ### Added
 - **`kairix eval generate`** — GPL-inspired automated benchmark suite generation. Samples documents from the QMD corpus, prompts gpt-4o-mini to write retrieval queries, runs hybrid search, judges retrieved documents with graded relevance (0/1/2), and outputs a suite YAML. Based on Generative Pseudo Labeling (Wang et al. 2022, NAACL).
