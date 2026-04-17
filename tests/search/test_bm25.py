@@ -89,6 +89,27 @@ def test_bm25_search_passes_limit_to_cmd() -> None:
 
 
 @pytest.mark.unit
+def test_bm25_search_sanitises_hyphens_in_qmd_query() -> None:
+    """Hyphens in query are replaced with spaces before passing to QMD.
+
+    FTS5 treats '-' as a NOT operator, so 'vm-tc-openclaw' without sanitisation
+    returns zero results. Replacing hyphens with spaces restores AND semantics.
+    """
+    with (
+        patch("kairix.search.bm25.get_qmd_binary", return_value="/usr/bin/qmd"),
+        patch("subprocess.run", return_value=_make_completed_process(stdout=json.dumps([]))) as mock_run,
+    ):
+        bm25_search("vm-tc-openclaw FEAT-020 Standard_D4as_v5")
+
+    cmd = mock_run.call_args[0][0]
+    # The sanitised query (hyphens → spaces) should appear in the command
+    assert "vm tc openclaw FEAT 020 Standard_D4as_v5" in cmd
+    # The raw query with hyphens must NOT appear
+    assert "vm-tc-openclaw" not in " ".join(cmd)
+    assert "FEAT-020" not in " ".join(cmd)
+
+
+@pytest.mark.unit
 def test_bm25_search_passes_collections_to_cmd() -> None:
     """collections parameter is passed as --collection flags."""
     with (
