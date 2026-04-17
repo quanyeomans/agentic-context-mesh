@@ -30,7 +30,7 @@ kairix search "your query here" --debug
 ```bash
 # Check if the document is in the index at all
 kairix search "exact phrase from the document" --debug
-# If not found: chunk may not be embedded yet → runbook-embedding-lag
+# If not found: chunk may not be embedded yet — run kairix embed and retry
 
 # Check when the file was last embedded
 tail -50 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/azure-embed.log | grep "filename.md"
@@ -45,7 +45,7 @@ tail -50 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/azure-embed.log | grep "filena
 # Missing cat_boost → category not matched or category scores misconfigured
 
 # View current category scoring config
-cat /opt/kairix/config/kairix.yaml | grep -A 30 "categories:"
+cat ${KAIRIX_CONFIG:-kairix.yaml} | grep -A 30 "categories:"
 ```
 
 ### Pattern C: Irrelevant result ranked #1
@@ -66,7 +66,7 @@ kairix search "query" --debug | head -20
 # Vector search silently failed
 kairix search "query" --debug
 # Shows: "vec_failed: True, reason: credential_error"
-# Fix: runbook-vector-search-failure
+# Fix: run kairix onboard check — verify credentials and wrapper script are configured correctly
 ```
 
 ---
@@ -75,7 +75,7 @@ kairix search "query" --debug
 
 ```bash
 # View the full ranking configuration
-cat /opt/kairix/config/kairix.yaml | grep -A 50 "ranking:"
+cat ${KAIRIX_CONFIG:-kairix.yaml} | grep -A 50 "ranking:"
 
 # Key parameters:
 # rrf_k: 60                    # RRF constant (higher = flatter ranking)
@@ -103,8 +103,8 @@ kairix benchmark run \
   --output ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/
 
 # Backup and edit config
-cp /opt/kairix/config/kairix.yaml /opt/kairix/config/kairix.yaml.bak
-sudo nano /opt/kairix/config/kairix.yaml
+cp ${KAIRIX_CONFIG:-kairix.yaml} ${KAIRIX_CONFIG:-kairix.yaml}.bak
+nano ${KAIRIX_CONFIG:-kairix.yaml}
 # Adjust rrf_k, bm25_weight, vec_weight, category boosts
 
 # Run incremental embed to pick up new config
@@ -119,7 +119,7 @@ kairix benchmark compare \
   ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/benchmark-results/<after>.json
 
 # If scores regressed → revert
-sudo cp /opt/kairix/config/kairix.yaml.bak /opt/kairix/config/kairix.yaml
+cp ${KAIRIX_CONFIG:-kairix.yaml}.bak ${KAIRIX_CONFIG:-kairix.yaml}
 kairix embed
 ```
 
@@ -162,5 +162,5 @@ kairix benchmark run --suite suites/your-suite.yaml
 ## Related
 
 - [runbook-benchmark-regression](runbook-benchmark-regression.md) — if NDCG drops after tuning
-- [runbook-embedding-lag](runbook-embedding-lag.md) — if document is missing from index entirely
+- [runbook-benchmark-regression](runbook-benchmark-regression.md) — if overall NDCG has degraded
 - [how-to-run-benchmark](how-to-run-benchmark.md) — benchmark workflow

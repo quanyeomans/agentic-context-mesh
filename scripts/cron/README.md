@@ -63,22 +63,12 @@ For setup and rotation of the secrets provider, see [OPERATIONS.md](../../OPERAT
 
 ## QMD-integrated deployments
 
-If your host also runs a tool that bundles QMD (such as OpenClaw), that tool may install its own cron jobs that call `qmd embed`. This overwrites kairix's Azure vectors (float[1536]) with GGUF local vectors (float[768]) and causes dimension mismatch errors on every kairix embed run.
+If another tool on your host calls `qmd embed`, it will overwrite kairix's Azure vectors (float[1536]) with GGUF local vectors (float[768]), causing dimension mismatch errors on every kairix embed run.
 
-The `qmd-reindex.sh` and `kairix-nightly.sh` scripts detect this automatically by scanning a set of probable integration cron directories. The default scan paths are:
-
-```
-/opt/openclaw/cron
-/usr/local/openclaw/cron
-/opt/homebrew/opt/openclaw/cron
-/usr/local/share/openclaw/cron
-~/.openclaw/cron
-```
-
-If your integration tool installs cron scripts in a non-standard location, override the scan list in `/opt/kairix/service.env`:
+The `qmd-reindex.sh` and `kairix-nightly.sh` scripts can detect this automatically by scanning your cron directories. Specify the directories to scan in your `service.env`:
 
 ```bash
 KAIRIX_INTEGRATION_CRON_DIRS="/opt/mytool/cron /usr/local/mytool/cron"
 ```
 
-The fix for a detected conflict is always the same: remove the `qmd embed` call from the offending script (keeping `qmd update` is fine), then run `kairix embed --force` to restore correct vectors. See [docs/runbooks/how-to-onboard-new-installation.md](../runbooks/how-to-onboard-new-installation.md) for the full procedure.
+The fix is always the same: remove the `qmd embed` call from the offending script (keeping `qmd update` is fine), then run `kairix embed --force` to restore correct vectors.

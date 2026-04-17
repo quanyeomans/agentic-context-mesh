@@ -2,7 +2,7 @@
 
 Step-by-step deployment and operations guide for Kairix on a server. This document is the single source of truth for getting a new deployment running and keeping it healthy.
 
-For design rationale see [PRD.md](PRD.md). For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
+For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 
 ---
 
@@ -160,17 +160,20 @@ kairix onboard check
 Create the required directories before first run:
 
 ```bash
-sudo mkdir -p /data/kairix/briefing
-sudo mkdir -p /data/kairix/logs
-sudo mkdir -p /data/workspaces
-sudo chown -R <service-user>:<service-user> /data/kairix /data/workspaces
+# Set KAIRIX_DATA_DIR and KAIRIX_WORKSPACE_ROOT to your preferred locations
+sudo mkdir -p ${KAIRIX_DATA_DIR:-/var/lib/kairix}/briefing
+sudo mkdir -p ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs
+sudo mkdir -p ${KAIRIX_WORKSPACE_ROOT:-/var/lib/kairix/workspaces}
+sudo chown -R <service-user>:<service-user> \
+  ${KAIRIX_DATA_DIR:-/var/lib/kairix} \
+  ${KAIRIX_WORKSPACE_ROOT:-/var/lib/kairix/workspaces}
 ```
 
 Kairix expects:
-- `/path/to/vault/` — vault root (QMD indexes this; set your actual vault path via `KAIRIX_VAULT_ROOT`)
-- `/data/kairix/briefing/` — session briefings output directory
-- `/data/kairix/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
-- `/data/workspaces/<agent>/memory/` — agent memory logs (required for briefing pipeline)
+- `$KAIRIX_VAULT_ROOT` — vault root (QMD indexes this)
+- `$KAIRIX_DATA_DIR/briefing/` — session briefings output directory
+- `$KAIRIX_DATA_DIR/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
+- `$KAIRIX_WORKSPACE_ROOT/<agent>/memory/` — agent memory logs (required for briefing pipeline)
 
 ---
 
@@ -333,13 +336,13 @@ If you see `SchemaVersionError` or `sqlite-vec extension load failed`, see [Trou
 ```bash
 AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
 AZURE_OPENAI_API_KEY="$APIKEY" \
-nohup kairix embed >> /data/kairix/logs/embed.log 2>&1 &
+nohup kairix embed >> ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log 2>&1 &
 echo "PID: $!"
 ```
 
-For a ~2,800 file vault this takes 15–20 minutes and costs ~$0.30–0.40 at 1536-dim. Monitor with:
+For a typical vault this takes 10–30 minutes and costs ~$0.30–0.50 at 1536-dim, depending on size. Monitor with:
 ```bash
-tail -f /data/kairix/logs/embed.log
+tail -f ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log
 ```
 
 Done when you see: `Done — embedded=N failed=0`
@@ -369,7 +372,7 @@ AZURE_OPENAI_API_KEY="$APIKEY" \
 kairix brief builder
 ```
 
-Output written to `/data/kairix/briefing/builder-latest.md`. Verify it's non-empty and coherent.
+Output written to `$KAIRIX_DATA_DIR/briefing/builder-latest.md`. Verify it's non-empty and coherent.
 
 ### Step 9: Install agent usage guide
 
@@ -405,45 +408,45 @@ export AZURE_OPENAI_API_KEY=$(az keyvault secret show ...)
 
 For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](SECURITY.md) for setup detail.
 
-### Hourly embed (new vault files)
+### Incremental embed (new vault files)
 
-Runs kairix embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed.
+Runs kairix embed incrementally — only embeds files modified since the last run. Exits quickly (embedded=0) when nothing has changed. Schedule to run frequently (e.g. hourly).
 
-```cron
-15 * * * * /opt/kairix/cron/kairix-embed.sh >> /data/kairix/logs/embed.log 2>&1
+Your cron wrapper should source credentials before running:
+```bash
+# Example wrapper pattern
+source "${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
+kairix embed >> ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log 2>&1
 ```
 
-`/opt/kairix/cron/kairix-embed.sh` sources `/run/secrets/kairix.env` then runs `kairix embed`. Source script: [`scripts/cron/kairix-embed.sh`](scripts/cron/kairix-embed.sh)
+See [`scripts/cron/kairix-embed.sh`](scripts/cron/kairix-embed.sh) for the reference implementation.
 
-### Nightly entity + relationship seed (03:00 AEST / 17:00 UTC)
+### Nightly entity + relationship seed
 
-Runs vault crawler and relationship seeding. Uses GPT-4o-mini for relationship classification.
+Runs vault crawler and relationship seeding. Uses GPT-4o-mini for relationship classification. Schedule nightly during low-usage hours.
 
-```cron
-0 17 * * * /opt/kairix/cron/entity-relation-seed.sh >> /data/kairix/logs/entity-relation-seed.log 2>&1
+```bash
+# The two commands to run, in order:
+kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
+python scripts/seed-entity-relations.py
 ```
 
-The shell script (`entity-relation-seed.sh`) sources `/run/secrets/kairix.env` and runs:
-1. `kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT`
-2. `python /opt/kairix/scripts/seed-entity-relations.py`
-
-Add both crons with `crontab -e` as the service user.
+See [`scripts/cron/`](scripts/cron/) for reference cron wrapper scripts.
 
 ### Verifying cron jobs are registered
 
 ```bash
 crontab -l
-# Should show both entries
 ```
 
 ### Verifying cron jobs ran successfully
 
 ```bash
-# Check embed log (should show runs at :15 of each hour)
-grep "Done —" /data/kairix/logs/embed.log | tail -5
+# Check embed log
+grep "Done —" ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log | tail -5
 
-# Check entity log (should show a run at 03:00 AEST)
-tail -20 /data/kairix/logs/entity-relation-seed.log
+# Check entity log
+tail -20 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/entity-relation-seed.log
 ```
 
 ---
@@ -458,7 +461,7 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `azure-openai-endpoint` |
 | `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment name | From Key Vault `azure-openai-embedding-deployment` |
 | `KAIRIX_VAULT_ROOT` | Path to Obsidian vault | `/path/to/vault` |
-| `KAIRIX_DATA_DIR` | Data directory for logs | `/data/kairix` |
+| `KAIRIX_DATA_DIR` | Data directory for logs | `/var/lib/kairix` |
 | `KAIRIX_WORKSPACE_ROOT` | Agent memory log root | `/data/workspaces` |
 | `KAIRIX_NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
@@ -483,13 +486,13 @@ See [EVALUATION.md](EVALUATION.md) for current scores, benchmark methodology, an
 
 ```bash
 # Embed ran and found/embedded the right number of files
-grep "Done —" /data/kairix/logs/embed.log | tail -3
+grep "Done —" ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log | tail -3
 
 # No dimension mismatch errors (would indicate QMD cron conflict)
-grep -i "dimension mismatch" /data/kairix/logs/embed.log | tail -5
+grep -i "dimension mismatch" ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log | tail -5
 
 # Entity crawler ran cleanly
-tail -5 /data/kairix/logs/entity-relation-seed.log
+tail -5 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/entity-relation-seed.log
 
 # Vector count is stable or growing
 qmd status
@@ -509,7 +512,7 @@ kairix curator health
 
 ```bash
 export KAIRIX_LOG_QUERIES=1
-# Queries logged to /data/kairix/logs/queries.jsonl
+# Queries logged to ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/queries.jsonl
 # Analyse with:
 .venv/bin/python scripts/analyze_queries.py
 ```
@@ -626,9 +629,9 @@ crontab -l | grep qmd
 # Schedule embed cron to run just after QMD reindex, not during it
 ```
 
-### GGUF/QMD embedding conflict
+### Embedding model mismatch
 
-If another tool (e.g. OpenClaw or a custom QMD wrapper) runs `qmd embed` as a cron job, it overwrites kairix's Azure vectors (`text-embedding-3-large`, 1536-dim) with GGUF local vectors (`float[768]`). This causes `Dimension mismatch` errors on the next kairix embed run, or `vec=0` results after an apparent successful embed.
+If another tool runs `qmd embed` as a cron job alongside kairix, it may overwrite Azure vectors (`text-embedding-3-large`, 1536-dim) with local GGUF vectors (`float[768]`), causing dimension mismatch errors or `vec=0` results.
 
 **Detect:**
 ```bash
@@ -636,24 +639,12 @@ If another tool (e.g. OpenClaw or a custom QMD wrapper) runs `qmd embed` as a cr
 sqlite3 ~/.cache/qmd/index.sqlite \
   "SELECT model, COUNT(*) FROM content_vectors GROUP BY model;"
 # If you see two models, the conflict is active
-
-# Scan integration cron directories for uncommented qmd embed calls
-for dir in /opt/openclaw/cron /usr/local/openclaw/cron; do
-  [[ -d "$dir" ]] || continue
-  grep -rl 'qmd embed' "$dir" 2>/dev/null | while read -r f; do
-    grep -v '^\s*#' "$f" | grep -qP "(?<!['\"])qmd\s+embed" && echo "CONFLICT: $f"
-  done
-done
 ```
 
 **Fix:**
-1. Remove or comment out the `qmd embed` call from the offending script — `qmd update` (BM25/FTS reindex) is fine to keep; only `qmd embed` causes the conflict
+1. Remove or comment out any `qmd embed` call from other cron jobs — `qmd update` (BM25/FTS reindex) is safe to keep; only `qmd embed` causes the conflict
 2. Force-rebuild Azure vectors: `kairix embed --force`
-3. Verify: `sqlite3 ~/.cache/qmd/index.sqlite "SELECT model, COUNT(*) FROM content_vectors GROUP BY model;"` should show only `text-embedding-3-large`
-
-The `qmd-reindex.sh` cron script (see [scripts/cron/](scripts/cron/)) runs this detection check automatically every 6 hours and warns if it finds a conflict.
-
-See [how-to-fix-binary-symlink.md](docs/runbooks/how-to-fix-binary-symlink.md) if `vec=0` persists after the force re-embed.
+3. Verify: the query above should show only `text-embedding-3-large`
 
 ### Neo4j unavailable
 
@@ -677,10 +668,11 @@ kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
 crontab -l
 
 # Check log for last run
-tail -20 /data/kairix/logs/entity-relation-seed.log
+tail -20 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/entity-relation-seed.log
 
 # Run manually to debug
-/opt/kairix/cron-scripts/entity-relation-seed.sh
+kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT
+python scripts/seed-entity-relations.py
 ```
 
 ### Briefing output is empty or incoherent

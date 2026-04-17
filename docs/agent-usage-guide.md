@@ -128,7 +128,7 @@ Generates a ~800-token briefing synthesising relevant vault content for the star
 kairix brief <agent-name>
 kairix brief shape --budget 5000
 ```
-Output written to `/data/kairix/briefing/<agent>-latest.md`.
+Output written to `$KAIRIX_DATA_DIR/briefing/<agent>-latest.md`.
 
 ### entity — entity graph lookup
 ```bash

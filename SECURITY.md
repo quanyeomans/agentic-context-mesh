@@ -126,7 +126,7 @@ All vectors, entity data, and search indexes live in SQLite and Neo4j on your ow
 
 The service account running kairix requires:
 - Read access to the Obsidian vault directory
-- Read/write to `/data/kairix/` and `~/.cache/qmd/`
+- Read/write to `${KAIRIX_DATA_DIR}/` and `~/.cache/qmd/`
 - Read access to `/run/secrets/kairix.env` (group membership)
 - `az` CLI authenticated via managed identity (no stored credentials)
 
@@ -157,7 +157,7 @@ Dependabot is configured (`.github/dependabot.yml`) to open PRs for dependency u
 ## Audit Logging
 
 Kairix does not produce a dedicated audit log. Operational visibility:
-- Embed logs: `/data/kairix/logs/embed.log` — timestamps, chunk counts, errors
+- Embed logs: `${KAIRIX_DATA_DIR}/logs/embed.log` — timestamps, chunk counts, errors
 - Query logs: `~/.cache/qmd/queries.jsonl` (when `KAIRIX_LOG_QUERIES=1`)
 - Benchmark results: `benchmark-results/*.json` — archived per-run NDCG scores
 - Azure OpenAI usage: visible in Azure Portal → Azure OpenAI → Monitoring → Requests

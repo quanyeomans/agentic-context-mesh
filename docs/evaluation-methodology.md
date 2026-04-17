@@ -193,8 +193,8 @@ Integration in `qmd-reindex.sh` (after `kairix embed`):
 
 ```bash
 kairix eval monitor \
-    --suite /data/development/tc-agent-zone/suites/canary.yaml \
-    --log /data/development/tc-agent-zone/logs/kairix-monitor.jsonl \
+    --suite /path/to/suites/canary.yaml \
+    --log /path/to/logs/kairix-monitor.jsonl \
     --alert-threshold 0.05
 ```
 
