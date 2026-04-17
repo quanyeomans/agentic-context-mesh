@@ -26,16 +26,14 @@ entities.db
 # Stray cache directory (created by run-command agent context)
 None/
 
-# Benchmark suites contain vault-specific gold paths and query content
-# generated from your personal knowledge base — not suitable for public repos.
-# Generate your own with: scripts/build-eval-gold.py (in your operational fork)
+# Benchmark suites contain vault-specific gold documents and query content — not suitable for public repos.
+# Generate your own with: kairix eval generate
 # See suites/example.yaml for the format.
 suites/v2-real-world.yaml
 suites/*.yaml
 !suites/example.yaml
 
-# Benchmark gold-build scripts contain vault-specific paths — these live in operational forks.
-# Generic entity quality tooling scripts (prune-entities.py, validate-entity-stubs.py) are public.
+# Operator-specific benchmark build scripts — keep in your private operator config repo
 scripts/build-eval-gold.py
 scripts/mine-eval-queries.py
 scripts/benchmark-path-audit.py

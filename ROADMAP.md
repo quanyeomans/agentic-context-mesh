@@ -41,7 +41,7 @@ The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2). See [EV
 | Contradiction detection | ✅ Shipped | `kairix contradict check` — hybrid search + LLM conflict detection |
 | MCP server | ✅ Shipped | `kairix mcp serve` — search, entity, prep, timeline tools |
 | Neo4j-native entity health | ✅ Shipped | Curator health reports entirely from Neo4j Cypher queries |
-| entities.db retirement | ✅ Shipped | SQLite entity store removed; Neo4j is sole canonical store (ADR-014) |
+| entities.db retirement | ✅ Shipped | SQLite entity store removed; Neo4j is sole canonical store |
 | Docker sidecar secrets | ✅ Shipped | vault-agent sidecar fetches Azure KV secrets to tmpfs at startup |
 | Cross-encoder re-ranking | 🔲 Planned | Post-RRF semantic re-rank via `ms-marco-MiniLM`; targets semantic NDCG |
 | Incremental file watcher | 🔲 Planned | `watchfiles`-based daemon; sub-60s vault sync latency |

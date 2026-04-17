@@ -29,11 +29,8 @@ tail -30 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/azure-embed.log
 If NDCG dropped after an edit to kairix config (RRF weights, category scores, BM25/vector balance):
 
 ```bash
-# View current ranking config
-cat /opt/kairix/config/kairix.yaml | grep -A 20 "ranking:"
-
-# Compare to last known-good (git diff)
-git diff HEAD~1 -- /opt/kairix/config/kairix.yaml
+# Compare config to last known-good
+git diff HEAD~1 -- kairix.yaml
 
 # Re-run benchmark to confirm regression is reproducible
 kairix benchmark run --suite suites/your-suite.yaml
@@ -42,8 +39,7 @@ kairix benchmark run --suite suites/your-suite.yaml
 **Fix:** Revert the ranking config to the previous version via git, then redeploy.
 
 ```bash
-git checkout HEAD~1 -- /opt/kairix/config/kairix.yaml
-sudo cp /opt/kairix/config/kairix.yaml /opt/kairix/config/kairix.yaml
+git checkout HEAD~1 -- kairix.yaml
 kairix benchmark run --suite suites/your-suite.yaml
 ```
 
@@ -70,7 +66,7 @@ kairix benchmark run --suite suites/your-suite.yaml
 Possible causes:
 - Embed failed mid-run, leaving partial re-embed
 - Vault file deleted/renamed — previously high-scoring chunk is gone
-- Dimension mismatch (see [runbook-vector-search-failure](runbook-vector-search-failure.md))
+- Dimension mismatch (check content_vectors for mixed embedding models; run `kairix embed --force` to rebuild)
 
 ---
 
@@ -86,13 +82,7 @@ kairix --version
 **Rollback to previous version:**
 
 ```bash
-sudo /opt/kairix/.venv/bin/pip install kairix==<PREVIOUS_VERSION>
-
-# Re-verify symlinks (pip install can reset them)
-ls -la /usr/local/bin/kairix
-# Must be: -> /opt/kairix/bin/kairix-wrapper.sh
-# If not: sudo ln -sf /opt/kairix/bin/kairix-wrapper.sh /usr/local/bin/kairix
-
+pip install git+https://github.com/quanyeomans/kairix@<PREVIOUS_TAG>
 kairix onboard check
 kairix benchmark run --suite suites/your-suite.yaml
 ```
@@ -139,5 +129,5 @@ kairix onboard check
 
 - [how-to-run-benchmark](how-to-run-benchmark.md) — full benchmark procedure
 - [how-to-upgrade-kairix](how-to-upgrade-kairix.md) — safe upgrade with eval gate
-- [runbook-emergency-recovery](runbook-emergency-recovery.md) — all-in-one quick reference
+- [INDEX](INDEX.md) — full runbook registry
 - [INDEX](INDEX.md) — full runbook registry

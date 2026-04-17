@@ -95,7 +95,7 @@ The generated suite file will be placed in the current directory. Move it to `su
 - Score 0.0 → expected result not found in top 10 (embedding or content issue)
 
 **When results are below expectations:**
-- `vec=0, vec_failed=True` → [runbook-vector-search-failure](runbook-vector-search-failure.md) (credentials or dimension mismatch)
+- `vec=0, vec_failed=True` → verify wrapper script is on PATH and credentials are loaded (see OPERATIONS.md troubleshooting)
 - Low scores on specific query types → [how-to-debug-search-ranking](how-to-debug-search-ranking.md)
 - Gold suite paths all missing → suite is stale, vault was restructured — rebuild suite
 

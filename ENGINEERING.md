@@ -32,7 +32,7 @@ Every merge to `main` must pass all four CI stages. No exceptions without a docu
 | Contract tests | pytest -m contract | Zero failures | ✅ Yes |
 | Build | pip install -e . | Succeeds | ✅ Yes |
 
-**Per-module coverage targets** (documented in PRD.md §6):
+**Per-module coverage targets:**
 - `embed/`: ≥ 90%
 - `search/`, `classify/`: ≥ 85%
 - `entities/`, `temporal/`: ≥ 80%
@@ -86,24 +86,19 @@ push/PR
 
 ### 2.3 Deployment
 
-There is no deployment pipeline. Mnemosyne runs on `<your-vm>`. Deployment:
-
 ```bash
-cd /tmp/qmd-azure-embed
-git pull origin main
-.venv/bin/pip install -e .    # only needed if pyproject.toml changed
+# Pin to a tagged release — do not deploy from @main
+pip install git+https://github.com/quanyeomans/kairix@v2026.04.18
+
+# Or from PyPI when published:
+pip install kairix==2026.4.18
+
+# Smoke test after deploy:
+kairix onboard check
+kairix search "test query" --agent <your-agent>
 ```
 
-**Pre-deploy checklist:**
-```
-[ ] git log --oneline -5 — confirm what's deploying
-[ ] pytest tests/ -q — confirm tests pass on the VM
-[ ] mnemosyne embed --limit 10 — smoke test (if embed code changed)
-[ ] mnemosyne search "test" --agent builder — smoke test (if search code changed)
-[ ] entities.db schema_version matches code (if entities schema changed)
-```
-
-**Rollback:** `git checkout <previous-commit>` + `pip install -e .`. All state is in SQLite/vault — safe.
+**Rollback:** `pip install git+https://github.com/quanyeomans/kairix@<previous-tag>`. All state is in SQLite/vault — safe.
 
 ### 2.4 Override process (emergency only)
 
@@ -111,8 +106,8 @@ If a gate must be bypassed:
 1. Document justification with specific business reason in the PR
 2. Risk assessment and consequences
 3. Mitigation plan with timeline to address
-4. Dan approval required
-5. Auto-expires: must be resolved within the next sprint
+4. Maintainer approval required
+5. Auto-expires: must be resolved in the next release cycle
 
 ---
 
@@ -122,7 +117,7 @@ If a gate must be bypassed:
 
 ```
      ┌─────────┐
-     │   E2E   │  ~5%  MNEMOSYNE_E2E=1 required. Never in CI.
+     │   E2E   │  ~5%  KAIRIX_E2E=1 required. Never in CI.
      ├─────────┤
      │Integr.  │  ~25%  Real sqlite-vec. Skips cleanly if unavailable.
      ├─────────┤
@@ -140,7 +135,7 @@ Mark every test class or function with the appropriate marker:
 @pytest.mark.contract    # interface agreement — schema, API shape, data format
 @pytest.mark.unit        # individual component logic
 @pytest.mark.integration # multi-component, real sqlite-vec
-@pytest.mark.e2e         # live Azure API (requires MNEMOSYNE_E2E=1)
+@pytest.mark.e2e         # live Azure API (requires KAIRIX_E2E=1)
 @pytest.mark.slow        # takes >5s
 ```
 
@@ -149,7 +144,7 @@ Run by stage:
 pytest -m contract               # Stage 1: <30s, must pass
 pytest -m "not integration"      # Stage 2: unit only (CI)
 pytest -m integration            # Stage 3: requires sqlite-vec
-MNEMOSYNE_E2E=1 pytest -m e2e   # Manual only
+KAIRIX_E2E=1 pytest -m e2e      # Manual only
 ```
 
 ### 3.3 Mocking rules
@@ -160,7 +155,7 @@ MNEMOSYNE_E2E=1 pytest -m e2e   # Manual only
 - File system (use `tempfile.TemporaryDirectory()`)
 
 **Keep real:**
-- SQLite operations (use test DB via `MNEMOSYNE_TEST_DB` env var)
+- SQLite operations (use test DB via `KAIRIX_TEST_DB` env var)
 - Internal logic and data structures
 - sqlite-vec extension (integration tests load the real `.so`)
 
@@ -168,13 +163,7 @@ MNEMOSYNE_E2E=1 pytest -m e2e   # Manual only
 
 ### 3.4 What must have a test
 
-Every production bug found becomes a test immediately. Current production bugs tested:
-
-| Bug | Test | Module |
-|---|---|---|
-| sqlite-vec extension must load before `--force` DELETE | `TestExtensionLoadOrder` | `test_sqlite_vec_constraints.py` |
-| vec0 tables reject INSERT OR REPLACE | `TestSqliteVecInsertConstraints` | `test_sqlite_vec_constraints.py` |
-| MATCH query fails with direct JOIN on vec0 | `TestCTEQuerySyntax` | `test_sqlite_vec_constraints.py` |
+Every production bug found becomes a test immediately.
 
 ### 3.5 Regression prevention
 
@@ -186,9 +175,9 @@ When a bug is found in production:
 
 ### 3.6 Benchmark as evaluation (not CI)
 
-The 50-query benchmark (`mnemosyne benchmark`) is NOT a CI test. It's an evaluation tool:
-- Requires live Azure API and QMD DB
-- Runs manually or via weekly cron on `<your-vm>`
+The benchmark (`kairix benchmark`) is NOT a CI test. It's an evaluation tool:
+- Requires live Azure API and a populated database
+- Runs manually or via scheduled cron
 - Results committed to `benchmark-results/`
 - Required in PR description when retrieval logic changes
 
@@ -210,7 +199,7 @@ Phase gate rule: Phase N+1 does not start until Phase N benchmark confirms gate 
 
 Run locally before committing:
 ```bash
-bandit -r mnemosyne/ --severity-level medium
+bandit -r kairix/ --severity-level medium
 ```
 
 - Zero HIGH findings: blocks merge
@@ -238,10 +227,9 @@ pip-audit --requirement <(pip freeze) --format markdown
 
 ### 4.5 Agent scoping enforcement
 
-The `--agent` parameter in all Mnemosyne commands enforces collection boundaries. Tests must verify that:
+The `--agent` parameter in all kairix commands enforces collection boundaries. Tests must verify that:
 - Agent A cannot write to Agent B's knowledge collections
 - Shared collections are readable by all agents but only writable via explicit `--scope shared`
-- Coach and Family agent identifiers are rejected by the Mnemosyne CLI entirely
 
 ---
 
@@ -284,14 +272,14 @@ Every module must have a top-level docstring covering:
 
 ```python
 """
-mnemosyne.search.rrf
-~~~~~~~~~~~~~~~~~~~~
+kairix.search.rrf
+~~~~~~~~~~~~~~~~~
 
 Reciprocal Rank Fusion implementation for combining BM25 and vector search results.
 
 Inputs:
-  bm25_results: list of BM25Result from mnemosyne.search.bm25
-  vec_results:  list of VecResult from mnemosyne.search.vector
+  bm25_results: list of BM25Result from kairix.search.bm25
+  vec_results:  list of VecResult from kairix.search.vector
 
 Output:
   list of FusedResult, sorted descending by RRF score
@@ -336,19 +324,16 @@ All Dependabot PRs require CI to pass before merge. No manual merge without CI g
 
 QMD (`qmd`) is the critical external dependency. It ships sqlite-vec and defines the SQLite schema we write into.
 
-- Tested QMD version pinned in `pyproject.toml` (`[tool.mnemosyne]` section)
+- Tested QMD version pinned in `pyproject.toml` (`[tool.kairix]` section)
 - Weekly CI job (`qmd-compat.yml`) checks schema drift
 - On drift: GitHub issue opened automatically, work required within 1 week
-- QMD upgrades: run `mnemosyne embed --limit 0` to validate schema before full run
+- QMD upgrades: run `kairix embed --limit 0` to validate schema before full run
 
 ### 6.3 sqlite-vec version
 
-sqlite-vec is bundled with QMD. We do not install it independently. The `.so` path is:
-```
-/data/workspace/.tools/qmd/node_modules/.pnpm/sqlite-vec-linux-x64@<version>/node_modules/sqlite-vec-linux-x64/vec0.so
-```
+sqlite-vec is bundled with QMD. We do not install it independently. The `find_sqlite_vec()` function in `kairix/embed/schema.py` searches for the `.so` path dynamically. If QMD is upgraded and the sqlite-vec version changes, this function will find the new path automatically.
 
-The `find_sqlite_vec()` function in `mnemosyne/embed/schema.py` searches for this path dynamically. If QMD is upgraded and the sqlite-vec version changes, this function will find the new path automatically.
+The `SQLITE_VEC_PATH` env var can be used to specify the location explicitly if auto-discovery fails.
 
 ### 6.4 Adding a new dependency
 
@@ -376,8 +361,8 @@ chore/deps-bump-requests       # dependency updates
 ### 7.2 PR requirements
 
 **Before opening a PR:**
-- [ ] All CI stages pass locally (`pytest tests/`, `mypy mnemosyne/`, `ruff check mnemosyne/`)
-- [ ] No secrets in diff (`detect-secrets scan mnemosyne/ tests/`)
+- [ ] All CI stages pass locally (`pytest tests/`, `mypy kairix/`, `ruff check kairix/`)
+- [ ] No secrets in diff (`detect-secrets scan kairix/ tests/`)
 - [ ] If retrieval logic changed: benchmark comparison included in description
 
 **PR description must include:**
@@ -390,7 +375,7 @@ chore/deps-bump-requests       # dependency updates
 
 ### 7.3 Review requirements
 
-- At least one approval (Dan or Builder with relevant context)
+- At least one maintainer approval
 - All CI stages green
 - No unresolved comments
 
@@ -421,16 +406,10 @@ CI GATES (all must be green)
 
 RETRIEVAL LOGIC CHANGES ONLY
 [ ] Benchmark before/after in PR description
-[ ] No category regressed below Phase 0 baseline
-[ ] If phase gate met: update benchmark results table in PRD.md
+[ ] No category regressed below baseline
 
 SCHEMA CHANGES ONLY
-[ ] entities.db schema_version incremented
-[ ] Migration script added under entities/migrations/
-[ ] QMD schema guard updated (mnemosyne/embed/schema.py) if QMD schema affected
-
-DEPLOYMENT
-[ ] Pre-deploy checklist in PRD.md §8.3 completed
-[ ] Cron updated if new subcommands added
+[ ] Migration script added under the relevant migrations directory
+[ ] QMD schema guard updated (kairix/embed/schema.py) if QMD schema affected
 ```
 

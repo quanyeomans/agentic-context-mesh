@@ -71,8 +71,8 @@ sudo chmod +x /opt/kairix/bin/kairix-wrapper.sh
 ```bash
 kairix onboard check
 # All tests must pass before running benchmark
-# If secrets tests fail → runbook-secrets-fetch-failure
-# If vector test fails → how-to-fix-binary-symlink or runbook-vector-search-failure
+# If secrets tests fail → check that your secrets file is populated and KAIRIX_KV_NAME is set
+# If vector test fails → verify the kairix wrapper script is on PATH (not the raw Python binary)
 ```
 
 ---
@@ -98,14 +98,9 @@ kairix benchmark compare \
 ## Step 5 — Commit Upgrade (If Benchmark Passes)
 
 ```bash
-# Update the version pin in your config/scripts
-# Edit your install script or version config file to pin the new version
+# Update the version pin in your operator config/install script
 git add <install-script-or-version-file>
 git commit -m "chore: pin kairix to v<NEW_VERSION> (benchmark passed)"
-
-# Copy updated cron scripts to deployment location (if any changed)
-sudo cp scripts/cron/*.sh /opt/kairix/cron/
-sudo chmod +x /opt/kairix/cron/*.sh
 ```
 
 ---
@@ -113,11 +108,8 @@ sudo chmod +x /opt/kairix/cron/*.sh
 ## Step 6 — Rollback (If Benchmark Fails)
 
 ```bash
-# Rollback to previous version
-sudo /opt/kairix/.venv/bin/pip install kairix==<PREVIOUS_VERSION>
-
-# Re-verify symlinks
-ls -la /usr/local/bin/kairix
+# Rollback to previous tagged release
+pip install git+https://github.com/quanyeomans/kairix@<PREVIOUS_TAG>
 
 # Re-run onboard check and benchmark to confirm baseline restored
 kairix onboard check
@@ -147,6 +139,5 @@ kairix benchmark run --suite suites/your-suite.yaml
 ## Related
 
 - [how-to-run-benchmark](how-to-run-benchmark.md) — detailed benchmark procedure
-- [how-to-fix-binary-symlink](how-to-fix-binary-symlink.md) — if symlink breaks after install
 - [runbook-benchmark-regression](runbook-benchmark-regression.md) — if benchmark fails post-upgrade
-- [runbook-emergency-recovery](runbook-emergency-recovery.md) — all-in-one quick reference
+- [INDEX](INDEX.md) — full runbook registry

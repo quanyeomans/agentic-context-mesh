@@ -143,8 +143,8 @@ kairix eval monitor \
 ```bash
 # In qmd-reindex.sh, after kairix embed:
 kairix eval monitor \
-  --suite /data/development/tc-agent-zone/suites/canary.yaml \
-  --log /data/development/tc-agent-zone/logs/kairix-monitor.jsonl \
+  --suite /path/to/suites/canary.yaml \
+  --log /path/to/logs/kairix-monitor.jsonl \
   --alert-threshold 0.05
 EXIT=$?
 if [ $EXIT -eq 2 ]; then

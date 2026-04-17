@@ -1,6 +1,6 @@
 # Retrieval Boost Configuration
 
-**Status:** Planned (Sprint 9)  
+**Status:** Planned  
 **Scope:** `kairix/search/config.py`, `rrf.py`, `hybrid.py`
 
 ---
@@ -19,7 +19,7 @@ The three retrieval boosts (entity, procedural, temporal) encode assumptions abo
 
 **Root cause of the design gap:** All three boosts have hardcoded factors and path patterns. Enabling any boost for a corpus where its assumptions don't hold causes regression. There is currently no way to disable a boost without a code change.
 
-**Observed regression (Sprint 8):** Temporal date-path boost caused temporal NDCG to drop from 0.668 → 0.597 on a corpus where temporal queries target concept notes, not date-named files. Boost was reverted by disabling via code comment — a fragile workaround.
+**Known caveat:** Temporal date-path boost caused temporal NDCG to drop from 0.668 → 0.597 on a corpus where temporal queries target concept notes, not date-named files. Boost was reverted by disabling via code comment — a fragile workaround.
 
 ---
 
@@ -149,7 +149,7 @@ Each function's first action is to check `config.enabled` and short-circuit (ret
 
 ---
 
-## YAML Configuration (Layer 2, Sprint 10)
+## YAML Configuration (Layer 2 — future)
 
 ```yaml
 # kairix.config.yaml — example for a consulting knowledge base
@@ -215,7 +215,7 @@ retrieval:
 
 ## Implementation Plan
 
-### Layer 1 — Sprint 9 (~2h agentic)
+### Layer 1 (~2h implementation)
 
 | File | Action |
 |---|---|
@@ -224,7 +224,7 @@ retrieval:
 | `kairix/search/hybrid.py` | UPDATE — add `config` param; re-enable `temporal_date_boost` call (no-ops by default via config) |
 | `tests/search/test_retrieval_config.py` | CREATE — enabled/disabled paths for all three boosts; factory method tests |
 
-### Layer 2 — Sprint 10 (~2h agentic)
+### Layer 2 (~2h implementation)
 
 | File | Action |
 |---|---|
