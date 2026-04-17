@@ -102,11 +102,13 @@ def test_bm25_search_sanitises_hyphens_in_qmd_query() -> None:
         bm25_search("vm-tc-openclaw FEAT-020 Standard_D4as_v5")
 
     cmd = mock_run.call_args[0][0]
-    # The sanitised query (hyphens → spaces) should appear in the command
-    assert "vm tc openclaw FEAT 020 Standard_D4as_v5" in cmd
-    # The raw query with hyphens must NOT appear
-    assert "vm-tc-openclaw" not in " ".join(cmd)
-    assert "FEAT-020" not in " ".join(cmd)
+    cmd_str = " ".join(cmd)
+    # The sanitised query (hyphens and underscores → spaces) should appear
+    assert "vm tc openclaw FEAT 020 Standard D4as v5" in cmd_str
+    # The raw query with hyphens/underscores must NOT appear
+    assert "vm-tc-openclaw" not in cmd_str
+    assert "FEAT-020" not in cmd_str
+    assert "Standard_D4as_v5" not in cmd_str
 
 
 @pytest.mark.unit
