@@ -44,3 +44,4 @@ scripts/benchmark-path-audit.py
 *.env
 !env.example
 PRD.md
+.claude/
