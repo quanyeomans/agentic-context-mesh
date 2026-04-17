@@ -1,0 +1,46 @@
+# kairix.example.config.yaml
+# Copy to kairix.config.yaml and adjust for your corpus type.
+#
+# Corpus type presets:
+#   consulting   — entity + procedural boost on; temporal off (default)
+#   daily-log    — date-path temporal boost on; entity optional
+#   technical    — entity off; procedural extended patterns on
+#
+# Set KAIRIX_CONFIG_PATH=/path/to/kairix.config.yaml to use a custom location.
+
+retrieval:
+  boosts:
+    entity:
+      enabled: true          # Boost documents for known named entities (Neo4j MENTIONS in-degree)
+      factor: 0.20           # Log-scale weight. Raise for entity-dense corpora.
+      cap: 2.0               # Max boost multiplier. Prevents runaway scores.
+
+    procedural:
+      enabled: true          # Boost procedural docs (how-to guides, runbooks, SOPs)
+      factor: 1.4            # Score multiplier for matching paths.
+      path_patterns:
+        - "(?:^|/)how-to-"
+        - "(?:^|/)runbooks?/"
+        - "(?:^|/)runbook-"
+        - "(?:^|/)procedure"
+        - "(?:^|/)sop-"
+        - "(?:^|/)guide-"
+        - "(?:^|/)playbook-"
+        # Uncomment for technical documentation corpora:
+        # - "(?:^|/)tutorial-"
+        # - "/docs?/"
+        # - "/reference/"
+
+    temporal:
+      # Date-path boost: boosts docs whose FILE PATH contains a date (e.g. 2026-03-22.md).
+      # Enable ONLY for corpora where YYYY-MM-DD.md daily log files are the primary query target.
+      date_path_boost:
+        enabled: false
+        factor: 1.35
+        recency_window_days: 90
+
+      # Chunk-date boost: boosts docs by chunk_date metadata proximity to the query date.
+      # Enable when chunk_date is populated at index time (see kairix index build --date-metadata).
+      chunk_date_boost:
+        enabled: false        # Enable for indexed corpora with chunk_date populated
+        decay_halflife_days: 30
