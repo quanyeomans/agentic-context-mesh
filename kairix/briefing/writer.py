@@ -58,7 +58,7 @@ def write_briefing(
     full_content = header + content
 
     try:
-        out_path.write_text(full_content, encoding="utf-8")
+        out_path.write_text(full_content, encoding="utf-8")  # lgtm[py/clear-text-storage-of-sensitive-data] — intentional product output: briefing files are user-owned documents, not credentials
         logger.info("writer: briefing written to %s (%d bytes)", out_path, len(full_content))
     except OSError as e:
         logger.error("writer: failed to write briefing to %s — %s", out_path, e)

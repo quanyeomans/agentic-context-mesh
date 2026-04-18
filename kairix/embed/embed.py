@@ -137,7 +137,7 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
         timeout=30,
     )
     resp.raise_for_status()
-    data = resp.json()
+    data = resp.json()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: response data is not passed to a log sink
     vec = data["data"][0]["embedding"]
     logger.info(f"Preflight OK — deployment={deployment} dims={len(vec)}")
     return len(vec)

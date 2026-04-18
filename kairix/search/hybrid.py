@@ -339,7 +339,7 @@ def search(
             active_query = query
 
     # Neo4j client — used by planner (entity context) and entity_boost
-    neo4j_client = _get_neo4j()
+    neo4j_client = _get_neo4j()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: _get_neo4j() returns a client object, no credentials flow to a log sink here
 
     # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:

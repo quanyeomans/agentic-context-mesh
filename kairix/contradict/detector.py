@@ -124,13 +124,13 @@ def _parse_llm_response(raw: str) -> tuple[float | None, str]:
     # Extract JSON object from response (model may add preamble)
     match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
     if not match:
-        logger.debug("contradict: no JSON object in LLM response: %r", raw[:100])
+        logger.debug("contradict: no JSON object in LLM response")
         return None, ""
 
     try:
         obj = json.loads(match.group())
     except json.JSONDecodeError:
-        logger.debug("contradict: JSON parse failed: %r", match.group()[:100])
+        logger.debug("contradict: JSON parse failed")
         return None, ""
 
     score_raw = obj.get("score")

@@ -14,6 +14,9 @@ jobs:
   pr-gates:
     name: PR compliance check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v6
@@ -68,6 +71,8 @@ jobs:
   full-integration:
     name: Full integration suite
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: pr-gates
 
     steps:
