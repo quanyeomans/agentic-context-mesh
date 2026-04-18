@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import IO
 
-from .embed import run_embed
+from .embed import DEFAULT_BATCH_SIZE, run_embed
 from .recall_check import run_recall_gate
 from .schema import (
     get_qmd_db_path,
@@ -195,7 +195,7 @@ def main() -> None:
     embed_p = sub.add_parser("embed", help="Run embedding pipeline (default)")
     embed_p.add_argument("--force", action="store_true", help="Re-embed all chunks (clears existing vectors)")
     embed_p.add_argument("--limit", type=int, default=None, help="Cap total chunks (for validation)")
-    embed_p.add_argument("--batch-size", type=int, default=100, help="Chunks per Azure API call")
+    embed_p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Chunks per Azure API call")
     embed_p.add_argument("--skip-recall-check", action="store_true", help="Skip post-embed quality gate")
 
     # recall-check
@@ -212,7 +212,7 @@ def main() -> None:
             # Default subcommand
             args.force = False
             args.limit = None
-            args.batch_size = 100
+            args.batch_size = DEFAULT_BATCH_SIZE
             args.skip_recall_check = False
         sys.exit(cmd_embed(args))
     elif args.command == "recall-check":
