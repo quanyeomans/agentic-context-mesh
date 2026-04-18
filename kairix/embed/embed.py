@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 # Azure OpenAI
 DEFAULT_DEPLOYMENT = "text-embedding-3-large"
 DEFAULT_DIMS = EMBED_VECTOR_DIMS
-DEFAULT_BATCH_SIZE = 100
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 1.0  # seconds, doubles per retry
+DEFAULT_BATCH_SIZE = 500
+MAX_RETRIES = 6
+RETRY_BASE_DELAY = 1.0  # seconds, doubles per retry (with jitter)
 
 # Chunking — mirrors QMD's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
 CHUNK_SIZE_CHARS = 3600  # ~900 tokens at 4 chars/token
@@ -151,10 +151,20 @@ def embed_batch(
     dims: int = DEFAULT_DIMS,
 ) -> list[list[float]]:
     """
-    Embed a batch of texts via Azure OpenAI. Retries on 429/500.
+    Embed a batch of texts via Azure OpenAI. Retries on 429/500 with
+    exponential backoff + jitter. On retry exhaustion, splits the batch
+    in half and recurses rather than failing the entire batch.
+
     Returns list of float vectors in same order as input texts.
-    Raises on 400 (bad request) or after MAX_RETRIES exhausted.
+    Raises on 400 (bad request) or after MAX_RETRIES exhausted on a
+    single-item batch.
     """
+    import random
+
+    # Base case: empty batch
+    if not texts:
+        return []
+
     url = f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version=2024-02-01"
 
     for attempt in range(MAX_RETRIES):
@@ -167,14 +177,22 @@ def embed_batch(
             )
 
             if resp.status_code == 429:
-                retry_after = int(resp.headers.get("Retry-After", RETRY_BASE_DELAY * (2**attempt)))
-                logger.warning(f"Rate limited — sleeping {retry_after}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                time.sleep(retry_after)
+                # Honour Retry-After if present; otherwise exponential backoff + jitter
+                retry_after_hdr = resp.headers.get("Retry-After")
+                if retry_after_hdr is not None:
+                    delay = float(retry_after_hdr)
+                else:
+                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    f"Rate limited (batch size {len(texts)}) — sleeping {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                time.sleep(delay)
                 continue
 
             if resp.status_code in (500, 502, 503):
-                delay = RETRY_BASE_DELAY * (2**attempt)
-                logger.warning(f"Server error {resp.status_code} — retrying in {delay}s")
+                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+                logger.warning(f"Server error {resp.status_code} — retrying in {delay:.1f}s")
                 time.sleep(delay)
                 continue
 
@@ -185,11 +203,23 @@ def embed_batch(
             return [r["embedding"] for r in results]
 
         except requests.Timeout:
-            delay = RETRY_BASE_DELAY * (2**attempt)
-            logger.warning(f"Request timeout — retrying in {delay}s")
+            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+            logger.warning(f"Request timeout — retrying in {delay:.1f}s")
             time.sleep(delay)
 
-    raise RuntimeError(f"Azure embed failed after {MAX_RETRIES} attempts")
+    # Retries exhausted — split and recurse rather than failing the whole batch.
+    # Single-item batches that still fail are a genuine error.
+    if len(texts) == 1:
+        raise RuntimeError(f"Azure embed failed after {MAX_RETRIES} attempts on single chunk")
+
+    mid = len(texts) // 2
+    logger.warning(
+        f"Batch of {len(texts)} exhausted retries — splitting into "
+        f"{mid} + {len(texts) - mid} and retrying"
+    )
+    left = embed_batch(texts[:mid], api_key, endpoint, deployment, dims)
+    right = embed_batch(texts[mid:], api_key, endpoint, deployment, dims)
+    return left + right
 
 
 # ── DB writes ─────────────────────────────────────────────────────────────────
@@ -293,17 +323,15 @@ def run_embed(
     force: bool = False,
     batch_size: int = DEFAULT_BATCH_SIZE,
     limit: int | None = None,
-    inter_batch_sleep: float = 0.1,
 ) -> dict:
     """
     Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
 
     Args:
-        db:                 Open SQLite connection (caller holds the lock)
-        force:              Re-embed everything, not just pending
-        batch_size:         Chunks per Azure API call (max ~2048, 100 is safe)
-        limit:              Cap total chunks (for validation/testing)
-        inter_batch_sleep:  Seconds to sleep between batches (rate-limit courtesy)
+        db:         Open SQLite connection (caller holds the lock)
+        force:      Re-embed everything, not just pending
+        batch_size: Chunks per Azure API call (Azure supports up to 2048; default 500)
+        limit:      Cap total chunks (for validation/testing)
 
     Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
     """
@@ -462,8 +490,8 @@ def run_embed(
             eta_s = (total - embedded) / rate if rate > 0 else 0
             logger.info(f"Progress: {embedded}/{total} ({pct:.1f}%) — {rate:.1f} chunks/s — ETA {eta_s / 60:.1f}m")
 
-        if inter_batch_sleep > 0:
-            time.sleep(inter_batch_sleep)
+        # No unconditional sleep — rate limiting is handled reactively via
+        # Retry-After headers in embed_batch() when Azure actually pushes back.
 
     duration_s = time.time() - start_time
 
