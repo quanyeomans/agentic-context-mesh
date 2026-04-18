@@ -76,9 +76,7 @@ else
 fi
 
 log "  Installing kairix from ${KAIRIX_REPO}@${KAIRIX_VERSION}"
-# --force-reinstall ensures branch refs (develop, main) always pull the latest
-# commit even when the version number has not changed between deploys.
-"${KAIRIX_VENV}/bin/pip" install -q --force-reinstall --no-deps \
+"${KAIRIX_VENV}/bin/pip" install -q --upgrade \
     "git+${KAIRIX_REPO}@${KAIRIX_VERSION}"
 
 INSTALLED_VERSION=$("${KAIRIX_VENV}/bin/kairix" --version 2>/dev/null || echo "unknown")

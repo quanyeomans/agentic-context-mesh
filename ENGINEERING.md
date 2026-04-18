@@ -358,12 +358,26 @@ docs/engineering-disciplines   # documentation
 chore/deps-bump-requests       # dependency updates
 ```
 
-### 7.2 PR requirements
+### 7.2 Version discipline
+
+kairix uses CalVer: `YYYY.M.D` for stable releases on `main`, `YYYY.M.Da<N>` for alpha releases on `develop`.
+
+**Rule: the version in `pyproject.toml` must be incremented before deploying to any environment.** This is what allows `pip install --upgrade` to work correctly — pip compares version numbers, not commit SHAs. Deploying without a version bump means pip sees the existing version as current and installs nothing.
+
+| Branch | Version example | Increment rule |
+|--------|----------------|----------------|
+| `develop` | `2026.4.18a3` | Increment `aN` before each deploy to a test/staging host |
+| `main` | `2026.4.18` | Increment date component on each stable release |
+
+Installing from a branch ref (`@develop`, `@main`) rather than a pinned tag does not override this — pip still resolves by version number. Pinned tags are the correct install target for reproducible environments.
+
+### 7.3 PR requirements
 
 **Before opening a PR:**
 - [ ] All CI stages pass locally (`pytest tests/`, `mypy kairix/`, `ruff check kairix/`)
 - [ ] No secrets in diff (`detect-secrets scan kairix/ tests/`)
 - [ ] If retrieval logic changed: benchmark comparison included in description
+- [ ] Version bumped in `pyproject.toml` if this set of changes will be deployed
 
 **PR description must include:**
 - What changed and why (1-3 sentences)
