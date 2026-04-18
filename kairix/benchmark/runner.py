@@ -383,8 +383,13 @@ def _retrieve(
         snippets = [r.get("snippet") or "" for r in results]
         return paths, snippets, {"system": "bm25"}
 
+    elif system == "mock":
+        from kairix.benchmark.mock_retrieval import mock_retrieve
+
+        return mock_retrieve(query=query, limit=limit)
+
     else:
-        raise ValueError(f"Unknown system: {system!r}. Use 'hybrid', 'bm25', or 'vector'.")
+        raise ValueError(f"Unknown system: {system!r}. Use 'hybrid', 'bm25', 'vector', or 'mock'.")
 
 
 # ---------------------------------------------------------------------------

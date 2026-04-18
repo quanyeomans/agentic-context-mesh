@@ -52,6 +52,21 @@ class TemporalBoostConfig:
     chunk_date_boost_enabled: bool = False
     chunk_date_decay_halflife_days: int = 30
 
+    # Guard: only apply chunk_date_boost when query contains an explicit temporal
+    # marker (ISO date or relative term like "last week"). Prevents generic TEMPORAL
+    # intent queries ("what changed and why") from receiving unintended recency bias.
+    chunk_date_boost_guard_explicit_only: bool = True
+
+
+@dataclass(frozen=True)
+class RerankConfig:
+    """Configuration for cross-encoder re-ranking (post-RRF semantic pass)."""
+
+    enabled: bool = False
+    model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    # Number of candidates to pass to the cross-encoder (top-N from RRF output).
+    candidate_limit: int = 20
+
 
 @dataclass(frozen=True)
 class RetrievalConfig:
@@ -71,6 +86,7 @@ class RetrievalConfig:
     entity: EntityBoostConfig = field(default_factory=EntityBoostConfig)
     procedural: ProceduralBoostConfig = field(default_factory=ProceduralBoostConfig)
     temporal: TemporalBoostConfig = field(default_factory=TemporalBoostConfig)
+    rerank: RerankConfig = field(default_factory=RerankConfig)
 
     @classmethod
     def defaults(cls) -> RetrievalConfig:
