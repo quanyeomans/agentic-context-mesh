@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# deploy-vm.sh — idempotent VM deployment script for kairix
+# install.sh — idempotent kairix installer
 #
 # Installs kairix as a pip package (no source tree required) and sets up the
-# operator environment. Run as the service user on the target VM.
+# operator environment. Works on any Linux host: bare metal, VM, or WSL.
+# Run as the service user that will own the kairix installation.
 #
 # INSTALL MODEL:
 #   kairix is installed via pip from the public GitHub repo into /opt/kairix/.venv
@@ -10,10 +11,10 @@
 #   /opt/kairix/ — not inside the kairix source repo.
 #
 # USAGE:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
 #
 #   Or if you have the script locally:
-#   bash scripts/deploy-vm.sh [--version TAG] [--no-path-setup] [--skip-smoke]
+#   bash scripts/install.sh [--version TAG] [--no-path-setup] [--skip-smoke]
 #
 # FLAGS:
 #   --version TAG     Install specific git tag or branch (default: main)
@@ -141,7 +142,7 @@ log "  Wrapper installed at ${WRAPPER_DEST}"
 
 # Stamp the venv path into a companion env so wrapper can find the binary
 {
-    echo "# Written by deploy-vm.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "# Written by install.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "KAIRIX_VENV=${KAIRIX_VENV}"
 } > "${KAIRIX_OPT}/bin/kairix-install.env"
 
