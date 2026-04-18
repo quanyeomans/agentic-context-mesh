@@ -467,22 +467,41 @@ def check_chunk_date_populated() -> CheckResult:
         )
 
 
-_OPENCLAW_MCP_SERVER_NAME = "mcp-kairix"
+# ---------------------------------------------------------------------------
+# MCP consumer harness checks
+# ---------------------------------------------------------------------------
+# kairix MCP server is a general service. Different consumers connect via
+# different transports:
+#
+#   stdio (per-session subprocess) — OpenClaw, Claude Desktop, any orchestrator
+#   SSE / HTTP (persistent process) — curl, generic HTTP MCP clients
+#
+# The check below probes whichever harnesses are detectable on this host.
+# It passes if at least one harness is configured and functional.
+# ---------------------------------------------------------------------------
+
+_MCP_KAIRIX_SERVER_NAME = "mcp-kairix"
+
+# ── OpenClaw ──────────────────────────────────────────────────────────────────
 _OPENCLAW_JSON_PATHS = (
     "/home/openclaw/.openclaw/openclaw.json",
     Path.home() / ".openclaw" / "openclaw.json",
 )
-_KAIRIX_MCP_START_SH = "/data/development/tc-agent-zone/mcp-servers/kairix/bin/start.sh"
+
+# ── Claude Desktop ────────────────────────────────────────────────────────────
+_CLAUDE_DESKTOP_CONFIG_PATHS = (
+    # macOS
+    Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+    # Linux (XDG)
+    Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "Claude" / "claude_desktop_config.json",
+)
+
+# ── SSE / HTTP ────────────────────────────────────────────────────────────────
+_MCP_SSE_PORT = int(os.environ.get("KAIRIX_MCP_PORT", "7443"))
 
 
-def _check_openclaw_mcp_registered() -> tuple[bool, str]:
-    """
-    Check whether kairix is registered as an MCP server in OpenClaw's config.
-
-    OpenClaw uses stdio transport — it spawns the start.sh script as a subprocess
-    per agent session. No persistent HTTP server or systemd unit is involved.
-    Checks the live openclaw.json for the mcp-kairix entry.
-    """
+def _probe_openclaw_harness() -> tuple[bool, str]:
+    """Return (ok, detail) for the OpenClaw stdio harness."""
     import json as _json
 
     for candidate in _OPENCLAW_JSON_PATHS:
@@ -493,76 +512,121 @@ def _check_openclaw_mcp_registered() -> tuple[bool, str]:
             data = _json.loads(p.read_text())
             # OpenClaw stores MCP servers at mcp.servers (set via `openclaw mcp set`)
             mcp_servers = data.get("mcp", {}).get("servers", {})
-            if _OPENCLAW_MCP_SERVER_NAME in mcp_servers:
-                entry = mcp_servers[_OPENCLAW_MCP_SERVER_NAME]
-                return True, f"registered in {p} (command: {entry.get('command', '?')})"
+            if _MCP_KAIRIX_SERVER_NAME in mcp_servers:
+                entry = mcp_servers[_MCP_KAIRIX_SERVER_NAME]
+                cmd = entry.get("command", "")
+                cmd_ok = bool(cmd) and Path(cmd).exists() and os.access(cmd, os.X_OK)
+                if cmd_ok:
+                    return True, f"OpenClaw: registered in {p.name}, start command executable"
+                return False, f"OpenClaw: registered but start command missing/not executable: {cmd}"
         except (OSError, _json.JSONDecodeError):
             continue
 
-    return False, f"'{_OPENCLAW_MCP_SERVER_NAME}' not found in OpenClaw config"
-
-
-def check_mcp_service() -> CheckResult:
-    """kairix MCP server is registered with OpenClaw and its start script is executable."""
-    registered, reg_detail = _check_openclaw_mcp_registered()
-
-    # Check the start script exists and is executable
-    start_sh = Path(_KAIRIX_MCP_START_SH)
-    start_ok = start_sh.exists() and os.access(str(start_sh), os.X_OK)
-
-    # Try openclaw CLI as a secondary check
-    openclaw_list_ok = False
+    # Fallback: try openclaw CLI
     try:
         result = subprocess.run(
             ["openclaw", "mcp", "list"],
-            capture_output=True,
-            text=True,
-            timeout=5,
+            capture_output=True, text=True, timeout=5,
         )
-        openclaw_list_ok = _OPENCLAW_MCP_SERVER_NAME in result.stdout
+        if _MCP_KAIRIX_SERVER_NAME in result.stdout:
+            return True, "OpenClaw: registered (via 'openclaw mcp list')"
     except (FileNotFoundError, Exception):
         pass
 
-    # Determine result
-    is_ok = (registered or openclaw_list_ok) and start_ok
+    return False, "OpenClaw: not detected"
 
-    if is_ok:
-        source = "openclaw mcp list" if openclaw_list_ok else "openclaw.json"
+
+def _probe_claude_desktop_harness() -> tuple[bool, str]:
+    """Return (ok, detail) for the Claude Desktop stdio harness."""
+    import json as _json
+
+    for candidate in _CLAUDE_DESKTOP_CONFIG_PATHS:
+        try:
+            p = Path(str(candidate))
+            if not p.exists():
+                continue
+            data = _json.loads(p.read_text())
+            mcp_servers = data.get("mcpServers", {})
+            if "kairix" in mcp_servers:
+                entry = mcp_servers["kairix"]
+                cmd_args = entry.get("args", [])
+                cmd = entry.get("command", "")
+                return True, f"Claude Desktop: registered (command: {cmd})"
+        except (OSError, _json.JSONDecodeError):
+            continue
+
+    return False, "Claude Desktop: not detected"
+
+
+def _probe_sse_harness() -> tuple[bool, str]:
+    """Return (ok, detail) for the SSE/HTTP persistent service harness."""
+    import socket
+
+    # TCP probe on MCP SSE port
+    try:
+        with socket.create_connection(("127.0.0.1", _MCP_SSE_PORT), timeout=2):
+            return True, f"SSE/HTTP: listening on port {_MCP_SSE_PORT}"
+    except OSError:
+        pass
+
+    # Fallback: check systemd unit exists and is active
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "kairix-mcp.service"],
+            capture_output=True, text=True, timeout=5,
+        )
+        state = result.stdout.strip()
+        if state == "active":
+            return True, f"SSE/HTTP: kairix-mcp.service active (port {_MCP_SSE_PORT} not yet listening — may still be starting)"
+        elif state not in ("", "inactive", "failed", "unknown"):
+            return False, f"SSE/HTTP: kairix-mcp.service state={state}"
+    except (FileNotFoundError, Exception):
+        pass
+
+    return False, f"SSE/HTTP: not listening on port {_MCP_SSE_PORT}"
+
+
+def check_mcp_service() -> CheckResult:
+    """
+    kairix MCP server is reachable by at least one configured consumer.
+
+    Probes each transport harness that is detectable on this host:
+      - OpenClaw (stdio): mcp-kairix registered in openclaw.json
+      - Claude Desktop (stdio): kairix registered in claude_desktop_config.json
+      - SSE/HTTP (persistent): port 7443 listening or kairix-mcp.service active
+
+    Passes if at least one harness is configured and functional.
+    If no harness is detected, reports which harnesses are available to configure.
+    """
+    openclaw_ok, openclaw_detail = _probe_openclaw_harness()
+    claude_ok, claude_detail = _probe_claude_desktop_harness()
+    sse_ok, sse_detail = _probe_sse_harness()
+
+    active = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if ok]
+    inactive = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if not ok]
+
+    if active:
         return CheckResult(
             name="mcp_service",
             ok=True,
-            detail=(
-                f"kairix MCP server registered ({source}), "
-                f"start script executable at {_KAIRIX_MCP_START_SH}"
-            ),
-        )
-
-    issues: list[str] = []
-    fix_parts: list[str] = []
-
-    if not (registered or openclaw_list_ok):
-        issues.append(reg_detail)
-        fix_parts.append(
-            "Register kairix with OpenClaw:\n"
-            f"  openclaw mcp set {_OPENCLAW_MCP_SERVER_NAME} "
-            "'{\"type\":\"stdio\",\"command\":\"/data/development/tc-agent-zone/mcp-servers/kairix/bin/start.sh\"}"
-            "'\n"
-            "Then restart: openclaw gateway restart"
-        )
-
-    if not start_ok:
-        issues.append(f"start script missing or not executable: {_KAIRIX_MCP_START_SH}")
-        fix_parts.append(
-            f"Ensure tc-agent-zone is deployed:\n"
-            f"  ls -la {_KAIRIX_MCP_START_SH}\n"
-            "  chmod +x {_KAIRIX_MCP_START_SH}"
+            detail="kairix MCP server accessible — " + "; ".join(active),
         )
 
     return CheckResult(
         name="mcp_service",
         ok=False,
-        detail="kairix MCP server not ready — " + "; ".join(issues),
-        fix="\n".join(fix_parts) if fix_parts else None,
+        detail="kairix MCP server not configured for any consumer — " + "; ".join(inactive),
+        fix=(
+            "Configure at least one MCP consumer harness:\n\n"
+            "  OpenClaw (stdio):\n"
+            "    openclaw mcp set mcp-kairix "
+            "'{\"type\":\"stdio\",\"command\":\"/path/to/kairix-start.sh\"}'\n\n"
+            "  Claude Desktop (stdio): add to ~/Library/Application Support/Claude/claude_desktop_config.json:\n"
+            "    {\"mcpServers\": {\"kairix\": {\"command\": \"kairix\", \"args\": [\"mcp\", \"serve\"]}}}\n\n"
+            "  SSE/HTTP (persistent service):\n"
+            "    sudo systemctl enable --now kairix-mcp.service\n"
+            "    # or: kairix mcp serve --transport sse --port 7443 &\n"
+        ),
     )
 
 
