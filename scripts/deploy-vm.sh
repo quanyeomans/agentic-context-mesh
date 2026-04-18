@@ -189,11 +189,73 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: Smoke test
+# Step 6: Install and enable kairix-mcp.service (systemd)
+# ---------------------------------------------------------------------------
+
+log "Step 6: installing kairix-mcp.service"
+
+SYSTEMD_UNIT_DIR="/etc/systemd/system"
+MCP_UNIT_DEST="${SYSTEMD_UNIT_DIR}/kairix-mcp.service"
+MCP_UNIT_SRC_URL="${KAIRIX_REPO}/raw/${KAIRIX_VERSION}/scripts/kairix-mcp.service"
+
+if command -v systemctl >/dev/null 2>&1 && [[ -d "$SYSTEMD_UNIT_DIR" ]]; then
+    # Download the unit file
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$MCP_UNIT_SRC_URL" -o /tmp/kairix-mcp.service.tmp
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO /tmp/kairix-mcp.service.tmp "$MCP_UNIT_SRC_URL"
+    else
+        warn "curl or wget required to download the MCP service unit file"
+    fi
+
+    if [[ -f /tmp/kairix-mcp.service.tmp ]]; then
+        if [[ -w "$SYSTEMD_UNIT_DIR" ]]; then
+            cp /tmp/kairix-mcp.service.tmp "$MCP_UNIT_DEST"
+            chmod 644 "$MCP_UNIT_DEST"
+            systemctl daemon-reload
+            systemctl enable kairix-mcp.service
+            systemctl restart kairix-mcp.service
+            sleep 2
+            if systemctl is-active --quiet kairix-mcp.service; then
+                log "  kairix-mcp.service enabled and running"
+            else
+                warn "kairix-mcp.service did not start cleanly — check: journalctl -u kairix-mcp.service -n 20"
+            fi
+            rm -f /tmp/kairix-mcp.service.tmp
+
+            # Register in OpenClaw tool manifest (if openclaw is present)
+            REGISTER_SCRIPT="${KAIRIX_OPT}/cron/kairix-mcp-register.sh"
+            if [[ ! -f "$REGISTER_SCRIPT" ]]; then
+                REGISTER_SCRIPT_URL="${KAIRIX_REPO}/raw/${KAIRIX_VERSION}/scripts/cron/kairix-mcp-register.sh"
+                mkdir -p "$(dirname "$REGISTER_SCRIPT")"
+                curl -fsSL "$REGISTER_SCRIPT_URL" -o "$REGISTER_SCRIPT" 2>/dev/null \
+                    || wget -qO "$REGISTER_SCRIPT" "$REGISTER_SCRIPT_URL" 2>/dev/null \
+                    || true
+                [[ -f "$REGISTER_SCRIPT" ]] && chmod 755 "$REGISTER_SCRIPT"
+            fi
+            if [[ -f "$REGISTER_SCRIPT" ]]; then
+                bash "$REGISTER_SCRIPT" || warn "OpenClaw registration failed — may not be installed yet"
+            fi
+        else
+            warn "${SYSTEMD_UNIT_DIR} is not writable — cannot install kairix-mcp.service"
+            warn "  Run with sudo, or manually:"
+            warn "    sudo cp /tmp/kairix-mcp.service.tmp /etc/systemd/system/kairix-mcp.service"
+            warn "    sudo systemctl daemon-reload && sudo systemctl enable --now kairix-mcp.service"
+        fi
+    else
+        warn "Failed to download kairix-mcp.service unit file"
+    fi
+else
+    log "  systemd not available — skipping MCP service installation"
+    log "  Start manually: kairix mcp serve --transport sse --port 7443 &"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 7: Smoke test
 # ---------------------------------------------------------------------------
 
 if [[ $SKIP_SMOKE -eq 0 ]]; then
-    log "Step 6: smoke test"
+    log "Step 7: smoke test"
 
     KAIRIX_SERVICE_ENV="${KAIRIX_OPT}/service.env" \
     KAIRIX_VENV="${KAIRIX_VENV}" \

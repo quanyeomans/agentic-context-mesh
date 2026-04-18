@@ -387,47 +387,183 @@ def check_agent_knowledge_populated() -> CheckResult:
     )
 
 
+def check_chunk_date_populated() -> CheckResult:
+    """chunk_date is populated in content_vectors (required for TMP-7B temporal boost)."""
+    try:
+        from kairix.embed.schema import get_qmd_db_path
+
+        db_path = get_qmd_db_path()
+        import sqlite3
+
+        db = sqlite3.connect(str(db_path))
+        try:
+            # Check if the column exists first
+            cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
+            if "chunk_date" not in cols:
+                return CheckResult(
+                    name="chunk_date_populated",
+                    ok=False,
+                    detail="chunk_date column missing from content_vectors",
+                    fix=(
+                        "Run kairix embed to add the column and populate dates.\n"
+                        "The migration is automatic on next embed run."
+                    ),
+                )
+
+            total = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
+            dated = db.execute("SELECT COUNT(*) FROM content_vectors WHERE chunk_date IS NOT NULL").fetchone()[0]
+        finally:
+            db.close()
+
+        if total == 0:
+            return CheckResult(
+                name="chunk_date_populated",
+                ok=False,
+                detail="content_vectors is empty — vault has not been embedded",
+                fix="Run: kairix embed",
+            )
+
+        pct = 100 * dated / total
+        if dated == 0:
+            return CheckResult(
+                name="chunk_date_populated",
+                ok=False,
+                detail=f"chunk_date: 0/{total} chunks dated (0%) — TMP-7B temporal boost is inert",
+                fix=(
+                    "Run kairix embed to populate chunk_date from document frontmatter and filenames.\n"
+                    "Documents need 'date: YYYY-MM-DD' in frontmatter or a date in their filename."
+                ),
+            )
+        if pct < 20:
+            return CheckResult(
+                name="chunk_date_populated",
+                ok=False,
+                detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%) — low coverage, temporal boost degraded",
+                fix=(
+                    "Add 'date: YYYY-MM-DD' frontmatter to more documents, or use dated filenames.\n"
+                    "Re-run kairix embed after updating documents."
+                ),
+            )
+
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=True,
+            detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%)",
+        )
+
+    except FileNotFoundError:
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=False,
+            detail="QMD index not found — vault not embedded yet",
+            fix="Run: kairix embed",
+        )
+    except Exception as exc:
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=False,
+            detail=f"chunk_date check failed: {exc}",
+            fix="Check QMD index at ~/.cache/qmd/index.sqlite",
+        )
+
+
+_OPENCLAW_MCP_SERVER_NAME = "mcp-kairix"
+_OPENCLAW_JSON_PATHS = (
+    "/home/openclaw/.openclaw/openclaw.json",
+    Path.home() / ".openclaw" / "openclaw.json",
+)
+_KAIRIX_MCP_START_SH = "/data/development/tc-agent-zone/mcp-servers/kairix/bin/start.sh"
+
+
+def _check_openclaw_mcp_registered() -> tuple[bool, str]:
+    """
+    Check whether kairix is registered as an MCP server in OpenClaw's config.
+
+    OpenClaw uses stdio transport — it spawns the start.sh script as a subprocess
+    per agent session. No persistent HTTP server or systemd unit is involved.
+    Checks the live openclaw.json for the mcp-kairix entry.
+    """
+    import json as _json
+
+    for candidate in _OPENCLAW_JSON_PATHS:
+        try:
+            p = Path(str(candidate))
+            if not p.exists():
+                continue
+            data = _json.loads(p.read_text())
+            # OpenClaw stores MCP servers at mcp.servers (set via `openclaw mcp set`)
+            mcp_servers = data.get("mcp", {}).get("servers", {})
+            if _OPENCLAW_MCP_SERVER_NAME in mcp_servers:
+                entry = mcp_servers[_OPENCLAW_MCP_SERVER_NAME]
+                return True, f"registered in {p} (command: {entry.get('command', '?')})"
+        except (OSError, _json.JSONDecodeError):
+            continue
+
+    return False, f"'{_OPENCLAW_MCP_SERVER_NAME}' not found in OpenClaw config"
+
+
 def check_mcp_service() -> CheckResult:
-    """kairix-mcp.service is active (systemd)."""
+    """kairix MCP server is registered with OpenClaw and its start script is executable."""
+    registered, reg_detail = _check_openclaw_mcp_registered()
+
+    # Check the start script exists and is executable
+    start_sh = Path(_KAIRIX_MCP_START_SH)
+    start_ok = start_sh.exists() and os.access(str(start_sh), os.X_OK)
+
+    # Try openclaw CLI as a secondary check
+    openclaw_list_ok = False
     try:
         result = subprocess.run(
-            ["systemctl", "is-active", "kairix-mcp.service"],
+            ["openclaw", "mcp", "list"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        state = result.stdout.strip()
-        if state == "active":
-            return CheckResult(
-                name="mcp_service",
-                ok=True,
-                detail="kairix-mcp.service is active",
-            )
+        openclaw_list_ok = _OPENCLAW_MCP_SERVER_NAME in result.stdout
+    except (FileNotFoundError, Exception):
+        pass
+
+    # Determine result
+    is_ok = (registered or openclaw_list_ok) and start_ok
+
+    if is_ok:
+        source = "openclaw mcp list" if openclaw_list_ok else "openclaw.json"
         return CheckResult(
             name="mcp_service",
-            ok=False,
-            detail=f"kairix-mcp.service state: {state or '(unknown)'}",
-            fix=(
-                "Start the MCP service:\n"
-                "  sudo systemctl enable --now kairix-mcp.service\n"
-                "If the unit is not installed, run apply-kairix-config.sh first.\n"
-                "Check logs: journalctl -u kairix-mcp.service -n 30"
+            ok=True,
+            detail=(
+                f"kairix MCP server registered ({source}), "
+                f"start script executable at {_KAIRIX_MCP_START_SH}"
             ),
         )
-    except FileNotFoundError:
-        return CheckResult(
-            name="mcp_service",
-            ok=False,
-            detail="systemctl not found — not a systemd host",
-            fix="kairix-mcp.service requires a systemd Linux host (not macOS or Docker without systemd).",
+
+    issues: list[str] = []
+    fix_parts: list[str] = []
+
+    if not (registered or openclaw_list_ok):
+        issues.append(reg_detail)
+        fix_parts.append(
+            "Register kairix with OpenClaw:\n"
+            f"  openclaw mcp set {_OPENCLAW_MCP_SERVER_NAME} "
+            "'{\"type\":\"stdio\",\"command\":\"/data/development/tc-agent-zone/mcp-servers/kairix/bin/start.sh\"}"
+            "'\n"
+            "Then restart: openclaw gateway restart"
         )
-    except Exception as exc:
-        return CheckResult(
-            name="mcp_service",
-            ok=False,
-            detail=f"Could not query kairix-mcp.service: {exc}",
-            fix="Check systemd is running and this process has permission to query service state.",
+
+    if not start_ok:
+        issues.append(f"start script missing or not executable: {_KAIRIX_MCP_START_SH}")
+        fix_parts.append(
+            f"Ensure tc-agent-zone is deployed:\n"
+            f"  ls -la {_KAIRIX_MCP_START_SH}\n"
+            "  chmod +x {_KAIRIX_MCP_START_SH}"
         )
+
+    return CheckResult(
+        name="mcp_service",
+        ok=False,
+        detail="kairix MCP server not ready — " + "; ".join(issues),
+        fix="\n".join(fix_parts) if fix_parts else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +579,7 @@ ALL_CHECKS = [
     check_vector_search_working,
     check_neo4j_reachable,
     check_agent_knowledge_populated,
+    check_chunk_date_populated,
     check_mcp_service,
 ]
 

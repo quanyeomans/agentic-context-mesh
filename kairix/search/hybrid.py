@@ -228,6 +228,12 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
         return
 
     if not rows:
+        logger.warning(
+            "hybrid: _enrich_chunk_dates found 0 rows for %d paths — "
+            "chunk_date column may not be populated. "
+            "Re-run `kairix embed` to populate chunk_date (ERR-001).",
+            len(paths),
+        )
         return
 
     # Build path → chunk_date map (last non-null value wins for multi-chunk docs)
