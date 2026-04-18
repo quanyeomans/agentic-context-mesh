@@ -245,7 +245,7 @@ Set with `--budget N`. The budget caps total tokens returned, not the number of 
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `command not found` | kairix not on PATH | Use `/usr/local/bin/kairix` or run `scripts/deploy-vm.sh` |
+| `command not found` | kairix not on PATH | Use `/usr/local/bin/kairix` or run `scripts/install.sh` |
 | `vec_failed: true` | Azure credentials not loaded | Run `kairix onboard check`; fix secrets_loaded issue |
 | 0 results, no error | Vault not embedded | Run `kairix embed --limit 20` to test |
 | Results are all from one section | Scope issue | Check `--agent` flag is correct |

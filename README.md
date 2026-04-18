@@ -170,7 +170,7 @@ pip install "kairix[agents]"
 For VM deployment, use the deploy script to install the wrapper and PATH setup:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
 ```
 
 Then follow the [OPERATIONS.md first-run sequence](OPERATIONS.md#first-run-sequence).
