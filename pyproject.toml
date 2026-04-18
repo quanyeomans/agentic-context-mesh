@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kairix"
-version = "2026.4.18a3"
+version = "2026.4.18a4"
 description = "Memory system for QMD + Obsidian agent stacks — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "Apache-2.0" }
