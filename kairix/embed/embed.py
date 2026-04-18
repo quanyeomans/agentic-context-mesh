@@ -11,11 +11,13 @@ from collections.abc import Generator
 
 import requests
 
+from .date_extract import extract_chunk_date
 from .schema import (
     EMBED_VECTOR_DIMS,
     SchemaVersionError,
     ensure_vec_table,
     load_sqlite_vec,
+    migrate_content_vectors,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,9 +25,9 @@ logger = logging.getLogger(__name__)
 # Azure OpenAI
 DEFAULT_DEPLOYMENT = "text-embedding-3-large"
 DEFAULT_DIMS = EMBED_VECTOR_DIMS
-DEFAULT_BATCH_SIZE = 100
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 1.0  # seconds, doubles per retry
+DEFAULT_BATCH_SIZE = 500
+MAX_RETRIES = 6
+RETRY_BASE_DELAY = 1.0  # seconds, doubles per retry (with jitter)
 
 # Chunking — mirrors QMD's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
 CHUNK_SIZE_CHARS = 3600  # ~900 tokens at 4 chars/token
@@ -135,7 +137,7 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
         timeout=30,
     )
     resp.raise_for_status()
-    data = resp.json()
+    data = resp.json()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: response data is not passed to a log sink
     vec = data["data"][0]["embedding"]
     logger.info(f"Preflight OK — deployment={deployment} dims={len(vec)}")
     return len(vec)
@@ -149,10 +151,20 @@ def embed_batch(
     dims: int = DEFAULT_DIMS,
 ) -> list[list[float]]:
     """
-    Embed a batch of texts via Azure OpenAI. Retries on 429/500.
+    Embed a batch of texts via Azure OpenAI. Retries on 429/500 with
+    exponential backoff + jitter. On retry exhaustion, splits the batch
+    in half and recurses rather than failing the entire batch.
+
     Returns list of float vectors in same order as input texts.
-    Raises on 400 (bad request) or after MAX_RETRIES exhausted.
+    Raises on 400 (bad request) or after MAX_RETRIES exhausted on a
+    single-item batch.
     """
+    import random
+
+    # Base case: empty batch
+    if not texts:
+        return []
+
     url = f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version=2024-02-01"
 
     for attempt in range(MAX_RETRIES):
@@ -165,14 +177,22 @@ def embed_batch(
             )
 
             if resp.status_code == 429:
-                retry_after = int(resp.headers.get("Retry-After", RETRY_BASE_DELAY * (2**attempt)))
-                logger.warning(f"Rate limited — sleeping {retry_after}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                time.sleep(retry_after)
+                # Honour Retry-After if present; otherwise exponential backoff + jitter
+                retry_after_hdr = resp.headers.get("Retry-After")
+                if retry_after_hdr is not None:
+                    delay = float(retry_after_hdr)
+                else:
+                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    f"Rate limited (batch size {len(texts)}) — sleeping {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                time.sleep(delay)
                 continue
 
             if resp.status_code in (500, 502, 503):
-                delay = RETRY_BASE_DELAY * (2**attempt)
-                logger.warning(f"Server error {resp.status_code} — retrying in {delay}s")
+                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+                logger.warning(f"Server error {resp.status_code} — retrying in {delay:.1f}s")
                 time.sleep(delay)
                 continue
 
@@ -183,11 +203,23 @@ def embed_batch(
             return [r["embedding"] for r in results]
 
         except requests.Timeout:
-            delay = RETRY_BASE_DELAY * (2**attempt)
-            logger.warning(f"Request timeout — retrying in {delay}s")
+            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+            logger.warning(f"Request timeout — retrying in {delay:.1f}s")
             time.sleep(delay)
 
-    raise RuntimeError(f"Azure embed failed after {MAX_RETRIES} attempts")
+    # Retries exhausted — split and recurse rather than failing the whole batch.
+    # Single-item batches that still fail are a genuine error.
+    if len(texts) == 1:
+        raise RuntimeError(f"Azure embed failed after {MAX_RETRIES} attempts on single chunk")
+
+    mid = len(texts) // 2
+    logger.warning(
+        f"Batch of {len(texts)} exhausted retries — splitting into "
+        f"{mid} + {len(texts) - mid} and retrying"
+    )
+    left = embed_batch(texts[:mid], api_key, endpoint, deployment, dims)
+    right = embed_batch(texts[mid:], api_key, endpoint, deployment, dims)
+    return left + right
 
 
 # ── DB writes ─────────────────────────────────────────────────────────────────
@@ -248,6 +280,7 @@ def stage_embedding(
     vector: list[float],
     model: str,
     embedded_at: int,
+    chunk_date: str | None = None,
 ) -> None:
     """
     Write chunk metadata to content_vectors and queue the vector in vec_staging.
@@ -256,13 +289,16 @@ def stage_embedding(
     The vector goes into vec_staging (also normal SQLite) — it will be merged
     into vectors_vec (sqlite-vec virtual table) via flush_staging_to_vec()
     at batch commit time.
+
+    chunk_date is the ISO date extracted from the document (frontmatter or path).
+    It is the same for all chunks of a given document (document-level property).
     """
     hash_seq = build_hash_seq(content_hash, seq)
     packed = encode_vector(vector)
 
     db.execute(
-        "INSERT OR REPLACE INTO content_vectors (hash, seq, pos, model, embedded_at) VALUES (?, ?, ?, ?, ?)",
-        (content_hash, seq, pos, model, embedded_at),
+        "INSERT OR REPLACE INTO content_vectors (hash, seq, pos, model, embedded_at, chunk_date) VALUES (?, ?, ?, ?, ?, ?)",
+        (content_hash, seq, pos, model, embedded_at, chunk_date),
     )
     db.execute(
         "INSERT OR REPLACE INTO vec_staging (hash_seq, embedding) VALUES (?, ?)",
@@ -287,17 +323,15 @@ def run_embed(
     force: bool = False,
     batch_size: int = DEFAULT_BATCH_SIZE,
     limit: int | None = None,
-    inter_batch_sleep: float = 0.1,
 ) -> dict:
     """
     Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
 
     Args:
-        db:                 Open SQLite connection (caller holds the lock)
-        force:              Re-embed everything, not just pending
-        batch_size:         Chunks per Azure API call (max ~2048, 100 is safe)
-        limit:              Cap total chunks (for validation/testing)
-        inter_batch_sleep:  Seconds to sleep between batches (rate-limit courtesy)
+        db:         Open SQLite connection (caller holds the lock)
+        force:      Re-embed everything, not just pending
+        batch_size: Chunks per Azure API call (Azure supports up to 2048; default 500)
+        limit:      Cap total chunks (for validation/testing)
 
     Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
     """
@@ -317,6 +351,9 @@ def run_embed(
     # Ensure vec table exists at correct dims, and staging table for upserts
     ensure_vec_table(db, actual_dims)
     ensure_staging_table(db)
+
+    # Ensure chunk_date column exists (idempotent — no-op when already present)
+    migrate_content_vectors(db)
 
     # Gather chunks to embed
     if force:
@@ -348,9 +385,10 @@ def run_embed(
               AND length(c.doc) > 0
         """).fetchall()
 
-    # Expand into chunks
+    # Expand into chunks, extracting chunk_date once per document
     all_chunks = []
     for content_hash, body, path in rows:
+        doc_date = extract_chunk_date(body, path)  # document-level date, same for all chunks
         for chunk in chunk_text(body):
             all_chunks.append(
                 {
@@ -359,6 +397,7 @@ def run_embed(
                     "pos": chunk["pos"],
                     "text": chunk["text"],
                     "path": path,
+                    "chunk_date": doc_date,
                 }
             )
 
@@ -401,6 +440,7 @@ def run_embed(
                         vector,
                         deployment,
                         now,
+                        chunk_date=chunk.get("chunk_date"),
                     )
                 flush_staging_to_vec(db)
             embedded += len(batch)
@@ -431,6 +471,7 @@ def run_embed(
                                 vector,
                                 deployment,
                                 now,
+                                chunk_date=chunk.get("chunk_date"),
                             )
                         flush_staging_to_vec(db)
                     embedded += len(batch)
@@ -449,8 +490,8 @@ def run_embed(
             eta_s = (total - embedded) / rate if rate > 0 else 0
             logger.info(f"Progress: {embedded}/{total} ({pct:.1f}%) — {rate:.1f} chunks/s — ETA {eta_s / 60:.1f}m")
 
-        if inter_batch_sleep > 0:
-            time.sleep(inter_batch_sleep)
+        # No unconditional sleep — rate limiting is handled reactively via
+        # Retry-After headers in embed_batch() when Azure actually pushes back.
 
     duration_s = time.time() - start_time
 
@@ -463,6 +504,17 @@ def run_embed(
         failed_paths = list({c["path"] for c in failed_chunks})[:10]
         logger.warning(f"{len(failed_chunks)} chunks failed. Affected paths (sample): {failed_paths}")
 
+    # Count how many chunks have chunk_date populated (for diagnostics / ERR-001 guard)
+    chunk_date_count = sum(1 for c in all_chunks if c.get("chunk_date"))
+    if chunk_date_count == 0 and total > 0:
+        logger.warning(
+            "embed: 0/%d chunks have chunk_date — temporal boost (TMP-7B) will be inert. "
+            "Ensure documents have a date in frontmatter (date: YYYY-MM-DD) or in their filename.",
+            total,
+        )
+    else:
+        logger.info("embed: chunk_date populated for %d/%d chunks (%.1f%%)", chunk_date_count, total, 100 * chunk_date_count / total)
+
     return {
         "embedded": embedded,
         "skipped": total - embedded - len(failed_chunks),
@@ -471,4 +523,5 @@ def run_embed(
         "duration_s": round(duration_s, 1),
         "estimated_cost_usd": round(estimated_cost, 4),
         "total_chunks": total,
+        "chunk_date_count": chunk_date_count,
     }

@@ -89,11 +89,11 @@ def load_secrets(path: str | Path | None = None) -> int:
             os.environ[key] = value
             count += 1
     except Exception as exc:
-        logger.warning("secrets: failed to load %s — %s", secrets_path, exc)
+        logger.warning("secrets: failed to load secrets file")
         return 0
 
     if count:
-        logger.debug("secrets: loaded %d variable(s) from %s", count, secrets_path)
+        logger.debug("secrets: loaded %d variable(s)", count)
     return count
 
 
@@ -113,7 +113,7 @@ def _load_secrets_file(path: Path) -> dict[str, str]:
             if key:
                 result[key] = value
     except Exception as exc:
-        logger.warning("secrets: failed to parse %s — %s", path, exc)
+        logger.warning("secrets: failed to parse secrets file")
     return result
 
 

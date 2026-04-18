@@ -1,0 +1,71 @@
+[Unit]
+Description=kairix MCP server — hybrid search + entity graph tools for OpenClaw agents
+Documentation=https://github.com/quanyeomans/agentic-context-mesh
+After=network.target
+# Start after Neo4j if it is present on this host
+After=neo4j.service
+# kairix works without Neo4j — do not hard-require it
+Wants=neo4j.service
+
+[Service]
+# ---------------------------------------------------------------------------
+# Runtime identity — run as the service account that owns /opt/kairix
+# ---------------------------------------------------------------------------
+# Set User= to the account that owns /opt/kairix/.venv and has read access
+# to the vault. For many deployments this is the same user that runs QMD.
+#
+# Example:
+#   User=ubuntu
+#   Group=ubuntu
+#
+# Leave commented to run as root (not recommended for production).
+# User=
+# Group=
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+# Load operator config (paths, KV name, non-secret settings)
+EnvironmentFile=-/opt/kairix/service.env
+
+# Load pre-fetched Azure secrets (populated by kairix-fetch-secrets.service
+# or the vault-agent sidecar before this service starts)
+EnvironmentFile=-/run/secrets/kairix.env
+
+# Fallback secrets location for non-Docker deployments
+EnvironmentFile=-/opt/kairix/secrets.env
+
+# ---------------------------------------------------------------------------
+# Process
+# ---------------------------------------------------------------------------
+ExecStart=/opt/kairix/bin/kairix-wrapper.sh mcp serve \
+    --transport sse \
+    --port ${KAIRIX_MCP_PORT:-7443}
+
+# Restart automatically on crash, exit, or signal (not on intentional stop)
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+# Kill cleanly — give 15s for in-flight requests to drain
+TimeoutStopSec=15
+KillMode=mixed
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+# Logs go to journald by default (journalctl -u kairix-mcp.service)
+# Standard output is captured — kairix writes progress to stderr
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kairix-mcp
+
+# ---------------------------------------------------------------------------
+# Working directory
+# ---------------------------------------------------------------------------
+# Use the kairix data dir if set; fall back to /opt/kairix
+WorkingDirectory=/opt/kairix
+
+[Install]
+WantedBy=multi-user.target

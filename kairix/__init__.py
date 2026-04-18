@@ -1,3 +1,8 @@
-"""qmd-azure-embed — Azure OpenAI embedding backend for QMD."""
+"""kairix — contextual intelligence layer for QMD + Obsidian agent stacks."""
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version as _pkg_version
+
+    __version__ = _pkg_version("kairix")
+except Exception:
+    __version__ = "unknown"

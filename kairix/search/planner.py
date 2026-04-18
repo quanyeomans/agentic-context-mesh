@@ -128,7 +128,7 @@ class QueryPlanner:
             if isinstance(subs, list) and 1 <= len(subs) <= 3:
                 subs = [s for s in subs if isinstance(s, str) and s.strip()]
                 if subs:
-                    logger.debug("planner: decomposed into %d sub-queries: %s", len(subs), subs)
+                    logger.debug("planner: decomposed into %d sub-queries", len(subs))
                     return subs
         except json.JSONDecodeError as _e:
             logger.warning("planner: JSON parse failed (%s) — falling back to original query", _e)

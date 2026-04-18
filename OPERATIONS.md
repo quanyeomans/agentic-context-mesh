@@ -182,8 +182,8 @@ Kairix expects:
 Kairix is installed as a pip package — the source repo is not required on the VM.
 
 ```bash
-# One-line deploy (downloads and runs deploy-vm.sh from the public repo)
-bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)
+# One-line deploy (downloads and runs install.sh from the public repo)
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
 ```
 
 This creates `/opt/kairix/.venv/`, installs kairix into it, installs the wrapper script, and creates the `/usr/local/bin/kairix` symlink. After this, `kairix --help` works from any shell.
@@ -239,7 +239,7 @@ The kairix wrapper (`scripts/kairix-wrapper.sh`) loads `service.env` and `/run/s
 ### Automated (recommended)
 
 ```bash
-bash scripts/deploy-vm.sh
+bash scripts/install.sh
 ```
 
 This installs the wrapper, creates/updates the symlink, and sets up `/etc/profile.d/kairix.sh` so every shell and agent exec context has kairix on PATH.
@@ -282,7 +282,7 @@ Run these in order on a fresh deployment. Each step must succeed before the next
 ### Step 1: Deploy wrapper and PATH
 
 ```bash
-bash scripts/deploy-vm.sh
+bash scripts/install.sh
 ```
 
 Or follow the manual steps in [Wrapper Script and PATH Setup](#wrapper-script-and-path-setup).
@@ -531,7 +531,7 @@ export PATH=/usr/local/bin:$PATH
 kairix --help
 
 # Permanent fix: run the deploy script
-bash scripts/deploy-vm.sh
+bash scripts/install.sh
 
 # Or manually check where the symlink is
 ls -la /usr/local/bin/kairix
@@ -551,7 +551,7 @@ kairix onboard check
 ls -la /usr/local/bin/kairix
 readlink /usr/local/bin/kairix
 # If this shows .venv/bin/kairix, the wrapper isn't installed:
-bash scripts/deploy-vm.sh
+bash scripts/install.sh
 
 # Alternative: verify manually
 which kairix
@@ -711,7 +711,7 @@ kairix onboard check
 
 If the wrapper script has changed in the new version, re-run:
 ```bash
-bash scripts/deploy-vm.sh --skip-smoke   # re-downloads and re-installs wrapper
+bash scripts/install.sh --skip-smoke   # re-downloads and re-installs wrapper
 ```
 
 ### Upgrading QMD

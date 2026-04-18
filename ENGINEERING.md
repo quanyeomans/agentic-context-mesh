@@ -233,6 +233,41 @@ The `--agent` parameter in all kairix commands enforces collection boundaries. T
 
 ---
 
+## Security Standards
+
+These rules are enforced by CI (CodeQL, Bandit, detect-secrets) and must be followed in all code changes.
+
+### Logging
+
+- **Never log exception objects** from credential-fetching code paths. An exception raised during Key Vault fetch, secrets file parsing, or auth can contain the raw credential value in its message. Log the operation name and return code only.
+- **Never log user query content** at any log level without an explicit opt-in env var (e.g. `KAIRIX_DEBUG_QUERIES=1`). Queries may contain personal or commercially sensitive information.
+- **Never log raw LLM responses** at DEBUG. Truncate or omit entirely — `logger.debug("step: failed")` not `logger.debug("step: failed %r", raw_response)`.
+- Logging a Key Vault **secret name** (not value) is acceptable at INFO/WARNING for operational tracing.
+
+### Subprocess
+
+- `subprocess.run()` must always use a **list of arguments**, never a shell-interpolated string with `shell=True`.
+- If a command string must be split at runtime, use `shlex.split()` rather than `.split()` or f-strings.
+
+### GitHub Actions
+
+- Every job must declare a **minimal `permissions:` block** explicitly. Never rely on inherited defaults.
+- The top-level workflow `permissions` should be `contents: read`. Jobs requiring write access declare it individually.
+
+### CodeQL Suppressions
+
+- Use inline `# lgtm[query-id]` comments only for **confirmed false positives** or **intentional product behaviour** (e.g. the vault-agent sidecar writing secrets to tmpfs, or the briefing CLI outputting user-owned documents).
+- Every suppression must include a `— reason` comment explaining why it is safe.
+- Do not use blanket path exclusions in `codeql-config.yml` — suppress at the specific line.
+
+### detect-secrets
+
+- The `.secrets.baseline` file must be updated when legitimate non-secret strings trigger false positives.
+- `detect-secrets` is a **hard gate** in CI — a failed scan blocks merge.
+- Never add `continue-on-error: true` to the detect-secrets step.
+
+---
+
 ## 5. Code Style
 
 ### 5.1 Type annotations
@@ -358,12 +393,26 @@ docs/engineering-disciplines   # documentation
 chore/deps-bump-requests       # dependency updates
 ```
 
-### 7.2 PR requirements
+### 7.2 Version discipline
+
+kairix uses CalVer: `YYYY.M.D` for stable releases on `main`, `YYYY.M.Da<N>` for alpha releases on `develop`.
+
+**Rule: the version in `pyproject.toml` must be incremented before deploying to any environment.** This is what allows `pip install --upgrade` to work correctly — pip compares version numbers, not commit SHAs. Deploying without a version bump means pip sees the existing version as current and installs nothing.
+
+| Branch | Version example | Increment rule |
+|--------|----------------|----------------|
+| `develop` | `2026.4.18a3` | Increment `aN` before each deploy to a test/staging host |
+| `main` | `2026.4.18` | Increment date component on each stable release |
+
+Installing from a branch ref (`@develop`, `@main`) rather than a pinned tag does not override this — pip still resolves by version number. Pinned tags are the correct install target for reproducible environments.
+
+### 7.3 PR requirements
 
 **Before opening a PR:**
 - [ ] All CI stages pass locally (`pytest tests/`, `mypy kairix/`, `ruff check kairix/`)
 - [ ] No secrets in diff (`detect-secrets scan kairix/ tests/`)
 - [ ] If retrieval logic changed: benchmark comparison included in description
+- [ ] Version bumped in `pyproject.toml` if this set of changes will be deployed
 
 **PR description must include:**
 - What changed and why (1-3 sentences)
@@ -381,7 +430,51 @@ chore/deps-bump-requests       # dependency updates
 
 ---
 
-## 8. Engineering Compliance Checklist
+## 8. CLI Standards
+
+kairix is a tool consumed by both humans and agents. All subcommands must follow standard conventions so any caller (human, shell script, or AI agent) can interact predictably.
+
+### 8.1 Required flags
+
+Every CLI entry point must handle:
+
+| Flag | Behaviour |
+|------|-----------|
+| `--version`, `-V` | Print `kairix <version>` to stdout and exit 0 |
+| `--help`, `-h` | Print usage to stdout and exit 0 |
+
+These are checked at the top-level dispatcher before subcommand dispatch.
+
+### 8.2 Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | User error (bad args, missing file, check failed) |
+| 2 | Configuration error (missing env var, bad service.env) |
+| 3+ | Reserved for subcommand-specific errors (document in the subcommand's CLI module) |
+
+### 8.3 Output format
+
+- Human-readable output goes to stdout.
+- Progress, warnings, and diagnostics go to stderr (logger).
+- Structured output (`--json`) must be valid JSON on stdout with no other lines mixed in.
+- `kairix onboard check --json` is the canonical machine-readable health signal.
+
+### 8.4 Compliance checklist addition
+
+Add to the PR checklist when adding or modifying a CLI subcommand:
+
+```
+CLI CHANGES ONLY
+[ ] --version and --help handled at top-level dispatcher
+[ ] Exit codes match the table in ENGINEERING.md §8.2
+[ ] --json flag added if structured output is expected by agents
+```
+
+---
+
+## 9. Engineering Compliance Checklist
 
 Use before merging any PR:
 

@@ -210,13 +210,16 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
     try:
         db = sqlite3.connect(str(db_path))
         try:
-            placeholders = ",".join("?" for _ in paths)
+            # Use LIKE suffix match because QMD stores absolute paths while FusedResult
+            # paths may be collection-relative (e.g. "concept/builder.md" vs
+            # "/data/vault/concept/builder.md"). An exact IN() match would miss all rows.
+            like_clauses = " OR ".join("d.path LIKE ?" for _ in paths)
             rows = db.execute(
                 f"SELECT d.path, cv.chunk_date "
                 f"FROM content_vectors cv "
                 f"JOIN documents d ON d.hash = cv.hash "
-                f"WHERE d.path IN ({placeholders}) AND cv.chunk_date IS NOT NULL",
-                paths,
+                f"WHERE cv.chunk_date IS NOT NULL AND ({like_clauses})",
+                [f"%{p}" for p in paths],
             ).fetchall()
         finally:
             db.close()
@@ -225,6 +228,12 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
         return
 
     if not rows:
+        logger.warning(
+            "hybrid: _enrich_chunk_dates found 0 rows for %d paths — "
+            "chunk_date column may not be populated. "
+            "Re-run `kairix embed` to populate chunk_date (ERR-001).",
+            len(paths),
+        )
         return
 
     # Build path → chunk_date map (last non-null value wins for multi-chunk docs)
@@ -330,7 +339,7 @@ def search(
             active_query = query
 
     # Neo4j client — used by planner (entity context) and entity_boost
-    neo4j_client = _get_neo4j()
+    neo4j_client = _get_neo4j()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: _get_neo4j() returns a client object, no credentials flow to a log sink here
 
     # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
@@ -477,13 +486,24 @@ def search(
         fused = temporal_date_boost(fused, active_query, config=cfg.temporal)
 
     # Chunk-date proximity boost for TEMPORAL intent (TMP-7B)
-    if intent == QueryIntent.TEMPORAL and cfg.temporal.chunk_date_boost_enabled:
+    # Guard: skip when config requires explicit temporal marker and query lacks one.
+    # Prevents recency bias on generic TEMPORAL queries ("what changed and why").
+    _chunk_date_guard_ok = (
+        not cfg.temporal.chunk_date_boost_guard_explicit_only
+        or _query_has_temporal_marker(active_query)
+    )
+    if intent == QueryIntent.TEMPORAL and cfg.temporal.chunk_date_boost_enabled and _chunk_date_guard_ok:
         import datetime as _dt
 
         from kairix.temporal.rewriter import extract_time_window
         try:
             _start, _end = extract_time_window(active_query, reference_date=_dt.date.today())
-            _query_date = _start or _dt.date.today()
+            # Use window midpoint rather than start — avoids systematic bias toward
+            # documents dated at the beginning of a multi-day query window.
+            if _start and _end:
+                _query_date = _start + _dt.timedelta(days=(_end - _start).days // 2)
+            else:
+                _query_date = _start or _dt.date.today()
             fused = chunk_date_boost(fused, _query_date, config=cfg.temporal)
         except Exception as _cbd_e:
             logger.warning("hybrid: chunk_date_boost failed — %s", _cbd_e)
@@ -515,6 +535,20 @@ def search(
         if temporal_fused:
             fused = temporal_fused + fused
             logger.debug("hybrid: merged %d temporal chunks into results", len(temporal_fused))
+
+    # Cross-encoder re-ranking (optional — enabled via config.rerank.enabled)
+    if cfg.rerank.enabled and fused:
+        try:
+            from kairix.search.rerank import rerank as _rerank
+
+            fused = _rerank(
+                query=active_query,
+                results=fused,
+                model=cfg.rerank.model,
+                candidate_limit=cfg.rerank.candidate_limit,
+            )
+        except Exception as _rr_e:
+            logger.warning("hybrid: rerank failed — %s — using unmodified order", _rr_e)
 
     # Apply token budget
     budgeted = apply_budget(fused, budget=budget)

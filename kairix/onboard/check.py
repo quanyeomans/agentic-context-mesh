@@ -387,47 +387,247 @@ def check_agent_knowledge_populated() -> CheckResult:
     )
 
 
-def check_mcp_service() -> CheckResult:
-    """kairix-mcp.service is active (systemd)."""
+def check_chunk_date_populated() -> CheckResult:
+    """chunk_date is populated in content_vectors (required for TMP-7B temporal boost)."""
     try:
-        result = subprocess.run(
-            ["systemctl", "is-active", "kairix-mcp.service"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        state = result.stdout.strip()
-        if state == "active":
+        from kairix.embed.schema import get_qmd_db_path
+
+        db_path = get_qmd_db_path()
+        import sqlite3
+
+        db = sqlite3.connect(str(db_path))
+        try:
+            # Check if the column exists first
+            cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
+            if "chunk_date" not in cols:
+                return CheckResult(
+                    name="chunk_date_populated",
+                    ok=False,
+                    detail="chunk_date column missing from content_vectors",
+                    fix=(
+                        "Run kairix embed to add the column and populate dates.\n"
+                        "The migration is automatic on next embed run."
+                    ),
+                )
+
+            total = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
+            dated = db.execute("SELECT COUNT(*) FROM content_vectors WHERE chunk_date IS NOT NULL").fetchone()[0]
+        finally:
+            db.close()
+
+        if total == 0:
             return CheckResult(
-                name="mcp_service",
-                ok=True,
-                detail="kairix-mcp.service is active",
+                name="chunk_date_populated",
+                ok=False,
+                detail="content_vectors is empty — vault has not been embedded",
+                fix="Run: kairix embed",
             )
+
+        pct = 100 * dated / total
+        if dated == 0:
+            return CheckResult(
+                name="chunk_date_populated",
+                ok=False,
+                detail=f"chunk_date: 0/{total} chunks dated (0%) — TMP-7B temporal boost is inert",
+                fix=(
+                    "Run kairix embed to populate chunk_date from document frontmatter and filenames.\n"
+                    "Documents need 'date: YYYY-MM-DD' in frontmatter or a date in their filename."
+                ),
+            )
+        if pct < 20:
+            return CheckResult(
+                name="chunk_date_populated",
+                ok=False,
+                detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%) — low coverage, temporal boost degraded",
+                fix=(
+                    "Add 'date: YYYY-MM-DD' frontmatter to more documents, or use dated filenames.\n"
+                    "Re-run kairix embed after updating documents."
+                ),
+            )
+
         return CheckResult(
-            name="mcp_service",
-            ok=False,
-            detail=f"kairix-mcp.service state: {state or '(unknown)'}",
-            fix=(
-                "Start the MCP service:\n"
-                "  sudo systemctl enable --now kairix-mcp.service\n"
-                "If the unit is not installed, run apply-kairix-config.sh first.\n"
-                "Check logs: journalctl -u kairix-mcp.service -n 30"
-            ),
+            name="chunk_date_populated",
+            ok=True,
+            detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%)",
         )
+
     except FileNotFoundError:
         return CheckResult(
-            name="mcp_service",
+            name="chunk_date_populated",
             ok=False,
-            detail="systemctl not found — not a systemd host",
-            fix="kairix-mcp.service requires a systemd Linux host (not macOS or Docker without systemd).",
+            detail="QMD index not found — vault not embedded yet",
+            fix="Run: kairix embed",
         )
     except Exception as exc:
         return CheckResult(
-            name="mcp_service",
+            name="chunk_date_populated",
             ok=False,
-            detail=f"Could not query kairix-mcp.service: {exc}",
-            fix="Check systemd is running and this process has permission to query service state.",
+            detail=f"chunk_date check failed: {exc}",
+            fix="Check QMD index at ~/.cache/qmd/index.sqlite",
         )
+
+
+# ---------------------------------------------------------------------------
+# MCP consumer harness checks
+# ---------------------------------------------------------------------------
+# kairix MCP server is a general service. Different consumers connect via
+# different transports:
+#
+#   stdio (per-session subprocess) — OpenClaw, Claude Desktop, any orchestrator
+#   SSE / HTTP (persistent process) — curl, generic HTTP MCP clients
+#
+# The check below probes whichever harnesses are detectable on this host.
+# It passes if at least one harness is configured and functional.
+# ---------------------------------------------------------------------------
+
+_MCP_KAIRIX_SERVER_NAME = "mcp-kairix"
+
+# ── OpenClaw ──────────────────────────────────────────────────────────────────
+_OPENCLAW_JSON_PATHS = (
+    "/home/openclaw/.openclaw/openclaw.json",
+    Path.home() / ".openclaw" / "openclaw.json",
+)
+
+# ── Claude Desktop ────────────────────────────────────────────────────────────
+_CLAUDE_DESKTOP_CONFIG_PATHS = (
+    # macOS
+    Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+    # Linux (XDG)
+    Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "Claude" / "claude_desktop_config.json",
+)
+
+# ── SSE / HTTP ────────────────────────────────────────────────────────────────
+_MCP_SSE_PORT = int(os.environ.get("KAIRIX_MCP_PORT", "7443"))
+
+
+def _probe_openclaw_harness() -> tuple[bool, str]:
+    """Return (ok, detail) for the OpenClaw stdio harness."""
+    import json as _json
+
+    for candidate in _OPENCLAW_JSON_PATHS:
+        try:
+            p = Path(str(candidate))
+            if not p.exists():
+                continue
+            data = _json.loads(p.read_text())
+            # OpenClaw stores MCP servers at mcp.servers (set via `openclaw mcp set`)
+            mcp_servers = data.get("mcp", {}).get("servers", {})
+            if _MCP_KAIRIX_SERVER_NAME in mcp_servers:
+                entry = mcp_servers[_MCP_KAIRIX_SERVER_NAME]
+                cmd = entry.get("command", "")
+                cmd_ok = bool(cmd) and Path(cmd).exists() and os.access(cmd, os.X_OK)
+                if cmd_ok:
+                    return True, f"OpenClaw: registered in {p.name}, start command executable"
+                return False, f"OpenClaw: registered but start command missing/not executable: {cmd}"
+        except (OSError, _json.JSONDecodeError):
+            continue
+
+    # Fallback: try openclaw CLI
+    try:
+        result = subprocess.run(
+            ["openclaw", "mcp", "list"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if _MCP_KAIRIX_SERVER_NAME in result.stdout:
+            return True, "OpenClaw: registered (via 'openclaw mcp list')"
+    except (FileNotFoundError, Exception):
+        pass
+
+    return False, "OpenClaw: not detected"
+
+
+def _probe_claude_desktop_harness() -> tuple[bool, str]:
+    """Return (ok, detail) for the Claude Desktop stdio harness."""
+    import json as _json
+
+    for candidate in _CLAUDE_DESKTOP_CONFIG_PATHS:
+        try:
+            p = Path(str(candidate))
+            if not p.exists():
+                continue
+            data = _json.loads(p.read_text())
+            mcp_servers = data.get("mcpServers", {})
+            if "kairix" in mcp_servers:
+                entry = mcp_servers["kairix"]
+                cmd_args = entry.get("args", [])
+                cmd = entry.get("command", "")
+                return True, f"Claude Desktop: registered (command: {cmd})"
+        except (OSError, _json.JSONDecodeError):
+            continue
+
+    return False, "Claude Desktop: not detected"
+
+
+def _probe_sse_harness() -> tuple[bool, str]:
+    """Return (ok, detail) for the SSE/HTTP persistent service harness."""
+    import socket
+
+    # TCP probe on MCP SSE port
+    try:
+        with socket.create_connection(("127.0.0.1", _MCP_SSE_PORT), timeout=2):
+            return True, f"SSE/HTTP: listening on port {_MCP_SSE_PORT}"
+    except OSError:
+        pass
+
+    # Fallback: check systemd unit exists and is active
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "kairix-mcp.service"],
+            capture_output=True, text=True, timeout=5,
+        )
+        state = result.stdout.strip()
+        if state == "active":
+            return True, f"SSE/HTTP: kairix-mcp.service active (port {_MCP_SSE_PORT} not yet listening — may still be starting)"
+        elif state not in ("", "inactive", "failed", "unknown"):
+            return False, f"SSE/HTTP: kairix-mcp.service state={state}"
+    except (FileNotFoundError, Exception):
+        pass
+
+    return False, f"SSE/HTTP: not listening on port {_MCP_SSE_PORT}"
+
+
+def check_mcp_service() -> CheckResult:
+    """
+    kairix MCP server is reachable by at least one configured consumer.
+
+    Probes each transport harness that is detectable on this host:
+      - OpenClaw (stdio): mcp-kairix registered in openclaw.json
+      - Claude Desktop (stdio): kairix registered in claude_desktop_config.json
+      - SSE/HTTP (persistent): port 7443 listening or kairix-mcp.service active
+
+    Passes if at least one harness is configured and functional.
+    If no harness is detected, reports which harnesses are available to configure.
+    """
+    openclaw_ok, openclaw_detail = _probe_openclaw_harness()
+    claude_ok, claude_detail = _probe_claude_desktop_harness()
+    sse_ok, sse_detail = _probe_sse_harness()
+
+    active = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if ok]
+    inactive = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if not ok]
+
+    if active:
+        return CheckResult(
+            name="mcp_service",
+            ok=True,
+            detail="kairix MCP server accessible — " + "; ".join(active),
+        )
+
+    return CheckResult(
+        name="mcp_service",
+        ok=False,
+        detail="kairix MCP server not configured for any consumer — " + "; ".join(inactive),
+        fix=(
+            "Configure at least one MCP consumer harness:\n\n"
+            "  OpenClaw (stdio):\n"
+            "    openclaw mcp set mcp-kairix "
+            "'{\"type\":\"stdio\",\"command\":\"/path/to/kairix-start.sh\"}'\n\n"
+            "  Claude Desktop (stdio): add to ~/Library/Application Support/Claude/claude_desktop_config.json:\n"
+            "    {\"mcpServers\": {\"kairix\": {\"command\": \"kairix\", \"args\": [\"mcp\", \"serve\"]}}}\n\n"
+            "  SSE/HTTP (persistent service):\n"
+            "    sudo systemctl enable --now kairix-mcp.service\n"
+            "    # or: kairix mcp serve --transport sse --port 7443 &\n"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +643,7 @@ ALL_CHECKS = [
     check_vector_search_working,
     check_neo4j_reachable,
     check_agent_knowledge_populated,
+    check_chunk_date_populated,
     check_mcp_service,
 ]
 

@@ -77,11 +77,11 @@ def fetch_from_keyvault() -> dict[str, str]:
             secret = client.get_secret(secret_name)
             if secret.value:
                 fetched[env_var] = secret.value
-                logger.info("Fetched: %s", secret_name)
+                logger.info("Fetched: %s", secret_name)  # lgtm[py/clear-text-logging-sensitive-data] — logs KV secret name only, not value
             else:
-                logger.warning("Secret %s has empty value — skipping", secret_name)
+                logger.warning("Secret %s has empty value — skipping", secret_name)  # lgtm[py/clear-text-logging-sensitive-data] — logs KV secret name only, not value
         except Exception as exc:
-            logger.warning("Failed to fetch %s: %s", secret_name, exc)
+            logger.warning("Failed to fetch %s", secret_name)  # lgtm[py/clear-text-logging-sensitive-data] — logs KV secret name only, not value
 
     return fetched
 
@@ -102,9 +102,9 @@ def write_secrets_file(secrets: dict[str, str]) -> None:
         safe_value = value.replace("\n", "").replace("\r", "")
         lines.append(f"{env_var}={safe_value}")
 
-    SECRETS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    SECRETS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")  # lgtm[py/clear-text-storage-of-sensitive-data] — intentional sidecar pattern: vault-agent writes secrets to tmpfs /run/secrets/ (chmod 600, ephemeral)
     SECRETS_FILE.chmod(0o600)
-    logger.info("Wrote %d secret(s) to %s", len(secrets), SECRETS_FILE)
+    logger.info("Wrote %d secret(s) to %s", len(secrets), SECRETS_FILE)  # lgtm[py/clear-text-logging-sensitive-data] — logs count and file path, not secret values
 
 
 def signal_ready() -> None:

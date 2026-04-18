@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# deploy-vm.sh — idempotent VM deployment script for kairix
+# install.sh — idempotent kairix installer
 #
 # Installs kairix as a pip package (no source tree required) and sets up the
-# operator environment. Run as the service user on the target VM.
+# operator environment. Works on any Linux host: bare metal, VM, or WSL.
+# Run as the service user that will own the kairix installation.
 #
 # INSTALL MODEL:
 #   kairix is installed via pip from the public GitHub repo into /opt/kairix/.venv
@@ -10,10 +11,10 @@
 #   /opt/kairix/ — not inside the kairix source repo.
 #
 # USAGE:
-#   bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
 #
 #   Or if you have the script locally:
-#   bash scripts/deploy-vm.sh [--version TAG] [--no-path-setup] [--skip-smoke]
+#   bash scripts/install.sh [--version TAG] [--no-path-setup] [--skip-smoke]
 #
 # FLAGS:
 #   --version TAG     Install specific git tag or branch (default: main)
@@ -141,7 +142,7 @@ log "  Wrapper installed at ${WRAPPER_DEST}"
 
 # Stamp the venv path into a companion env so wrapper can find the binary
 {
-    echo "# Written by deploy-vm.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "# Written by install.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "KAIRIX_VENV=${KAIRIX_VENV}"
 } > "${KAIRIX_OPT}/bin/kairix-install.env"
 
@@ -189,11 +190,73 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: Smoke test
+# Step 6: Install and enable kairix-mcp.service (systemd)
+# ---------------------------------------------------------------------------
+
+log "Step 6: installing kairix-mcp.service"
+
+SYSTEMD_UNIT_DIR="/etc/systemd/system"
+MCP_UNIT_DEST="${SYSTEMD_UNIT_DIR}/kairix-mcp.service"
+MCP_UNIT_SRC_URL="${KAIRIX_REPO}/raw/${KAIRIX_VERSION}/scripts/kairix-mcp.service"
+
+if command -v systemctl >/dev/null 2>&1 && [[ -d "$SYSTEMD_UNIT_DIR" ]]; then
+    # Download the unit file
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$MCP_UNIT_SRC_URL" -o /tmp/kairix-mcp.service.tmp
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO /tmp/kairix-mcp.service.tmp "$MCP_UNIT_SRC_URL"
+    else
+        warn "curl or wget required to download the MCP service unit file"
+    fi
+
+    if [[ -f /tmp/kairix-mcp.service.tmp ]]; then
+        if [[ -w "$SYSTEMD_UNIT_DIR" ]]; then
+            cp /tmp/kairix-mcp.service.tmp "$MCP_UNIT_DEST"
+            chmod 644 "$MCP_UNIT_DEST"
+            systemctl daemon-reload
+            systemctl enable kairix-mcp.service
+            systemctl restart kairix-mcp.service
+            sleep 2
+            if systemctl is-active --quiet kairix-mcp.service; then
+                log "  kairix-mcp.service enabled and running"
+            else
+                warn "kairix-mcp.service did not start cleanly — check: journalctl -u kairix-mcp.service -n 20"
+            fi
+            rm -f /tmp/kairix-mcp.service.tmp
+
+            # Register in OpenClaw tool manifest (if openclaw is present)
+            REGISTER_SCRIPT="${KAIRIX_OPT}/cron/kairix-mcp-register.sh"
+            if [[ ! -f "$REGISTER_SCRIPT" ]]; then
+                REGISTER_SCRIPT_URL="${KAIRIX_REPO}/raw/${KAIRIX_VERSION}/scripts/cron/kairix-mcp-register.sh"
+                mkdir -p "$(dirname "$REGISTER_SCRIPT")"
+                curl -fsSL "$REGISTER_SCRIPT_URL" -o "$REGISTER_SCRIPT" 2>/dev/null \
+                    || wget -qO "$REGISTER_SCRIPT" "$REGISTER_SCRIPT_URL" 2>/dev/null \
+                    || true
+                [[ -f "$REGISTER_SCRIPT" ]] && chmod 755 "$REGISTER_SCRIPT"
+            fi
+            if [[ -f "$REGISTER_SCRIPT" ]]; then
+                bash "$REGISTER_SCRIPT" || warn "OpenClaw registration failed — may not be installed yet"
+            fi
+        else
+            warn "${SYSTEMD_UNIT_DIR} is not writable — cannot install kairix-mcp.service"
+            warn "  Run with sudo, or manually:"
+            warn "    sudo cp /tmp/kairix-mcp.service.tmp /etc/systemd/system/kairix-mcp.service"
+            warn "    sudo systemctl daemon-reload && sudo systemctl enable --now kairix-mcp.service"
+        fi
+    else
+        warn "Failed to download kairix-mcp.service unit file"
+    fi
+else
+    log "  systemd not available — skipping MCP service installation"
+    log "  Start manually: kairix mcp serve --transport sse --port 7443 &"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 7: Smoke test
 # ---------------------------------------------------------------------------
 
 if [[ $SKIP_SMOKE -eq 0 ]]; then
-    log "Step 6: smoke test"
+    log "Step 7: smoke test"
 
     KAIRIX_SERVICE_ENV="${KAIRIX_OPT}/service.env" \
     KAIRIX_VENV="${KAIRIX_VENV}" \

@@ -1,10 +1,10 @@
 """
-CLI entrypoint for qmd-azure-embed.
+CLI entrypoint for kairix embed.
 
 Usage:
-  qmd-azure-embed [--force] [--limit N] [--batch-size N] [--skip-recall-check]
-  qmd-azure-embed recall-check
-  qmd-azure-embed status
+  kairix embed [--force] [--limit N] [--batch-size N] [--skip-recall-check]
+  kairix embed recall-check
+  kairix embed status
 """
 
 import argparse
@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import IO
 
-from .embed import run_embed
+from .embed import DEFAULT_BATCH_SIZE, run_embed
 from .recall_check import run_recall_gate
 from .schema import (
     get_qmd_db_path,
@@ -73,7 +73,7 @@ def release_lock(lock_fh: IO[str]) -> None:
 
 def cmd_embed(args: argparse.Namespace) -> int:
     """Run the embedding pipeline."""
-    logging.info(f"qmd-azure-embed starting — force={args.force} limit={args.limit} batch_size={args.batch_size}")
+    logging.info(f"kairix embed starting — force={args.force} limit={args.limit} batch_size={args.batch_size}")
 
     lock_fh = acquire_lock()
     db_path = get_qmd_db_path()
@@ -185,8 +185,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="qmd-azure-embed",
-        description="Azure OpenAI embedding backend for QMD",
+        prog="kairix embed",
+        description="Embed vault documents into the kairix vector index",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     sub = parser.add_subparsers(dest="command")
@@ -195,7 +195,7 @@ def main() -> None:
     embed_p = sub.add_parser("embed", help="Run embedding pipeline (default)")
     embed_p.add_argument("--force", action="store_true", help="Re-embed all chunks (clears existing vectors)")
     embed_p.add_argument("--limit", type=int, default=None, help="Cap total chunks (for validation)")
-    embed_p.add_argument("--batch-size", type=int, default=100, help="Chunks per Azure API call")
+    embed_p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Chunks per Azure API call")
     embed_p.add_argument("--skip-recall-check", action="store_true", help="Skip post-embed quality gate")
 
     # recall-check
@@ -212,7 +212,7 @@ def main() -> None:
             # Default subcommand
             args.force = False
             args.limit = None
-            args.batch_size = 100
+            args.batch_size = DEFAULT_BATCH_SIZE
             args.skip_recall_check = False
         sys.exit(cmd_embed(args))
     elif args.command == "recall-check":
