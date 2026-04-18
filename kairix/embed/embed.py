@@ -11,11 +11,13 @@ from collections.abc import Generator
 
 import requests
 
+from .date_extract import extract_chunk_date
 from .schema import (
     EMBED_VECTOR_DIMS,
     SchemaVersionError,
     ensure_vec_table,
     load_sqlite_vec,
+    migrate_content_vectors,
 )
 
 logger = logging.getLogger(__name__)
@@ -248,6 +250,7 @@ def stage_embedding(
     vector: list[float],
     model: str,
     embedded_at: int,
+    chunk_date: str | None = None,
 ) -> None:
     """
     Write chunk metadata to content_vectors and queue the vector in vec_staging.
@@ -256,13 +259,16 @@ def stage_embedding(
     The vector goes into vec_staging (also normal SQLite) — it will be merged
     into vectors_vec (sqlite-vec virtual table) via flush_staging_to_vec()
     at batch commit time.
+
+    chunk_date is the ISO date extracted from the document (frontmatter or path).
+    It is the same for all chunks of a given document (document-level property).
     """
     hash_seq = build_hash_seq(content_hash, seq)
     packed = encode_vector(vector)
 
     db.execute(
-        "INSERT OR REPLACE INTO content_vectors (hash, seq, pos, model, embedded_at) VALUES (?, ?, ?, ?, ?)",
-        (content_hash, seq, pos, model, embedded_at),
+        "INSERT OR REPLACE INTO content_vectors (hash, seq, pos, model, embedded_at, chunk_date) VALUES (?, ?, ?, ?, ?, ?)",
+        (content_hash, seq, pos, model, embedded_at, chunk_date),
     )
     db.execute(
         "INSERT OR REPLACE INTO vec_staging (hash_seq, embedding) VALUES (?, ?)",
@@ -318,6 +324,9 @@ def run_embed(
     ensure_vec_table(db, actual_dims)
     ensure_staging_table(db)
 
+    # Ensure chunk_date column exists (idempotent — no-op when already present)
+    migrate_content_vectors(db)
+
     # Gather chunks to embed
     if force:
         # Clear existing vectors first (after successful preflight)
@@ -348,9 +357,10 @@ def run_embed(
               AND length(c.doc) > 0
         """).fetchall()
 
-    # Expand into chunks
+    # Expand into chunks, extracting chunk_date once per document
     all_chunks = []
     for content_hash, body, path in rows:
+        doc_date = extract_chunk_date(body, path)  # document-level date, same for all chunks
         for chunk in chunk_text(body):
             all_chunks.append(
                 {
@@ -359,6 +369,7 @@ def run_embed(
                     "pos": chunk["pos"],
                     "text": chunk["text"],
                     "path": path,
+                    "chunk_date": doc_date,
                 }
             )
 
@@ -401,6 +412,7 @@ def run_embed(
                         vector,
                         deployment,
                         now,
+                        chunk_date=chunk.get("chunk_date"),
                     )
                 flush_staging_to_vec(db)
             embedded += len(batch)
@@ -431,6 +443,7 @@ def run_embed(
                                 vector,
                                 deployment,
                                 now,
+                                chunk_date=chunk.get("chunk_date"),
                             )
                         flush_staging_to_vec(db)
                     embedded += len(batch)
@@ -463,6 +476,17 @@ def run_embed(
         failed_paths = list({c["path"] for c in failed_chunks})[:10]
         logger.warning(f"{len(failed_chunks)} chunks failed. Affected paths (sample): {failed_paths}")
 
+    # Count how many chunks have chunk_date populated (for diagnostics / ERR-001 guard)
+    chunk_date_count = sum(1 for c in all_chunks if c.get("chunk_date"))
+    if chunk_date_count == 0 and total > 0:
+        logger.warning(
+            "embed: 0/%d chunks have chunk_date — temporal boost (TMP-7B) will be inert. "
+            "Ensure documents have a date in frontmatter (date: YYYY-MM-DD) or in their filename.",
+            total,
+        )
+    else:
+        logger.info("embed: chunk_date populated for %d/%d chunks (%.1f%%)", chunk_date_count, total, 100 * chunk_date_count / total)
+
     return {
         "embedded": embedded,
         "skipped": total - embedded - len(failed_chunks),
@@ -471,4 +495,5 @@ def run_embed(
         "duration_s": round(duration_s, 1),
         "estimated_cost_usd": round(estimated_cost, 4),
         "total_chunks": total,
+        "chunk_date_count": chunk_date_count,
     }

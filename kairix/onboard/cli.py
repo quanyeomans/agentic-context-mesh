@@ -9,6 +9,7 @@ Subcommands:
 Usage:
   kairix onboard check
   kairix onboard check --json
+  kairix onboard check --env-file /opt/kairix/service.env
   kairix onboard guide --vault-root /data/obsidian-vault
   kairix onboard verify --agent builder
 """
@@ -22,12 +23,79 @@ import sys
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
+# Env self-loader (ERR-003 fix)
+# ---------------------------------------------------------------------------
+
+_KNOWN_ENV_PATHS = (
+    "/run/secrets/kairix.env",
+    "/opt/kairix/service.env",
+    "/opt/kairix/secrets.env",
+)
+
+
+def _load_env_file(path: str) -> list[str]:
+    """
+    Load KEY=VALUE pairs from *path* into os.environ.
+
+    Only sets keys that are not already present (does not override).
+    Returns list of keys that were loaded.
+    Silently ignores missing files and malformed lines.
+    """
+    loaded: list[str] = []
+    try:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+                loaded.append(key)
+    except OSError:
+        pass
+    return loaded
+
+
+def _self_load_env(explicit_path: str | None) -> tuple[str | None, list[str]]:
+    """
+    Attempt to self-load production env files before running checks.
+
+    Priority:
+      1. --env-file argument (explicit, always attempted)
+      2. KAIRIX_ENV_FILE env var
+      3. Known production paths (tried in order, first existing wins)
+
+    Returns (source_path_or_None, list_of_keys_loaded).
+    """
+    if explicit_path:
+        loaded = _load_env_file(explicit_path)
+        return (explicit_path, loaded)
+
+    env_var_path = os.environ.get("KAIRIX_ENV_FILE", "")
+    if env_var_path:
+        loaded = _load_env_file(env_var_path)
+        return (env_var_path, loaded)
+
+    for probe in _KNOWN_ENV_PATHS:
+        if Path(probe).exists():
+            loaded = _load_env_file(probe)
+            return (probe, loaded)
+
+    return (None, [])
+
+
+# ---------------------------------------------------------------------------
 # check subcommand
 # ---------------------------------------------------------------------------
 
 
 def cmd_check(args: argparse.Namespace) -> int:
     from kairix.onboard.check import run_all_checks
+
+    # Self-load env files so check results are context-independent (ERR-003)
+    env_source, env_keys = _self_load_env(getattr(args, "env_file", None))
 
     results = run_all_checks()
     passed = sum(1 for r in results if r.ok)
@@ -39,6 +107,7 @@ def cmd_check(args: argparse.Namespace) -> int:
             "ok": all_ok,
             "passed": passed,
             "total": total,
+            "env_source": env_source,
             "checks": [
                 {
                     "name": r.name,
@@ -55,6 +124,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     # Human-readable output
     print()
     print("kairix deployment check")
+    if env_source:
+        loaded_note = f" ({len(env_keys)} keys loaded)" if env_keys else " (no new keys — already in env)"
+        print(f"  env: {env_source}{loaded_note}")
+    else:
+        print("  env: none — using current environment")
     print("─" * 50)
     for r in results:
         icon = "✓" if r.ok else "✗"
@@ -191,6 +265,12 @@ def main(argv: list[str] | None = None) -> None:
     # check
     p_check = sub.add_parser("check", help="Run all deployment health checks")
     p_check.add_argument("--json", action="store_true", help="Output as JSON")
+    p_check.add_argument(
+        "--env-file",
+        metavar="PATH",
+        default=None,
+        help="Explicit env file to load before running checks (overrides auto-detection)",
+    )
 
     # guide
     p_guide = sub.add_parser("guide", help="Install the agent usage guide into the vault")
