@@ -30,7 +30,17 @@ def main() -> None:
 
     cmd = sys.argv[1]
 
-    if cmd == "embed":
+    if cmd in ("--version", "-V", "version"):
+        from kairix import __version__
+
+        print(f"kairix {__version__}")
+        sys.exit(0)
+
+    elif cmd in ("--help", "-h"):
+        print(__doc__)
+        sys.exit(0)
+
+    elif cmd == "embed":
         from kairix.embed.cli import main as embed_main
 
         embed_main()
