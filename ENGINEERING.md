@@ -381,7 +381,51 @@ chore/deps-bump-requests       # dependency updates
 
 ---
 
-## 8. Engineering Compliance Checklist
+## 8. CLI Standards
+
+kairix is a tool consumed by both humans and agents. All subcommands must follow standard conventions so any caller (human, shell script, or AI agent) can interact predictably.
+
+### 8.1 Required flags
+
+Every CLI entry point must handle:
+
+| Flag | Behaviour |
+|------|-----------|
+| `--version`, `-V` | Print `kairix <version>` to stdout and exit 0 |
+| `--help`, `-h` | Print usage to stdout and exit 0 |
+
+These are checked at the top-level dispatcher before subcommand dispatch.
+
+### 8.2 Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | User error (bad args, missing file, check failed) |
+| 2 | Configuration error (missing env var, bad service.env) |
+| 3+ | Reserved for subcommand-specific errors (document in the subcommand's CLI module) |
+
+### 8.3 Output format
+
+- Human-readable output goes to stdout.
+- Progress, warnings, and diagnostics go to stderr (logger).
+- Structured output (`--json`) must be valid JSON on stdout with no other lines mixed in.
+- `kairix onboard check --json` is the canonical machine-readable health signal.
+
+### 8.4 Compliance checklist addition
+
+Add to the PR checklist when adding or modifying a CLI subcommand:
+
+```
+CLI CHANGES ONLY
+[ ] --version and --help handled at top-level dispatcher
+[ ] Exit codes match the table in ENGINEERING.md §8.2
+[ ] --json flag added if structured output is expected by agents
+```
+
+---
+
+## 9. Engineering Compliance Checklist
 
 Use before merging any PR:
 
