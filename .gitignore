@@ -13,8 +13,10 @@ htmlcov/
 # Cross-model review artefacts
 .reviews/
 
-# Benchmark result JSON files (contain vault snippets)
+# Benchmark result JSON files (contain vault snippets) — not committed
+# Exception: the contract suite baseline is safe (mock data only, no vault content)
 benchmark-results/*.json
+!benchmark-results/contract-baseline.json
 
 # Live database file — not a repo artefact
 entities.db
@@ -32,6 +34,7 @@ None/
 suites/v2-real-world.yaml
 suites/*.yaml
 !suites/example.yaml
+!suites/contract-suite.yaml
 
 # Operator-specific benchmark build scripts — keep in your private operator config repo
 scripts/build-eval-gold.py

@@ -52,9 +52,10 @@ def tool_search(
         latency_ms, error.
     """
     try:
+        from kairix.search.config_loader import load_config
         from kairix.search.hybrid import search
 
-        result = search(query=query, agent=agent, scope=scope, budget=budget)
+        result = search(query=query, agent=agent, scope=scope, budget=budget, config=load_config())
         return {
             "query": result.query,
             "intent": result.intent.value if hasattr(result.intent, "value") else str(result.intent),

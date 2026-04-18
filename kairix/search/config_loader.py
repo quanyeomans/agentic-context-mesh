@@ -8,6 +8,8 @@ Resolution order:
 
 Missing file silently falls back to defaults.
 YAML parse failure logs a warning and falls back to defaults.
+Invalid config values raise ConfigValidationError — do NOT fall back silently,
+as silent fallback can mask misconfiguration in production deployments.
 Result is cached per process (lru_cache on resolved path).
 """
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 from kairix.search.config import (
     EntityBoostConfig,
     ProceduralBoostConfig,
+    RerankConfig,
     RetrievalConfig,
     TemporalBoostConfig,
 )
@@ -27,6 +30,27 @@ from kairix.search.config import (
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_FILENAME = "kairix.config.yaml"
+
+
+class ConfigValidationError(ValueError):
+    """Raised at startup when kairix.config.yaml contains out-of-range values.
+
+    Unlike YAML parse errors (which fall back to defaults), validation errors
+    are propagated to the caller — an invalid config should not silently produce
+    unexpected retrieval behaviour in production.
+    """
+
+
+# Valid ranges for numeric config fields. Tuple is (min_inclusive, max_inclusive).
+_VALID_RANGES: dict[str, tuple[float, float]] = {
+    "entity.factor": (0.0, 10.0),
+    "entity.cap": (1.0, 10.0),
+    "procedural.factor": (1.0, 5.0),
+    "temporal.date_path_boost_factor": (1.0, 5.0),
+    "temporal.date_path_recency_window_days": (1.0, 3650.0),
+    "temporal.chunk_date_decay_halflife_days": (1.0, 3650.0),
+    "rerank.candidate_limit": (1.0, 100.0),
+}
 
 
 def _resolve_config_path() -> Path | None:
@@ -42,6 +66,33 @@ def _resolve_config_path() -> Path | None:
     if cwd_path.is_file():
         return cwd_path
     return None
+
+
+def _validate_config(cfg: RetrievalConfig) -> None:
+    """Raise ConfigValidationError if any field is outside its valid range.
+
+    Called after parsing, before caching. Does NOT fall back to defaults —
+    invalid configuration should surface as an error so operators notice it.
+    """
+    checks = {
+        "entity.factor": cfg.entity.factor,
+        "entity.cap": cfg.entity.cap,
+        "procedural.factor": cfg.procedural.factor,
+        "temporal.date_path_boost_factor": cfg.temporal.date_path_boost_factor,
+        "temporal.date_path_recency_window_days": float(cfg.temporal.date_path_recency_window_days),
+        "temporal.chunk_date_decay_halflife_days": float(cfg.temporal.chunk_date_decay_halflife_days),
+        "rerank.candidate_limit": float(cfg.rerank.candidate_limit),
+    }
+    errors: list[str] = []
+    for field_name, value in checks.items():
+        lo, hi = _VALID_RANGES[field_name]
+        if not (lo <= value <= hi):
+            errors.append(f"  {field_name}: {value} is outside valid range [{lo}, {hi}]")
+
+    if errors:
+        raise ConfigValidationError(
+            "kairix.config.yaml contains invalid values:\n" + "\n".join(errors)
+        )
 
 
 @lru_cache(maxsize=1)
@@ -62,7 +113,15 @@ def _load_cached(config_path: Path | None) -> RetrievalConfig:
         logger.warning("config_loader: failed to read %s — %s — using defaults", config_path, e)
         return RetrievalConfig.defaults()
 
-    return _parse_config(data)
+    try:
+        cfg = _parse_config(data)
+        _validate_config(cfg)
+        return cfg
+    except ConfigValidationError:
+        raise  # propagate — never fall back silently on invalid config
+    except Exception as e:
+        logger.warning("config_loader: failed to parse %s — %s — using defaults", config_path, e)
+        return RetrievalConfig.defaults()
 
 
 def load_config() -> RetrievalConfig:
@@ -70,6 +129,9 @@ def load_config() -> RetrievalConfig:
     Load RetrievalConfig from YAML file or return defaults.
 
     Call this once at startup. Result is cached per process.
+
+    Raises:
+        ConfigValidationError: if the config file contains out-of-range values.
     """
     path = _resolve_config_path()
     if path is not None:
@@ -85,11 +147,13 @@ def _parse_config(data: dict) -> RetrievalConfig:
     entity_cfg = _parse_entity(boosts.get("entity", {}) or {})
     procedural_cfg = _parse_procedural(boosts.get("procedural", {}) or {})
     temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {})
+    rerank_cfg = _parse_rerank((retrieval.get("rerank", {}) or {}))
 
     return RetrievalConfig(
         entity=entity_cfg,
         procedural=procedural_cfg,
         temporal=temporal_cfg,
+        rerank=rerank_cfg,
     )
 
 
@@ -124,4 +188,16 @@ def _parse_temporal(d: dict) -> TemporalBoostConfig:
         chunk_date_decay_halflife_days=int(
             chunk_date.get("decay_halflife_days", defaults.chunk_date_decay_halflife_days)
         ),
+        chunk_date_boost_guard_explicit_only=bool(
+            chunk_date.get("guard_explicit_only", defaults.chunk_date_boost_guard_explicit_only)
+        ),
+    )
+
+
+def _parse_rerank(d: dict) -> RerankConfig:
+    defaults = RerankConfig()
+    return RerankConfig(
+        enabled=bool(d.get("enabled", defaults.enabled)),
+        model=str(d.get("model", defaults.model)),
+        candidate_limit=int(d.get("candidate_limit", defaults.candidate_limit)),
     )

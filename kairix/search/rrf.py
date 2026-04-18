@@ -124,6 +124,9 @@ class FusedResult:
     # Chunk date metadata (populated at index time — used by chunk_date_boost, TMP-7B)
     chunk_date: str = ""
 
+    # Cross-encoder re-rank score (populated by rerank.rerank() when enabled)
+    rerank_score: float = 0.0
+
     # Raw ranks (1-based, 0 = not ranked in that list)
     bm25_rank: int = 0
     vec_rank: int = 0

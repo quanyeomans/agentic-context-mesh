@@ -79,8 +79,28 @@ compatible endpoints, the URL construction in `embed_batch()` and `preflight_che
 would need a flag to switch between Azure and OpenAI endpoint formats.
 PRs welcome.
 
+## Branching model
+
+This repo uses a `develop → main` branching model with CalVer pre-release tags.
+
+| Branch | Purpose |
+|---|---|
+| `main` | Validated stable releases only. Never committed to directly. |
+| `develop` | All PRs merge here. VM deploys from alpha tags cut here. |
+| `feature/*` | One branch per feature or fix. PR targets `develop`. |
+
+**PR targets `develop`, not `main`.** The CI benchmark gate runs automatically on PRs that touch retrieval code.
+
+## Versioning
+
+CalVer: `YYYY.MM.DD`. Pre-release tags on `develop` use the `aN` suffix: `v2026.4.18a1`, `v2026.4.18a2`.
+
 ## Cutting a release
 
-1. Bump `version` in `pyproject.toml`
-2. Update [QMD_COMPAT.md](QMD_COMPAT.md) with any new tested QMD versions
-3. Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+When `develop` is validated on the deployment target:
+
+1. Open a PR `develop → main`
+2. In that PR: change `pyproject.toml` version from `2026.X.YaN` → `2026.X.Y`; update `CHANGELOG.md`
+3. Merge the PR
+4. Tag: `git tag v2026.X.Y && git push origin v2026.X.Y`
+5. Update [QMD_COMPAT.md](QMD_COMPAT.md) if a new QMD version was tested

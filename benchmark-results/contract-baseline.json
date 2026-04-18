@@ -1,0 +1,592 @@
+{
+  "meta": {
+    "suite_name": "contract",
+    "system": "mock",
+    "agent": "shared",
+    "date": "2026-04-18",
+    "n_cases": 20,
+    "weighted_total": 0.9585
+  },
+  "summary": {
+    "weighted_total": 0.9585,
+    "category_scores": {
+      "multi_hop": 1.0,
+      "entity": 0.94,
+      "classification": 0.0,
+      "temporal": 1.0,
+      "recall": 0.9301,
+      "procedural": 0.8801,
+      "conceptual": 1.0
+    },
+    "gates": {
+      "phase1": true,
+      "phase2": true,
+      "phase3": true
+    },
+    "ndcg_at_10": 0.9466,
+    "hit_rate_at_5": 1.0,
+    "mrr_at_10": 1.0
+  },
+  "diagnostics": {
+    "category_counts": {
+      "multi_hop": 2,
+      "entity": 4,
+      "classification": 0,
+      "temporal": 3,
+      "recall": 5,
+      "procedural": 4,
+      "conceptual": 2
+    }
+  },
+  "cases": [
+    {
+      "id": "CON-R001",
+      "category": "recall",
+      "original_category": "recall",
+      "query": "hybrid search retrieval architecture bm25 vector",
+      "gold_path": "retrieval-architecture",
+      "score_method": "ndcg",
+      "score": 0.7763,
+      "retrieved_paths": [
+        "concept/retrieval-architecture.md",
+        "runbooks/runbook-embed-failure.md",
+        "concept/vector-embeddings.md",
+        "concept/bm25-scoring.md",
+        "concept/semantic-search.md",
+        "how-to/how-to-debug-search.md"
+      ],
+      "elapsed_ms": 0.5,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 6,
+      "query_tokens": [
+        "architecture",
+        "bm25",
+        "hybrid",
+        "retrieval",
+        "search",
+        "vector"
+      ]
+    },
+    {
+      "id": "CON-R002",
+      "category": "recall",
+      "original_category": "recall",
+      "query": "rrf reciprocal rank fusion combination ranking",
+      "gold_path": "rrf-fusion",
+      "score_method": "ndcg",
+      "score": 0.9502,
+      "retrieved_paths": [
+        "concept/rrf-fusion.md",
+        "how-to/how-to-debug-search.md",
+        "concept/retrieval-architecture.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 3,
+      "query_tokens": [
+        "combination",
+        "fusion",
+        "rank",
+        "ranking",
+        "reciprocal",
+        "rrf"
+      ]
+    },
+    {
+      "id": "CON-R003",
+      "category": "recall",
+      "original_category": "recall",
+      "query": "vector embeddings dense float azure dimensions",
+      "gold_path": "vector-embeddings",
+      "score_method": "ndcg",
+      "score": 0.9239,
+      "retrieved_paths": [
+        "concept/vector-embeddings.md",
+        "concept/retrieval-architecture.md",
+        "runbooks/runbook-embed-failure.md",
+        "concept/semantic-search.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 4,
+      "query_tokens": [
+        "azure",
+        "dense",
+        "dimensions",
+        "embeddings",
+        "float",
+        "vector"
+      ]
+    },
+    {
+      "id": "CON-R004",
+      "category": "recall",
+      "original_category": "recall",
+      "query": "token budget tier allocator context window",
+      "gold_path": "token-budget",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/token-budget.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 1,
+      "query_tokens": [
+        "allocator",
+        "budget",
+        "context",
+        "tier",
+        "token",
+        "window"
+      ]
+    },
+    {
+      "id": "CON-R005",
+      "category": "recall",
+      "original_category": "recall",
+      "query": "semantic search dense embedding conceptual similarity",
+      "gold_path": "semantic-search",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/semantic-search.md",
+        "concept/vector-embeddings.md",
+        "runbooks/runbook-embed-failure.md",
+        "concept/retrieval-architecture.md",
+        "how-to/how-to-debug-search.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 5,
+      "query_tokens": [
+        "conceptual",
+        "dense",
+        "embedding",
+        "search",
+        "semantic",
+        "similarity"
+      ]
+    },
+    {
+      "id": "CON-E001",
+      "category": "entity",
+      "original_category": "entity",
+      "query": "alice engineer software person entity infrastructure",
+      "gold_path": "alice-engineer",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "person/alice-engineer.md",
+        "person/bob-manager.md",
+        "concept/entity-graph.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 3,
+      "query_tokens": [
+        "alice",
+        "engineer",
+        "entity",
+        "infrastructure",
+        "person",
+        "software"
+      ]
+    },
+    {
+      "id": "CON-E002",
+      "category": "entity",
+      "original_category": "entity",
+      "query": "bob manager person entity leadership product stakeholder",
+      "gold_path": "bob-manager",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "person/bob-manager.md",
+        "person/alice-engineer.md",
+        "concept/entity-graph.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 3,
+      "query_tokens": [
+        "bob",
+        "entity",
+        "leadership",
+        "manager",
+        "person",
+        "product",
+        "stakeholder"
+      ]
+    },
+    {
+      "id": "CON-E003",
+      "category": "entity",
+      "original_category": "entity",
+      "query": "acme corp organisation consulting client",
+      "gold_path": "acme-corp",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "organisation/acme-corp.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 1,
+      "query_tokens": [
+        "acme",
+        "client",
+        "consulting",
+        "corp",
+        "organisation"
+      ]
+    },
+    {
+      "id": "CON-E004",
+      "category": "entity",
+      "original_category": "entity",
+      "query": "entity graph neo4j relationship knowledge nodes mentions",
+      "gold_path": "entity-graph",
+      "score_method": "ndcg",
+      "score": 0.7602,
+      "retrieved_paths": [
+        "concept/entity-graph.md",
+        "person/alice-engineer.md",
+        "person/bob-manager.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 3,
+      "query_tokens": [
+        "entity",
+        "graph",
+        "knowledge",
+        "mentions",
+        "neo4j",
+        "nodes",
+        "relationship"
+      ]
+    },
+    {
+      "id": "CON-T001",
+      "category": "temporal",
+      "original_category": "temporal",
+      "query": "what happened on 2026-03-15 standup meeting notes",
+      "gold_path": "2026-03-15-standup",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "notes/2026-03-15-standup.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 1,
+      "query_tokens": [
+        "2026-03-15",
+        "happened",
+        "meeting",
+        "notes",
+        "on",
+        "standup",
+        "what"
+      ]
+    },
+    {
+      "id": "CON-T002",
+      "category": "temporal",
+      "original_category": "temporal",
+      "query": "2026-04-10 april quarterly review performance results",
+      "gold_path": "2026-04-10-review",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "notes/2026-04-10-review.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 1,
+      "query_tokens": [
+        "2026-04-10",
+        "april",
+        "performance",
+        "quarterly",
+        "results",
+        "review"
+      ]
+    },
+    {
+      "id": "CON-T003",
+      "category": "temporal",
+      "original_category": "temporal",
+      "query": "temporal index date chunk time chronological dates",
+      "gold_path": "temporal-indexing",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/temporal-indexing.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 1,
+      "query_tokens": [
+        "chronological",
+        "chunk",
+        "date",
+        "dates",
+        "index",
+        "temporal",
+        "time"
+      ]
+    },
+    {
+      "id": "CON-C001",
+      "category": "conceptual",
+      "original_category": "conceptual",
+      "query": "bm25 scoring term frequency full-text probabilistic okapi",
+      "gold_path": "bm25-scoring",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/bm25-scoring.md",
+        "concept/retrieval-architecture.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 2,
+      "query_tokens": [
+        "bm25",
+        "frequency",
+        "full-text",
+        "okapi",
+        "probabilistic",
+        "scoring",
+        "term"
+      ]
+    },
+    {
+      "id": "CON-C002",
+      "category": "conceptual",
+      "original_category": "conceptual",
+      "query": "multi-hop multi hop query planning decompose sub-query",
+      "gold_path": "multi-hop-queries",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/multi-hop-queries.md",
+        "project/q2-planning.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 2,
+      "query_tokens": [
+        "decompose",
+        "hop",
+        "multi",
+        "multi-hop",
+        "planning",
+        "query",
+        "sub-query"
+      ]
+    },
+    {
+      "id": "CON-M001",
+      "category": "multi_hop",
+      "original_category": "multi_hop",
+      "query": "multi hop query planning decompose sub-query retrieval",
+      "gold_path": "multi-hop-queries",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/multi-hop-queries.md",
+        "concept/retrieval-architecture.md",
+        "project/q2-planning.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 3,
+      "query_tokens": [
+        "decompose",
+        "hop",
+        "multi",
+        "planning",
+        "query",
+        "retrieval",
+        "sub-query"
+      ]
+    },
+    {
+      "id": "CON-M002",
+      "category": "multi_hop",
+      "original_category": "multi_hop",
+      "query": "entity graph neo4j relationship multi hop knowledge retrieval",
+      "gold_path": "entity-graph",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "concept/entity-graph.md",
+        "concept/multi-hop-queries.md",
+        "concept/retrieval-architecture.md",
+        "person/alice-engineer.md",
+        "person/bob-manager.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 5,
+      "query_tokens": [
+        "entity",
+        "graph",
+        "hop",
+        "knowledge",
+        "multi",
+        "neo4j",
+        "relationship",
+        "retrieval"
+      ]
+    },
+    {
+      "id": "CON-P001",
+      "category": "procedural",
+      "original_category": "procedural",
+      "query": "how to setup kairix install configure guide quickstart",
+      "gold_path": "how-to-setup-kairix",
+      "score_method": "ndcg",
+      "score": 0.7602,
+      "retrieved_paths": [
+        "how-to/how-to-setup-kairix.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 1,
+      "query_tokens": [
+        "configure",
+        "guide",
+        "how",
+        "install",
+        "kairix",
+        "quickstart",
+        "setup",
+        "to"
+      ]
+    },
+    {
+      "id": "CON-P002",
+      "category": "procedural",
+      "original_category": "procedural",
+      "query": "deploy deployment checklist runbook procedure steps production",
+      "gold_path": "deploy-checklist",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "runbooks/deploy-checklist.md",
+        "procedure/onboarding-checklist.md",
+        "runbooks/runbook-embed-failure.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 3,
+      "query_tokens": [
+        "checklist",
+        "deploy",
+        "deployment",
+        "procedure",
+        "production",
+        "runbook",
+        "steps"
+      ]
+    },
+    {
+      "id": "CON-P003",
+      "category": "procedural",
+      "original_category": "procedural",
+      "query": "debug search ranking troubleshoot diagnose inspect how-to",
+      "gold_path": "how-to-debug-search",
+      "score_method": "ndcg",
+      "score": 1.0,
+      "retrieved_paths": [
+        "how-to/how-to-debug-search.md",
+        "runbooks/runbook-embed-failure.md",
+        "concept/rrf-fusion.md",
+        "how-to/how-to-setup-kairix.md",
+        "concept/retrieval-architecture.md",
+        "concept/semantic-search.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 6,
+      "query_tokens": [
+        "debug",
+        "diagnose",
+        "how-to",
+        "inspect",
+        "ranking",
+        "search",
+        "troubleshoot"
+      ]
+    },
+    {
+      "id": "CON-P004",
+      "category": "procedural",
+      "original_category": "procedural",
+      "query": "onboarding procedure sop checklist new start begin",
+      "gold_path": "onboarding-checklist",
+      "score_method": "ndcg",
+      "score": 0.7602,
+      "retrieved_paths": [
+        "procedure/onboarding-checklist.md",
+        "runbooks/deploy-checklist.md"
+      ],
+      "elapsed_ms": 0.0,
+      "hit_at_5": true,
+      "rr": 1.0,
+      "system": "mock",
+      "n_matched": 2,
+      "query_tokens": [
+        "begin",
+        "checklist",
+        "new",
+        "onboarding",
+        "procedure",
+        "sop",
+        "start"
+      ]
+    }
+  ]
+}

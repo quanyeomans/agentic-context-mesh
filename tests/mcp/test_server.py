@@ -78,7 +78,12 @@ def test_tool_search_passes_agent_and_scope() -> None:
     )
     with patch("kairix.search.hybrid.search", return_value=mock_result) as mock_search:
         tool_search(query="q", agent="builder", scope="agent", budget=1000)
-        mock_search.assert_called_once_with(query="q", agent="builder", scope="agent", budget=1000)
+        call_kwargs = mock_search.call_args.kwargs
+        assert call_kwargs["query"] == "q"
+        assert call_kwargs["agent"] == "builder"
+        assert call_kwargs["scope"] == "agent"
+        assert call_kwargs["budget"] == 1000
+        assert "config" in call_kwargs  # load_config() now passed through
 
 
 @pytest.mark.unit

@@ -1,33 +1,43 @@
-name: Benchmark gate (manual)
+name: Benchmark gate
 
-# Manual benchmark comparison — required on PRs that change retrieval logic.
-# Engineering hub: "PRs that change retrieval logic must include benchmark result comparison."
-# This workflow is triggered manually by Builder after a benchmark run completes.
-# It does NOT run automatically (benchmark requires live Azure API and QMD DB).
+# Automatic regression gate — runs on every PR that touches retrieval logic.
+# Uses the mock retrieval backend (no Azure API or QMD DB required).
+# Compares against the committed baseline in benchmark-results/contract-baseline.json.
+#
+# FAIL conditions:
+#   - overall weighted_total drops by > 0.02 from baseline
+#   - any category score drops below 0.50
+#
+# To update the baseline after an intentional change:
+#   python3 -c "
+#     from kairix.benchmark.suite import load_suite
+#     from kairix.benchmark.runner import run_benchmark
+#     import json
+#     suite = load_suite('suites/contract-suite.yaml')
+#     result = run_benchmark(suite, system='mock', agent='shared')
+#     data = {'meta': result.meta, 'summary': result.summary, 'diagnostics': result.diagnostics, 'cases': result.cases}
+#     json.dump(data, open('benchmark-results/contract-baseline.json', 'w'), indent=2)
+#   "
+#   Then commit benchmark-results/contract-baseline.json with the PR.
 
 on:
-  workflow_dispatch:
-    inputs:
-      system:
-        description: "Search system to benchmark (bm25|vector|hybrid)"
-        required: true
-        default: "hybrid"
-      pr_number:
-        description: "PR number to comment results on (leave blank for push)"
-        required: false
-      baseline_score:
-        description: "Previous weighted total to compare against (e.g. 0.51)"
-        required: false
-        default: "0.51"
+  pull_request:
+    paths:
+      - "kairix/search/**"
+      - "kairix/benchmark/**"
+      - "kairix/temporal/**"
+      - "kairix/embed/**"
+      - "kairix/graph/**"
+      - "suites/contract-suite.yaml"
+      - "benchmark-results/contract-baseline.json"
 
 jobs:
-  benchmark:
-    name: Run benchmark — ${{ inputs.system }}
+  benchmark-gate:
+    name: Benchmark gate (contract suite)
     runs-on: ubuntu-latest
-    # This job requires secrets — only runs when triggered manually by an authorised user.
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
@@ -37,103 +47,122 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      - name: Run benchmark
-        run: |
-          echo "Benchmark gate: ${{ inputs.system }}"
-          echo "Baseline: ${{ inputs.baseline_score }}"
-          echo ""
-          echo "NOTE: This workflow is a gate template."
-          echo "The actual benchmark run happens on your-deployment-server where the live"
-          echo "QMD DB and Azure credentials are available. Results from that run"
-          echo "are committed to benchmark-results/ and referenced in the PR."
-          echo ""
-          echo "Verifying benchmark results file exists:"
-          ls benchmark-results/*.json 2>/dev/null || echo "No results yet — run kairix benchmark on your-deployment-server first."
-
-      - name: Check benchmark results against baseline
-        if: ${{ inputs.baseline_score != '' }}
+      - name: Run contract suite (mock backend)
         run: |
           python3 -c "
-          import json, glob, sys, os
-          from pathlib import Path
+          from kairix.benchmark.suite import load_suite
+          from kairix.benchmark.runner import run_benchmark
+          import json
 
-          baseline = float('${{ inputs.baseline_score }}')
-          system = '${{ inputs.system }}'
-          results_dir = Path('benchmark-results')
-
-          # Find most recent result file for this system
-          pattern = str(results_dir / f'*{system}*.json')
-          files = sorted(glob.glob(pattern), reverse=True)
-
-          if not files:
-              print(f'No benchmark results found for system={system}')
-              print('Run: kairix benchmark --system {system} on your-deployment-server')
-              sys.exit(0)  # Warning, not failure — results may not be committed yet
-
-          with open(files[0]) as f:
-              result = json.load(f)
-
-          score = result.get('weighted_total', 0)
-          delta = score - baseline
-          delta_pct = (delta / baseline) * 100
-
-          print(f'System:   {system}')
-          print(f'Baseline: {baseline:.4f}')
-          print(f'Current:  {score:.4f}')
-          print(f'Delta:    {delta:+.4f} ({delta_pct:+.1f}%)')
-          print()
-
-          # Per-category breakdown
-          scores = result.get('scores', {})
-          print('Category breakdown:')
-          for cat, data in scores.items():
-              s = data.get('score', 0)
-              print(f'  {cat:<14} {s:.4f}')
-
-          print()
-          # Engineering hub: alert on >5% regression
-          if delta < -0.025:  # 5% of 0.51 baseline = 0.025
-              print(f'REGRESSION: score dropped by {abs(delta_pct):.1f}% — investigation required')
-              sys.exit(1)
-          elif delta < 0:
-              print(f'WARNING: minor regression ({abs(delta_pct):.1f}%) — review category breakdown')
-          else:
-              print(f'PASS: score improved or maintained')
+          suite = load_suite('suites/contract-suite.yaml')
+          result = run_benchmark(suite, system='mock', agent='shared', output_dir=None)
+          data = {
+              'meta': result.meta,
+              'summary': result.summary,
+              'diagnostics': result.diagnostics,
+              'cases': result.cases,
+          }
+          with open('/tmp/contract-current.json', 'w') as f:
+              json.dump(data, f, indent=2)
+          print(f'weighted_total: {result.summary[\"weighted_total\"]}')
+          for cat, score in sorted(result.summary['category_scores'].items()):
+              print(f'  {cat:<14} {score:.4f}')
           "
 
-      - name: Comment benchmark results on PR
-        if: ${{ inputs.pr_number != '' }}
-        uses: actions/github-script@v9
+      - name: Compare against baseline
+        id: compare
+        run: |
+          python3 -m kairix.benchmark.baseline \
+            benchmark-results/contract-baseline.json \
+            /tmp/contract-current.json
+
+      - name: Build PR comment body
+        if: always() && github.event_name == 'pull_request'
+        id: comment_body
+        run: |
+          python3 -c "
+          import json, sys
+
+          try:
+              current = json.load(open('/tmp/contract-current.json'))
+              baseline = json.load(open('benchmark-results/contract-baseline.json'))
+          except Exception as e:
+              print(f'Could not read result files: {e}', file=sys.stderr)
+              sys.exit(0)
+
+          cur_total = current['summary']['weighted_total']
+          base_total = baseline['summary']['weighted_total']
+          delta = cur_total - base_total
+          passed = '${{ steps.compare.outcome }}' == 'success'
+          emoji = '✅' if passed else '❌'
+
+          lines = [
+              f'## {emoji} Benchmark Gate — Contract Suite',
+              '',
+              f'**Weighted total:** {base_total:.4f} → {cur_total:.4f} ({delta:+.4f})',
+              '',
+              '| Category | Baseline | Current | Delta |',
+              '|---|---|---|---|',
+          ]
+          cur_cats = current['summary'].get('category_scores', {})
+          base_cats = baseline['summary'].get('category_scores', {})
+          for cat in sorted(set(cur_cats) | set(base_cats)):
+              b = base_cats.get(cat, 0.0)
+              c = cur_cats.get(cat, 0.0)
+              d = c - b
+              flag = ' ⚠️' if c < 0.50 else (' ↓' if d < -0.01 else '')
+              lines.append(f'| {cat} | {b:.4f} | {c:.4f} | {d:+.4f}{flag} |')
+
+          lines += [
+              '',
+              '_No regression detected. Gate passed._' if passed
+              else '_Gate failed: regression detected (threshold ±0.02). Review scores above._',
+          ]
+
+          body = chr(10).join(lines)
+          # Write to env file for next step
+          with open('/tmp/comment-body.txt', 'w') as f:
+              f.write(body)
+          print('Comment body written.')
+          "
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const glob = require('glob');
-            const system = '${{ inputs.system }}';
 
-            const files = glob.sync(`benchmark-results/*${system}*.json`).sort().reverse();
-            if (files.length === 0) {
-              console.log('No benchmark result files found to comment.');
-              return;
+            let body;
+            try {
+              body = fs.readFileSync('/tmp/comment-body.txt', 'utf8');
+            } catch (e) {
+              body = '⚠️ Benchmark gate: could not read results.';
             }
 
-            const result = JSON.parse(fs.readFileSync(files[0]));
-            const score = result.weighted_total || 0;
-            const baseline = parseFloat('${{ inputs.baseline_score }}' || '0.51');
-            const delta = score - baseline;
-            const emoji = delta >= 0 ? '✅' : '⚠️';
-
-            const categoryTable = Object.entries(result.scores || {})
-              .map(([cat, data]) => `| ${cat} | ${(data.score || 0).toFixed(4)} |`)
-              .join('\n');
-
-            const body = `## Benchmark Results — \`${system}\`\n\n` +
-              `${emoji} **Weighted total:** ${score.toFixed(4)} (baseline: ${baseline.toFixed(4)}, delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(4)})\n\n` +
-              `| Category | Score |\n|---|---|\n${categoryTable}\n\n` +
-              `*Run date: ${result.date || 'unknown'} | File: ${files[0]}*`;
-
-            await github.rest.issues.createComment({
+            // Find and update existing bot comment, or create new one
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: parseInt('${{ inputs.pr_number }}'),
-              body: body
+              issue_number: context.issue.number,
             });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('Benchmark Gate — Contract Suite')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
