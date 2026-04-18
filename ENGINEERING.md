@@ -233,6 +233,41 @@ The `--agent` parameter in all kairix commands enforces collection boundaries. T
 
 ---
 
+## Security Standards
+
+These rules are enforced by CI (CodeQL, Bandit, detect-secrets) and must be followed in all code changes.
+
+### Logging
+
+- **Never log exception objects** from credential-fetching code paths. An exception raised during Key Vault fetch, secrets file parsing, or auth can contain the raw credential value in its message. Log the operation name and return code only.
+- **Never log user query content** at any log level without an explicit opt-in env var (e.g. `KAIRIX_DEBUG_QUERIES=1`). Queries may contain personal or commercially sensitive information.
+- **Never log raw LLM responses** at DEBUG. Truncate or omit entirely — `logger.debug("step: failed")` not `logger.debug("step: failed %r", raw_response)`.
+- Logging a Key Vault **secret name** (not value) is acceptable at INFO/WARNING for operational tracing.
+
+### Subprocess
+
+- `subprocess.run()` must always use a **list of arguments**, never a shell-interpolated string with `shell=True`.
+- If a command string must be split at runtime, use `shlex.split()` rather than `.split()` or f-strings.
+
+### GitHub Actions
+
+- Every job must declare a **minimal `permissions:` block** explicitly. Never rely on inherited defaults.
+- The top-level workflow `permissions` should be `contents: read`. Jobs requiring write access declare it individually.
+
+### CodeQL Suppressions
+
+- Use inline `# lgtm[query-id]` comments only for **confirmed false positives** or **intentional product behaviour** (e.g. the vault-agent sidecar writing secrets to tmpfs, or the briefing CLI outputting user-owned documents).
+- Every suppression must include a `— reason` comment explaining why it is safe.
+- Do not use blanket path exclusions in `codeql-config.yml` — suppress at the specific line.
+
+### detect-secrets
+
+- The `.secrets.baseline` file must be updated when legitimate non-secret strings trigger false positives.
+- `detect-secrets` is a **hard gate** in CI — a failed scan blocks merge.
+- Never add `continue-on-error: true` to the detect-secrets step.
+
+---
+
 ## 5. Code Style
 
 ### 5.1 Type annotations

@@ -241,10 +241,6 @@ jobs:
           else:
               print('No secrets detected.')
           "
-        continue-on-error: true
-        # continue-on-error: true because detect-secrets has false positives.
-        # Findings reviewed manually in PR. Will be changed to false after
-        # baseline is established and false positives are suppressed.
 
       - name: Upload security reports
         uses: actions/upload-artifact@v4

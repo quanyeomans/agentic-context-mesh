@@ -114,9 +114,9 @@ def _get_secrets() -> dict[str, str]:
             if result.returncode == 0 and result.stdout.strip():
                 secrets[key] = result.stdout.strip()
             else:
-                logger.warning("_azure: failed to fetch KV secret %r (exit=%d)", secret_name, result.returncode)
+                logger.warning("_azure: failed to fetch KV secret %r (exit=%d)", secret_name, result.returncode)  # lgtm[py/clear-text-logging-sensitive-data] — logs KV secret name and exit code, not the secret value
         except Exception as e:
-            logger.warning("_azure: error fetching KV secret %r — %s", secret_name, e)
+            logger.warning("_azure: error fetching KV secret %r", secret_name)
 
     if "deployment" not in secrets:
         secrets["deployment"] = _DEFAULT_EMBED_DEPLOYMENT
