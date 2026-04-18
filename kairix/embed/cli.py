@@ -1,10 +1,10 @@
 """
-CLI entrypoint for qmd-azure-embed.
+CLI entrypoint for kairix embed.
 
 Usage:
-  qmd-azure-embed [--force] [--limit N] [--batch-size N] [--skip-recall-check]
-  qmd-azure-embed recall-check
-  qmd-azure-embed status
+  kairix embed [--force] [--limit N] [--batch-size N] [--skip-recall-check]
+  kairix embed recall-check
+  kairix embed status
 """
 
 import argparse
@@ -73,7 +73,7 @@ def release_lock(lock_fh: IO[str]) -> None:
 
 def cmd_embed(args: argparse.Namespace) -> int:
     """Run the embedding pipeline."""
-    logging.info(f"qmd-azure-embed starting — force={args.force} limit={args.limit} batch_size={args.batch_size}")
+    logging.info(f"kairix embed starting — force={args.force} limit={args.limit} batch_size={args.batch_size}")
 
     lock_fh = acquire_lock()
     db_path = get_qmd_db_path()
@@ -185,8 +185,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        prog="qmd-azure-embed",
-        description="Azure OpenAI embedding backend for QMD",
+        prog="kairix embed",
+        description="Embed vault documents into the kairix vector index",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     sub = parser.add_subparsers(dest="command")
