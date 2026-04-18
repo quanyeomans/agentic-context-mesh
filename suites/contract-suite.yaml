@@ -1,0 +1,199 @@
+meta:
+  name: contract
+  description: >
+    CI contract suite — runs against the mock retrieval backend (no Azure or QMD required).
+    Tests pipeline code correctness (RRF fusion, scoring, boost logic) not retrieval quality.
+    Baseline committed to benchmark-results/contract-baseline.json.
+    Gate: overall weighted_total must not regress more than 0.02 from the baseline.
+  version: "1.0"
+  system: mock
+  n_cases: 20
+
+cases:
+  # --- recall (weight 0.25) ---
+  - id: CON-R001
+    category: recall
+    query: hybrid search retrieval architecture bm25 vector
+    score_method: ndcg
+    gold_titles:
+      - title: retrieval-architecture
+        relevance: 2
+      - title: rrf-fusion
+        relevance: 1
+      - title: bm25-scoring
+        relevance: 1
+
+  - id: CON-R002
+    category: recall
+    query: rrf reciprocal rank fusion combination ranking
+    score_method: ndcg
+    gold_titles:
+      - title: rrf-fusion
+        relevance: 2
+      - title: retrieval-architecture
+        relevance: 1
+
+  - id: CON-R003
+    category: recall
+    query: vector embeddings dense float azure dimensions
+    score_method: ndcg
+    gold_titles:
+      - title: vector-embeddings
+        relevance: 2
+      - title: semantic-search
+        relevance: 1
+
+  - id: CON-R004
+    category: recall
+    query: token budget tier allocator context window
+    score_method: ndcg
+    gold_titles:
+      - title: token-budget
+        relevance: 2
+
+  - id: CON-R005
+    category: recall
+    query: semantic search dense embedding conceptual similarity
+    score_method: ndcg
+    gold_titles:
+      - title: semantic-search
+        relevance: 2
+      - title: vector-embeddings
+        relevance: 1
+
+  # --- entity (weight 0.20) ---
+  - id: CON-E001
+    category: entity
+    query: alice engineer software person entity infrastructure
+    score_method: ndcg
+    gold_titles:
+      - title: alice-engineer
+        relevance: 2
+
+  - id: CON-E002
+    category: entity
+    query: bob manager person entity leadership product stakeholder
+    score_method: ndcg
+    gold_titles:
+      - title: bob-manager
+        relevance: 2
+
+  - id: CON-E003
+    category: entity
+    query: acme corp organisation consulting client
+    score_method: ndcg
+    gold_titles:
+      - title: acme-corp
+        relevance: 2
+
+  - id: CON-E004
+    category: entity
+    query: entity graph neo4j relationship knowledge nodes mentions
+    score_method: ndcg
+    gold_titles:
+      - title: entity-graph
+        relevance: 2
+      - title: retrieval-architecture
+        relevance: 1
+
+  # --- temporal (weight 0.20) ---
+  - id: CON-T001
+    category: temporal
+    query: what happened on 2026-03-15 standup meeting notes
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-03-15-standup
+        relevance: 2
+
+  - id: CON-T002
+    category: temporal
+    query: 2026-04-10 april quarterly review performance results
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-10-review
+        relevance: 2
+
+  - id: CON-T003
+    category: temporal
+    query: temporal index date chunk time chronological dates
+    score_method: ndcg
+    gold_titles:
+      - title: temporal-indexing
+        relevance: 2
+
+  # --- conceptual (weight 0.15) ---
+  - id: CON-C001
+    category: conceptual
+    query: bm25 scoring term frequency full-text probabilistic okapi
+    score_method: ndcg
+    gold_titles:
+      - title: bm25-scoring
+        relevance: 2
+      - title: retrieval-architecture
+        relevance: 1
+
+  - id: CON-C002
+    category: conceptual
+    query: multi-hop multi hop query planning decompose sub-query
+    score_method: ndcg
+    gold_titles:
+      - title: multi-hop-queries
+        relevance: 2
+
+  # --- multi_hop (weight 0.10) ---
+  - id: CON-M001
+    category: multi_hop
+    query: multi hop query planning decompose sub-query retrieval
+    score_method: ndcg
+    gold_titles:
+      - title: multi-hop-queries
+        relevance: 2
+      - title: retrieval-architecture
+        relevance: 1
+
+  - id: CON-M002
+    category: multi_hop
+    query: entity graph neo4j relationship multi hop knowledge retrieval
+    score_method: ndcg
+    gold_titles:
+      - title: entity-graph
+        relevance: 2
+      - title: multi-hop-queries
+        relevance: 1
+
+  # --- procedural (weight 0.10) ---
+  - id: CON-P001
+    category: procedural
+    query: how to setup kairix install configure guide quickstart
+    score_method: ndcg
+    gold_titles:
+      - title: how-to-setup-kairix
+        relevance: 2
+      - title: onboarding-checklist
+        relevance: 1
+
+  - id: CON-P002
+    category: procedural
+    query: deploy deployment checklist runbook procedure steps production
+    score_method: ndcg
+    gold_titles:
+      - title: deploy-checklist
+        relevance: 2
+
+  - id: CON-P003
+    category: procedural
+    query: debug search ranking troubleshoot diagnose inspect how-to
+    score_method: ndcg
+    gold_titles:
+      - title: how-to-debug-search
+        relevance: 2
+
+  - id: CON-P004
+    category: procedural
+    query: onboarding procedure sop checklist new start begin
+    score_method: ndcg
+    gold_titles:
+      - title: onboarding-checklist
+        relevance: 2
+      - title: how-to-setup-kairix
+        relevance: 1
