@@ -247,14 +247,6 @@ def main(argv: list[str] | None = None) -> None:
     p_rep.add_argument("--days", type=int, default=30, help="Days of history to include (default: 30)")
     p_rep.add_argument("--output", default=None, help="Markdown output path (stdout if omitted)")
 
-    args = parser.parse_args(argv)
-
-    # Resolve default log path for report
-    if args.subcommand in ("monitor", "report") and args.log is None:
-        import os
-        from pathlib import Path
-        args.log = os.environ.get("KAIRIX_MONITOR_LOG", str(Path.home() / ".cache/qmd/monitor.jsonl"))
-
     # --- build-gold ---
     p_gold = subparsers.add_parser("build-gold", help="Build independent gold suite via TREC pooling + LLM judge")
     p_gold.add_argument("--suite", required=True, help="Input suite YAML (queries + categories)")
@@ -269,6 +261,14 @@ def main(argv: list[str] | None = None) -> None:
     p_sweep = subparsers.add_parser("sweep", help="Grid search BM25 column weights and query styles")
     p_sweep.add_argument("--suite", required=True, help="Benchmark suite YAML with gold_titles")
     p_sweep.add_argument("--output", default=None, help="CSV output path (stdout summary if omitted)")
+
+    args = parser.parse_args(argv)
+
+    # Resolve default log path for report
+    if args.subcommand in ("monitor", "report") and args.log is None:
+        import os
+        from pathlib import Path
+        args.log = os.environ.get("KAIRIX_MONITOR_LOG", str(Path.home() / ".cache/kairix/monitor.jsonl"))
 
     dispatch = {
         "generate": _cmd_generate,
