@@ -45,6 +45,11 @@ def _format_result(sr: SearchResult, limit: int) -> str:
     lines: list[str] = []
     lines.append(f"Query: {sr.query}")
     lines.append(f"Intent: {sr.intent.value}")
+
+    if sr.error:
+        lines.append(f"Error: {sr.error}")
+        return "\n".join(lines)
+
     lines.append(
         f"Results: {len(sr.results)} returned "
         f"(BM25={sr.bm25_count}, vec={sr.vec_count}"
@@ -73,6 +78,8 @@ def _format_result(sr: SearchResult, limit: int) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    import sys
+
     args = _parse_args(argv)
 
     cfg = load_config()
@@ -85,7 +92,7 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     if args.as_json:
-        output = {
+        output: dict = {
             "query": sr.query,
             "intent": sr.intent.value,
             "bm25_count": sr.bm25_count,
@@ -106,9 +113,15 @@ def main(argv: list[str] | None = None) -> None:
                 for b in sr.results[: args.limit]
             ],
         }
+        if sr.error:
+            output["error"] = sr.error
         print(json.dumps(output, indent=2))
+        if sr.error:
+            sys.exit(1)
     else:
         print(_format_result(sr, limit=args.limit))
+        if sr.error:
+            sys.exit(1)
 
 
 if __name__ == "__main__":

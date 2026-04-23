@@ -9,7 +9,12 @@ Orchestrates the full search pipeline:
   5. Apply token budget
   6. Log retrieval event
 
-Falls back to BM25-only if vector search fails.
+ENTITY intent requires an available Neo4j connection. When Neo4j is
+unavailable and the classified intent is ENTITY, search() returns a
+SearchResult with a non-empty error field and no results. The caller
+should check sr.error before using sr.results.
+
+Falls back to BM25-only if vector search fails (non-ENTITY intents).
 Logs every search event to the path set by KAIRIX_SEARCH_LOG (default: /data/kairix/logs/search.jsonl).
 
 Never raises — returns SearchResult with empty results on any failure.
@@ -26,7 +31,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from kairix.embed.schema import get_qmd_db_path, load_sqlite_vec
+from kairix.db import get_db_path, load_extensions
 from kairix.graph.client import get_client as _get_neo4j
 from kairix.llm import get_default_backend as _get_llm
 from kairix.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
@@ -179,11 +184,11 @@ def _query_has_temporal_marker(query: str) -> bool:
 
 
 def _open_vec_db() -> sqlite3.Connection | None:
-    """Open QMD DB with sqlite-vec extension loaded. Returns None on any failure."""
+    """Open kairix DB with sqlite-vec extension loaded. Returns None on any failure."""
     try:
-        db_path = get_qmd_db_path()
+        db_path = get_db_path()
         db = sqlite3.connect(str(db_path))
-        load_sqlite_vec(db)
+        load_extensions(db)
         return db
     except Exception as e:
         logger.warning("hybrid: cannot open vec DB — %s", e)
@@ -319,7 +324,7 @@ def search(
                 from kairix.temporal.rewriter import is_relative_temporal
 
                 if is_relative_temporal(query):
-                    _tmp2_db = sqlite3.connect(str(get_qmd_db_path()))
+                    _tmp2_db = sqlite3.connect(str(get_db_path()))
                     try:
                         _paths = get_date_filtered_paths(_tmp2_db, start, end)
                         if _paths:  # empty = no dated chunks yet; do not filter
@@ -340,6 +345,19 @@ def search(
 
     # Neo4j client — used by planner (entity context) and entity_boost
     neo4j_client = _get_neo4j()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: _get_neo4j() returns a client object, no credentials flow to a log sink here
+
+    # ENTITY intent requires Neo4j. Do not silently degrade to BM25+vector
+    # for entity queries — the results would be misleading (no entity graph
+    # expansion, no alias resolution, no mention-based boosting).
+    if intent == QueryIntent.ENTITY and not neo4j_client.available:
+        err = (
+            "Entity queries require Neo4j but the graph is unavailable. "
+            "Check KAIRIX_NEO4J_URI, KAIRIX_NEO4J_USER, KAIRIX_NEO4J_PASSWORD "
+            "and run `kairix onboard check` for diagnostics. "
+            "Install Neo4j with `bash scripts/install-neo4j.sh` if not yet set up."
+        )
+        logger.error("hybrid: ENTITY query rejected — Neo4j unavailable (query=%r)", query[:60])
+        return SearchResult(query=query, intent=intent, error=err)
 
     # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
@@ -466,7 +484,7 @@ def search(
 
     # Populate chunk_date metadata for TMP-7B (only when DB available)
     try:
-        _enrich_chunk_dates(fused, get_qmd_db_path())
+        _enrich_chunk_dates(fused, get_db_path())
     except Exception as _cde:
         logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
 

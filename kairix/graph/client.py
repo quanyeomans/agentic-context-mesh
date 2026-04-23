@@ -6,8 +6,12 @@ Configured via env vars:
   KAIRIX_NEO4J_USER     (default: neo4j)
   KAIRIX_NEO4J_PASSWORD (required — no default)
 
-All public methods return results or empty lists rather than raising.
-Never raises — caller treats empty/None return as unavailable signal.
+Neo4j is required for ENTITY intent queries. Callers handling ENTITY
+intent must check client.available before use; hybrid.py enforces this
+by failing fast with a SearchResult.error when Neo4j is unavailable.
+
+Upsert and write methods return bool/None rather than raising — failures
+are logged as warnings and are expected to be retried on the next crawl.
 """
 
 from __future__ import annotations

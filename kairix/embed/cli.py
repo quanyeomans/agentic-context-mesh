@@ -17,17 +17,17 @@ import time
 from pathlib import Path
 from typing import IO
 
+from kairix.db import get_db_path, load_extensions
+
 from .embed import DEFAULT_BATCH_SIZE, run_embed
 from .recall_check import run_recall_gate
 from .schema import (
-    get_qmd_db_path,
-    load_sqlite_vec,
     save_run_log,
     validate_schema,
 )
 
 LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", "/data/kairix/logs/azure-embed.log"))
-LOCKFILE = Path("/tmp/qmd-embed.lock")  # nosec: S108 — intentional lockfile, documented in PRD §7.2
+LOCKFILE = Path("/tmp/kairix-embed.lock")  # nosec: S108 — intentional lockfile, documented in PRD §7.2
 LOCK_WAIT_SECS = 60
 
 
@@ -76,7 +76,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
     logging.info(f"kairix embed starting — force={args.force} limit={args.limit} batch_size={args.batch_size}")
 
     lock_fh = acquire_lock()
-    db_path = get_qmd_db_path()
+    db_path = get_db_path()
     start = time.time()
     result = None
 
@@ -87,7 +87,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
 
         # Note: load_sqlite_vec is called inside run_embed before any vec0 operations.
         # We still need it here for schema validation which checks the vectors_vec table.
-        load_sqlite_vec(db)
+        load_extensions(db)
         validate_schema(db)
 
         result = run_embed(
@@ -148,14 +148,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     """Show current embedding status."""
     from .schema import get_pending_chunks
 
-    db_path = get_qmd_db_path()
+    db_path = get_db_path()
     db = sqlite3.connect(str(db_path))
 
     pending = get_pending_chunks(db)
     total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
     total_docs = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
 
-    print(f"QMD index: {db_path}")
+    print(f"Kairix index: {db_path}")
     print(f"Documents: {total_docs}")
     print(f"Vectors:   {total_vecs}")
     print(f"Pending:   {len(pending)} documents need embedding")

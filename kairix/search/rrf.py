@@ -175,21 +175,17 @@ def _rrf_impl(
     fused: dict[str, FusedResult] = {}
 
     def _canonical_path(raw: str) -> str:
-        """Normalise path to bare collection-relative form for deduplication.
+        """Normalise path to bare form for deduplication.
 
-        BM25 returns  qmd://vault-entities/concept/builder.md
-        Vector returns concept/builder.md   (for vault-entities collection)
-               or     04-agent-knowledge/entities/concept/builder.md (vault collection)
-
-        Strip the qmd://collection-name/ prefix so BM25 and vector paths for the
-        same document merge correctly in the fused dict.
+        Both BM25 and vector search return vault-relative paths directly.
+        This function exists as a safety net for any legacy qmd:// URIs
+        that might remain in cached data or tests.
         """
         if raw.startswith("qmd://"):
-            # Remove qmd://collection-name/ prefix → bare path
-            without_scheme = raw[len("qmd://") :]
+            without_scheme = raw[len("qmd://"):]
             slash = without_scheme.find("/")
             if slash != -1:
-                return without_scheme[slash + 1 :]
+                return without_scheme[slash + 1:]
             return without_scheme
         return raw
 
@@ -253,7 +249,9 @@ def entity_boost_neo4j(
     Documents matching an entity vault_path or living inside an entity directory
     receive a log-scaled boost proportional to the entity's in-degree.
 
-    Falls back to returning unmodified results if Neo4j is unavailable or empty.
+    Called for all intents post-RRF. For ENTITY intent, hybrid.py guarantees
+    Neo4j is available before this is called. For other intents, if Neo4j is
+    unavailable the boost is skipped and results are returned unmodified.
     Never raises.
     """
     if not results:

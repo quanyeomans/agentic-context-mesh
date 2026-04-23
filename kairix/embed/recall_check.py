@@ -25,7 +25,7 @@ from kairix.embed.schema import EMBED_VECTOR_DIMS as EMBED_DIMS
 
 logger = logging.getLogger(__name__)
 
-RECALL_LOG = Path.home() / ".cache" / "qmd" / "recall-check.json"
+RECALL_LOG = Path.home() / ".cache" / "kairix" / "recall-check.json"
 
 # Recall queries with known gold path fragments (must appear in top-5 results)
 # Path fragments are vault-relative and lowercase-matched
@@ -108,14 +108,14 @@ def check_recall(db: sqlite3.Connection | None = None) -> dict:
     Returns {score, passed, total, detail}.
     Score is fraction of queries where gold path appears in top-5.
 
-    If db is None, opens QMD DB internally (requires sqlite-vec loaded).
+    If db is None, opens the kairix DB internally (requires sqlite-vec).
     """
-    from .schema import get_qmd_db_path, load_sqlite_vec
+    from kairix.db import get_db_path, load_extensions
 
     close_db = False
     if db is None:
-        db = sqlite3.connect(str(get_qmd_db_path()))
-        load_sqlite_vec(db)
+        db = sqlite3.connect(str(get_db_path()))
+        load_extensions(db)
         close_db = True
 
     queries = _get_recall_queries()

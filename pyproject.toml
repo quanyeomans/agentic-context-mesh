@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kairix"
 version = "2026.4.18a4"
-description = "Memory system for QMD + Obsidian agent stacks — hybrid search, entity graph, temporal reasoning, session briefing"
+description = "Self-contained knowledge retrieval engine — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ dependencies = [
     "requests>=2.33.1",
     "httpx>=0.27",
     "pyyaml>=6.0",
+    "sqlite-vec>=0.1.6,<0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -48,12 +49,10 @@ dev = [
 
 [project.scripts]
 kairix = "kairix.cli:main"
-# Legacy alias — kept for backwards compat with existing cron entries
-qmd-embed = "kairix.embed.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/quanyeomans/agentic-context-mesh"
-Issues = "https://github.com/quanyeomans/agentic-context-mesh/issues"
+Homepage = "https://github.com/quanyeomans/kairix"
+Issues = "https://github.com/quanyeomans/kairix/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -77,9 +76,8 @@ omit = [
     # CLI entry points are thin argparse wrappers — tested via integration, not unit coverage
     "kairix/cli.py",
     "kairix/*/cli.py",
-    # External I/O adapters — Azure API + QMD subprocess; behaviour mocked in unit tests
+    # External I/O adapters — Azure API; behaviour mocked in unit tests
     "kairix/_azure.py",
-    "kairix/_qmd.py",
     # Neo4j graph layer — requires live Neo4j instance; not available in CI
     "kairix/graph/*",
     # Pipeline orchestrators — thin wrappers over individually-tested modules
@@ -146,8 +144,6 @@ select = [
 ]
 ignore = [
     "S101",  # use of assert (test code)
-    "S603",  # subprocess calls (we use subprocess intentionally for qmd)
-    "S607",  # partial executable path (qmd is on PATH by design)
     "S608",  # SQL injection false positive — all dynamic SQL uses ? parameter binding
     "B008",  # function call in default arg (used in CLI argument defaults)
     "T201",  # print found (allowed in CLI modules — cli.py excluded below)
@@ -158,6 +154,7 @@ ignore = [
 "tests/e2e/*" = ["S", "T20", "I001"]  # E2E tests: inline imports required for lazy loading
 "kairix/*/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
 "kairix/cli.py" = ["T201"]
+"kairix/_azure.py" = ["S603", "S607"]  # Azure CLI subprocess (az keyvault) is intentional
 
 [tool.ruff.format]
 quote-style = "double"
@@ -169,20 +166,12 @@ indent-style = "space"
 exclude_dirs = ["tests", ".venv"]
 skips = [
     "B101",  # assert_used — acceptable in test-adjacent code
-    "B603",  # subprocess_without_shell_equals_true — we use explicit commands
-    "B607",  # start_process_with_partial_path — qmd is on PATH
 ]
 # Any HIGH finding not listed here blocks the build.
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["kairix*", "qmd_azure_embed*"]
-
-# QMD compatibility — update when testing against a new QMD version
-# Tested: qmd@1.1.2
-[tool.kairix]
-qmd-tested-version = "1.1.2"
-qmd-schema-version = "1"
+include = ["kairix*"]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.
 # E2E test gate: set KAIRIX_E2E=1 to enable live Azure API tests.

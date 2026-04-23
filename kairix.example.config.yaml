@@ -8,6 +8,32 @@
 #
 # Set KAIRIX_CONFIG_PATH=/path/to/kairix.config.yaml to use a custom location.
 
+# ── Collections ─────────────────────────────────────────────────────────────
+# Define what vault directories to index. Each collection maps a name to a
+# path relative to KAIRIX_VAULT_ROOT. Used by `kairix scan`.
+#
+# collections:
+#   - name: vault-projects
+#     path: "01-Projects"
+#     glob: "**/*.md"
+#   - name: vault-areas
+#     path: "02-Areas"
+#     glob: "**/*.md"
+#   - name: vault-resources
+#     path: "03-Resources"
+#     glob: "**/*.md"
+#   - name: vault-agent-knowledge
+#     path: "04-Agent-Knowledge"
+#     glob: "**/*.md"
+#   - name: vault-knowledge
+#     path: "05-Knowledge"
+#     glob: "**/*.md"
+#   - name: vault-archive
+#     path: "06-Archive"
+#     glob: "**/*.md"
+#     exclude:
+#       - ".trash"
+
 retrieval:
   boosts:
     entity:

@@ -45,9 +45,8 @@ def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when no vec0.so can be located."""
     monkeypatch.delenv("SQLITE_VEC_PATH", raising=False)
-    with patch("kairix.embed.schema._SQLITE_VEC_SEARCH_PATHS", ["/nonexistent/vec0.so"]):
-        with patch("pathlib.Path.exists", return_value=False):
-            result = find_sqlite_vec()
+    with patch("kairix.db._find_sqlite_vec", return_value=None):
+        result = find_sqlite_vec()
     assert result is None
 
 
@@ -59,7 +58,7 @@ def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyP
 def test_load_sqlite_vec_raises_when_not_found() -> None:
     """Raises RuntimeError with helpful message when extension is not found."""
     db = sqlite3.connect(":memory:")
-    with patch("kairix.embed.schema.find_sqlite_vec", return_value=None):
+    with patch("kairix.db._find_sqlite_vec", return_value=None):
         with pytest.raises(RuntimeError, match="sqlite-vec extension"):
             load_sqlite_vec(db)
 
@@ -70,19 +69,22 @@ def test_load_sqlite_vec_raises_when_not_found() -> None:
 
 
 def test_get_qmd_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Uses QMD_CACHE_DIR env var when set."""
+    """Uses KAIRIX_DB_PATH env var when set."""
     db_file = tmp_path / "index.sqlite"
     db_file.touch()
-    monkeypatch.setenv("QMD_CACHE_DIR", str(tmp_path))
+    monkeypatch.setenv("KAIRIX_DB_PATH", str(db_file))
     result = get_qmd_db_path()
     assert result == db_file
 
 
-def test_get_qmd_db_path_raises_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Raises FileNotFoundError when DB doesn't exist."""
-    monkeypatch.setenv("QMD_CACHE_DIR", str(tmp_path))  # empty dir, no index.sqlite
-    with pytest.raises(FileNotFoundError, match="QMD index not found"):
-        get_qmd_db_path()
+def test_get_qmd_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Returns default kairix DB path when no DB exists (for fresh installs)."""
+    monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
+    monkeypatch.delenv("QMD_CACHE_DIR", raising=False)
+    # Redirect home to tmp_path so default path resolves to a temp location
+    monkeypatch.setenv("HOME", str(tmp_path))
+    result = get_qmd_db_path()
+    assert str(result).endswith("kairix/index.sqlite")
 
 
 # ---------------------------------------------------------------------------
