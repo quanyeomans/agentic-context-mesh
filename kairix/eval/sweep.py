@@ -133,25 +133,54 @@ def _bm25_search_config(
         return []
 
 
-def _compute_ndcg(retrieved_paths: list[str], gold_titles: list[dict], k: int = 10) -> float:
+def _build_rel_map(gold: list[dict]) -> tuple[dict[str, int], str]:
+    """Build relevance map from gold_titles or gold_paths format.
+
+    Returns (rel_map, match_mode) where match_mode is 'stem' or 'path'.
+    """
+    if not gold:
+        return {}, "stem"
+
+    # Detect format: gold_titles use 'title', gold_paths use 'path'
+    if "title" in gold[0]:
+        rel_map = {str(g["title"]).lower().strip(): int(g.get("relevance", 0)) for g in gold}
+        return rel_map, "stem"
+    elif "path" in gold[0]:
+        rel_map = {str(g["path"]).lower().strip(): int(g.get("relevance", 0)) for g in gold}
+        return rel_map, "path"
+    return {}, "stem"
+
+
+def _match_path(retrieved: str, rel_map: dict[str, int], mode: str) -> int:
+    """Look up relevance grade for a retrieved path."""
+    if mode == "stem":
+        return rel_map.get(Path(retrieved).stem.lower(), 0)
+    elif mode == "path":
+        retrieved_lower = retrieved.lower()
+        # Try exact match first
+        if retrieved_lower in rel_map:
+            return rel_map[retrieved_lower]
+        # Try suffix match (gold may be collection-relative, retrieved may be different prefix)
+        for gold_path, rel in rel_map.items():
+            if retrieved_lower.endswith(gold_path) or gold_path.endswith(retrieved_lower):
+                return rel
+        return 0
+    return 0
+
+
+def _compute_ndcg(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
     """Compute NDCG@k for a single query."""
     import math
 
-    if not gold_titles:
+    if not gold:
         return 0.0
 
-    # Build relevance map: title_stem → grade
-    rel_map: dict[str, int] = {}
-    for g in gold_titles:
-        stem = str(g.get("title", "")).lower().strip()
-        rel = int(g.get("relevance", 0))
-        rel_map[stem] = rel
+    rel_map, mode = _build_rel_map(gold)
 
     # DCG@k
     dcg = 0.0
     for i, path in enumerate(retrieved_paths[:k]):
-        stem = Path(path).stem.lower()
-        rel = rel_map.get(stem, 0)
+        rel = _match_path(path, rel_map, mode)
         dcg += rel / math.log2(i + 2)
 
     # IDCG@k (ideal ranking)
@@ -161,20 +190,20 @@ def _compute_ndcg(retrieved_paths: list[str], gold_titles: list[dict], k: int = 
     return dcg / idcg if idcg > 0 else 0.0
 
 
-def _compute_hit_at_k(retrieved_paths: list[str], gold_titles: list[dict], k: int = 5) -> bool:
+def _compute_hit_at_k(retrieved_paths: list[str], gold: list[dict], k: int = 5) -> bool:
     """Check if any gold doc appears in top-k."""
-    gold_stems = {str(g.get("title", "")).lower().strip() for g in gold_titles if g.get("relevance", 0) >= 1}
+    rel_map, mode = _build_rel_map(gold)
     for path in retrieved_paths[:k]:
-        if Path(path).stem.lower() in gold_stems:
+        if _match_path(path, rel_map, mode) >= 1:
             return True
     return False
 
 
-def _compute_mrr(retrieved_paths: list[str], gold_titles: list[dict], k: int = 10) -> float:
+def _compute_mrr(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
     """Compute MRR@k (reciprocal rank of first relevant doc)."""
-    gold_stems = {str(g.get("title", "")).lower().strip() for g in gold_titles if g.get("relevance", 0) >= 1}
+    rel_map, mode = _build_rel_map(gold)
     for i, path in enumerate(retrieved_paths[:k]):
-        if Path(path).stem.lower() in gold_stems:
+        if _match_path(path, rel_map, mode) >= 1:
             return 1.0 / (i + 1)
     return 0.0
 
@@ -226,13 +255,13 @@ def sweep_bm25_params(
         logger.error("sweep: no cases in suite %s", suite_path)
         return SweepReport()
 
-    # Filter to ndcg-scored cases with gold_titles
+    # Filter to ndcg-scored cases with gold (either gold_titles or gold_paths)
     ndcg_cases = [
         c for c in cases
-        if c.get("score_method") == "ndcg" and c.get("gold_titles")
+        if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))
     ]
     if not ndcg_cases:
-        logger.error("sweep: no ndcg-scored cases with gold_titles in suite")
+        logger.error("sweep: no ndcg-scored cases with gold_titles or gold_paths in suite")
         return SweepReport()
 
     logger.info("sweep: %d configs x %d cases = %d evaluations",
@@ -261,14 +290,14 @@ def sweep_bm25_params(
 
             for case in ndcg_cases:
                 query = case["query"]
-                gold_titles = case.get("gold_titles", [])
+                gold = case.get("gold_titles") or case.get("gold_paths", [])
                 category = case.get("category", "recall")
 
                 paths = _bm25_search_config(db, query, weights, style, limit=20)
 
-                ndcg = _compute_ndcg(paths, gold_titles)
-                hit = _compute_hit_at_k(paths, gold_titles)
-                mrr = _compute_mrr(paths, gold_titles)
+                ndcg = _compute_ndcg(paths, gold)
+                hit = _compute_hit_at_k(paths, gold)
+                mrr = _compute_mrr(paths, gold)
 
                 ndcg_scores.append(ndcg)
                 hit_scores.append(hit)
