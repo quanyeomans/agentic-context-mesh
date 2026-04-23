@@ -250,7 +250,7 @@ def bm25_search(
                        d.path,
                        d.title,
                        c.doc,
-                       bm25(documents_fts, 1.0, 1.0, 1.0) AS bm25_score
+                       bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
                 FROM documents_fts
                 JOIN documents d ON d.id = documents_fts.rowid
                 JOIN content   c ON c.hash = d.hash
@@ -267,7 +267,7 @@ def bm25_search(
                        d.path,
                        d.title,
                        c.doc,
-                       bm25(documents_fts, 1.0, 1.0, 1.0) AS bm25_score
+                       bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
                 FROM documents_fts
                 JOIN documents d ON d.id = documents_fts.rowid
                 JOIN content   c ON c.hash = d.hash
