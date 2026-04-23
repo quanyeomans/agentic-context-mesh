@@ -40,6 +40,7 @@ from kairix.search.config import RetrievalConfig
 from kairix.search.intent import QueryIntent, classify
 from kairix.search.rrf import (
     FusedResult,
+    bm25_primary_fuse,
     chunk_date_boost,
     entity_boost_neo4j,
     procedural_boost,
@@ -479,8 +480,15 @@ def search(
         vec_failed = True
         logger.info("hybrid: vector search returned no results, using BM25 only (query=%r)", query[:60])
 
-    # Fuse results
-    fused: list[FusedResult] = rrf(bm25_results, vec_results)
+    # Fuse results using the configured strategy.
+    # bm25_primary: BM25 results first, vector-only appended (best for structured KBs).
+    # rrf: Standard Reciprocal Rank Fusion (better for semantic/unstructured corpora).
+    # Run `kairix eval hybrid-sweep` against your gold suite to determine which is
+    # optimal for your data.
+    if cfg.fusion_strategy == "rrf":
+        fused: list[FusedResult] = rrf(bm25_results, vec_results, k=cfg.rrf_k)
+    else:
+        fused = bm25_primary_fuse(bm25_results, vec_results)
 
     # Populate chunk_date metadata for TMP-7B (only when DB available)
     try:

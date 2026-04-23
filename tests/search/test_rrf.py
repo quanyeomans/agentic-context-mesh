@@ -21,6 +21,7 @@ from kairix.search.config import EntityBoostConfig, ProceduralBoostConfig
 from kairix.search.rrf import (
     RRF_K,
     FusedResult,
+    bm25_primary_fuse,
     entity_boost_neo4j,
     procedural_boost,
     rrf,
@@ -385,3 +386,77 @@ def test_entity_boost_mention_count_stored_on_result() -> None:
 
     boosted = entity_boost_neo4j(results, mock_neo4j)
     assert boosted[0].entity_mention_count == 7
+
+
+# ---------------------------------------------------------------------------
+# BM25-primary fusion
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_bm25_primary_empty_inputs() -> None:
+    """Both empty → []."""
+    assert bm25_primary_fuse([], []) == []
+
+
+@pytest.mark.unit
+def test_bm25_primary_bm25_only() -> None:
+    """BM25 results only → returned in BM25 rank order."""
+    results = bm25_primary_fuse([_bm25("a.md"), _bm25("b.md")], [])
+    assert len(results) == 2
+    assert results[0].path == "a.md"
+    assert results[1].path == "b.md"
+    assert all(r.in_bm25 for r in results)
+    assert not any(r.in_vec for r in results)
+
+
+@pytest.mark.unit
+def test_bm25_primary_vec_only() -> None:
+    """Vector results only → returned in vector rank order."""
+    results = bm25_primary_fuse([], [_vec("x.md"), _vec("y.md")])
+    assert len(results) == 2
+    assert results[0].path == "x.md"
+    assert results[1].path == "y.md"
+    assert all(r.in_vec for r in results)
+
+
+@pytest.mark.unit
+def test_bm25_primary_bm25_before_vec() -> None:
+    """BM25 results appear before vector-only results."""
+    results = bm25_primary_fuse(
+        [_bm25("bm25_doc.md")],
+        [_vec("vec_doc.md")],
+    )
+    assert len(results) == 2
+    assert results[0].path == "bm25_doc.md"
+    assert results[0].in_bm25 is True
+    assert results[1].path == "vec_doc.md"
+    assert results[1].in_vec is True
+    # BM25 result has higher score
+    assert results[0].rrf_score > results[1].rrf_score
+
+
+@pytest.mark.unit
+def test_bm25_primary_deduplication() -> None:
+    """Doc in both lists appears at BM25 rank, marked as in_vec too."""
+    results = bm25_primary_fuse(
+        [_bm25("shared.md"), _bm25("bm25_only.md")],
+        [_vec("shared.md"), _vec("vec_only.md")],
+    )
+    assert len(results) == 3
+    assert results[0].path == "shared.md"
+    assert results[0].in_bm25 is True
+    assert results[0].in_vec is True
+    assert results[1].path == "bm25_only.md"
+    assert results[2].path == "vec_only.md"
+
+
+@pytest.mark.unit
+def test_bm25_primary_scores_descending() -> None:
+    """All results have descending scores (BM25 > vec-only)."""
+    results = bm25_primary_fuse(
+        [_bm25("a.md"), _bm25("b.md")],
+        [_vec("c.md"), _vec("d.md")],
+    )
+    scores = [r.rrf_score for r in results]
+    assert scores == sorted(scores, reverse=True)

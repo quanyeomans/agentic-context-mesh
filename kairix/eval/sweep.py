@@ -219,6 +219,12 @@ _CATEGORY_WEIGHTS: dict[str, float] = {
     "classification": 0.0,
 }
 
+# Suite category aliases — v2 suites use "semantic" and "keyword"
+_CATEGORY_ALIASES: dict[str, str] = {
+    "semantic": "recall",
+    "keyword": "conceptual",
+}
+
 
 def sweep_bm25_params(
     suite_path: Path,
@@ -291,7 +297,8 @@ def sweep_bm25_params(
             for case in ndcg_cases:
                 query = case["query"]
                 gold = case.get("gold_titles") or case.get("gold_paths", [])
-                category = case.get("category", "recall")
+                raw_category = case.get("category", "recall")
+                category = _CATEGORY_ALIASES.get(raw_category, raw_category)
 
                 paths = _bm25_search_config(db, query, weights, style, limit=20)
 

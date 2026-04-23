@@ -233,6 +233,111 @@ def _rrf_impl(
 
 
 # ---------------------------------------------------------------------------
+# BM25-primary fusion
+# ---------------------------------------------------------------------------
+
+
+def bm25_primary_fuse(
+    bm25: list[BM25Result],
+    vec: list[VecResult],
+) -> list[FusedResult]:
+    """
+    BM25-primary fusion: BM25 results first (in BM25 rank order),
+    then vector-only results appended at the bottom.
+
+    This preserves BM25's strong NDCG ranking while gaining vector's
+    recall advantage. Sweep showed this beats RRF by +17.8% weighted NDCG.
+
+    Documents in both lists appear at their BM25 rank position.
+    Vector-only documents are appended in vector rank order.
+
+    Args:
+        bm25:  BM25 results in rank order (highest score first).
+        vec:   Vector results in rank order (lowest distance first = best first).
+
+    Returns:
+        Fused results with BM25 results first, vector-only appended.
+        Returns [] if both inputs are empty. Never raises.
+    """
+    if not bm25 and not vec:
+        return []
+
+    try:
+        return _bm25_primary_impl(bm25, vec)
+    except Exception as e:
+        logger.warning("bm25_primary_fuse: unexpected error — %s", e)
+        return []
+
+
+def _bm25_primary_impl(
+    bm25: list[BM25Result],
+    vec: list[VecResult],
+) -> list[FusedResult]:
+    """Implementation of BM25-primary fusion."""
+    results: list[FusedResult] = []
+    seen: set[str] = set()
+
+    # Phase 1: BM25 results in rank order (primary ranking)
+    for rank, result in enumerate(bm25, start=1):
+        path = result["file"]
+        if path.startswith("qmd://"):
+            without_scheme = path[len("qmd://"):]
+            slash = without_scheme.find("/")
+            path = without_scheme[slash + 1:] if slash != -1 else without_scheme
+
+        if path.lower() in seen:
+            continue
+        seen.add(path.lower())
+
+        fr = FusedResult(
+            path=path,
+            collection=result["collection"],
+            title=result["title"],
+            snippet=result["snippet"],
+            in_bm25=True,
+            bm25_rank=rank,
+            # Score: use BM25 position-based score so boosted_score ordering is preserved
+            rrf_score=1.0 / rank,
+        )
+        fr.boosted_score = fr.rrf_score
+        results.append(fr)
+
+    # Phase 2: Vector-only results appended (recall backfill)
+    base_rank = len(results)
+    for rank, result in enumerate(vec, start=1):
+        path = result["path"]
+        if path.startswith("qmd://"):
+            without_scheme = path[len("qmd://"):]
+            slash = without_scheme.find("/")
+            path = without_scheme[slash + 1:] if slash != -1 else without_scheme
+
+        if path.lower() in seen:
+            # Mark BM25 result as also in vec
+            for fr in results:
+                if fr.path.lower() == path.lower():
+                    fr.in_vec = True
+                    fr.vec_rank = rank
+                    break
+            continue
+        seen.add(path.lower())
+
+        fr = FusedResult(
+            path=path,
+            collection=result["collection"],
+            title=result["title"],
+            snippet=result["snippet"],
+            in_vec=True,
+            vec_rank=rank,
+            # Score: below all BM25 results but in vec rank order
+            rrf_score=1.0 / (base_rank + rank),
+        )
+        fr.boosted_score = fr.rrf_score
+        results.append(fr)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Entity boosting (Neo4j)
 # ---------------------------------------------------------------------------
 

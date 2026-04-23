@@ -23,8 +23,9 @@ from typing import TypedDict
 
 logger = logging.getLogger(__name__)
 
-# Default number of results to return
-VECTOR_DEFAULT_K: int = 10
+# Default number of vector results to return.
+# More candidates improve recall at minimal latency cost (~200ms for k=20).
+VECTOR_DEFAULT_K: int = 20
 
 
 class VecResult(TypedDict):

@@ -165,6 +165,63 @@ def _cmd_build_gold(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
+    import logging
+    from pathlib import Path
+
+    from kairix.eval.hybrid_sweep import build_default_configs, sweep_hybrid_params
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    configs = build_default_configs()
+    if args.quick:
+        # Quick mode: baselines + key hybrid variants + bm25_primary
+        configs = [c for c in configs if c.name in (
+            "bm25-only", "hybrid-k20-minimal", "hybrid-k40-minimal",
+            "hybrid-k60-minimal", "hybrid-k60-defaults",
+            "bm25primary-v5", "bm25primary-v10", "bm25primary-v20",
+        )]
+
+    print(f"Running hybrid calibration sweep: {len(configs)} configs x suite {args.suite}")
+
+    report = sweep_hybrid_params(
+        suite_path=Path(args.suite),
+        output_path=Path(args.output) if args.output else None,
+        configs=configs,
+    )
+
+    print(f"\nSweep complete: {report.total_configs} configs, {report.total_duration_s:.0f}s")
+    if report.best:
+        b = report.best
+        c = b.config
+        print(f"\n{'='*70}")
+        print("BEST CONFIG:")
+        print(f"  Name: {c.name}")
+        print(f"  Mode: {c.mode} | RRF k={c.rrf_k}")
+        print(f"  Entity: {c.entity_enabled} (factor={c.entity_factor}, cap={c.entity_cap})")
+        print(f"  Procedural: {c.procedural_enabled} (factor={c.procedural_factor})")
+        print(f"  BM25 limit={c.bm25_limit} | Vec limit={c.vec_limit}")
+        print(f"  Weighted total: {b.weighted_total:.4f}")
+        print(f"  NDCG@10: {b.ndcg_at_10:.4f}")
+        print(f"  Hit@5: {b.hit_at_5:.3f}")
+        print(f"  MRR@10: {b.mrr_at_10:.4f}")
+        print(f"  Vec failures: {b.n_vec_failed}/{b.n_cases}")
+        print(f"  Avg latency: {b.avg_latency_ms:.0f}ms")
+        print(f"{'='*70}")
+
+    # Show top 10
+    print("\nTop 10 configs:")
+    for i, r in enumerate(report.results[:10], 1):
+        print(f"  {i:2d}. {r.config.name:30s} → weighted={r.weighted_total:.4f} "
+              f"NDCG={r.ndcg_at_10:.4f} Hit@5={r.hit_at_5:.3f} "
+              f"vecfail={r.n_vec_failed}")
+
+    if args.output:
+        print(f"\nFull results: {args.output}")
+
+    return 0
+
+
 def _cmd_sweep(args: argparse.Namespace) -> int:
     from pathlib import Path
 
@@ -262,6 +319,14 @@ def main(argv: list[str] | None = None) -> None:
     p_sweep.add_argument("--suite", required=True, help="Benchmark suite YAML with gold_titles")
     p_sweep.add_argument("--output", default=None, help="CSV output path (stdout summary if omitted)")
 
+    # --- hybrid-sweep ---
+    p_hsweep = subparsers.add_parser("hybrid-sweep",
+                                      help="Grid search over hybrid pipeline: RRF k, boosts, retrieval modes")
+    p_hsweep.add_argument("--suite", required=True, help="Independent gold suite YAML")
+    p_hsweep.add_argument("--output", default=None, help="CSV output path")
+    p_hsweep.add_argument("--quick", action="store_true",
+                          help="Quick mode: run only baseline + key RRF k variants")
+
     args = parser.parse_args(argv)
 
     # Resolve default log path for report
@@ -277,6 +342,7 @@ def main(argv: list[str] | None = None) -> None:
         "report": _cmd_report,
         "build-gold": _cmd_build_gold,
         "sweep": _cmd_sweep,
+        "hybrid-sweep": _cmd_hybrid_sweep,
     }
 
     fn = dispatch[args.subcommand]
