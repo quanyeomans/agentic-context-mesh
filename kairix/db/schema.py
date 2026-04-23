@@ -84,7 +84,7 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
     if not fts_exists:
         db.execute(
             "CREATE VIRTUAL TABLE documents_fts USING fts5("
-            "filepath, title, doc, content='', tokenize='porter unicode61')"
+            "filepath, title, doc, tokenize='porter unicode61')"
         )
 
     # sqlite-vec virtual table
