@@ -20,8 +20,8 @@ from kairix.db import get_db_path
 
 logger = logging.getLogger(__name__)
 
-# Default result limit
-BM25_DEFAULT_LIMIT: int = 10
+# Default result limit — 20 provides more candidates for RRF fusion
+BM25_DEFAULT_LIMIT: int = 20
 
 
 class BM25Result(TypedDict):
@@ -181,22 +181,25 @@ _FTS_STOP_WORDS: frozenset[str] = frozenset(
 
 def _normalise_fts_query(query: str) -> str:
     """
-    Normalise a natural-language query for FTS5.
+    Build an FTS5 query from natural language using quoted prefix match.
 
-    - Remove stop words
-    - Replace hyphens and underscores with spaces (FTS5 treats '-' as NOT operator)
-    - Quote tokens that contain special FTS characters
-    - Return remaining tokens joined with implicit AND (space)
-    - Returns empty string if no meaningful tokens remain
+    Matches QMD's buildFTS5Query() behaviour: each meaningful token becomes
+    ``"token"*`` (quoted with prefix wildcard), joined with AND. This gives
+    exact token matches with prefix expansion, which is more precise than
+    bare tokens for technical identifiers (ADR-012 → ``"adr"* AND "012"*``).
+
+    Returns empty string if no meaningful tokens remain.
     """
     # Replace hyphens, underscores, and apostrophes with spaces
-    # (FTS5 treats '-' as NOT, apostrophe as phrase delimiter)
     query = query.replace("-", " ").replace("_", " ").replace("'", " ").replace("\u2019", " ")
     # Extract word tokens (alphanumeric sequences only)
     raw_tokens = re.findall(r"[a-zA-Z0-9]+", query.lower())
     # Filter stop words and very short tokens
     tokens = [t for t in raw_tokens if t not in _FTS_STOP_WORDS and len(t) >= 2]
-    return " ".join(tokens)
+    if not tokens:
+        return ""
+    # Quoted prefix match per token, AND-joined (matches QMD's search behaviour)
+    return " AND ".join(f'"{t}"*' for t in tokens)
 
 
 def bm25_search(
@@ -237,6 +240,9 @@ def bm25_search(
         return []
 
     try:
+        # Use bm25() auxiliary function with column weights (filepath, title, doc).
+        # Default weights from sweep: equal weights work well; prefix query style
+        # has more impact than weight tuning.
         if collections:
             placeholders = ",".join("?" * len(collections))
             sql = f"""
@@ -244,14 +250,14 @@ def bm25_search(
                        d.path,
                        d.title,
                        c.doc,
-                       documents_fts.rank AS rank
+                       bm25(documents_fts, 1.0, 1.0, 1.0) AS bm25_score
                 FROM documents_fts
                 JOIN documents d ON d.id = documents_fts.rowid
                 JOIN content   c ON c.hash = d.hash
                 WHERE documents_fts MATCH ?
                   AND d.collection IN ({placeholders})
                   AND d.active = 1
-                ORDER BY documents_fts.rank
+                ORDER BY bm25_score ASC
                 LIMIT ?
             """
             params: list = [fts_query, *collections, limit]
@@ -261,13 +267,13 @@ def bm25_search(
                        d.path,
                        d.title,
                        c.doc,
-                       documents_fts.rank AS rank
+                       bm25(documents_fts, 1.0, 1.0, 1.0) AS bm25_score
                 FROM documents_fts
                 JOIN documents d ON d.id = documents_fts.rowid
                 JOIN content   c ON c.hash = d.hash
                 WHERE documents_fts MATCH ?
                   AND d.active = 1
-                ORDER BY documents_fts.rank
+                ORDER BY bm25_score ASC
                 LIMIT ?
             """
             params = [fts_query, limit]
@@ -280,9 +286,11 @@ def bm25_search(
 
     results: list[BM25Result] = []
     for row in rows:
-        # FTS5 rank is negative (more negative = better). Normalise to [0, 1].
-        raw_rank = float(row["rank"])
-        score = 1.0 / (1.0 + math.exp(raw_rank * 0.3))
+        # bm25() returns negative values (lower = better match).
+        # Normalise to [0, 1) using QMD's formula: |x| / (1 + |x|)
+        # Maps: strong(-10)→0.91, medium(-2)→0.67, weak(-0.5)→0.33, none(0)→0
+        raw_score = float(row["bm25_score"])
+        score = abs(raw_score) / (1.0 + abs(raw_score))
 
         # Build a short snippet from doc (first 300 chars of body)
         doc_text = row["doc"] or ""
