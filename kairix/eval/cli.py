@@ -136,6 +136,71 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_build_gold(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from kairix.eval.gold_builder import build_independent_gold
+
+    systems = [s.strip() for s in args.systems.split(",")]
+    print(f"Building independent gold suite: {args.suite} → {args.output}")
+    print(f"Systems: {systems}")
+    print(f"Judge runs: {args.judge_runs}")
+
+    report = build_independent_gold(
+        suite_path=Path(args.suite),
+        output_path=Path(args.output),
+        systems=systems,
+        judge_runs=args.judge_runs,
+        calibrate_first=not args.no_calibrate,
+        limit_per_system=args.limit,
+    )
+
+    print("\nGold suite built:")
+    print(f"  Queries: {report.queries_processed}")
+    print(f"  Candidates pooled: {report.total_candidates_pooled}")
+    print(f"  Avg candidates/query: {report.avg_candidates_per_query:.1f}")
+    print(f"  Judge calls: {report.total_judge_calls}")
+    print(f"  Grades: 2={report.grade_distribution.get(2, 0)} 1={report.grade_distribution.get(1, 0)} 0={report.grade_distribution.get(0, 0)}")
+    print(f"  Output: {args.output}")
+    return 0
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from kairix.eval.sweep import sweep_bm25_params
+
+    print(f"Sweeping BM25 parameters against: {args.suite}")
+
+    report = sweep_bm25_params(
+        suite_path=Path(args.suite),
+        output_path=Path(args.output) if args.output else None,
+    )
+
+    print(f"\nSweep complete: {report.total_configs} configs, {report.total_duration_s:.0f}s")
+    if report.best:
+        b = report.best
+        print(f"\n{'='*60}")
+        print("BEST CONFIG:")
+        print(f"  Weights: filepath={b.weights[0]} title={b.weights[1]} doc={b.weights[2]}")
+        print(f"  Query style: {b.query_style}")
+        print(f"  Weighted total: {b.weighted_total:.4f}")
+        print(f"  NDCG@10: {b.ndcg_at_10:.4f}")
+        print(f"  Hit@5: {b.hit_at_5:.4f}")
+        print(f"  MRR@10: {b.mrr_at_10:.4f}")
+        print(f"{'='*60}")
+
+    # Show top 5
+    print("\nTop 5 configs:")
+    for i, r in enumerate(report.results[:5], 1):
+        print(f"  {i}. w=({r.weights[0]},{r.weights[1]},{r.weights[2]}) style={r.query_style:7s} → {r.weighted_total:.4f}")
+
+    if args.output:
+        print(f"\nFull results: {args.output}")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="kairix eval",
@@ -190,11 +255,28 @@ def main(argv: list[str] | None = None) -> None:
         from pathlib import Path
         args.log = os.environ.get("KAIRIX_MONITOR_LOG", str(Path.home() / ".cache/qmd/monitor.jsonl"))
 
+    # --- build-gold ---
+    p_gold = subparsers.add_parser("build-gold", help="Build independent gold suite via TREC pooling + LLM judge")
+    p_gold.add_argument("--suite", required=True, help="Input suite YAML (queries + categories)")
+    p_gold.add_argument("--output", required=True, help="Output enriched suite YAML")
+    p_gold.add_argument("--systems", default="bm25-equal,bm25-qmd,bm25-title,vector",
+                        help="Retrieval systems to pool (default: bm25-equal,bm25-qmd,bm25-title,vector)")
+    p_gold.add_argument("--judge-runs", type=int, default=2, help="Judge runs per query (default: 2)")
+    p_gold.add_argument("--no-calibrate", action="store_true", help="Skip judge calibration")
+    p_gold.add_argument("--limit", type=int, default=10, help="Top-k per system (default: 10)")
+
+    # --- sweep ---
+    p_sweep = subparsers.add_parser("sweep", help="Grid search BM25 column weights and query styles")
+    p_sweep.add_argument("--suite", required=True, help="Benchmark suite YAML with gold_titles")
+    p_sweep.add_argument("--output", default=None, help="CSV output path (stdout summary if omitted)")
+
     dispatch = {
         "generate": _cmd_generate,
         "enrich": _cmd_enrich,
         "monitor": _cmd_monitor,
         "report": _cmd_report,
+        "build-gold": _cmd_build_gold,
+        "sweep": _cmd_sweep,
     }
 
     fn = dispatch[args.subcommand]
