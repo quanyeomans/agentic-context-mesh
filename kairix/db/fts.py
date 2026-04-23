@@ -24,12 +24,12 @@ def rebuild_fts(db: sqlite3.Connection) -> int:
     db.execute("DROP TABLE IF EXISTS documents_fts")
     db.execute(
         "CREATE VIRTUAL TABLE documents_fts USING fts5("
-        "title, doc, content='', tokenize='porter unicode61')"
+        "filepath, title, doc, content='', tokenize='porter unicode61')"
     )
 
     db.execute("""
-        INSERT INTO documents_fts(rowid, title, doc)
-        SELECT d.id, COALESCE(d.title, ''), COALESCE(c.doc, '')
+        INSERT INTO documents_fts(rowid, filepath, title, doc)
+        SELECT d.id, COALESCE(d.path, ''), COALESCE(d.title, ''), COALESCE(c.doc, '')
         FROM documents d
         JOIN content c ON c.hash = d.hash
         WHERE d.active = 1
