@@ -12,7 +12,6 @@ Usage:
 import argparse
 import os
 import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 
@@ -22,28 +21,10 @@ from pathlib import Path
 
 
 def _get_cred(secret_name: str) -> str:
-    result = subprocess.run(
-        [
-            "az",
-            "keyvault",
-            "secret",
-            "show",
-            "--vault-name",
-            os.environ.get("KV_NAME", ""),  # set via env
-            "--name",
-            secret_name,
-            "--query",
-            "value",
-            "-o",
-            "tsv",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    value = result.stdout.strip()
-    if not value:
-        raise RuntimeError(f"Could not fetch secret '{secret_name}' from Key Vault")
+    from kairix.secrets import get_secret
+
+    value = get_secret(secret_name, required=True)
+    assert value is not None  # get_secret raises if required and missing
     return value
 
 

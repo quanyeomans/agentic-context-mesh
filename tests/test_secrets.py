@@ -299,5 +299,5 @@ def test_get_secret_oserror_message_is_informative(monkeypatch) -> None:
         get_secret("azure-openai-api-key")
     msg = str(exc_info.value)
     assert "azure-openai-api-key" in msg
-    # Should mention the env var or secrets file in the message
-    assert "AZURE_OPENAI_API_KEY" in msg or "kairix.env" in msg or "KAIRIX_KV_NAME" in msg
+    # Error message should be generic — no internal paths or env var names leaked
+    assert "not available" in msg

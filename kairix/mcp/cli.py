@@ -28,6 +28,13 @@ def main(argv: list[str] | None = None) -> None:
         help="Port to listen on when transport=sse (default: 8080)",
     )
     serve_p.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind to when transport=sse (default: 127.0.0.1). "
+        "WARNING: The MCP server has no authentication. Do not bind to 0.0.0.0 "
+        "unless you have network-level access controls in place.",
+    )
+    serve_p.add_argument(
         "--transport",
         choices=["stdio", "sse"],
         default="stdio",
@@ -53,8 +60,8 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     server = build_server()
 
     if args.transport == "sse":
-        print(f"Starting kairix MCP server on port {args.port} (SSE transport)", file=sys.stderr)
-        server.run(transport="sse", port=args.port)
+        print(f"Starting kairix MCP server on {args.host}:{args.port} (SSE transport)", file=sys.stderr)
+        server.run(transport="sse", host=args.host, port=args.port)
     else:
         print("Starting kairix MCP server (stdio transport)", file=sys.stderr)
         server.run(transport="stdio")

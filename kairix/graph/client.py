@@ -236,6 +236,8 @@ class Neo4jClient:
         """
         if not self._driver:
             return []
+        # Clamp max_hops to prevent unbounded graph traversal (DoS mitigation)
+        max_hops = min(max(1, max_hops), 5)
         try:
             with self._driver.session() as session:
                 result = session.run(

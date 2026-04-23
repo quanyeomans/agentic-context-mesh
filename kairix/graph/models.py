@@ -15,6 +15,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+class NodeLabel(str, Enum):
+    """Valid Neo4j node labels. Used to validate GraphEdge labels and prevent injection."""
+
+    Document = "Document"
+    Organisation = "Organisation"
+    Person = "Person"
+    Outcome = "Outcome"
+    Concept = "Concept"
+
+
 class EdgeKind(str, Enum):
     WORKS_AT = "WORKS_AT"
     KNOWS = "KNOWS"
@@ -132,6 +142,9 @@ class OutcomeNode:
         }
 
 
+_VALID_LABELS: frozenset[str] = frozenset(label.value for label in NodeLabel)
+
+
 @dataclass
 class GraphEdge:
     """A directed relationship between two nodes."""
@@ -142,3 +155,15 @@ class GraphEdge:
     to_label: str
     kind: EdgeKind
     props: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.from_label not in _VALID_LABELS:
+            raise ValueError(
+                f"from_label {self.from_label!r} is not a valid node label. "
+                f"Valid labels: {sorted(_VALID_LABELS)}"
+            )
+        if self.to_label not in _VALID_LABELS:
+            raise ValueError(
+                f"to_label {self.to_label!r} is not a valid node label. "
+                f"Valid labels: {sorted(_VALID_LABELS)}"
+            )

@@ -186,9 +186,9 @@ def get_secret(name: str, required: bool = True) -> str | None:
 
     # Not found
     if required:
-        raise OSError(
-            f"Secret {name!r} could not be resolved. "
-            f"Set env var {env_var!r}, populate {secrets_file}, "
-            f"or set KAIRIX_KV_NAME for Key Vault fallback."
+        logger.error(
+            "get_secret: %r not found in env (%s), secrets file (%s), or Key Vault",
+            name, env_var, secrets_file,
         )
+        raise OSError(f"Secret {name!r} not available. Check environment, secrets file, or Key Vault configuration.")
     return None

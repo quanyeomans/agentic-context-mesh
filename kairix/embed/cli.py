@@ -27,7 +27,13 @@ from .schema import (
 )
 
 LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", "/data/kairix/logs/azure-embed.log"))
-LOCKFILE = Path("/tmp/kairix-embed.lock")  # nosec: S108 — intentional lockfile, documented in PRD §7.2
+def _default_lockfile() -> Path:
+    """Lockfile in user cache dir — avoids world-writable /tmp on multi-user systems."""
+    from kairix.db import get_db_path
+    return get_db_path().parent / "embed.lock"
+
+
+LOCKFILE = _default_lockfile()
 LOCK_WAIT_SECS = 60
 
 

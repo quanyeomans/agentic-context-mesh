@@ -54,7 +54,7 @@ def test_tool_search_error_handled() -> None:
 
     assert result["query"] == "broken"
     assert result["results"] == []
-    assert "db unavailable" in result["error"]
+    assert "failed" in result["error"].lower()  # sanitised error, no internal details
 
 
 @pytest.mark.unit
@@ -205,7 +205,7 @@ def test_tool_prep_error_handled() -> None:
         result = tool_prep(query="anything", tier="l0")
 
     assert result["summary"] == ""
-    assert "llm unavailable" in result["error"]
+    assert "failed" in result["error"].lower()  # sanitised error, no internal details
 
 
 @pytest.mark.unit
@@ -268,7 +268,7 @@ def test_tool_timeline_error_handled() -> None:
 
     assert result["is_temporal"] is False
     assert result["rewritten_query"] == "any query"
-    assert "oops" in result["error"]
+    assert "failed" in result["error"].lower()  # sanitised error, no internal details
 
 
 @pytest.mark.unit

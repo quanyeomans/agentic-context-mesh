@@ -73,8 +73,11 @@ def tool_search(
             "error": result.error,
         }
     except Exception as exc:
-        logger.warning("mcp.search failed: %s", exc)
-        return {"query": query, "intent": "", "results": [], "total_tokens": 0, "latency_ms": 0.0, "error": str(exc)}
+        logger.warning("mcp.search failed: %s", exc, exc_info=True)
+        return {
+            "query": query, "intent": "", "results": [], "total_tokens": 0,
+            "latency_ms": 0.0, "error": "Search failed — check server logs for details.",
+        }
 
 
 def tool_entity(
@@ -118,7 +121,7 @@ def tool_entity(
                     "error": "",
                 }
     except Exception as exc:
-        logger.warning("mcp.entity neo4j lookup failed: %s", exc)
+        logger.warning("mcp.entity neo4j lookup failed: %s", exc, exc_info=True)
 
     return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": f"Entity not found: {name}"}
 
@@ -161,8 +164,11 @@ def tool_prep(
             "error": "",
         }
     except Exception as exc:
-        logger.warning("mcp.prep failed: %s", exc)
-        return {"query": query, "tier": tier, "summary": "", "tokens": 0, "error": str(exc)}
+        logger.warning("mcp.prep failed: %s", exc, exc_info=True)
+        return {
+            "query": query, "tier": tier, "summary": "", "tokens": 0,
+            "error": "Prep failed — check server logs for details.",
+        }
 
 
 def tool_timeline(
@@ -222,13 +228,13 @@ def tool_timeline(
             "error": "",
         }
     except Exception as exc:
-        logger.warning("mcp.timeline failed: %s", exc)
+        logger.warning("mcp.timeline failed: %s", exc, exc_info=True)
         return {
             "original_query": query,
             "rewritten_query": query,
             "is_temporal": False,
             "time_window": {},
-            "error": str(exc),
+            "error": "Timeline processing failed — check server logs for details.",
         }
 
 
