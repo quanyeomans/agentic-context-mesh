@@ -189,10 +189,11 @@ def _normalise_fts_query(query: str) -> str:
     - Return remaining tokens joined with implicit AND (space)
     - Returns empty string if no meaningful tokens remain
     """
-    # Replace hyphens and underscores with spaces
-    query = query.replace("-", " ").replace("_", " ")
-    # Extract word tokens (alphanumeric sequences)
-    raw_tokens = re.findall(r"[a-zA-Z0-9']+", query.lower())
+    # Replace hyphens, underscores, and apostrophes with spaces
+    # (FTS5 treats '-' as NOT, apostrophe as phrase delimiter)
+    query = query.replace("-", " ").replace("_", " ").replace("'", " ").replace("\u2019", " ")
+    # Extract word tokens (alphanumeric sequences only)
+    raw_tokens = re.findall(r"[a-zA-Z0-9]+", query.lower())
     # Filter stop words and very short tokens
     tokens = [t for t in raw_tokens if t not in _FTS_STOP_WORDS and len(t) >= 2]
     return " ".join(tokens)
