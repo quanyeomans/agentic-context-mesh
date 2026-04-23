@@ -43,8 +43,11 @@ from kairix.eval.judge import (
 
 logger = logging.getLogger(__name__)
 
-# Path to QMD's SQLite index (same default as bm25.py)
-_QMD_DB_PATH: str = str(Path.home() / ".cache/qmd/index.sqlite")
+# Path to kairix's SQLite index (resolved via kairix.db)
+def _get_db_path_str() -> str:
+    from kairix.db import get_db_path
+
+    return str(get_db_path())
 
 # Category target distribution for generate_suite()
 _TARGET_DISTRIBUTION: dict[str, float] = {
@@ -106,7 +109,7 @@ class EnrichmentResult:
 
 
 def sample_documents(
-    db_path: str = _QMD_DB_PATH,
+    db_path: str = _get_db_path_str(),
     n: int = 200,
     collections: list[str] | None = None,
     seed: int | None = None,
@@ -371,7 +374,7 @@ def build_case(
 
 
 def generate_suite(
-    db_path: str = _QMD_DB_PATH,
+    db_path: str = _get_db_path_str(),
     output_path: str = "suites/generated.yaml",
     n_cases: int = 100,
     categories: list[str] | None = None,
@@ -570,7 +573,7 @@ def generate_suite(
 def enrich_suite(
     suite_path: str,
     output_path: str,
-    db_path: str = _QMD_DB_PATH,
+    db_path: str = _get_db_path_str(),
     api_key: str | None = None,
     endpoint: str | None = None,
     deployment: str = "gpt-4o-mini",

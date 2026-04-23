@@ -6,8 +6,12 @@ Configured via env vars:
   KAIRIX_NEO4J_USER     (default: neo4j)
   KAIRIX_NEO4J_PASSWORD (required — no default)
 
-All public methods return results or empty lists rather than raising.
-Never raises — caller treats empty/None return as unavailable signal.
+Neo4j is required for ENTITY intent queries. Callers handling ENTITY
+intent must check client.available before use; hybrid.py enforces this
+by failing fast with a SearchResult.error when Neo4j is unavailable.
+
+Upsert and write methods return bool/None rather than raising — failures
+are logged as warnings and are expected to be retried on the next crawl.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ _CONSTRAINT_QUERIES = [
     "CREATE CONSTRAINT organisation_id IF NOT EXISTS FOR (n:Organisation) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (n:Person) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT outcome_id IF NOT EXISTS FOR (n:Outcome) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (n:Document) REQUIRE n.id IS UNIQUE",
 ]
 
 
@@ -160,13 +165,24 @@ class Neo4jClient:
     def upsert_edge(self, edge: GraphEdge) -> bool:
         if not self._driver:
             return False
-        # Two separate MATCHes avoid cartesian product warning; constraints ensure index use.
-        cypher = (
-            f"MATCH (a:{edge.from_label} {{id: $from_id}}) "
-            f"MATCH (b:{edge.to_label} {{id: $to_id}}) "
-            f"MERGE (a)-[r:{edge.kind.value}]->(b) "
-            "SET r += $props"
-        )
+        if edge.from_label == "Document":
+            # Document nodes are not pre-created; MERGE creates them on first MENTIONS edge.
+            # Using MATCH here was a silent no-op — Document nodes never exist at time of call.
+            cypher = (
+                f"MERGE (a:Document {{id: $from_id}}) "
+                f"WITH a "
+                f"MATCH (b:{edge.to_label} {{id: $to_id}}) "
+                f"MERGE (a)-[r:{edge.kind.value}]->(b) "
+                "SET r += $props"
+            )
+        else:
+            # Known entity labels are guaranteed to exist via upsert_entity — MATCH is safe.
+            cypher = (
+                f"MATCH (a:{edge.from_label} {{id: $from_id}}) "
+                f"MATCH (b:{edge.to_label} {{id: $to_id}}) "
+                f"MERGE (a)-[r:{edge.kind.value}]->(b) "
+                "SET r += $props"
+            )
         try:
             with self._driver.session() as session:
                 session.run(cypher, from_id=edge.from_id, to_id=edge.to_id, props=edge.props)

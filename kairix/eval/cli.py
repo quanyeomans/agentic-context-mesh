@@ -136,6 +136,128 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_build_gold(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from kairix.eval.gold_builder import build_independent_gold
+
+    systems = [s.strip() for s in args.systems.split(",")]
+    print(f"Building independent gold suite: {args.suite} → {args.output}")
+    print(f"Systems: {systems}")
+    print(f"Judge runs: {args.judge_runs}")
+
+    report = build_independent_gold(
+        suite_path=Path(args.suite),
+        output_path=Path(args.output),
+        systems=systems,
+        judge_runs=args.judge_runs,
+        calibrate_first=not args.no_calibrate,
+        limit_per_system=args.limit,
+    )
+
+    print("\nGold suite built:")
+    print(f"  Queries: {report.queries_processed}")
+    print(f"  Candidates pooled: {report.total_candidates_pooled}")
+    print(f"  Avg candidates/query: {report.avg_candidates_per_query:.1f}")
+    print(f"  Judge calls: {report.total_judge_calls}")
+    print(f"  Grades: 2={report.grade_distribution.get(2, 0)} 1={report.grade_distribution.get(1, 0)} 0={report.grade_distribution.get(0, 0)}")
+    print(f"  Output: {args.output}")
+    return 0
+
+
+def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
+    import logging
+    from pathlib import Path
+
+    from kairix.eval.hybrid_sweep import build_default_configs, sweep_hybrid_params
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    configs = build_default_configs()
+    if args.quick:
+        # Quick mode: baselines + key hybrid variants + bm25_primary
+        configs = [c for c in configs if c.name in (
+            "bm25-only", "hybrid-k20-minimal", "hybrid-k40-minimal",
+            "hybrid-k60-minimal", "hybrid-k60-defaults",
+            "bm25primary-v5", "bm25primary-v10", "bm25primary-v20",
+        )]
+
+    print(f"Running hybrid calibration sweep: {len(configs)} configs x suite {args.suite}")
+
+    report = sweep_hybrid_params(
+        suite_path=Path(args.suite),
+        output_path=Path(args.output) if args.output else None,
+        configs=configs,
+    )
+
+    print(f"\nSweep complete: {report.total_configs} configs, {report.total_duration_s:.0f}s")
+    if report.best:
+        b = report.best
+        c = b.config
+        print(f"\n{'='*70}")
+        print("BEST CONFIG:")
+        print(f"  Name: {c.name}")
+        print(f"  Mode: {c.mode} | RRF k={c.rrf_k}")
+        print(f"  Entity: {c.entity_enabled} (factor={c.entity_factor}, cap={c.entity_cap})")
+        print(f"  Procedural: {c.procedural_enabled} (factor={c.procedural_factor})")
+        print(f"  BM25 limit={c.bm25_limit} | Vec limit={c.vec_limit}")
+        print(f"  Weighted total: {b.weighted_total:.4f}")
+        print(f"  NDCG@10: {b.ndcg_at_10:.4f}")
+        print(f"  Hit@5: {b.hit_at_5:.3f}")
+        print(f"  MRR@10: {b.mrr_at_10:.4f}")
+        print(f"  Vec failures: {b.n_vec_failed}/{b.n_cases}")
+        print(f"  Avg latency: {b.avg_latency_ms:.0f}ms")
+        print(f"{'='*70}")
+
+    # Show top 10
+    print("\nTop 10 configs:")
+    for i, r in enumerate(report.results[:10], 1):
+        print(f"  {i:2d}. {r.config.name:30s} → weighted={r.weighted_total:.4f} "
+              f"NDCG={r.ndcg_at_10:.4f} Hit@5={r.hit_at_5:.3f} "
+              f"vecfail={r.n_vec_failed}")
+
+    if args.output:
+        print(f"\nFull results: {args.output}")
+
+    return 0
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from kairix.eval.sweep import sweep_bm25_params
+
+    print(f"Sweeping BM25 parameters against: {args.suite}")
+
+    report = sweep_bm25_params(
+        suite_path=Path(args.suite),
+        output_path=Path(args.output) if args.output else None,
+    )
+
+    print(f"\nSweep complete: {report.total_configs} configs, {report.total_duration_s:.0f}s")
+    if report.best:
+        b = report.best
+        print(f"\n{'='*60}")
+        print("BEST CONFIG:")
+        print(f"  Weights: filepath={b.weights[0]} title={b.weights[1]} doc={b.weights[2]}")
+        print(f"  Query style: {b.query_style}")
+        print(f"  Weighted total: {b.weighted_total:.4f}")
+        print(f"  NDCG@10: {b.ndcg_at_10:.4f}")
+        print(f"  Hit@5: {b.hit_at_5:.4f}")
+        print(f"  MRR@10: {b.mrr_at_10:.4f}")
+        print(f"{'='*60}")
+
+    # Show top 5
+    print("\nTop 5 configs:")
+    for i, r in enumerate(report.results[:5], 1):
+        print(f"  {i}. w=({r.weights[0]},{r.weights[1]},{r.weights[2]}) style={r.query_style:7s} → {r.weighted_total:.4f}")
+
+    if args.output:
+        print(f"\nFull results: {args.output}")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="kairix eval",
@@ -182,19 +304,45 @@ def main(argv: list[str] | None = None) -> None:
     p_rep.add_argument("--days", type=int, default=30, help="Days of history to include (default: 30)")
     p_rep.add_argument("--output", default=None, help="Markdown output path (stdout if omitted)")
 
+    # --- build-gold ---
+    p_gold = subparsers.add_parser("build-gold", help="Build independent gold suite via TREC pooling + LLM judge")
+    p_gold.add_argument("--suite", required=True, help="Input suite YAML (queries + categories)")
+    p_gold.add_argument("--output", required=True, help="Output enriched suite YAML")
+    p_gold.add_argument("--systems", default="bm25-equal,bm25-qmd,bm25-title,vector",
+                        help="Retrieval systems to pool (default: bm25-equal,bm25-qmd,bm25-title,vector)")
+    p_gold.add_argument("--judge-runs", type=int, default=2, help="Judge runs per query (default: 2)")
+    p_gold.add_argument("--no-calibrate", action="store_true", help="Skip judge calibration")
+    p_gold.add_argument("--limit", type=int, default=10, help="Top-k per system (default: 10)")
+
+    # --- sweep ---
+    p_sweep = subparsers.add_parser("sweep", help="Grid search BM25 column weights and query styles")
+    p_sweep.add_argument("--suite", required=True, help="Benchmark suite YAML with gold_titles")
+    p_sweep.add_argument("--output", default=None, help="CSV output path (stdout summary if omitted)")
+
+    # --- hybrid-sweep ---
+    p_hsweep = subparsers.add_parser("hybrid-sweep",
+                                      help="Grid search over hybrid pipeline: RRF k, boosts, retrieval modes")
+    p_hsweep.add_argument("--suite", required=True, help="Independent gold suite YAML")
+    p_hsweep.add_argument("--output", default=None, help="CSV output path")
+    p_hsweep.add_argument("--quick", action="store_true",
+                          help="Quick mode: run only baseline + key RRF k variants")
+
     args = parser.parse_args(argv)
 
     # Resolve default log path for report
     if args.subcommand in ("monitor", "report") and args.log is None:
         import os
         from pathlib import Path
-        args.log = os.environ.get("KAIRIX_MONITOR_LOG", str(Path.home() / ".cache/qmd/monitor.jsonl"))
+        args.log = os.environ.get("KAIRIX_MONITOR_LOG", str(Path.home() / ".cache/kairix/monitor.jsonl"))
 
     dispatch = {
         "generate": _cmd_generate,
         "enrich": _cmd_enrich,
         "monitor": _cmd_monitor,
         "report": _cmd_report,
+        "build-gold": _cmd_build_gold,
+        "sweep": _cmd_sweep,
+        "hybrid-sweep": _cmd_hybrid_sweep,
     }
 
     fn = dispatch[args.subcommand]

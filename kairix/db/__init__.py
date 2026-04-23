@@ -1,0 +1,170 @@
+"""
+Kairix storage layer — owns the SQLite database, FTS5 index, and sqlite-vec vectors.
+
+This module replaces the external QMD dependency. Kairix maintains its own
+database at ``~/.cache/kairix/index.sqlite`` (configurable via ``KAIRIX_DB_PATH``).
+
+Public API:
+  - get_db_path()       — resolve the database file path
+  - open_db()           — open a connection with sqlite-vec loaded
+  - load_extensions()   — load sqlite-vec into an existing connection
+"""
+
+import logging
+import os
+import sqlite3
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+# Environment variable for explicit DB path override
+_DB_PATH_ENV = "KAIRIX_DB_PATH"
+
+# Legacy QMD DB path — used as fallback during migration period
+_LEGACY_QMD_CACHE_ENV = "QMD_CACHE_DIR"
+
+# sqlite-vec env override (preserved for deployments with custom vec0.so location)
+_SQLITE_VEC_ENV = "SQLITE_VEC_PATH"
+
+# Embedding dimensions — Azure text-embedding-3-large
+EMBED_VECTOR_DIMS = 1536
+
+
+def get_db_path() -> Path:
+    """
+    Resolve the kairix database path.
+
+    Search order:
+      1. ``KAIRIX_DB_PATH`` environment variable (explicit override)
+      2. ``~/.cache/kairix/index.sqlite`` (default kairix location)
+      3. Legacy fallback: ``QMD_CACHE_DIR/index.sqlite`` or ``~/.cache/qmd/index.sqlite``
+
+    Returns the path (which may not exist yet for fresh installs).
+    Raises FileNotFoundError only if no DB exists at any location.
+    """
+    # 1. Explicit override
+    env_path = os.environ.get(_DB_PATH_ENV)
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        # If explicitly set but doesn't exist, return it anyway — caller
+        # will create it (e.g. kairix scan on first run).
+        return p
+
+    # 2. Default kairix location
+    kairix_db = Path.home() / ".cache" / "kairix" / "index.sqlite"
+    if kairix_db.exists():
+        return kairix_db
+
+    # 3. Legacy QMD fallback (migration period)
+    qmd_cache = os.environ.get(_LEGACY_QMD_CACHE_ENV, str(Path.home() / ".cache" / "qmd"))
+    qmd_db = Path(qmd_cache) / "index.sqlite"
+    if qmd_db.exists():
+        logger.info("db: using legacy QMD index at %s — run 'kairix db migrate-from-qmd' to migrate", qmd_db)
+        return qmd_db
+
+    # No DB exists anywhere — return the default path for creation
+    return kairix_db
+
+
+def _find_sqlite_vec() -> str | None:
+    """
+    Locate the sqlite-vec extension.
+
+    Search order:
+      1. ``SQLITE_VEC_PATH`` environment variable
+      2. PyPI ``sqlite-vec`` package (``import sqlite_vec``)
+      3. System paths (``/usr/local/lib/vec0.so``, etc.)
+    """
+    # 1. Explicit override
+    env_path = os.environ.get(_SQLITE_VEC_ENV)
+    if env_path and Path(env_path).exists():
+        return env_path
+
+    # 2. PyPI package
+    try:
+        import sqlite_vec  # type: ignore[import-untyped]
+
+        return sqlite_vec.loadable_path()
+    except (ImportError, AttributeError):
+        pass
+
+    # 3. System paths
+    system_paths = [
+        "/usr/local/lib/vec0.so",
+        "/usr/lib/sqlite3/vec0.so",
+        "/usr/lib/vec0.so",
+    ]
+    for path in system_paths:
+        if Path(path).exists():
+            return path
+
+    # 4. Legacy: QMD node_modules (migration period only)
+    for qmd_root_str in [
+        "/data/workspace/.tools/qmd/node_modules",
+        "/data/tools/qmd/node_modules",
+    ]:
+        qmd_root = Path(qmd_root_str)
+        if qmd_root.exists():
+            matches = sorted(qmd_root.glob("**/vec0.so"))
+            for m in matches:
+                if "x64" in str(m):
+                    return str(m)
+            if matches:
+                return str(matches[0])
+
+    return None
+
+
+def load_extensions(db: sqlite3.Connection) -> None:
+    """
+    Load the sqlite-vec extension into an open SQLite connection.
+
+    Raises RuntimeError if the extension cannot be found.
+    Must be called before any ``vectors_vec`` virtual table operations.
+    """
+    vec_path = _find_sqlite_vec()
+    if not vec_path:
+        raise RuntimeError(
+            "sqlite-vec extension not found. "
+            "Install it with: pip install sqlite-vec\n"
+            f"Or set {_SQLITE_VEC_ENV}=/path/to/vec0.so to specify the location explicitly."
+        )
+
+    db.enable_load_extension(True)
+    # SQLite strips the platform suffix (.so / .dylib) itself
+    load_path = vec_path
+    for suffix in (".so", ".dylib", ".dll"):
+        if load_path.endswith(suffix):
+            load_path = load_path.removesuffix(suffix)
+            break
+    db.load_extension(load_path)
+    db.enable_load_extension(False)
+
+
+def open_db(path: Path | None = None, *, extensions: bool = True) -> sqlite3.Connection:
+    """
+    Open (or create) the kairix SQLite database.
+
+    Args:
+        path:       Explicit path. Defaults to ``get_db_path()``.
+        extensions: If True, load sqlite-vec. Set False for FTS-only operations.
+
+    Returns:
+        An open ``sqlite3.Connection`` with WAL mode enabled.
+    """
+    if path is None:
+        path = get_db_path()
+
+    # Ensure parent directory exists for fresh installs
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    db = sqlite3.connect(str(path), timeout=10.0)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA foreign_keys=ON")
+
+    if extensions:
+        load_extensions(db)
+
+    return db

@@ -14,12 +14,13 @@
 #   bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
 #
 #   Or if you have the script locally:
-#   bash scripts/install.sh [--version TAG] [--no-path-setup] [--skip-smoke]
+#   bash scripts/install.sh [--version TAG] [--no-path-setup] [--skip-smoke] [--fetch-secrets]
 #
 # FLAGS:
-#   --version TAG     Install specific git tag or branch (default: main)
-#   --no-path-setup   Skip /etc/profile.d/ setup (if you manage PATH yourself)
-#   --skip-smoke      Skip smoke test at end
+#   --version TAG       Install specific git tag or branch (default: installed version)
+#   --no-path-setup     Skip /etc/profile.d/ setup (if you manage PATH yourself)
+#   --skip-smoke        Skip smoke test at end
+#   --fetch-secrets     Fetch Azure KV secrets into /opt/kairix/secrets.env
 
 set -euo pipefail
 
@@ -31,19 +32,30 @@ KAIRIX_OPT="${KAIRIX_OPT:-/opt/kairix}"
 KAIRIX_VENV="${KAIRIX_VENV:-/opt/kairix/.venv}"
 KAIRIX_SYMLINK="${KAIRIX_SYMLINK:-/usr/local/bin/kairix}"
 KAIRIX_REPO="${KAIRIX_REPO:-https://github.com/quanyeomans/agentic-context-mesh}"
-KAIRIX_VERSION="${KAIRIX_VERSION:-main}"
+KAIRIX_VERSION="${KAIRIX_VERSION:-}"
 
 NO_PATH_SETUP=0
 SKIP_SMOKE=0
+FETCH_SECRETS=0
 
 for arg in "$@"; do
     case "$arg" in
-        --version=*) KAIRIX_VERSION="${arg#--version=}" ;;
+        --version=*)     KAIRIX_VERSION="${arg#--version=}" ;;
         --no-path-setup) NO_PATH_SETUP=1 ;;
         --skip-smoke)    SKIP_SMOKE=1 ;;
+        --fetch-secrets) FETCH_SECRETS=1 ;;
         *) echo "Unknown flag: $arg" >&2; exit 1 ;;
     esac
 done
+
+# Default version: detect from installed package, fall back to main
+if [[ -z "$KAIRIX_VERSION" ]]; then
+    if [[ -d "$KAIRIX_VENV" ]] && "${KAIRIX_VENV}/bin/pip" show kairix >/dev/null 2>&1; then
+        KAIRIX_VERSION=$("${KAIRIX_VENV}/bin/pip" show kairix 2>/dev/null | grep '^Version:' | awk '{print $2}')
+        log "  Auto-detected installed version: ${KAIRIX_VERSION}"
+    fi
+    KAIRIX_VERSION="${KAIRIX_VERSION:-main}"
+fi
 
 WRAPPER_DEST="${KAIRIX_OPT}/bin/kairix-wrapper.sh"
 WRAPPER_SRC_URL="${KAIRIX_REPO}/raw/${KAIRIX_VERSION}/scripts/kairix-wrapper.sh"
@@ -114,7 +126,7 @@ KAIRIX_NEO4J_USER=neo4j
 # KAIRIX_NEO4J_PASSWORD=   # Set here or via vault-agent sidecar
 
 # ── Optional ──────────────────────────────────────────────────────────────────
-# SQLITE_VEC_PATH=/path/to/vec0.so   # Only needed if auto-discovery fails
+# KAIRIX_DB_PATH=                    # Override kairix DB path (default: ~/.cache/kairix/index.sqlite)
 # KAIRIX_LOG_QUERIES=1               # Log all queries to queries.jsonl
 ENVTEMPLATE
     chmod 600 "${KAIRIX_OPT}/service.env"
@@ -122,6 +134,67 @@ ENVTEMPLATE
 else
     log "  service.env already exists — skipping"
 fi
+
+# ---------------------------------------------------------------------------
+# Step 2.5: Fetch Azure KV secrets (if requested)
+# ---------------------------------------------------------------------------
+
+if [[ $FETCH_SECRETS -eq 1 ]]; then
+    log "Step 2.5: fetching Azure KV secrets"
+    SECRETS_DEST="${KAIRIX_OPT}/secrets.env"
+
+    # Source service.env to get KAIRIX_KV_NAME
+    KV_NAME=""
+    if [[ -f "${KAIRIX_OPT}/service.env" ]]; then
+        KV_NAME=$(grep -E '^KAIRIX_KV_NAME=' "${KAIRIX_OPT}/service.env" 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+    fi
+
+    if [[ -z "$KV_NAME" ]]; then
+        warn "KAIRIX_KV_NAME not set in service.env — cannot fetch secrets"
+    elif ! command -v az >/dev/null 2>&1; then
+        warn "Azure CLI (az) not installed — cannot fetch secrets"
+    else
+        _fetch_kv_secret() {
+            az keyvault secret show --vault-name "$KV_NAME" --name "$1" --query value -o tsv 2>/dev/null
+        }
+
+        SECRETS_TMP="${SECRETS_DEST}.tmp"
+        {
+            echo "# Fetched from Azure Key Vault '${KV_NAME}' on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            for kv_env in \
+                "azure-openai-api-key:AZURE_OPENAI_API_KEY" \
+                "azure-openai-endpoint:AZURE_OPENAI_ENDPOINT" \
+                "kairix-neo4j-password:KAIRIX_NEO4J_PASSWORD"; do
+                kv_name="${kv_env%%:*}"
+                env_var="${kv_env#*:}"
+                value=$(_fetch_kv_secret "$kv_name")
+                if [[ -n "$value" ]]; then
+                    echo "${env_var}=${value}"
+                    log "  ✓ ${env_var}"
+                else
+                    warn "  ✗ ${kv_name} not found in vault"
+                fi
+            done
+        } > "$SECRETS_TMP"
+
+        mv "$SECRETS_TMP" "$SECRETS_DEST"
+        chmod 600 "$SECRETS_DEST"
+        log "  Secrets written to ${SECRETS_DEST} (mode 600)"
+    fi
+else
+    log "Step 2.5: skipping secret fetch (use --fetch-secrets to enable)"
+fi
+
+# Harden permissions on any existing secrets files
+for secrets_path in "${KAIRIX_OPT}/secrets.env" "/run/secrets/kairix.env"; do
+    if [[ -f "$secrets_path" ]]; then
+        current_perms=$(stat -c %a "$secrets_path" 2>/dev/null || stat -f %Lp "$secrets_path" 2>/dev/null)
+        if [[ -n "$current_perms" ]] && [[ "$current_perms" != "600" ]] && [[ "$current_perms" != "640" ]]; then
+            chmod 600 "$secrets_path"
+            log "  Hardened permissions on ${secrets_path}: ${current_perms} → 600"
+        fi
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Step 3: Install wrapper script
@@ -281,8 +354,10 @@ echo ""
 echo "  Next steps:"
 echo "  1. Fill in ${KAIRIX_OPT}/service.env (KAIRIX_KV_NAME, vault paths)"
 echo "  2. kairix onboard check        ← verify full deployment"
-echo "  3. kairix embed --limit 20     ← test embed"
-echo "  4. kairix embed                ← full vault embed"
+echo "  3. kairix scan                 ← index vault into kairix DB"
+echo "  4. kairix embed --limit 20     ← test embed (Azure OpenAI vectors)"
+echo "  5. kairix embed                ← full vault embed"
 echo ""
-echo "  See OPERATIONS.md for cron setup and monitoring."
+echo "  Secrets: re-run with --fetch-secrets to pull from Azure KV"
+echo "  See docs/operations.md for cron setup and monitoring."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

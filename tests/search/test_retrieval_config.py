@@ -48,6 +48,27 @@ class TestRetrievalConfigFactories:
         assert cfg.procedural.enabled is True
         assert r"/docs?/" in cfg.procedural.path_patterns
 
+    def test_for_semantic_corpus_uses_rrf(self):
+        cfg = RetrievalConfig.for_semantic_corpus()
+        assert cfg.fusion_strategy == "rrf"
+        assert cfg.entity.enabled is False
+
+    def test_defaults_use_bm25_primary(self):
+        cfg = RetrievalConfig.defaults()
+        assert cfg.fusion_strategy == "bm25_primary"
+
+    def test_minimal_uses_bm25_primary(self):
+        cfg = RetrievalConfig.minimal()
+        assert cfg.fusion_strategy == "bm25_primary"
+
+    def test_fusion_strategy_configurable(self):
+        cfg = RetrievalConfig(fusion_strategy="rrf")
+        assert cfg.fusion_strategy == "rrf"
+
+    def test_rrf_k_configurable(self):
+        cfg = RetrievalConfig(fusion_strategy="rrf", rrf_k=20)
+        assert cfg.rrf_k == 20
+
     def test_configs_are_frozen(self):
         cfg = RetrievalConfig.defaults()
         with pytest.raises((AttributeError, TypeError)):

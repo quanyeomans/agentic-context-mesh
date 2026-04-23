@@ -1,14 +1,45 @@
 """
-Retrieval boost configuration for the kairix search pipeline.
+Retrieval configuration for the kairix search pipeline.
 
-Each boost ships with opt-in defaults appropriate for a consulting knowledge base
-(entity + procedural enabled, temporal disabled). Use RetrievalConfig.minimal()
-to disable all boosts for baseline isolation testing.
+Controls fusion strategy, boost layers, and re-ranking. Each component ships
+with defaults tuned via parameter sweep against an independent gold suite
+(see ``kairix eval hybrid-sweep``).
+
+**Fusion strategies** (``fusion_strategy`` field):
+
+  ``"bm25_primary"`` (default)
+    BM25 results ranked first, vector-only results appended at the bottom.
+    Best when BM25 is the stronger ranking signal — structured filenames,
+    keyword-rich content, consulting/enterprise knowledge bases.
+    Sweep result: 0.803 NDCG@10, 91% Hit@5.
+
+  ``"rrf"``
+    Standard Reciprocal Rank Fusion (Cormack et al., 2009). Merges BM25 and
+    vector rankings with equal weight. Better for corpora where semantic
+    similarity is the primary signal — research papers, unstructured prose,
+    multilingual content.
+
+**Choosing a strategy**: Run ``kairix eval hybrid-sweep --suite <your-gold.yaml>``
+to evaluate both strategies on your data. If you don't have a gold suite yet,
+use ``kairix eval build-gold`` to create one via TREC-style pooling + LLM judge.
+
+As a rule of thumb:
+
+- **Structured knowledge bases** (wikis, runbooks, named entities, Obsidian vaults)
+  → ``bm25_primary``. BM25 excels when filenames and headings carry strong signal.
+- **Unstructured document collections** (research papers, long-form prose, logs)
+  → ``rrf``. Semantic similarity adds value when keyword matching is insufficient.
+
+Use factory class methods for common corpus types, or configure directly via
+YAML (``retrieval.fusion_strategy`` in kairix config).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+# Valid fusion strategy values
+FUSION_STRATEGIES = ("bm25_primary", "rrf")
 
 
 @dataclass(frozen=True)
@@ -60,28 +91,48 @@ class TemporalBoostConfig:
 
 @dataclass(frozen=True)
 class RerankConfig:
-    """Configuration for cross-encoder re-ranking (post-RRF semantic pass)."""
+    """Configuration for cross-encoder re-ranking (post-fusion semantic pass)."""
 
     enabled: bool = False
     model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    # Number of candidates to pass to the cross-encoder (top-N from RRF output).
+    # Number of candidates to pass to the cross-encoder (top-N from fusion output).
     candidate_limit: int = 20
 
 
 @dataclass(frozen=True)
 class RetrievalConfig:
     """
-    Configuration for the kairix retrieval pipeline boosts.
+    Top-level configuration for the kairix retrieval pipeline.
 
     Passed as optional ``config`` parameter to ``hybrid_search()``.
-    All boost sub-configs default to consulting knowledge base settings.
 
     Use factory class methods for common corpus types:
-      - ``RetrievalConfig.defaults()``      — consulting KB (entity + procedural, no temporal)
-      - ``RetrievalConfig.minimal()``       — all boosts off; RRF baseline
-      - ``RetrievalConfig.for_daily_log_corpus()``  — date-path temporal boost enabled
-      - ``RetrievalConfig.for_technical_documentation()``  — entity off, extended procedural
+
+      - ``RetrievalConfig.defaults()``
+        Consulting KB: bm25_primary fusion, entity + procedural boosts.
+      - ``RetrievalConfig.minimal()``
+        All boosts disabled, bm25_primary fusion. Use to isolate boost impact.
+      - ``RetrievalConfig.for_daily_log_corpus()``
+        Date-path temporal boost enabled for YYYY-MM-DD.md file corpora.
+      - ``RetrievalConfig.for_technical_documentation()``
+        Entity off, extended procedural patterns, bm25_primary fusion.
+      - ``RetrievalConfig.for_semantic_corpus()``
+        RRF fusion for corpora where semantic similarity dominates.
+
+    To find the best config for your data, run::
+
+        kairix eval build-gold --suite your-queries.yaml --output gold.yaml
+        kairix eval hybrid-sweep --suite gold.yaml --output sweep.csv
     """
+
+    # Fusion strategy: "bm25_primary" or "rrf".
+    # bm25_primary: BM25 results ranked first, vector-only appended at bottom.
+    # rrf: standard Reciprocal Rank Fusion with equal BM25/vector weight.
+    fusion_strategy: str = "bm25_primary"
+
+    # RRF constant (only used when fusion_strategy="rrf"). Higher values
+    # give more weight to documents appearing in both lists.
+    rrf_k: int = 60
 
     entity: EntityBoostConfig = field(default_factory=EntityBoostConfig)
     procedural: ProceduralBoostConfig = field(default_factory=ProceduralBoostConfig)
@@ -90,14 +141,14 @@ class RetrievalConfig:
 
     @classmethod
     def defaults(cls) -> RetrievalConfig:
-        """Consulting knowledge base defaults: entity + procedural boost, chunk_date temporal boost on."""
+        """Consulting knowledge base defaults: bm25_primary, entity + procedural boost."""
         return cls(
             temporal=TemporalBoostConfig(chunk_date_boost_enabled=True),
         )
 
     @classmethod
     def minimal(cls) -> RetrievalConfig:
-        """All boosts disabled. RRF baseline only. Use to isolate boost impact."""
+        """All boosts disabled, bm25_primary fusion. Use to isolate boost impact."""
         return cls(
             entity=EntityBoostConfig(enabled=False),
             procedural=ProceduralBoostConfig(enabled=False),
@@ -131,4 +182,16 @@ class RetrievalConfig:
                     r"/reference/",
                 ),
             ),
+        )
+
+    @classmethod
+    def for_semantic_corpus(cls) -> RetrievalConfig:
+        """Unstructured/semantic corpus where vector similarity is the primary signal.
+
+        Uses standard RRF fusion. Better for research papers, long-form prose,
+        multilingual content, or any corpus where keyword matching is insufficient.
+        """
+        return cls(
+            fusion_strategy="rrf",
+            entity=EntityBoostConfig(enabled=False),
         )

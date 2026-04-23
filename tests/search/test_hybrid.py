@@ -471,12 +471,105 @@ def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_open_vec_db() returns None when QMD DB is unavailable."""
+    """_open_vec_db() returns None when kairix DB is unavailable."""
     from kairix.search import hybrid as hybrid_mod
 
-    monkeypatch.setattr(hybrid_mod, "get_qmd_db_path", lambda: (_ for _ in ()).throw(FileNotFoundError("no db")))
+    monkeypatch.setattr(hybrid_mod, "get_db_path", lambda: (_ for _ in ()).throw(FileNotFoundError("no db")))
     result = hybrid_mod._open_vec_db()
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# ENTITY intent — Neo4j required
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_search_entity_intent_errors_when_neo4j_unavailable() -> None:
+    """ENTITY intent returns an error result when Neo4j is unavailable.
+
+    Regression: previously search() silently fell through to BM25+vector,
+    producing misleading results with no entity graph expansion.
+    """
+    with (
+        patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+    ):
+        result = search("tell me about Acme Corp")  # ENTITY intent
+
+    assert result.intent == QueryIntent.ENTITY
+    assert result.error != ""
+    assert "Neo4j" in result.error
+    assert result.results == []
+
+
+@pytest.mark.unit
+def test_search_entity_intent_proceeds_when_neo4j_available() -> None:
+    """ENTITY intent proceeds to full pipeline when Neo4j is available."""
+    mock_neo4j = type("C", (), {"available": True, "cypher": lambda self, q: []})()
+
+    with (
+        patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
+        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.search.hybrid._log_search_event"),
+        patch("kairix.search.hybrid._get_neo4j", return_value=mock_neo4j),
+    ):
+        result = search("tell me about Acme Corp")  # ENTITY intent
+
+    assert result.intent == QueryIntent.ENTITY
+    assert result.error == ""
+    assert len(result.results) >= 0  # results list present (may be empty if budget=0)
+
+
+@pytest.mark.unit
+def test_cli_entity_error_exits_nonzero(capsys: pytest.CaptureFixture) -> None:
+    """CLI exits with code 1 and prints error when entity query fails."""
+    from kairix.search.cli import main as search_cli
+
+    mock_sr = SearchResult(
+        query="tell me about Acme",
+        intent=QueryIntent.ENTITY,
+        results=[],
+        error="Neo4j is required for entity queries but is unavailable.",
+    )
+
+    with patch("kairix.search.cli.search", return_value=mock_sr):
+        with pytest.raises(SystemExit) as exc_info:
+            search_cli(["tell me about Acme"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Neo4j" in captured.out
+
+
+@pytest.mark.unit
+def test_cli_entity_error_json_includes_error_field(capsys: pytest.CaptureFixture) -> None:
+    """--json output includes 'error' field when entity query fails."""
+    from kairix.search.cli import main as search_cli
+
+    mock_sr = SearchResult(
+        query="tell me about Acme",
+        intent=QueryIntent.ENTITY,
+        results=[],
+        error="Neo4j is required for entity queries but is unavailable.",
+    )
+
+    with patch("kairix.search.cli.search", return_value=mock_sr):
+        with pytest.raises(SystemExit) as exc_info:
+            search_cli(["tell me about Acme", "--json"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert "error" in data
+    assert "Neo4j" in data["error"]
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: logging, DB open, temporal rewriting, keyword fallback
+# ---------------------------------------------------------------------------
 
 
 def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) -> None:

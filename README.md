@@ -95,7 +95,7 @@ kairix vault crawl --vault-root /path/to/vault
        └─ Upserts into Neo4j (idempotent)
 ```
 
-All search and entity data is stored in SQLite — no separate vector database. Neo4j Community Edition is used for the entity graph (optional; degrades gracefully when unavailable).
+All search and entity data is stored in SQLite — no separate vector database. Neo4j Community Edition is required for entity-intent queries (graph expansion, alias resolution, mention-based boosting). Non-entity intents (semantic, temporal, procedural, keyword) function without it.
 
 ---
 
@@ -150,7 +150,7 @@ Production RAG systems on heterogeneous personal knowledge typically score 0.55�
   - `text-embedding-3-large` deployment (1536-dim)
   - `gpt-4o-mini` deployment (briefing, classify, benchmark judging)
 - **Azure Key Vault** (recommended) — or export secrets as environment variables directly
-- **Neo4j Community Edition** (optional) — for entity graph; kairix degrades gracefully when unavailable
+- **Neo4j Community Edition** — required for entity queries (`kairix entity`, `kairix search` with entity intent). Other search intents (semantic, temporal, procedural, keyword) function without it.
 
 See [OPERATIONS.md](OPERATIONS.md) for full infrastructure setup, cron configuration, and first-run sequence.
 

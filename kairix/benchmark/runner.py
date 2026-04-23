@@ -370,16 +370,8 @@ def _retrieve(
         from kairix.search.bm25 import bm25_search
 
         results = bm25_search(query=query, agent=agent, limit=limit)
-        # BM25Result.file is a qmd:// URI — strip the scheme+collection prefix
-        # to match the bare relative paths stored in gold_paths
-        def _strip_qmd(uri: str) -> str:
-            if uri.startswith("qmd://"):
-                tail = uri[len("qmd://"):]
-                slash = tail.find("/")
-                return tail[slash + 1:] if slash != -1 else tail
-            return uri
-
-        paths = [_strip_qmd(r["file"]) for r in results]
+        # BM25Result.file is now a bare vault-relative path
+        paths = [r["file"] for r in results]
         snippets = [r.get("snippet") or "" for r in results]
         return paths, snippets, {"system": "bm25"}
 

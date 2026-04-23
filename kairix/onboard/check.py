@@ -390,9 +390,9 @@ def check_agent_knowledge_populated() -> CheckResult:
 def check_chunk_date_populated() -> CheckResult:
     """chunk_date is populated in content_vectors (required for TMP-7B temporal boost)."""
     try:
-        from kairix.embed.schema import get_qmd_db_path
+        from kairix.db import get_db_path
 
-        db_path = get_qmd_db_path()
+        db_path = get_db_path()
         import sqlite3
 
         db = sqlite3.connect(str(db_path))
