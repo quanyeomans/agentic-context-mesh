@@ -60,6 +60,28 @@ logger = logging.getLogger(__name__)
 
 RRF_K: int = 60
 
+
+# ---------------------------------------------------------------------------
+# Path normalisation
+# ---------------------------------------------------------------------------
+
+
+def canonical_path(raw: str) -> str:
+    """Normalise path to bare form for deduplication.
+
+    Both BM25 and vector search return vault-relative paths directly.
+    This function strips any legacy qmd:// URIs that might remain in
+    cached data or tests.
+    """
+    if raw.startswith("qmd://"):
+        without_scheme = raw[len("qmd://"):]
+        slash = without_scheme.find("/")
+        if slash != -1:
+            return without_scheme[slash + 1:]
+        return without_scheme
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # Entity slug helpers (for secondary name-based lookup)
 # ---------------------------------------------------------------------------
@@ -174,24 +196,9 @@ def _rrf_impl(
     # Build path → FusedResult index
     fused: dict[str, FusedResult] = {}
 
-    def _canonical_path(raw: str) -> str:
-        """Normalise path to bare form for deduplication.
-
-        Both BM25 and vector search return vault-relative paths directly.
-        This function exists as a safety net for any legacy qmd:// URIs
-        that might remain in cached data or tests.
-        """
-        if raw.startswith("qmd://"):
-            without_scheme = raw[len("qmd://"):]
-            slash = without_scheme.find("/")
-            if slash != -1:
-                return without_scheme[slash + 1:]
-            return without_scheme
-        return raw
-
     # Process BM25 results (1-indexed ranks)
     for rank, result in enumerate(bm25, start=1):
-        path = _canonical_path(result["file"])
+        path = canonical_path(result["file"])
         if path not in fused:
             fused[path] = FusedResult(
                 path=path,
@@ -205,7 +212,7 @@ def _rrf_impl(
 
     # Process vector results (1-indexed ranks)
     for rank, result in enumerate(vec, start=1):
-        path = _canonical_path(result["path"])
+        path = canonical_path(result["path"])
         if path not in fused:
             fused[path] = FusedResult(
                 path=path,
@@ -279,11 +286,7 @@ def _bm25_primary_impl(
 
     # Phase 1: BM25 results in rank order (primary ranking)
     for rank, result in enumerate(bm25, start=1):
-        path = result["file"]
-        if path.startswith("qmd://"):
-            without_scheme = path[len("qmd://"):]
-            slash = without_scheme.find("/")
-            path = without_scheme[slash + 1:] if slash != -1 else without_scheme
+        path = canonical_path(result["file"])
 
         if path.lower() in seen:
             continue
@@ -305,11 +308,7 @@ def _bm25_primary_impl(
     # Phase 2: Vector-only results appended (recall backfill)
     base_rank = len(results)
     for rank, result in enumerate(vec, start=1):
-        path = result["path"]
-        if path.startswith("qmd://"):
-            without_scheme = path[len("qmd://"):]
-            slash = without_scheme.find("/")
-            path = without_scheme[slash + 1:] if slash != -1 else without_scheme
+        path = canonical_path(result["path"])
 
         if path.lower() in seen:
             # Mark BM25 result as also in vec

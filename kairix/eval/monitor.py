@@ -27,8 +27,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kairix.benchmark.runner import run_benchmark
-from kairix.benchmark.suite import load_suite
+from kairix.eval.constants import CATEGORY_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +36,6 @@ _DEFAULT_LOG_PATH: str = str(Path.home() / ".cache/qmd/monitor.jsonl")
 
 # Maximum log entries to retain (rolling window)
 _MAX_LOG_ENTRIES: int = 90
-
-# Category weights — must match runner.py CATEGORY_WEIGHTS
-_CATEGORY_WEIGHTS: dict[str, float] = {
-    "recall": 0.25,
-    "temporal": 0.20,
-    "entity": 0.20,
-    "conceptual": 0.15,
-    "multi_hop": 0.10,
-    "procedural": 0.10,
-}
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -165,6 +154,10 @@ def run_monitor(
     Returns:
         MonitorResult. Never raises.
     """
+    # Lazy imports to avoid circular dependency (runner -> eval.constants -> eval.__init__ -> monitor -> runner)
+    from kairix.benchmark.runner import run_benchmark
+    from kairix.benchmark.suite import load_suite
+
     if log_path is None:
         log_path = os.environ.get("KAIRIX_MONITOR_LOG", _DEFAULT_LOG_PATH)
 
@@ -194,13 +187,13 @@ def run_monitor(
 
         ndcg_by_category = {
             cat: round(float(result.summary["category_scores"].get(cat, 0.0)), 4)
-            for cat in _CATEGORY_WEIGHTS
+            for cat in CATEGORY_WEIGHTS
         }
 
         # Compute weighted NDCG
         weighted = sum(
             ndcg_by_category.get(cat, 0.0) * w
-            for cat, w in _CATEGORY_WEIGHTS.items()
+            for cat, w in CATEGORY_WEIGHTS.items()
         )
         weighted_ndcg = round(weighted, 4)
 
@@ -320,7 +313,7 @@ def generate_report(log_path: str, days: int = 30) -> str:
     lines.append("| Category | NDCG | Weight | Contribution |")
     lines.append("|----------|------|--------|--------------|")
     by_cat = latest.get("ndcg_by_category", {})
-    for cat, w in _CATEGORY_WEIGHTS.items():
+    for cat, w in CATEGORY_WEIGHTS.items():
         ndcg = by_cat.get(cat, 0.0)
         contrib = ndcg * w
         lines.append(f"| {cat} | {ndcg:.4f} | {w:.0%} | {contrib:.4f} |")

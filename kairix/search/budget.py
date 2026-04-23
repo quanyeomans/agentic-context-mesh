@@ -78,9 +78,15 @@ def _estimate_tokens(text: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _get_summaries_db_path() -> Path:
+    """Return the summaries DB path, configurable via KAIRIX_SUMMARIES_DB env var."""
+    import os
+    return Path(os.environ.get("KAIRIX_SUMMARIES_DB", "/data/kairix/summaries.db"))
+
+
 def _open_summaries_db() -> sqlite3.Connection | None:
     """Open the summaries DB if it exists, else return None."""
-    db_path = Path("/data/kairix/summaries.db")
+    db_path = _get_summaries_db_path()
     if not db_path.exists():
         return None
     try:

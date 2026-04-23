@@ -23,9 +23,50 @@ Design principles:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Budget inference + entity name extraction (AFF-1, AFF-3)
+# ---------------------------------------------------------------------------
+
+_RESEARCH_WORDS = re.compile(r"\b(research|compare|analyse|analyze|comprehensive|detailed)\b", re.IGNORECASE)
+
+_ENTITY_PREFIX_RE = re.compile(
+    r"^(what\s+is|who\s+is|tell\s+me\s+about|what\s+do\s+we\s+know\s+about)\s+",
+    re.IGNORECASE,
+)
+
+
+def _infer_budget(query: str, explicit_budget: int) -> int:
+    """Automatically adjust the token budget based on question type.
+
+    Quick lookups (person/company names, keywords) get a small budget.
+    Research-style questions get a larger one. If the caller explicitly
+    set a budget, that value is used unchanged.
+    """
+    if explicit_budget != 3000:
+        return explicit_budget
+    try:
+        from kairix.search.intent import QueryIntent, classify
+
+        intent = classify(query)
+        if intent in (QueryIntent.ENTITY, QueryIntent.KEYWORD):
+            return 1500
+    except Exception:
+        logger.debug("_infer_budget: classify failed, using heuristics", exc_info=True)
+    if _RESEARCH_WORDS.search(query):
+        return 5000
+    return 3000
+
+
+def _extract_entity_name(query: str) -> str:
+    """Best-effort extraction of the entity name from a query string."""
+    name = _ENTITY_PREFIX_RE.sub("", query).strip()
+    return name.rstrip("?!. ")
+
 
 # ---------------------------------------------------------------------------
 # Tool implementations — pure Python, no mcp dependency
@@ -38,36 +79,55 @@ def tool_search(
     scope: str = "shared+agent",
     budget: int = 3000,
 ) -> dict[str, Any]:
-    """
-    Run hybrid BM25 + vector search over the vault.
+    """Search for anything in the knowledge base.
 
-    Args:
-        query:  Search query string.
-        agent:  Agent name for collection scoping (e.g. "shape", "builder").
-        scope:  Collection scope: "shared", "agent", or "shared+agent".
-        budget: Token budget cap. Default 3000.
-
-    Returns:
-        dict with keys: query, intent, results (list of dicts), total_tokens,
-        latency_ms, error.
+    Just ask your question — the system works out the best way to find
+    what you need, including handling date-based queries (temporal) and
+    setting the right amount of context automatically. You don't need
+    to configure anything.
     """
     try:
         from kairix.search.config_loader import load_config
         from kairix.search.hybrid import search
 
+        budget = _infer_budget(query, budget)
         result = search(query=query, agent=agent, scope=scope, budget=budget, config=load_config())
+
+        intent_value = result.intent.value if hasattr(result.intent, "value") else str(result.intent)
+        results_list = [
+            {
+                "path": r.result.path,
+                "score": r.result.boosted_score,
+                "snippet": r.content[:500],
+                "tokens": r.token_estimate,
+            }
+            for r in result.results
+        ]
+
+        # AFF-3: When the question is about a known person/company, show
+        # their knowledge graph summary at the top of results.
+        if intent_value == "entity":
+            entity_name = _extract_entity_name(query)
+            if entity_name:
+                entity_result = tool_entity(name=entity_name)
+                if not entity_result.get("error"):
+                    results_list.insert(0, {
+                        "path": entity_result.get("vault_path", ""),
+                        "score": 1.0,
+                        "snippet": entity_result.get("summary", ""),
+                        "tokens": len(entity_result.get("summary", "")) // 4,
+                        "source": "entity_graph",
+                        "entity": {
+                            "id": entity_result.get("id", ""),
+                            "name": entity_result.get("name", ""),
+                            "type": entity_result.get("type", ""),
+                        },
+                    })
+
         return {
             "query": result.query,
-            "intent": result.intent.value if hasattr(result.intent, "value") else str(result.intent),
-            "results": [
-                {
-                    "path": r.result.path,
-                    "score": r.result.boosted_score,
-                    "snippet": r.content[:500],
-                    "tokens": r.token_estimate,
-                }
-                for r in result.results
-            ],
+            "intent": intent_value,
+            "results": results_list,
             "total_tokens": result.total_tokens,
             "latency_ms": result.latency_ms,
             "error": result.error,
@@ -84,16 +144,10 @@ def tool_entity(
     name: str,
     action: str = "lookup",
 ) -> dict[str, Any]:
-    """
-    Entity lookup from Neo4j.
+    """Look up a specific person, company, or topic by name.
 
-    Args:
-        name:   Entity name or id to look up.
-        action: "lookup" (default) — find and return the entity.
-
-    Returns:
-        dict with keys: id, name, type, summary, vault_path, error.
-        Returns error key when entity not found.
+    This is a quick, direct lookup from the knowledge graph (Neo4j) —
+    use it when you already know the name of what you're looking for.
     """
     try:
         # Try Neo4j first
@@ -131,16 +185,10 @@ def tool_prep(
     agent: str | None = None,
     tier: str = "l0",
 ) -> dict[str, Any]:
-    """
-    Context preparation: generate tiered summaries for the given query.
+    """Get a short summary of a topic before committing to a full search.
 
-    Args:
-        query:  Query to prepare context for.
-        agent:  Agent name for scoping.
-        tier:   "l0" (brief, ≤500 tokens) or "l1" (detailed, ≤2000 tokens).
-
-    Returns:
-        dict with keys: query, tier, summary, tokens, error.
+    Choose 'l0' for 2-3 sentences or 'l1' for a structured overview.
+    Uses less resources than a full search — good for quick context checks.
     """
     try:
         from kairix._azure import chat_completion
@@ -175,20 +223,11 @@ def tool_timeline(
     query: str,
     anchor_date: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Temporal query rewriting and date-aware retrieval.
+    """Check how a date-related question will be interpreted.
 
-    Detects relative temporal expressions ("last week", "yesterday", "Q1")
-    and rewrites them with explicit date tokens for improved retrieval.
-
-    Args:
-        query:       Query that may contain temporal expressions.
-        anchor_date: ISO date string (YYYY-MM-DD) to anchor relative dates.
-                     Defaults to today.
-
-    Returns:
-        dict with keys: original_query, rewritten_query, is_temporal,
-        time_window (dict with start/end), error.
+    For debugging only — you don't need to call this before searching;
+    date handling is automatic. Shows how date expressions like "last week"
+    or "yesterday" are rewritten into specific date ranges.
     """
     try:
         from datetime import date as _date

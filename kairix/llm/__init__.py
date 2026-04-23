@@ -6,7 +6,6 @@ chat/embed APIs without a hard dependency on any specific provider.
 
 Built-in backends:
   AzureOpenAIBackend — wraps kairix._azure (Azure OpenAI, Key Vault secrets)
-  AnthropicBackend  — stub (raises NotImplementedError; add SDK when needed)
 
 Usage::
 
@@ -21,10 +20,10 @@ Or inject a specific backend for testing::
     backend = AzureOpenAIBackend()
 """
 
-from kairix.llm.backends import AnthropicBackend, AzureOpenAIBackend
+from kairix.llm.backends import AzureOpenAIBackend
 from kairix.llm.protocol import LLMBackend
 
-__all__ = ["AnthropicBackend", "AzureOpenAIBackend", "LLMBackend", "get_default_backend"]
+__all__ = ["AzureOpenAIBackend", "LLMBackend", "get_default_backend"]
 
 
 def get_default_backend() -> LLMBackend:

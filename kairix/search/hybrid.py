@@ -115,6 +115,7 @@ class SearchResult:
     vec_failed: bool = False
     fallback_used: bool = False  # True when BM25 returned 0 and vector was the sole source
     error: str = ""
+    _temporal_chunks: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +255,93 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Multi-hop helper (extracted from search() — SOLID-1)
+# ---------------------------------------------------------------------------
+
+
+def _run_multi_hop(
+    query: str,
+    agent: str | None,
+    scope: str,
+    budget: int,
+    cfg: RetrievalConfig,
+    neo4j_client: object,
+    collections: list[str],
+    t_start: float,
+) -> SearchResult:
+    """Decompose a MULTI_HOP query into sub-queries, run each through hybrid
+    search, merge and deduplicate results, then apply budget.
+
+    Raises on planner failure so the caller can fall back to SEMANTIC.
+    """
+    from dataclasses import replace as _replace
+
+    from kairix.search.planner import QueryPlanner
+
+    planner = QueryPlanner()
+    sub_queries = planner.decompose(query, neo4j_client=neo4j_client)
+    logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
+
+    def _hybrid_search_fn(sq: str) -> list:
+        sub_result = search(sq, agent=agent, scope=scope, budget=budget, _no_multi_hop=True)
+        return sub_result.results
+
+    fused_results = planner.retrieve_and_merge(sub_queries, _hybrid_search_fn, top_k_per_sub=6, final_top_k=8)
+
+    seen_paths: set[str] = set()
+    fused_for_budget: list[FusedResult] = []
+    for i, r in enumerate(fused_results):
+        if not hasattr(r, "result") or not r.result.path:
+            continue
+        if r.result.path in seen_paths:
+            continue
+        seen_paths.add(r.result.path)
+        snippet = r.result.snippet or ""
+        merged_fr = _replace(
+            r.result,
+            snippet=snippet[:600] if len(snippet) > 600 else snippet,
+            rrf_score=1.0 / (60 + i + 1),
+            boosted_score=1.0 / (60 + i + 1),
+        )
+        fused_for_budget.append(merged_fr)
+
+    budgeted = apply_budget(fused_for_budget, budget=budget)
+    total_tokens = sum(r.token_estimate for r in budgeted)
+    tiers_used = sorted(set(r.tier for r in budgeted))
+    t_end = time.monotonic()
+    latency_ms = (t_end - t_start) * 1000.0
+    query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
+
+    result = SearchResult(
+        query=query,
+        intent=QueryIntent.MULTI_HOP,
+        results=budgeted,
+        bm25_count=len(fused_results),
+        vec_count=0,
+        fused_count=len(fused_for_budget),
+        collections=collections,
+        tiers_used=tiers_used,
+        total_tokens=total_tokens,
+        latency_ms=latency_ms,
+        vec_failed=False,
+        fallback_used=False,
+    )
+    _log_search_event({
+        "query_hash": query_hash,
+        "intent": QueryIntent.MULTI_HOP.value,
+        "agent": agent,
+        "scope": scope,
+        "bm25_count": len(fused_results),
+        "vec_count": 0,
+        "fused_count": len(fused_for_budget),
+        "budget_tokens": total_tokens,
+        "latency_ms": latency_ms,
+        "sub_queries": len(sub_queries),
+    })
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Search pipeline
 # ---------------------------------------------------------------------------
 
@@ -360,88 +448,10 @@ def search(
         logger.error("hybrid: ENTITY query rejected — Neo4j unavailable (query=%r)", query[:60])
         return SearchResult(query=query, intent=intent, error=err)
 
-    # Multi-hop: decompose and run sub-queries in parallel, then merge. (Phase 4B-2)
+    # Multi-hop: decompose and run sub-queries in parallel, then merge.
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
         try:
-            from kairix.search.planner import QueryPlanner
-
-            planner = QueryPlanner()
-            sub_queries = planner.decompose(query, neo4j_client=neo4j_client)
-            if True:
-                logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
-
-                def _hybrid_search_fn(sq: str) -> list:
-                    # Run full hybrid (BM25+vector) per sub-query, bypassing MULTI_HOP
-                    sub_result = search(sq, agent=agent, scope=scope, budget=budget, _no_multi_hop=True)
-                    # Return BudgetedResult list — planner uses .result.path via getattr fallback
-                    return sub_result.results
-
-                fused_results = planner.retrieve_and_merge(
-                    sub_queries,
-                    _hybrid_search_fn,
-                    top_k_per_sub=6,
-                    final_top_k=8,
-                )
-                # fused_results are BudgetedResult objects from sub-query search() calls
-                # Use r.result (FusedResult) directly — avoids re-copying large snippets
-                # and lets apply_budget re-score tiers fresh for the merged result set.
-                seen_paths: set[str] = set()
-                fused_for_budget: list[FusedResult] = []
-                for i, r in enumerate(fused_results):
-                    if not hasattr(r, "result") or not r.result.path:
-                        continue
-                    if r.result.path in seen_paths:
-                        continue
-                    seen_paths.add(r.result.path)
-                    # Re-score with RRF position for merged ordering.
-                    # Truncate snippet to cap per-result budget use; apply_budget
-                    # will fetch fresh content at the appropriate tier anyway.
-                    from dataclasses import replace as _replace
-
-                    snippet = r.result.snippet or ""
-                    merged_fr = _replace(
-                        r.result,
-                        snippet=snippet[:600] if len(snippet) > 600 else snippet,
-                        rrf_score=1.0 / (60 + i + 1),
-                        boosted_score=1.0 / (60 + i + 1),
-                    )
-                    fused_for_budget.append(merged_fr)
-                budgeted = apply_budget(fused_for_budget, budget=budget)
-                total_tokens = sum(r.token_estimate for r in budgeted)
-                tiers_used = sorted(set(r.tier for r in budgeted))
-                t_end = time.monotonic()
-                latency_ms = (t_end - t_start) * 1000.0
-                query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
-                result = SearchResult(
-                    query=query,
-                    intent=intent,
-                    results=budgeted,
-                    bm25_count=len(fused_results),
-                    vec_count=0,
-                    fused_count=len(fused_for_budget),
-                    collections=collections,
-                    tiers_used=tiers_used,
-                    total_tokens=total_tokens,
-                    latency_ms=latency_ms,
-                    vec_failed=False,
-                    fallback_used=False,
-                )
-                _log_search_event(
-                    {
-                        "query_hash": query_hash,
-                        "intent": intent.value,
-                        "agent": agent,
-                        "scope": scope,
-                        "bm25_count": len(fused_results),
-                        "vec_count": 0,
-                        "fused_count": len(fused_for_budget),
-                        "budget_tokens": total_tokens,
-                        "latency_ms": latency_ms,
-                        "sub_queries": len(sub_queries),
-                    }
-                )
-                return result
-
+            return _run_multi_hop(query, agent, scope, budget, cfg, neo4j_client, collections, t_start)
         except Exception as _mh_e:
             logger.warning("hybrid: MULTI_HOP planner failed (%s) — falling back to SEMANTIC", _mh_e)
             intent = QueryIntent.SEMANTIC
@@ -605,10 +615,7 @@ def search(
     # Attach temporal chunks for TEMPORAL intent (accessible to callers)
     if temporal_chunks:
         result.error = ""  # ensure no error state masks chunks
-        if hasattr(result, "__slots__"):
-            object.__setattr__(result, "_temporal_chunks", temporal_chunks)
-        else:
-            result._temporal_chunks = temporal_chunks  # type: ignore[attr-defined]
+        result._temporal_chunks = temporal_chunks
 
     # Log event
     query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]

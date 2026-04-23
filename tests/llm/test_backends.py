@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from kairix.llm import AnthropicBackend, AzureOpenAIBackend, get_default_backend
+from kairix.llm import AzureOpenAIBackend, get_default_backend
 from kairix.llm.protocol import LLMBackend
 
 # ---------------------------------------------------------------------------
@@ -16,11 +16,6 @@ from kairix.llm.protocol import LLMBackend
 
 def test_azure_backend_conforms_to_protocol() -> None:
     backend = AzureOpenAIBackend()
-    assert isinstance(backend, LLMBackend)
-
-
-def test_anthropic_backend_conforms_to_protocol() -> None:
-    backend = AnthropicBackend()
     assert isinstance(backend, LLMBackend)
 
 
@@ -82,27 +77,6 @@ def test_azure_backend_embed_returns_empty_list_on_failure() -> None:
         result = backend.embed("text")
 
     assert result == []
-
-
-# ---------------------------------------------------------------------------
-# AnthropicBackend — stub
-# ---------------------------------------------------------------------------
-
-
-def test_anthropic_backend_chat_raises_not_implemented() -> None:
-    import pytest
-
-    backend = AnthropicBackend()
-    with pytest.raises(NotImplementedError):
-        backend.chat([{"role": "user", "content": "hi"}])
-
-
-def test_anthropic_backend_embed_raises_not_implemented() -> None:
-    import pytest
-
-    backend = AnthropicBackend()
-    with pytest.raises(NotImplementedError):
-        backend.embed("text")
 
 
 # ---------------------------------------------------------------------------

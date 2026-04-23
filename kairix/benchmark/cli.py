@@ -18,8 +18,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-# QMD index location
-_QMD_DB = Path.home() / ".cache" / "qmd" / "index.sqlite"
+from kairix.embed.schema import get_qmd_db_path
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -80,8 +79,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Suite: {suite.meta.get('name', args.suite)}  ({len(suite.cases)} cases)")
 
     # Lightweight validation — warn but don't block on missing gold paths
-    if _QMD_DB.exists():
-        db = sqlite3.connect(str(_QMD_DB))
+    try:
+        _qmd_db = get_qmd_db_path()
+    except FileNotFoundError:
+        _qmd_db = None
+    if _qmd_db is not None:
+        db = sqlite3.connect(str(_qmd_db))
         errors = validate_suite(suite, db, strict=False)
         db.close()
         if errors:
@@ -116,12 +119,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     print(f"Suite: {suite.meta.get('name', args.suite)}  ({len(suite.cases)} cases)")
 
-    if not _QMD_DB.exists():
-        print(f"⚠️  QMD index not found at {_QMD_DB} — skipping path validation")
+    try:
+        _qmd_db = get_qmd_db_path()
+    except FileNotFoundError:
+        _qmd_db = None
+    if _qmd_db is None:
+        print("⚠️  QMD index not found — skipping path validation")
         print("✅ Schema validation passed")
         return 0
 
-    db = sqlite3.connect(str(_QMD_DB))
+    db = sqlite3.connect(str(_qmd_db))
     errors = validate_suite(suite, db, strict=True)
     db.close()
 

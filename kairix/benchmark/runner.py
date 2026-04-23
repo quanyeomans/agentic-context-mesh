@@ -23,23 +23,14 @@ from pathlib import Path
 from typing import Any
 
 from kairix.benchmark.suite import BenchmarkSuite
+from kairix.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
+
+# Re-export so existing `from kairix.benchmark.runner import CATEGORY_WEIGHTS` keeps working
+__all__ = ["CATEGORY_WEIGHTS", "CATEGORY_ALIASES"]
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-CATEGORY_WEIGHTS: dict[str, float] = {
-    "recall": 0.25,
-    "temporal": 0.20,
-    "entity": 0.20,
-    "conceptual": 0.15,
-    "multi_hop": 0.10,
-    "procedural": 0.10,
-    # Phase 3: classification — weighted 0.0 so it doesn't affect legacy suite total
-    # When classification cases are present, they contribute to the category score
-    # but are displayed separately. Set to non-zero when suite version >= 1.1
-    "classification": 0.0,
-}
 
 PHASE_GATES: dict[str, float] = {
     "phase1": 0.62,
@@ -58,13 +49,6 @@ SCORE_TIERS = [
 ]
 
 CATEGORY_FLOOR = 0.50  # per-category minimum for gate pass
-
-# Suite category aliases — v2-real-world.yaml uses "semantic" and "keyword";
-# the runner tracks "recall" and "conceptual". Map them so no cases are dropped.
-CATEGORY_ALIASES: dict[str, str] = {
-    "semantic": "recall",
-    "keyword": "conceptual",
-}
 
 # How many top results to inspect for exact/fuzzy matching
 EXACT_MATCH_TOPK = 5
