@@ -7,7 +7,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
-## [2026.4.24a2] - 2026-04-24 — Self-contained storage, BM25-primary fusion, security hardening
+## [2026.4.24a3] - 2026-04-24 — Researcher Agent, Embed SDK, security hardening
 
 ### Added
 - **KFEAT-009: Self-contained storage** — removed QMD (Node.js) dependency entirely. Kairix now owns its own SQLite database, FTS5 full-text index, and sqlite-vec vector store. `pip install kairix` is the only install step.
@@ -17,8 +17,11 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 - **`kairix eval build-gold`** — TREC-style pooling + LLM judge to create unbiased relevance judgments from your own data.
 - **`kairix eval sweep`** — BM25 column weight and query style optimisation.
 - **KFEAT-010: MCP affordance** — budget auto-inference (entity lookups get smaller budgets, research queries get larger ones), entity-first hints in search results, plain-language tool descriptions.
+- **KFEAT-004: Researcher Agent** — LangGraph state machine for iterative search. 6 nodes: classify_intent, retrieve, evaluate_sufficiency, refine_query, synthesise, give_up. Searches multiple times, refining the query until it finds a good answer or reports what's missing. Max 4 turns. New MCP tool: `tool_research()`.
+- **EmbedProvider protocol** — `EmbedProvider` interface with `AzureEmbedProvider` and `OpenAIEmbedProvider` implementations using the `openai` SDK. Built-in retry, rate-limit handling, and exponential backoff. Factory: `get_embed_provider()`.
 - **Public API surface** — `kairix.hybrid_search`, `kairix.SearchResult`, `kairix.RetrievalConfig`, `kairix.QueryIntent` exported from `kairix/__init__.py`.
 - **`bm25_primary_fuse()`** in `rrf.py` — new fusion function for BM25-primary strategy.
+- **Dependencies** — `langgraph>=0.2,<1` and `openai>=1.40,<2` added to core.
 
 ### Changed
 - **README completely rewritten** — value-first messaging, plain language, cost comparison, agent platform integration context.
@@ -52,8 +55,8 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 - `SQLITE_VEC_PATH` no longer required; extension loaded via pip package.
 
 ### Tests
-- **1,192 tests** (up from ~1,050 at v2026.4.18). 1,090 carry `@pytest.mark.unit`.
-- New: 25 MCP affordance tests, 7 contract conformance tests, 5 e2e pipeline tests, 4 chunk-date enrichment tests.
+- **1,222 tests** (up from ~1,050 at v2026.4.18). 1,090 carry `@pytest.mark.unit`.
+- New: 22 Researcher Agent tests, 25 MCP affordance tests, 8 EmbedProvider tests, 7 contract conformance tests, 5 e2e pipeline tests, 4 chunk-date enrichment tests.
 - Dead QMD e2e test replaced with kairix pipeline e2e.
 
 ## [2026.4.18] - 2026-04-18 — kairix eval: automated evaluation suite generation

@@ -178,7 +178,8 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 |---|---|---|
 | `kairix embed` | Shipped | Indexes your documents for search (keyword + meaning-based) |
 | `kairix search` | Shipped | Finds the best answers to any question |
-| `kairix mcp serve` | Shipped | MCP server — lets AI agents query your knowledge base |
+| `kairix mcp serve` | Shipped | MCP server with 6 tools — search, entity, prep, timeline, research, usage guide |
+| `tool_research` (MCP) | Shipped | Iterative research — searches multiple times, refining until it finds a good answer |
 | `kairix eval` | Shipped | Measures and improves search quality on your data |
 | `kairix vault crawl` | Shipped | Builds a knowledge graph from your document structure |
 | `kairix brief` | Shipped | Generates a session briefing for an agent before it starts work |
@@ -193,13 +194,13 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 
 ## Roadmap
 
-**Working now:** Hybrid search, knowledge graph, temporal reasoning, session briefings, MCP server, evaluation tooling, configurable fusion strategies.
+**Working now:** Hybrid search, knowledge graph, temporal reasoning, session briefings, MCP server (6 tools), iterative Researcher Agent (LangGraph), evaluation tooling, configurable fusion strategies, budget auto-inference.
 
 **Coming next:**
-- Researcher Agent — LLM-powered query routing with multi-step retrieval
-- Improved MCP affordance — smarter defaults so agents need less configuration
 - Connector framework — ingest from SharePoint, CRM, email headers
 - Curator agent — proactive knowledge harvesting and gap detection
+- Cross-encoder re-ranking evaluation
+- Multi-hop query improvement (weakest category at 0.572)
 
 See [ROADMAP.md](ROADMAP.md) for detail.
 
