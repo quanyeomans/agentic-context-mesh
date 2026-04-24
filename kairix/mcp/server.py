@@ -277,6 +277,51 @@ def tool_timeline(
         }
 
 
+def tool_research(
+    query: str,
+    agent: str | None = None,
+    max_turns: int = 4,
+) -> dict[str, Any]:
+    """Ask a research question. The system searches multiple times, refining
+    its approach until it finds a good answer or reports what's missing.
+
+    Use this for complex questions that need more than a quick search.
+    For simple lookups, use search instead — it's faster.
+
+    Args:
+        query:      The question to research.
+        agent:      Agent name for collection scoping.
+        max_turns:  Maximum search rounds (default 4).
+
+    Returns:
+        dict with: query, synthesis, retrieved_chunks, gaps, confidence, turns, error.
+    """
+    try:
+        from kairix.research.graph import run_research
+
+        result = run_research(query=query, agent=agent, max_turns=max_turns)
+        return {
+            "query": result.get("query", query),
+            "synthesis": result.get("synthesis", ""),
+            "retrieved_chunks": result.get("retrieved_chunks", [])[:10],
+            "gaps": result.get("gaps", []),
+            "confidence": result.get("confidence", 0.0),
+            "turns": result.get("turns", 0),
+            "error": result.get("error", ""),
+        }
+    except Exception as exc:
+        logger.warning("mcp.research failed: %s", exc, exc_info=True)
+        return {
+            "query": query,
+            "synthesis": "",
+            "retrieved_chunks": [],
+            "gaps": [],
+            "confidence": 0.0,
+            "turns": 0,
+            "error": "Research failed — check server logs for details.",
+        }
+
+
 def tool_usage_guide(topic: str = "") -> dict[str, Any]:
     """
     Return the kairix agent usage guide, or a section of it filtered by topic.
@@ -396,6 +441,11 @@ def build_server() -> Any:
     def timeline(query: str, anchor_date: str | None = None) -> dict[str, Any]:
         """Temporal query rewriting + date-aware retrieval."""
         return tool_timeline(query=query, anchor_date=anchor_date)
+
+    @server.tool()
+    def research(query: str, agent: str | None = None, max_turns: int = 4) -> dict[str, Any]:
+        """Research a complex question. Searches iteratively until it finds a good answer."""
+        return tool_research(query=query, agent=agent, max_turns=max_turns)
 
     @server.tool()
     def usage_guide(topic: str = "") -> dict[str, Any]:
