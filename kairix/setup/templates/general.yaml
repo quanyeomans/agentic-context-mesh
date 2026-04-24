@@ -1,0 +1,15 @@
+name: general
+description: Mixed content — notes, documents, research, personal knowledge
+retrieval:
+  fusion_strategy: bm25_primary
+  boosts:
+    entity:
+      enabled: true
+      factor: 0.15
+      cap: 2.0
+    procedural:
+      enabled: true
+      factor: 1.2
+    temporal:
+      chunk_date_boost:
+        enabled: false

@@ -115,6 +115,16 @@ def main() -> None:
 
         eval_main(sys.argv[2:])
 
+    elif cmd == "setup":
+        from kairix.setup.cli import main as setup_main
+
+        setup_main(sys.argv[2:])
+
+    elif cmd == "worker":
+        from kairix.worker import main as worker_main
+
+        worker_main()
+
     else:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)
         sys.exit(1)
