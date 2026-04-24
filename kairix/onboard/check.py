@@ -484,7 +484,7 @@ _MCP_KAIRIX_SERVER_NAME = "mcp-kairix"
 
 # ── OpenClaw ──────────────────────────────────────────────────────────────────
 _OPENCLAW_JSON_PATHS = (
-    "/home/openclaw/.openclaw/openclaw.json",
+    str(Path.home() / ".openclaw" / "openclaw.json"),
     Path.home() / ".openclaw" / "openclaw.json",
 )
 

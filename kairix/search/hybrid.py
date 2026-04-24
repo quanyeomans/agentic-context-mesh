@@ -70,25 +70,38 @@ _QUERY_LOG_PATH: Path = Path(os.getenv("KAIRIX_QUERY_LOG", str(Path.home() / ".c
 # Rotate when file exceeds this size
 _QUERY_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
-# Collections used per intent/scope
-# These collection names must match your QMD index.yml configuration.
-# Collections available to all agents (shared knowledge + main vault)
-_SHARED_COLLECTIONS = [
-    "vault-projects",  # Active projects (01-Projects)
-    "vault-areas",  # Areas of responsibility (02-Areas)
-    "vault-resources",  # Reference material (03-Resources)
-    "vault-agent-knowledge",  # Agent knowledge files (04-Agent-Knowledge)
-    "vault-knowledge",  # Generalised knowledge (05-Knowledge)
-    "vault-entities",  # Entity knowledge graph — boosted for entity/person/org queries
-    "knowledge-shared",
-    "tc-agent-zone",   # Agent configs, skill definitions, runbooks, architecture docs (tc-agent-zone repo)
-    "tc-engineering",  # Engineering standards, Ralph framework, design system, templates (engineering-hub repo)
-    # vault-archive excluded from default — search explicitly when historical context needed
-    # Add deployment-specific collections via KAIRIX_EXTRA_COLLECTIONS (comma-separated):
-    *[c.strip() for c in os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "").split(",") if c.strip()],
-]
-# Per-agent private collections (agent name substituted at query time)
-_AGENT_COLLECTIONS_TMPL = ["{agent}-memory"]  # knowledge-{agent} removed: vault-agent-knowledge covers these
+# Collections — loaded from kairix.config.yaml if configured, otherwise use defaults.
+# Override with KAIRIX_EXTRA_COLLECTIONS env var (comma-separated) for quick additions.
+_COLLECTIONS_CONFIG = None  # loaded lazily from config
+
+
+def _get_shared_collections() -> list[str]:
+    """Get shared collection names from config or defaults."""
+    global _COLLECTIONS_CONFIG  # noqa: PLW0603
+    if _COLLECTIONS_CONFIG is None:
+        try:
+            from kairix.search.config_loader import load_collections
+            _COLLECTIONS_CONFIG = load_collections()
+        except Exception:
+            _COLLECTIONS_CONFIG = False  # mark as "tried and failed"
+
+    if _COLLECTIONS_CONFIG:
+        names = [c.name for c in _COLLECTIONS_CONFIG.shared]
+    else:
+        # Fallback: search all documents (no collection scoping)
+        names = []
+
+    # Add extra collections from env var
+    extra = os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "")
+    names.extend(c.strip() for c in extra.split(",") if c.strip())
+    return names
+
+
+def _get_agent_pattern() -> str:
+    """Get the per-agent collection name template."""
+    if _COLLECTIONS_CONFIG:
+        return _COLLECTIONS_CONFIG.agent_pattern
+    return "{agent}-memory"
 
 
 # ---------------------------------------------------------------------------
@@ -124,12 +137,15 @@ class SearchResult:
 
 
 def _collections_for(agent: str | None, scope: str) -> list[str]:
-    """Derive QMD collection list from agent and scope parameters."""
-    cols: list[str] = list(_SHARED_COLLECTIONS)
+    """Build collection list from config, agent name, and scope.
+
+    If no collections are configured, returns an empty list (search all documents).
+    """
+    cols: list[str] = list(_get_shared_collections())
     if agent and "agent" in scope:
-        for tmpl in _AGENT_COLLECTIONS_TMPL:
-            cols.append(tmpl.format(agent=agent))
-    return cols
+        pattern = _get_agent_pattern()
+        cols.append(pattern.format(agent=agent))
+    return cols or None  # None = no collection filter (search everything)
 
 
 def _log_search_event(event: dict) -> None:

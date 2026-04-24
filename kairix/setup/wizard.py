@@ -143,7 +143,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
             return False
 
     # ── Step 2: Document Source ───────────────────────────────────────────
-    print("Step 2 of 5: Document Source\n")
+    print("Step 2 of 7: Document Source\n")
 
     vault_path = _prompt("Where are your documents? (path to folder)")
     vault_path = os.path.expanduser(vault_path)
@@ -157,8 +157,32 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         file_count, size_mb = _count_documents(vault_path)
         print(f"\n  Found: {file_count:,} markdown files ({size_mb:.1f} MB)\n")
 
-    # ── Step 3: Knowledge Graph ──────────────────────────────────────────
-    print("Step 3 of 5: Knowledge Graph (optional)\n")
+    # ── Step 3: Storage Location ──────────────────────────────────────────
+    print("Step 3 of 7: Where to store the search index\n")
+    print("  Kairix needs a place to store its search index and logs.\n")
+
+    storage_options = [
+        "Default location (~/.cache/kairix/) — good for personal use",
+        "Custom path — for shared or production deployments",
+        "Docker paths (/data/kairix/) — for container deployments",
+    ]
+    storage_idx = _prompt_choice("Where should kairix store its data?", storage_options)
+
+    if storage_idx == 0:
+        db_dir = str(Path.home() / ".cache" / "kairix")
+    elif storage_idx == 1:
+        db_dir = _prompt("Data directory path")
+        db_dir = os.path.expanduser(db_dir)
+    else:
+        db_dir = "/data/kairix"
+
+    db_path = os.path.join(db_dir, "index.sqlite")
+    log_dir = os.path.join(db_dir, "logs")
+    print(f"  \u2713 Index: {db_path}")
+    print(f"  \u2713 Logs: {log_dir}\n")
+
+    # ── Step 4: Knowledge Graph ──────────────────────────────────────────
+    print("Step 4 of 7: Knowledge Graph (optional)\n")
     print("  The knowledge graph tracks people, companies, and relationships")
     print("  for better search results. It requires Neo4j.")
 
@@ -177,8 +201,8 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         except Exception:
             print("  Note: Neo4j connection will be tested when the service starts\n")
 
-    # ── Step 4: Search Configuration ─────────────────────────────────────
-    print("Step 4 of 5: Search Configuration\n")
+    # ── Step 5: Search Configuration ─────────────────────────────────────
+    print("Step 5 of 7: Search Configuration\n")
 
     presets = [
         "Consulting / professional services knowledge base",
@@ -193,25 +217,121 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
     template_name = template.get("name", preset_key)
     print(f"\n  Using '{template_name}' preset.\n")
 
+    # ── Step 6: Document Collections ──────────────────────────────────────
+    print("Step 6 of 7: Document Collections\n")
+    print("  Collections let you organise which documents are searched.")
+    print("  You can search everything, or split into groups.\n")
+
+    collection_options = [
+        "Search everything — all documents in one collection (simplest)",
+        "Use template collections (based on your preset above)",
+        "Skip — I'll configure collections later",
+    ]
+    coll_idx = _prompt_choice("How do you want to organise your documents?", collection_options)
+
+    collections_config: dict | None = None
+    if coll_idx == 0:
+        collections_config = {
+            "shared": [{"name": "all", "path": ".", "glob": "**/*.md"}],
+        }
+        print("  \u2713 All documents will be searchable.\n")
+    elif coll_idx == 1:
+        # Use preset-appropriate collections
+        if preset_key == "consulting":
+            collections_config = {
+                "shared": [
+                    {"name": "clients", "path": "Clients", "glob": "**/*.md"},
+                    {"name": "projects", "path": "Projects", "glob": "**/*.md"},
+                    {"name": "knowledge", "path": "Knowledge", "glob": "**/*.md"},
+                    {"name": "entities", "path": "Entities", "glob": "**/*.md"},
+                ],
+            }
+        elif preset_key == "technical":
+            collections_config = {
+                "shared": [
+                    {"name": "docs", "path": "docs", "glob": "**/*.md"},
+                    {"name": "runbooks", "path": "runbooks", "glob": "**/*.md"},
+                    {"name": "reference", "path": "reference", "glob": "**/*.md"},
+                ],
+            }
+        else:
+            collections_config = {
+                "shared": [{"name": "all", "path": ".", "glob": "**/*.md"}],
+            }
+        print(f"  \u2713 {len(collections_config['shared'])} collections configured.\n")
+
+    # ── Step 7: Agent Integration ────────────────────────────────────────
+    print("Step 7 of 7: Agent Integration\n")
+    print("  How will your agents connect to kairix?\n")
+
+    agent_options = [
+        "Claude Desktop / Claude Code (stdio MCP)",
+        "OpenClaw or similar agent platform (stdio MCP)",
+        "Docker / HTTP service (SSE MCP on port 8080)",
+        "Direct Python import (no MCP server needed)",
+        "Skip — I'll configure this later",
+    ]
+    agent_idx = _prompt_choice("Select your agent platform:", agent_options)
+
+    if agent_idx == 0:
+        import platform as _platform
+        if _platform.system() == "Darwin":
+            config_path_hint = "~/Library/Application Support/Claude/claude_desktop_config.json"
+        else:
+            config_path_hint = "~/.config/Claude/claude_desktop_config.json"
+        print(f"\n  To connect Claude Desktop, add this to:\n  {config_path_hint}\n")
+        print('  {')
+        print('    "mcpServers": {')
+        print('      "kairix": {')
+        print('        "command": "kairix",')
+        print('        "args": ["mcp", "serve"]')
+        print('      }')
+        print('    }')
+        print('  }\n')
+    elif agent_idx == 1:
+        print('\n  Run: openclaw mcp set mcp-kairix "kairix mcp serve"\n')
+    elif agent_idx == 2:
+        print("\n  MCP endpoint: http://localhost:8080")
+        print("  Start with: kairix mcp serve --transport sse --port 8080\n")
+    elif agent_idx == 3:
+        print("\n  Import directly in Python:")
+        print("  from kairix.mcp.server import tool_search, tool_research\n")
+
     # ── Build config ─────────────────────────────────────────────────────
     config = template.get("retrieval", {})
     if not config:
         config = {"fusion_strategy": "bm25_primary"}
 
-    # Write config file
-    full_config = {"retrieval": config}
+    full_config: dict = {}
+
+    # Paths section
+    full_config["paths"] = {
+        "vault_root": vault_path,
+        "db_path": db_path,
+        "log_dir": log_dir,
+    }
+
+    # Collections section
+    if collections_config:
+        full_config["collections"] = collections_config
+
+    # Retrieval section
+    full_config["retrieval"] = config
+
+    # Graph section
+    if use_neo4j:
+        full_config["graph"] = {"enabled": True, "uri": neo4j_uri}
 
     output = Path(output_path)
     with open(output, "w") as f:
         f.write(f"# kairix configuration — generated by kairix setup\n")
-        f.write(f"# Preset: {template_name}\n")
-        f.write(f"# Documents: {vault_path}\n\n")
+        f.write(f"# Preset: {template_name}\n\n")
         yaml.dump(full_config, f, default_flow_style=False, sort_keys=False)
 
     print(f"  Config saved to: {output}\n")
 
-    # ── Step 5: Initial Index ────────────────────────────────────────────
-    print("Step 5 of 5: Initial Index\n")
+    # ── Initial Index ────────────────────────────────────────────────────
+    print("Ready to index your documents.\n")
 
     if file_count > 0:
         est_minutes = max(1, file_count // 1000)

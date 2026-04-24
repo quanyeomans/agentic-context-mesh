@@ -103,29 +103,33 @@ def test_apply_budget_assigns_l2_tier_in_phase1() -> None:
 
 
 @pytest.mark.unit
-def test_collections_for_shared_only() -> None:
-    """scope='shared' returns only shared collections."""
+def test_collections_for_no_config_returns_none() -> None:
+    """Without collections config, returns None (search everything)."""
     cols = _collections_for("shape", "shared")
-    assert "knowledge-shared" in cols
-    assert "knowledge-shape" not in cols
+    assert cols is None
 
 
 @pytest.mark.unit
-def test_collections_for_shared_plus_agent() -> None:
-    """scope='shared+agent' includes agent-specific collections."""
-    cols = _collections_for("shape", "shared+agent")
-    assert "knowledge-shared" in cols
-    assert "vault-agent-knowledge" in cols
-    assert "shape-memory" in cols
+def test_collections_for_with_agent_includes_agent_pattern() -> None:
+    """scope='shared+agent' appends agent-specific collection."""
+    import kairix.search.hybrid as _mod
 
-
-@pytest.mark.unit
-def test_collections_for_no_agent() -> None:
-    """None agent → only shared collections regardless of scope."""
-    from kairix.search.hybrid import _SHARED_COLLECTIONS
-
-    cols = _collections_for(None, "shared+agent")
-    assert cols == list(_SHARED_COLLECTIONS)
+    # Simulate having collections config with env var
+    import os
+    old = os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "")
+    os.environ["KAIRIX_EXTRA_COLLECTIONS"] = "test-collection"
+    _mod._COLLECTIONS_CONFIG = None  # reset cache
+    try:
+        cols = _collections_for("shape", "shared+agent")
+        assert cols is not None
+        assert "shape-memory" in cols
+        assert "test-collection" in cols
+    finally:
+        if old:
+            os.environ["KAIRIX_EXTRA_COLLECTIONS"] = old
+        else:
+            os.environ.pop("KAIRIX_EXTRA_COLLECTIONS", None)
+        _mod._COLLECTIONS_CONFIG = None
 
 
 # ---------------------------------------------------------------------------

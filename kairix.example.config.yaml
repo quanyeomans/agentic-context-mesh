@@ -8,31 +8,44 @@
 #
 # Set KAIRIX_CONFIG_PATH=/path/to/kairix.config.yaml to use a custom location.
 
+# ── Paths ───────────────────────────────────────────────────────────────────
+# Where your documents and data live. Defaults work for most setups.
+# Environment variables (KAIRIX_VAULT_ROOT, KAIRIX_DB_PATH, etc.) take
+# precedence over these values.
+#
+# paths:
+#   vault_root: ~/Documents/my-vault     # your documents folder
+#   db_path: ~/.cache/kairix/index.sqlite # search index
+#   log_dir: ~/.cache/kairix/logs         # search and embed logs
+#   workspace_root: ~/.kairix/workspaces  # agent memory logs
+
 # ── Collections ─────────────────────────────────────────────────────────────
-# Define what vault directories to index. Each collection maps a name to a
-# path relative to KAIRIX_VAULT_ROOT. Used by `kairix scan`.
+# Organise your documents into named collections for search scoping.
+# Each collection maps a name to a folder inside your vault.
+# If not configured, all documents in your vault are searched as one collection.
 #
 # collections:
-#   - name: vault-projects
-#     path: "01-Projects"
-#     glob: "**/*.md"
-#   - name: vault-areas
-#     path: "02-Areas"
-#     glob: "**/*.md"
-#   - name: vault-resources
-#     path: "03-Resources"
-#     glob: "**/*.md"
-#   - name: vault-agent-knowledge
-#     path: "04-Agent-Knowledge"
-#     glob: "**/*.md"
-#   - name: vault-knowledge
-#     path: "05-Knowledge"
-#     glob: "**/*.md"
-#   - name: vault-archive
-#     path: "06-Archive"
-#     glob: "**/*.md"
-#     exclude:
-#       - ".trash"
+#   # Shared collections — searched by all agents
+#   shared:
+#     - name: projects
+#       path: "01-Projects"
+#       glob: "**/*.md"
+#     - name: areas
+#       path: "02-Areas"
+#       glob: "**/*.md"
+#     - name: knowledge
+#       path: "05-Knowledge"
+#       glob: "**/*.md"
+#     # Add more as needed:
+#     # - name: archive
+#     #   path: "06-Archive"
+#     #   glob: "**/*.md"
+#
+#   # Per-agent collections — each agent gets its own memory scope
+#   agent_pattern: "{agent}-memory"
+#   agent_paths:
+#     builder: "workspaces/builder/memory"
+#     shape: "workspaces/shape/memory"
 
 retrieval:
   # Fusion strategy: how keyword (BM25) and meaning-based (vector) search results are combined.

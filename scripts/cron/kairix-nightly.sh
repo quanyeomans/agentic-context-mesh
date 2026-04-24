@@ -68,9 +68,9 @@ fi
 # Check: uncommented 'qmd embed' in any active integration cron script
 # KAIRIX_INTEGRATION_CRON_DIRS can be overridden in service.env for non-standard installs.
 KAIRIX_INTEGRATION_CRON_DIRS="${KAIRIX_INTEGRATION_CRON_DIRS:-\
-  /opt/openclaw/cron \
+  /opt/kairix/cron \
   /usr/local/openclaw/cron \
-  /opt/homebrew/opt/openclaw/cron \
+  /opt/homebrew/opt/kairix/cron \
   /usr/local/share/openclaw/cron \
   ${HOME}/.openclaw/cron}"
 

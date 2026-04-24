@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -149,12 +150,82 @@ def _parse_config(data: dict) -> RetrievalConfig:
     temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {})
     rerank_cfg = _parse_rerank((retrieval.get("rerank", {}) or {}))
 
+    # Fusion strategy + RRF k
+    defaults = RetrievalConfig.defaults()
+    fusion = str(retrieval.get("fusion_strategy", defaults.fusion_strategy))
+    if fusion not in ("bm25_primary", "rrf"):
+        logger.warning("config_loader: unknown fusion_strategy %r — using bm25_primary", fusion)
+        fusion = "bm25_primary"
+    rrf_k = int(retrieval.get("rrf_k", defaults.rrf_k))
+
     return RetrievalConfig(
+        fusion_strategy=fusion,
+        rrf_k=rrf_k,
         entity=entity_cfg,
         procedural=procedural_cfg,
         temporal=temporal_cfg,
         rerank=rerank_cfg,
     )
+
+
+# ---------------------------------------------------------------------------
+# Collections parsing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CollectionDef:
+    """A configured document collection for search scoping."""
+
+    name: str
+    path: str  # relative to vault_root
+    glob: str = "**/*.md"
+
+
+@dataclass
+class CollectionsConfig:
+    """Parsed collections configuration."""
+
+    shared: list[CollectionDef]
+    agent_pattern: str = "{agent}-memory"
+    agent_paths: dict[str, str] = field(default_factory=dict)
+
+
+def parse_collections(data: dict) -> CollectionsConfig | None:
+    """Parse the collections: section from config. Returns None if not present."""
+    collections = data.get("collections")
+    if not collections:
+        return None
+
+    shared_raw = collections.get("shared", [])
+    shared = []
+    for item in shared_raw:
+        if isinstance(item, dict) and "name" in item:
+            shared.append(CollectionDef(
+                name=item["name"],
+                path=item.get("path", "."),
+                glob=item.get("glob", "**/*.md"),
+            ))
+
+    return CollectionsConfig(
+        shared=shared,
+        agent_pattern=collections.get("agent_pattern", "{agent}-memory"),
+        agent_paths=collections.get("agent_paths", {}),
+    )
+
+
+def load_collections() -> CollectionsConfig | None:
+    """Load collections config from YAML. Returns None if not configured."""
+    path = _resolve_config_path()
+    if path is None:
+        return None
+    try:
+        import yaml
+        with path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return parse_collections(data)
+    except Exception:
+        return None
 
 
 def _parse_entity(d: dict) -> EntityBoostConfig:
