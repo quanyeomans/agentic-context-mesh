@@ -35,6 +35,25 @@
 #       - ".trash"
 
 retrieval:
+  # Fusion strategy: how keyword (BM25) and meaning-based (vector) search results are combined.
+  #
+  # "bm25_primary" (default) — keyword results ranked first, meaning-based results appended.
+  #   Best for structured knowledge bases with keyword-rich filenames and headings
+  #   (wikis, runbooks, Obsidian vaults, consulting/enterprise knowledge).
+  #
+  # "rrf" — standard Reciprocal Rank Fusion, equal weight to both approaches.
+  #   Better for corpora where meaning-based similarity is the primary signal
+  #   (research papers, long-form prose, multilingual content).
+  #
+  # To find the best strategy for YOUR data, run:
+  #   kairix eval build-gold --suite queries.yaml --output gold.yaml
+  #   kairix eval hybrid-sweep --suite gold.yaml
+  fusion_strategy: "bm25_primary"
+
+  # RRF constant (only used when fusion_strategy is "rrf").
+  # Higher values flatten the ranking. Default: 60.
+  # rrf_k: 60
+
   boosts:
     entity:
       enabled: true          # Boost documents for known named entities (Neo4j MENTIONS in-degree)

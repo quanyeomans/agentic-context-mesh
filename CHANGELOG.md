@@ -7,6 +7,55 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.4.24a2] - 2026-04-24 — Self-contained storage, BM25-primary fusion, security hardening
+
+### Added
+- **KFEAT-009: Self-contained storage** — removed QMD (Node.js) dependency entirely. Kairix now owns its own SQLite database, FTS5 full-text index, and sqlite-vec vector store. `pip install kairix` is the only install step.
+- **BM25-primary fusion** — new default search strategy. BM25 results are ranked first; meaning-based (vector) results are appended for recall. 38-configuration sweep showed this outperforms standard RRF by +17% on weighted NDCG.
+- **Configurable fusion strategy** — `RetrievalConfig.fusion_strategy` accepts `"bm25_primary"` (default) or `"rrf"`. Factory methods for common corpus types: `defaults()`, `for_semantic_corpus()`, `for_technical_documentation()`.
+- **`kairix eval hybrid-sweep`** — grid search over fusion strategies, RRF constants, and boost parameters against a gold suite. Embedding cache for 60% faster iterations.
+- **`kairix eval build-gold`** — TREC-style pooling + LLM judge to create unbiased relevance judgments from your own data.
+- **`kairix eval sweep`** — BM25 column weight and query style optimisation.
+- **KFEAT-010: MCP affordance** — budget auto-inference (entity lookups get smaller budgets, research queries get larger ones), entity-first hints in search results, plain-language tool descriptions.
+- **Public API surface** — `kairix.hybrid_search`, `kairix.SearchResult`, `kairix.RetrievalConfig`, `kairix.QueryIntent` exported from `kairix/__init__.py`.
+- **`bm25_primary_fuse()`** in `rrf.py` — new fusion function for BM25-primary strategy.
+
+### Changed
+- **README completely rewritten** — value-first messaging, plain language, cost comparison, agent platform integration context.
+- **Benchmark scores updated** — weighted NDCG 0.818, NDCG@10 0.803, Hit@5 91.1% (293 queries, independent gold suite).
+- **Vector default K** increased from 10 to 20 for better recall.
+- **`RetrievalConfig`** now includes `fusion_strategy` and `rrf_k` fields.
+- **Tool docstrings** rewritten for grade 8 reading level (plain language first, technical terms in brackets).
+- **`CATEGORY_WEIGHTS`** centralised in `eval/constants.py` (was defined in 4 files with silent divergence).
+- **`canonical_path()`** extracted to module level in `rrf.py` (was duplicated 3 times).
+- **Multi-hop search** extracted from `search()` into `_run_multi_hop()` helper (reduces `search()` from 390 to ~320 lines).
+
+### Fixed
+- **Category alias bug** — sweep scoring now correctly maps `semantic→recall` and `keyword→conceptual`. Was dropping 40% of weighted score.
+- **Cypher injection** — `GraphEdge` labels validated against `NodeLabel` enum via `__post_init__`.
+- **Graph traversal DoS** — `max_hops` clamped to [1, 5].
+- **MCP error leakage** — `str(exc)` no longer returned to callers; sanitised messages instead.
+- **Secrets path leakage** — `OSError` messages no longer include internal file paths.
+- **SSE transport** — MCP server defaults to `127.0.0.1` (was implicit `0.0.0.0`).
+- **Lockfile** — moved from world-writable `/tmp` to `~/.cache/kairix/`.
+- **Duplicate KV fetch** — `summaries/cli.py` now uses `kairix.secrets.get_secret()`.
+- **Hardcoded legacy paths** — `benchmark/cli.py` QMD path replaced with `get_db_path()`.
+
+### Removed
+- **QMD dependency** — no more Node.js, npm, or external binary discovery.
+- **`kairix/_qmd.py`** — QMD binary discovery module.
+- **`qmd_azure_embed`** — backward-compatibility shim package.
+- **`AnthropicBackend`** — stub that raised `NotImplementedError` on all methods (LSP violation).
+
+### Security
+- Dependency upper bounds added: `requests<3`, `httpx<1`, `pyyaml<7`.
+- `SQLITE_VEC_PATH` no longer required; extension loaded via pip package.
+
+### Tests
+- **1,192 tests** (up from ~1,050 at v2026.4.18). 1,090 carry `@pytest.mark.unit`.
+- New: 25 MCP affordance tests, 7 contract conformance tests, 5 e2e pipeline tests, 4 chunk-date enrichment tests.
+- Dead QMD e2e test replaced with kairix pipeline e2e.
+
 ## [2026.4.18] - 2026-04-18 — kairix eval: automated evaluation suite generation
 
 ### Added

@@ -1,315 +1,274 @@
-# Kairix — Agentic Context Mesh
+# Kairix
 
-Private, on-infrastructure contextual retrieval for human-agent teams. Your knowledge stays on your servers. Your agents and teammates query the same indexed knowledge base.
+**Private knowledge retrieval for AI agents and teams.**
+Your documents, your servers, your agents — finding the right answer in under a second.
 
-**NDCG@10 0.587** on a 95-case curated real-world benchmark (strict NDCG@10, graded relevance) · **Hit@5 0.821** · **MRR@10 0.679**.
+[![Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-1192%20passing-brightgreen)]()
+[![NDCG@10](https://img.shields.io/badge/NDCG%4010-0.803-orange)]()
 
 ---
 
 ## The problem
 
-Skilled professionals accumulate intelligence over years — client knowledge, methods, relationships, decisions. The problem is that this intelligence is fragile: scattered across files, locked in heads, lost in context resets. When a new engagement starts, everyone re-explains context that was already earned. When a tool changes, the institutional knowledge evaporates.
+AI agents forget everything between sessions. Your professional knowledge — clients, projects, decisions, methods — is scattered across files, tools, and people's heads. Every new engagement starts with re-explaining context that was already earned.
 
-Most AI memory solutions compound this by sending your knowledge to a third-party LLM service:
+Most solutions make this worse by sending your knowledge to someone else's servers. Or they give you a search box that returns the wrong documents half the time. Or they cost hundreds per month and require GPU infrastructure you don't have.
 
-1. **Privacy** — your organisation's decisions, relationships, and domain knowledge leave your infrastructure permanently
-2. **Retrieval quality** — generic RAG without entity awareness, temporal reasoning, or domain-specific patterns produces mediocre results on knowledge that matters
-3. **Team coherence** — when agents and humans draw from different sources, shared context breaks down
+## What kairix does
 
-Kairix is the alternative: a private, on-infrastructure retrieval layer that both human team members and AI agents query against the same indexed knowledge base. Every query compounds the shared understanding. **Your data never leaves your servers.**
+Kairix is a knowledge retrieval engine that runs on your own infrastructure. It indexes your documents and gives your agents and team members fast, ranked answers to any question — using both keyword matching (BM25) and meaning-based search (vector similarity).
+
+Three things make it different:
+
+1. **Your data stays on your servers.** No document content is sent to external services. Embedding is the only outbound API call — and even that can be swapped for a local model.
+
+2. **Search quality you can measure.** Built-in benchmarking tools let you evaluate how well kairix works on your data. The reference deployment scores **0.803 NDCG@10** on 293 real queries — meaning 9 out of 10 queries find a relevant document in the top 5 results.
+
+3. **Runs on modest hardware.** No GPU. No Kubernetes. A 4-vCPU VM with 16GB RAM handles a 4,000-document vault with 6 agents querying it. That's ~$20/month on Azure or AWS.
+
+---
+
+## Where kairix fits in your stack
+
+Kairix is the **knowledge layer**. It doesn't replace your agents, your orchestrator, or your LLM. It sits underneath them and gives them the right context for every task.
+
+```
+Your agents (Claude, OpenClaw, LangGraph, CrewAI, custom)
+    ↓ ask questions via MCP or CLI
+Kairix (knowledge layer — search, entity graph, briefings)
+    ↓ finds the best answers from
+Your documents (Obsidian vault, markdown, PDFs, CRM exports)
+```
+
+For agent platforms like [OpenClaw](https://github.com/three-cubes/openclaw) that use skill registries, kairix provides the retrieval that skills call. An agent's "meeting prep" skill queries kairix for client context rather than doing its own document search. The agent brings the craft; kairix brings the context.
+
+---
+
+## How it compares
+
+| | Kairix | Notion AI / Confluence AI | Mem.ai / Rewind | Raw LLM context window |
+|---|---|---|---|---|
+| **Where your data lives** | Your servers | Vendor cloud | Vendor cloud | API provider |
+| **How it searches** | Keyword + meaning + entity graph | Full-text only | Meaning only | No search — full dump |
+| **Knows about people & companies** | Yes (knowledge graph) | No | No | No |
+| **Controls token cost** | Yes (budget per query) | No (full page dump) | No | No |
+| **Handles date-based questions** | Yes (temporal routing) | No | Limited | No |
+| **Measurable quality** | NDCG@10 benchmarked | Not published | Not published | N/A |
+| **GPU required** | No | N/A (SaaS) | N/A (SaaS) | N/A |
+| **Monthly cost** | ~$25 (VM + LLM API) | $8-10/user/month | $24/month | API costs only |
+
+---
+
+## Quick start
+
+```bash
+# Install
+pip install kairix
+
+# Configure (edit with your LLM API credentials and document path)
+cp kairix.example.config.yaml kairix.config.yaml
+
+# Index your documents
+kairix embed
+
+# Search
+kairix search "what are our engineering standards" --agent builder
+```
+
+**What you need:**
+- Python 3.10+
+- An LLM API key (Azure OpenAI, or any OpenAI-compatible endpoint)
+- A folder of documents (Obsidian vault, markdown files, or any text)
+
+**Optional (recommended):**
+- Neo4j Community Edition — for knowledge graph features (people, companies, relationships)
+- `pip install "kairix[neo4j]"` to enable
+
+---
+
+## What it costs to run
+
+| Component | Monthly cost | What you get |
+|-----------|-------------|--------------|
+| VM (4 vCPU, 16GB) | ~$20 | Runs everything — search, embedding, Neo4j, agents |
+| LLM API (embedding) | ~$3-5 | Index 4,000 documents, hourly incremental updates |
+| LLM API (search/prep) | ~$2-5 | Depends on query volume |
+| **Total** | **~$25-30** | Full private knowledge platform |
+
+No GPU required. No per-seat licensing. One VM serves an entire small team.
+
+Compare: enterprise knowledge platforms start at $500+/month. Cloud RAG services charge $50-200/month per workspace. Kairix runs on infrastructure you already have.
+
+---
+
+## For agent builders
+
+Kairix exposes an MCP server that any MCP-compatible agent can call. One tool, one question — kairix handles the rest.
+
+```bash
+# Start the MCP server
+pip install "kairix[agents]"
+kairix mcp serve
+```
+
+**What the agent sees:**
+
+```
+mcp-kairix__search("brief for client meeting with Bupa")
+→ Returns: ranked results, entity context, budget-managed content
+```
+
+The system handles automatically:
+- **Right-sized responses** — quick lookups get small answers; research questions get thorough ones
+- **Date-based questions** — "what happened last week" is rewritten with specific dates before searching
+- **People and company context** — if the question is about a known person or company, their knowledge graph summary appears at the top
+
+Other MCP tools available: `entity` (direct person/company lookup), `prep` (quick topic summary), `timeline` (date query inspection).
+
+---
+
+## Measuring quality on your data
+
+Kairix ships with tools to evaluate search quality on your own documents — not just the reference deployment.
+
+```bash
+# Build a gold-standard test suite from your data
+# (uses multiple search methods + LLM judge to create unbiased relevance scores)
+kairix eval build-gold --suite queries.yaml --output gold.yaml
+
+# Test different search configurations against your gold suite
+kairix eval hybrid-sweep --suite gold.yaml --output results.csv
+
+# Run the standard benchmark
+kairix benchmark run --suite gold.yaml
+```
+
+The evaluation methodology uses TREC-style pooling (the same approach used by academic search competitions) with LLM-as-judge relevance scoring. This means the test suite isn't biased toward any particular search configuration — it measures what's relevant to the questions, independently.
+
+**Reference deployment scores (293 real queries, independently judged):**
+
+| Metric | Score | What it means |
+|--------|-------|--------------|
+| NDCG@10 | 0.803 | Documents are found AND ranked in the right order |
+| Hit@5 | 91.1% | 9 out of 10 queries find a relevant document in the top 5 |
+| MRR@10 | 0.746 | The first relevant result appears at position 1.3 on average |
 
 ---
 
 ## How it works
 
-A skilled professional should be able to walk onto any job already knowing it — the history, the plan, the outstanding items. Kairix is the infrastructure for that: a structured knowledge base that agents can query before every session to arrive ready to work.
+You have documents. Kairix indexes them. When you or your agents ask a question, it finds the best answers.
 
-The design mirrors how experienced professionals think about knowledge:
+**Search:** Combines keyword matching (finds exact terms, file names, codes) with meaning-based search (finds related concepts even when the words don't match). The best results from both approaches are merged, with keyword matches ranked first and meaning-based discoveries appended for recall.
 
-- **The site** — accumulated knowledge from every engagement: clients, contacts, research, project history, structured so any agent can walk in and immediately understand where things stand
-- **Contextual briefing** — before each session, agents pull a synthesised brief: relevant entities, recent activity, outstanding items, content ranked by relevance to the current task
-- **Entity traversal** — queries expand across relationships: a question about a client surfaces relevant research, associated contacts, and recent decisions — not just keyword matches
+**Entity awareness:** If you connect a knowledge graph (Neo4j), kairix understands relationships. A question about a client surfaces their related contacts, recent decisions, and relevant research — not just documents that mention the client's name.
 
----
+**Date handling:** Questions like "what did we decide last month" are automatically rewritten with specific date ranges before searching. No special syntax needed.
 
-## How it differs from alternatives
+**Token budget:** Each search has a configurable context budget. Quick fact checks get small responses (1,500 tokens). Research questions get thorough ones (5,000 tokens). Agents can override, but the defaults are smart.
 
-| | Kairix | Notion AI / Confluence AI | Mem.ai / Rewind | Raw LLM context |
-|---|---|---|---|---|
-| **Data residency** | Your infrastructure | Vendor cloud | Vendor cloud | API provider |
-| **Search approach** | Hybrid BM25 + vector + entity | Full-text only | Vector only | None — full dump |
-| **Entity awareness** | Graph with alias resolution | No | No | No |
-| **Token efficiency** | Budget-managed retrieval | Unranked export | Unranked export | Unbounded |
-| **Temporal reasoning** | Date-aware chunking + routing | No | Limited | No |
-| **NDCG@10** | 0.5686 curated real-world | Not published | Not published | N/A |
-
-**On token efficiency:** commercial alternatives typically export full page content and rely on the LLM to filter relevance — you pay for every token regardless of utility. Kairix runs ranked retrieval with a configurable token budget (`--budget`), returning only the highest-relevance chunks within that budget. L0/L1 tiered loading (summary-first, full text on demand) further reduces context consumption.
-
----
-
-## Research foundations
-
-The retrieval design draws on several well-validated approaches:
-
-- **Hybrid BM25 + dense retrieval** — consistently outperforms either alone on heterogeneous corpora ([Thakur et al., BEIR 2021](https://arxiv.org/abs/2104.08663); Lin et al., sparse-dense fusion). RRF (Reciprocal Rank Fusion) is used for score combination.
-- **Entity-aware retrieval** — knowledge graph augmentation significantly improves recall on named-entity queries ([REALM, Guu et al. 2020](https://arxiv.org/abs/2002.08909))
-- **Tiered memory** — L0/L1 loading mirrors the sensory → short-term → long-term memory taxonomy from Lilian Weng's [LLM-Powered Autonomous Agents](https://lilianweng.github.io/posts/2023-06-23-agent/) and cognitive science analogues of working memory capacity
-- **Temporal routing** — date-aware chunking with explicit timeline indexes improves recall on time-referenced queries, a gap identified in standard RAG evaluations
-
----
-
-## Architecture
-
-```
-kairix search "query" --agent <name>
-       │
-       ├─ BM25 search (QMD FTS)        ─┐
-       ├─ Vector search (sqlite-vec)    ─┤ concurrent
-       │                                │
-       └─ RRF fusion ◄──────────────────┘
-              │
-              ├─ Entity boost (Neo4j / entities.db)
-              ├─ Token budget cap
-              └─ SearchResult → agent context
-```
-
-```
-kairix brief <agent>
-       │
-       ├─ Memory logs (last 7 days)
-       ├─ Entity stubs (entity collection)
-       ├─ Rules + decisions (agent knowledge)
-       ├─ Hybrid search (top queries)
-       └─ GPT-4o-mini synthesis → briefing.md
-
-kairix classify "<content>"
-       │
-       ├─ Rule-based classifier (≥90% coverage)
-       └─ GPT-4o-mini fallback → vault destination
-
-kairix vault crawl --vault-root /path/to/vault
-       │
-       ├─ Scans PARA structure → OrganisationNode, PersonNode, OutcomeNode
-       ├─ Extracts WORKS_AT edges from frontmatter
-       ├─ Extracts MENTIONS edges from [[wikilinks]]
-       └─ Upserts into Neo4j (idempotent)
-```
-
-All search and entity data is stored in SQLite — no separate vector database. Neo4j Community Edition is required for entity-intent queries (graph expansion, alias resolution, mention-based boosting). Non-entity intents (semantic, temporal, procedural, keyword) function without it.
+**Fusion strategy:** The system defaults to BM25-primary fusion (keyword results first, meaning-based results appended). If your documents are heavy on unstructured prose with little keyword overlap, you can switch to RRF fusion via configuration. Run `kairix eval hybrid-sweep` to find the best strategy for your data.
 
 ---
 
 ## Capabilities
 
-| Module | Status | What it delivers |
+| What | Status | Plain description |
 |---|---|---|
-| `kairix embed` | ✅ Shipped | Azure OpenAI `text-embedding-3-large` → sqlite-vec (1536-dim) |
-| `kairix search` | ✅ Shipped | Hybrid BM25 + vector via RRF, token budget management |
-| `kairix entity` | ✅ Shipped | Entity graph, alias resolution, entity boost, multi-hop query planning |
-| `kairix temporal` | ✅ Shipped | Temporal query rewriting + date-filtered retrieval (TMP-2); `chunk_date` extraction at embed time (TMP-1/5b) |
-| `kairix summarise` | ✅ Shipped | L0/L1 tiered context loading |
-| `kairix wikilinks` | ✅ Shipped | Wikilink injection + entity resolver |
-| `kairix brief` | ✅ Shipped | Session briefing synthesis via GPT-4o-mini |
-| `kairix classify` | ✅ Shipped | Auto-classification of memory writes to vault destinations |
-| `kairix benchmark` | ✅ Shipped | YAML-driven benchmark runner, NDCG@10/Hit@5/MRR@10 scoring |
-| `kairix contradict` | ✅ Shipped | Contradiction detection on new knowledge writes |
-| `kairix vault` | ✅ Shipped | Vault crawler → Neo4j entity graph; vault health check |
-| `kairix mcp` | ✅ Shipped | MCP server exposing search/entity/prep/timeline to any MCP-compatible agent |
-| `kairix curator` | ✅ Shipped | Entity health monitoring and enrichment (CA-1) |
-
-See [ROADMAP.md](ROADMAP.md) for priorities and [ENGINEERING.md](ENGINEERING.md) for design detail.
+| `kairix embed` | Shipped | Indexes your documents for search (keyword + meaning-based) |
+| `kairix search` | Shipped | Finds the best answers to any question |
+| `kairix mcp serve` | Shipped | MCP server — lets AI agents query your knowledge base |
+| `kairix eval` | Shipped | Measures and improves search quality on your data |
+| `kairix vault crawl` | Shipped | Builds a knowledge graph from your document structure |
+| `kairix brief` | Shipped | Generates a session briefing for an agent before it starts work |
+| `kairix prep` | Shipped | Quick topic summary (cheaper than full search) |
+| `kairix benchmark` | Shipped | Runs quality benchmarks against a test suite |
+| `kairix entity suggest` | Shipped | Discovers people, companies, and concepts in your documents |
+| `kairix classify` | Shipped | Routes new knowledge to the right place in your vault |
+| `kairix contradict` | Shipped | Flags conflicting facts before they persist |
+| `kairix curator health` | Shipped | Monitors knowledge graph quality |
 
 ---
 
-## Benchmark Results
+## Roadmap
 
-**Suite:** 95 curated queries across 6 categories (entity, keyword, multi_hop, procedural, semantic, temporal), scored with strict NDCG@10 using graded gold relevance. Evaluated on a real-world personal knowledge base of ~2,800 documents (11,316 vectors at 1536-dim).
+**Working now:** Hybrid search, knowledge graph, temporal reasoning, session briefings, MCP server, evaluation tooling, configurable fusion strategies.
 
-### Current results (v0.9.1)
+**Coming next:**
+- Researcher Agent — LLM-powered query routing with multi-step retrieval
+- Improved MCP affordance — smarter defaults so agents need less configuration
+- Connector framework — ingest from SharePoint, CRM, email headers
+- Curator agent — proactive knowledge harvesting and gap detection
 
-| Category | NDCG@10 | Notes |
-|---|---|---|
-| entity | 0.714 | Neo4j entity graph + alias resolution |
-| keyword | 0.616 | Full hybrid BM25 + vector |
-| procedural | 0.609 | Path boost for how-to/runbook queries |
-| temporal | 0.540 | Date-filtered retrieval |
-| multi_hop | 0.526 | QueryPlanner, entity-aware sub-query decomposition |
-| semantic | 0.501 | Vector search; cross-encoder re-ranking on roadmap |
-| **Overall** | **0.587** | **Hit@5 0.821, MRR@10 0.679** |
-
-Production RAG systems on heterogeneous personal knowledge typically score 0.55–0.70 on strict curated suites.
+See [ROADMAP.md](ROADMAP.md) for detail.
 
 ---
-
-## Prerequisites
-
-- **Python 3.10+**
-- **QMD** — installed and indexed (`qmd index` must have run to create `~/.cache/qmd/index.sqlite`)
-- **sqlite-vec** extension (`.so`/`.dylib` on `SQLITE_VEC_PATH`, or auto-discovered by QMD)
-- **Azure OpenAI** resource with:
-  - `text-embedding-3-large` deployment (1536-dim)
-  - `gpt-4o-mini` deployment (briefing, classify, benchmark judging)
-- **Azure Key Vault** (recommended) — or export secrets as environment variables directly
-- **Neo4j Community Edition** — required for entity queries (`kairix entity`, `kairix search` with entity intent). Other search intents (semantic, temporal, procedural, keyword) function without it.
-
-See [OPERATIONS.md](OPERATIONS.md) for full infrastructure setup, cron configuration, and first-run sequence.
 
 ## Install
 
 ```bash
-# Core install
+# Core (search, embed, eval)
 pip install kairix
 
-# With Neo4j entity graph support (recommended for full feature set)
+# With knowledge graph support
 pip install "kairix[neo4j]"
 
 # With MCP server for agent integration
 pip install "kairix[agents]"
+
+# Everything
+pip install "kairix[neo4j,agents,nlp]"
 ```
 
-For VM deployment, use the deploy script to install the wrapper and PATH setup:
+**Prerequisites:**
+- Python 3.10+
+- An LLM API key for embeddings (Azure OpenAI, or OpenAI-compatible)
+- A folder of documents to index
 
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
-```
+**Optional:**
+- Neo4j Community Edition — for knowledge graph features
+- Azure Key Vault — for production secret management
 
-Then follow the [OPERATIONS.md first-run sequence](OPERATIONS.md#first-run-sequence).
-
----
-
-## Usage
-
-### Embed
-
-```bash
-kairix embed                  # incremental — pending docs only
-kairix embed --force          # full re-embed
-kairix embed --limit 50       # test with first 50 chunks
-kairix embed --changed        # re-embed recently modified files
-```
-
-### Search
-
-```bash
-kairix search "what are our engineering patterns" --agent builder
-kairix search "decisions made last week" --agent shape --budget 3000
-```
-
-### Entity graph
-
-```bash
-kairix entity list
-kairix entity lookup "alice chen"
-kairix entity write --name "Jordan Blake" --type person
-kairix entity extract --collection <your-entities-collection>
-```
-
-### Vault crawler (Neo4j)
-
-```bash
-kairix vault crawl --vault-root /path/to/vault        # populate Neo4j from PARA structure
-kairix vault crawl --vault-root /path/to/vault --dry-run  # preview without writing
-kairix vault health                                    # entity graph health check
-kairix vault health --json                             # machine-readable output
-```
-
-### Session briefing
-
-```bash
-kairix brief builder           # synthesise briefing for builder agent
-kairix brief shape --budget 5000
-```
-
-### Auto-classification
-
-```bash
-kairix classify "We decided to use PostgreSQL for the jobs table"
-# → type: decision, destination: <vault-root>/agent-knowledge/builder/decisions.md, confidence: 0.95
-
-kairix classify "Use monkeypatching for Azure API calls in unit tests"
-# → type: pattern, destination: <vault-root>/agent-knowledge/builder/patterns.md, confidence: 0.92
-```
-
-### Temporal
-
-```bash
-kairix temporal index          # index date-tagged chunks
-kairix temporal query "decisions last week"
-```
-
-### Wikilinks
-
-```bash
-kairix wikilinks inject --vault /path/to/vault
-kairix wikilinks audit
-```
-
-### Contradiction detection
-
-```bash
-kairix contradict check "We use PostgreSQL for all persistence" --top-k 5
-kairix contradict check "$(cat new-decision.md)" --threshold 0.7 --format json
-```
-
-### Curator health
-
-```bash
-kairix curator health          # entity graph health (Neo4j)
-kairix curator health --json
-```
-
-### MCP server
-
-```bash
-# Requires: pip install 'kairix[agents]'
-kairix mcp serve                            # stdio transport (Claude Desktop)
-kairix mcp serve --transport sse --port 8080  # SSE transport (HTTP)
-```
-
-### Benchmark
-
-```bash
-kairix benchmark run --suite suites/example.yaml --system hybrid --agent shape
-kairix benchmark compare benchmark-results/run-2026-04-07.json
-```
-
----
-
-## QMD Schema Compatibility
-
-Tested against qmd@1.1.2. The embed module validates schema before writing. See [QMD_COMPAT.md](QMD_COMPAT.md) for the exact schema and known constraints.
-
-**Key sqlite-vec constraints (documented with tests):**
-- `INSERT OR REPLACE` not supported on vec0 virtual tables — use staging table pattern
-- MATCH syntax requires a CTE subquery; direct `FROM vectors_vec JOIN` fails
-- Extension must be loaded before any vec0 operation
+See [OPERATIONS.md](OPERATIONS.md) for full deployment guide.
 
 ---
 
 ## Development
 
 ```bash
-.venv/bin/pytest tests/           # unit + integration suite
-.venv/bin/pytest tests/embed/     # embed module only
-.venv/bin/ruff check kairix/ tests/
+git clone https://github.com/quanyeomans/kairix
+cd kairix
+pip install -e ".[dev,neo4j,agents]"
+pytest tests/                    # 1,192 tests
+ruff check kairix/ tests/        # lint
 ```
 
-Coverage: 82% (unit + integration). See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, architecture, and PR process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, PR process, and versioning.
 
 ---
 
-## Prior Art & Acknowledgements
+## Research foundations
 
-See [PRIOR_ART.md](PRIOR_ART.md). Key inspirations: [QMD](https://github.com/tobi/qmd) (tobi), [sqlite-vec](https://github.com/asg017/sqlite-vec) (Alex Garcia), OpenViking L0/L1/L2 tiered loading concept, Lilian Weng's [LLM Powered Autonomous Agents](https://lilianweng.github.io/posts/2023-06-23-agent/) memory taxonomy, BEIR hybrid retrieval benchmarks.
+The retrieval design builds on validated approaches from information retrieval research:
+
+- **Hybrid search** — combining keyword and meaning-based retrieval consistently outperforms either alone ([Thakur et al., BEIR 2021](https://arxiv.org/abs/2104.08663))
+- **Entity-aware retrieval** — knowledge graph augmentation improves recall on questions about people, companies, and concepts ([REALM, Guu et al. 2020](https://arxiv.org/abs/2002.08909))
+- **Evaluation methodology** — TREC-style pooling with graded relevance ([Voorhees & Harman, TREC](https://trec.nist.gov/)); LLM-as-judge with position-bias mitigation
+- **BM25-primary fusion** — preserves keyword ranking precision while gaining semantic recall (validated via 38-configuration parameter sweep)
 
 ---
 
-## Data Residency
+## Data residency
 
-Vault content is sent to Azure OpenAI for embedding and synthesis only. No data is stored externally. All vectors and entity data live in SQLite and Neo4j on your own infrastructure. See [EVALUATION.md](EVALUATION.md) and [SECURITY.md](SECURITY.md) for detail.
+Document content is sent to your configured LLM endpoint for embedding only. No content is stored externally. All indexes, vectors, and knowledge graph data live in SQLite and Neo4j on your own infrastructure.
+
+See [SECURITY.md](SECURITY.md) for the full security posture.
 
 ---
 
 ## Licence
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+Built on: [sqlite-vec](https://github.com/asg017/sqlite-vec) (Alex Garcia), [SQLite FTS5](https://www.sqlite.org/fts5.html), [Neo4j Community Edition](https://neo4j.com/).
