@@ -1,6 +1,6 @@
 """kairix — Self-contained knowledge retrieval engine."""
 
-__version__ = "2026.4.24a2"
+__version__ = "2026.4.24a3"
 
 __all__ = ["QueryIntent", "RetrievalConfig", "SearchResult", "__version__", "hybrid_search"]
 
