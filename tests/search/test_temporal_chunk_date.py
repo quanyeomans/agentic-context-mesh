@@ -19,18 +19,22 @@ _ENABLED = TemporalBoostConfig(chunk_date_boost_enabled=True, chunk_date_decay_h
 _TODAY = datetime.date(2026, 4, 17)
 
 
+@pytest.mark.unit
 class TestChunkDateBoost:
+    @pytest.mark.unit
     def test_disabled_returns_results_unchanged(self):
         results = [_make("notes/recent.md", 0.5, "2026-04-15")]
         cfg = TemporalBoostConfig(chunk_date_boost_enabled=False)
         out = chunk_date_boost(results, _TODAY, config=cfg)
         assert out[0].boosted_score == pytest.approx(0.5)
 
+    @pytest.mark.unit
     def test_no_query_date_returns_results_unchanged(self):
         results = [_make("notes/recent.md", 0.5, "2026-04-15")]
         out = chunk_date_boost(results, None, config=_ENABLED)
         assert out[0].boosted_score == pytest.approx(0.5)
 
+    @pytest.mark.unit
     def test_recent_doc_boosted_more_than_old(self):
         results = [
             _make("notes/recent.md", 0.5, "2026-04-15"),   # 2 days ago
@@ -41,6 +45,7 @@ class TestChunkDateBoost:
         old = next(r for r in out if "old" in r.path)
         assert recent.boosted_score > old.boosted_score
 
+    @pytest.mark.unit
     def test_doc_with_no_chunk_date_not_boosted(self):
         results = [
             _make("notes/recent.md", 0.5, "2026-04-15"),
@@ -51,12 +56,14 @@ class TestChunkDateBoost:
         # no_date doc should be unchanged (boost factor = 1.0 * score)
         assert no_date.boosted_score == pytest.approx(0.5)
 
+    @pytest.mark.unit
     def test_exact_date_match_max_boost(self):
         results = [_make("notes/today.md", 0.5, "2026-04-17")]
         out = chunk_date_boost(results, _TODAY, config=_ENABLED)
         # At delta=0, boost = 1 + exp(0) = 2.0
         assert out[0].boosted_score == pytest.approx(0.5 * 2.0, rel=1e-5)
 
+    @pytest.mark.unit
     def test_halflife_decay(self):
         # At delta = halflife (30 days), boost should be approximately 1 + 0.5 = 1.5
         results = [_make("notes/month_ago.md", 1.0, "2026-03-18")]  # 30 days before today

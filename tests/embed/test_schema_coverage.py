@@ -33,6 +33,7 @@ from kairix.embed.schema import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Returns the path from SQLITE_VEC_PATH env var when it exists."""
     so = tmp_path / "vec0.so"
@@ -42,6 +43,7 @@ def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
     assert result == str(so)
 
 
+@pytest.mark.unit
 def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when no vec0.so can be located."""
     monkeypatch.delenv("SQLITE_VEC_PATH", raising=False)
@@ -55,6 +57,7 @@ def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyP
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_load_sqlite_vec_raises_when_not_found() -> None:
     """Raises RuntimeError with helpful message when extension is not found."""
     db = sqlite3.connect(":memory:")
@@ -68,6 +71,7 @@ def test_load_sqlite_vec_raises_when_not_found() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_get_qmd_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Uses KAIRIX_DB_PATH env var when set."""
     db_file = tmp_path / "index.sqlite"
@@ -77,6 +81,7 @@ def test_get_qmd_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
     assert result == db_file
 
 
+@pytest.mark.unit
 def test_get_qmd_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Returns default kairix DB path when no DB exists (for fresh installs)."""
     monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
@@ -92,6 +97,7 @@ def test_get_qmd_db_path_returns_default_when_missing(monkeypatch: pytest.Monkey
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_ensure_vec_table_creates_table_via_fake_db() -> None:
     """ensure_vec_table() issues CREATE VIRTUAL TABLE with the correct dimensions."""
     executed: list[str] = []
@@ -114,6 +120,7 @@ def test_ensure_vec_table_creates_table_via_fake_db() -> None:
     assert any("float[1536]" in s for s in create_sqls)
 
 
+@pytest.mark.unit
 def test_ensure_vec_table_skips_recreate_when_dims_match() -> None:
     """ensure_vec_table() returns early when table already has correct dims."""
     executed: list[str] = []
@@ -150,6 +157,7 @@ def _make_minimal_qmd_db() -> sqlite3.Connection:
     return db
 
 
+@pytest.mark.unit
 def test_get_pending_chunks_returns_empty_when_all_embedded() -> None:
     """Returns [] when no chunks need embedding."""
     db = _make_minimal_qmd_db()
@@ -165,6 +173,7 @@ def test_get_pending_chunks_returns_empty_when_all_embedded() -> None:
     assert chunks[0]["hash"] == "abc123"
 
 
+@pytest.mark.unit
 def test_get_pending_chunks_skips_inactive_docs() -> None:
     """Skips documents with active=0."""
     db = _make_minimal_qmd_db()
@@ -175,6 +184,7 @@ def test_get_pending_chunks_skips_inactive_docs() -> None:
     assert chunks == []
 
 
+@pytest.mark.unit
 def test_get_pending_chunks_skips_empty_content() -> None:
     """Skips chunks with empty doc text."""
     db = _make_minimal_qmd_db()
@@ -185,6 +195,7 @@ def test_get_pending_chunks_skips_empty_content() -> None:
     assert chunks == []
 
 
+@pytest.mark.unit
 def test_get_all_chunks_needing_embedding_returns_empty_without_content_vectors() -> None:
     """Returns [] when content_vectors table is empty."""
     db = _make_minimal_qmd_db()
@@ -200,6 +211,7 @@ def test_get_all_chunks_needing_embedding_returns_empty_without_content_vectors(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_save_run_log_creates_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Creates the run log file on first call."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -213,6 +225,7 @@ def test_save_run_log_creates_file(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert runs == [{"run": 1, "status": "ok"}]
 
 
+@pytest.mark.unit
 def test_save_run_log_appends_and_rotates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Appends to existing log and rotates to keep last 90 runs."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)

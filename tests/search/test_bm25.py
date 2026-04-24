@@ -196,7 +196,9 @@ def test_bm25_result_typeddict_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestNormaliseFtsQuery:
+    @pytest.mark.unit
     def test_removes_stop_words(self) -> None:
         result = _normalise_fts_query("what do we know about Jordan Blake")
         assert "what" not in result
@@ -207,34 +209,41 @@ class TestNormaliseFtsQuery:
         assert "jordan" in result.lower()
         assert "blake" in result.lower()
 
+    @pytest.mark.unit
     def test_replaces_hyphens_with_spaces(self) -> None:
         result = _normalise_fts_query("project-x")
         assert "-" not in result
         assert "project" in result
 
+    @pytest.mark.unit
     def test_replaces_underscores_with_spaces(self) -> None:
         result = _normalise_fts_query("Standard_D4as_v5")
         assert "_" not in result
         assert "standard" in result.lower()
 
+    @pytest.mark.unit
     def test_filters_short_tokens(self) -> None:
         result = _normalise_fts_query("a b c builder")
         assert '"builder"*' in result
 
+    @pytest.mark.unit
     def test_preserves_meaningful_terms(self) -> None:
         result = _normalise_fts_query("tell me about Acme Corp as an organisation")
         assert '"acme"*' in result
         assert '"corp"*' in result
         assert '"organisation"*' in result
 
+    @pytest.mark.unit
     def test_empty_query_returns_empty(self) -> None:
         result = _normalise_fts_query("")
         assert result == ""
 
+    @pytest.mark.unit
     def test_all_stop_words_returns_empty(self) -> None:
         result = _normalise_fts_query("what is the a an")
         assert result == ""
 
+    @pytest.mark.unit
     def test_uses_prefix_match_syntax(self) -> None:
         result = _normalise_fts_query("knowledge management platform")
         assert '"knowledge"*' in result
@@ -242,6 +251,7 @@ class TestNormaliseFtsQuery:
         assert '"platform"*' in result
         assert " AND " in result
 
+    @pytest.mark.unit
     def test_platform(self) -> None:
         result = _normalise_fts_query("what does the platform do")
         assert '"platform"*' in result

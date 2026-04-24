@@ -22,6 +22,7 @@ from kairix.onboard.check import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_neo4j_fix_hint_contains_install_script() -> None:
     """fix hint must reference install-neo4j.sh when Neo4j is unavailable."""
     mock_client = MagicMock()
@@ -37,6 +38,7 @@ def test_neo4j_fix_hint_contains_install_script() -> None:
     assert "optional" in result.fix.lower()
 
 
+@pytest.mark.unit
 def test_neo4j_fix_hint_contains_docker_run() -> None:
     """fix hint must include a docker run command as a quick-start option."""
     mock_client = MagicMock()
@@ -49,6 +51,7 @@ def test_neo4j_fix_hint_contains_docker_run() -> None:
     assert "neo4j:5-community" in result.fix
 
 
+@pytest.mark.unit
 def test_neo4j_reachable_ok_when_has_nodes() -> None:
     """Returns ok=True when Neo4j is reachable and contains at least one node."""
     mock_client = MagicMock()
@@ -62,6 +65,7 @@ def test_neo4j_reachable_ok_when_has_nodes() -> None:
     assert "42" in result.detail
 
 
+@pytest.mark.unit
 def test_neo4j_reachable_fail_when_empty() -> None:
     """Returns ok=False when Neo4j is reachable but empty (vault crawler not run)."""
     mock_client = MagicMock()
@@ -75,6 +79,7 @@ def test_neo4j_reachable_fail_when_empty() -> None:
     assert result.fix is not None
 
 
+@pytest.mark.unit
 def test_neo4j_check_exception_surfaces_as_failed_result() -> None:
     """Exceptions from Neo4j client are caught and returned as a failed CheckResult."""
     with patch("kairix.graph.client.get_client", side_effect=ImportError("neo4j not installed")):
@@ -89,6 +94,7 @@ def test_neo4j_check_exception_surfaces_as_failed_result() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_secrets_loaded_ok_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "key-abc12345")
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
@@ -97,6 +103,7 @@ def test_secrets_loaded_ok_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "key-abc1" in result.detail  # masked key present
 
 
+@pytest.mark.unit
 def test_secrets_loaded_fail_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
@@ -106,6 +113,7 @@ def test_secrets_loaded_fail_when_missing(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.fix is not None
 
 
+@pytest.mark.unit
 def test_secrets_loaded_ok_from_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Tier 2: secrets file with both keys present returns ok=True."""
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
@@ -125,6 +133,7 @@ def test_secrets_loaded_ok_from_file(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_vault_root_configured_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     md_file = tmp_path / "note.md"
     md_file.write_text("# test")
@@ -134,6 +143,7 @@ def test_vault_root_configured_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert str(tmp_path) in result.detail
 
 
+@pytest.mark.unit
 def test_vault_root_configured_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAIRIX_VAULT_ROOT", "/nonexistent/path/vault")
     result = check_vault_root_configured()
@@ -141,6 +151,7 @@ def test_vault_root_configured_missing_dir(monkeypatch: pytest.MonkeyPatch) -> N
     assert result.fix is not None
 
 
+@pytest.mark.unit
 def test_vault_root_configured_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KAIRIX_VAULT_ROOT", raising=False)
     monkeypatch.delenv("VAULT_ROOT", raising=False)
@@ -154,6 +165,7 @@ def test_vault_root_configured_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_run_all_checks_returns_list_of_check_results() -> None:
     """run_all_checks always returns a list of CheckResult objects without raising."""
     results = run_all_checks()

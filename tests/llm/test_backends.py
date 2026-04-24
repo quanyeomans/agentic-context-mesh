@@ -3,6 +3,7 @@ Tests for kairix.llm — LLM backend abstraction (P1-2).
 """
 
 from __future__ import annotations
+import pytest
 
 from unittest.mock import patch
 
@@ -14,11 +15,13 @@ from kairix.llm.protocol import LLMBackend
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_azure_backend_conforms_to_protocol() -> None:
     backend = AzureOpenAIBackend()
     assert isinstance(backend, LLMBackend)
 
 
+@pytest.mark.unit
 def test_get_default_backend_returns_azure() -> None:
     backend = get_default_backend()
     assert isinstance(backend, AzureOpenAIBackend)
@@ -29,6 +32,7 @@ def test_get_default_backend_returns_azure() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_azure_backend_chat_delegates_to_azure() -> None:
     backend = AzureOpenAIBackend()
     messages = [{"role": "user", "content": "Hello"}]
@@ -40,6 +44,7 @@ def test_azure_backend_chat_delegates_to_azure() -> None:
     assert result == "Hi there"
 
 
+@pytest.mark.unit
 def test_azure_backend_chat_default_max_tokens() -> None:
     backend = AzureOpenAIBackend()
     messages = [{"role": "user", "content": "test"}]
@@ -50,6 +55,7 @@ def test_azure_backend_chat_default_max_tokens() -> None:
     mock_chat.assert_called_once_with(messages, max_tokens=800)
 
 
+@pytest.mark.unit
 def test_azure_backend_embed_delegates_to_azure() -> None:
     backend = AzureOpenAIBackend()
     expected = [0.1, 0.2, 0.3]
@@ -61,6 +67,7 @@ def test_azure_backend_embed_delegates_to_azure() -> None:
     assert result == expected
 
 
+@pytest.mark.unit
 def test_azure_backend_chat_returns_empty_string_on_failure() -> None:
     backend = AzureOpenAIBackend()
 
@@ -70,6 +77,7 @@ def test_azure_backend_chat_returns_empty_string_on_failure() -> None:
     assert result == ""
 
 
+@pytest.mark.unit
 def test_azure_backend_embed_returns_empty_list_on_failure() -> None:
     backend = AzureOpenAIBackend()
 
@@ -89,6 +97,7 @@ def _do_summarise(text: str, llm: LLMBackend) -> str:
     return llm.chat([{"role": "user", "content": f"Summarise: {text}"}])
 
 
+@pytest.mark.unit
 def test_caller_accepts_protocol_type() -> None:
     backend = AzureOpenAIBackend()
 
@@ -114,11 +123,13 @@ class _MockLLMBackend:
         return struct.pack(f"<{len(vec)}f", *vec)
 
 
+@pytest.mark.unit
 def test_mock_backend_satisfies_protocol() -> None:
     mock = _MockLLMBackend()
     assert isinstance(mock, LLMBackend)
 
 
+@pytest.mark.unit
 def test_caller_works_with_mock_backend() -> None:
     mock = _MockLLMBackend()
     result = _do_summarise("text", mock)

@@ -19,6 +19,7 @@ Tests cover:
 """
 
 from __future__ import annotations
+import pytest
 
 import sqlite3
 import tempfile
@@ -59,30 +60,37 @@ def _fused(path: str = "doc.md", snippet: str = "snippet text", score: float = 0
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestApplyBudget:
+    @pytest.mark.unit
     def test_empty_results_returns_empty(self) -> None:
         assert apply_budget([], budget=3000) == []
 
+    @pytest.mark.unit
     def test_zero_budget_returns_empty(self) -> None:
         results = [_fused()]
         assert apply_budget(results, budget=0) == []
 
+    @pytest.mark.unit
     def test_negative_budget_returns_empty(self) -> None:
         results = [_fused()]
         assert apply_budget(results, budget=-1) == []
 
+    @pytest.mark.unit
     def test_phase1_all_results_l2(self) -> None:
         """With no summaries DB, all results should be L2 tier."""
         results = [_fused(f"doc{i}.md", snippet="abc " * 10) for i in range(3)]
         budgeted = apply_budget(results, budget=10_000)
         assert all(r.tier == "L2" for r in budgeted)
 
+    @pytest.mark.unit
     def test_returns_budgeted_result_type(self) -> None:
         results = [_fused()]
         budgeted = apply_budget(results, budget=10_000)
         assert len(budgeted) == 1
         assert isinstance(budgeted[0], BudgetedResult)
 
+    @pytest.mark.unit
     def test_truncates_content_when_exceeds_budget(self) -> None:
         """A single large result should be truncated to fit the budget."""
         # 1000-char snippet → ~250 tokens. Budget = 50 → truncate.
@@ -94,6 +102,7 @@ class TestApplyBudget:
         assert len(budgeted[0].content) < len(large_snippet)
         assert budgeted[0].token_estimate <= 50
 
+    @pytest.mark.unit
     def test_stops_when_budget_exhausted(self) -> None:
         """Should stop adding results once budget is used up."""
         # Each snippet is ~500 chars → ~125 tokens
@@ -106,6 +115,7 @@ class TestApplyBudget:
         total = sum(r.token_estimate for r in budgeted)
         assert total <= 200 + 50  # allow for rounding
 
+    @pytest.mark.unit
     def test_unexpected_exception_returns_empty(self) -> None:
         """apply_budget should never raise — returns [] on internal error."""
         results = [_fused()]
@@ -119,13 +129,16 @@ class TestApplyBudget:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestOpenSummariesDb:
+    @pytest.mark.unit
     def test_returns_none_when_path_missing(self) -> None:
         with patch("kairix.search.budget.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
             result = _open_summaries_db()
         assert result is None
 
+    @pytest.mark.unit
     def test_returns_connection_when_path_exists(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
             tmp_path = Path(tmp.name)
@@ -141,6 +154,7 @@ class TestOpenSummariesDb:
         finally:
             tmp_path.unlink(missing_ok=True)
 
+    @pytest.mark.unit
     def test_returns_none_when_connect_raises(self) -> None:
         with patch("kairix.search.budget.Path") as mock_path:
             mock_path.return_value.exists.return_value = True
@@ -155,13 +169,16 @@ class TestOpenSummariesDb:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestSelectTier:
+    @pytest.mark.unit
     def test_phase1_always_l2(self) -> None:
         """No summaries_db → always L2, regardless of score or budget."""
         result = _fused(score=0.0)
         assert _select_tier(result, 100, L1_SCORE_THRESHOLD, L2_SCORE_THRESHOLD, None) == "L2"
         assert _select_tier(result, 10_000, L1_SCORE_THRESHOLD, L2_SCORE_THRESHOLD, None) == "L2"
 
+    @pytest.mark.unit
     def test_phase2_l2_when_high_score_high_budget(self) -> None:
         """High score + budget ≥ L2_BUDGET_MIN → L2."""
         result = _fused(score=L2_SCORE_THRESHOLD + 0.1)
@@ -169,6 +186,7 @@ class TestSelectTier:
         tier = _select_tier(result, L2_BUDGET_MIN, L1_SCORE_THRESHOLD, L2_SCORE_THRESHOLD, db)
         assert tier == "L2"
 
+    @pytest.mark.unit
     def test_phase2_l1_when_medium_score_medium_budget(self) -> None:
         """Medium score + budget ≥ L1_BUDGET_MIN but < L2_BUDGET_MIN → L1."""
         result = _fused(score=L1_SCORE_THRESHOLD + 0.01)
@@ -184,6 +202,7 @@ class TestSelectTier:
         )
         assert tier == "L1"
 
+    @pytest.mark.unit
     def test_phase2_l0_when_low_score(self) -> None:
         """Low score → L0 regardless of budget."""
         result = _fused(score=0.0)
@@ -191,6 +210,7 @@ class TestSelectTier:
         tier = _select_tier(result, L2_BUDGET_MIN, L1_SCORE_THRESHOLD, L2_SCORE_THRESHOLD, db)
         assert tier == "L0"
 
+    @pytest.mark.unit
     def test_phase2_l0_when_low_budget(self) -> None:
         """Very low budget → L0 even if score is high."""
         result = _fused(score=1.0)
@@ -204,13 +224,16 @@ class TestSelectTier:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestGetContentForTier:
+    @pytest.mark.unit
     def test_phase1_returns_snippet(self) -> None:
         """No summaries_db → return result.snippet."""
         result = _fused(snippet="the snippet content")
         content = _get_content_for_tier(result, "L2", summaries_db=None)
         assert content == "the snippet content"
 
+    @pytest.mark.unit
     def test_phase1_empty_snippet_returns_empty(self) -> None:
         result = FusedResult(
             path="x.md",
@@ -223,6 +246,7 @@ class TestGetContentForTier:
         content = _get_content_for_tier(result, "L2", summaries_db=None)
         assert content == ""
 
+    @pytest.mark.unit
     def test_phase2_l0_returns_abstract_when_available(self) -> None:
         """With summaries_db, L0 tier returns abstract from get_l0."""
         result = _fused(snippet="fallback snippet")
@@ -237,6 +261,7 @@ class TestGetContentForTier:
 
         assert content == "abstract text"
 
+    @pytest.mark.unit
     def test_phase2_l0_falls_back_to_snippet_when_no_abstract(self) -> None:
         """With summaries_db, L0 falls back to snippet if get_l0 returns None."""
         result = _fused(snippet="fallback snippet")
@@ -251,6 +276,7 @@ class TestGetContentForTier:
 
         assert content == "fallback snippet"
 
+    @pytest.mark.unit
     def test_phase2_l1_falls_back_to_l0_when_unavailable(self) -> None:
         """With summaries_db, L1 tier falls back to L0 abstract if L1 missing."""
         result = _fused(snippet="fallback snippet")
@@ -265,6 +291,7 @@ class TestGetContentForTier:
 
         assert content == "l0 abstract"
 
+    @pytest.mark.unit
     def test_phase2_l1_returns_l1_when_available(self) -> None:
         """With summaries_db, L1 returns L1 overview when available."""
         result = _fused(snippet="fallback snippet")
@@ -279,6 +306,7 @@ class TestGetContentForTier:
 
         assert content == "l1 overview"
 
+    @pytest.mark.unit
     def test_phase2_exception_falls_back_to_snippet(self) -> None:
         """If summary lookup raises, fall back to snippet."""
         result = _fused(snippet="safe fallback")

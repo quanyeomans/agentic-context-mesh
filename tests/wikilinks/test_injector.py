@@ -8,6 +8,7 @@ Covers:
 """
 
 from __future__ import annotations
+import pytest
 
 from pathlib import Path
 
@@ -52,6 +53,7 @@ BURGER_CHAIN = make_entity(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_injects_on_first_mention() -> None:
     content = "We worked with Acme Corp on their strategy. Acme Corp is a key partner."
     modified, injected = inject_wikilinks(content, [ACME_CORP])
@@ -61,6 +63,7 @@ def test_injects_on_first_mention() -> None:
     assert modified.startswith("We worked with [[Acme-Corp]]")
 
 
+@pytest.mark.unit
 def test_does_not_inject_second_mention() -> None:
     content = "We worked with Acme Corp on their strategy. Acme Corp is a key partner."
     modified, _injected = inject_wikilinks(content, [ACME_CORP])
@@ -73,6 +76,7 @@ def test_does_not_inject_second_mention() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_skips_already_linked() -> None:
     content = "We worked with [[Acme-Corp]] on their strategy."
     modified, injected = inject_wikilinks(content, [ACME_CORP])
@@ -81,6 +85,7 @@ def test_skips_already_linked() -> None:
     assert injected == []
 
 
+@pytest.mark.unit
 def test_does_not_double_wrap_wikilink() -> None:
     # Use an entity whose name matches its link slug exactly (no space → slug differs).
     # When the link target and display name are identical, _find_already_linked() correctly
@@ -98,6 +103,7 @@ def test_does_not_double_wrap_wikilink() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_skips_fenced_code_block() -> None:
     content = (
         "Here is code:\n\n```python\n# Acme Corp client\nclient = 'Acme Corp'\n```\n\nAcme Corp is an organisation."
@@ -109,6 +115,7 @@ def test_skips_fenced_code_block() -> None:
     assert "```python\n# Acme Corp client" in modified or "```python\n# [[Acme-Corp]] client" not in modified
 
 
+@pytest.mark.unit
 def test_skips_inline_code() -> None:
     content = "Use the `Acme Corp` constant. Acme Corp is our company."
     modified, injected = inject_wikilinks(content, [ACME_CORP])
@@ -124,6 +131,7 @@ def test_skips_inline_code() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_skips_frontmatter() -> None:
     content = "---\ntitle: Acme Corp Project\nclient: Acme Corp\n---\n\nAcme Corp is a major health insurer."
     modified, injected = inject_wikilinks(content, [ACME_CORP])
@@ -135,6 +143,7 @@ def test_skips_frontmatter() -> None:
     assert "[[Acme-Corp]] is a major health insurer." in modified
 
 
+@pytest.mark.unit
 def test_frontmatter_acme_not_linked_in_yaml() -> None:
     content = "---\nclient: Acme Corp\n---\n\nAcme Corp overview."
     modified, _ = inject_wikilinks(content, [ACME_CORP])
@@ -148,6 +157,7 @@ def test_frontmatter_acme_not_linked_in_yaml() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_whole_word_match_only() -> None:
     content = "Acme-CorpGroup is not the same as Acme Corp."
     modified, injected = inject_wikilinks(content, [ACME_CORP])
@@ -158,6 +168,7 @@ def test_whole_word_match_only() -> None:
     assert injected == ["Acme Corp"]
 
 
+@pytest.mark.unit
 def test_no_match_for_substring() -> None:
     content = "Acme-CorpGroup and SubAcme-Corp are different."
     modified, injected = inject_wikilinks(content, [ACME_CORP])
@@ -171,6 +182,7 @@ def test_no_match_for_substring() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_no_self_link_on_own_page() -> None:
     content = "Acme Corp is a major health insurer with global operations."
     modified, injected = inject_wikilinks(
@@ -180,6 +192,7 @@ def test_no_self_link_on_own_page() -> None:
     assert "[[Acme-Corp]]" not in modified
 
 
+@pytest.mark.unit
 def test_self_link_check_different_entity() -> None:
     """On Acme Corp's page, a different entity is still linked."""
     content = "Acme Corp works with Gamma Systems on strategy."
@@ -200,6 +213,7 @@ def test_self_link_check_different_entity() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_alias_triggers_link() -> None:
     """Alias 'Gamma Systems' should trigger the [[Gamma-Systems|Gamma Systems]] link."""
     content = "Gamma Systems is a fast food chain."
@@ -208,6 +222,7 @@ def test_alias_triggers_link() -> None:
     assert injected == ["Gamma Systems"]
 
 
+@pytest.mark.unit
 def test_primary_name_triggers_link() -> None:
     """Primary name 'Gamma Systems' should also trigger."""
     content = "Gamma Systems is a fast food chain."
@@ -221,47 +236,58 @@ def test_primary_name_triggers_link() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_should_inject_memory_log() -> None:
     assert should_inject("/data/workspaces/builder/memory/2026-03-23.md") is True
 
 
+@pytest.mark.unit
 def test_should_inject_agent_knowledge() -> None:
     assert should_inject("/data/obsidian-vault/04-Agent-Knowledge/builder/patterns.md") is True
 
 
+@pytest.mark.unit
 def test_should_inject_projects() -> None:
     assert should_inject("/data/obsidian-vault/01-Projects/202603-Mnemosyne/README.md") is True
 
 
+@pytest.mark.unit
 def test_should_inject_areas() -> None:
     assert should_inject("/data/obsidian-vault/02-Areas/Clients/Acme-Corp/Overview.md") is True
 
 
+@pytest.mark.unit
 def test_should_inject_knowledge() -> None:
     assert should_inject("/data/obsidian-vault/05-Knowledge/01-Strategy/notes.md") is True
 
 
+@pytest.mark.unit
 def test_should_not_inject_archived_path() -> None:
     assert should_inject("/vault/02-Areas/Clients/Acme-Corp/archive/old.md") is False
 
 
+@pytest.mark.unit
 def test_should_not_inject_archived_substring() -> None:
     assert should_inject("/vault/archived/2023/something.md") is False
 
 
+@pytest.mark.unit
 def test_should_not_inject_shape_cache() -> None:
     assert should_inject("/home/<service-user>/.cache/shape/some-import.md") is False
 
 
+@pytest.mark.unit
 def test_should_not_inject_non_md() -> None:
     assert should_inject("/data/workspaces/builder/memory/notes.txt") is False
 
 
+@pytest.mark.unit
 def test_should_not_inject_workspace_non_memory() -> None:
     """Workspace files outside /memory/ subfolder should NOT be eligible."""
     assert should_inject("/data/workspaces/builder/some-other-dir/notes.md") is False
 
 
+@pytest.mark.unit
 def test_should_not_inject_large_file(tmp_path: Path) -> None:
     """Files > 500KB should not be eligible."""
     large_file = tmp_path / "big.md"
@@ -297,6 +323,7 @@ BRIDGEWATER = make_entity(
 )
 
 
+@pytest.mark.unit
 def test_alias_surface_form_produces_canonical_link() -> None:
     """'BWE&C strategy' → '[[Delta-Co]] strategy' (alias triggers canonical link)."""
     content = "The BWE&C strategy is evolving."
@@ -306,6 +333,7 @@ def test_alias_surface_form_produces_canonical_link() -> None:
     assert injected == ["Delta Co"]
 
 
+@pytest.mark.unit
 def test_alias_sme_c_produces_canonical_link() -> None:
     """'BWE-C' surface form → '[[Delta-Co]]'."""
     content = "BWE-C is a well-known company."
@@ -314,6 +342,7 @@ def test_alias_sme_c_produces_canonical_link() -> None:
     assert injected == ["Delta Co"]
 
 
+@pytest.mark.unit
 def test_canonical_name_still_works_with_aliases_defined() -> None:
     """Primary name 'Delta Co' still triggers '[[Delta-Co]]' even when aliases exist."""
     content = "Delta Co is a major infrastructure company."
@@ -322,6 +351,7 @@ def test_canonical_name_still_works_with_aliases_defined() -> None:
     assert injected == ["Delta Co"]
 
 
+@pytest.mark.unit
 def test_only_first_alias_mention_linked() -> None:
     """Only the first occurrence of any alias form is linked."""
     content = "BWE&C works on big projects. BWE-C is part of the same group. Delta Co is canonical."
@@ -331,6 +361,7 @@ def test_only_first_alias_mention_linked() -> None:
     assert injected == ["Delta Co"]
 
 
+@pytest.mark.unit
 def test_burger_chain_alias_produces_canonical_link() -> None:
     """'Gamma Systems' → '[[Gamma-Systems|Gamma Systems]]' (alias → canonical display)."""
     content = "Gamma Systems is a major fast food chain."

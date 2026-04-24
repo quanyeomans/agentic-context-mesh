@@ -5,13 +5,16 @@ Uses mocked Azure client — no live API calls.
 """
 
 from __future__ import annotations
+import pytest
 
 from unittest.mock import patch
 
 from kairix.briefing.synthesiser import _fallback_briefing, synthesise
 
 
+@pytest.mark.unit
 class TestSynthesise:
+    @pytest.mark.unit
     def test_successful_synthesis(self):
         mock_body = (
             "## Pending & Blocked\n- Fix the RRF bug [pending]\n\n"
@@ -30,16 +33,19 @@ class TestSynthesise:
         assert "Pending" in result
         assert "Decisions" in result or "ADR" in result
 
+    @pytest.mark.unit
     def test_empty_context_returns_fallback(self):
         result = synthesise("builder", {})
         assert "synthesis unavailable" in result.lower() or "fallback" in result.lower() or "failed" in result.lower()
 
+    @pytest.mark.unit
     def test_api_failure_returns_fallback(self):
         with patch("kairix._azure.chat_completion", return_value=""):
             result = synthesise("builder", {"memory_logs": "some content"})
         assert isinstance(result, str)
         assert len(result) > 0
 
+    @pytest.mark.unit
     def test_api_exception_returns_fallback(self):
         with patch("kairix._azure.chat_completion", side_effect=Exception("API down")):
             result = synthesise("builder", {"memory_logs": "some content"})
@@ -47,6 +53,7 @@ class TestSynthesise:
         # Should contain fallback message
         assert "synthesis" in result.lower() or "failed" in result.lower()
 
+    @pytest.mark.unit
     def test_context_is_included_in_prompt(self):
         """Verify context content is passed to the LLM."""
         captured_messages = []
@@ -62,6 +69,7 @@ class TestSynthesise:
         full_prompt = " ".join(str(m) for m in captured_messages)
         assert "UNIQUE_MARKER_12345" in full_prompt
 
+    @pytest.mark.unit
     def test_long_context_is_truncated(self):
         """Verify very long context doesn't exceed limits."""
         context = {"memory_logs": " ".join(["word"] * 5000)}
@@ -79,7 +87,9 @@ class TestSynthesise:
         assert "truncated" in full_prompt or len(full_prompt) < 25000
 
 
+@pytest.mark.unit
 class TestFallbackBriefing:
+    @pytest.mark.unit
     def test_contains_all_sections(self):
         result = _fallback_briefing("builder", "test error")
         assert "Pending" in result
@@ -87,10 +97,12 @@ class TestFallbackBriefing:
         assert "Active Projects" in result
         assert "Key Constraints" in result
 
+    @pytest.mark.unit
     def test_includes_reason(self):
         result = _fallback_briefing("builder", "network timeout")
         assert "network timeout" in result
 
+    @pytest.mark.unit
     def test_includes_fallback_path(self):
         result = _fallback_briefing("builder", "any error")
         assert "builder" in result

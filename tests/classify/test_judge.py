@@ -15,7 +15,9 @@ from kairix.classify.judge import classify_with_llm
 from kairix.classify.rules import ClassificationResult
 
 
+@pytest.mark.unit
 class TestClassifyWithLLM:
+    @pytest.mark.unit
     def test_successful_classification(self):
         mock_response = json.dumps(
             {
@@ -31,6 +33,7 @@ class TestClassifyWithLLM:
         assert result.confidence == 0.85
         assert not result.needs_confirmation
 
+    @pytest.mark.unit
     def test_low_confidence_sets_needs_confirmation(self):
         mock_response = json.dumps(
             {
@@ -44,6 +47,7 @@ class TestClassifyWithLLM:
         assert result.needs_confirmation is True
         assert result.confidence == 0.55
 
+    @pytest.mark.unit
     def test_api_failure_returns_unknown(self):
         with patch("kairix._azure.chat_completion", return_value=""):
             result = classify_with_llm("some content", agent="builder")
@@ -51,18 +55,21 @@ class TestClassifyWithLLM:
         assert result.confidence == 0.0
         assert result.needs_confirmation is True
 
+    @pytest.mark.unit
     def test_json_parse_error_returns_unknown(self):
         with patch("kairix._azure.chat_completion", return_value="not valid json"):
             result = classify_with_llm("some content", agent="builder")
         assert result.type == "unknown"
         assert result.needs_confirmation is True
 
+    @pytest.mark.unit
     def test_empty_content_returns_unknown(self):
         with patch("kairix._azure.chat_completion", return_value="{}"):
             result = classify_with_llm("", agent="builder")
         assert result.type == "unknown"
         assert result.needs_confirmation is True
 
+    @pytest.mark.unit
     def test_code_fence_wrapped_json(self):
         mock_response = '```json\n{"type": "episodic", "confidence": 0.9, "reason": "timestamp"}\n```'
         with patch("kairix._azure.chat_completion", return_value=mock_response):
@@ -70,6 +77,7 @@ class TestClassifyWithLLM:
         assert result.type == "episodic"
         assert result.confidence == 0.9
 
+    @pytest.mark.unit
     def test_path_resolved_for_valid_type(self):
         mock_response = json.dumps(
             {
@@ -83,10 +91,12 @@ class TestClassifyWithLLM:
         assert result.target_path != ""
         assert "rules.md" in result.target_path
 
+    @pytest.mark.unit
     def test_invalid_agent_raises(self):
         with pytest.raises(ValueError, match="Invalid agent"):
             classify_with_llm("some content", agent="invalid")
 
+    @pytest.mark.unit
     def test_shared_agent_is_valid(self):
         mock_response = json.dumps(
             {

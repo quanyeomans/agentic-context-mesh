@@ -63,6 +63,7 @@ def _make_search_mock(budgeted_results: list[BudgetedResult]) -> dict:
 class TestQueryLoggingDisabled:
     """When KAIRIX_LOG_QUERIES=0, no queries.jsonl should be written."""
 
+    @pytest.mark.unit
     def test_no_file_written_when_disabled(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
 
@@ -88,6 +89,7 @@ class TestQueryLoggingDisabled:
 
         assert not log_path.exists(), "queries.jsonl should not be created when logging is disabled"
 
+    @pytest.mark.unit
     def test_search_does_not_write_query_log_when_disabled(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/a.md"), _budgeted("/vault/b.md")]
@@ -120,6 +122,7 @@ class TestQueryLoggingDisabled:
 class TestQueryLoggingEnabled:
     """When KAIRIX_LOG_QUERIES=1, entry must be written with correct fields."""
 
+    @pytest.mark.unit
     def test_entry_written_after_search(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/doc1.md"), _budgeted("/vault/doc2.md")]
@@ -156,6 +159,7 @@ class TestQueryLoggingEnabled:
         assert "ts" in entry
         assert "top_paths" in entry
 
+    @pytest.mark.unit
     def test_query_hash_present_and_correct_length(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/a.md")]
@@ -181,6 +185,7 @@ class TestQueryLoggingEnabled:
         assert len(entry["query_hash"]) == 12
         assert all(c in "0123456789abcdef" for c in entry["query_hash"])
 
+    @pytest.mark.unit
     def test_top_paths_limited_to_three(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         # 5 results — only first 3 paths should appear in log
@@ -212,6 +217,7 @@ class TestQueryLoggingEnabled:
         assert len(entry["top_paths"]) == 3
         assert entry["top_paths"] == ["/vault/a.md", "/vault/b.md", "/vault/c.md"]
 
+    @pytest.mark.unit
     def test_top_paths_fewer_than_three_results(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/only.md")]
@@ -236,6 +242,7 @@ class TestQueryLoggingEnabled:
         assert len(entry["top_paths"]) == 1
         assert entry["top_paths"] == ["/vault/only.md"]
 
+    @pytest.mark.unit
     def test_multiple_searches_append_multiple_lines(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/x.md")]
@@ -274,6 +281,7 @@ class TestQueryLoggingEnabled:
 class TestQueryLogRotation:
     """Log rotation: file > 10MB → rotate to .1 before appending."""
 
+    @pytest.mark.unit
     def test_rotation_when_file_exceeds_10mb(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         rotated_path = tmp_path / "queries.jsonl.1"
@@ -312,6 +320,7 @@ class TestQueryLogRotation:
         entry = json.loads(log_path.read_text().strip())
         assert entry["query"] == "new query"
 
+    @pytest.mark.unit
     def test_rotation_replaces_existing_dot_one(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         rotated_path = tmp_path / "queries.jsonl.1"
@@ -348,6 +357,7 @@ class TestQueryLogRotation:
         # "old rotated content" should be gone
         assert "old rotated content" not in rotated_path.read_text(errors="replace")
 
+    @pytest.mark.unit
     def test_no_rotation_when_file_under_limit(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         rotated_path = tmp_path / "queries.jsonl.1"
@@ -380,6 +390,7 @@ class TestQueryLogRotation:
         lines = log_path.read_text().strip().splitlines()
         assert len(lines) == 2
 
+    @pytest.mark.unit
     def test_rotate_helper_directly(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
         rotated_path = tmp_path / "queries.jsonl.1"

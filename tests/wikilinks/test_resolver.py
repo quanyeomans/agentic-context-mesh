@@ -100,12 +100,14 @@ def _make_neo4j_client(rows: list[dict] | None = None) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_bootstrap_loads_entities(bootstrap_file: str) -> None:
     """load_entities_from_bootstrap() parses at least 10 entities from the synthetic index."""
     entities = load_entities_from_bootstrap(bootstrap_file)
     assert len(entities) >= 10, f"Expected ≥10 entities, got {len(entities)}"
 
 
+@pytest.mark.unit
 def test_bootstrap_entity_has_required_fields(bootstrap_file: str) -> None:
     """Each entity from bootstrap should have name, link, vault_path set."""
     entities = load_entities_from_bootstrap(bootstrap_file)
@@ -117,6 +119,7 @@ def test_bootstrap_entity_has_required_fields(bootstrap_file: str) -> None:
         assert entity.link.endswith("]]"), f"Link doesn't end with ]]: {entity.link}"
 
 
+@pytest.mark.unit
 def test_bootstrap_parses_acme_health(bootstrap_file: str) -> None:
     """Acme Corp should be present with correct link and vault_path."""
     entities = load_entities_from_bootstrap(bootstrap_file)
@@ -126,6 +129,7 @@ def test_bootstrap_parses_acme_health(bootstrap_file: str) -> None:
     assert "Acme-Corp" in acme.vault_path
 
 
+@pytest.mark.unit
 def test_bootstrap_parses_burger_palace_alias(bootstrap_file: str) -> None:
     """Gamma Systems should parse the display-alias link form correctly."""
     entities = load_entities_from_bootstrap(bootstrap_file)
@@ -134,6 +138,7 @@ def test_bootstrap_parses_burger_palace_alias(bootstrap_file: str) -> None:
     assert bp.link == "[[Gamma-Systems|Gamma Systems]]"
 
 
+@pytest.mark.unit
 def test_bootstrap_entity_types_populated(bootstrap_file: str) -> None:
     """Entity types should reflect section headings (client, organisation, person, etc.)."""
     entities = load_entities_from_bootstrap(bootstrap_file)
@@ -141,12 +146,14 @@ def test_bootstrap_entity_types_populated(bootstrap_file: str) -> None:
     assert len(types) >= 3, f"Expected ≥3 distinct entity types, got {types}"
 
 
+@pytest.mark.unit
 def test_bootstrap_handles_missing_file() -> None:
     """load_entities_from_bootstrap() returns [] for a missing file."""
     entities = load_entities_from_bootstrap("/nonexistent/path/index.md")
     assert entities == []
 
 
+@pytest.mark.unit
 def test_bootstrap_no_header_rows(bootstrap_file: str) -> None:
     """Should not include rows with 'Entity' or 'Name' as the entity name."""
     entities = load_entities_from_bootstrap(bootstrap_file)
@@ -160,6 +167,7 @@ def test_bootstrap_no_header_rows(bootstrap_file: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_neo4j_load_returns_entities(monkeypatch: pytest.MonkeyPatch) -> None:
     """load_entities_from_neo4j() returns WikiEntity objects from Neo4j rows.
 
@@ -182,6 +190,7 @@ def test_neo4j_load_returns_entities(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Jordan Blake" in names
 
 
+@pytest.mark.unit
 def test_neo4j_load_returns_empty_when_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """load_entities_from_neo4j() returns [] when Neo4j is unavailable."""
     import kairix.wikilinks.resolver as resolver_mod
@@ -194,6 +203,7 @@ def test_neo4j_load_returns_empty_when_unavailable(monkeypatch: pytest.MonkeyPat
     assert entities == []
 
 
+@pytest.mark.unit
 def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Aliases list from Neo4j row is included in all_triggers()."""
     import kairix.wikilinks.resolver as resolver_mod
@@ -212,6 +222,7 @@ def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "AH" in triggers
 
 
+@pytest.mark.unit
 def test_neo4j_load_returns_empty_on_cypher_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """load_entities_from_neo4j() returns [] on any cypher exception."""
     import kairix.wikilinks.resolver as resolver_mod
@@ -230,6 +241,7 @@ def test_neo4j_load_returns_empty_on_cypher_error(monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_get_entities_uses_neo4j_when_sufficient(
     bootstrap_file: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -253,6 +265,7 @@ def test_get_entities_uses_neo4j_when_sufficient(
     assert len(entities) == 6
 
 
+@pytest.mark.unit
 def test_get_entities_falls_back_to_bootstrap_when_neo4j_sparse(
     bootstrap_file: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -277,6 +290,7 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_sparse(
     assert len(entities) >= 10, f"Expected fallback to bootstrap, got {len(entities)} entities"
 
 
+@pytest.mark.unit
 def test_get_entities_falls_back_to_bootstrap_when_neo4j_unavailable(
     bootstrap_file: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -300,6 +314,7 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_unavailable(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_wiki_entity_all_triggers_deduplicates() -> None:
     """all_triggers() should not return duplicate terms."""
     entity = WikiEntity(
@@ -316,6 +331,7 @@ def test_wiki_entity_all_triggers_deduplicates() -> None:
     assert "AH" in triggers
 
 
+@pytest.mark.unit
 def test_wiki_entity_all_triggers_skips_empty() -> None:
     """all_triggers() should not include empty strings."""
     entity = WikiEntity(

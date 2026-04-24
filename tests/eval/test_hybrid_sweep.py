@@ -26,7 +26,9 @@ from kairix.eval.hybrid_sweep import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestHybridSweepConfig:
+    @pytest.mark.unit
     def test_defaults(self) -> None:
         cfg = HybridSweepConfig(name="test", mode="hybrid")
         assert cfg.rrf_k == 60
@@ -35,10 +37,12 @@ class TestHybridSweepConfig:
         assert cfg.bm25_limit == 20
         assert cfg.vec_limit == 10
 
+    @pytest.mark.unit
     def test_bm25_only(self) -> None:
         cfg = HybridSweepConfig(name="bm25", mode="bm25_only")
         assert cfg.mode == "bm25_only"
 
+    @pytest.mark.unit
     def test_frozen(self) -> None:
         cfg = HybridSweepConfig(name="test", mode="hybrid")
         with pytest.raises(AttributeError):
@@ -50,49 +54,59 @@ class TestHybridSweepConfig:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestBuildDefaultConfigs:
+    @pytest.mark.unit
     def test_returns_configs(self) -> None:
         configs = build_default_configs()
         assert len(configs) > 10
 
+    @pytest.mark.unit
     def test_includes_bm25_only_baseline(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
         assert "bm25-only" in names
 
+    @pytest.mark.unit
     def test_includes_rrf_k_sweep(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
         for k in [10, 20, 40, 60, 100]:
             assert f"hybrid-k{k}-minimal" in names
 
+    @pytest.mark.unit
     def test_includes_entity_factor_sweep(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
         assert any("entity-f" in n for n in names)
 
+    @pytest.mark.unit
     def test_includes_procedural_factor_sweep(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
         assert any("proc-f" in n for n in names)
 
+    @pytest.mark.unit
     def test_includes_bm25_primary_configs(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
         assert any("bm25primary" in n for n in names)
 
+    @pytest.mark.unit
     def test_includes_tuned_combos(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
         assert "hybrid-tuned-a" in names
         assert "hybrid-tuned-b" in names
 
+    @pytest.mark.unit
     def test_all_configs_have_names(self) -> None:
         configs = build_default_configs()
         for cfg in configs:
             assert cfg.name
             assert cfg.mode in ("hybrid", "bm25_only", "bm25_primary")
 
+    @pytest.mark.unit
     def test_no_duplicate_names(self) -> None:
         configs = build_default_configs()
         names = [c.name for c in configs]
@@ -104,37 +118,46 @@ class TestBuildDefaultConfigs:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestRelMap:
+    @pytest.mark.unit
     def test_gold_titles_format(self) -> None:
         gold = [{"title": "My Doc", "relevance": 2}]
         rel_map, mode = _build_rel_map(gold)
         assert mode == "stem"
         assert rel_map == {"my doc": 2}
 
+    @pytest.mark.unit
     def test_gold_paths_format(self) -> None:
         gold = [{"path": "areas/kairix.md", "relevance": 1}]
         rel_map, mode = _build_rel_map(gold)
         assert mode == "path"
         assert rel_map == {"areas/kairix.md": 1}
 
+    @pytest.mark.unit
     def test_empty_gold(self) -> None:
         rel_map, mode = _build_rel_map([])
         assert rel_map == {}
 
 
+@pytest.mark.unit
 class TestMatchPath:
+    @pytest.mark.unit
     def test_stem_match(self) -> None:
         rel_map = {"kairix platform": 2}
         assert _match_path("areas/kairix platform.md", rel_map, "stem") == 2
 
+    @pytest.mark.unit
     def test_path_exact_match(self) -> None:
         rel_map = {"areas/kairix.md": 2}
         assert _match_path("areas/kairix.md", rel_map, "path") == 2
 
+    @pytest.mark.unit
     def test_path_suffix_match(self) -> None:
         rel_map = {"areas/kairix.md": 2}
         assert _match_path("vault/areas/kairix.md", rel_map, "path") == 2
 
+    @pytest.mark.unit
     def test_no_match(self) -> None:
         rel_map = {"other.md": 1}
         assert _match_path("areas/kairix.md", rel_map, "path") == 0
@@ -145,62 +168,77 @@ class TestMatchPath:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestComputeNdcg:
+    @pytest.mark.unit
     def test_perfect_ranking(self) -> None:
         gold = [{"path": "a.md", "relevance": 2}, {"path": "b.md", "relevance": 1}]
         paths = ["a.md", "b.md"]
         ndcg = compute_ndcg(paths, gold, k=10)
         assert ndcg == pytest.approx(1.0)
 
+    @pytest.mark.unit
     def test_reversed_ranking(self) -> None:
         gold = [{"path": "a.md", "relevance": 2}, {"path": "b.md", "relevance": 1}]
         paths = ["b.md", "a.md"]
         ndcg = compute_ndcg(paths, gold, k=10)
         assert 0.0 < ndcg < 1.0
 
+    @pytest.mark.unit
     def test_no_relevant_docs(self) -> None:
         gold = [{"path": "a.md", "relevance": 2}]
         paths = ["x.md", "y.md"]
         ndcg = compute_ndcg(paths, gold, k=10)
         assert ndcg == 0.0
 
+    @pytest.mark.unit
     def test_empty_gold(self) -> None:
         assert compute_ndcg(["a.md"], [], k=10) == 0.0
 
+    @pytest.mark.unit
     def test_empty_retrieved(self) -> None:
         gold = [{"path": "a.md", "relevance": 2}]
         assert compute_ndcg([], gold, k=10) == 0.0
 
 
+@pytest.mark.unit
 class TestComputeHitAtK:
+    @pytest.mark.unit
     def test_hit_in_top_k(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         assert compute_hit_at_k(["x.md", "a.md", "y.md"], gold, k=5) is True
 
+    @pytest.mark.unit
     def test_miss(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         assert compute_hit_at_k(["x.md", "y.md"], gold, k=5) is False
 
+    @pytest.mark.unit
     def test_hit_at_boundary(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         paths = ["x.md", "y.md", "z.md", "w.md", "a.md"]
         assert compute_hit_at_k(paths, gold, k=5) is True
 
+    @pytest.mark.unit
     def test_miss_beyond_k(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         paths = ["x.md", "y.md", "z.md", "w.md", "v.md", "a.md"]
         assert compute_hit_at_k(paths, gold, k=5) is False
 
 
+@pytest.mark.unit
 class TestComputeMrr:
+    @pytest.mark.unit
     def test_first_position(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         assert compute_mrr(["a.md", "x.md"], gold) == pytest.approx(1.0)
 
+    @pytest.mark.unit
     def test_second_position(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         assert compute_mrr(["x.md", "a.md"], gold) == pytest.approx(0.5)
 
+    @pytest.mark.unit
     def test_no_relevant(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
         assert compute_mrr(["x.md", "y.md"], gold) == 0.0

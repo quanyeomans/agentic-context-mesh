@@ -63,6 +63,7 @@ def pack(vec: list[float]) -> bytes:
 @pytest.mark.contract
 class TestExtensionLoadOrder:
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_vec0_table_fails_without_extension(self):
         """
         Creating or querying a vec0 virtual table without loading the extension
@@ -74,6 +75,7 @@ class TestExtensionLoadOrder:
             db.execute("CREATE VIRTUAL TABLE t USING vec0(embedding float[4] distance_metric=cosine)")
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_delete_on_vec0_fails_without_extension(self):
         """
         Even DELETE on an existing vec0 table fails if the extension isn't loaded
@@ -108,6 +110,7 @@ class TestExtensionLoadOrder:
             os.unlink(path)
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_load_sqlite_vec_enables_vec0(self):
         """load_sqlite_vec() makes vec0 operations available."""
         import sys
@@ -131,6 +134,7 @@ class TestExtensionLoadOrder:
 @pytest.mark.contract
 class TestSqliteVecInsertConstraints:
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_insert_or_replace_raises(self):
         """
         sqlite-vec virtual tables reject INSERT OR REPLACE.
@@ -146,6 +150,7 @@ class TestSqliteVecInsertConstraints:
             db.execute("INSERT OR REPLACE INTO vectors_vec VALUES (?, ?)", ("h_0", pack([0.5, 0.6, 0.7, 0.8])))
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_insert_or_ignore_raises(self):
         """sqlite-vec also rejects INSERT OR IGNORE."""
         db = make_vec_db()
@@ -156,6 +161,7 @@ class TestSqliteVecInsertConstraints:
             db.execute("INSERT OR IGNORE INTO vectors_vec VALUES (?, ?)", ("h_0", pack([0.5] * 4)))
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_staging_upsert_is_idempotent(self):
         """
         The staging pattern (write to temp table, bulk merge into vec0) is idempotent.
@@ -188,6 +194,7 @@ class TestSqliteVecInsertConstraints:
         assert decoded[0] == pytest.approx(0.5, abs=1e-5)  # second write wins
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_stage_and_flush_end_to_end(self):
         """
         stage_embedding() + flush_staging_to_vec() writes correctly to both
@@ -234,6 +241,7 @@ class TestSqliteVecInsertConstraints:
         assert staging_count == 0  # staging: cleared after flush
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_flush_clears_staging(self):
         """Staging table is empty after flush — ready for the next batch."""
         import sys
@@ -261,8 +269,10 @@ class TestSqliteVecInsertConstraints:
 # ── Constraint 3: Direct vector search (no llama.cpp dependency) ──────────────
 
 
+@pytest.mark.unit
 class TestDirectVectorSearch:
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_match_query_returns_results(self):
         """
         Direct MATCH query against vectors_vec returns nearest neighbours
@@ -288,6 +298,7 @@ class TestDirectVectorSearch:
         assert rows[0][1] == pytest.approx(0.0, abs=1e-5)  # cosine distance 0 = identical
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_match_query_cosine_ordering(self):
         """Cosine distance orders results correctly — lower distance = more similar."""
         db = make_vec_db(dims=4)
@@ -305,6 +316,7 @@ class TestDirectVectorSearch:
         assert [r[0] for r in rows] == ["near_0", "mid_0", "far_0"]
 
     @needs_sqlite_vec
+    @pytest.mark.unit
     def test_recall_check_uses_direct_search(self):
         """
         recall_check.py check_recall() uses direct SQLite vector search,

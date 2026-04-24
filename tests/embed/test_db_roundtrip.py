@@ -84,9 +84,11 @@ def tmp_db_with_docs(tmp_db):
 @pytest.mark.contract
 @pytest.mark.integration
 class TestSchemaValidation:
+    @pytest.mark.unit
     def test_valid_schema_passes(self, tmp_db):
         validate_schema(tmp_db)  # Should not raise
 
+    @pytest.mark.unit
     def test_missing_content_vectors_column_raises(self, tmp_db):
         tmp_db.execute("DROP TABLE content_vectors")
         tmp_db.execute("CREATE TABLE content_vectors (hash TEXT PRIMARY KEY)")
@@ -94,6 +96,7 @@ class TestSchemaValidation:
         with pytest.raises(SchemaVersionError, match="missing columns"):
             validate_schema(tmp_db)
 
+    @pytest.mark.unit
     def test_missing_content_column_raises(self, tmp_db):
         tmp_db.execute("DROP TABLE content")
         tmp_db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY)")
@@ -105,7 +108,9 @@ class TestSchemaValidation:
 # ── Vec table tests ───────────────────────────────────────────────────────────
 
 
+@pytest.mark.unit
 class TestEnsureVecTable:
+    @pytest.mark.unit
     def test_creates_table(self, tmp_db):
         # Requires sqlite-vec extension — skip if not available
         try:
@@ -118,6 +123,7 @@ class TestEnsureVecTable:
         tables = {r[0] for r in tmp_db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "vectors_vec" in tables
 
+    @pytest.mark.unit
     def test_idempotent_same_dims(self, tmp_db):
         try:
             ensure_vec_table(tmp_db, 4)
@@ -131,7 +137,9 @@ class TestEnsureVecTable:
 # ── Insert embedding tests ────────────────────────────────────────────────────
 
 
+@pytest.mark.unit
 class TestInsertEmbedding:
+    @pytest.mark.unit
     def test_inserts_to_content_vectors(self, tmp_db):
         try:
             ensure_vec_table(tmp_db, 4)
@@ -151,6 +159,7 @@ class TestInsertEmbedding:
         assert row[0] == "testhash"
         assert row[1] == 0
 
+    @pytest.mark.unit
     def test_inserts_to_vectors_vec(self, tmp_db):
         try:
             ensure_vec_table(tmp_db, 4)
@@ -168,6 +177,7 @@ class TestInsertEmbedding:
         row = tmp_db.execute("SELECT hash_seq FROM vectors_vec WHERE hash_seq='testhash_0'").fetchone()
         assert row is not None
 
+    @pytest.mark.unit
     def test_idempotent_insert(self, tmp_db):
         try:
             ensure_vec_table(tmp_db, 4)
@@ -192,7 +202,9 @@ class TestInsertEmbedding:
 # ── Full roundtrip test ───────────────────────────────────────────────────────
 
 
+@pytest.mark.unit
 class TestFullRoundtrip:
+    @pytest.mark.unit
     def test_pending_to_embedded(self, tmp_db_with_docs):
         """Simulate: pending chunks → mock Azure → inserted → nothing pending."""
         try:

@@ -8,6 +8,7 @@ Covers:
 """
 
 from __future__ import annotations
+import pytest
 
 import sqlite3
 from pathlib import Path
@@ -68,6 +69,7 @@ def _create_test_db(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
     """date_filter_paths=None → results not filtered."""
     db_path = _create_test_db(tmp_path)
@@ -77,6 +79,7 @@ def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
     assert len(results) == 2
 
 
+@pytest.mark.unit
 def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
     """date_filter_paths=frozenset() → results not filtered (empty = no-filter)."""
     db_path = _create_test_db(tmp_path)
@@ -86,6 +89,7 @@ def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
     assert len(results) == 2
 
 
+@pytest.mark.unit
 def test_bm25_date_filter_applied(tmp_path: Path) -> None:
     """date_filter_paths with one path → only matching result returned."""
     db_path = _create_test_db(tmp_path)
@@ -104,6 +108,7 @@ def test_bm25_date_filter_applied(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_vector_date_filter_none_passthrough() -> None:
     """date_filter_paths=None → vector results not filtered."""
     mock_db = MagicMock()
@@ -116,6 +121,7 @@ def test_vector_date_filter_none_passthrough() -> None:
     assert len(results) == 2
 
 
+@pytest.mark.unit
 def test_vector_date_filter_empty_passthrough() -> None:
     """date_filter_paths=frozenset() → results not filtered."""
     mock_db = MagicMock()
@@ -127,6 +133,7 @@ def test_vector_date_filter_empty_passthrough() -> None:
     assert len(results) == 1
 
 
+@pytest.mark.unit
 def test_vector_date_filter_applied() -> None:
     """date_filter_paths with one path → only matching result returned."""
     mock_db = MagicMock()

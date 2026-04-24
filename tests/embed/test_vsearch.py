@@ -69,7 +69,9 @@ def embedded_db(tmp_path_factory):
     return tmp_db_path
 
 
+@pytest.mark.unit
 class TestVsearchQuality:
+    @pytest.mark.unit
     def test_recall_queries_hit_gold(self, embedded_db, monkeypatch):
         """After embedding, vsearch should find known docs in top-3."""
         if not QMD_BIN.exists():
@@ -100,6 +102,7 @@ class TestVsearchQuality:
             f"Only {passed}/{len(GOLD_QUERIES)} recall queries passed vsearch. Vector quality may be degraded."
         )
 
+    @pytest.mark.unit
     def test_no_empty_results(self, embedded_db, monkeypatch):
         """Every query should return at least 1 result after embedding."""
         if not QMD_BIN.exists():

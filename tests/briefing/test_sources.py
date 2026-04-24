@@ -5,6 +5,7 @@ All tests use fixtures or temporary directories — no live API calls.
 """
 
 from __future__ import annotations
+import pytest
 
 from datetime import date, timedelta
 from unittest.mock import patch
@@ -24,20 +25,25 @@ from kairix.briefing.sources import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestTokenHelpers:
+    @pytest.mark.unit
     def test_estimate_tokens_empty(self):
         assert _estimate_tokens("") == 0
 
+    @pytest.mark.unit
     def test_estimate_tokens_small(self):
         # "hello world" = 2 words * 1.3 = 2
         count = _estimate_tokens("hello world")
         assert count >= 2
 
+    @pytest.mark.unit
     def test_truncate_to_tokens_short(self):
         text = "hello world"
         result = _truncate_to_tokens(text, 100)
         assert result == text  # no truncation needed
 
+    @pytest.mark.unit
     def test_truncate_to_tokens_truncates(self):
         words = ["word"] * 1000
         text = " ".join(words)
@@ -51,11 +57,14 @@ class TestTokenHelpers:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFetchMemoryLogs:
+    @pytest.mark.unit
     def test_returns_empty_for_missing_dir(self):
         result = fetch_memory_logs("nonexistent_agent_xyz")
         assert result == ""
 
+    @pytest.mark.unit
     def test_reads_tagged_items(self, tmp_path):
         today = date.today()
         memory_dir = tmp_path / "builder" / "memory"
@@ -76,6 +85,7 @@ class TestFetchMemoryLogs:
         assert "[pending]" in result or "pending" in result.lower()
         assert "[blocked]" in result or "blocked" in result.lower()
 
+    @pytest.mark.unit
     def test_handles_read_error_gracefully(self, tmp_path):
         memory_dir = tmp_path / "builder" / "memory"
         memory_dir.mkdir(parents=True)
@@ -88,6 +98,7 @@ class TestFetchMemoryLogs:
         # Should not raise — may return empty or partial content
         assert isinstance(result, str)
 
+    @pytest.mark.unit
     def test_respects_token_cap(self, tmp_path):
         today = date.today()
         memory_dir = tmp_path / "builder" / "memory"
@@ -108,11 +119,14 @@ class TestFetchMemoryLogs:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFetchRecentMemory:
+    @pytest.mark.unit
     def test_returns_empty_for_missing_dir(self):
         result = fetch_recent_memory("nonexistent_agent_xyz")
         assert result == ""
 
+    @pytest.mark.unit
     def test_reads_today_and_yesterday(self, tmp_path):
         today = date.today()
         yesterday = today - timedelta(days=1)
@@ -134,11 +148,14 @@ class TestFetchRecentMemory:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFetchEntityStub:
+    @pytest.mark.unit
     def test_returns_empty_for_missing_entity(self):
         result = fetch_entity_stub("nonexistent_agent_xyz")
         assert result == ""
 
+    @pytest.mark.unit
     def test_reads_concept_stub(self, tmp_path):
         entity_dir = tmp_path / "04-Agent-Knowledge" / "entities" / "concept"
         entity_dir.mkdir(parents=True)
@@ -155,13 +172,16 @@ class TestFetchEntityStub:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFetchKnowledgeRules:
+    @pytest.mark.unit
     def test_returns_empty_for_missing_rules(self, tmp_path):
         # Use an isolated vault root with no rules files
         with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
             result = fetch_knowledge_rules("nonexistent_agent_xyz")
         assert result == ""
 
+    @pytest.mark.unit
     def test_reads_rules_file(self, tmp_path):
         rules_dir = tmp_path / "04-Agent-Knowledge" / "builder"
         rules_dir.mkdir(parents=True)
@@ -178,11 +198,14 @@ class TestFetchKnowledgeRules:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestFetchRecentDecisions:
+    @pytest.mark.unit
     def test_returns_empty_for_missing_decisions(self):
         result = fetch_recent_decisions("nonexistent_agent_xyz")
         assert result == ""
 
+    @pytest.mark.unit
     def test_reads_decisions_file(self, tmp_path):
         decisions_dir = tmp_path / "04-Agent-Knowledge" / "builder"
         decisions_dir.mkdir(parents=True)
@@ -195,6 +218,7 @@ class TestFetchRecentDecisions:
 
         assert "ADR" in result or "decision" in result.lower()
 
+    @pytest.mark.unit
     def test_returns_empty_when_no_decisions_file(self, tmp_path):
         # Should return empty string when decisions.md doesn't exist
         with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):

@@ -5,6 +5,7 @@ Uses mocked sources and synthesiser — no live API calls or file system depende
 """
 
 from __future__ import annotations
+import pytest
 
 from unittest.mock import patch
 
@@ -16,22 +17,28 @@ from kairix.briefing.pipeline import (
 )
 
 
+@pytest.mark.unit
 class TestTokenHelpers:
+    @pytest.mark.unit
     def test_estimate_tokens_empty(self):
         assert _estimate_tokens("") == 0
 
+    @pytest.mark.unit
     def test_estimate_tokens_scales_with_words(self):
         t10 = _estimate_tokens(" ".join(["word"] * 10))
         t100 = _estimate_tokens(" ".join(["word"] * 100))
         assert t100 > t10
 
 
+@pytest.mark.unit
 class TestTrimContext:
+    @pytest.mark.unit
     def test_no_trim_when_under_cap(self):
         context = {"memory_logs": "short content", "entity_stub": "also short"}
         result = _trim_context(context)
         assert result == context
 
+    @pytest.mark.unit
     def test_trims_when_over_cap(self):
         # Create context well above 3000 tokens
         long_text = " ".join(["word"] * 3000)
@@ -43,6 +50,7 @@ class TestTrimContext:
         total = sum(_estimate_tokens(v) for v in result.values())
         assert total <= _TOTAL_CONTEXT_CAP * 2  # some tolerance
 
+    @pytest.mark.unit
     def test_truncates_lowest_priority_first(self):
         """hybrid_search should be truncated before memory_logs."""
         # 3000 words * 1.3 = 3900 tokens — well over the 3000 cap
@@ -56,7 +64,9 @@ class TestTrimContext:
         assert len(result.get("hybrid_search", "")) <= len(long_text)
 
 
+@pytest.mark.unit
 class TestGenerateBriefing:
+    @pytest.mark.unit
     def test_basic_pipeline_runs(self, tmp_path):
         """Test that pipeline runs and returns a string."""
         mock_briefing_body = (
@@ -83,6 +93,7 @@ class TestGenerateBriefing:
         assert len(result) > 0
         assert "Briefing" in result or "briefing" in result.lower() or "Pending" in result
 
+    @pytest.mark.unit
     def test_header_is_included(self, tmp_path):
         with (
             patch("kairix.briefing.sources.fetch_memory_logs", return_value=""),
@@ -99,6 +110,7 @@ class TestGenerateBriefing:
         assert "# Agent Briefing" in result
         assert "builder" in result.lower()
 
+    @pytest.mark.unit
     def test_source_failure_does_not_raise(self, tmp_path):
         """Pipeline must not raise when a source fetcher fails."""
 
@@ -119,6 +131,7 @@ class TestGenerateBriefing:
 
         assert isinstance(result, str)
 
+    @pytest.mark.unit
     def test_synthesis_failure_returns_partial_briefing(self, tmp_path):
         """Synthesis API failure should return a partial/fallback briefing, not raise."""
         with (
@@ -136,6 +149,7 @@ class TestGenerateBriefing:
         assert isinstance(result, str)
         assert len(result) > 0
 
+    @pytest.mark.unit
     def test_output_file_is_written(self, tmp_path):
         with (
             patch("kairix.briefing.sources.fetch_memory_logs", return_value="logs"),

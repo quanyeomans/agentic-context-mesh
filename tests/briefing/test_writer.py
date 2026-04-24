@@ -3,6 +3,7 @@ Tests for the briefing writer (mnemosyne/briefing/writer.py).
 """
 
 from __future__ import annotations
+import pytest
 
 from pathlib import Path
 from unittest.mock import patch
@@ -10,13 +11,16 @@ from unittest.mock import patch
 from kairix.briefing.writer import write_briefing
 
 
+@pytest.mark.unit
 class TestWriteBriefing:
+    @pytest.mark.unit
     def test_creates_output_file(self, tmp_path):
         with patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path):
             out = write_briefing("builder", "## Pending & Blocked\nNone.", sources_count=3, token_estimate=200)
         assert out.exists()
         assert out.name == "builder-latest.md"
 
+    @pytest.mark.unit
     def test_creates_directory_if_missing(self, tmp_path):
         target_dir = tmp_path / "nested" / "briefing"
         assert not target_dir.exists()
@@ -25,6 +29,7 @@ class TestWriteBriefing:
         assert target_dir.exists()
         assert out.exists()
 
+    @pytest.mark.unit
     def test_file_contains_header(self, tmp_path):
         with patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path):
             out = write_briefing("builder", "## Pending\nNone.", sources_count=4, token_estimate=150)
@@ -34,6 +39,7 @@ class TestWriteBriefing:
         assert "Sources: 4" in content
         assert "Tokens: ~150" in content
 
+    @pytest.mark.unit
     def test_file_contains_body(self, tmp_path):
         body = "## Pending & Blocked\n- Fix the bug\n\n## Recent Decisions\n- ADR-001"
         with patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path):
@@ -42,6 +48,7 @@ class TestWriteBriefing:
         assert "Fix the bug" in content
         assert "ADR-001" in content
 
+    @pytest.mark.unit
     def test_overwrites_existing_file(self, tmp_path):
         with patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path):
             write_briefing("builder", "First content", sources_count=1)
@@ -50,6 +57,7 @@ class TestWriteBriefing:
         assert "Second content" in content
         assert "First content" not in content
 
+    @pytest.mark.unit
     def test_correct_filename_per_agent(self, tmp_path):
         with patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path):
             b_out = write_briefing("builder", "b content")
@@ -57,6 +65,7 @@ class TestWriteBriefing:
         assert b_out.name == "builder-latest.md"
         assert s_out.name == "shape-latest.md"
 
+    @pytest.mark.unit
     def test_returns_path_object(self, tmp_path):
         with patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path):
             result = write_briefing("builder", "content")

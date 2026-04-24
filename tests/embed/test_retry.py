@@ -30,7 +30,9 @@ def make_embed_response(texts):
     return {"data": [{"index": i, "embedding": [0.1] * DIMS} for i in range(len(texts))]}
 
 
+@pytest.mark.unit
 class TestEmbedBatch:
+    @pytest.mark.unit
     def test_success(self):
         texts = ["hello", "world"]
         with patch("requests.post") as mock_post:
@@ -39,6 +41,7 @@ class TestEmbedBatch:
         assert len(result) == 2
         assert all(len(v) == DIMS for v in result)
 
+    @pytest.mark.unit
     def test_results_ordered_by_index(self):
         texts = ["a", "b", "c"]
         # Return out-of-order
@@ -57,6 +60,7 @@ class TestEmbedBatch:
         assert result[1][0] == pytest.approx(0.2)
         assert result[2][0] == pytest.approx(0.3)
 
+    @pytest.mark.unit
     def test_retries_on_429(self):
         texts = ["hello"]
         rate_limit = make_mock_response(429, headers={"Retry-After": "0"})
@@ -67,6 +71,7 @@ class TestEmbedBatch:
                 result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
         assert len(result) == 1
 
+    @pytest.mark.unit
     def test_retries_on_500(self):
         texts = ["hello"]
         server_error = make_mock_response(500)
@@ -77,6 +82,7 @@ class TestEmbedBatch:
                 result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
         assert len(result) == 1
 
+    @pytest.mark.unit
     def test_raises_after_max_retries(self):
         texts = ["hello"]
         server_error = make_mock_response(500)
@@ -86,6 +92,7 @@ class TestEmbedBatch:
                 with pytest.raises(RuntimeError, match="failed after"):
                     embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
 
+    @pytest.mark.unit
     def test_400_raises_immediately(self):
         texts = ["hello"]
         bad_request = make_mock_response(400)
@@ -94,6 +101,7 @@ class TestEmbedBatch:
             with pytest.raises(requests.HTTPError):
                 embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
 
+    @pytest.mark.unit
     def test_timeout_retries(self):
         texts = ["hello"]
         success = make_mock_response(200, make_embed_response(texts))
@@ -103,6 +111,7 @@ class TestEmbedBatch:
                 result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
         assert len(result) == 1
 
+    @pytest.mark.unit
     def test_missing_api_key_raises(self):
         import os
 

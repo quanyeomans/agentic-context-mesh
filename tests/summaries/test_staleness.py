@@ -52,12 +52,14 @@ def _make_result(path: str, l0: str = "Abstract.", l1: str | None = None) -> Sum
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_init_creates_table(db: sqlite3.Connection):
     """init_summaries_db() should create the summaries table."""
     tables = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='summaries'").fetchall()
     assert len(tables) == 1, "summaries table not created"
 
 
+@pytest.mark.unit
 def test_init_is_idempotent(db: sqlite3.Connection):
     """Calling init_summaries_db() twice should not raise."""
     init_summaries_db(db)  # second call
@@ -70,12 +72,14 @@ def test_init_is_idempotent(db: sqlite3.Connection):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_is_stale_true_for_missing_path(db: sqlite3.Connection, tmp_path: Path):
     """is_stale() returns True when no summary exists for the path."""
     path = str(tmp_path / "nonexistent.md")
     assert is_stale(path, db) is True
 
 
+@pytest.mark.unit
 def test_is_stale_false_for_fresh_summary(db: sqlite3.Connection, sample_file: Path):
     """is_stale() returns False when summary mtime matches source mtime."""
     result = _make_result(str(sample_file))
@@ -84,6 +88,7 @@ def test_is_stale_false_for_fresh_summary(db: sqlite3.Connection, sample_file: P
     assert is_stale(str(sample_file), db) is False
 
 
+@pytest.mark.unit
 def test_is_stale_true_when_source_newer(db: sqlite3.Connection, sample_file: Path):
     """is_stale() returns True when source file is newer than stored mtime."""
     result = _make_result(str(sample_file))
@@ -105,6 +110,7 @@ def test_is_stale_true_when_source_newer(db: sqlite3.Connection, sample_file: Pa
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_write_and_get_summary_roundtrip(db: sqlite3.Connection, sample_file: Path):
     """write_summary() + get_summary() should persist and retrieve correctly."""
     result = _make_result(str(sample_file), l0="My abstract.", l1="My overview.")
@@ -118,6 +124,7 @@ def test_write_and_get_summary_roundtrip(db: sqlite3.Connection, sample_file: Pa
     assert retrieved.model == "gpt-4o-mini"
 
 
+@pytest.mark.unit
 def test_write_summary_upserts(db: sqlite3.Connection, sample_file: Path):
     """Writing a summary twice should update, not duplicate."""
     r1 = _make_result(str(sample_file), l0="First abstract.")
@@ -134,6 +141,7 @@ def test_write_summary_upserts(db: sqlite3.Connection, sample_file: Path):
     assert retrieved.l0 == "Updated abstract."
 
 
+@pytest.mark.unit
 def test_get_summary_returns_none_for_missing(db: sqlite3.Connection):
     """get_summary() returns None when path not in DB."""
     result = get_summary("/nonexistent/path.md", db)
@@ -145,6 +153,7 @@ def test_get_summary_returns_none_for_missing(db: sqlite3.Connection):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_get_stale_paths_returns_missing(db: sqlite3.Connection, tmp_path: Path):
     """get_stale_paths() includes paths with no summary."""
     p1 = str(tmp_path / "a.md")

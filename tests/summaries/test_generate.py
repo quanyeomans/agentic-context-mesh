@@ -4,6 +4,7 @@ Tests for kairix.summaries.generate
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import pytest
 
 from kairix.summaries.generate import (
     _first_n_words,
@@ -32,6 +33,7 @@ def _make_response(content: str, total_tokens: int = 42) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_generate_l0_returns_string():
     """generate_l0() makes one API call and returns the abstract string."""
     expected = "This doc covers Azure Key Vault setup and token rotation."
@@ -53,6 +55,7 @@ def test_generate_l0_returns_string():
     mock_ctx.post.assert_called_once()
 
 
+@pytest.mark.unit
 def test_generate_l0_uses_first_800_words():
     """generate_l0() passes only the first 800 words to the API."""
     # Build a document with 1200 words (word_0 to word_1199)
@@ -92,6 +95,7 @@ def test_generate_l0_uses_first_800_words():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_generate_summaries_handles_api_failure_gracefully(tmp_path: Path):
     """One failing file should not prevent others from succeeding."""
     good_file = tmp_path / "good.md"
@@ -124,6 +128,7 @@ def test_generate_summaries_handles_api_failure_gracefully(tmp_path: Path):
     assert results[0].l0 == "Good abstract."
 
 
+@pytest.mark.unit
 def test_generate_summaries_sleeps_between_batches(tmp_path: Path):
     """generate_summaries() should sleep between batches of batch_size."""
     # Create 3 files with batch_size=2 → sleep expected after index 2
@@ -165,11 +170,13 @@ def test_generate_summaries_sleeps_between_batches(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_first_n_words_truncates():
     text = "one two three four five"
     assert _first_n_words(text, 3) == "one two three"
 
 
+@pytest.mark.unit
 def test_first_n_words_short_doc():
     text = "short doc"
     assert _first_n_words(text, 100) == "short doc"

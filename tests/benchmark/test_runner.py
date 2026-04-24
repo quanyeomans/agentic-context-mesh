@@ -42,29 +42,35 @@ from kairix.benchmark.runner import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_exact_match_returns_1_for_direct_match() -> None:
     paths = ["04-Agent-Knowledge/builder/patterns.md", "some/other/doc.md"]
     assert _exact_match(paths, "04-Agent-Knowledge/builder/patterns.md") == 1.0
 
 
+@pytest.mark.unit
 def test_exact_match_returns_1_for_substring_match() -> None:
     paths = ["04-Agent-Knowledge/builder/patterns.md"]
     assert _exact_match(paths, "builder/patterns") == 1.0
 
 
+@pytest.mark.unit
 def test_exact_match_returns_0_when_no_match() -> None:
     paths = ["some/unrelated/doc.md"]
     assert _exact_match(paths, "builder/patterns.md") == 0.0
 
 
+@pytest.mark.unit
 def test_exact_match_returns_0_for_empty_gold() -> None:
     assert _exact_match(["any/path.md"], "") == 0.0
 
 
+@pytest.mark.unit
 def test_exact_match_returns_0_for_empty_paths() -> None:
     assert _exact_match([], "builder/patterns.md") == 0.0
 
 
+@pytest.mark.unit
 def test_exact_match_is_case_insensitive() -> None:
     paths = ["04-Agent-Knowledge/Builder/Patterns.md"]
     assert _exact_match(paths, "builder/patterns.md") == 1.0
@@ -75,20 +81,24 @@ def test_exact_match_is_case_insensitive() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_fuzzy_match_returns_1_for_suffix_match() -> None:
     paths = ["04-Agent-Knowledge/entities/jordan-blake.md"]
     assert _fuzzy_match(paths, "entities/jordan-blake.md") == 1.0
 
 
+@pytest.mark.unit
 def test_fuzzy_match_returns_0_for_no_match() -> None:
     paths = ["totally/unrelated/file.md"]
     assert _fuzzy_match(paths, "entities/jordan-blake.md") == 0.0
 
 
+@pytest.mark.unit
 def test_fuzzy_match_returns_0_for_empty_gold() -> None:
     assert _fuzzy_match(["any/path.md"], "") == 0.0
 
 
+@pytest.mark.unit
 def test_fuzzy_match_respects_topk_limit() -> None:
     # gold is in position 11 (0-indexed), beyond top-10
     paths = [f"unrelated/{i}.md" for i in range(10)] + ["04-Agent-Knowledge/entities/target.md"]
@@ -100,6 +110,7 @@ def test_fuzzy_match_respects_topk_limit() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_classification_score_returns_1_for_correct_type() -> None:
     """Returns 1.0 when classifier returns the expected type."""
     mock_result = MagicMock()
@@ -114,6 +125,7 @@ def test_classification_score_returns_1_for_correct_type() -> None:
     assert score == 1.0
 
 
+@pytest.mark.unit
 def test_classification_score_returns_0_for_wrong_type() -> None:
     """Returns 0.0 when classifier returns a different type."""
     mock_result = MagicMock()
@@ -128,6 +140,7 @@ def test_classification_score_returns_0_for_wrong_type() -> None:
     assert score == 0.0
 
 
+@pytest.mark.unit
 def test_classification_score_returns_0_on_exception() -> None:
     """Returns 0.0 when classifier raises an exception."""
     with patch("kairix.classify.rules.classify_content", side_effect=RuntimeError("oops")):
@@ -136,6 +149,7 @@ def test_classification_score_returns_0_on_exception() -> None:
     assert score == 0.0
 
 
+@pytest.mark.unit
 def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Falls back to LLM judge when rules return 'unknown'."""
     unknown_result = MagicMock()
@@ -158,6 +172,7 @@ def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyP
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_llm_judge_returns_score_from_api() -> None:
     """Returns float score from API response."""
     mock_resp_body = b'{"choices":[{"message":{"content":"0.8"}}]}'
@@ -180,6 +195,7 @@ def test_llm_judge_returns_score_from_api() -> None:
     assert score == pytest.approx(0.8)
 
 
+@pytest.mark.unit
 def test_llm_judge_clamps_to_range() -> None:
     """Clamps score to [0.0, 1.0]."""
     mock_resp_body = b'{"choices":[{"message":{"content":"1.5"}}]}'
@@ -194,6 +210,7 @@ def test_llm_judge_clamps_to_range() -> None:
     assert score == 1.0
 
 
+@pytest.mark.unit
 def test_llm_judge_returns_0_on_api_error() -> None:
     """Returns 0.0 when API call fails."""
     with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
@@ -202,12 +219,14 @@ def test_llm_judge_returns_0_on_api_error() -> None:
     assert score == 0.0
 
 
+@pytest.mark.unit
 def test_llm_judge_returns_0_for_empty_paths() -> None:
     """Returns 0.0 immediately when no paths are provided."""
     score = _llm_judge("q", [], [], "k", "https://e.com")
     assert score == 0.0
 
 
+@pytest.mark.unit
 def test_llm_judge_returns_0_on_bad_json() -> None:
     """Returns 0.0 when response body is not valid JSON."""
     mock_response = MagicMock()
@@ -226,18 +245,22 @@ def test_llm_judge_returns_0_on_bad_json() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_score_tier_production() -> None:
     assert "Production" in _score_tier(0.762)
 
 
+@pytest.mark.unit
 def test_score_tier_stable() -> None:
     assert "Phase 2" in _score_tier(0.69)
 
 
+@pytest.mark.unit
 def test_score_tier_developing() -> None:
     assert "BM25" in _score_tier(0.61)
 
 
+@pytest.mark.unit
 def test_score_tier_needs_work() -> None:
     assert "BM25" in _score_tier(0.45)
 
@@ -247,16 +270,19 @@ def test_score_tier_needs_work() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_category_diagnosis_temporal_low() -> None:
     msg = _category_diagnosis("temporal", 0.3)
     assert "temporal" in msg.lower() or "date" in msg.lower() or "chunking" in msg.lower()
 
 
+@pytest.mark.unit
 def test_category_diagnosis_entity_low() -> None:
     msg = _category_diagnosis("entity", 0.3)
     assert len(msg) > 0  # Just verify it returns a non-empty string
 
 
+@pytest.mark.unit
 def test_category_diagnosis_unknown_category() -> None:
     msg = _category_diagnosis("nonexistent_category", 0.5)
     assert isinstance(msg, str)  # Should not crash
@@ -267,6 +293,7 @@ def test_category_diagnosis_unknown_category() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_format_interpretation_returns_string() -> None:
     result = BenchmarkResult(
         meta={"suite_name": "test-suite", "system": "hybrid", "date": "2026-03-23", "n_cases": 4},

@@ -406,6 +406,7 @@ def test_search_result_has_fallback_used_field() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_rotate_query_log_moves_file(tmp_path: Path) -> None:
     """_rotate_query_log() moves path → path.1 and removes older rotated file."""
 
@@ -424,6 +425,7 @@ def test_rotate_query_log_moves_file(tmp_path: Path) -> None:
     assert rotated.read_text() != "old rotated\n"
 
 
+@pytest.mark.unit
 def test_log_query_event_writes_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() appends to JSONL log when _LOG_QUERIES is True."""
     import kairix.search.hybrid as hybrid_mod
@@ -441,6 +443,7 @@ def test_log_query_event_writes_when_enabled(tmp_path: Path, monkeypatch: pytest
     assert event["q"] == "test query"
 
 
+@pytest.mark.unit
 def test_log_query_event_noop_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() is a no-op when _LOG_QUERIES is False."""
     import kairix.search.hybrid as hybrid_mod
@@ -453,6 +456,7 @@ def test_log_query_event_noop_when_disabled(tmp_path: Path, monkeypatch: pytest.
     assert not log_path.exists()
 
 
+@pytest.mark.unit
 def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() rotates the file when it exceeds the size threshold."""
     import kairix.search.hybrid as hybrid_mod
@@ -470,6 +474,7 @@ def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.
     assert rotated.exists()
 
 
+@pytest.mark.unit
 def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """_open_vec_db() returns None when kairix DB is unavailable."""
     from kairix.search import hybrid as hybrid_mod
@@ -572,6 +577,7 @@ def test_cli_entity_error_json_includes_error_field(capsys: pytest.CaptureFixtur
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) -> None:
     """search() with TEMPORAL intent calls temporal rewriting (mocked)."""
     from kairix.search.bm25 import BM25Result

@@ -12,6 +12,7 @@ Verifies:
 """
 
 from __future__ import annotations
+import pytest
 
 import sqlite3
 from datetime import date
@@ -74,6 +75,7 @@ def _make_db_with_dated_chunks() -> sqlite3.Connection:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_both_none_returns_empty() -> None:
     """When both start and end are None, returns empty frozenset immediately."""
     db = _make_db_with_dated_chunks()
@@ -81,6 +83,7 @@ def test_both_none_returns_empty() -> None:
     assert result == frozenset()
 
 
+@pytest.mark.unit
 def test_returns_paths_in_window() -> None:
     """Paths with chunk_date in [start, end] are returned."""
     db = _make_db_with_dated_chunks()
@@ -90,6 +93,7 @@ def test_returns_paths_in_window() -> None:
     assert "old.md" not in result
 
 
+@pytest.mark.unit
 def test_excludes_paths_outside_window() -> None:
     """Paths with chunk_date outside window are excluded."""
     db = _make_db_with_dated_chunks()
@@ -99,6 +103,7 @@ def test_excludes_paths_outside_window() -> None:
     assert "mid.md" not in result
 
 
+@pytest.mark.unit
 def test_null_chunk_dates_always_excluded() -> None:
     """Documents with chunk_date=NULL are never included regardless of window."""
     db = _make_db_with_dated_chunks()
@@ -107,6 +112,7 @@ def test_null_chunk_dates_always_excluded() -> None:
     assert "nodated.md" not in result
 
 
+@pytest.mark.unit
 def test_start_boundary_inclusive() -> None:
     """Start date boundary is inclusive."""
     db = _make_db_with_dated_chunks()
@@ -114,6 +120,7 @@ def test_start_boundary_inclusive() -> None:
     assert "old.md" in result  # chunk_date='2026-01-10' == start
 
 
+@pytest.mark.unit
 def test_end_boundary_inclusive() -> None:
     """End date boundary is inclusive."""
     db = _make_db_with_dated_chunks()
@@ -121,6 +128,7 @@ def test_end_boundary_inclusive() -> None:
     assert "recent.md" in result  # chunk_date='2026-04-08' == end
 
 
+@pytest.mark.unit
 def test_start_only_no_upper_bound() -> None:
     """When end=None, all paths from start onward are returned."""
     db = _make_db_with_dated_chunks()
@@ -130,6 +138,7 @@ def test_start_only_no_upper_bound() -> None:
     assert "old.md" not in result
 
 
+@pytest.mark.unit
 def test_end_only_no_lower_bound() -> None:
     """When start=None, all paths up to end are returned."""
     db = _make_db_with_dated_chunks()
@@ -139,6 +148,7 @@ def test_end_only_no_lower_bound() -> None:
     assert "recent.md" not in result
 
 
+@pytest.mark.unit
 def test_empty_window_returns_empty() -> None:
     """Window that contains no dated chunks returns empty frozenset."""
     db = _make_db_with_dated_chunks()
@@ -146,6 +156,7 @@ def test_empty_window_returns_empty() -> None:
     assert result == frozenset()
 
 
+@pytest.mark.unit
 def test_returns_frozenset() -> None:
     """Return type is always frozenset."""
     db = _make_db_with_dated_chunks()
@@ -153,6 +164,7 @@ def test_returns_frozenset() -> None:
     assert isinstance(result, frozenset)
 
 
+@pytest.mark.unit
 def test_db_error_returns_empty_not_raises() -> None:
     """On DB error, returns empty frozenset without raising."""
     db = sqlite3.connect(":memory:")  # no tables — will error on query
@@ -160,6 +172,7 @@ def test_db_error_returns_empty_not_raises() -> None:
     assert result == frozenset()
 
 
+@pytest.mark.unit
 def test_multiple_chunks_same_document_deduplicated() -> None:
     """Multiple chunks (seq>0) for same document path appear only once in result."""
     db = sqlite3.connect(":memory:")

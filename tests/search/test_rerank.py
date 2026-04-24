@@ -19,13 +19,16 @@ def _make_result(path: str, score: float, snippet: str = "") -> FusedResult:
     )
 
 
+@pytest.mark.unit
 class TestRerank:
+    @pytest.mark.unit
     def test_returns_unchanged_when_sentence_transformers_not_installed(self):
         results = [_make_result("a.md", 0.9), _make_result("b.md", 0.5)]
         with patch("kairix.search.rerank._get_cross_encoder", return_value=None):
             out = rerank("test query", results)
         assert out == results  # same objects, same order
 
+    @pytest.mark.unit
     def test_reorders_by_cross_encoder_score(self):
         results = [
             _make_result("a.md", 0.9, snippet="irrelevant content"),
@@ -41,6 +44,7 @@ class TestRerank:
         assert out[0].path == "b.md"
         assert out[1].path == "a.md"
 
+    @pytest.mark.unit
     def test_overwrites_boosted_score(self):
         results = [_make_result("a.md", 0.9), _make_result("b.md", 0.1)]
         mock_encoder = MagicMock()
@@ -53,6 +57,7 @@ class TestRerank:
         assert out[0].path == "b.md"
         assert out[0].boosted_score == pytest.approx(7.0)
 
+    @pytest.mark.unit
     def test_tail_results_appended_unchanged(self):
         many = [_make_result(f"{i}.md", float(i)) for i in range(25)]
         scores = list(range(RERANK_CANDIDATE_LIMIT))
@@ -69,6 +74,7 @@ class TestRerank:
         expected_tail = {f"{i}.md" for i in range(RERANK_CANDIDATE_LIMIT, 25)}
         assert tail_paths == expected_tail
 
+    @pytest.mark.unit
     def test_returns_unchanged_on_inference_error(self):
         results = [_make_result("a.md", 0.9), _make_result("b.md", 0.5)]
         mock_encoder = MagicMock()
@@ -79,11 +85,13 @@ class TestRerank:
 
         assert out == results
 
+    @pytest.mark.unit
     def test_empty_results_returned_unchanged(self):
         with patch("kairix.search.rerank._get_cross_encoder", return_value=MagicMock()):
             out = rerank("query", [])
         assert out == []
 
+    @pytest.mark.unit
     def test_rerank_score_field_populated(self):
         results = [_make_result("a.md", 0.5)]
         mock_encoder = MagicMock()

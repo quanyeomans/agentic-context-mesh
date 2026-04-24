@@ -120,19 +120,24 @@ def board_no_dates(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestChunkBoard:
+    @pytest.mark.unit
     def test_parses_all_columns(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         assert len(chunks) > 0
 
+    @pytest.mark.unit
     def test_chunk_type_is_board_card(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         assert all(c.chunk_type == "board_card" for c in chunks)
 
+    @pytest.mark.unit
     def test_source_path_preserved(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         assert all(c.source_path == str(board_file) for c in chunks)
 
+    @pytest.mark.unit
     def test_extracts_completed_date(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         # "Phase 1 shipped" card should have completed date 2026-03-10
@@ -141,6 +146,7 @@ class TestChunkBoard:
         assert phase1[0].date == date(2026, 3, 10)
         assert phase1[0].metadata.get("date_field") == "completed"
 
+    @pytest.mark.unit
     def test_extracts_started_date_when_no_completed(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         # "Phase 2 temporal" card has only [started::2026-03-23]
@@ -149,6 +155,7 @@ class TestChunkBoard:
         assert phase2[0].date == date(2026, 3, 23)
         assert phase2[0].metadata.get("date_field") == "started"
 
+    @pytest.mark.unit
     def test_completed_takes_priority_over_started(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         # "Fix BM25 bug" has both [completed::2026-03-12] and [started::2026-03-11]
@@ -156,17 +163,20 @@ class TestChunkBoard:
         assert bug
         assert bug[0].date == date(2026, 3, 12), "completed should take priority over started"
 
+    @pytest.mark.unit
     def test_cards_without_dates_get_date_none(self, board_no_dates: Path) -> None:
         chunks = chunk_board(str(board_no_dates))
         assert len(chunks) > 0
         undated = [c for c in chunks if c.date is None]
         assert len(undated) == len(chunks), "All cards should have date=None when no date tags"
 
+    @pytest.mark.unit
     def test_cards_without_dates_have_status(self, board_no_dates: Path) -> None:
         chunks = chunk_board(str(board_no_dates))
         done_chunks = [c for c in chunks if c.metadata.get("status") == "done"]
         assert done_chunks, "Done column cards should have status='done'"
 
+    @pytest.mark.unit
     def test_column_status_mapping(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         # In Progress column → status="in_progress"
@@ -174,14 +184,17 @@ class TestChunkBoard:
         assert in_progress
         assert in_progress[0].metadata.get("status") == "in_progress"
 
+    @pytest.mark.unit
     def test_card_id_is_set(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         assert all("card_id" in c.metadata for c in chunks)
 
+    @pytest.mark.unit
     def test_returns_empty_on_missing_file(self) -> None:
         chunks = chunk_board("/nonexistent/path/board.md")
         assert chunks == []
 
+    @pytest.mark.unit
     def test_created_date_used_as_fallback(self, board_file: Path) -> None:
         chunks = chunk_board(str(board_file))
         # "Seed entities.db" has [created::2026-03-23] only
@@ -196,12 +209,15 @@ class TestChunkBoard:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestChunkMemoryLog:
+    @pytest.mark.unit
     def test_date_extracted_from_filename(self, memory_log_file: Path) -> None:
         chunks = chunk_memory_log(str(memory_log_file))
         assert len(chunks) > 0
         assert all(c.date == date(2026, 3, 22) for c in chunks)
 
+    @pytest.mark.unit
     def test_splits_on_section_headers(self, memory_log_file: Path) -> None:
         chunks = chunk_memory_log(str(memory_log_file))
         headings = [c.metadata.get("section_heading") for c in chunks]
@@ -209,37 +225,44 @@ class TestChunkMemoryLog:
         assert "Decisions" in headings
         assert "Next Steps" in headings
 
+    @pytest.mark.unit
     def test_chunk_type_is_memory_section(self, memory_log_file: Path) -> None:
         chunks = chunk_memory_log(str(memory_log_file))
         assert all(c.chunk_type == "memory_section" for c in chunks)
 
+    @pytest.mark.unit
     def test_source_path_preserved(self, memory_log_file: Path) -> None:
         chunks = chunk_memory_log(str(memory_log_file))
         assert all(c.source_path == str(memory_log_file) for c in chunks)
 
+    @pytest.mark.unit
     def test_frontmatter_stripped(self, memory_log_file: Path) -> None:
         chunks = chunk_memory_log(str(memory_log_file))
         # Frontmatter "date: 2026-03-22" should not appear in chunk text
         all_text = " ".join(c.text for c in chunks)
         assert "kanban-plugin" not in all_text
 
+    @pytest.mark.unit
     def test_section_text_contains_content(self, memory_log_file: Path) -> None:
         chunks = chunk_memory_log(str(memory_log_file))
         decisions = [c for c in chunks if c.metadata.get("section_heading") == "Decisions"]
         assert decisions
         assert "BM25" in decisions[0].text or "RRF" in decisions[0].text
 
+    @pytest.mark.unit
     def test_no_headings_produces_single_chunk(self, undated_memory_log: Path) -> None:
         chunks = chunk_memory_log(str(undated_memory_log))
         assert len(chunks) == 1
         assert "raw notes" in chunks[0].text
 
+    @pytest.mark.unit
     def test_invalid_filename_gives_none_date(self, tmp_path: Path) -> None:
         p = tmp_path / "random_notes.md"
         p.write_text("## Notes\n\nSome content.", encoding="utf-8")
         chunks = chunk_memory_log(str(p))
         assert all(c.date is None for c in chunks)
 
+    @pytest.mark.unit
     def test_returns_empty_on_missing_file(self) -> None:
         chunks = chunk_memory_log("/nonexistent/path/2026-03-22.md")
         assert chunks == []
@@ -250,17 +273,21 @@ class TestChunkMemoryLog:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestChunkFile:
+    @pytest.mark.unit
     def test_dispatches_memory_log_by_filename(self, memory_log_file: Path) -> None:
         chunks = chunk_file(str(memory_log_file))
         assert len(chunks) > 0
         assert all(c.chunk_type == "memory_section" for c in chunks)
 
+    @pytest.mark.unit
     def test_dispatches_board_by_directory(self, board_file: Path) -> None:
         chunks = chunk_file(str(board_file))
         assert len(chunks) > 0
         assert all(c.chunk_type == "board_card" for c in chunks)
 
+    @pytest.mark.unit
     def test_board_detected_by_content(self, tmp_path: Path) -> None:
         """File not in Boards/ dir but with kanban content should be detected as board."""
         content = textwrap.dedent("""\
@@ -278,6 +305,7 @@ class TestChunkFile:
         # Content has ## Done so should be detected as board
         assert any(c.chunk_type == "board_card" for c in chunks)
 
+    @pytest.mark.unit
     def test_memory_filename_takes_priority(self, tmp_path: Path) -> None:
         """YYYY-MM-DD.md should always be treated as memory log."""
         content = textwrap.dedent("""\

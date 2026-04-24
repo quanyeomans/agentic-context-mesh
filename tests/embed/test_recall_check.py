@@ -29,6 +29,7 @@ from kairix.embed.recall_check import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_get_recall_queries_returns_defaults() -> None:
     """Returns non-empty list of (id, query, gold_fragment) tuples by default."""
     queries = _get_recall_queries()
@@ -41,6 +42,7 @@ def test_get_recall_queries_returns_defaults() -> None:
         assert isinstance(gold, str)
 
 
+@pytest.mark.unit
 def test_get_recall_queries_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """RECALL_QUERIES env var overrides defaults when valid JSON."""
     custom = [["T1", "what is the test?", "test-fragment"]]
@@ -49,6 +51,7 @@ def test_get_recall_queries_uses_env_override(monkeypatch: pytest.MonkeyPatch) -
     assert queries == [("T1", "what is the test?", "test-fragment")]
 
 
+@pytest.mark.unit
 def test_get_recall_queries_falls_back_on_bad_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """Falls back to defaults when RECALL_QUERIES env var is invalid JSON."""
     monkeypatch.setenv("RECALL_QUERIES", "not-valid-json{{{")
@@ -61,6 +64,7 @@ def test_get_recall_queries_falls_back_on_bad_json(monkeypatch: pytest.MonkeyPat
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_embed_query_returns_none_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when Azure credentials are not set."""
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
@@ -69,6 +73,7 @@ def test_embed_query_returns_none_without_credentials(monkeypatch: pytest.Monkey
     assert result is None
 
 
+@pytest.mark.unit
 def test_embed_query_returns_bytes_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns packed float bytes when API call succeeds."""
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "fake-key")
@@ -86,6 +91,7 @@ def test_embed_query_returns_bytes_on_success(monkeypatch: pytest.MonkeyPatch) -
     assert len(result) == 1536 * 4  # 1536 float32s x 4 bytes
 
 
+@pytest.mark.unit
 def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when the API call raises an exception."""
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "fake-key")
@@ -102,6 +108,7 @@ def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_vsearch_direct_returns_empty_for_no_vectors(tmp_path: pytest.TempPathFactory) -> None:
     """Returns [] when vectors_vec table has no rows."""
     db = sqlite3.connect(":memory:")
@@ -116,6 +123,7 @@ def test_vsearch_direct_returns_empty_for_no_vectors(tmp_path: pytest.TempPathFa
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_check_recall_skips_when_embed_returns_none() -> None:
     """check_recall() marks queries as skipped when _embed_query returns None."""
     db = sqlite3.connect(":memory:")
@@ -129,6 +137,7 @@ def test_check_recall_skips_when_embed_returns_none() -> None:
     assert all(d.get("skipped") for d in result["detail"])
 
 
+@pytest.mark.unit
 def test_check_recall_returns_structure() -> None:
     """check_recall() always returns a dict with required keys."""
     db = sqlite3.connect(":memory:")
@@ -144,6 +153,7 @@ def test_check_recall_returns_structure() -> None:
     assert isinstance(result["detail"], list)
 
 
+@pytest.mark.unit
 def test_check_recall_counts_hit_when_gold_in_results() -> None:
     """check_recall() counts a hit when gold fragment appears in vsearch results."""
     db = sqlite3.connect(":memory:")

@@ -30,6 +30,7 @@ from kairix.mcp.server import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestBudgetInference:
     """_infer_budget selects the right token budget by query intent."""
 
@@ -113,6 +114,7 @@ class TestBudgetInference:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestPlainLanguageDocstrings:
     """Verify tool docstrings are written at grade 8 reading level."""
 
@@ -163,6 +165,7 @@ class TestPlainLanguageDocstrings:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestEntityFirstHint:
     """When intent is ENTITY, the entity graph result appears first."""
 
@@ -255,6 +258,7 @@ class TestEntityFirstHint:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestExtractEntityName:
 
     @pytest.mark.unit

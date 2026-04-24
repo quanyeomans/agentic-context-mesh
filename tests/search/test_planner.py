@@ -17,6 +17,7 @@ Tests cover:
 """
 
 from __future__ import annotations
+import pytest
 
 from dataclasses import dataclass
 from typing import Any
@@ -51,7 +52,9 @@ def _search_fn_factory(results_by_query: dict[str, list[_FakeResult]]):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestDecompose:
+    @pytest.mark.unit
     def test_fallback_when_import_fails(self) -> None:
         """Should return [query] when mnemosyne._azure is not importable."""
         planner = QueryPlanner()
@@ -59,6 +62,7 @@ class TestDecompose:
             result = planner.decompose("what is the meaning of life?")
         assert result == ["what is the meaning of life?"]
 
+    @pytest.mark.unit
     def test_fallback_when_chat_completion_raises(self) -> None:
         """Should return [query] when chat_completion raises."""
         planner = QueryPlanner()
@@ -68,6 +72,7 @@ class TestDecompose:
             result = planner.decompose("query that fails")
         assert result == ["query that fails"]
 
+    @pytest.mark.unit
     def test_fallback_when_response_is_empty(self) -> None:
         """Should return [query] when chat_completion returns empty string."""
         planner = QueryPlanner()
@@ -77,6 +82,7 @@ class TestDecompose:
             result = planner.decompose("what happened in march")
         assert result == ["what happened in march"]
 
+    @pytest.mark.unit
     def test_fallback_when_json_invalid(self) -> None:
         """Should return [query] when response is not valid JSON."""
         planner = QueryPlanner()
@@ -86,6 +92,7 @@ class TestDecompose:
             result = planner.decompose("some query")
         assert result == ["some query"]
 
+    @pytest.mark.unit
     def test_fallback_when_json_not_list(self) -> None:
         """Should return [query] when response JSON is not a list."""
         planner = QueryPlanner()
@@ -95,6 +102,7 @@ class TestDecompose:
             result = planner.decompose("what")
         assert result == ["what"]
 
+    @pytest.mark.unit
     def test_fallback_when_list_too_long(self) -> None:
         """Should return [query] when response list has more than 3 items."""
         planner = QueryPlanner()
@@ -104,6 +112,7 @@ class TestDecompose:
             result = planner.decompose("something")
         assert result == ["something"]
 
+    @pytest.mark.unit
     def test_fallback_when_list_is_empty(self) -> None:
         """Should return [query] when response list is empty."""
         planner = QueryPlanner()
@@ -113,6 +122,7 @@ class TestDecompose:
             result = planner.decompose("empty response")
         assert result == ["empty response"]
 
+    @pytest.mark.unit
     def test_success_single_sub_query(self) -> None:
         """Should return the single sub-query from a simple query."""
         planner = QueryPlanner()
@@ -122,6 +132,7 @@ class TestDecompose:
             result = planner.decompose("simple query passthrough")
         assert result == ["simple query passthrough"]
 
+    @pytest.mark.unit
     def test_success_multi_hop_three_subs(self) -> None:
         """Should return 3 sub-queries for a complex multi-hop query."""
         planner = QueryPlanner()
@@ -131,6 +142,7 @@ class TestDecompose:
             result = planner.decompose("complex query needing decomposition")
         assert result == ["sub1", "sub2", "sub3"]
 
+    @pytest.mark.unit
     def test_filters_empty_strings_from_list(self) -> None:
         """Should filter out empty strings from the sub-query list."""
         planner = QueryPlanner()
@@ -140,6 +152,7 @@ class TestDecompose:
             result = planner.decompose("query with blanks")
         assert result == ["sub1", "sub2"]
 
+    @pytest.mark.unit
     def test_with_neo4j_unavailable(self) -> None:
         """Should use plain prompt when Neo4j client is unavailable."""
         planner = QueryPlanner()
@@ -152,6 +165,7 @@ class TestDecompose:
         assert isinstance(result, list)
         assert len(result) >= 1
 
+    @pytest.mark.unit
     def test_with_neo4j_context_injected(self) -> None:
         """Should inject entity context when Neo4j graph context returns a string."""
         planner = QueryPlanner()
@@ -175,7 +189,9 @@ class TestDecompose:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 class TestRetrieveAndMerge:
+    @pytest.mark.unit
     def test_single_sub_query_returns_results(self) -> None:
         """Single sub-query: results returned in order."""
         planner = QueryPlanner()
@@ -188,6 +204,7 @@ class TestRetrieveAndMerge:
         for i in range(5):
             assert f"doc{i}.md" in paths
 
+    @pytest.mark.unit
     def test_multi_sub_query_deduplication(self) -> None:
         """Same document in multiple sub-query results → appears once in merged."""
         planner = QueryPlanner()
@@ -210,6 +227,7 @@ class TestRetrieveAndMerge:
         assert "only-q1.md" in paths
         assert "only-q2.md" in paths
 
+    @pytest.mark.unit
     def test_rrf_boosts_document_in_multiple_lists(self) -> None:
         """Document appearing in both sub-query result lists should rank higher."""
         planner = QueryPlanner()
@@ -230,6 +248,7 @@ class TestRetrieveAndMerge:
         # shared.md appears in both lists at rank 2 → RRF score higher than unique docs at rank 2
         assert paths[0] == "shared.md", f"Expected shared.md first, got {paths}"
 
+    @pytest.mark.unit
     def test_search_fn_exception_handled(self) -> None:
         """If search_fn raises for one sub-query, other results still returned."""
         planner = QueryPlanner()
@@ -244,6 +263,7 @@ class TestRetrieveAndMerge:
         paths = [r.path for r in merged]
         assert "good.md" in paths
 
+    @pytest.mark.unit
     def test_respects_final_top_k(self) -> None:
         """Result count should not exceed final_top_k."""
         planner = QueryPlanner()
@@ -253,6 +273,7 @@ class TestRetrieveAndMerge:
         merged = planner.retrieve_and_merge(["q1", "q2"], search_fn, top_k_per_sub=5, final_top_k=3)
         assert len(merged) <= 3
 
+    @pytest.mark.unit
     def test_dict_results_with_file_key(self) -> None:
         """Handles dict results with 'file' key (BM25-style)."""
         planner = QueryPlanner()
@@ -262,6 +283,7 @@ class TestRetrieveAndMerge:
         merged = planner.retrieve_and_merge(["q"], search_fn, top_k_per_sub=5, final_top_k=5)
         assert len(merged) == 1
 
+    @pytest.mark.unit
     def test_dict_results_with_path_key(self) -> None:
         """Handles dict results with 'path' key."""
         planner = QueryPlanner()
@@ -271,6 +293,7 @@ class TestRetrieveAndMerge:
         merged = planner.retrieve_and_merge(["q"], search_fn, top_k_per_sub=5, final_top_k=5)
         assert len(merged) == 1
 
+    @pytest.mark.unit
     def test_nested_result_path_attribute(self) -> None:
         """Handles results with .result.path (BudgetedResult style)."""
         planner = QueryPlanner()
@@ -288,6 +311,7 @@ class TestRetrieveAndMerge:
         merged = planner.retrieve_and_merge(["q"], search_fn, top_k_per_sub=5, final_top_k=5)
         assert len(merged) == 1
 
+    @pytest.mark.unit
     def test_top_k_per_sub_limits_results_per_sub(self) -> None:
         """top_k_per_sub limits how many results per sub-query enter RRF."""
         planner = QueryPlanner()

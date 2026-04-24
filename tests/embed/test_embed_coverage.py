@@ -35,6 +35,7 @@ from kairix.embed.embed import (
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_encode_vector_returns_bytes() -> None:
     vec = [0.1, 0.2, 0.3]
     result = encode_vector(vec)
@@ -42,6 +43,7 @@ def test_encode_vector_returns_bytes() -> None:
     assert len(result) == 3 * 4  # 3 float32s x 4 bytes
 
 
+@pytest.mark.unit
 def test_encode_vector_round_trips() -> None:
     vec = [1.0, -0.5, 0.0, 0.25]
     result = encode_vector(vec)
@@ -51,6 +53,7 @@ def test_encode_vector_round_trips() -> None:
         assert abs(a - b) < 1e-6
 
 
+@pytest.mark.unit
 def test_build_hash_seq() -> None:
     assert build_hash_seq("abc123", 0) == "abc123_0"
     assert build_hash_seq("abc123", 3) == "abc123_3"
@@ -61,12 +64,14 @@ def test_build_hash_seq() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_chunk_text_returns_list_of_dicts() -> None:
     chunks = chunk_text("Hello world. This is a test.", chunk_size=100, overlap=0)
     assert isinstance(chunks, list)
     assert all("seq" in c and "pos" in c and "text" in c for c in chunks)
 
 
+@pytest.mark.unit
 def test_chunk_text_single_chunk_short_text() -> None:
     text = "Short text."
     chunks = chunk_text(text, chunk_size=500, overlap=0)
@@ -76,6 +81,7 @@ def test_chunk_text_single_chunk_short_text() -> None:
     assert chunks[0]["pos"] == 0
 
 
+@pytest.mark.unit
 def test_chunk_text_multiple_chunks() -> None:
     # Generate text longer than chunk_size
     text = "Word " * 400  # ~2000 chars
@@ -86,6 +92,7 @@ def test_chunk_text_multiple_chunks() -> None:
         assert c["seq"] == i
 
 
+@pytest.mark.unit
 def test_chunk_text_empty_string() -> None:
     # Empty string produces one chunk — the function doesn't filter empty results
     result = chunk_text("")
@@ -97,6 +104,7 @@ def test_chunk_text_empty_string() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_get_azure_config_returns_tuple(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
@@ -108,6 +116,7 @@ def test_get_azure_config_returns_tuple(monkeypatch: pytest.MonkeyPatch) -> None
     assert deployment == "my-deploy"
 
 
+@pytest.mark.unit
 def test_get_azure_config_raises_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
@@ -115,6 +124,7 @@ def test_get_azure_config_raises_without_api_key(monkeypatch: pytest.MonkeyPatch
         _get_azure_config()
 
 
+@pytest.mark.unit
 def test_get_azure_config_raises_without_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key")
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
@@ -127,6 +137,7 @@ def test_get_azure_config_raises_without_endpoint(monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_preflight_check_returns_dims_on_success() -> None:
     fake_vec = [0.1] * 1536
     mock_resp = MagicMock()
@@ -139,6 +150,7 @@ def test_preflight_check_returns_dims_on_success() -> None:
     assert dims == 1536
 
 
+@pytest.mark.unit
 def test_preflight_check_raises_on_http_error() -> None:
     mock_resp = MagicMock()
     mock_resp.raise_for_status.side_effect = Exception("HTTP 401")
@@ -161,6 +173,7 @@ def _make_staging_db() -> sqlite3.Connection:
     return db
 
 
+@pytest.mark.unit
 def test_ensure_staging_table_creates_table() -> None:
     db = sqlite3.connect(":memory:")
     ensure_staging_table(db)
@@ -169,6 +182,7 @@ def test_ensure_staging_table_creates_table() -> None:
     assert cur.fetchone() is not None
 
 
+@pytest.mark.unit
 def test_ensure_staging_table_idempotent() -> None:
     db = sqlite3.connect(":memory:")
     ensure_staging_table(db)
@@ -177,6 +191,7 @@ def test_ensure_staging_table_idempotent() -> None:
     assert cur.fetchone() is not None
 
 
+@pytest.mark.unit
 def test_stage_embedding_inserts_row() -> None:
     db = sqlite3.connect(":memory:")
     # content_vectors table required by stage_embedding
@@ -188,6 +203,7 @@ def test_stage_embedding_inserts_row() -> None:
     assert count == 1
 
 
+@pytest.mark.unit
 def test_flush_staging_to_vec_returns_zero_when_empty() -> None:
     db = _make_staging_db()
     ensure_staging_table(db)
@@ -195,6 +211,7 @@ def test_flush_staging_to_vec_returns_zero_when_empty() -> None:
     assert result == 0
 
 
+@pytest.mark.unit
 def test_flush_staging_to_vec_moves_rows() -> None:
     db = _make_staging_db()
     ensure_staging_table(db)
@@ -223,18 +240,21 @@ def test_flush_staging_to_vec_moves_rows() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_batched_splits_correctly() -> None:
     items = list(range(10))
     result = list(batched(items, size=3))
     assert result == [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
 
 
+@pytest.mark.unit
 def test_batched_single_batch() -> None:
     items = [1, 2, 3]
     result = list(batched(items, size=10))
     assert result == [[1, 2, 3]]
 
 
+@pytest.mark.unit
 def test_batched_empty() -> None:
     result = list(batched([], size=5))
     assert result == []
@@ -245,6 +265,7 @@ def test_batched_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_chunk_text_splits_on_sentence_boundary() -> None:
     """Chunker prefers sentence boundary when paragraph boundary not available."""
     # Create text long enough to force a split, no double-newline paragraph breaks
@@ -259,6 +280,7 @@ def test_chunk_text_splits_on_sentence_boundary() -> None:
         assert c["text"].strip()
 
 
+@pytest.mark.unit
 def test_chunk_text_splits_on_paragraph_boundary() -> None:
     """Chunker prefers double-newline paragraph boundary."""
     para_1 = "First paragraph about architecture decisions.\n\n"
@@ -273,6 +295,7 @@ def test_chunk_text_splits_on_paragraph_boundary() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_run_embed_with_no_chunks_returns_stats() -> None:
     """run_embed() with no pending chunks returns embedded=0 immediately."""
     from kairix.embed.embed import run_embed
@@ -296,6 +319,7 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
     assert "estimated_cost_usd" in result
 
 
+@pytest.mark.unit
 def test_run_embed_raises_on_dim_mismatch() -> None:
     """run_embed() raises SchemaVersionError when Azure returns unexpected dims."""
     from kairix.embed.embed import run_embed
