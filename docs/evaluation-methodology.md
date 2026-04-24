@@ -189,7 +189,7 @@ A **regression** is flagged when:
 
 where `alert_threshold` defaults to 0.05 (5% relative drop).
 
-Integration in `qmd-reindex.sh` (after `kairix embed`):
+Integration in `kairix embed` (after `kairix embed`):
 
 ```bash
 kairix eval monitor \

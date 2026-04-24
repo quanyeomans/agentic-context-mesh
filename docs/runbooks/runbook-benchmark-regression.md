@@ -55,7 +55,7 @@ tail -50 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/azure-embed.log
 # Look for: failed= count > 0, dimension mismatch errors, partial completion
 
 # Check database state
-sqlite3 ~/.cache/qmd/index.sqlite \
+sqlite3 ~/.cache/kairix/index.sqlite \
   'SELECT model, COUNT(*) FROM content_vectors GROUP BY model;'
 # If mixed models present: dimension mismatch likely — run kairix embed --force again
 
@@ -100,7 +100,7 @@ kairix benchmark run --suite suites/your-suite.yaml
 
 # Check if gold paths in the suite still exist in the index
 # (vault reorganisation can break gold path references)
-tail -20 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/qmd-reindex.log | grep -i "gold suite"
+tail -20 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/kairix-embed.log | grep -i "gold suite"
 # "WARN: N/M gold paths missing" → suite needs rebuilding, not index
 ```
 

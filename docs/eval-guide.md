@@ -11,7 +11,7 @@ For the methodology and research basis, see [evaluation-methodology.md](evaluati
 - `kairix` installed and configured
 - `KAIRIX_KV_NAME` env var set (for Azure Key Vault credential resolution), **or**
   `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` set directly
-- QMD index populated (`kairix embed` completed)
+- Kairix index populated (`kairix embed` completed)
 - `kairix benchmark` working (`kairix benchmark validate --suite <suite>`)
 
 ---
@@ -19,7 +19,7 @@ For the methodology and research basis, see [evaluation-methodology.md](evaluati
 ## Quickstart: Generate Your First Suite
 
 ```bash
-# Generate 100 cases from your QMD corpus
+# Generate 100 cases from your document corpus
 kairix eval generate \
   --output suites/generated.yaml \
   --count 100
@@ -35,7 +35,7 @@ kairix benchmark run \
 
 That's it. The generate command:
 1. Runs calibration anchors (15 frozen test cases) to verify the judge is working
-2. Samples documents from your QMD corpus
+2. Samples documents from your document corpus
 3. Prompts gpt-4o-mini to generate retrieval queries for each document
 4. Runs hybrid search for each query
 5. Judges the top-10 retrieved documents with graded relevance (0/1/2)
@@ -54,7 +54,7 @@ kairix eval generate \
   --output PATH           # Required. Output suite YAML path.
   [--count N]             # Target case count (default: 100)
   [--categories LIST]     # Comma-separated: recall,temporal,entity,conceptual,multi_hop,procedural
-  [--db PATH]             # QMD SQLite path (default: ~/.cache/qmd/index.sqlite)
+  [--db PATH]             # Kairix database path (default: ~/.cache/kairix/index.sqlite)
   [--deployment NAME]     # Azure deployment (default: gpt-4o-mini)
   [--no-calibrate]        # Skip calibration anchor check (faster, less safe)
   [--seed N]              # Random seed for reproducibility
@@ -93,7 +93,7 @@ Use this when you have an existing suite (e.g. manually curated or created when 
 kairix eval enrich \
   --suite PATH            # Required. Input suite YAML.
   --output PATH           # Required. Output suite YAML (can equal --suite for in-place).
-  [--db PATH]             # QMD SQLite path
+  [--db PATH]             # Kairix database path
   [--deployment NAME]     # Azure deployment (default: gpt-4o-mini)
   [--agent NAME]          # Agent for retrieval scoping (default: shape)
 ```
@@ -127,7 +127,7 @@ Run a canary suite and check for retrieval regression.
 ```
 kairix eval monitor \
   --suite PATH            # Required. Canary suite YAML.
-  [--log PATH]            # Monitor log (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)
+  [--log PATH]            # Monitor log (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)
   [--alert-threshold F]   # Relative NDCG drop to flag regression (default: 0.05)
   [--window-days N]       # Rolling baseline window in days (default: 7)
   [--agent NAME]          # Agent for retrieval scoping (default: shape)
@@ -141,7 +141,7 @@ kairix eval monitor \
 **Example — integration in reindex script:**
 
 ```bash
-# In qmd-reindex.sh, after kairix embed:
+# In kairix embed, after kairix embed:
 kairix eval monitor \
   --suite /path/to/suites/canary.yaml \
   --log /path/to/logs/kairix-monitor.jsonl \
@@ -172,7 +172,7 @@ Generate a markdown report from the monitor log.
 
 ```
 kairix eval report \
-  [--log PATH]            # Monitor log (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)
+  [--log PATH]            # Monitor log (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)
   [--days N]              # Days of history to include (default: 30)
   [--output PATH]         # Markdown output path (stdout if omitted)
 ```
@@ -237,7 +237,7 @@ To increase acceptance rate: use `--count` larger than your target (the pipeline
    kairix eval monitor --suite suites/canary.yaml
    ```
 
-3. **Add to your reindex script** (`qmd-reindex.sh`):
+3. **Add to your reindex script** (`kairix embed`):
    ```bash
    kairix eval monitor \
      --suite /path/to/canary.yaml \
@@ -265,9 +265,9 @@ Use `--no-calibrate` to bypass for development/testing. Do not bypass calibratio
 
 ### "No documents returned from sample_documents"
 
-- Check `--db` path points to a populated QMD index
+- Check `--db` path points to a populated kairix index
 - Run `kairix embed` if the index is empty
-- Verify the index has documents: `sqlite3 ~/.cache/qmd/index.sqlite "SELECT COUNT(*) FROM documents;"`
+- Verify the index has documents: `sqlite3 ~/.cache/kairix/index.sqlite "SELECT COUNT(*) FROM documents;"`
 
 ### NDCG scores look too low
 

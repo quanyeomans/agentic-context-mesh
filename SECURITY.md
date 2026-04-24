@@ -117,7 +117,7 @@ Vault content is sent to **Azure OpenAI** for:
 No vault content is stored by Azure beyond the API call. Azure OpenAI does not use customer data for model training by default (see Microsoft's Data Privacy terms).
 
 All vectors, entity data, and search indexes live in SQLite and Neo4j on your own infrastructure:
-- `~/.cache/qmd/index.sqlite` — QMD FTS + sqlite-vec vectors (1536-dim)
+- `~/.cache/kairix/index.sqlite` — Kairix FTS + sqlite-vec vectors (1536-dim)
 - Neo4j — entity graph (if installed)
 
 ---
@@ -126,7 +126,7 @@ All vectors, entity data, and search indexes live in SQLite and Neo4j on your ow
 
 The service account running kairix requires:
 - Read access to the Obsidian vault directory
-- Read/write to `${KAIRIX_DATA_DIR}/` and `~/.cache/qmd/`
+- Read/write to `${KAIRIX_DATA_DIR}/` and `~/.cache/kairix/`
 - Read access to `/run/secrets/kairix.env` (group membership)
 - `az` CLI authenticated via managed identity (no stored credentials)
 
@@ -158,7 +158,7 @@ Dependabot is configured (`.github/dependabot.yml`) to open PRs for dependency u
 
 Kairix does not produce a dedicated audit log. Operational visibility:
 - Embed logs: `${KAIRIX_DATA_DIR}/logs/embed.log` — timestamps, chunk counts, errors
-- Query logs: `~/.cache/qmd/queries.jsonl` (when `KAIRIX_LOG_QUERIES=1`)
+- Query logs: `~/.cache/kairix/queries.jsonl` (when `KAIRIX_LOG_QUERIES=1`)
 - Benchmark results: `benchmark-results/*.json` — archived per-run NDCG scores
 - Azure OpenAI usage: visible in Azure Portal → Azure OpenAI → Monitoring → Requests
 

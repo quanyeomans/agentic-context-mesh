@@ -101,26 +101,22 @@ az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpo
 - Set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` in the service env file
 - Or use `az login --service-principal` in the deploy script
 
-### 3. QMD Installed and Running
+### 3. Kairix Index
 
-Kairix writes into QMD's SQLite index. QMD must be installed and have indexed your vault before running `kairix embed`.
+Kairix owns its own SQLite database for full-text search (FTS5) and vector storage (sqlite-vec). No external search tool is required.
 
 ```bash
-# Verify QMD is installed
-qmd --version        # should report 1.1.2 or later
+# Run the initial index build
+kairix embed
 
-# Verify QMD index exists
-ls ~/.cache/qmd/index.sqlite   # or the path QMD is configured to use
+# Verify the index exists
+ls ~/.cache/kairix/index.sqlite
 
-# Verify QMD has indexed content
-qmd status
-# Expected: N files, N vectors, last updated <date>
+# Check index health
+kairix onboard check
 ```
 
-**sqlite-vec:** Kairix uses the sqlite-vec extension bundled with QMD. No separate installation needed — the extension is discovered automatically from QMD's `node_modules` directory. If the discovery fails at startup, set:
-```bash
-export SQLITE_VEC_PATH="/path/to/vec0.so"
-```
+**sqlite-vec:** Installed automatically as a pip dependency (`sqlite-vec>=0.1.6`). No manual extension path configuration needed.
 
 ### 4. Neo4j (optional — entity graph)
 
@@ -170,7 +166,7 @@ sudo chown -R <service-user>:<service-user> \
 ```
 
 Kairix expects:
-- `$KAIRIX_VAULT_ROOT` — vault root (QMD indexes this)
+- `$KAIRIX_VAULT_ROOT` — vault root (kairix indexes this)
 - `$KAIRIX_DATA_DIR/briefing/` — session briefings output directory
 - `$KAIRIX_DATA_DIR/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `$KAIRIX_WORKSPACE_ROOT/<agent>/memory/` — agent memory logs (required for briefing pipeline)
@@ -466,7 +462,7 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `KAIRIX_NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
 | `KAIRIX_LOG_QUERIES` | Set to `1` to log all search queries | Off |
-| `SQLITE_VEC_PATH` | Override sqlite-vec `.so` path | Auto-discovered from QMD node_modules |
+| `SQLITE_VEC_PATH` | Override sqlite-vec `.so` path | Auto-discovered via pip package |
 
 ---
 
@@ -488,14 +484,14 @@ See [EVALUATION.md](EVALUATION.md) for current scores, benchmark methodology, an
 # Embed ran and found/embedded the right number of files
 grep "Done —" ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log | tail -3
 
-# No dimension mismatch errors (would indicate QMD cron conflict)
+# No dimension mismatch errors (would indicate concurrent index writers)
 grep -i "dimension mismatch" ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log | tail -5
 
 # Entity crawler ran cleanly
 tail -5 ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/entity-relation-seed.log
 
 # Vector count is stable or growing
-qmd status
+kairix onboard check
 
 # Entity graph health
 kairix curator health
@@ -503,7 +499,7 @@ kairix curator health
 
 ### Key metrics to track
 
-- **Vector count:** Should grow as vault grows. Sudden drop indicates QMD reindex issue.
+- **Vector count:** Should grow as vault grows. Sudden drop indicates index rebuild issue.
 - **Entity count:** Grows as new entity stubs are added and vault crawler runs. Check with `kairix curator health`.
 - **Entity graph density:** Growing node/relationship counts improve entity-aware retrieval.
 - **Recall gate:** Post-embed recall check in embed log — should be ≥ 4/5. If < 4/5, run `kairix embed --force`.
@@ -576,9 +572,9 @@ If `az account show` fails, run `az login` or check the VM's managed identity as
 The sqlite-vec `.so` file can't be found.
 
 ```bash
-# Check if QMD is installed and has sqlite-vec bundled
-which qmd
-find $(dirname $(which qmd))/../ -name "vec0.so" 2>/dev/null
+# Check if sqlite-vec is available
+python3 -c "import sqlite_vec; print(sqlite_vec)"
+find $(dirname $(python3 -c "import sqlite_vec; print(sqlite_vec)"))/../ -name "vec0.so" 2>/dev/null
 
 # Override manually
 export SQLITE_VEC_PATH="/path/to/vec0.so"
@@ -587,11 +583,11 @@ kairix embed --limit 5
 
 ### `SchemaVersionError: missing columns`
 
-QMD has been upgraded to a version with a changed schema.
+The database schema has changed between versions.
 
 ```bash
-# Check QMD version
-qmd --version
+# Check kairix version
+kairix --version
 
 # Run schema compatibility tests
 .venv/bin/pytest tests/ -k "schema" -v
@@ -605,11 +601,11 @@ The embed pipeline hasn't run, or the vectors_vec table is empty or wrong-dimens
 
 ```bash
 # Check vector count
-sqlite3 ~/.cache/qmd/index.sqlite "SELECT COUNT(*) FROM vectors_vec;"
+sqlite3 ~/.cache/kairix/index.sqlite "SELECT COUNT(*) FROM vectors_vec;"
 # Should be > 0
 
 # Check dimensions
-sqlite3 ~/.cache/qmd/index.sqlite \
+sqlite3 ~/.cache/kairix/index.sqlite \
   "SELECT length(embedding)/4 FROM vectors_vec LIMIT 1;"
 # Should be 1536
 
@@ -620,29 +616,27 @@ kairix embed --force
 
 ### `Dimension mismatch` errors in embed log
 
-QMD's reindex cron (`qmd update`) ran during a long embed run and recreated `vectors_vec` with different dimensions. This is handled automatically by the retry logic in embed.py (ADR-M08), but if it's happening frequently:
+Another process wrote to the kairix database during an embed run and recreated `vectors_vec` with different dimensions. This is handled automatically by the retry logic in embed.py (ADR-M08), but if it's happening frequently, check for concurrent writers:
 
 ```bash
-# Check QMD cron schedule — if it runs during long embed windows, offset it
-crontab -l | grep qmd
-
-# Schedule embed cron to run just after QMD reindex, not during it
+# Check for other processes accessing the database
+fuser ~/.cache/kairix/index.sqlite
 ```
 
 ### Embedding model mismatch
 
-If another tool runs `qmd embed` as a cron job alongside kairix, it may overwrite Azure vectors (`text-embedding-3-large`, 1536-dim) with local GGUF vectors (`float[768]`), causing dimension mismatch errors or `vec=0` results.
+If another tool writes embeddings with a different model or dimension to the same database, it causes dimension mismatch errors or `vec=0` results.
 
 **Detect:**
 ```bash
 # Check for mixed embedding models in content_vectors
-sqlite3 ~/.cache/qmd/index.sqlite \
+sqlite3 ~/.cache/kairix/index.sqlite \
   "SELECT model, COUNT(*) FROM content_vectors GROUP BY model;"
 # If you see two models, the conflict is active
 ```
 
 **Fix:**
-1. Remove or comment out any `qmd embed` call from other cron jobs — `qmd update` (BM25/FTS reindex) is safe to keep; only `qmd embed` causes the conflict
+1. Ensure no other tool writes embeddings to the kairix database — only `kairix embed` should write vectors
 2. Force-rebuild Azure vectors: `kairix embed --force`
 3. Verify: the query above should show only `text-embedding-3-large`
 
@@ -714,17 +708,17 @@ If the wrapper script has changed in the new version, re-run:
 bash scripts/install.sh --skip-smoke   # re-downloads and re-installs wrapper
 ```
 
-### Upgrading QMD
+### Upgrading kairix
 
 ```bash
-# Check QMD changelog for schema changes first
-# Then run compatibility tests from the kairix source (clone temporarily if needed)
-git clone --depth=1 https://github.com/quanyeomans/agentic-context-mesh /tmp/kairix-src
-cd /tmp/kairix-src
-/opt/kairix/.venv/bin/pytest tests/ -k "schema" -v
+# Install new version
+pip install --force-reinstall --no-deps "kairix==<new-version>"
 
-# If tests pass, the upgrade is compatible
-rm -rf /tmp/kairix-src
+# Run schema tests to verify compatibility
+pytest tests/ -k "schema" -v
+
+# Run onboard check
+kairix onboard check
 ```
 
 ---

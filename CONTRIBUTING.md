@@ -14,21 +14,21 @@ pip install -e ".[dev]"
 # Unit + integration (fast, no external deps required)
 pytest tests/unit/ tests/integration/ -v
 
-# E2E (requires real QMD index + Azure credentials)
+# E2E (requires real kairix index + Azure credentials)
 KAIRIX_E2E=1 pytest tests/e2e/ -v -s
 ```
 
 ### About skipped tests
 
 Integration tests that exercise the `vectors_vec` virtual table are marked `skip` unless sqlite-vec
-is installed. sqlite-vec ships as part of QMD and is present in the production runtime — it's not
-a separate install for most contributors. The skips are expected and do not indicate broken tests.
+is installed. sqlite-vec is a pip dependency (`sqlite-vec>=0.1.6`) and is loaded automatically.
+The skips are expected on systems where the native extension fails to compile and do not indicate broken tests.
 
-To run with sqlite-vec locally, install QMD and point the tests at the QMD node_modules:
+To install sqlite-vec:
 
 ```bash
-# Rough example — adapt to your QMD install path
-LD_PRELOAD=$(find ~/.local -name "vec0.so" 2>/dev/null | head -1) pytest tests/integration/
+pip install "sqlite-vec>=0.1.6"
+pytest tests/integration/
 ```
 
 ## Architecture
@@ -37,14 +37,14 @@ LD_PRELOAD=$(find ~/.local -name "vec0.so" 2>/dev/null | head -1) pytest tests/i
 kairix/
   cli.py              — top-level dispatcher (kairix <subcommand>)
   embed/              — Azure OpenAI embedding pipeline → sqlite-vec
-    schema.py         — QMD DB path resolution, schema validation, pending chunk queries
+    schema.py         — DB path resolution, schema validation, pending chunk queries
     embed.py          — Azure API client, chunking, vector encoding, DB writes
     recall_check.py   — Post-embed quality gate
     cli.py            — argparse entrypoint, lockfile, run logging
   search/             — Hybrid BM25 + vector retrieval
     hybrid.py         — Full pipeline: intent → BM25+vec → RRF → entity boost → budget
     intent.py         — Query intent classification (6 intents)
-    bm25.py           — QMD FTS wrapper
+    bm25.py           — Kairix FTS wrapper
     vector.py         — sqlite-vec wrapper
     rrf.py            — Reciprocal Rank Fusion + entity/procedural boosts
     budget.py         — Token budget management (L0/L1/L2 tiering)
@@ -62,14 +62,14 @@ kairix/
   benchmark/          — YAML-driven benchmark runner (NDCG@10/Hit@5/MRR@10)
 ```
 
-**Key invariant:** `kairix/embed/schema.py` is the only place that knows about QMD's table structure.
-`embed.py` calls `schema.py` functions — it does not contain raw SQL against QMD's tables.
-If QMD's schema changes, `schema.py` is the single file to update.
+**Key invariant:** `kairix/db/schema.py` is the single source of truth for the database schema.
+`embed.py` calls schema functions — it does not contain raw SQL against the database tables.
+If the schema changes, `schema.py` is the single file to update.
 
 ## Schema changes
 
-If you find that QMD's schema has changed (new QMD version), see [QMD_COMPAT.md](QMD_COMPAT.md)
-for the update procedure. The schema validation on startup will tell you exactly what changed.
+The schema validation on `kairix onboard check` will tell you if columns or tables are missing.
+Run `pytest tests/ -k "schema" -v` to verify compatibility after any schema change.
 
 ## Adding support for other OpenAI-compatible endpoints
 
@@ -103,4 +103,4 @@ When `develop` is validated on the deployment target:
 2. In that PR: change `pyproject.toml` version from `2026.X.YaN` → `2026.X.Y`; update `CHANGELOG.md`
 3. Merge the PR
 4. Tag: `git tag v2026.X.Y && git push origin v2026.X.Y`
-5. Update [QMD_COMPAT.md](QMD_COMPAT.md) if a new QMD version was tested
+5. Deploy to VM: `./infra/scripts/kairix-deploy.sh v2026.X.Y`
