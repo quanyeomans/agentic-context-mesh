@@ -7,12 +7,13 @@ All underlying kairix module calls are mocked.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline
+from kairix.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline, tool_usage_guide
 
 # ---------------------------------------------------------------------------
 # tool_search
@@ -295,3 +296,76 @@ def test_build_server_raises_when_mcp_not_installed() -> None:
 
         with pytest.raises(ImportError, match="mcp"):
             build_server()
+
+
+# ---------------------------------------------------------------------------
+# tool_usage_guide (TEST-5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def guide_file(tmp_path: Path) -> Path:
+    """Create a temporary agent-usage-guide.md."""
+    guide = tmp_path / "agent-usage-guide.md"
+    guide.write_text(
+        "# Kairix Agent Usage Guide\n\n"
+        "## Search\nHow to search the vault.\n\n"
+        "## Budget\nToken budget controls cost.\nDefault budget is 3000 tokens.\n\n"
+        "## Troubleshooting\nDebug tips for common issues.\n",
+        encoding="utf-8",
+    )
+    return guide
+
+
+@pytest.mark.unit
+def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
+    """Empty topic returns full guide content."""
+    import kairix.mcp.server as _mod
+    server_file = Path(_mod.__file__)
+    expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
+    if expected.exists():
+        result = tool_usage_guide(topic="")
+        assert result["error"] == ""
+        assert len(result["content"]) > 0
+    else:
+        expected.parent.mkdir(parents=True, exist_ok=True)
+        expected.write_text(guide_file.read_text(), encoding="utf-8")
+        try:
+            result = tool_usage_guide(topic="")
+            assert result["error"] == ""
+            assert "Kairix Agent Usage Guide" in result["content"]
+        finally:
+            expected.unlink(missing_ok=True)
+
+
+@pytest.mark.unit
+def test_tool_usage_guide_topic_filter(guide_file: Path) -> None:
+    """Specific topic filters to relevant sections."""
+    import kairix.mcp.server as _mod
+    server_file = Path(_mod.__file__)
+    expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
+    if expected.exists():
+        result = tool_usage_guide(topic="budget")
+        assert result["error"] == ""
+        assert "budget" in result["content"].lower()
+    else:
+        expected.parent.mkdir(parents=True, exist_ok=True)
+        expected.write_text(guide_file.read_text(), encoding="utf-8")
+        try:
+            result = tool_usage_guide(topic="budget")
+            assert result["error"] == ""
+            assert "budget" in result["content"].lower()
+        finally:
+            expected.unlink(missing_ok=True)
+
+
+@pytest.mark.unit
+def test_tool_usage_guide_missing_file(tmp_path: Path, monkeypatch) -> None:
+    """Missing guide file returns error dict."""
+    import kairix as _kairix_pkg
+    import kairix.mcp.server as _mod
+    monkeypatch.setattr(_mod, "__file__", str(tmp_path / "kairix" / "mcp" / "server.py"))
+    monkeypatch.setattr(_kairix_pkg, "__file__", str(tmp_path / "kairix" / "__init__.py"))
+    result = tool_usage_guide(topic="anything")
+    assert result["error"] != ""
+    assert result["content"] == ""

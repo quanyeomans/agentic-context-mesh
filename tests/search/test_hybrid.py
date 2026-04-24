@@ -607,3 +607,76 @@ def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) 
         result = search("what happened last week?", agent="builder")
 
     assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# _enrich_chunk_dates tests (TEST-6)
+# ---------------------------------------------------------------------------
+
+
+def _make_chunk_date_db(tmp_path: Path, rows: list[tuple[str, str, str]]) -> Path:
+    """Create a SQLite DB with documents + content_vectors tables for chunk_date tests."""
+    import sqlite3
+
+    db_path = tmp_path / "chunk_dates.sqlite"
+    db = sqlite3.connect(str(db_path))
+    db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT NOT NULL)")
+    db.execute("CREATE TABLE content_vectors (hash TEXT, chunk_date TEXT)")
+    for h, p, cd in rows:
+        db.execute("INSERT INTO documents (hash, path) VALUES (?, ?)", (h, p))
+        db.execute("INSERT INTO content_vectors (hash, chunk_date) VALUES (?, ?)", (h, cd))
+    db.commit()
+    db.close()
+    return db_path
+
+
+@pytest.mark.unit
+def test_enrich_chunk_dates_populates_matching_paths(tmp_path: Path) -> None:
+    """_enrich_chunk_dates sets chunk_date on FusedResult for matching paths."""
+    from kairix.search.hybrid import _enrich_chunk_dates
+    from kairix.search.rrf import FusedResult
+
+    db_path = _make_chunk_date_db(tmp_path, [
+        ("h1", "/vault/doc-a.md", "2026-04-20"),
+        ("h2", "/vault/doc-b.md", "2026-04-21"),
+    ])
+    fused = [
+        FusedResult(path="/vault/doc-a.md", collection="c", title="A", snippet="s", rrf_score=0.5, boosted_score=0.5),
+        FusedResult(path="/vault/doc-b.md", collection="c", title="B", snippet="s", rrf_score=0.4, boosted_score=0.4),
+        FusedResult(path="/vault/doc-c.md", collection="c", title="C", snippet="s", rrf_score=0.3, boosted_score=0.3),
+    ]
+    _enrich_chunk_dates(fused, db_path)
+    assert fused[0].chunk_date == "2026-04-20"
+    assert fused[1].chunk_date == "2026-04-21"
+    assert fused[2].chunk_date == ""
+
+
+@pytest.mark.unit
+def test_enrich_chunk_dates_handles_missing_db(tmp_path: Path) -> None:
+    """_enrich_chunk_dates returns silently when DB does not exist."""
+    from kairix.search.hybrid import _enrich_chunk_dates
+    from kairix.search.rrf import FusedResult
+
+    fused = [FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)]
+    _enrich_chunk_dates(fused, tmp_path / "nonexistent.sqlite")
+    assert fused[0].chunk_date == ""
+
+
+@pytest.mark.unit
+def test_enrich_chunk_dates_empty_list(tmp_path: Path) -> None:
+    """_enrich_chunk_dates is a no-op for empty list."""
+    from kairix.search.hybrid import _enrich_chunk_dates
+    db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/doc.md", "2026-04-20")])
+    _enrich_chunk_dates([], db_path)
+
+
+@pytest.mark.unit
+def test_enrich_chunk_dates_no_matching_paths(tmp_path: Path) -> None:
+    """_enrich_chunk_dates leaves chunk_date empty when paths don't match."""
+    from kairix.search.hybrid import _enrich_chunk_dates
+    from kairix.search.rrf import FusedResult
+
+    db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/other.md", "2026-04-20")])
+    fused = [FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)]
+    _enrich_chunk_dates(fused, db_path)
+    assert fused[0].chunk_date == ""
