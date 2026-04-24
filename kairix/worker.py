@@ -44,7 +44,7 @@ def _run_entity_seed() -> None:
         from kairix.vault.cli import main as vault_main
 
         logger.info("worker: starting entity seed")
-        vault_main(["crawl", "--vault-root", "/data/vault"])
+        vault_main(["crawl", "--vault-root", os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))])
         logger.info("worker: entity seed complete")
     except Exception as exc:
         logger.warning("worker: entity seed failed — %s", exc)

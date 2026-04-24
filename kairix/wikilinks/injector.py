@@ -25,10 +25,10 @@ from pathlib import Path
 from kairix.wikilinks.resolver import WikiEntity
 
 # Injection log path
-_LOG_PATH = "/data/kairix/wikilinks-log.jsonl"
+_LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
-_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault")
-_WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces")
+_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 
 # Eligible base paths for injection
 _ELIGIBLE_PREFIXES = (

@@ -19,18 +19,18 @@ class TestEpisodicRouting:
     def test_episodic_builder_default_date(self):
         today = date.today().isoformat()
         path = resolve_target_path("builder", "episodic")
-        assert path == f"/data/workspaces/builder/memory/{today}.md"
+        assert path.endswith(f"/builder/memory/{today}.md")
 
     @pytest.mark.unit
     def test_episodic_shape_default_date(self):
         today = date.today().isoformat()
         path = resolve_target_path("shape", "episodic")
-        assert path == f"/data/workspaces/shape/memory/{today}.md"
+        assert path.endswith(f"/shape/memory/{today}.md")
 
     @pytest.mark.unit
     def test_episodic_custom_date(self):
         path = resolve_target_path("builder", "episodic", date="2026-03-23")
-        assert path == "/data/workspaces/builder/memory/2026-03-23.md"
+        assert path.endswith("/builder/memory/2026-03-23.md")
 
     @pytest.mark.unit
     def test_episodic_growth(self):
@@ -52,12 +52,12 @@ class TestProceduralRuleRouting:
     @pytest.mark.unit
     def test_builder_rules(self):
         path = resolve_target_path("builder", "procedural-rule")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/rules.md"
+        assert path.endswith("/04-Agent-Knowledge/builder/rules.md")
 
     @pytest.mark.unit
     def test_shape_rules(self):
         path = resolve_target_path("shape", "procedural-rule")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/rules.md"
+        assert path.endswith("/04-Agent-Knowledge/shape/rules.md")
 
     @pytest.mark.unit
     def test_shared_rules(self):
@@ -77,12 +77,12 @@ class TestProceduralPatternRouting:
     @pytest.mark.unit
     def test_builder_patterns(self):
         path = resolve_target_path("builder", "procedural-pattern")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/patterns.md"
+        assert path.endswith("/04-Agent-Knowledge/builder/patterns.md")
 
     @pytest.mark.unit
     def test_shape_patterns(self):
         path = resolve_target_path("shape", "procedural-pattern")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/patterns.md"
+        assert path.endswith("/04-Agent-Knowledge/shape/patterns.md")
 
     @pytest.mark.unit
     def test_shared_patterns(self):
@@ -96,12 +96,12 @@ class TestSemanticDecisionRouting:
     @pytest.mark.unit
     def test_builder_decisions(self):
         path = resolve_target_path("builder", "semantic-decision")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/decisions.md"
+        assert path.endswith("/04-Agent-Knowledge/builder/decisions.md")
 
     @pytest.mark.unit
     def test_shape_decisions(self):
         path = resolve_target_path("shape", "semantic-decision")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/decisions.md"
+        assert path.endswith("/04-Agent-Knowledge/shape/decisions.md")
 
     @pytest.mark.unit
     def test_shared_decisions(self):
@@ -115,12 +115,12 @@ class TestSemanticFactRouting:
     @pytest.mark.unit
     def test_builder_facts(self):
         path = resolve_target_path("builder", "semantic-fact")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/builder/facts.md"
+        assert path.endswith("/04-Agent-Knowledge/builder/facts.md")
 
     @pytest.mark.unit
     def test_shape_facts(self):
         path = resolve_target_path("shape", "semantic-fact")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/shape/facts.md"
+        assert path.endswith("/04-Agent-Knowledge/shape/facts.md")
 
     @pytest.mark.unit
     def test_shared_facts(self):
@@ -134,7 +134,7 @@ class TestEntityRouting:
     @pytest.mark.unit
     def test_entity_person(self):
         path = resolve_target_path("builder", "entity", entity_type="person", entity_slug="jordan-blake")
-        assert path == "/data/obsidian-vault/04-Agent-Knowledge/entities/person/jordan-blake.md"
+        assert path.endswith("/04-Agent-Knowledge/entities/person/jordan-blake.md")
 
     @pytest.mark.unit
     def test_entity_organisation(self):

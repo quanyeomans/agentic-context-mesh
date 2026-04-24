@@ -15,7 +15,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_BRIEFING_DIR = Path(os.environ.get("KAIRIX_BRIEFING_DIR", "/data/kairix/briefing"))
+_BRIEFING_DIR = Path(os.environ.get("KAIRIX_BRIEFING_DIR", str(Path.home() / ".cache" / "kairix" / "briefing")))
 
 
 def write_briefing(

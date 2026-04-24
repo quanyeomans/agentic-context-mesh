@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault"))
-_WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces"))
-_MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", "/data/workspaces"))
+_VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
+_WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces")))
+_MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", str(Path.home() / ".kairix" / "workspaces")))
 
 # Approximate token estimator: words * 1.3
 _WORDS_PER_TOKEN = 1.3

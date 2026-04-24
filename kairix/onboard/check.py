@@ -350,7 +350,7 @@ def check_neo4j_reachable() -> CheckResult:
 
 def check_agent_knowledge_populated() -> CheckResult:
     """At least one agent has memory logs (required for briefing pipeline)."""
-    workspace_root = os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces")
+    workspace_root = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
     p = Path(workspace_root)
     if not p.exists():
         return CheckResult(

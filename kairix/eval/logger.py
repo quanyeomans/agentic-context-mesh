@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_LOG_PATH = os.environ.get(
     "KAIRIX_SEARCH_LOG",
-    str(Path(os.environ.get("KAIRIX_DATA_DIR", "/data/kairix")) / "logs" / "search.jsonl"),
+    str(Path(os.environ.get("KAIRIX_DATA_DIR", str(Path.home() / ".cache" / "kairix"))) / "logs" / "search.jsonl"),
 )
 
 

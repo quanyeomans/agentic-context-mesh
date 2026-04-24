@@ -61,11 +61,11 @@ def embed_text_as_bytes(text: str) -> bytes | None:
 # Configuration
 # ---------------------------------------------------------------------------
 
-SEARCH_LOG_PATH = Path(os.environ.get("KAIRIX_SEARCH_LOG", "/data/kairix/logs/search.jsonl"))
+SEARCH_LOG_PATH = Path(os.environ.get("KAIRIX_SEARCH_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "search.jsonl")))
 
 # Query logging (privacy-sensitive — disabled by default)
 _LOG_QUERIES: bool = os.getenv("KAIRIX_LOG_QUERIES", "0") == "1"
-_QUERY_LOG_PATH: Path = Path(os.getenv("KAIRIX_QUERY_LOG", "/data/kairix/logs/queries.jsonl"))
+_QUERY_LOG_PATH: Path = Path(os.getenv("KAIRIX_QUERY_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "queries.jsonl")))
 
 # Rotate when file exceeds this size
 _QUERY_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB

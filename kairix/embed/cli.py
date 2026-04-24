@@ -26,7 +26,7 @@ from .schema import (
     validate_schema,
 )
 
-LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", "/data/kairix/logs/azure-embed.log"))
+LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "embed.log")))
 def _default_lockfile() -> Path:
     """Lockfile in user cache dir — avoids world-writable /tmp on multi-user systems."""
     from kairix.db import get_db_path

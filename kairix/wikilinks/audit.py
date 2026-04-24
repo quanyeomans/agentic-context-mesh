@@ -19,7 +19,7 @@ from pathlib import Path
 from kairix.wikilinks.injector import _MAX_FILE_SIZE, should_inject
 from kairix.wikilinks.resolver import WikiEntity
 
-_LOG_PATH = "/data/kairix/wikilinks-log.jsonl"
+_LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
 # Regex to find all [[wikilinks]] in content
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -30,7 +30,7 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 # ---------------------------------------------------------------------------
 
 
-def find_broken_links(vault_root: str = "/data/obsidian-vault") -> list[dict]:
+def find_broken_links(vault_root: str = str(Path.home() / "kairix-vault")) -> list[dict]:
     """
     Scan vault for [[wikilinks]] pointing to non-existent files/folders.
 
@@ -108,7 +108,7 @@ def find_unlinked_mentions(
             eligible.append(md_file)
 
     # Also check workspace memory files
-    workspaces_root = Path("/data/workspaces")
+    workspaces_root = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces")))
     if workspaces_root.exists():
         for md_file in workspaces_root.rglob("*.md"):
             if should_inject(str(md_file)):

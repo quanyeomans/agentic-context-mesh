@@ -24,11 +24,11 @@ from kairix.wikilinks.injector import (
 )
 from kairix.wikilinks.resolver import get_entities
 
-_VAULT_ROOT = "/data/obsidian-vault"
-_WORKSPACES_ROOT = "/data/workspaces"
+_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_WORKSPACES_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 
 # Timestamp file to track last run
-_LAST_RUN_PATH = "/data/kairix/wikilinks-last-run"
+_LAST_RUN_PATH = os.environ.get("KAIRIX_DATA_DIR", str(Path.home() / ".cache" / "kairix")) + "/wikilinks-last-run"
 
 
 def main(argv: list[str] | None = None) -> None:

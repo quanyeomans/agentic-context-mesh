@@ -15,8 +15,9 @@ Path mappings:
 
 from __future__ import annotations
 
-import os as _os
+import os
 from datetime import date as _date
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -25,8 +26,8 @@ from datetime import date as _date
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant"})
 SHARED_AGENT = "shared"
 
-_VAULT_ROOT = _os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault")
-_WORKSPACE_ROOT = _os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces")
+_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 _KNOWLEDGE_ROOT = f"{_VAULT_ROOT}/04-Agent-Knowledge"
 
 # Agents where "shared" maps to the shared knowledge area

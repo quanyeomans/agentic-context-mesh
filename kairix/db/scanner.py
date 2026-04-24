@@ -10,7 +10,7 @@ Usage::
     from kairix.db.scanner import VaultScanner, CollectionConfig
 
     db = open_db(extensions=False)
-    scanner = VaultScanner(db, vault_root=Path("/data/obsidian-vault"))
+    scanner = VaultScanner(db, vault_root=Path("~/kairix-vault").expanduser())
     report = scanner.scan([
         CollectionConfig(name="vault-areas", path="02-Areas"),
         CollectionConfig(name="vault-knowledge", path="05-Knowledge"),

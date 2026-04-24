@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = _os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault")
-_WORKSPACE_ROOT = _os.environ.get("KAIRIX_WORKSPACE_ROOT", "/data/workspaces")
+_VAULT_ROOT = _os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_WORKSPACE_ROOT = _os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 # override with KAIRIX_BOARDS_DIR env var
 _VAULT_BOARDS_DIR = _os.environ.get("KAIRIX_BOARDS_DIR", f"{_VAULT_ROOT}/01-Projects/Boards")
 

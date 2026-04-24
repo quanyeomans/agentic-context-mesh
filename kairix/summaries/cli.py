@@ -32,7 +32,7 @@ def _get_cred(secret_name: str) -> str:
 # Vault doc discovery
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = Path("/data/obsidian-vault")
+_VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
 
 
 def _discover_vault_docs() -> list[str]:
@@ -46,7 +46,7 @@ def _discover_vault_docs() -> list[str]:
 
 
 def _open_db() -> sqlite3.Connection:
-    db_path = Path(os.environ.get("KAIRIX_SUMMARIES_DB", "/data/kairix/summaries.db"))
+    db_path = Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     from kairix.summaries.staleness import init_summaries_db
