@@ -147,7 +147,7 @@ def synthesise(state: ResearcherState) -> dict[str, Any]:
         return {"synthesis": synthesis}
     except Exception as exc:
         logger.warning("research: synthesise LLM call failed — %s", exc)
-        return {"synthesis": f"Found {len(chunks)} relevant documents but synthesis failed.", "error": str(exc)}
+        return {"synthesis": f"Found {len(chunks)} relevant documents but synthesis failed.", "error": "Synthesis failed — check server logs for details."}
 
 
 def give_up(state: ResearcherState) -> dict[str, Any]:

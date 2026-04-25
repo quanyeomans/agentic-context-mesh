@@ -296,6 +296,8 @@ def tool_research(
     Returns:
         dict with: query, synthesis, retrieved_chunks, gaps, confidence, turns, error.
     """
+    # Clamp max_turns to prevent unbounded LLM call amplification
+    max_turns = min(max(1, max_turns), 10)
     try:
         from kairix.research.graph import run_research
 

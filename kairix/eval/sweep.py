@@ -26,6 +26,8 @@ from pathlib import Path
 
 import yaml
 
+from kairix.eval.constants import CATEGORY_ALIASES as _CATEGORY_ALIASES, CATEGORY_WEIGHTS as _CATEGORY_WEIGHTS
+
 logger = logging.getLogger(__name__)
 
 # Default parameter space
@@ -209,21 +211,6 @@ def _compute_mrr(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> f
 
 
 # Category weights (same as benchmark runner)
-_CATEGORY_WEIGHTS: dict[str, float] = {
-    "recall": 0.25,
-    "temporal": 0.20,
-    "entity": 0.20,
-    "conceptual": 0.15,
-    "multi_hop": 0.10,
-    "procedural": 0.10,
-    "classification": 0.0,
-}
-
-# Suite category aliases — v2 suites use "semantic" and "keyword"
-_CATEGORY_ALIASES: dict[str, str] = {
-    "semantic": "recall",
-    "keyword": "conceptual",
-}
 
 
 def sweep_bm25_params(

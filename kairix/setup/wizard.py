@@ -108,7 +108,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
     config: dict = {}
 
     # ── Step 1: LLM Backend ──────────────────────────────────────────────
-    print("Step 1 of 5: LLM Backend\n")
+    print("Step 1 of 7: LLM Backend\n")
 
     providers = [
         "Azure OpenAI (recommended for enterprise)",
