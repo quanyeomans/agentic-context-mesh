@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kairix"
-version = "2026.4.24a4"
+version = "2026.4.25a1"
 description = "Self-contained knowledge retrieval engine — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "Apache-2.0" }

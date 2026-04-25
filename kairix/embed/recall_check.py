@@ -32,9 +32,9 @@ RECALL_LOG = Path.home() / ".cache" / "kairix" / "recall-check.json"
 # Override with your own vault's known documents via RECALL_QUERIES env var (JSON)
 DEFAULT_RECALL_QUERIES = [
     ("R01", "Arize Phoenix observability recommendation", "arize-observability-research"),
-    ("R03", "SPF record duplicate permerror DNS", "shared/facts"),
-    ("R04", "Jordan Blake voice profile writing style", "jordan-blake-voice-profile"),
-    ("R05", "QMD SQLite WAL lock crash root cause", "shared/facts"),
+    ("R03", "kairix hybrid search architecture", "kairix"),
+    ("R04", "how to run benchmark evaluation", "benchmark"),
+    ("R05", "engineering standards and patterns", "facts"),
     ("R12", "NemoClaw analysis OpenShell verdict", "nemoclaw-analysis"),
 ]
 
