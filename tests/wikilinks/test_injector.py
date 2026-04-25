@@ -186,7 +186,7 @@ def test_no_match_for_substring() -> None:
 def test_no_self_link_on_own_page() -> None:
     content = "Acme Corp is a major health insurer with global operations."
     modified, injected = inject_wikilinks(
-        content, [ACME_CORP], source_path="/Users/danielmcmahon/kairix-vault/02-Areas/Clients/Acme-Corp/Overview.md"
+        content, [ACME_CORP], source_path="/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md"
     )
     assert injected == []
     assert "[[Acme-Corp]]" not in modified
@@ -199,7 +199,7 @@ def test_self_link_check_different_entity() -> None:
     modified, injected = inject_wikilinks(
         content,
         [ACME_CORP, BURGER_CHAIN],
-        source_path="/Users/danielmcmahon/kairix-vault/02-Areas/Clients/Acme-Corp/Overview.md",
+        source_path="/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md",
     )
     # Acme Corp suppressed (self-link on own page); Gamma Systems still linked
     assert "[[Acme-Corp]]" not in modified
@@ -238,27 +238,27 @@ def test_primary_name_triggers_link() -> None:
 
 @pytest.mark.unit
 def test_should_inject_memory_log() -> None:
-    assert should_inject("/Users/danielmcmahon/.kairix/workspaces/builder/memory/2026-03-23.md") is True
+    assert should_inject("/tmp/test-workspaces/builder/memory/2026-03-23.md") is True
 
 
 @pytest.mark.unit
 def test_should_inject_agent_knowledge() -> None:
-    assert should_inject("/Users/danielmcmahon/kairix-vault/04-Agent-Knowledge/builder/patterns.md") is True
+    assert should_inject("/tmp/test-vault/04-Agent-Knowledge/builder/patterns.md") is True
 
 
 @pytest.mark.unit
 def test_should_inject_projects() -> None:
-    assert should_inject("/Users/danielmcmahon/kairix-vault/01-Projects/202603-Mnemosyne/README.md") is True
+    assert should_inject("/tmp/test-vault/01-Projects/202603-Mnemosyne/README.md") is True
 
 
 @pytest.mark.unit
 def test_should_inject_areas() -> None:
-    assert should_inject("/Users/danielmcmahon/kairix-vault/02-Areas/Clients/Acme-Corp/Overview.md") is True
+    assert should_inject("/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md") is True
 
 
 @pytest.mark.unit
 def test_should_inject_knowledge() -> None:
-    assert should_inject("/Users/danielmcmahon/kairix-vault/05-Knowledge/01-Strategy/notes.md") is True
+    assert should_inject("/tmp/test-vault/05-Knowledge/01-Strategy/notes.md") is True
 
 
 @pytest.mark.unit
@@ -278,13 +278,13 @@ def test_should_not_inject_shape_cache() -> None:
 
 @pytest.mark.unit
 def test_should_not_inject_non_md() -> None:
-    assert should_inject("/Users/danielmcmahon/.kairix/workspaces/builder/memory/notes.txt") is False
+    assert should_inject("/tmp/test-workspaces/builder/memory/notes.txt") is False
 
 
 @pytest.mark.unit
 def test_should_not_inject_workspace_non_memory() -> None:
     """Workspace files outside /memory/ subfolder should NOT be eligible."""
-    assert should_inject("/Users/danielmcmahon/.kairix/workspaces/builder/some-other-dir/notes.md") is False
+    assert should_inject("/tmp/test-workspaces/builder/some-other-dir/notes.md") is False
 
 
 @pytest.mark.unit
@@ -300,7 +300,7 @@ def test_should_not_inject_large_file(tmp_path: Path) -> None:
     # we test should_inject with a fake eligible path where the file is large.
     # The size check in should_inject uses os.path.getsize which reads reality.
     # So we create a large file at a temp path that happens to match vault structure.
-    # Since we can't easily place it in /Users/danielmcmahon/kairix-vault, we test inject_file instead.
+    # Since we can't easily place it in /tmp/test-vault, we test inject_file instead.
     # Here we just verify should_inject skips large files by placing one in a tmp dir
     # and calling it directly (the path won't match eligible prefixes, so test inject_file).
     from kairix.wikilinks.injector import inject_file

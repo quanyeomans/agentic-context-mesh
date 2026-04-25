@@ -17,7 +17,7 @@ _CANONICAL_CASES = [
     ("steps to restart the service", QueryIntent.PROCEDURAL),
     ("FEAT-081 implementation status", QueryIntent.KEYWORD),
     ("infrastructure cost optimisation strategy", QueryIntent.SEMANTIC),
-    ("connection between OpenClaw and Avanade", QueryIntent.MULTI_HOP),
+    ("connection between OpenClaw and Acme Partners", QueryIntent.MULTI_HOP),
 ]
 
 
@@ -64,5 +64,5 @@ def test_temporal_beats_entity():
 @pytest.mark.contract
 def test_multi_hop_beats_entity():
     """Multi-hop intent has higher priority than entity."""
-    result = classify("connection between Alice Smith and Avanade")
+    result = classify("connection between Alice Smith and Acme Partners")
     assert result == QueryIntent.MULTI_HOP

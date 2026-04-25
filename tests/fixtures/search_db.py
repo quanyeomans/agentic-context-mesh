@@ -15,7 +15,7 @@ _TEST_DOCUMENTS = [
     {"path": "daily/2026-04-09.md", "title": "Daily Note 2026-04-09", "body": "Sprint review happened yesterday. Reviewed all open tickets."},
     # entity
     {"path": "entities/openclaw.md", "title": "OpenClaw", "body": "OpenClaw is an AI agent platform. It provides memory_search and tool orchestration."},
-    {"path": "entities/avanade.md", "title": "Avanade", "body": "Avanade is a Microsoft services partner. Connected to OpenClaw via PARTNER_OF."},
+    {"path": "entities/acme-partners.md", "title": "Acme Partners", "body": "Acme Partners is a Microsoft services partner. Connected to OpenClaw via PARTNER_OF."},
     # procedural
     {"path": "runbooks/how-to-run-embed.md", "title": "How to run the embedding pipeline", "body": "Step 1: Run kairix embed. Step 2: Check recall. Step 3: Verify index."},
     {"path": "runbooks/how-to-restart.md", "title": "How to restart services", "body": "Run systemctl restart kairix. Verify with kairix onboard check."},
@@ -26,7 +26,7 @@ _TEST_DOCUMENTS = [
     {"path": "strategy/infra-cost.md", "title": "Infrastructure Cost Strategy", "body": "Infrastructure cost optimisation strategy: use spot instances, auto-scaling, and reserved capacity."},
     {"path": "strategy/tech-debt.md", "title": "Technical Debt Strategy", "body": "Approach to managing technical debt: quarterly reviews, sprint allocation, automated detection."},
     # multi_hop
-    {"path": "research/openclaw-avanade-partnership.md", "title": "OpenClaw Avanade Partnership", "body": "The connection between OpenClaw and Avanade is a strategic partnership for enterprise AI deployment."},
+    {"path": "research/openclaw-acme-partners-partnership.md", "title": "OpenClaw Acme Partners Partnership", "body": "The connection between OpenClaw and Acme Partners is a strategic partnership for enterprise AI deployment."},
     {"path": "research/entity-graph.md", "title": "Entity Graph Overview", "body": "Multi-hop relationships between organisations and people enable contextual search."},
     # extra semantic docs
     {"path": "notes/architecture.md", "title": "Architecture Overview", "body": "Kairix uses hybrid BM25 + vector search with RRF fusion for ranking."},

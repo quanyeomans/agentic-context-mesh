@@ -36,9 +36,9 @@ def test_search_wikidata_parses_results():
 
 @pytest.mark.unit
 def test_confidence_high_on_exact_match():
-    fake_items = [{"id": "Q1", "label": "Microsoft", "description": "Tech company"}]
+    fake_items = [{"id": "Q1", "label": "ACME", "description": "Example company"}]
     with patch("kairix.entities.validate.requests.get", return_value=_mock_wikidata_response(fake_items)):
-        results = search_wikidata("Microsoft")
+        results = search_wikidata("ACME")
     assert results[0].confidence == "high"
 
 

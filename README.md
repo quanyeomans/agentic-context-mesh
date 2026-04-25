@@ -115,7 +115,7 @@ kairix mcp serve
 **What the agent sees:**
 
 ```
-mcp-kairix__search("brief for client meeting with Bupa")
+mcp-kairix__search("brief for quarterly client meeting")
 → Returns: ranked results, entity context, budget-managed content
 ```
 

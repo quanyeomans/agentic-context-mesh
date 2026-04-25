@@ -173,13 +173,13 @@ def test_crawl_org_reads_frontmatter_fields(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_crawl_org_fallback_display_name_from_dirname(tmp_path: Path) -> None:
-    org_dir = tmp_path / "02-Areas" / "00-Clients" / "mantel-group"
+    org_dir = tmp_path / "02-Areas" / "00-Clients" / "example-client"
     _write(org_dir / "index.md", "# Index")  # no name in frontmatter
 
     client = _make_neo4j()
     crawl(vault_root=tmp_path, neo4j_client=client)
     node = client.upsert_organisation.call_args[0][0]
-    assert node.name == "Mantel Group"
+    assert node.name == "Example Client"
 
 
 @pytest.mark.unit

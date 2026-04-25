@@ -128,7 +128,7 @@ Neo4j Community Edition is licensed under **GPL v3**. Kairix communicates via th
 
 ```bash
 # Install script (Docker default; --apt option also available)
-bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install-neo4j.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/install-neo4j.sh)
 
 # Or quick Docker start (no install script):
 docker run -d --name neo4j -p 7687:7687 \
@@ -179,7 +179,7 @@ Kairix is installed as a pip package — the source repo is not required on the 
 
 ```bash
 # One-line deploy (downloads and runs install.sh from the public repo)
-bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/install.sh)
 ```
 
 This creates `/opt/kairix/.venv/`, installs kairix into it, installs the wrapper script, and creates the `/usr/local/bin/kairix` symlink. After this, `kairix --help` works from any shell.
@@ -220,7 +220,7 @@ For production deployments: operator config (service.env, private benchmark suit
 ### Upgrading
 
 ```bash
-/opt/kairix/.venv/bin/pip install --upgrade git+https://github.com/quanyeomans/agentic-context-mesh
+/opt/kairix/.venv/bin/pip install --upgrade git+https://github.com/quanyeomans/kairix
 kairix onboard check   # verify after upgrade
 ```
 

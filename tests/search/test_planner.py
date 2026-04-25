@@ -170,7 +170,7 @@ class TestDecompose:
         """Should inject entity context when Neo4j graph context returns a string."""
         planner = QueryPlanner()
         neo4j_mock = MagicMock(available=True)
-        context_str = "Known entities related to this query:\n- TechCorp → Microsoft, BuilderCo"
+        context_str = "Known entities related to this query:\n- TechCorp → GlobalTech, BuilderCo"
 
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["entity-aware sub-query"]'
