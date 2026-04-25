@@ -86,6 +86,7 @@ def tool_search(
     setting the right amount of context automatically. You don't need
     to configure anything.
     """
+    logger.info("mcp.search: agent=%r scope=%r", agent, scope)
     try:
         from kairix.search.config_loader import load_config
         from kairix.search.hybrid import search

@@ -77,7 +77,8 @@ KAIRIX_INTEGRATION_CRON_DIRS="${KAIRIX_INTEGRATION_CRON_DIRS:-\
 GGUF_OFFENDERS=""
 for _dir in $KAIRIX_INTEGRATION_CRON_DIRS; do
   [[ ! -d "$_dir" ]] && continue
-  _found=$(grep -rl 'qmd embed' "$_dir" 2>/dev/null | while IFS= read -r f; do
+  # Check active job definitions (jobs.json, shell scripts) — NOT run history (runs/)
+  _found=$(find "$_dir" -maxdepth 1 \( -name "*.sh" -o -name "*.json" -o -name "jobs.json" \) 2>/dev/null | while IFS= read -r f; do
     grep -v '^\s*#' "$f" 2>/dev/null | grep -qP "(?<!['\"])qmd\s+embed" && echo "$f" || true
   done || true)
   [[ -n "$_found" ]] && GGUF_OFFENDERS="${GGUF_OFFENDERS}${_found}"$'\n'

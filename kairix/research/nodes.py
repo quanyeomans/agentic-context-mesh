@@ -10,7 +10,13 @@ import json
 import logging
 from typing import Any
 
-from kairix.research.state import DEFAULT_MAX_TURNS, SUFFICIENCY_THRESHOLD, ResearcherState
+from kairix.research.state import (
+    DEFAULT_MAX_TURNS,
+    INITIAL_BUDGET,
+    REFINEMENT_BUDGET,
+    SUFFICIENCY_THRESHOLD,
+    ResearcherState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +41,7 @@ def retrieve(state: ResearcherState) -> dict[str, Any]:
     turns = state.get("turns", 0)
 
     # Use a bigger budget on refinement turns — we need more context
-    budget = 3000 if turns == 0 else 5000
+    budget = INITIAL_BUDGET if turns == 0 else REFINEMENT_BUDGET
 
     result = tool_search(query=query, budget=budget)
 
@@ -50,6 +56,7 @@ def retrieve(state: ResearcherState) -> dict[str, Any]:
             existing.append(r)
             seen_paths.add(r.get("path", ""))
 
+    logger.info("research: retrieve turn=%d new=%d accumulated=%d", turns, len(new_results), len(existing))
     return {"retrieved_chunks": existing}
 
 
@@ -98,6 +105,7 @@ def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
         confidence = float(parsed.get("confidence", 0.0))
         refined = parsed.get("refined_query")
 
+        logger.info("research: evaluate turn=%d confidence=%.2f sufficient=%s", turns, confidence, confidence >= SUFFICIENCY_THRESHOLD)
         return {
             "confidence": confidence,
             "refined_query": refined or state.get("refined_query") or query,

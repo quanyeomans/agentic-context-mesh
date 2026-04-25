@@ -292,7 +292,8 @@ class Neo4jClient:
         if not self._driver:
             return []
         try:
-            with self._driver.session() as session:
+            # Enforce read-only to prevent accidental graph mutation via arbitrary queries
+            with self._driver.session(default_access_mode="READ") as session:
                 result = session.run(query, **(params or {}))
                 return [dict(r) for r in result]
         except Exception as e:

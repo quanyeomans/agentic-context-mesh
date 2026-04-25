@@ -21,7 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 agents = [
     # MCP server (Model Context Protocol — exposes kairix tools to agents)
-    "mcp>=1.0",
+    "mcp>=1.0,<2",
 ]
 neo4j = [
     # Neo4j Python driver — required for entity graph, multi-hop queries, and curator health
@@ -29,7 +29,7 @@ neo4j = [
 ]
 rerank = [
     # Cross-encoder re-ranking (post-RRF semantic pass). CPU-only, ~22 MB model.
-    "sentence-transformers>=3.0",
+    "sentence-transformers>=3.0,<4",
 ]
 dev = [
     # Test runner
