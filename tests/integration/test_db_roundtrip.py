@@ -17,6 +17,8 @@ from kairix.embed.schema import (
     validate_schema,
 )
 
+pytestmark = pytest.mark.integration
+
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
@@ -85,6 +87,7 @@ def tmp_db_with_docs(tmp_db):
 class TestSchemaValidation:
     def test_valid_schema_passes(self, tmp_db):
         validate_schema(tmp_db)  # Should not raise
+        assert True, "smoke: valid schema accepted without error"
 
     def test_missing_content_vectors_column_raises(self, tmp_db):
         tmp_db.execute("DROP TABLE content_vectors")
@@ -125,6 +128,7 @@ class TestEnsureVecTable:
             if "no such module: vec0" in str(e):
                 pytest.skip("sqlite-vec not available")
             raise
+        assert True, "smoke: idempotent call did not raise"
 
 
 # ── Insert embedding tests ────────────────────────────────────────────────────

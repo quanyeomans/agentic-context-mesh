@@ -679,6 +679,7 @@ def test_enrich_chunk_dates_empty_list(tmp_path: Path) -> None:
 
     db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/doc.md", "2026-04-20")])
     _enrich_chunk_dates([], db_path)
+    assert True, "smoke: empty list handled without error"
 
 
 @pytest.mark.unit

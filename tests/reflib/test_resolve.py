@@ -12,6 +12,8 @@ from kairix.reflib.resolve import (
     resolve_entities,
 )
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Slug tests
 # ---------------------------------------------------------------------------

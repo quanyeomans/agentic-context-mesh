@@ -18,6 +18,10 @@ import pytest
 pytest_plugins = [
     "tests.bdd.steps.search_steps",
     "tests.bdd.steps.curator_steps",
+    "tests.bdd.steps.reflib_steps",
+    "tests.bdd.steps.normalisation_steps",
+    "tests.bdd.steps.entity_steps",
+    "tests.bdd.steps.onboard_steps",
 ]
 
 from tests.fixtures.embeddings import fake_embedding  # noqa: E402

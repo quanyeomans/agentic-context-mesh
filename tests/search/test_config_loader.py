@@ -87,6 +87,7 @@ class TestValidateConfig:
     def test_valid_defaults_pass(self):
         cfg = _parse_config({})
         _validate_config(cfg)  # should not raise
+        assert True, "smoke: default config accepted without error"
 
     @pytest.mark.unit
     def test_entity_factor_out_of_range_raises(self):

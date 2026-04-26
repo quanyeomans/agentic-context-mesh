@@ -142,7 +142,8 @@ def search_db(tmp_db_path):
     """)
     conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(path, title, body, content='documents')")
     conn.commit()
-    return conn
+    yield conn
+    conn.close()
 
 
 @pytest.fixture
@@ -158,7 +159,8 @@ def seeded_search_db(search_db):
             (doc["path"], doc["title"], doc["body"]),
         )
     search_db.commit()
-    return search_db
+    yield search_db
+    # Connection closed by search_db fixture teardown
 
 
 # 30 representative reference library documents spanning all collections
@@ -380,4 +382,5 @@ def reflib_search_db(search_db):
             (doc["path"].replace("/", "_"), doc["body"]),
         )
     search_db.commit()
-    return search_db
+    yield search_db
+    # Connection closed by search_db fixture teardown

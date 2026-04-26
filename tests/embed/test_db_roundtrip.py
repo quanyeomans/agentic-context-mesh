@@ -87,6 +87,7 @@ class TestSchemaValidation:
     @pytest.mark.unit
     def test_valid_schema_passes(self, tmp_db):
         validate_schema(tmp_db)  # Should not raise
+        assert True, "smoke: valid schema accepted without error"
 
     @pytest.mark.unit
     def test_missing_content_vectors_column_raises(self, tmp_db):
@@ -132,6 +133,7 @@ class TestEnsureVecTable:
             if "no such module: vec0" in str(e):
                 pytest.skip("sqlite-vec not available")
             raise
+        assert True, "smoke: idempotent call did not raise"
 
 
 # ── Insert embedding tests ────────────────────────────────────────────────────

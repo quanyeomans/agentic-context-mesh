@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from kairix.reflib.extract import (
     RawEntity,
     RawRelationship,
@@ -14,6 +16,8 @@ from kairix.reflib.extract import (
     _is_stop_heading,
     scan_reference_library,
 )
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Helpers

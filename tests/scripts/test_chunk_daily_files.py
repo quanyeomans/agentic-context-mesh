@@ -8,6 +8,10 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 _SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "chunk-daily-files.py"
 
 

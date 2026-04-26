@@ -125,6 +125,8 @@ class TestExtensionLoadOrder:
         db.execute(
             "CREATE VIRTUAL TABLE t USING vec0(hash_seq TEXT PRIMARY KEY, embedding float[4] distance_metric=cosine)"
         )
+        tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "t" in tables, "vec0 virtual table should be created"
 
 
 # ── Constraint 2: INSERT OR REPLACE not supported by sqlite-vec ───────────────

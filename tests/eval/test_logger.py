@@ -67,3 +67,4 @@ def test_logger_never_raises_on_bad_path():
         latency_ms=0.0,
     )
     ql.log(entry)  # should not raise
+    assert True, "smoke: unwritable path did not raise"

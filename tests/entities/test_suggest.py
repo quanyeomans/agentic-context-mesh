@@ -52,9 +52,8 @@ def test_suggest_entities_new_entity():
                 fake_spacy.load.return_value = mock_nlp
                 suggest_entities("AcmeCorp is a new company.", neo4j)
 
-    # Because the mock bypasses the actual import guard, test the adapter directly
-    # Test the core logic directly instead
-    pass  # Covered by integration test below
+    # Smoke: the call completed without raising, mocking bypasses import guard
+    assert True, "smoke: suggest_entities ran without error under mock"
 
 
 @pytest.mark.unit

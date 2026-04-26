@@ -82,6 +82,11 @@ omit = [
     "kairix/*/cli.py",
     # External I/O adapters — Azure API; behaviour mocked in unit tests
     "kairix/_azure.py",
+    # Eval orchestration — requires live DB + Azure for end-to-end sweep
+    "kairix/eval/hybrid_sweep.py",
+    "kairix/eval/sweep.py",
+    # One-time QMD migration — not applicable to new installs
+    "kairix/db/migrate_qmd.py",
     # Neo4j graph layer — requires live Neo4j instance; not available in CI
     "kairix/graph/*",
     # Pipeline orchestrators — thin wrappers over individually-tested modules

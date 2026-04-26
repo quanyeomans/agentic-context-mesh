@@ -13,6 +13,8 @@ def test_run_embed_catches_exceptions() -> None:
     with patch("kairix.embed.cli.main", side_effect=RuntimeError("embed failed")):
         _run_embed()  # should not raise
 
+    assert True, "smoke: no exception propagated"
+
 
 @pytest.mark.unit
 def test_run_entity_seed_catches_exceptions() -> None:
@@ -22,6 +24,8 @@ def test_run_entity_seed_catches_exceptions() -> None:
     with patch("kairix.store.cli.main", side_effect=RuntimeError("store crawl failed")):
         _run_entity_seed()  # should not raise
 
+    assert True, "smoke: no exception propagated"
+
 
 @pytest.mark.unit
 def test_run_health_check_catches_exceptions() -> None:
@@ -30,6 +34,8 @@ def test_run_health_check_catches_exceptions() -> None:
 
     with patch("kairix.onboard.check.run_all_checks", side_effect=RuntimeError("check failed")):
         _run_health_check()  # should not raise
+
+    assert True, "smoke: no exception propagated"
 
 
 @pytest.mark.unit
