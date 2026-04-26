@@ -98,6 +98,20 @@ def cmd_embed(args: argparse.Namespace) -> int:
         create_schema(db)
         validate_schema(db)
 
+        # Scan vault for new/changed documents before embedding.
+        # This ensures first-run embed works without a separate scan step.
+        from kairix.db.scanner import VaultScanner, CollectionConfig
+        from kairix.paths import vault_root
+        vroot = vault_root()
+        scanner = VaultScanner(db, vault_root=vroot)
+        # Default: scan the entire vault root as a single collection
+        scan_report = scanner.scan([CollectionConfig(name="default", path=".")])
+        if scan_report.new > 0 or scan_report.updated > 0:
+            logging.info(
+                "Scanned vault: %d new, %d updated, %d unchanged",
+                scan_report.new, scan_report.updated, scan_report.unchanged,
+            )
+
         result = run_embed(
             db=db,
             force=args.force,
