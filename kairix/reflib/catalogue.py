@@ -19,6 +19,9 @@ class CatalogueEntry:
     total_size_kb: float
     date_verified: str
 
+    def __str__(self) -> str:
+        return f"{self.source_name} ({self.licence})"
+
 
 def generate_catalogue(entries: list[CatalogueEntry]) -> str:
     """Generate CATALOGUE.md content from catalogue entries."""

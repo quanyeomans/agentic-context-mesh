@@ -44,6 +44,9 @@ class LoadReport:
     edges_skipped: int = 0
     errors: list[str] = field(default_factory=list)
 
+    def __str__(self) -> str:
+        return f"Loaded {self.nodes_loaded} nodes, {self.edges_loaded} edges"
+
 
 # ---------------------------------------------------------------------------
 # Label → (node dataclass, upsert method name) dispatch table
@@ -67,7 +70,8 @@ _GENERIC_LABELS: dict[str, type] = {
 
 def _upsert_generic_node(neo4j_client: Any, label: str, node: Any) -> bool:
     """MERGE a node type that has no dedicated upsert method on the client."""
-    return neo4j_client.upsert_node(label, node.id, node.to_neo4j_props())
+    result: bool = neo4j_client.upsert_node(label, node.id, node.to_neo4j_props())
+    return result
 
 
 def _build_node(label: str, data: dict) -> Any:

@@ -53,9 +53,9 @@ DEFAULT_QUERY_STYLES: list[str] = [
 
 
 def _get_stop_words() -> frozenset[str]:
-    from kairix.search.bm25 import _FTS_STOP_WORDS
+    from kairix.search.bm25 import FTS_STOP_WORDS
 
-    return _FTS_STOP_WORDS
+    return FTS_STOP_WORDS
 
 
 @dataclass

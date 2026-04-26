@@ -51,6 +51,15 @@ from pathlib import Path
 from kairix.search.bm25 import BM25Result
 from kairix.search.config import EntityBoostConfig, ProceduralBoostConfig, TemporalBoostConfig
 from kairix.search.vector import VecResult
+from kairix.temporal.rewriter import (
+    QUERY_ISO_DATE_RE as _QUERY_ISO_DATE_RE,
+)
+from kairix.temporal.rewriter import (
+    QUERY_YEAR_MONTH_RE as _QUERY_YEAR_MONTH_RE,
+)
+from kairix.temporal.rewriter import (
+    RELATIVE_TEMPORAL_RE as _RELATIVE_TEMPORAL_RE,
+)
 from kairix.utils import slugify
 
 logger = logging.getLogger(__name__)
@@ -88,15 +97,6 @@ def canonical_path(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _slugify(name: str) -> str:
-    """Convert entity name to QMD path slug (lowercase, hyphens for separators).
-
-    Delegates to ``kairix.utils.slugify`` — kept as a local alias for
-    backwards compatibility.
-    """
-    return slugify(name)
-
-
 _LABEL_TO_DIR: dict[str, str] = {
     "person": "person",
     "organisation": "organisation",
@@ -105,20 +105,8 @@ _LABEL_TO_DIR: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
-# Temporal date extraction patterns (query-side)
+# Temporal date extraction patterns (query-side) — canonical source: temporal.rewriter
 # ---------------------------------------------------------------------------
-
-# Matches YYYY-MM-DD (e.g. "2026-03-22") in a query
-_QUERY_ISO_DATE_RE: re.Pattern[str] = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
-
-# Matches YYYY-MM (e.g. "2026-03") — also captures the YYYY-MM prefix of ISO dates
-_QUERY_YEAR_MONTH_RE: re.Pattern[str] = re.compile(r"\b(\d{4}-\d{2})(?:-\d{2})?\b")
-
-# Relative temporal terms that trigger a recency boost instead of a date-match boost
-_RELATIVE_TEMPORAL_RE: re.Pattern[str] = re.compile(
-    r"\b(recent(?:ly)?|last\s+(?:week|month)|yesterday|today|this\s+(?:week|month))\b",
-    re.IGNORECASE,
-)
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -413,7 +401,7 @@ def entity_boost_neo4j(
             for lbl in labels:
                 dir_name = _LABEL_TO_DIR.get(str(lbl).lower())
                 if dir_name:
-                    slug = _slugify(name)
+                    slug = slugify(name)
                     if slug:
                         qmd_path = f"{dir_name}/{slug}.md"
                         existing = name_slug_in_degree.get(qmd_path, 0)

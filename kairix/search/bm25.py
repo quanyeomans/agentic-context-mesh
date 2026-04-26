@@ -33,7 +33,7 @@ class BM25Result(TypedDict):
     collection: str
 
 
-_FTS_STOP_WORDS: frozenset[str] = frozenset(
+FTS_STOP_WORDS: frozenset[str] = frozenset(
     {
         "a",
         "an",
@@ -194,7 +194,7 @@ def _normalise_fts_query(query: str) -> str:
     # Extract word tokens (alphanumeric sequences only)
     raw_tokens = re.findall(r"[a-zA-Z0-9]+", query.lower())
     # Filter stop words and very short tokens
-    tokens = [t for t in raw_tokens if t not in _FTS_STOP_WORDS and len(t) >= 2]
+    tokens = [t for t in raw_tokens if t not in FTS_STOP_WORDS and len(t) >= 2]
     if not tokens:
         return ""
     # Quoted prefix match per token, AND-joined (matches QMD's search behaviour)

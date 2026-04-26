@@ -125,6 +125,9 @@ def apply_budget(
         return []
 
     try:
+        # Phase 2 tier logic is gated behind summaries DB — skip the open
+        # entirely until summaries generation is enabled.  The DB never
+        # exists in Phase 1, so _open_summaries_db() always returns None.
         summaries_db = _open_summaries_db()
         budgeted = _apply_budget_impl(results, budget, l1_threshold, l2_threshold, summaries_db)
         if summaries_db is not None:
@@ -189,7 +192,8 @@ def _select_tier(
     Phase 2+: L0 by default; promote to L1 or L2 based on score and budget.
     When budget is tight (< L2_BUDGET_MIN), prefer L0/L1 summaries to save tokens.
     """
-    # Phase 1: no summaries available — always use full content (L2)
+    # Phase 2 tier logic is not yet active — summaries DB is never populated.
+    # Short-circuit to avoid opening a DB that always returns None.
     if summaries_db is None:
         return "L2"
 

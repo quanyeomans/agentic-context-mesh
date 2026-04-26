@@ -94,6 +94,23 @@ _RECENTLY_RE = re.compile(r"\b(?:recently|lately)\b", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
+# Canonical temporal query patterns (shared with kairix.search.rrf)
+# ---------------------------------------------------------------------------
+
+# Matches YYYY-MM-DD (e.g. "2026-03-22") in a query — capturing group 1
+QUERY_ISO_DATE_RE: re.Pattern[str] = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
+# Matches YYYY-MM (e.g. "2026-03") — also captures the YYYY-MM prefix of ISO dates
+QUERY_YEAR_MONTH_RE: re.Pattern[str] = re.compile(r"\b(\d{4}-\d{2})(?:-\d{2})?\b")
+
+# Relative temporal terms that trigger a recency boost instead of a date-match boost
+RELATIVE_TEMPORAL_RE: re.Pattern[str] = re.compile(
+    r"\b(recent(?:ly)?|last\s+(?:week|month)|yesterday|today|this\s+(?:week|month))\b",
+    re.IGNORECASE,
+)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 

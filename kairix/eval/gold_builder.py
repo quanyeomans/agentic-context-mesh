@@ -77,12 +77,12 @@ def _bm25_search_with_weights(
     from kairix.db import get_db_path
 
     # Stop words (same as bm25.py)
-    from kairix.search.bm25 import _FTS_STOP_WORDS
+    from kairix.search.bm25 import FTS_STOP_WORDS
 
     # Build FTS5 query
     raw = query.replace("-", " ").replace("_", " ").replace("'", " ").replace("\u2019", " ")
     tokens = re.findall(r"[a-zA-Z0-9]+", raw.lower())
-    tokens = [t for t in tokens if t not in _FTS_STOP_WORDS and len(t) >= 2]
+    tokens = [t for t in tokens if t not in FTS_STOP_WORDS and len(t) >= 2]
     if not tokens:
         return []
     fts_query = " ".join(tokens)

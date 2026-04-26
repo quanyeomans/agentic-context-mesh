@@ -134,7 +134,7 @@ class SearchResult:
     vec_failed: bool = False
     fallback_used: bool = False  # True when BM25 returned 0 and vector was the sole source
     error: str = ""
-    _temporal_chunks: list = field(default_factory=list)
+    _temporal_chunks: list | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +370,84 @@ def _run_multi_hop(
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _SearchPipelineState:
+    """Groups pipeline state passed between search stages (reduces parameter lists)."""
+
+    fused: list[FusedResult]
+    query: str
+    intent: QueryIntent
+    budget: int
+    t_start: float
+    bm25_count: int
+    vec_count: int
+    collections: list[str]
+    vec_failed: bool
+    fallback_used: bool
+    temporal_chunks: list | None = None
+    agent: str | None = None
+    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent"
+
+
+def _preprocess_temporal(
+    query: str,
+    intent: QueryIntent,
+    collections: list[str],
+) -> tuple[str, list, frozenset[str] | None]:
+    """Rewrite a TEMPORAL query and extract temporal chunks and date-filter paths.
+
+    Returns (active_query, temporal_chunks, date_filter_paths).
+    For non-TEMPORAL intents, returns (query, [], None) unchanged.
+    Never raises.
+    """
+    if intent != QueryIntent.TEMPORAL:
+        return query, [], None
+
+    active_query = query
+    temporal_chunks: list = []
+    date_filter_paths: frozenset[str] | None = None
+
+    try:
+        from datetime import date as _date
+
+        from kairix.temporal.index import query_temporal_chunks
+        from kairix.temporal.rewriter import extract_time_window, rewrite_temporal_query
+
+        active_query = rewrite_temporal_query(query, reference_date=_date.today())
+        start, end = extract_time_window(query, reference_date=_date.today())
+        temporal_chunks = query_temporal_chunks(topic=active_query, start=start, end=end, limit=10)
+
+        # TMP-2: build date-filtered path set to restrict BM25 and vector results.
+        # Only for RELATIVE temporal expressions (last week, recently, yesterday).
+        # NOT for absolute date references (March 2026, 2026-03-09) — those queries
+        # are ABOUT a time period, not filtered by document creation date.
+        if start is not None:
+            from kairix.embed.schema import get_date_filtered_paths
+            from kairix.temporal.rewriter import is_relative_temporal
+
+            if is_relative_temporal(query):
+                _tmp2_db = sqlite3.connect(str(get_db_path()))
+                try:
+                    _paths = get_date_filtered_paths(_tmp2_db, start, end)
+                    if _paths:  # empty = no dated chunks yet; do not filter
+                        date_filter_paths = _paths
+                        logger.debug(
+                            "hybrid: TMP-2 date filter active — %d paths in [%s, %s]",
+                            len(_paths),
+                            start,
+                            end,
+                        )
+                except Exception as _dfp_e:
+                    logger.warning("hybrid: TMP-2 get_date_filtered_paths failed — %s", _dfp_e)
+                finally:
+                    _tmp2_db.close()
+    except Exception as _e:
+        logger.warning("hybrid: temporal rewriting failed — %s", _e)
+        active_query = query
+
+    return active_query, temporal_chunks, date_filter_paths
+
+
 def _apply_entity_boost(
     fused: list[FusedResult],
     query: str,
@@ -388,72 +466,57 @@ def _apply_entity_boost(
     return fused
 
 
-def _build_search_result(
-    fused: list[FusedResult],
-    query: str,
-    intent: QueryIntent,
-    budget: int,
-    t_start: float,
-    *,
-    bm25_count: int,
-    vec_count: int,
-    collections: list[str],
-    vec_failed: bool,
-    fallback_used: bool,
-    temporal_chunks: list | None = None,
-    agent: str | None = None,
-    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
-) -> SearchResult:
+def _build_search_result(state: _SearchPipelineState) -> SearchResult:
     """Apply token budget, compute diagnostics, build SearchResult, and log.
 
     This is the final assembly stage of the search pipeline — everything
     after boosting and re-ranking is done here.
     """
-    budgeted = apply_budget(fused, budget=budget)
+    budgeted = apply_budget(state.fused, budget=state.budget)
 
     total_tokens = sum(r.token_estimate for r in budgeted)
     tiers_used = sorted(set(r.tier for r in budgeted))
 
     t_end = time.monotonic()
-    latency_ms = (t_end - t_start) * 1000.0
+    latency_ms = (t_end - state.t_start) * 1000.0
 
     result = SearchResult(
-        query=query,
-        intent=intent,
+        query=state.query,
+        intent=state.intent,
         results=budgeted,
-        bm25_count=bm25_count,
-        vec_count=vec_count,
-        fused_count=len(fused),
-        collections=collections,
+        bm25_count=state.bm25_count,
+        vec_count=state.vec_count,
+        fused_count=len(state.fused),
+        collections=state.collections,
         tiers_used=tiers_used,
         total_tokens=total_tokens,
         latency_ms=latency_ms,
-        vec_failed=vec_failed,
-        fallback_used=fallback_used,
+        vec_failed=state.vec_failed,
+        fallback_used=state.fallback_used,
     )
 
     # Attach temporal chunks for TEMPORAL intent (accessible to callers)
-    if temporal_chunks:
+    if state.temporal_chunks:
         result.error = ""  # ensure no error state masks chunks
-        result._temporal_chunks = temporal_chunks
+        result._temporal_chunks = state.temporal_chunks
 
     # Log event
-    query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
+    query_hash = hashlib.sha256(state.query.encode()).hexdigest()[:12]
     _log_search_event(
         {
             "query_hash": query_hash,
-            "intent": intent.value,
-            "agent": agent,
-            "scope": scope,
-            "bm25_count": bm25_count,
-            "vec_count": vec_count,
-            "fused_count": len(fused),
-            "collections": collections,
+            "intent": state.intent.value,
+            "agent": state.agent,
+            "scope": state.scope,
+            "bm25_count": state.bm25_count,
+            "vec_count": state.vec_count,
+            "fused_count": len(state.fused),
+            "collections": state.collections,
             "tiers_used": tiers_used,
             "total_tokens": total_tokens,
             "latency_ms": round(latency_ms, 1),
-            "vec_failed": vec_failed,
-            "fallback_used": fallback_used,
+            "vec_failed": state.vec_failed,
+            "fallback_used": state.fallback_used,
             "ts": int(time.time()),
         }
     )
@@ -462,12 +525,12 @@ def _build_search_result(
     _log_query_event(
         {
             "ts": int(time.time()),
-            "query": query,
+            "query": state.query,
             "query_hash": query_hash,
-            "intent": intent.value,
-            "agent": agent,
-            "fused_count": len(fused),
-            "vec_failed": vec_failed,
+            "intent": state.intent.value,
+            "agent": state.agent,
+            "fused_count": len(state.fused),
+            "vec_failed": state.vec_failed,
             "latency_ms": round(latency_ms, 1),
             "top_paths": [r.result.path for r in budgeted[:3]],
         }
@@ -526,46 +589,7 @@ def search(
     fallback_used = False
 
     # Temporal query rewriting — expand query with explicit date tokens before retrieval
-    active_query = query
-    temporal_chunks: list = []
-    date_filter_paths: frozenset[str] | None = None  # TMP-2: set in TEMPORAL block below
-    if intent == QueryIntent.TEMPORAL:
-        try:
-            from datetime import date as _date
-
-            from kairix.temporal.index import query_temporal_chunks
-            from kairix.temporal.rewriter import extract_time_window, rewrite_temporal_query
-
-            active_query = rewrite_temporal_query(query, reference_date=_date.today())
-            start, end = extract_time_window(query, reference_date=_date.today())
-            temporal_chunks = query_temporal_chunks(topic=active_query, start=start, end=end, limit=10)
-            # TMP-2: build date-filtered path set to restrict BM25 and vector results
-            # Only for RELATIVE temporal expressions (last week, recently, yesterday).
-            # NOT for absolute date references (March 2026, 2026-03-09) — those queries
-            # are ABOUT a time period, not filtered by document creation date.
-            if start is not None:
-                from kairix.embed.schema import get_date_filtered_paths
-                from kairix.temporal.rewriter import is_relative_temporal
-
-                if is_relative_temporal(query):
-                    _tmp2_db = sqlite3.connect(str(get_db_path()))
-                    try:
-                        _paths = get_date_filtered_paths(_tmp2_db, start, end)
-                        if _paths:  # empty = no dated chunks yet; do not filter
-                            date_filter_paths = _paths
-                            logger.debug(
-                                "hybrid: TMP-2 date filter active — %d paths in [%s, %s]",
-                                len(_paths),
-                                start,
-                                end,
-                            )
-                    except Exception as _dfp_e:
-                        logger.warning("hybrid: TMP-2 get_date_filtered_paths failed — %s", _dfp_e)
-                    finally:
-                        _tmp2_db.close()
-        except Exception as _e:
-            logger.warning("hybrid: temporal rewriting failed — %s", _e)
-            active_query = query
+    active_query, temporal_chunks, date_filter_paths = _preprocess_temporal(query, intent, collections)
 
     # Neo4j client — used by planner (entity context) and entity_boost
     # lgtm — false positive: _get_neo4j() returns a client object, no credentials logged
@@ -721,19 +745,21 @@ def search(
 
     # Build final result: apply budget, compute diagnostics, log events
     return _build_search_result(
-        fused,
-        query,
-        intent,
-        budget,
-        t_start,
-        bm25_count=len(bm25_results),
-        vec_count=len(vec_results),
-        collections=collections,
-        vec_failed=vec_failed,
-        fallback_used=fallback_used,
-        temporal_chunks=temporal_chunks or None,
-        agent=agent,
-        scope=scope,
+        _SearchPipelineState(
+            fused=fused,
+            query=query,
+            intent=intent,
+            budget=budget,
+            t_start=t_start,
+            bm25_count=len(bm25_results),
+            vec_count=len(vec_results),
+            collections=collections,
+            vec_failed=vec_failed,
+            fallback_used=fallback_used,
+            temporal_chunks=temporal_chunks or None,
+            agent=agent,
+            scope=scope,
+        )
     )
 
 

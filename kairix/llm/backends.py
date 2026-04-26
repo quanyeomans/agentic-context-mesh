@@ -18,6 +18,8 @@ class AzureOpenAIBackend:
     This class adds no extra logic — it is purely an adapter so callers
     can program against the ``LLMBackend`` protocol without importing
     ``kairix._azure`` directly.
+
+    # Adapter pattern: satisfies LLMBackend protocol by delegating to _azure module
     """
 
     def chat(self, messages: list[dict], max_tokens: int = 800) -> str:
