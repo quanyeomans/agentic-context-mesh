@@ -82,7 +82,7 @@ def test_neo4j_reachable_ok_when_has_nodes() -> None:
 
 @pytest.mark.unit
 def test_neo4j_reachable_fail_when_empty() -> None:
-    """Returns ok=False when Neo4j is reachable but empty (vault crawler not run)."""
+    """Returns ok=False when Neo4j is reachable but empty (document store crawler not run)."""
     mock_client = MagicMock()
     mock_client.available = True
     mock_client.cypher.return_value = [{"total": 0}]
@@ -144,7 +144,7 @@ def test_secrets_loaded_ok_from_file(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 # ---------------------------------------------------------------------------
-# check_vault_root_configured
+# check_vault_root_configured (document root configuration check)
 # ---------------------------------------------------------------------------
 
 

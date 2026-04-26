@@ -164,15 +164,15 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_guide(args: argparse.Namespace) -> int:
-    """Install the agent usage guide into the vault's shared knowledge base."""
-    vault_root = args.vault_root or os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
-    if not vault_root:
-        print("Error: --vault-root is required (or set KAIRIX_VAULT_ROOT)", file=sys.stderr)
+    """Install the agent usage guide into the document store's shared knowledge base."""
+    doc_root = args.vault_root or os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
+    if not doc_root:
+        print("Error: --vault-root is required (or set KAIRIX_DOCUMENT_ROOT)", file=sys.stderr)
         return 1
 
-    vault_path = Path(vault_root)
+    vault_path = Path(doc_root)
     if not vault_path.exists():
-        print(f"Error: vault root does not exist: {vault_root}", file=sys.stderr)
+        print(f"Error: document root does not exist: {doc_root}", file=sys.stderr)
         return 1
 
     # Find the guide source in the kairix package
@@ -273,8 +273,8 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # guide
-    p_guide = sub.add_parser("guide", help="Install the agent usage guide into the vault")
-    p_guide.add_argument("--vault-root", help="Path to vault root (default: KAIRIX_VAULT_ROOT)")
+    p_guide = sub.add_parser("guide", help="Install the agent usage guide into the document store")
+    p_guide.add_argument("--vault-root", help="Path to document root (default: KAIRIX_DOCUMENT_ROOT)")
     p_guide.add_argument("--output", help="Override destination file path")
     p_guide.add_argument("--dry-run", action="store_true", help="Show what would be installed without writing")
 

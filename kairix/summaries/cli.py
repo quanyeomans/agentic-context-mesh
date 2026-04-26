@@ -32,12 +32,12 @@ def _get_cred(secret_name: str) -> str:
 # Vault doc discovery
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
+_DOCUMENT_ROOT = Path(os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
 
 
 def _discover_vault_docs() -> list[str]:
     """Return absolute paths for all .md files in the vault."""
-    return [str(p) for p in _VAULT_ROOT.rglob("*.md") if p.is_file()]
+    return [str(p) for p in _DOCUMENT_ROOT.rglob("*.md") if p.is_file()]
 
 
 # ---------------------------------------------------------------------------

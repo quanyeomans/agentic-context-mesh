@@ -105,7 +105,7 @@ class TestProceduralPattern:
 
     @pytest.mark.unit
     def test_how_to(self):
-        content = "How to run the embedding pipeline on a new vault"
+        content = "How to run the embedding pipeline on a new document store"
         result_type, _ = classify_by_rules(content)
         assert result_type == "procedural-pattern"
 

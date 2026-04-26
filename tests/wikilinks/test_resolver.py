@@ -6,7 +6,7 @@ Covers:
 - load_entities_from_neo4j(): loads from a mock Neo4j client
 - get_entities(): Neo4j-prefer / fallback logic via monkeypatch
 
-All tests are fully self-contained — no real vault or Neo4j required.
+All tests are fully self-contained — no real document store or Neo4j required.
 """
 
 from __future__ import annotations

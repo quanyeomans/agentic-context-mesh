@@ -472,7 +472,7 @@ def test_stem_from_path_simple_filename() -> None:
 
 
 @pytest.mark.unit
-def test_stem_from_path_deep_vault_path() -> None:
+def test_stem_from_path_deep_document_store_path() -> None:
     assert _stem_from_path("02-Areas/00-Clients/Acme-Corp/Acme-Corp.md") == "acme-corp"
 
 
@@ -560,7 +560,7 @@ def test_ndcg_by_title_empty_gold() -> None:
 
 @pytest.mark.unit
 def test_ndcg_by_title_file_moved_still_matches() -> None:
-    """Score is unaffected by vault reorganisation — title is the stable identity."""
+    """Score is unaffected by document store reorganisation — title is the stable identity."""
     gold = [{"title": "patterns", "relevance": 2}]
     # Same note, different folder
     original_path = ["04-Agent-Knowledge/builder/patterns.md"]

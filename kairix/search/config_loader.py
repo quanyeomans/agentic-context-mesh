@@ -178,7 +178,7 @@ class CollectionDef:
     """A configured document collection for search scoping."""
 
     name: str
-    path: str  # relative to vault_root
+    path: str  # relative to document_root
     glob: str = "**/*.md"
 
 

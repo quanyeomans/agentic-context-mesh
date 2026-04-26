@@ -24,7 +24,7 @@ from kairix.wikilinks.injector import (
 )
 from kairix.wikilinks.resolver import get_entities
 
-_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_DOCUMENT_ROOT", str(Path.home() / "kairix-vault"))
 _WORKSPACES_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 
 # Timestamp file to track last run
@@ -167,7 +167,7 @@ def _inject_changed(entities: list, dry_run: bool) -> None:
 def _gather_eligible_files() -> list[str]:
     """Collect all eligible .md files from vault and workspaces."""
     result: list[str] = []
-    for root in [_VAULT_ROOT, _WORKSPACES_ROOT]:
+    for root in [_DOCUMENT_ROOT, _WORKSPACES_ROOT]:
         p = Path(root)
         if not p.exists():
             continue
@@ -192,11 +192,11 @@ def _audit_cmd(argv: list[str]) -> None:
     from kairix.wikilinks.audit import weekly_report
 
     entities = get_entities()
-    report = weekly_report(_VAULT_ROOT, entities)
+    report = weekly_report(_DOCUMENT_ROOT, entities)
     print(report)
 
     # Optionally save report to vault
-    report_path = Path(_VAULT_ROOT) / "04-Agent-Knowledge" / "shared" / "wikilink-audit-report.md"
+    report_path = Path(_DOCUMENT_ROOT) / "04-Agent-Knowledge" / "shared" / "wikilink-audit-report.md"
     try:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(report, encoding="utf-8")

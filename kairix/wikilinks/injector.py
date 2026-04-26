@@ -27,16 +27,16 @@ from kairix.wikilinks.resolver import WikiEntity
 # Injection log path
 _LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
-_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
 _WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 
 # Eligible base paths for injection
 _ELIGIBLE_PREFIXES = (
     f"{_WORKSPACE_ROOT}/",
-    f"{_VAULT_ROOT}/04-Agent-Knowledge/",
-    f"{_VAULT_ROOT}/01-Projects/",
-    f"{_VAULT_ROOT}/02-Areas/",
-    f"{_VAULT_ROOT}/05-Knowledge/",
+    f"{_DOCUMENT_ROOT}/04-Agent-Knowledge/",
+    f"{_DOCUMENT_ROOT}/01-Projects/",
+    f"{_DOCUMENT_ROOT}/02-Areas/",
+    f"{_DOCUMENT_ROOT}/05-Knowledge/",
 )
 
 _INELIGIBLE_SUBSTRINGS = (
@@ -158,10 +158,10 @@ def _entities_for_own_page(source_path: str, entities: list[WikiEntity]) -> set[
     if not source_path:
         return set()
 
-    # Normalise source_path to a relative vault path for comparison
-    vault_root = f"{_VAULT_ROOT}/"
-    if source_path.startswith(vault_root):
-        rel = source_path[len(vault_root) :]
+    # Normalise source_path to a relative document path for comparison
+    doc_root = f"{_DOCUMENT_ROOT}/"
+    if source_path.startswith(doc_root):
+        rel = source_path[len(doc_root) :]
     else:
         rel = source_path
 
@@ -375,11 +375,11 @@ def inject_file(path: str, entities: list[WikiEntity], dry_run: bool = False) ->
 
 def _log_injection(file_path: str, injected: list[str], dry_run: bool) -> None:
     """Append an entry to the injection log."""
-    # Use relative vault path when possible
-    vault_root = f"{_VAULT_ROOT}/"
+    # Use relative document path when possible
+    doc_root = f"{_DOCUMENT_ROOT}/"
     rel_path = file_path
-    if file_path.startswith(vault_root):
-        rel_path = file_path[len(vault_root) :]
+    if file_path.startswith(doc_root):
+        rel_path = file_path[len(doc_root) :]
 
     entry = {
         "ts": int(time.time()),

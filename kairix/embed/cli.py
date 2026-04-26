@@ -98,17 +98,17 @@ def cmd_embed(args: argparse.Namespace) -> int:
         create_schema(db)
         validate_schema(db)
 
-        # Scan vault for new/changed documents before embedding.
+        # Scan document store for new/changed documents before embedding.
         # This ensures first-run embed works without a separate scan step.
-        from kairix.db.scanner import VaultScanner, CollectionConfig
-        from kairix.paths import vault_root
-        vroot = vault_root()
-        scanner = VaultScanner(db, vault_root=vroot)
-        # Default: scan the entire vault root as a single collection
+        from kairix.db.scanner import DocumentScanner, CollectionConfig
+        from kairix.paths import document_root
+        droot = document_root()
+        scanner = DocumentScanner(db, document_root=droot)
+        # Default: scan the entire document root as a single collection
         scan_report = scanner.scan([CollectionConfig(name="default", path=".")])
         if scan_report.new > 0 or scan_report.updated > 0:
             logging.info(
-                "Scanned vault: %d new, %d updated, %d unchanged",
+                "Scanned documents: %d new, %d updated, %d unchanged",
                 scan_report.new, scan_report.updated, scan_report.unchanged,
             )
             # Rebuild FTS index after scanning new/changed documents
@@ -212,7 +212,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="kairix embed",
-        description="Embed vault documents into the kairix vector index",
+        description="Embed documents into the kairix vector index",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     sub = parser.add_subparsers(dest="command")

@@ -25,7 +25,7 @@ def main(args: list[str] | None = None) -> None:
 
     parser = argparse.ArgumentParser(
         prog="kairix classify",
-        description="Auto-classify memory writes to the correct vault path.",
+        description="Auto-classify memory writes to the correct document path.",
     )
     parser.add_argument(
         "content",

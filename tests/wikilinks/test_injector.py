@@ -293,13 +293,13 @@ def test_should_not_inject_large_file(tmp_path: Path) -> None:
     large_file = tmp_path / "big.md"
     # Write 501KB
     large_file.write_bytes(b"x" * (501 * 1024))
-    # Patch path to look like an eligible vault path
+    # Patch path to look like an eligible document store path
     # We test should_inject directly but need a real file for size check
-    # Simulate by using an eligible vault path but with a monkeypatched size
+    # Simulate by using an eligible document store path but with a monkeypatched size
     # We test the file-size check via inject_file (integration), but here
     # we test should_inject with a fake eligible path where the file is large.
     # The size check in should_inject uses os.path.getsize which reads reality.
-    # So we create a large file at a temp path that happens to match vault structure.
+    # So we create a large file at a temp path that happens to match document store structure.
     # Since we can't easily place it in /tmp/test-vault, we test inject_file instead.
     # Here we just verify should_inject skips large files by placing one in a tmp dir
     # and calling it directly (the path won't match eligible prefixes, so test inject_file).

@@ -1,16 +1,16 @@
 """
-Classification router — maps (agent, type) → absolute vault path.
+Classification router — maps (agent, type) → absolute document path.
 
 Agent scoping: only valid agents are builder, shape, growth, consultant.
 "shared" maps to shared knowledge area.
 
 Path mappings:
   episodic           → <workspace-root>/<agent>/memory/<date>.md
-  procedural-rule    → <vault-root>/04-Agent-Knowledge/<agent>/rules.md
-  procedural-pattern → <vault-root>/04-Agent-Knowledge/<agent>/patterns.md
-  semantic-decision  → <vault-root>/04-Agent-Knowledge/<agent>/decisions.md
-  semantic-fact      → <vault-root>/04-Agent-Knowledge/<agent>/facts.md
-  entity             → <vault-root>/04-Agent-Knowledge/entities/<type>/<slug>.md
+  procedural-rule    → <document-root>/04-Agent-Knowledge/<agent>/rules.md
+  procedural-pattern → <document-root>/04-Agent-Knowledge/<agent>/patterns.md
+  semantic-decision  → <document-root>/04-Agent-Knowledge/<agent>/decisions.md
+  semantic-fact      → <document-root>/04-Agent-Knowledge/<agent>/facts.md
+  entity             → <document-root>/04-Agent-Knowledge/entities/<type>/<slug>.md
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ from pathlib import Path
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant"})
 SHARED_AGENT = "shared"
 
-_VAULT_ROOT = os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
 _WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
-_KNOWLEDGE_ROOT = f"{_VAULT_ROOT}/04-Agent-Knowledge"
+_KNOWLEDGE_ROOT = f"{_DOCUMENT_ROOT}/04-Agent-Knowledge"
 
 # Agents where "shared" maps to the shared knowledge area
 _SHARED_AGENT_ROOT = f"{_KNOWLEDGE_ROOT}/shared"
@@ -47,7 +47,7 @@ def resolve_target_path(
     entity_slug: str | None = None,
 ) -> str:
     """
-    Return the absolute vault path for an agent + classification type.
+    Return the absolute document path for an agent + classification type.
 
     Args:
         agent:               Agent name. Must be in VALID_AGENTS or "shared".

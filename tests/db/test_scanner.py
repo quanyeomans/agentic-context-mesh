@@ -1,4 +1,4 @@
-"""Tests for kairix.db.scanner — vault file discovery, hashing, and ingestion."""
+"""Tests for kairix.db.scanner — document store file discovery, hashing, and ingestion."""
 
 import sqlite3
 

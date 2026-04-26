@@ -306,7 +306,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
 
     # Paths section
     full_config["paths"] = {
-        "vault_root": vault_path,
+        "document_root": vault_path,
         "db_path": db_path,
         "log_dir": log_dir,
     }

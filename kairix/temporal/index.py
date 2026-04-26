@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = _os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = _os.environ.get("KAIRIX_DOCUMENT_ROOT") or _os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
 _WORKSPACE_ROOT = _os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 # override with KAIRIX_BOARDS_DIR env var
-_VAULT_BOARDS_DIR = _os.environ.get("KAIRIX_BOARDS_DIR", f"{_VAULT_ROOT}/01-Projects/Boards")
+_BOARDS_DIR = _os.environ.get("KAIRIX_BOARDS_DIR", f"{_DOCUMENT_ROOT}/01-Projects/Boards")
 
-_VAULT_BOARDS_GLOB = f"{_VAULT_BOARDS_DIR}/*.md"
+_BOARDS_GLOB = f"{_BOARDS_DIR}/*.md"
 _WORKSPACE_MEMORY_GLOB = f"{_WORKSPACE_ROOT}/*/memory"
 
 # Filename pattern for memory logs
@@ -260,7 +260,7 @@ def query_temporal_chunks(
         all_chunks: list[TemporalChunk] = []
 
         # 1. Board files
-        for board_path in sorted(Path(_VAULT_BOARDS_DIR).glob("*.md")):
+        for board_path in sorted(Path(_BOARDS_DIR).glob("*.md")):
             try:
                 all_chunks.extend(chunk_board(str(board_path)))
             except Exception as e:

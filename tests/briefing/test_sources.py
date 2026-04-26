@@ -161,7 +161,7 @@ class TestFetchEntityStub:
         entity_dir.mkdir(parents=True)
         (entity_dir / "builder.md").write_text("# Builder\nThe engineering agent.")
 
-        with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
+        with patch("kairix.briefing.sources._DOCUMENT_ROOT", tmp_path):
             result = fetch_entity_stub("builder")
 
         assert "Builder" in result or "builder" in result.lower()
@@ -176,8 +176,8 @@ class TestFetchEntityStub:
 class TestFetchKnowledgeRules:
     @pytest.mark.unit
     def test_returns_empty_for_missing_rules(self, tmp_path):
-        # Use an isolated vault root with no rules files
-        with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
+        # Use an isolated document store root with no rules files
+        with patch("kairix.briefing.sources._DOCUMENT_ROOT", tmp_path):
             result = fetch_knowledge_rules("nonexistent_agent_xyz")
         assert result == ""
 
@@ -187,7 +187,7 @@ class TestFetchKnowledgeRules:
         rules_dir.mkdir(parents=True)
         (rules_dir / "rules.md").write_text("# Rules\n1. Never commit secrets\n2. Always test")
 
-        with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
+        with patch("kairix.briefing.sources._DOCUMENT_ROOT", tmp_path):
             result = fetch_knowledge_rules("builder")
 
         assert "secrets" in result.lower() or "rules" in result.lower()
@@ -213,7 +213,7 @@ class TestFetchRecentDecisions:
             "# Decisions\n- ADR-001: Use Azure embeddings\n- ADR-002: SQLite for entity facts"
         )
 
-        with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
+        with patch("kairix.briefing.sources._DOCUMENT_ROOT", tmp_path):
             result = fetch_recent_decisions("builder")
 
         assert "ADR" in result or "decision" in result.lower()
@@ -221,6 +221,6 @@ class TestFetchRecentDecisions:
     @pytest.mark.unit
     def test_returns_empty_when_no_decisions_file(self, tmp_path):
         # Should return empty string when decisions.md doesn't exist
-        with patch("kairix.briefing.sources._VAULT_ROOT", tmp_path):
+        with patch("kairix.briefing.sources._DOCUMENT_ROOT", tmp_path):
             result = fetch_recent_decisions("builder")
         assert isinstance(result, str)

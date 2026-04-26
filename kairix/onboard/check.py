@@ -207,33 +207,37 @@ def check_secrets_loaded() -> CheckResult:
     )
 
 
-def check_vault_root_configured() -> CheckResult:
-    """KAIRIX_VAULT_ROOT is set and the directory exists."""
-    vault_root = os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
-    if not vault_root:
+def check_document_root_configured() -> CheckResult:
+    """KAIRIX_DOCUMENT_ROOT is set and the directory exists."""
+    doc_root = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
+    if not doc_root:
         return CheckResult(
-            name="vault_root_configured",
+            name="document_root_configured",
             ok=False,
-            detail="KAIRIX_VAULT_ROOT is not set",
-            fix=("Set KAIRIX_VAULT_ROOT in /opt/kairix/service.env:\n  KAIRIX_VAULT_ROOT=/data/obsidian-vault"),
+            detail="KAIRIX_DOCUMENT_ROOT is not set",
+            fix=("Set KAIRIX_DOCUMENT_ROOT in /opt/kairix/service.env:\n  KAIRIX_DOCUMENT_ROOT=/data/obsidian-vault"),
         )
-    p = Path(vault_root)
+    p = Path(doc_root)
     if not p.exists():
         return CheckResult(
-            name="vault_root_configured",
+            name="document_root_configured",
             ok=False,
-            detail=f"KAIRIX_VAULT_ROOT directory does not exist: {vault_root}",
+            detail=f"KAIRIX_DOCUMENT_ROOT directory does not exist: {doc_root}",
             fix=(
-                "Create the directory or update KAIRIX_VAULT_ROOT in /opt/kairix/service.env.\n"
-                "If your vault is at a different path, set: KAIRIX_VAULT_ROOT=/your/vault/path"
+                "Create the directory or update KAIRIX_DOCUMENT_ROOT in /opt/kairix/service.env.\n"
+                "If your documents are at a different path, set: KAIRIX_DOCUMENT_ROOT=/your/docs/path"
             ),
         )
     md_count = sum(1 for _ in p.rglob("*.md") if not _.name.startswith("."))
     return CheckResult(
-        name="vault_root_configured",
+        name="document_root_configured",
         ok=True,
-        detail=f"Vault root: {vault_root} ({md_count:,} .md files found)",
+        detail=f"Document root: {doc_root} ({md_count:,} .md files found)",
     )
+
+
+# Backwards-compat alias
+check_vault_root_configured = check_document_root_configured
 
 
 def check_vector_search_working() -> CheckResult:
@@ -330,11 +334,11 @@ def check_neo4j_reachable() -> CheckResult:
             return CheckResult(
                 name="neo4j_reachable",
                 ok=False,
-                detail="Neo4j reachable but empty — vault crawler has not run",
+                detail="Neo4j reachable but empty — document crawler has not run",
                 fix=(
                     "Populate the entity graph:\n"
-                    "  kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT\n"
-                    "Expected: ≥ 50 nodes for a typical vault."
+                    "  kairix store crawl --document-root $KAIRIX_DOCUMENT_ROOT\n"
+                    "Expected: ≥ 50 nodes for a typical document store."
                 ),
             )
 
@@ -648,7 +652,7 @@ ALL_CHECKS = [
     check_kairix_on_path,
     check_wrapper_installed,
     check_secrets_loaded,
-    check_vault_root_configured,
+    check_document_root_configured,
     check_vector_search_working,
     check_neo4j_reachable,
     check_agent_knowledge_populated,

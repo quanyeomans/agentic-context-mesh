@@ -1,19 +1,19 @@
 """
-Vault scanner — discovers, hashes, and ingests markdown files into the kairix database.
+Document scanner — discovers, hashes, and ingests markdown files into the kairix database.
 
-Replaces what ``qmd update`` previously did: scanning vault directories, computing
+Replaces what ``qmd update`` previously did: scanning document directories, computing
 content hashes, and upserting into the documents + content tables.
 
 Usage::
 
     from kairix.db import open_db
-    from kairix.db.scanner import VaultScanner, CollectionConfig
+    from kairix.db.scanner import DocumentScanner, CollectionConfig
 
     db = open_db(extensions=False)
-    scanner = VaultScanner(db, vault_root=Path("~/kairix-vault").expanduser())
+    scanner = DocumentScanner(db, document_root=Path("~/kairix-vault").expanduser())
     report = scanner.scan([
-        CollectionConfig(name="vault-areas", path="02-Areas"),
-        CollectionConfig(name="vault-knowledge", path="05-Knowledge"),
+        CollectionConfig(name="doc-areas", path="02-Areas"),
+        CollectionConfig(name="doc-knowledge", path="05-Knowledge"),
     ])
     print(report)
 """
@@ -34,14 +34,14 @@ class CollectionConfig:
     """Configuration for a single collection to scan."""
 
     name: str
-    path: str  # relative to vault_root
+    path: str  # relative to document_root
     glob: str = "**/*.md"
     exclude: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ScanReport:
-    """Summary of a vault scan operation."""
+    """Summary of a document scan operation."""
 
     new: int = 0
     updated: int = 0
@@ -97,17 +97,17 @@ def _extract_title(text: str, path: Path) -> str:
     return path.stem.replace("-", " ").replace("_", " ").title()
 
 
-class VaultScanner:
+class DocumentScanner:
     """
-    Scans vault directories and ingests documents into the kairix database.
+    Scans document directories and ingests documents into the kairix database.
 
     The scanner is incremental: it compares content hashes to detect changes
     and only updates modified documents.
     """
 
-    def __init__(self, db: sqlite3.Connection, vault_root: Path) -> None:
+    def __init__(self, db: sqlite3.Connection, document_root: Path | None = None, vault_root: Path | None = None) -> None:
         self._db = db
-        self._vault_root = vault_root
+        self._document_root = document_root or vault_root or Path.home() / "kairix-vault"
 
     def scan(self, collections: list[CollectionConfig]) -> ScanReport:
         """
@@ -137,7 +137,7 @@ class VaultScanner:
     def _scan_collection(self, config: CollectionConfig) -> ScanReport:
         """Scan a single collection."""
         report = ScanReport()
-        collection_path = self._vault_root / config.path
+        collection_path = self._document_root / config.path
 
         if not collection_path.exists():
             logger.warning("db.scanner: collection path does not exist: %s", collection_path)
@@ -163,7 +163,7 @@ class VaultScanner:
                 continue
 
             # Check excludes
-            rel_to_vault = str(file_path.relative_to(self._vault_root))
+            rel_to_vault = str(file_path.relative_to(self._document_root))
             if any(pattern in rel_to_vault for pattern in exclude_patterns):
                 continue
 
@@ -220,3 +220,7 @@ class VaultScanner:
                 report.removed += 1
 
         return report
+
+
+# Backwards-compat alias
+VaultScanner = DocumentScanner

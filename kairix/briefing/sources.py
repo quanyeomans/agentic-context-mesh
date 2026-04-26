@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
+_DOCUMENT_ROOT = Path(os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
 _WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces")))
 _MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", str(Path.home() / ".kairix" / "workspaces")))
 
@@ -139,9 +139,9 @@ def fetch_entity_stub(agent: str, max_tokens: int = 400) -> str:
     try:
         # Try agent-specific entity stub (concept type)
         candidate_paths = [
-            _VAULT_ROOT / "04-Agent-Knowledge" / "entities" / "concept" / f"{agent}.md",
-            _VAULT_ROOT / "04-Agent-Knowledge" / "entities" / "agent" / f"{agent}.md",
-            _VAULT_ROOT / "04-Agent-Knowledge" / "entities" / "person" / f"{agent}.md",
+            _DOCUMENT_ROOT / "04-Agent-Knowledge" / "entities" / "concept" / f"{agent}.md",
+            _DOCUMENT_ROOT / "04-Agent-Knowledge" / "entities" / "agent" / f"{agent}.md",
+            _DOCUMENT_ROOT / "04-Agent-Knowledge" / "entities" / "person" / f"{agent}.md",
         ]
 
         for path in candidate_paths:
@@ -172,8 +172,8 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300) -> str:
     """
     try:
         rules_paths = [
-            _VAULT_ROOT / "04-Agent-Knowledge" / agent / "rules.md",
-            _VAULT_ROOT / "04-Agent-Knowledge" / "shared" / "rules.md",
+            _DOCUMENT_ROOT / "04-Agent-Knowledge" / agent / "rules.md",
+            _DOCUMENT_ROOT / "04-Agent-Knowledge" / "shared" / "rules.md",
         ]
 
         parts: list[str] = []
@@ -210,7 +210,7 @@ def fetch_recent_decisions(agent: str, max_tokens: int = 400) -> str:
         parts: list[str] = []
 
         # decisions.md
-        decisions_path = _VAULT_ROOT / "04-Agent-Knowledge" / agent / "decisions.md"
+        decisions_path = _DOCUMENT_ROOT / "04-Agent-Knowledge" / agent / "decisions.md"
         if decisions_path.exists():
             try:
                 content = decisions_path.read_text(encoding="utf-8", errors="replace")

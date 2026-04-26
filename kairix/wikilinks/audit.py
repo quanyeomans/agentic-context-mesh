@@ -30,15 +30,16 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 # ---------------------------------------------------------------------------
 
 
-def find_broken_links(vault_root: str = str(Path.home() / "kairix-vault")) -> list[dict]:
+def find_broken_links(document_root: str = str(Path.home() / "kairix-vault"), vault_root: str | None = None) -> list[dict]:
     """
-    Scan vault for [[wikilinks]] pointing to non-existent files/folders.
+    Scan document store for [[wikilinks]] pointing to non-existent files/folders.
 
-    Only checks wikilinks to vault-resident entities (those in WikiEntity.vault_path).
+    Only checks wikilinks to entities with a vault_path property set.
     Returns list of dicts: {file, link, reason}.
     """
     from kairix.wikilinks.resolver import get_entities
 
+    root = vault_root or document_root
     entities = get_entities()
     # Build lookup: wikilink target → vault_path
     target_to_path: dict[str, str] = {}
@@ -48,11 +49,11 @@ def find_broken_links(vault_root: str = str(Path.home() / "kairix-vault")) -> li
         if m:
             target_to_path[m.group(1)] = entity.vault_path
 
-    vault_path = Path(vault_root)
+    doc_path = Path(root)
     results: list[dict] = []
 
-    # Walk all markdown files in vault
-    for md_file in vault_path.rglob("*.md"):
+    # Walk all markdown files in document store
+    for md_file in doc_path.rglob("*.md"):
         try:
             content = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -64,14 +65,14 @@ def find_broken_links(vault_root: str = str(Path.home() / "kairix-vault")) -> li
                 continue  # Not a tracked entity link, skip
 
             expected_path = target_to_path[link_target]
-            full_expected = vault_path / expected_path
+            full_expected = doc_path / expected_path
 
             # Check if path exists (as file or directory)
             if not full_expected.exists():
                 # Also check without trailing slash
-                alt_path = vault_path / expected_path.rstrip("/")
+                alt_path = doc_path / expected_path.rstrip("/")
                 if not alt_path.exists():
-                    rel_file = str(md_file.relative_to(vault_path))
+                    rel_file = str(md_file.relative_to(doc_path))
                     results.append(
                         {
                             "file": rel_file,
@@ -89,7 +90,7 @@ def find_broken_links(vault_root: str = str(Path.home() / "kairix-vault")) -> li
 
 
 def find_unlinked_mentions(
-    vault_root: str,
+    document_root: str,
     entities: list[WikiEntity],
     sample_size: int = 50,
 ) -> list[dict]:
@@ -99,11 +100,11 @@ def find_unlinked_mentions(
     Returns list of dicts: {file, entity_name, mention_count}.
     Used to estimate injection backlog.
     """
-    vault_path = Path(vault_root)
+    doc_path = Path(document_root)
 
     # Gather eligible files
     eligible: list[Path] = []
-    for md_file in vault_path.rglob("*.md"):
+    for md_file in doc_path.rglob("*.md"):
         if should_inject(str(md_file)):
             eligible.append(md_file)
 
@@ -153,8 +154,8 @@ def find_unlinked_mentions(
 
             if count > 0:
                 md_str = str(md_file)
-                vault_str = str(vault_path)
-                rel_file = str(md_file.relative_to(vault_path)) if md_str.startswith(vault_str) else md_str
+                doc_str = str(doc_path)
+                rel_file = str(md_file.relative_to(doc_path)) if md_str.startswith(doc_str) else md_str
                 results.append(
                     {
                         "file": rel_file,
@@ -173,7 +174,7 @@ def find_unlinked_mentions(
 # ---------------------------------------------------------------------------
 
 
-def weekly_report(vault_root: str, entities: list[WikiEntity]) -> str:
+def weekly_report(document_root: str, entities: list[WikiEntity]) -> str:
     """
     Generate markdown weekly audit report covering:
     - Total entities in ontology (with/without vault_path)
@@ -190,10 +191,10 @@ def weekly_report(vault_root: str, entities: list[WikiEntity]) -> str:
     without_vault_path = total_entities - with_vault_path
 
     # Broken links
-    broken = find_broken_links(vault_root)
+    broken = find_broken_links(document_root)
 
     # Unlinked mentions sample
-    unlinked = find_unlinked_mentions(vault_root, entities, sample_size=50)
+    unlinked = find_unlinked_mentions(document_root, entities, sample_size=50)
 
     # Injection log stats (last 7 days)
     recent_injections = _read_recent_log(days=7)

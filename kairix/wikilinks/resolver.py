@@ -6,7 +6,7 @@ wikilink-entity-index.md (fallback).
 
 Entity sources:
   Primary: Neo4j graph (Organisation and Person nodes with vault_path)
-  Fallback: <vault-root>/agent-knowledge/shared/wikilink-entity-index.md
+  Fallback: <document-root>/agent-knowledge/shared/wikilink-entity-index.md
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-DEFAULT_BOOTSTRAP_PATH = "<vault-root>/agent-knowledge/shared/wikilink-entity-index.md"
+DEFAULT_BOOTSTRAP_PATH = "<document-root>/agent-knowledge/shared/wikilink-entity-index.md"
 
 # Minimum number of entities with vault_path required before we prefer the primary source
 _DB_THRESHOLD = 5
@@ -22,7 +22,7 @@ _DB_THRESHOLD = 5
 
 @dataclass
 class WikiEntity:
-    """An entity that can be linked in vault markdown files."""
+    """An entity that can be linked in document store markdown files."""
 
     name: str
     aliases: list[str]  # all names/aliases (including name itself) that trigger this link

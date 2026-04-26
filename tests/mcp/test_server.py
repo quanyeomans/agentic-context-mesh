@@ -309,7 +309,7 @@ def guide_file(tmp_path: Path) -> Path:
     guide = tmp_path / "agent-usage-guide.md"
     guide.write_text(
         "# Kairix Agent Usage Guide\n\n"
-        "## Search\nHow to search the vault.\n\n"
+        "## Search\nHow to search the document store.\n\n"
         "## Budget\nToken budget controls cost.\nDefault budget is 3000 tokens.\n\n"
         "## Troubleshooting\nDebug tips for common issues.\n",
         encoding="utf-8",
