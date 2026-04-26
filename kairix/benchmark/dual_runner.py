@@ -5,12 +5,13 @@ Runs a benchmark suite against two retrieval backends (baseline and comparison)
 and computes per-category score deltas. Used to compare a reference library
 against a user's knowledge store, or to measure the impact of a system change.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from kairix.benchmark.runner import BenchmarkResult, run_benchmark
-from kairix.benchmark.suite import BenchmarkSuite, load_suite
+from kairix.benchmark.suite import load_suite
 
 
 @dataclass

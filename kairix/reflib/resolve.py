@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 
 from kairix.reflib.extract import RawEntity
 
-
 # ---------------------------------------------------------------------------
 # Dataclass
 # ---------------------------------------------------------------------------
@@ -79,7 +78,7 @@ def _levenshtein(a: str, b: str) -> int:
 
 
 def _similarity(a: str, b: str) -> float:
-    """Normalised similarity between two strings (0.0–1.0)."""
+    """Normalised similarity between two strings (0.0-1.0)."""
     if a == b:
         return 1.0
     max_len = max(len(a), len(b))
@@ -185,7 +184,7 @@ def resolve_entities(raw: list[RawEntity]) -> list[ResolvedEntity]:
     # Step 3: fuzzy-match within same type
     # Skip fuzzy matching for high-cardinality types where O(n^2) is too slow
     # and fuzzy dedup adds little value (concepts from headings, individual docs).
-    _SKIP_FUZZY_TYPES = {"Concept", "Document"}
+    skip_fuzzy_types = {"Concept", "Document"}
 
     by_type: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for key in merged:
@@ -194,7 +193,7 @@ def resolve_entities(raw: list[RawEntity]) -> list[ResolvedEntity]:
     merge_map: dict[tuple[str, str], tuple[str, str]] = {}  # victim -> winner
 
     for etype, keys in by_type.items():
-        if etype in _SKIP_FUZZY_TYPES:
+        if etype in skip_fuzzy_types:
             continue
         slugs = sorted(keys, key=lambda k: k[0])
         # Safety: skip if group is very large (>2000) to avoid long runtime

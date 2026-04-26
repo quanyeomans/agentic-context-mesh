@@ -8,6 +8,7 @@ the Neo4j node property with --update.
 No API key required (Wikidata public REST API).
 Timeout: 10 seconds. Never raises — returns empty result on any failure.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,11 +26,11 @@ _DEFAULT_TIMEOUT = 10
 class WikidataMatch:
     """Result of a Wikidata entity search."""
 
-    qid: str                  # Wikidata item ID (e.g. "Q123456")
-    label: str                # Canonical English label
-    description: str          # Short description
-    url: str                  # Wikidata item URL
-    confidence: str           # "high" | "medium" | "low" based on label match
+    qid: str  # Wikidata item ID (e.g. "Q123456")
+    label: str  # Canonical English label
+    description: str  # Short description
+    url: str  # Wikidata item URL
+    confidence: str  # "high" | "medium" | "low" based on label match
 
 
 def search_wikidata(name: str, language: str = "en") -> list[WikidataMatch]:
@@ -82,13 +83,15 @@ def search_wikidata(name: str, language: str = "en") -> list[WikidataMatch]:
         else:
             confidence = "low"
 
-        results.append(WikidataMatch(
-            qid=qid,
-            label=label,
-            description=description,
-            url=url,
-            confidence=confidence,
-        ))
+        results.append(
+            WikidataMatch(
+                qid=qid,
+                label=label,
+                description=description,
+                url=url,
+                confidence=confidence,
+            )
+        )
 
     return results
 

@@ -209,7 +209,11 @@ def check_secrets_loaded() -> CheckResult:
 
 def check_document_root_configured() -> CheckResult:
     """KAIRIX_DOCUMENT_ROOT is set and the directory exists."""
-    doc_root = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
+    doc_root = (
+        os.environ.get("KAIRIX_DOCUMENT_ROOT")
+        or os.environ.get("KAIRIX_VAULT_ROOT")
+        or os.environ.get("VAULT_ROOT", "")
+    )
     if not doc_root:
         return CheckResult(
             name="document_root_configured",
@@ -538,12 +542,14 @@ def _probe_openclaw_harness() -> tuple[bool, str]:
     # Fallback: try openclaw CLI
     try:
         result = subprocess.run(
-            ["openclaw", "mcp", "list"],
-            capture_output=True, text=True, timeout=5,
+            ["openclaw", "mcp", "list"],  # noqa: S607 — openclaw is a known trusted binary
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if _MCP_KAIRIX_SERVER_NAME in result.stdout:
             return True, "OpenClaw: registered (via 'openclaw mcp list')"
-    except (FileNotFoundError, Exception):
+    except (FileNotFoundError, Exception):  # noqa: S110 — expected when openclaw not installed
         pass
 
     return False, "OpenClaw: not detected"
@@ -562,7 +568,6 @@ def _probe_claude_desktop_harness() -> tuple[bool, str]:
             mcp_servers = data.get("mcpServers", {})
             if "kairix" in mcp_servers:
                 entry = mcp_servers["kairix"]
-                cmd_args = entry.get("args", [])
                 cmd = entry.get("command", "")
                 return True, f"Claude Desktop: registered (command: {cmd})"
         except (OSError, _json.JSONDecodeError):
@@ -585,15 +590,20 @@ def _probe_sse_harness() -> tuple[bool, str]:
     # Fallback: check systemd unit exists and is active
     try:
         result = subprocess.run(
-            ["systemctl", "is-active", "kairix-mcp.service"],
-            capture_output=True, text=True, timeout=5,
+            ["systemctl", "is-active", "kairix-mcp.service"],  # noqa: S607 — systemctl is a trusted binary
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         state = result.stdout.strip()
         if state == "active":
-            return True, f"SSE/HTTP: kairix-mcp.service active (port {_MCP_SSE_PORT} not yet listening — may still be starting)"
+            return (
+                True,
+                f"SSE/HTTP: kairix-mcp.service active (port {_MCP_SSE_PORT} not yet listening — may still be starting)",
+            )
         elif state not in ("", "inactive", "failed", "unknown"):
             return False, f"SSE/HTTP: kairix-mcp.service state={state}"
-    except (FileNotFoundError, Exception):
+    except (FileNotFoundError, Exception):  # noqa: S110 — expected when systemctl not available
         pass
 
     return False, f"SSE/HTTP: not listening on port {_MCP_SSE_PORT}"
@@ -616,7 +626,9 @@ def check_mcp_service() -> CheckResult:
     sse_ok, sse_detail = _probe_sse_harness()
 
     active = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if ok]
-    inactive = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if not ok]
+    inactive = [
+        d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if not ok
+    ]
 
     if active:
         return CheckResult(
@@ -633,9 +645,9 @@ def check_mcp_service() -> CheckResult:
             "Configure at least one MCP consumer harness:\n\n"
             "  OpenClaw (stdio):\n"
             "    openclaw mcp set mcp-kairix "
-            "'{\"type\":\"stdio\",\"command\":\"/path/to/kairix-start.sh\"}'\n\n"
+            '\'{"type":"stdio","command":"/path/to/kairix-start.sh"}\'\n\n'
             "  Claude Desktop (stdio): add to ~/Library/Application Support/Claude/claude_desktop_config.json:\n"
-            "    {\"mcpServers\": {\"kairix\": {\"command\": \"kairix\", \"args\": [\"mcp\", \"serve\"]}}}\n\n"
+            '    {"mcpServers": {"kairix": {"command": "kairix", "args": ["mcp", "serve"]}}}\n\n'
             "  SSE/HTTP (persistent service):\n"
             "    sudo systemctl enable --now kairix-mcp.service\n"
             "    # or: kairix mcp serve --transport sse --port 7443 &\n"

@@ -60,8 +60,7 @@ def generate_catalogue(entries: list[CatalogueEntry]) -> str:
         lines.append("")
 
     # Summary
-    lines.insert(6, f"**Total: {total_files} files, {total_size:.0f} KB "
-                    f"across {len(by_collection)} collections**")
+    lines.insert(6, f"**Total: {total_files} files, {total_size:.0f} KB across {len(by_collection)} collections**")
     lines.insert(7, "")
 
     return "\n".join(lines) + "\n"
@@ -112,8 +111,9 @@ def generate_licence_notices(entries: list[CatalogueEntry]) -> str:
         lines.append(f"### {e.source_name}")
         lines.append(f"- Licence: {e.licence}")
         lines.append(f"- Source: {e.source_url}")
-        lines.append(f"- This work is used under the terms of {e.licence}. "
-                     f"Attribution: {e.source_name} ({e.source_url}).")
+        lines.append(
+            f"- This work is used under the terms of {e.licence}. Attribution: {e.source_name} ({e.source_url})."
+        )
         lines.append("")
 
     return "\n".join(lines) + "\n"

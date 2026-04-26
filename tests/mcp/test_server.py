@@ -321,6 +321,7 @@ def guide_file(tmp_path: Path) -> Path:
 def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
     """Empty topic returns full guide content."""
     import kairix.mcp.server as _mod
+
     server_file = Path(_mod.__file__)
     expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
     if expected.exists():
@@ -342,6 +343,7 @@ def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
 def test_tool_usage_guide_topic_filter(guide_file: Path) -> None:
     """Specific topic filters to relevant sections."""
     import kairix.mcp.server as _mod
+
     server_file = Path(_mod.__file__)
     expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
     if expected.exists():
@@ -364,6 +366,7 @@ def test_tool_usage_guide_missing_file(tmp_path: Path, monkeypatch) -> None:
     """Missing guide file returns error dict."""
     import kairix as _kairix_pkg
     import kairix.mcp.server as _mod
+
     monkeypatch.setattr(_mod, "__file__", str(tmp_path / "kairix" / "mcp" / "server.py"))
     monkeypatch.setattr(_kairix_pkg, "__file__", str(tmp_path / "kairix" / "__init__.py"))
     result = tool_usage_guide(topic="anything")

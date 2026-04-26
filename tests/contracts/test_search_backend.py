@@ -79,6 +79,10 @@ def test_search_result_protocol_fields():
     """SearchResultProtocol defines the expected attributes."""
     from kairix.contracts.search import SearchResultProtocol
 
-    annotations = SearchResultProtocol.__protocol_attrs__ if hasattr(SearchResultProtocol, "__protocol_attrs__") else list(SearchResultProtocol.__annotations__.keys())
+    annotations = (
+        SearchResultProtocol.__protocol_attrs__
+        if hasattr(SearchResultProtocol, "__protocol_attrs__")
+        else list(SearchResultProtocol.__annotations__.keys())
+    )
     for field_name in ("path", "score", "title", "snippet", "intent"):
         assert field_name in annotations, f"SearchResultProtocol missing field: {field_name}"

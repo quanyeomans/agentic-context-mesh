@@ -20,6 +20,7 @@ Gate rules:
   FAIL if any category score drops below CATEGORY_FLOOR (default 0.50)
   WARN (non-failing) if any category delta < -0.01 but overall within threshold
 """
+
 from __future__ import annotations
 
 import json
@@ -107,10 +108,7 @@ def compare(baseline: dict, current: dict) -> dict:
     lines.append("")
 
     if regression:
-        lines.append(
-            f"❌ FAIL: weighted_total dropped {abs(overall_delta):.4f} "
-            f"(threshold: {REGRESSION_THRESHOLD})"
-        )
+        lines.append(f"❌ FAIL: weighted_total dropped {abs(overall_delta):.4f} (threshold: {REGRESSION_THRESHOLD})")
     elif category_fails:
         lines.append(f"❌ FAIL: categories below floor ({CATEGORY_FLOOR}): {', '.join(category_fails)}")
     else:
@@ -158,6 +156,6 @@ def run_gate(baseline_path: str, current_path: str) -> int:
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print(f"Usage: python -m kairix.benchmark.baseline <baseline.json> <current.json>")
+        print("Usage: python -m kairix.benchmark.baseline <baseline.json> <current.json>")
         sys.exit(1)
     sys.exit(run_gate(sys.argv[1], sys.argv[2]))

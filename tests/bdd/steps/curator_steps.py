@@ -1,7 +1,9 @@
 """Step definitions for curator_health.feature."""
-from pytest_bdd import given, when, then
+
+from pytest_bdd import given, then, when
+
+from kairix.curator.health import run_health_check
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
-from kairix.curator.health import run_health_check, HealthReport
 
 _state: dict = {}
 
@@ -9,8 +11,13 @@ _state: dict = {}
 @given("Neo4j has 5 entities with vault_path and summary set")
 def neo4j_healthy():
     entities = [
-        {"id": f"entity-{i}", "name": f"Entity {i}", "label": "Organisation",
-         "vault_path": f"entities/entity-{i}.md", "summary": f"Summary {i}"}
+        {
+            "id": f"entity-{i}",
+            "name": f"Entity {i}",
+            "label": "Organisation",
+            "vault_path": f"entities/entity-{i}.md",
+            "summary": f"Summary {i}",
+        }
         for i in range(5)
     ]
     _state["neo4j"] = FakeNeo4jClient(entities=entities)
@@ -20,6 +27,7 @@ def neo4j_healthy():
 def neo4j_unavailable():
     class UnavailableClient:
         available = False
+
     _state["neo4j"] = UnavailableClient()
 
 
@@ -28,8 +36,13 @@ def neo4j_missing_vault_path():
     # FakeNeo4jClient returns missing_vault_path when "vault_path IS NULL" is in query
     # Override cypher to return one missing vault_path entity
     entities = [
-        {"id": "broken-entity", "name": "Broken Entity", "label": "Organisation",
-         "vault_path": None, "summary": "Has no vault path"}
+        {
+            "id": "broken-entity",
+            "name": "Broken Entity",
+            "label": "Organisation",
+            "vault_path": None,
+            "summary": "Has no vault path",
+        }
     ]
 
     class ClientWithMissingVaultPath(FakeNeo4jClient):
@@ -61,7 +74,7 @@ def check_stale_empty():
     assert len(_state["report"].stale_entities) == 0
 
 
-@then(f"total_entities equals 5")
+@then("total_entities equals 5")
 def check_total_5():
     assert _state["report"].total_entities == 5
 

@@ -1,7 +1,8 @@
 """Unit tests for batch splitting and chunk text logic."""
 
-from kairix.embed.embed import batched, chunk_text
 import pytest
+
+from kairix.embed.embed import batched, chunk_text
 
 
 @pytest.mark.unit

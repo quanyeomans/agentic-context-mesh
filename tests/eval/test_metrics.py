@@ -1,6 +1,8 @@
 """Unit tests for kairix.eval.metrics."""
+
 import pytest
-from kairix.eval.metrics import ndcg_score, hit_at_k, mean_reciprocal_rank
+
+from kairix.eval.metrics import hit_at_k, mean_reciprocal_rank, ndcg_score
 
 
 @pytest.mark.unit
@@ -32,7 +34,7 @@ class TestNdcg:
         gold = ["a.md"]
         score_k1 = ndcg_score(retrieved, gold, k=1)
         score_k10 = ndcg_score(retrieved, gold, k=10)
-        assert score_k1 == 0.0   # hit is beyond k=1
+        assert score_k1 == 0.0  # hit is beyond k=1
         assert score_k10 > 0.0
 
 

@@ -35,9 +35,7 @@ _QUERY = "What are the steps to deploy a Docker container?"
 def _mock_response(grades: dict[str, int]) -> MagicMock:
     """Build a mock urllib.request.urlopen context manager returning grades JSON."""
     content = json.dumps(grades)
-    body = json.dumps({
-        "choices": [{"message": {"content": content}}]
-    }).encode()
+    body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
     mock_resp = MagicMock()
     mock_resp.read.return_value = body
     mock_resp.__enter__ = lambda s: s
@@ -82,7 +80,7 @@ def test_judge_batch_clamps_grades_to_0_2() -> None:
         )
 
     assert result.grades["docker-deployment-guide"] == 2  # 5 clamped to 2
-    assert result.grades["ci-cd-pipeline-config"] == 0   # -1 clamped to 0
+    assert result.grades["ci-cd-pipeline-config"] == 0  # -1 clamped to 0
 
 
 @pytest.mark.unit
@@ -162,9 +160,7 @@ def test_judge_batch_returns_zeros_on_api_error() -> None:
 def test_judge_batch_returns_zeros_on_malformed_json() -> None:
     """Malformed JSON response → all grades are 0."""
     mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps({
-        "choices": [{"message": {"content": "not json at all {"}}]
-    }).encode()
+    mock_resp.read.return_value = json.dumps({"choices": [{"message": {"content": "not json at all {"}}]}).encode()
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = MagicMock(return_value=False)
 
@@ -263,7 +259,7 @@ def test_calibrate_passes_when_all_anchors_correct() -> None:
 @pytest.mark.unit
 def test_calibrate_raises_when_too_many_anchors_wrong() -> None:
     """Calibration raises JudgeCalibrationError when >3 anchors are wrong."""
-    from kairix.eval.judge import _CALIBRATION_ANCHORS, CALIBRATION_MAX_ERRORS
+    from kairix.eval.judge import CALIBRATION_MAX_ERRORS
 
     call_count = [0]
 

@@ -234,6 +234,7 @@ def test_get_secret_from_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path))
     # Clear lru_cache so this path is freshly read
     from kairix.secrets import _load_secrets_file
+
     _load_secrets_file.cache_clear()
     value = get_secret("azure-openai-endpoint")
     assert value == "https://example.openai.azure.com"
@@ -249,6 +250,7 @@ def test_get_secret_file_ignores_comments_and_blank_lines(tmp_path, monkeypatch)
     p.write_text(content, encoding="utf-8")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path))
     from kairix.secrets import _load_secrets_file
+
     _load_secrets_file.cache_clear()
     value = get_secret("kairix-neo4j-password")
     assert value == "s3cr3t"

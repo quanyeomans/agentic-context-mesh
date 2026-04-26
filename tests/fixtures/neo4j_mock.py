@@ -1,12 +1,43 @@
 """Fake Neo4j client for tests — no real Neo4j connection required."""
+
 from __future__ import annotations
 
 _DEFAULT_ENTITIES: list[dict] = [
-    {"id": "openclaw", "name": "OpenClaw", "label": "Organisation", "vault_path": "entities/openclaw.md", "summary": "AI agent platform"},
-    {"id": "acme-partners", "name": "Acme Partners", "label": "Organisation", "vault_path": "entities/acme-partners.md", "summary": "Microsoft services partner"},
-    {"id": "alice-smith", "name": "Alice Smith", "label": "Person", "vault_path": "entities/alice-smith.md", "summary": "Founder"},
-    {"id": "kairix-project", "name": "Kairix", "label": "Project", "vault_path": "entities/kairix.md", "summary": "Hybrid search memory system"},
-    {"id": "example-org", "name": "Example Corp", "label": "Organisation", "vault_path": "entities/example-corp.md", "summary": "Technology company"},
+    {
+        "id": "openclaw",
+        "name": "OpenClaw",
+        "label": "Organisation",
+        "vault_path": "entities/openclaw.md",
+        "summary": "AI agent platform",
+    },
+    {
+        "id": "acme-partners",
+        "name": "Acme Partners",
+        "label": "Organisation",
+        "vault_path": "entities/acme-partners.md",
+        "summary": "Microsoft services partner",
+    },
+    {
+        "id": "alice-smith",
+        "name": "Alice Smith",
+        "label": "Person",
+        "vault_path": "entities/alice-smith.md",
+        "summary": "Founder",
+    },
+    {
+        "id": "kairix-project",
+        "name": "Kairix",
+        "label": "Project",
+        "vault_path": "entities/kairix.md",
+        "summary": "Hybrid search memory system",
+    },
+    {
+        "id": "example-org",
+        "name": "Example Corp",
+        "label": "Organisation",
+        "vault_path": "entities/example-corp.md",
+        "summary": "Technology company",
+    },
 ]
 
 

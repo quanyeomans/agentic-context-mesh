@@ -88,7 +88,7 @@ def load_secrets(path: str | Path | None = None) -> int:
                 continue
             os.environ[key] = value
             count += 1
-    except Exception as exc:
+    except Exception:
         logger.warning("secrets: failed to load secrets file")
         return 0
 
@@ -112,7 +112,7 @@ def _load_secrets_file(path: Path) -> dict[str, str]:
             key = key.strip()
             if key:
                 result[key] = value
-    except Exception as exc:
+    except Exception:
         logger.warning("secrets: failed to parse secrets file")
     return result
 
@@ -158,8 +158,8 @@ def get_secret(name: str, required: bool = True) -> str | None:
     kv_name = os.environ.get("KAIRIX_KV_NAME", "")
     if kv_name:
         try:
-            result = subprocess.run(
-                [
+            result = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
+                [  # noqa: S607
                     "az",
                     "keyvault",
                     "secret",
@@ -188,7 +188,9 @@ def get_secret(name: str, required: bool = True) -> str | None:
     if required:
         logger.error(
             "get_secret: %r not found in env (%s), secrets file (%s), or Key Vault",
-            name, env_var, secrets_file,
+            name,
+            env_var,
+            secrets_file,
         )
         raise OSError(f"Secret {name!r} not available. Check environment, secrets file, or Key Vault configuration.")
     return None

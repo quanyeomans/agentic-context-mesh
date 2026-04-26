@@ -2,8 +2,6 @@
 Tests for kairix.eval.hybrid_sweep — hybrid pipeline calibration sweep.
 """
 
-import math
-
 import pytest
 
 from kairix.eval.hybrid_sweep import (
@@ -12,14 +10,13 @@ from kairix.eval.hybrid_sweep import (
     HybridSweepConfig,
     HybridSweepReport,
     HybridSweepResult,
+    _build_rel_map,
+    _match_path,
     build_default_configs,
     compute_hit_at_k,
     compute_mrr,
     compute_ndcg,
-    _build_rel_map,
-    _match_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # HybridSweepConfig
@@ -136,7 +133,7 @@ class TestRelMap:
 
     @pytest.mark.unit
     def test_empty_gold(self) -> None:
-        rel_map, mode = _build_rel_map([])
+        rel_map, _mode = _build_rel_map([])
         assert rel_map == {}
 
 

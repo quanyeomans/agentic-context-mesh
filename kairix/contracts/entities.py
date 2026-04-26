@@ -1,4 +1,5 @@
 """kairix.contracts.entities — Entity Resolver Protocol definition."""
+
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

@@ -19,12 +19,13 @@ Tests cover:
 """
 
 from __future__ import annotations
-import pytest
 
 import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from kairix.search.budget import (
     L1_BUDGET_MIN,

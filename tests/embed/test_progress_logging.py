@@ -1,6 +1,7 @@
 """Unit test: verify embed progress logging is present in the embed pipeline."""
 
 import inspect
+
 import pytest
 
 from kairix.embed import embed as embed_mod

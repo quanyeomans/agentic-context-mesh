@@ -5,6 +5,7 @@ Targets >= 90% coverage of date_extract.py.
 """
 
 from __future__ import annotations
+
 import pytest
 
 from kairix.embed.date_extract import extract_chunk_date

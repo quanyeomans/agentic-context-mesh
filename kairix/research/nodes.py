@@ -72,10 +72,7 @@ def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
         return {"confidence": 0.0, "refined_query": query}
 
     # Build a summary of what we found
-    found_summary = "\n".join(
-        f"- {r.get('path', '?')}: {r.get('snippet', '')[:200]}"
-        for r in chunks[:10]
-    )
+    found_summary = "\n".join(f"- {r.get('path', '?')}: {r.get('snippet', '')[:200]}" for r in chunks[:10])
 
     messages = [
         {
@@ -105,7 +102,12 @@ def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
         confidence = float(parsed.get("confidence", 0.0))
         refined = parsed.get("refined_query")
 
-        logger.info("research: evaluate turn=%d confidence=%.2f sufficient=%s", turns, confidence, confidence >= SUFFICIENCY_THRESHOLD)
+        logger.info(
+            "research: evaluate turn=%d confidence=%.2f sufficient=%s",
+            turns,
+            confidence,
+            confidence >= SUFFICIENCY_THRESHOLD,
+        )
         return {
             "confidence": confidence,
             "refined_query": refined or state.get("refined_query") or query,
@@ -129,10 +131,7 @@ def synthesise(state: ResearcherState) -> dict[str, Any]:
     query = state["query"]
     chunks = state.get("retrieved_chunks", [])
 
-    found_summary = "\n".join(
-        f"Source: {r.get('path', '?')}\n{r.get('snippet', '')[:300]}\n"
-        for r in chunks[:8]
-    )
+    found_summary = "\n".join(f"Source: {r.get('path', '?')}\n{r.get('snippet', '')[:300]}\n" for r in chunks[:8])
 
     messages = [
         {
@@ -155,7 +154,10 @@ def synthesise(state: ResearcherState) -> dict[str, Any]:
         return {"synthesis": synthesis}
     except Exception as exc:
         logger.warning("research: synthesise LLM call failed — %s", exc)
-        return {"synthesis": f"Found {len(chunks)} relevant documents but synthesis failed.", "error": "Synthesis failed — check server logs for details."}
+        return {
+            "synthesis": f"Found {len(chunks)} relevant documents but synthesis failed.",
+            "error": "Synthesis failed — check server logs for details.",
+        }
 
 
 def give_up(state: ResearcherState) -> dict[str, Any]:
@@ -168,11 +170,11 @@ def give_up(state: ResearcherState) -> dict[str, Any]:
     if not chunks:
         gaps.append("No relevant documents found in the knowledge base.")
 
-    partial = f"Found {len(chunks)} documents across {turns + 1} search rounds, but confidence remained below threshold."
+    partial = (
+        f"Found {len(chunks)} documents across {turns + 1} search rounds, but confidence remained below threshold."
+    )
     if chunks:
-        partial += " Best results:\n" + "\n".join(
-            f"- {r.get('path', '?')}" for r in chunks[:5]
-        )
+        partial += " Best results:\n" + "\n".join(f"- {r.get('path', '?')}" for r in chunks[:5])
 
     return {"gaps": gaps, "synthesis": partial}
 

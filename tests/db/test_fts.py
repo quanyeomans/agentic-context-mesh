@@ -51,9 +51,7 @@ def test_rebuild_fts_searchable() -> None:
     db = _create_test_db()
     rebuild_fts(db)
 
-    rows = db.execute(
-        "SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'knowledge'"
-    ).fetchall()
+    rows = db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'knowledge'").fetchall()
     assert len(rows) == 1
 
 
@@ -72,9 +70,7 @@ def test_rebuild_fts_excludes_inactive() -> None:
     db = _create_test_db()
     rebuild_fts(db)
 
-    rows = db.execute(
-        "SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'removed'"
-    ).fetchall()
+    rows = db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'removed'").fetchall()
     assert len(rows) == 0
 
 
@@ -92,15 +88,11 @@ def test_sync_fts_updates_specific_documents() -> None:
     assert synced == 1
 
     # Old content should not match
-    rows = db.execute(
-        "SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'fox'"
-    ).fetchall()
+    rows = db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'fox'").fetchall()
     assert len(rows) == 0
 
     # New content should match
-    rows = db.execute(
-        "SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'retrieval'"
-    ).fetchall()
+    rows = db.execute("SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'retrieval'").fetchall()
     assert len(rows) == 1
 
 

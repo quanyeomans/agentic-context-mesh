@@ -3,9 +3,10 @@ Tests for kairix.llm — LLM backend abstraction (P1-2).
 """
 
 from __future__ import annotations
-import pytest
 
 from unittest.mock import patch
+
+import pytest
 
 from kairix.llm import AzureOpenAIBackend, get_default_backend
 from kairix.llm.protocol import LLMBackend

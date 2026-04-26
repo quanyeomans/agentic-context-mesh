@@ -12,6 +12,7 @@ Invalid config values raise ConfigValidationError — do NOT fall back silently,
 as silent fallback can mask misconfiguration in production deployments.
 Result is cached per process (lru_cache on resolved path).
 """
+
 from __future__ import annotations
 
 import logging
@@ -91,9 +92,7 @@ def _validate_config(cfg: RetrievalConfig) -> None:
             errors.append(f"  {field_name}: {value} is outside valid range [{lo}, {hi}]")
 
     if errors:
-        raise ConfigValidationError(
-            "kairix.config.yaml contains invalid values:\n" + "\n".join(errors)
-        )
+        raise ConfigValidationError("kairix.config.yaml contains invalid values:\n" + "\n".join(errors))
 
 
 @lru_cache(maxsize=1)
@@ -148,7 +147,7 @@ def _parse_config(data: dict) -> RetrievalConfig:
     entity_cfg = _parse_entity(boosts.get("entity", {}) or {})
     procedural_cfg = _parse_procedural(boosts.get("procedural", {}) or {})
     temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {})
-    rerank_cfg = _parse_rerank((retrieval.get("rerank", {}) or {}))
+    rerank_cfg = _parse_rerank(retrieval.get("rerank", {}) or {})
 
     # Fusion strategy + RRF k
     defaults = RetrievalConfig.defaults()
@@ -201,11 +200,13 @@ def parse_collections(data: dict) -> CollectionsConfig | None:
     shared = []
     for item in shared_raw:
         if isinstance(item, dict) and "name" in item:
-            shared.append(CollectionDef(
-                name=item["name"],
-                path=item.get("path", "."),
-                glob=item.get("glob", "**/*.md"),
-            ))
+            shared.append(
+                CollectionDef(
+                    name=item["name"],
+                    path=item.get("path", "."),
+                    glob=item.get("glob", "**/*.md"),
+                )
+            )
 
     return CollectionsConfig(
         shared=shared,
@@ -221,6 +222,7 @@ def load_collections() -> CollectionsConfig | None:
         return None
     try:
         import yaml
+
         with path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return parse_collections(data)

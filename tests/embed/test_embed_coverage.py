@@ -195,7 +195,10 @@ def test_ensure_staging_table_idempotent() -> None:
 def test_stage_embedding_inserts_row() -> None:
     db = sqlite3.connect(":memory:")
     # content_vectors table required by stage_embedding
-    db.execute("CREATE TABLE content_vectors (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)")
+    db.execute(
+        "CREATE TABLE content_vectors"
+        " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)"
+    )
     ensure_staging_table(db)
     vec = [0.1] * 1536
     stage_embedding(db, "hash123", 0, 0, vec, "text-embedding-3-large", 1711111111)
@@ -303,7 +306,10 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
     db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT)")
-    db.execute("CREATE TABLE content_vectors (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)")
+    db.execute(
+        "CREATE TABLE content_vectors"
+        " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)"
+    )
     db.execute("CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY, embedding BLOB)")
 
     with (

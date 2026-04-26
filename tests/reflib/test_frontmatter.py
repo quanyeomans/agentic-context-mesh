@@ -10,7 +10,6 @@ from kairix.reflib.frontmatter import (
     extract_existing_frontmatter,
     extract_title,
     inject_frontmatter,
-    render_frontmatter,
 )
 from kairix.reflib.sources import SourceDef
 
@@ -42,7 +41,7 @@ class TestExtractExistingFrontmatter:
 
     def test_strips_quotes_from_values(self):
         text = '---\ntitle: "Quoted Title"\n---\n\nBody.'
-        fm, body = extract_existing_frontmatter(text)
+        fm, _body = extract_existing_frontmatter(text)
         assert fm["title"] == "Quoted Title"
 
 

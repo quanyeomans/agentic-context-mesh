@@ -27,7 +27,9 @@ from kairix.wikilinks.resolver import WikiEntity
 # Injection log path
 _LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
-_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(
+    "KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")
+)
 _WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 
 # Eligible base paths for injection

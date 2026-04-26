@@ -3,7 +3,9 @@
 Verifies that FakeNeo4jClient and the contracts.EntityResolverProtocol
 are structurally compatible. Also validates the resolver contract behaviour.
 """
+
 import pytest
+
 from kairix.contracts.entities import EntityResolverProtocol
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 

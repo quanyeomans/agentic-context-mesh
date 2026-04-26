@@ -25,10 +25,7 @@ def rebuild_fts(db: sqlite3.Connection) -> int:
     # Use regular content FTS5 (not contentless content='') for accurate BM25 scoring.
     # Contentless mode saves disk but degrades ranking because term frequency
     # statistics are computed differently. QMD used a regular content table.
-    db.execute(
-        "CREATE VIRTUAL TABLE documents_fts USING fts5("
-        "filepath, title, doc, tokenize='porter unicode61')"
-    )
+    db.execute("CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61')")
 
     db.execute("""
         INSERT INTO documents_fts(rowid, filepath, title, doc)

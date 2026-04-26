@@ -43,7 +43,7 @@ def extract_existing_frontmatter(text: str) -> tuple[dict[str, str] | None, str]
         return None, text
 
     fm_block = match.group(1)
-    body = text[match.end():]
+    body = text[match.end() :]
 
     # Simple YAML key: value parsing (no nested structures)
     parsed: dict[str, str] = {}

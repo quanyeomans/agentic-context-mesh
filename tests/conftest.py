@@ -10,6 +10,7 @@ Fixture hierarchy:
 BDD step modules must be declared as pytest_plugins at the root conftest level
 (pytest restriction: pytest_plugins in sub-conftest files is not supported).
 """
+
 import pytest
 
 # BDD step definition modules — registered here so pytest-bdd can discover them
@@ -19,8 +20,8 @@ pytest_plugins = [
     "tests.bdd.steps.curator_steps",
 ]
 
-from tests.fixtures.embeddings import fake_embedding, fake_embedding_bytes
-from tests.fixtures.neo4j_mock import FakeNeo4jClient
+from tests.fixtures.embeddings import fake_embedding  # noqa: E402
+from tests.fixtures.neo4j_mock import FakeNeo4jClient  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

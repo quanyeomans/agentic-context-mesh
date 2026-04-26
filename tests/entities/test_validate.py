@@ -1,7 +1,10 @@
 """Tests for kairix.entities.validate — Wikidata validator."""
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from kairix.entities.validate import search_wikidata, validate_entity, WikidataMatch
+
+from kairix.entities.validate import WikidataMatch, search_wikidata, validate_entity
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
 

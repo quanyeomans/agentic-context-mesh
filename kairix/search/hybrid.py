@@ -61,11 +61,15 @@ def embed_text_as_bytes(text: str) -> bytes | None:
 # Configuration
 # ---------------------------------------------------------------------------
 
-SEARCH_LOG_PATH = Path(os.environ.get("KAIRIX_SEARCH_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "search.jsonl")))
+SEARCH_LOG_PATH = Path(
+    os.environ.get("KAIRIX_SEARCH_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "search.jsonl"))
+)
 
 # Query logging (privacy-sensitive — disabled by default)
 _LOG_QUERIES: bool = os.getenv("KAIRIX_LOG_QUERIES", "0") == "1"
-_QUERY_LOG_PATH: Path = Path(os.getenv("KAIRIX_QUERY_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "queries.jsonl")))
+_QUERY_LOG_PATH: Path = Path(
+    os.getenv("KAIRIX_QUERY_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "queries.jsonl"))
+)
 
 # Rotate when file exceeds this size
 _QUERY_LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
@@ -77,10 +81,11 @@ _COLLECTIONS_CONFIG = None  # loaded lazily from config
 
 def _get_shared_collections() -> list[str]:
     """Get shared collection names from config or defaults."""
-    global _COLLECTIONS_CONFIG  # noqa: PLW0603
+    global _COLLECTIONS_CONFIG
     if _COLLECTIONS_CONFIG is None:
         try:
             from kairix.search.config_loader import load_collections
+
             _COLLECTIONS_CONFIG = load_collections()
         except Exception:
             _COLLECTIONS_CONFIG = False  # mark as "tried and failed"
@@ -342,18 +347,20 @@ def _run_multi_hop(
         vec_failed=False,
         fallback_used=False,
     )
-    _log_search_event({
-        "query_hash": query_hash,
-        "intent": QueryIntent.MULTI_HOP.value,
-        "agent": agent,
-        "scope": scope,
-        "bm25_count": len(fused_results),
-        "vec_count": 0,
-        "fused_count": len(fused_for_budget),
-        "budget_tokens": total_tokens,
-        "latency_ms": latency_ms,
-        "sub_queries": len(sub_queries),
-    })
+    _log_search_event(
+        {
+            "query_hash": query_hash,
+            "intent": QueryIntent.MULTI_HOP.value,
+            "agent": agent,
+            "scope": scope,
+            "bm25_count": len(fused_results),
+            "vec_count": 0,
+            "fused_count": len(fused_for_budget),
+            "budget_tokens": total_tokens,
+            "latency_ms": latency_ms,
+            "sub_queries": len(sub_queries),
+        }
+    )
     return result
 
 
@@ -449,7 +456,8 @@ def search(
             active_query = query
 
     # Neo4j client — used by planner (entity context) and entity_boost
-    neo4j_client = _get_neo4j()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: _get_neo4j() returns a client object, no credentials flow to a log sink here
+    # lgtm — false positive: _get_neo4j() returns a client object, no credentials logged
+    neo4j_client = _get_neo4j()
 
     # ENTITY intent requires Neo4j. Do not silently degrade to BM25+vector
     # for entity queries — the results would be misleading (no entity graph
@@ -540,14 +548,14 @@ def search(
     # Chunk-date proximity boost for TEMPORAL intent (TMP-7B)
     # Guard: skip when config requires explicit temporal marker and query lacks one.
     # Prevents recency bias on generic TEMPORAL queries ("what changed and why").
-    _chunk_date_guard_ok = (
-        not cfg.temporal.chunk_date_boost_guard_explicit_only
-        or _query_has_temporal_marker(active_query)
+    _chunk_date_guard_ok = not cfg.temporal.chunk_date_boost_guard_explicit_only or _query_has_temporal_marker(
+        active_query
     )
     if intent == QueryIntent.TEMPORAL and cfg.temporal.chunk_date_boost_enabled and _chunk_date_guard_ok:
         import datetime as _dt
 
         from kairix.temporal.rewriter import extract_time_window
+
         try:
             _start, _end = extract_time_window(active_query, reference_date=_dt.date.today())
             # Use window midpoint rather than start — avoids systematic bias toward

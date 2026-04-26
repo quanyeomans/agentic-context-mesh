@@ -7,31 +7,33 @@ from pathlib import Path
 from kairix.reflib.sources import SourceDef
 
 # Exact filename matches (case-insensitive) — repo boilerplate, not content
-BOILERPLATE_FILENAMES: frozenset[str] = frozenset({
-    "contributing.md",
-    "code_of_conduct.md",
-    "security.md",
-    "changelog.md",
-    "changes.md",
-    "codeowners",
-    "license",
-    "license.md",
-    "license.txt",
-    "licence",
-    "licence.md",
-    "copying",
-    "pull_request_template.md",
-    "issue_template.md",
-    "bug_report.md",
-    "feature_request.md",
-    ".gitignore",
-    ".gitattributes",
-    ".editorconfig",
-    ".prettierrc",
-    ".eslintrc.md",
-    "dependabot.yml",
-    "renovate.json",
-})
+BOILERPLATE_FILENAMES: frozenset[str] = frozenset(
+    {
+        "contributing.md",
+        "code_of_conduct.md",
+        "security.md",
+        "changelog.md",
+        "changes.md",
+        "codeowners",
+        "license",
+        "license.md",
+        "license.txt",
+        "licence",
+        "licence.md",
+        "copying",
+        "pull_request_template.md",
+        "issue_template.md",
+        "bug_report.md",
+        "feature_request.md",
+        ".gitignore",
+        ".gitattributes",
+        ".editorconfig",
+        ".prettierrc",
+        ".eslintrc.md",
+        "dependabot.yml",
+        "renovate.json",
+    }
+)
 
 # Path substring matches — directories to skip entirely
 BOILERPLATE_PATH_PATTERNS: tuple[str, ...] = (

@@ -26,7 +26,7 @@ from kairix.benchmark.suite import BenchmarkSuite
 from kairix.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
 
 # Re-export so existing `from kairix.benchmark.runner import CATEGORY_WEIGHTS` keeps working
-__all__ = ["CATEGORY_WEIGHTS", "CATEGORY_ALIASES"]
+__all__ = ["CATEGORY_ALIASES", "CATEGORY_WEIGHTS"]
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -488,8 +488,8 @@ def run_benchmark(
                 "or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT directly to skip Key Vault."
             )
 
-        api_key = subprocess.run(
-            [
+        api_key = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
+            [  # noqa: S607
                 "az",
                 "keyvault",
                 "secret",
@@ -507,8 +507,8 @@ def run_benchmark(
             text=True,
             timeout=15,
         ).stdout.strip()
-        endpoint = subprocess.run(
-            [
+        endpoint = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
+            [  # noqa: S607
                 "az",
                 "keyvault",
                 "secret",
@@ -526,8 +526,8 @@ def run_benchmark(
             text=True,
             timeout=15,
         ).stdout.strip()
-        dep = subprocess.run(
-            [
+        dep = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
+            [  # noqa: S607
                 "az",
                 "keyvault",
                 "secret",

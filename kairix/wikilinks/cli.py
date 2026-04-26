@@ -25,7 +25,9 @@ from kairix.wikilinks.injector import (
 )
 from kairix.wikilinks.resolver import get_entities
 
-_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_DOCUMENT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(
+    "KAIRIX_DOCUMENT_ROOT", str(Path.home() / "kairix-vault")
+)
 _WORKSPACES_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 
 # Timestamp file to track last run

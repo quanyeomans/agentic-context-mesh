@@ -20,7 +20,7 @@ def _shingle(text: str, n: int = 3) -> set[str]:
     text = text.lower()
     if len(text) < n:
         return {text}
-    return {text[i:i + n] for i in range(len(text) - n + 1)}
+    return {text[i : i + n] for i in range(len(text) - n + 1)}
 
 
 def jaccard_similarity(a: str, b: str, n: int = 3) -> float:

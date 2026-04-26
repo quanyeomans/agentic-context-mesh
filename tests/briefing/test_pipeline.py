@@ -5,9 +5,10 @@ Uses mocked sources and synthesiser — no live API calls or file system depende
 """
 
 from __future__ import annotations
-import pytest
 
 from unittest.mock import patch
+
+import pytest
 
 from kairix.briefing.pipeline import (
     _TOTAL_CONTEXT_CAP,

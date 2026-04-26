@@ -88,10 +88,7 @@ def validate_schema(db: sqlite3.Connection) -> None:
 
     errors = _validate(db)
     if errors:
-        raise SchemaVersionError(
-            "Database schema validation failed:\n"
-            + "\n".join(f"  - {e}" for e in errors)
-        )
+        raise SchemaVersionError("Database schema validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
 
 def ensure_vec_table(db: sqlite3.Connection, dims: int = EMBED_VECTOR_DIMS) -> None:

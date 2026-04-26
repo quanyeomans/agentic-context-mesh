@@ -260,7 +260,6 @@ class TestEntityFirstHint:
 
 @pytest.mark.unit
 class TestExtractEntityName:
-
     @pytest.mark.unit
     def test_strips_what_is(self) -> None:
         assert _extract_entity_name("what is Acme") == "Acme"

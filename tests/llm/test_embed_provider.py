@@ -24,7 +24,7 @@ def _mock_openai_module(monkeypatch):
         del sys.modules["kairix.llm.embed_provider"]
 
 
-from kairix.llm.embed_provider import (
+from kairix.llm.embed_provider import (  # noqa: E402
     AzureEmbedProvider,
     EmbedProvider,
     OpenAIEmbedProvider,

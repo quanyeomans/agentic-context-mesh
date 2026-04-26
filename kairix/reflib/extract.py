@@ -123,7 +123,10 @@ _SEED_FRAMEWORKS: dict[str, dict] = {
     "OKR": {"domain": "personal-development", "aliases": ["Objectives and Key Results"]},
     "Business Model Canvas": {"domain": "strategy"},
     "OpenTelemetry": {"domain": "software-engineering", "aliases": ["OTel"]},
-    "ADR": {"domain": "software-engineering", "aliases": ["Architecture Decision Record", "Architecture Decision Records"]},
+    "ADR": {
+        "domain": "software-engineering",
+        "aliases": ["Architecture Decision Record", "Architecture Decision Records"],
+    },
     "MADR": {"domain": "software-engineering", "aliases": ["Markdown ADR", "Markdown Architecture Decision Record"]},
 }
 
@@ -157,26 +160,66 @@ _FRAMEWORK_PATTERN = re.compile(
 )
 
 # Matches title-case proper nouns (2-5 words starting with capitals)
-_PROPER_NOUN_PATTERN = re.compile(
-    r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})\b"
-)
+_PROPER_NOUN_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})\b")
 
 # Heading extraction
 _HEADING_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 
 # Common words that are NOT entities when title-cased in headings
-_STOP_TITLE_WORDS = frozenset({
-    "The", "And", "For", "With", "From", "Into", "About", "This",
-    "That", "These", "Those", "What", "When", "Where", "How", "Why",
-    "Getting Started", "Quick Start", "Table Of Contents", "Next Steps",
-    "See Also", "Further Reading", "More Information", "Best Practices",
-    "Key Takeaways", "Key Points", "Common Mistakes", "Common Patterns",
-    "Related Topics", "Related Resources", "In This", "In The",
-    "Overview", "Introduction", "Summary", "Conclusion", "References",
-    "Appendix", "Prerequisites", "Requirements", "Installation",
-    "Configuration", "Usage", "Examples", "Example", "Setup",
-    "Final Thoughts", "Part One", "Part Two", "Part Three",
-})
+_STOP_TITLE_WORDS = frozenset(
+    {
+        "The",
+        "And",
+        "For",
+        "With",
+        "From",
+        "Into",
+        "About",
+        "This",
+        "That",
+        "These",
+        "Those",
+        "What",
+        "When",
+        "Where",
+        "How",
+        "Why",
+        "Getting Started",
+        "Quick Start",
+        "Table Of Contents",
+        "Next Steps",
+        "See Also",
+        "Further Reading",
+        "More Information",
+        "Best Practices",
+        "Key Takeaways",
+        "Key Points",
+        "Common Mistakes",
+        "Common Patterns",
+        "Related Topics",
+        "Related Resources",
+        "In This",
+        "In The",
+        "Overview",
+        "Introduction",
+        "Summary",
+        "Conclusion",
+        "References",
+        "Appendix",
+        "Prerequisites",
+        "Requirements",
+        "Installation",
+        "Configuration",
+        "Usage",
+        "Examples",
+        "Example",
+        "Setup",
+        "Final Thoughts",
+        "Part One",
+        "Part Two",
+        "Part Three",
+    }
+)
 
 
 def _is_stop_heading(text: str) -> bool:
@@ -219,65 +262,84 @@ def _extract_from_frontmatter(
 
     # The document itself is a Document entity
     if title:
-        entities.append(RawEntity(
-            name=title,
-            entity_type="Document",
-            description=f"Reference document: {title}",
-            source_docs=[rel_path],
-            domain=domain,
-            domains=[domain],
-            confidence=1.0,
-        ))
+        entities.append(
+            RawEntity(
+                name=title,
+                entity_type="Document",
+                description=f"Reference document: {title}",
+                source_docs=[rel_path],
+                domain=domain,
+                domains=[domain],
+                confidence=1.0,
+            )
+        )
 
     # Source name is an Organisation entity
     if source:
-        entities.append(RawEntity(
-            name=source,
-            entity_type="Organisation",
-            description=f"Source organisation: {source}",
-            source_docs=[rel_path],
-            domain=domain,
-            domains=[domain],
-            confidence=0.9,
-        ))
+        entities.append(
+            RawEntity(
+                name=source,
+                entity_type="Organisation",
+                description=f"Source organisation: {source}",
+                source_docs=[rel_path],
+                domain=domain,
+                domains=[domain],
+                confidence=0.9,
+            )
+        )
         # AUTHORED_BY relationship
         if title:
-            relationships.append(RawRelationship(
-                from_name=title,
-                from_type="Document",
-                to_name=source,
-                to_type="Organisation",
-                kind="AUTHORED_BY",
-                source_doc=rel_path,
-                confidence=0.9,
-            ))
+            relationships.append(
+                RawRelationship(
+                    from_name=title,
+                    from_type="Document",
+                    to_name=source,
+                    to_type="Organisation",
+                    kind="AUTHORED_BY",
+                    source_doc=rel_path,
+                    confidence=0.9,
+                )
+            )
 
     # DESCRIBED_IN — the document describes content in its domain
     if title:
-        relationships.append(RawRelationship(
-            from_name=title,
-            from_type="Document",
-            to_name=domain,
-            to_type="Concept",
-            kind="DESCRIBED_IN",
-            source_doc=rel_path,
-            confidence=0.7,
-        ))
+        relationships.append(
+            RawRelationship(
+                from_name=title,
+                from_type="Document",
+                to_name=domain,
+                to_type="Concept",
+                kind="DESCRIBED_IN",
+                source_doc=rel_path,
+                confidence=0.7,
+            )
+        )
 
     # Detect framework-like titles
     if title:
-        for suffix in ("Framework", "Method", "Model", "Pattern", "Methodology",
-                        "Architecture", "Playbook", "Guide", "Specification"):
+        for suffix in (
+            "Framework",
+            "Method",
+            "Model",
+            "Pattern",
+            "Methodology",
+            "Architecture",
+            "Playbook",
+            "Guide",
+            "Specification",
+        ):
             if suffix in title:
-                entities.append(RawEntity(
-                    name=title,
-                    entity_type="Framework",
-                    description=f"{suffix}: {title}",
-                    source_docs=[rel_path],
-                    domain=domain,
-                    domains=[domain],
-                    confidence=0.85,
-                ))
+                entities.append(
+                    RawEntity(
+                        name=title,
+                        entity_type="Framework",
+                        description=f"{suffix}: {title}",
+                        source_docs=[rel_path],
+                        domain=domain,
+                        domains=[domain],
+                        confidence=0.85,
+                    )
+                )
                 break
 
 
@@ -303,47 +365,53 @@ def _extract_from_headings(
             continue
 
         # Update heading stack for hierarchy
-        heading_stack = [(l, t) for l, t in heading_stack if l < level]
+        heading_stack = [(lvl, t) for lvl, t in heading_stack if lvl < level]
         heading_stack.append((level, text))
 
         # Check for framework patterns in headings
         fm_match = _FRAMEWORK_PATTERN.search(text)
         if fm_match:
             fw_name = fm_match.group(0)
-            entities.append(RawEntity(
-                name=fw_name,
-                entity_type="Framework",
-                description=f"Framework/method mentioned in heading",
-                source_docs=[rel_path],
-                domain=domain,
-                domains=[domain],
-                confidence=0.7,
-            ))
+            entities.append(
+                RawEntity(
+                    name=fw_name,
+                    entity_type="Framework",
+                    description="Framework/method mentioned in heading",
+                    source_docs=[rel_path],
+                    domain=domain,
+                    domains=[domain],
+                    confidence=0.7,
+                )
+            )
 
         # TEACHES relationship: only from h2 headings (reduces noise)
         if level <= 2 and parent_title:
-            relationships.append(RawRelationship(
-                from_name=parent_title,
-                from_type="Document",
-                to_name=text,
-                to_type="Concept",
-                kind="TEACHES",
-                source_doc=rel_path,
-                confidence=0.6,
-            ))
+            relationships.append(
+                RawRelationship(
+                    from_name=parent_title,
+                    from_type="Document",
+                    to_name=text,
+                    to_type="Concept",
+                    kind="TEACHES",
+                    source_doc=rel_path,
+                    confidence=0.6,
+                )
+            )
 
         # PART_OF from sub-headings (h2 under h1, h3 under h2)
         if len(heading_stack) >= 2:
             parent_heading = heading_stack[-2][1]
-            relationships.append(RawRelationship(
-                from_name=text,
-                from_type="Concept",
-                to_name=parent_heading,
-                to_type="Concept",
-                kind="PART_OF",
-                source_doc=rel_path,
-                confidence=0.5,
-            ))
+            relationships.append(
+                RawRelationship(
+                    from_name=text,
+                    from_type="Concept",
+                    to_name=parent_heading,
+                    to_type="Concept",
+                    kind="PART_OF",
+                    source_doc=rel_path,
+                    confidence=0.5,
+                )
+            )
 
 
 # Pre-build a combined lookup: name -> (entity_type, description_prefix, info_dict)
@@ -378,16 +446,18 @@ def _extract_seed_entities(
 
     for name in found:
         etype, desc, info = _ALL_SEEDS[name]
-        entities.append(RawEntity(
-            name=name,
-            entity_type=etype,
-            description=desc,
-            source_docs=[rel_path],
-            domain=info.get("domain", domain),
-            domains=[info.get("domain", domain), domain],
-            aliases=list(info.get("aliases", [])),
-            confidence=0.95,
-        ))
+        entities.append(
+            RawEntity(
+                name=name,
+                entity_type=etype,
+                description=desc,
+                source_docs=[rel_path],
+                domain=info.get("domain", domain),
+                domains=[info.get("domain", domain), domain],
+                aliases=list(info.get("aliases", [])),
+                confidence=0.95,
+            )
+        )
 
 
 def _process_file(

@@ -3,9 +3,11 @@
 Verifies that AzureOpenAIBackend satisfies the LLMBackend Protocol
 structurally (no live API calls made).
 """
+
 import pytest
-from kairix.llm.protocol import LLMBackend
+
 from kairix.llm.backends import AzureOpenAIBackend
+from kairix.llm.protocol import LLMBackend
 
 
 @pytest.mark.contract
@@ -18,7 +20,9 @@ def test_azure_backend_satisfies_llm_protocol():
 def test_llm_backend_protocol_has_required_methods():
     """LLMBackend Protocol must declare chat, embed, embed_as_bytes."""
     required = {"chat", "embed", "embed_as_bytes"}
-    protocol_members = set(LLMBackend.__protocol_attrs__) if hasattr(LLMBackend, "__protocol_attrs__") else set(dir(LLMBackend))
+    protocol_members = (
+        set(LLMBackend.__protocol_attrs__) if hasattr(LLMBackend, "__protocol_attrs__") else set(dir(LLMBackend))
+    )
     for method in required:
         assert method in protocol_members, f"LLMBackend missing required method: {method}"
 

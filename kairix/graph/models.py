@@ -283,11 +283,9 @@ class GraphEdge:
     def __post_init__(self) -> None:
         if self.from_label not in _VALID_LABELS:
             raise ValueError(
-                f"from_label {self.from_label!r} is not a valid node label. "
-                f"Valid labels: {sorted(_VALID_LABELS)}"
+                f"from_label {self.from_label!r} is not a valid node label. Valid labels: {sorted(_VALID_LABELS)}"
             )
         if self.to_label not in _VALID_LABELS:
             raise ValueError(
-                f"to_label {self.to_label!r} is not a valid node label. "
-                f"Valid labels: {sorted(_VALID_LABELS)}"
+                f"to_label {self.to_label!r} is not a valid node label. Valid labels: {sorted(_VALID_LABELS)}"
             )

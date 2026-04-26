@@ -36,15 +36,17 @@ def emit_entity_stubs(
     # Build nodes
     nodes = []
     for e in entities:
-        nodes.append({
-            "id": e.id,
-            "label": e.entity_type,
-            "name": e.canonical_name,
-            "description": e.description,
-            "domains": e.domains,
-            "source_docs": e.source_docs[:20],  # cap for readability
-            "aliases": e.aliases,
-        })
+        nodes.append(
+            {
+                "id": e.id,
+                "label": e.entity_type,
+                "name": e.canonical_name,
+                "description": e.description,
+                "domains": e.domains,
+                "source_docs": e.source_docs[:20],  # cap for readability
+                "aliases": e.aliases,
+            }
+        )
 
     # Build edge lookup: name → id for resolved entities
     name_to_id: dict[str, str] = {}
@@ -66,12 +68,14 @@ def emit_entity_stubs(
         if edge_key in seen_edges:
             continue
         seen_edges.add(edge_key)
-        edges.append({
-            "from_id": from_id,
-            "to_id": to_id,
-            "kind": r.kind,
-            "source_doc": r.source_doc,
-        })
+        edges.append(
+            {
+                "from_id": from_id,
+                "to_id": to_id,
+                "kind": r.kind,
+                "source_doc": r.source_doc,
+            }
+        )
 
     nodes_path = entities_dir / "nodes.json"
     edges_path = entities_dir / "edges.json"

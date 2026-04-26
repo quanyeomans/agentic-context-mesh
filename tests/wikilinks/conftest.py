@@ -1,5 +1,5 @@
 """Fixtures for wikilinks tests."""
-import os
+
 import pytest
 
 
@@ -11,5 +11,7 @@ def _set_test_roots(monkeypatch):
 
     # Force reimport so module-level variables pick up the new env vars
     import importlib
+
     import kairix.wikilinks.injector
+
     importlib.reload(kairix.wikilinks.injector)

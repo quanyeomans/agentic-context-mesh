@@ -81,6 +81,7 @@ def _estimate_tokens(text: str) -> int:
 def _get_summaries_db_path() -> Path:
     """Return the summaries DB path, configurable via KAIRIX_SUMMARIES_DB env var."""
     import os
+
     return Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
 
 

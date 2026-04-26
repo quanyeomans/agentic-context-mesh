@@ -69,7 +69,7 @@ def split_at_headings(
 
     # Include any preamble before the first heading
     if headings and headings[0].start() > 0:
-        preamble = text[:headings[0].start()].strip()
+        preamble = text[: headings[0].start()].strip()
         if preamble and not is_too_small(preamble):
             sections.insert(0, ("preamble", preamble))
 

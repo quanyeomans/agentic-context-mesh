@@ -32,7 +32,9 @@ def _get_cred(secret_name: str) -> str:
 # Vault doc discovery
 # ---------------------------------------------------------------------------
 
-_DOCUMENT_ROOT = Path(os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")))
+_DOCUMENT_ROOT = Path(
+    os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+)
 
 
 def _discover_vault_docs() -> list[str]:

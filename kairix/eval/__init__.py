@@ -12,6 +12,7 @@ Provides:
   - enrich_suite: convert existing gold_path suite to graded gold_titles
   - MonitorResult, run_monitor: canary regression detection
 """
+
 from kairix.eval.generate import (
     EnrichmentResult,
     GeneratedQuery,

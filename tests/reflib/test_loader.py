@@ -8,8 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.reflib.loader import LoadReport, load_entity_stubs
-
+from kairix.reflib.loader import load_entity_stubs
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -171,15 +170,18 @@ class TestLoadFromFixtures:
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"
         _write_json(nodes_path, [])
-        _write_json(edges_path, [
-            {
-                "from_id": "a",
-                "from_label": "Person",
-                "to_id": "b",
-                "to_label": "Organisation",
-                "kind": "INVENTED_REL",
-            }
-        ])
+        _write_json(
+            edges_path,
+            [
+                {
+                    "from_id": "a",
+                    "from_label": "Person",
+                    "to_id": "b",
+                    "to_label": "Organisation",
+                    "kind": "INVENTED_REL",
+                }
+            ],
+        )
 
         client = _make_mock_client()
         report = load_entity_stubs(nodes_path, edges_path, client)

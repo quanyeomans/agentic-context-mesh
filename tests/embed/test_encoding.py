@@ -1,6 +1,7 @@
 """Unit tests for vector encoding and hash_seq construction."""
 
 import struct
+
 import pytest
 
 from kairix.embed.embed import build_hash_seq, encode_vector

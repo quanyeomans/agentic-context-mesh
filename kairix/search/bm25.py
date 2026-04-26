@@ -11,7 +11,6 @@ BM25Result is a TypedDict for lightweight, serialisable results.
 """
 
 import logging
-import math
 import re
 import sqlite3
 from typing import TypedDict

@@ -43,11 +43,13 @@ from kairix.eval.judge import (
 
 logger = logging.getLogger(__name__)
 
+
 # Path to kairix's SQLite index (resolved via kairix.db)
 def _get_db_path_str() -> str:
     from kairix.db import get_db_path
 
     return str(get_db_path())
+
 
 # Category target distribution for generate_suite()
 _TARGET_DISTRIBUTION: dict[str, float] = {
@@ -85,7 +87,7 @@ class GenerationResult:
     n_generated: int
     n_accepted: int
     n_rejected: int  # no grade-2 doc found
-    n_failed: int    # API or retrieval error
+    n_failed: int  # API or retrieval error
     category_counts: dict[str, int]
     calibration_passed: bool
     errors: list[str] = field(default_factory=list)
@@ -97,9 +99,9 @@ class EnrichmentResult:
 
     output_path: str
     n_cases: int
-    n_enriched: int   # cases that received gold_titles
-    n_skipped: int    # cases where no grade-1+ doc was found (kept with existing gold)
-    n_failed: int     # cases where retrieval/judge failed
+    n_enriched: int  # cases that received gold_titles
+    n_skipped: int  # cases where no grade-1+ doc was found (kept with existing gold)
+    n_failed: int  # cases where retrieval/judge failed
     errors: list[str] = field(default_factory=list)
 
 
@@ -495,11 +497,13 @@ def generate_suite(
                 continue
 
             # Build candidates for judge
-            candidates = list(zip(
-                [Path(p).stem for p in paths[:10]],
-                [s[:300] for s in snippets[:10]],
-                strict=False,
-            ))
+            candidates = list(
+                zip(
+                    [Path(p).stem for p in paths[:10]],
+                    [s[:300] for s in snippets[:10]],
+                    strict=False,
+                )
+            )
 
             # Judge
             result = judge_batch(
@@ -648,11 +652,13 @@ def enrich_suite(
             continue
 
         # Build candidates
-        candidates = list(zip(
-            [Path(p).stem for p in paths[:10]],
-            [s[:300] for s in snippets[:10]],
-            strict=False,
-        ))
+        candidates = list(
+            zip(
+                [Path(p).stem for p in paths[:10]],
+                [s[:300] for s in snippets[:10]],
+                strict=False,
+            )
+        )
 
         # Judge
         result = judge_batch(
@@ -672,9 +678,7 @@ def enrich_suite(
 
         # Build gold_titles
         gold_titles: list[dict[str, Any]] = [
-            {"title": stem, "relevance": grade}
-            for stem, grade in result.grades.items()
-            if grade >= 1
+            {"title": stem, "relevance": grade} for stem, grade in result.grades.items() if grade >= 1
         ]
         gold_titles.sort(key=lambda x: -int(x["relevance"]))
 

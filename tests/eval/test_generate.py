@@ -7,9 +7,8 @@ All external calls (SQLite, hybrid search, LLM API) are mocked.
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -62,10 +61,12 @@ _JUDGE_RESULT_ALL_ZERO = JudgeResult(
 @pytest.mark.unit
 def test_generate_queries_returns_list_on_valid_response() -> None:
     """generate_queries returns list of GeneratedQuery from a valid API response."""
-    mock_response = json.dumps([
-        {"query": "How do I deploy a Docker container?", "intent": "procedural"},
-        {"query": "What is the Docker deployment process?", "intent": "recall"},
-    ])
+    mock_response = json.dumps(
+        [
+            {"query": "How do I deploy a Docker container?", "intent": "procedural"},
+            {"query": "What is the Docker deployment process?", "intent": "recall"},
+        ]
+    )
 
     with patch("kairix.eval.generate._call_llm", return_value=mock_response):
         results = generate_queries(
@@ -129,9 +130,11 @@ def test_generate_queries_returns_empty_when_no_credentials() -> None:
 @pytest.mark.unit
 def test_generate_queries_defaults_unknown_intent_to_recall() -> None:
     """Unknown intent categories default to 'recall'."""
-    mock_response = json.dumps([
-        {"query": "What does this doc cover?", "intent": "unknown_category_xyz"},
-    ])
+    mock_response = json.dumps(
+        [
+            {"query": "What does this doc cover?", "intent": "unknown_category_xyz"},
+        ]
+    )
 
     with patch("kairix.eval.generate._call_llm", return_value=mock_response):
         results = generate_queries(
@@ -238,18 +241,26 @@ def test_generate_suite_writes_valid_yaml(tmp_path: Path) -> None:
         {"path": "docs/api-guide.md", "title": "API Guide", "collection": "knowledge", "body": "y" * 500},
     ]
     mock_queries = [
-        GeneratedQuery(query="How do I deploy?", intent="procedural", source_doc_path="docs/docker-guide.md", source_doc_title="Docker Guide"),
+        GeneratedQuery(
+            query="How do I deploy?",
+            intent="procedural",
+            source_doc_path="docs/docker-guide.md",
+            source_doc_title="Docker Guide",
+        ),
     ]
     mock_judge = _JUDGE_RESULT_WITH_GRADE2
 
     with (
         patch("kairix.eval.generate.sample_documents", return_value=mock_docs),
         patch("kairix.eval.generate.generate_queries", return_value=mock_queries),
-        patch("kairix.eval.generate._retrieve", return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"])),
+        patch(
+            "kairix.eval.generate._retrieve",
+            return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"]),
+        ),
         patch("kairix.eval.generate.judge_batch", return_value=mock_judge),
         patch("kairix.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
     ):
-        result = generate_suite(
+        generate_suite(
             output_path=str(output),
             n_cases=5,
             calibrate_first=False,
@@ -311,7 +322,10 @@ def test_enrich_suite_writes_valid_yaml_with_gold_titles(tmp_path: Path) -> None
         yaml.dump(input_suite, f)
 
     with (
-        patch("kairix.eval.generate._retrieve", return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"])),
+        patch(
+            "kairix.eval.generate._retrieve",
+            return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"]),
+        ),
         patch("kairix.eval.generate.judge_batch", return_value=_JUDGE_RESULT_WITH_GRADE2),
         patch("kairix.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
     ):
@@ -357,9 +371,12 @@ def test_enrich_suite_preserves_existing_fields(tmp_path: Path) -> None:
 
     with (
         patch("kairix.eval.generate._retrieve", return_value=(["daily-log.md"], ["snippet"])),
-        patch("kairix.eval.generate.judge_batch", return_value=JudgeResult(
-            query="q", grades={"daily-log": 2}, shuffle_order=["daily-log"], judge_model="gpt-4o-mini"
-        )),
+        patch(
+            "kairix.eval.generate.judge_batch",
+            return_value=JudgeResult(
+                query="q", grades={"daily-log": 2}, shuffle_order=["daily-log"], judge_model="gpt-4o-mini"
+            ),
+        ),
         patch("kairix.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
     ):
         enrich_suite(suite_path=str(input_path), output_path=str(output_path))

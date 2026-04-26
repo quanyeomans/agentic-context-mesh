@@ -44,16 +44,41 @@ def fts5_db(tmp_path):
     )
 
     docs = [
-        ("hash_001", "/vault/shared/facts.md", "Shared Facts", "knowledge-shared",
-         "The VM has 4 vCPUs and 16 GB RAM. Infrastructure runs on Azure."),
-        ("hash_002", "/vault/builder/patterns.md", "Builder Patterns", "knowledge-shared",
-         "Use trash instead of rm for safety. Always check before deleting."),
-        ("hash_003", "/vault/projects/alpha.md", "Project Alpha", "vault-projects",
-         "Project Alpha is the main client engagement for Q2 2026."),
-        ("hash_004", "/vault/resources/runbook-deploy.md", "Deployment Runbook", "knowledge-shared",
-         "Step 1: Pull latest code. Step 2: Run tests. Step 3: Deploy to staging."),
-        ("hash_005", "/vault/knowledge/observability.md", "Observability Guide", "knowledge-shared",
-         "Arize Phoenix is used for LLM observability and tracing."),
+        (
+            "hash_001",
+            "/vault/shared/facts.md",
+            "Shared Facts",
+            "knowledge-shared",
+            "The VM has 4 vCPUs and 16 GB RAM. Infrastructure runs on Azure.",
+        ),
+        (
+            "hash_002",
+            "/vault/builder/patterns.md",
+            "Builder Patterns",
+            "knowledge-shared",
+            "Use trash instead of rm for safety. Always check before deleting.",
+        ),
+        (
+            "hash_003",
+            "/vault/projects/alpha.md",
+            "Project Alpha",
+            "vault-projects",
+            "Project Alpha is the main client engagement for Q2 2026.",
+        ),
+        (
+            "hash_004",
+            "/vault/resources/runbook-deploy.md",
+            "Deployment Runbook",
+            "knowledge-shared",
+            "Step 1: Pull latest code. Step 2: Run tests. Step 3: Deploy to staging.",
+        ),
+        (
+            "hash_005",
+            "/vault/knowledge/observability.md",
+            "Observability Guide",
+            "knowledge-shared",
+            "Arize Phoenix is used for LLM observability and tracing.",
+        ),
     ]
 
     for hash_val, path, title, collection, content in docs:

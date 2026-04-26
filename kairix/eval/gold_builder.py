@@ -140,12 +140,14 @@ def _bm25_search_with_weights(
             snippet = parts[2].strip()[:300] if len(parts) >= 3 else doc_text[:300]
         else:
             snippet = doc_text[:300]
-        results.append({
-            "path": str(row["path"]),
-            "title": str(row["title"] or ""),
-            "snippet": snippet,
-            "collection": str(row["collection"]),
-        })
+        results.append(
+            {
+                "path": str(row["path"]),
+                "title": str(row["title"] or ""),
+                "snippet": snippet,
+                "collection": str(row["collection"]),
+            }
+        )
 
     db.close()
     return results
@@ -201,9 +203,7 @@ def pool_candidates(
         if system == "vector":
             results = _vector_search(query, collections, limit_per_system)
         elif system in _WEIGHT_PRESETS:
-            results = _bm25_search_with_weights(
-                query, _WEIGHT_PRESETS[system], collections, limit_per_system
-            )
+            results = _bm25_search_with_weights(query, _WEIGHT_PRESETS[system], collections, limit_per_system)
         else:
             logger.warning("gold_builder: unknown system %r — skipping", system)
             continue
@@ -336,9 +336,7 @@ def build_independent_gold(
             continue
 
         # Grade with LLM judge
-        candidates = grade_candidates(
-            query, candidates, api_key, endpoint, deployment, judge_runs
-        )
+        candidates = grade_candidates(query, candidates, api_key, endpoint, deployment, judge_runs)
         report.total_judge_calls += len(candidates) * judge_runs
 
         # Build gold_titles from graded candidates (grade >= 1)
@@ -346,10 +344,12 @@ def build_independent_gold(
         for c in sorted(candidates, key=lambda x: x.grade, reverse=True):
             report.grade_distribution[c.grade] = report.grade_distribution.get(c.grade, 0) + 1
             if c.grade >= 1:
-                gold_titles.append({
-                    "title": Path(c.path).stem,
-                    "relevance": c.grade,
-                })
+                gold_titles.append(
+                    {
+                        "title": Path(c.path).stem,
+                        "relevance": c.grade,
+                    }
+                )
 
         # Update case with independent gold
         case["gold_titles"] = gold_titles
@@ -372,9 +372,7 @@ def build_independent_gold(
         yaml.dump(suite_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     report.avg_candidates_per_query = (
-        report.total_candidates_pooled / report.queries_processed
-        if report.queries_processed > 0
-        else 0
+        report.total_candidates_pooled / report.queries_processed if report.queries_processed > 0 else 0
     )
 
     logger.info("gold_builder: %s", report)

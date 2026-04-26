@@ -8,11 +8,12 @@ Covers:
 """
 
 from __future__ import annotations
-import pytest
 
 import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from kairix.search.bm25 import bm25_search
 from kairix.search.vector import VecResult, vector_search_bytes

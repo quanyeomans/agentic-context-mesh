@@ -137,7 +137,9 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
         timeout=30,
     )
     resp.raise_for_status()
-    data = resp.json()  # lgtm[py/clear-text-logging-sensitive-data] — false positive: response data is not passed to a log sink
+    data = (
+        resp.json()
+    )  # lgtm[py/clear-text-logging-sensitive-data] — false positive: response data is not passed to a log sink
     vec = data["data"][0]["embedding"]
     logger.info(f"Preflight OK — deployment={deployment} dims={len(vec)}")
     return len(vec)
@@ -182,7 +184,7 @@ def embed_batch(
                 if retry_after_hdr is not None:
                     delay = float(retry_after_hdr)
                 else:
-                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311
                 logger.warning(
                     f"Rate limited (batch size {len(texts)}) — sleeping {delay:.1f}s "
                     f"(attempt {attempt + 1}/{MAX_RETRIES})"
@@ -191,7 +193,7 @@ def embed_batch(
                 continue
 
             if resp.status_code in (500, 502, 503):
-                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311
                 logger.warning(f"Server error {resp.status_code} — retrying in {delay:.1f}s")
                 time.sleep(delay)
                 continue
@@ -203,7 +205,7 @@ def embed_batch(
             return [r["embedding"] for r in results]
 
         except requests.Timeout:
-            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)
+            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311
             logger.warning(f"Request timeout — retrying in {delay:.1f}s")
             time.sleep(delay)
 
@@ -213,10 +215,7 @@ def embed_batch(
         raise RuntimeError(f"Azure embed failed after {MAX_RETRIES} attempts on single chunk")
 
     mid = len(texts) // 2
-    logger.warning(
-        f"Batch of {len(texts)} exhausted retries — splitting into "
-        f"{mid} + {len(texts) - mid} and retrying"
-    )
+    logger.warning(f"Batch of {len(texts)} exhausted retries — splitting into {mid} + {len(texts) - mid} and retrying")
     left = embed_batch(texts[:mid], api_key, endpoint, deployment, dims)
     right = embed_batch(texts[mid:], api_key, endpoint, deployment, dims)
     return left + right
@@ -297,7 +296,8 @@ def stage_embedding(
     packed = encode_vector(vector)
 
     db.execute(
-        "INSERT OR REPLACE INTO content_vectors (hash, seq, pos, model, embedded_at, chunk_date) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT OR REPLACE INTO content_vectors"
+        " (hash, seq, pos, model, embedded_at, chunk_date) VALUES (?, ?, ?, ?, ?, ?)",
         (content_hash, seq, pos, model, embedded_at, chunk_date),
     )
     db.execute(
@@ -513,7 +513,12 @@ def run_embed(
             total,
         )
     else:
-        logger.info("embed: chunk_date populated for %d/%d chunks (%.1f%%)", chunk_date_count, total, 100 * chunk_date_count / total)
+        logger.info(
+            "embed: chunk_date populated for %d/%d chunks (%.1f%%)",
+            chunk_date_count,
+            total,
+            100 * chunk_date_count / total,
+        )
 
     return {
         "embedded": embedded,

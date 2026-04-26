@@ -113,12 +113,7 @@ class TestCollapseBlankLines:
 @pytest.mark.unit
 class TestCleanMarkdown:
     def test_combined_cleanup(self):
-        text = (
-            "<div>Hello</div>\r\n"
-            "[![badge](https://img.shields.io/badge)](link)\r\n"
-            "\r\n\r\n\r\n\r\n\r\n"
-            "Content here."
-        )
+        text = "<div>Hello</div>\r\n[![badge](https://img.shields.io/badge)](link)\r\n\r\n\r\n\r\n\r\n\r\nContent here."
         result = clean_markdown(text)
         assert "<div>" not in result
         assert "\r" not in result

@@ -4,6 +4,7 @@ Tests for kairix.summaries.generate
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from kairix.summaries.generate import (

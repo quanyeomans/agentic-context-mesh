@@ -17,7 +17,7 @@ def test_vault_crawler_shim_exports_crawl() -> None:
     """from kairix.vault.crawler import crawl still works via compat shim."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from kairix.vault.crawler import crawl  # noqa: F401
+        from kairix.vault.crawler import crawl
     assert callable(crawl)
 
 
@@ -26,7 +26,7 @@ def test_vault_crawler_shim_exports_crawl_report() -> None:
     """from kairix.vault.crawler import CrawlReport still works via compat shim."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from kairix.vault.crawler import CrawlReport  # noqa: F401
+        from kairix.vault.crawler import CrawlReport
     r = CrawlReport(vault_root="/test", dry_run=True)
     assert r.ok is True
 
@@ -36,7 +36,7 @@ def test_vault_crawler_shim_exports_helpers() -> None:
     """Private helpers are re-exported for test compatibility."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from kairix.vault.crawler import _to_slug, _to_display_name, _as_list, _parse_frontmatter  # noqa: F401
+        from kairix.vault.crawler import _as_list, _parse_frontmatter, _to_display_name, _to_slug  # noqa: F401
     assert _to_slug("Hello World") == "hello-world"
     assert _to_display_name("hello-world") == "Hello World"
     assert _as_list(None) == []
@@ -48,7 +48,9 @@ def test_vault_crawler_shim_emits_deprecation_warning() -> None:
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         import importlib
+
         import kairix.vault.crawler
+
         importlib.reload(kairix.vault.crawler)
         dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
         assert len(dep_warnings) >= 1

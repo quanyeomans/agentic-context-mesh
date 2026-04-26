@@ -7,9 +7,10 @@ Covers:
 """
 
 from __future__ import annotations
-import pytest
 
 from datetime import date, timedelta
+
+import pytest
 
 from kairix.temporal.rewriter import extract_time_window, rewrite_temporal_query
 

@@ -105,7 +105,9 @@ class DocumentScanner:
     and only updates modified documents.
     """
 
-    def __init__(self, db: sqlite3.Connection, document_root: Path | None = None, vault_root: Path | None = None) -> None:
+    def __init__(
+        self, db: sqlite3.Connection, document_root: Path | None = None, vault_root: Path | None = None
+    ) -> None:
         self._db = db
         self._document_root = document_root or vault_root or Path.home() / "kairix-vault"
 

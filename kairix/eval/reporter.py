@@ -1,4 +1,5 @@
 """Performance reporter — generates per-category NDCG markdown report."""
+
 from __future__ import annotations
 
 import json

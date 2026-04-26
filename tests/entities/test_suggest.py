@@ -1,9 +1,12 @@
 """Tests for kairix.entities.suggest — NER entity suggestions."""
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock, patch
-from kairix.entities.suggest import suggest_entities, format_suggestions, SuggestedEntity
+
+import pytest
+
+from kairix.entities.suggest import SuggestedEntity, format_suggestions, suggest_entities
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
 
@@ -33,20 +36,21 @@ def test_suggest_entities_new_entity():
     neo4j = FakeNeo4jClient(entities=[])  # empty graph
     mock_nlp = _make_mock_spacy([("AcmeCorp", "ORG")])
 
-    with patch("kairix.entities.suggest._load_model", return_value=mock_nlp), \
-         patch("kairix.entities.suggest.spacy", create=True):
+    with (
+        patch("kairix.entities.suggest._load_model", return_value=mock_nlp),
+        patch("kairix.entities.suggest.spacy", create=True),
+    ):
         # Patch the import inside suggest_entities
-        import importlib
         import kairix.entities.suggest as suggest_mod
-        original = suggest_mod._load_model
+
+        _ = suggest_mod._load_model  # kept to verify attribute exists
 
         with patch.object(suggest_mod, "_load_model", return_value=mock_nlp):
             # We need to patch out the spacy import too
-            import sys
             fake_spacy = MagicMock()
             with patch.dict("sys.modules", {"spacy": fake_spacy}):
                 fake_spacy.load.return_value = mock_nlp
-                results = suggest_entities("AcmeCorp is a new company.", neo4j)
+                suggest_entities("AcmeCorp is a new company.", neo4j)
 
     # Because the mock bypasses the actual import guard, test the adapter directly
     # Test the core logic directly instead
@@ -56,6 +60,7 @@ def test_suggest_entities_new_entity():
 @pytest.mark.unit
 def test_suggest_returns_empty_when_neo4j_unavailable():
     """Should return [] gracefully when Neo4j is unavailable."""
+
     class UnavailableNeo4j:
         available = False
 
@@ -68,6 +73,7 @@ def test_suggest_graceful_import_error():
     """Should raise ImportError with install instructions when spaCy not installed."""
     neo4j = FakeNeo4jClient()
     import sys
+
     # Remove spacy from sys.modules to simulate it not being installed
     sys_modules_backup = sys.modules.copy()
     sys.modules.pop("spacy", None)
@@ -93,10 +99,22 @@ def test_format_suggestions_empty():
 @pytest.mark.unit
 def test_format_suggestions_table():
     suggestions = [
-        SuggestedEntity(text="OpenClaw", label="ORG", existing_id="openclaw",
-                       existing_name="OpenClaw", is_new=False, context="OpenClaw is an AI platform."),
-        SuggestedEntity(text="NewCorp", label="ORG", existing_id=None,
-                       existing_name=None, is_new=True, context="NewCorp was founded in 2025."),
+        SuggestedEntity(
+            text="OpenClaw",
+            label="ORG",
+            existing_id="openclaw",
+            existing_name="OpenClaw",
+            is_new=False,
+            context="OpenClaw is an AI platform.",
+        ),
+        SuggestedEntity(
+            text="NewCorp",
+            label="ORG",
+            existing_id=None,
+            existing_name=None,
+            is_new=True,
+            context="NewCorp was founded in 2025.",
+        ),
     ]
     result = format_suggestions(suggestions, fmt="table")
     assert "OpenClaw" in result
@@ -108,9 +126,9 @@ def test_format_suggestions_table():
 @pytest.mark.unit
 def test_format_suggestions_jsonl():
     import json
+
     suggestions = [
-        SuggestedEntity(text="OpenClaw", label="ORG", existing_id="openclaw",
-                       existing_name="OpenClaw", is_new=False),
+        SuggestedEntity(text="OpenClaw", label="ORG", existing_id="openclaw", existing_name="OpenClaw", is_new=False),
     ]
     result = format_suggestions(suggestions, fmt="jsonl")
     parsed = json.loads(result.strip())
@@ -122,6 +140,8 @@ def test_format_suggestions_jsonl():
 def test_suggested_entity_is_new_flag():
     """is_new must be True when entity not in graph, False when found."""
     new_entity = SuggestedEntity(text="NewCorp", label="ORG", existing_id=None, existing_name=None, is_new=True)
-    existing_entity = SuggestedEntity(text="OpenClaw", label="ORG", existing_id="openclaw", existing_name="OpenClaw", is_new=False)
+    existing_entity = SuggestedEntity(
+        text="OpenClaw", label="ORG", existing_id="openclaw", existing_name="OpenClaw", is_new=False
+    )
     assert new_entity.is_new is True
     assert existing_entity.is_new is False

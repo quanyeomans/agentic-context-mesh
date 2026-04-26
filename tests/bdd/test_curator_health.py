@@ -1,7 +1,9 @@
 """pytest-bdd test module for curator_health.feature."""
+
+from pathlib import Path
+
 import pytest
 from pytest_bdd import scenario
-from pathlib import Path
 
 FEATURE = str(Path(__file__).parent / "features" / "curator_health.feature")
 

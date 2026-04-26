@@ -278,9 +278,7 @@ def test_strip_frontmatter_no_frontmatter():
 @pytest.mark.unit
 def test_vector_search_strips_frontmatter_from_snippet() -> None:
     """vector_search should strip YAML frontmatter from snippet content."""
-    row = _make_mock_row(
-        snippet="---\ntitle: My Doc\ntags: [a, b]\n---\n\nActual content here."
-    )
+    row = _make_mock_row(snippet="---\ntitle: My Doc\ntags: [a, b]\n---\n\nActual content here.")
     mock_db = MagicMock(spec=sqlite3.Connection)
     mock_db.execute.return_value.fetchall.return_value = [row]
 

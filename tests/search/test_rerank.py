@@ -1,11 +1,13 @@
 """Tests for cross-encoder re-ranking module."""
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from kairix.search.rerank import RERANK_CANDIDATE_LIMIT, rerank
 from kairix.search.rrf import FusedResult
-from kairix.search.rerank import rerank, RERANK_CANDIDATE_LIMIT
 
 
 def _make_result(path: str, score: float, snippet: str = "") -> FusedResult:

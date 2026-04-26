@@ -75,7 +75,7 @@ def test_rolling_average_computes_mean_within_window() -> None:
 def test_rolling_average_excludes_entries_outside_window() -> None:
     entries = [
         _make_log_entry(0.9, days_ago=10),  # outside 7-day window
-        _make_log_entry(0.5, days_ago=1),   # inside window
+        _make_log_entry(0.5, days_ago=1),  # inside window
     ]
     avg = _rolling_average(entries, window_days=7)
     assert avg == pytest.approx(0.5, abs=0.001)
@@ -109,7 +109,7 @@ def test_run_monitor_returns_result_with_correct_weighted_ndcg(tmp_path: Path) -
 
     with (
         patch("kairix.benchmark.suite.load_suite") as mock_load,
-        patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result) as mock_run,
+        patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result),
     ):
         mock_suite = MagicMock()
         mock_suite.cases = [MagicMock()] * 10

@@ -74,10 +74,10 @@ def canonical_path(raw: str) -> str:
     cached data or tests.
     """
     if raw.startswith("qmd://"):
-        without_scheme = raw[len("qmd://"):]
+        without_scheme = raw[len("qmd://") :]
         slash = without_scheme.find("/")
         if slash != -1:
-            return without_scheme[slash + 1:]
+            return without_scheme[slash + 1 :]
         return without_scheme
     return raw
 
@@ -686,7 +686,7 @@ def _chunk_date_boost_impl(
             continue
 
         delta_days = abs((chunk_date - query_date).days)
-        boost = 1.0 + math.exp(-(delta_days ** 2) / (2 * sigma ** 2))
+        boost = 1.0 + math.exp(-(delta_days**2) / (2 * sigma**2))
         r.boosted_score *= boost
         boosted_any = True
 

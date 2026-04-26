@@ -47,8 +47,8 @@ class EntityBoostConfig:
     """Configuration for Neo4j entity in-degree boosting."""
 
     enabled: bool = True
-    factor: float = 0.20   # log-scale weight on Neo4j MENTIONS in-degree
-    cap: float = 2.0        # max boosted_score / rrf_score ratio
+    factor: float = 0.20  # log-scale weight on Neo4j MENTIONS in-degree
+    cap: float = 2.0  # max boosted_score / rrf_score ratio
 
 
 @dataclass(frozen=True)

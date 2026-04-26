@@ -5,9 +5,10 @@ Uses mocked Azure client — no live API calls.
 """
 
 from __future__ import annotations
-import pytest
 
 from unittest.mock import patch
+
+import pytest
 
 from kairix.briefing.synthesiser import _fallback_briefing, synthesise
 

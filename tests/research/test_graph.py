@@ -73,10 +73,14 @@ def test_run_research_gives_up_after_max_turns() -> None:
 
     mock_backend = MagicMock()
     # Always insufficient
-    mock_backend.chat.return_value = json.dumps({
-        "confidence": 0.2, "sufficient": False,
-        "refined_query": "still trying", "reasoning": "not enough",
-    })
+    mock_backend.chat.return_value = json.dumps(
+        {
+            "confidence": 0.2,
+            "sufficient": False,
+            "refined_query": "still trying",
+            "reasoning": "not enough",
+        }
+    )
 
     with (
         patch("kairix.mcp.server.tool_search", return_value={"results": [{"path": "a.md", "snippet": "x"}]}),

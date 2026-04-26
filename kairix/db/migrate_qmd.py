@@ -85,9 +85,7 @@ def migrate_from_qmd(
             SELECT id, collection, path, title, hash, created_at, modified_at, active
             FROM qmd.documents
         """)
-        report.documents = db.execute(
-            "SELECT changes()"
-        ).fetchone()[0]
+        report.documents = db.execute("SELECT changes()").fetchone()[0]
 
         # Copy content
         db.execute("""
@@ -95,9 +93,7 @@ def migrate_from_qmd(
             SELECT hash, doc, created_at
             FROM qmd.content
         """)
-        report.content_rows = db.execute(
-            "SELECT changes()"
-        ).fetchone()[0]
+        report.content_rows = db.execute("SELECT changes()").fetchone()[0]
 
         # Copy content_vectors — handle chunk_date column which may or may not exist in QMD
         qmd_cv_cols = {row[1] for row in db.execute("PRAGMA qmd.table_info(content_vectors)")}
@@ -113,15 +109,11 @@ def migrate_from_qmd(
                 SELECT hash, seq, pos, model, embedded_at
                 FROM qmd.content_vectors
             """)
-        report.content_vectors = db.execute(
-            "SELECT changes()"
-        ).fetchone()[0]
+        report.content_vectors = db.execute("SELECT changes()").fetchone()[0]
 
         # Copy vectors — requires sqlite-vec loaded on both connections
         # Check if QMD has vectors_vec table
-        qmd_has_vec = db.execute(
-            "SELECT 1 FROM qmd.sqlite_master WHERE name='vectors_vec'"
-        ).fetchone()
+        qmd_has_vec = db.execute("SELECT 1 FROM qmd.sqlite_master WHERE name='vectors_vec'").fetchone()
 
         if qmd_has_vec:
             db.execute("""
@@ -129,9 +121,7 @@ def migrate_from_qmd(
                 SELECT hash_seq, embedding
                 FROM qmd.vectors_vec
             """)
-            report.vectors = db.execute(
-                "SELECT COUNT(*) FROM vectors_vec"
-            ).fetchone()[0]
+            report.vectors = db.execute("SELECT COUNT(*) FROM vectors_vec").fetchone()[0]
 
         # Rebuild FTS index
         report.fts_indexed = rebuild_fts(db)

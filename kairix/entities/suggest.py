@@ -7,6 +7,7 @@ are already known and which are candidates for new stubs.
 
 Install spaCy support: pip install kairix[nlp]
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,12 +21,12 @@ logger = logging.getLogger(__name__)
 class SuggestedEntity:
     """A named entity extracted from text and cross-referenced against Neo4j."""
 
-    text: str                      # Extracted surface form
-    label: str                     # spaCy entity label (ORG, PERSON, GPE, etc.)
-    existing_id: str | None        # Neo4j entity id if already known, else None
-    existing_name: str | None      # Canonical name if already known
-    is_new: bool                   # True if not found in graph
-    context: str = ""              # Surrounding sentence for review
+    text: str  # Extracted surface form
+    label: str  # spaCy entity label (ORG, PERSON, GPE, etc.)
+    existing_id: str | None  # Neo4j entity id if already known, else None
+    existing_name: str | None  # Canonical name if already known
+    is_new: bool  # True if not found in graph
+    context: str = ""  # Surrounding sentence for review
 
 
 def suggest_entities(text: str, neo4j_client: Any) -> list[SuggestedEntity]:
@@ -84,14 +85,16 @@ def suggest_entities(text: str, neo4j_client: Any) -> list[SuggestedEntity]:
         except Exception as exc:
             logger.debug("suggest_entities: Neo4j lookup for %r failed — %s", surface_form, exc)
 
-        results.append(SuggestedEntity(
-            text=surface_form,
-            label=label,
-            existing_id=existing_id,
-            existing_name=existing_name,
-            is_new=is_new,
-            context=context,
-        ))
+        results.append(
+            SuggestedEntity(
+                text=surface_form,
+                label=label,
+                existing_id=existing_id,
+                existing_name=existing_name,
+                is_new=is_new,
+                context=context,
+            )
+        )
 
     return results
 
@@ -99,12 +102,12 @@ def suggest_entities(text: str, neo4j_client: Any) -> list[SuggestedEntity]:
 def _load_model() -> Any:
     """Load en_core_web_sm model. Raises RuntimeError with install instructions if missing."""
     import spacy
+
     try:
         return spacy.load("en_core_web_sm")
     except OSError as exc:
         raise RuntimeError(
-            "spaCy model 'en_core_web_sm' not found. Install it with:\n"
-            "  python -m spacy download en_core_web_sm"
+            "spaCy model 'en_core_web_sm' not found. Install it with:\n  python -m spacy download en_core_web_sm"
         ) from exc
 
 
@@ -116,6 +119,7 @@ def format_suggestions(suggestions: list[SuggestedEntity], fmt: str = "table") -
     if fmt == "jsonl":
         import dataclasses
         import json
+
         return "\n".join(json.dumps(dataclasses.asdict(s)) for s in suggestions) + "\n"
 
     lines = [

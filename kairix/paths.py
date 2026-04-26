@@ -145,16 +145,11 @@ def _resolve_cached() -> KairixPaths:
             stacklevel=3,
         )
     vault_root = Path(
-        env_doc_root
-        or env_vault_root
-        or config_paths.get("vault_root")
-        or str(_default_document_root())
+        env_doc_root or env_vault_root or config_paths.get("vault_root") or str(_default_document_root())
     ).expanduser()
 
     db_path = Path(
-        os.environ.get("KAIRIX_DB_PATH")
-        or config_paths.get("db_path")
-        or str(cache_dir / "index.sqlite")
+        os.environ.get("KAIRIX_DB_PATH") or config_paths.get("db_path") or str(cache_dir / "index.sqlite")
     ).expanduser()
 
     log_dir = Path(
@@ -165,9 +160,7 @@ def _resolve_cached() -> KairixPaths:
     ).expanduser()
 
     workspace_root = Path(
-        os.environ.get("KAIRIX_WORKSPACE_ROOT")
-        or config_paths.get("workspace_root")
-        or str(_default_workspace_root())
+        os.environ.get("KAIRIX_WORKSPACE_ROOT") or config_paths.get("workspace_root") or str(_default_workspace_root())
     ).expanduser()
 
     return KairixPaths(
@@ -190,7 +183,7 @@ def _load_paths_from_config() -> dict[str, str]:
                 data = yaml.safe_load(f) or {}
             result: dict[str, str] = data.get("paths", {})
             return result
-    except Exception:
+    except Exception:  # noqa: S110 — graceful fallback when config is missing or malformed
         pass
     return {}
 
@@ -201,6 +194,7 @@ def clear_cache() -> None:
 
 
 # Convenience functions — import these directly instead of calling KairixPaths.resolve()
+
 
 def document_root() -> Path:
     """Return the document store root path (was: vault_root)."""

@@ -5,10 +5,11 @@ All tests use fixtures or temporary directories — no live API calls.
 """
 
 from __future__ import annotations
-import pytest
 
 from datetime import date, timedelta
 from unittest.mock import patch
+
+import pytest
 
 from kairix.briefing.sources import (
     _estimate_tokens,

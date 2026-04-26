@@ -249,11 +249,20 @@ def test_get_entities_uses_neo4j_when_sufficient(
     """get_entities() uses Neo4j when it returns >= 5 entities with vault_path."""
     import kairix.wikilinks.resolver as resolver_mod
 
-    monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: [
-        WikiEntity(name=r["name"], aliases=r["aliases"], vault_path=r["vault_path"],
-                   link=f"[[{r['name']}]]", entity_type="organisation")
-        for r in _NEO4J_ROWS
-    ])
+    monkeypatch.setattr(
+        resolver_mod,
+        "load_entities_from_neo4j",
+        lambda: [
+            WikiEntity(
+                name=r["name"],
+                aliases=r["aliases"],
+                vault_path=r["vault_path"],
+                link=f"[[{r['name']}]]",
+                entity_type="organisation",
+            )
+            for r in _NEO4J_ROWS
+        ],
+    )
     monkeypatch.setattr(
         resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
     )
@@ -275,10 +284,20 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_sparse(
 
     # Only 2 entities from Neo4j — below _DB_THRESHOLD of 5
     sparse_rows = [
-        WikiEntity(name="Acme Corp", aliases=[], vault_path="02-Areas/Clients/Acme-Corp/",
-                   link="[[Acme-Corp]]", entity_type="organisation"),
-        WikiEntity(name="Zenith Ltd", aliases=[], vault_path="02-Areas/Clients/Zenith-Ltd/",
-                   link="[[Zenith-Ltd]]", entity_type="organisation"),
+        WikiEntity(
+            name="Acme Corp",
+            aliases=[],
+            vault_path="02-Areas/Clients/Acme-Corp/",
+            link="[[Acme-Corp]]",
+            entity_type="organisation",
+        ),
+        WikiEntity(
+            name="Zenith Ltd",
+            aliases=[],
+            vault_path="02-Areas/Clients/Zenith-Ltd/",
+            link="[[Zenith-Ltd]]",
+            entity_type="organisation",
+        ),
     ]
     monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: sparse_rows)
     monkeypatch.setattr(

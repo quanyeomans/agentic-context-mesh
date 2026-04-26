@@ -78,14 +78,9 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
 
     # FTS5 — external content mode is not needed; we populate directly.
     # Check if it already exists before creating (FTS5 doesn't support IF NOT EXISTS).
-    fts_exists = db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents_fts'"
-    ).fetchone()
+    fts_exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents_fts'").fetchone()
     if not fts_exists:
-        db.execute(
-            "CREATE VIRTUAL TABLE documents_fts USING fts5("
-            "filepath, title, doc, tokenize='porter unicode61')"
-        )
+        db.execute("CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61')")
 
     # sqlite-vec virtual table
     _ensure_vec_table(db, dims)
@@ -137,12 +132,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
     errors: list[str] = []
 
     # Check required tables
-    tables = {
-        row[0]
-        for row in db.execute(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
-        )
-    }
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")}
     for required in ("documents", "content", "content_vectors"):
         if required not in tables:
             errors.append(f"missing table: {required}")

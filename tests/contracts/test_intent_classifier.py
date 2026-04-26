@@ -4,9 +4,10 @@ The intent classifier is the most critical contract in the search domain:
 it must never raise, must always return a valid QueryIntent, and must
 route the canonical query patterns to their expected intents.
 """
-import pytest
-from kairix.search.intent import QueryIntent, classify
 
+import pytest
+
+from kairix.search.intent import QueryIntent, classify
 
 _CANONICAL_CASES = [
     ("what happened last week", QueryIntent.TEMPORAL),

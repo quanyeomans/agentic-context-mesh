@@ -162,9 +162,7 @@ def _cmd_status(args: argparse.Namespace) -> None:
     # Discover collections (top-level dirs in reflib root)
     if reflib_root.is_dir():
         status["collections"] = sorted(
-            d.name
-            for d in reflib_root.iterdir()
-            if d.is_dir() and not d.name.startswith((".", "_"))
+            d.name for d in reflib_root.iterdir() if d.is_dir() and not d.name.startswith((".", "_"))
         )
 
     # Check entity files
@@ -192,7 +190,7 @@ def _cmd_status(args: argparse.Namespace) -> None:
     if args.json_out:
         print(json.dumps(status, indent=2))
     else:
-        print(f"Reference Library Status")
+        print("Reference Library Status")
         print(f"  Root:       {status['reflib_root']}")
         print(f"  Collections: {len(status['collections'])}")
         if status["collections"]:

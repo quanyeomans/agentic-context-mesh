@@ -26,28 +26,29 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
-from kairix.eval.constants import CATEGORY_ALIASES as _CATEGORY_ALIASES, CATEGORY_WEIGHTS as _CATEGORY_WEIGHTS
+from kairix.eval.constants import CATEGORY_ALIASES as _CATEGORY_ALIASES
+from kairix.eval.constants import CATEGORY_WEIGHTS as _CATEGORY_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
 # Default parameter space
 DEFAULT_WEIGHT_CONFIGS: list[tuple[float, float, float]] = [
-    (1.0, 1.0, 1.0),     # equal (current kairix)
-    (10.0, 1.0, 1.0),    # QMD's actual weights
-    (10.0, 5.0, 1.0),    # QMD + title boost
-    (1.0, 5.0, 1.0),     # title-heavy
-    (1.0, 3.0, 1.0),     # title-moderate
-    (2.0, 5.0, 1.0),     # filepath slight + title heavy
-    (5.0, 3.0, 1.0),     # filepath moderate + title moderate
-    (0.5, 1.0, 1.0),     # de-weight filepath
-    (1.0, 1.0, 0.5),     # de-weight body
-    (5.0, 5.0, 1.0),     # both boosted
+    (1.0, 1.0, 1.0),  # equal (current kairix)
+    (10.0, 1.0, 1.0),  # QMD's actual weights
+    (10.0, 5.0, 1.0),  # QMD + title boost
+    (1.0, 5.0, 1.0),  # title-heavy
+    (1.0, 3.0, 1.0),  # title-moderate
+    (2.0, 5.0, 1.0),  # filepath slight + title heavy
+    (5.0, 3.0, 1.0),  # filepath moderate + title moderate
+    (0.5, 1.0, 1.0),  # de-weight filepath
+    (1.0, 1.0, 0.5),  # de-weight body
+    (5.0, 5.0, 1.0),  # both boosted
 ]
 
 DEFAULT_QUERY_STYLES: list[str] = [
-    "bare",     # `term1 term2` (implicit AND)
-    "prefix",   # `"term1"* AND "term2"*` (QMD-style)
-    "quoted",   # `"term1" AND "term2"` (exact match)
+    "bare",  # `term1 term2` (implicit AND)
+    "prefix",  # `"term1"* AND "term2"*` (QMD-style)
+    "quoted",  # `"term1" AND "term2"` (exact match)
 ]
 
 
@@ -249,17 +250,17 @@ def sweep_bm25_params(
         return SweepReport()
 
     # Filter to ndcg-scored cases with gold (either gold_titles or gold_paths)
-    ndcg_cases = [
-        c for c in cases
-        if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))
-    ]
+    ndcg_cases = [c for c in cases if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))]
     if not ndcg_cases:
         logger.error("sweep: no ndcg-scored cases with gold_titles or gold_paths in suite")
         return SweepReport()
 
-    logger.info("sweep: %d configs x %d cases = %d evaluations",
-                len(weight_configs) * len(query_styles), len(ndcg_cases),
-                len(weight_configs) * len(query_styles) * len(ndcg_cases))
+    logger.info(
+        "sweep: %d configs x %d cases = %d evaluations",
+        len(weight_configs) * len(query_styles),
+        len(ndcg_cases),
+        len(weight_configs) * len(query_styles) * len(ndcg_cases),
+    )
 
     # Open DB once for all configs
     from kairix.db import get_db_path
@@ -302,16 +303,10 @@ def sweep_bm25_params(
                 category_ndcg[category].append(ndcg)
 
             # Compute category means
-            cat_scores = {
-                cat: sum(scores) / len(scores) if scores else 0.0
-                for cat, scores in category_ndcg.items()
-            }
+            cat_scores = {cat: sum(scores) / len(scores) if scores else 0.0 for cat, scores in category_ndcg.items()}
 
             # Weighted total
-            weighted_total = sum(
-                cat_scores.get(cat, 0.0) * weight
-                for cat, weight in _CATEGORY_WEIGHTS.items()
-            )
+            weighted_total = sum(cat_scores.get(cat, 0.0) * weight for cat, weight in _CATEGORY_WEIGHTS.items())
 
             result = SweepResult(
                 weights=weights,
@@ -328,7 +323,11 @@ def sweep_bm25_params(
 
             logger.info(
                 "sweep: weights=(%s,%s,%s) style=%-7s → weighted=%.4f NDCG=%.4f Hit@5=%.3f (%ds)",
-                *weights, style, weighted_total, result.ndcg_at_10, result.hit_at_5,
+                *weights,
+                style,
+                weighted_total,
+                result.ndcg_at_10,
+                result.hit_at_5,
                 int(result.duration_s),
             )
 
@@ -344,24 +343,41 @@ def sweep_bm25_params(
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "fp_weight", "title_weight", "doc_weight", "query_style",
-                "weighted_total", "ndcg_at_10", "hit_at_5", "mrr_at_10",
-                *sorted(_CATEGORY_WEIGHTS.keys()),
-            ])
+            writer.writerow(
+                [
+                    "fp_weight",
+                    "title_weight",
+                    "doc_weight",
+                    "query_style",
+                    "weighted_total",
+                    "ndcg_at_10",
+                    "hit_at_5",
+                    "mrr_at_10",
+                    *sorted(_CATEGORY_WEIGHTS.keys()),
+                ]
+            )
             for r in report.results:
-                writer.writerow([
-                    r.weights[0], r.weights[1], r.weights[2], r.query_style,
-                    f"{r.weighted_total:.4f}", f"{r.ndcg_at_10:.4f}",
-                    f"{r.hit_at_5:.4f}", f"{r.mrr_at_10:.4f}",
-                    *[f"{r.category_scores.get(cat, 0):.4f}" for cat in sorted(_CATEGORY_WEIGHTS.keys())],
-                ])
+                writer.writerow(
+                    [
+                        r.weights[0],
+                        r.weights[1],
+                        r.weights[2],
+                        r.query_style,
+                        f"{r.weighted_total:.4f}",
+                        f"{r.ndcg_at_10:.4f}",
+                        f"{r.hit_at_5:.4f}",
+                        f"{r.mrr_at_10:.4f}",
+                        *[f"{r.category_scores.get(cat, 0):.4f}" for cat in sorted(_CATEGORY_WEIGHTS.keys())],
+                    ]
+                )
 
     if report.best:
         logger.info(
             "sweep: BEST → weights=(%s,%s,%s) style=%s weighted=%.4f NDCG=%.4f",
-            *report.best.weights, report.best.query_style,
-            report.best.weighted_total, report.best.ndcg_at_10,
+            *report.best.weights,
+            report.best.query_style,
+            report.best.weighted_total,
+            report.best.ndcg_at_10,
         )
 
     return report

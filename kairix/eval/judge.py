@@ -217,11 +217,26 @@ def fetch_llm_credentials() -> tuple[str, str, str]:
         return "", "", deployment
 
     try:
+
         def _kv_secret(name: str) -> str:
-            return subprocess.run(
-                ["az", "keyvault", "secret", "show",
-                 "--vault-name", kv_name, "--name", name, "--query", "value", "-o", "tsv"],
-                capture_output=True, text=True, timeout=15,
+            return subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
+                [  # noqa: S607
+                    "az",
+                    "keyvault",
+                    "secret",
+                    "show",
+                    "--vault-name",
+                    kv_name,
+                    "--name",
+                    name,
+                    "--query",
+                    "value",
+                    "-o",
+                    "tsv",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             ).stdout.strip()
 
         api_key = _kv_secret("azure-openai-api-key")
@@ -251,10 +266,7 @@ def _call_llm(
     Call Azure OpenAI chat completions. Returns the response content string.
     Raises on any network or API error.
     """
-    url = (
-        f"{endpoint.rstrip('/')}/openai/deployments/{deployment}"
-        f"/chat/completions?api-version={JUDGE_API_VERSION}"
-    )
+    url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions?api-version={JUDGE_API_VERSION}"
     payload = json.dumps(
         {
             "model": deployment,
@@ -447,9 +459,7 @@ def calibrate(
         actual = result.grades.get(anchor["title"], 0)
         expected = anchor["expected"]
         if actual != expected:
-            errors.append(
-                f"  anchor {anchor['title']!r}: expected {expected}, got {actual}"
-            )
+            errors.append(f"  anchor {anchor['title']!r}: expected {expected}, got {actual}")
 
     if len(errors) > CALIBRATION_MAX_ERRORS:
         raise JudgeCalibrationError(

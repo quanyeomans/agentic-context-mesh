@@ -1,6 +1,7 @@
 """Step definitions for search_intents.feature."""
-import pytest
-from pytest_bdd import given, when, then, parsers
+
+from pytest_bdd import given, parsers, then, when
+
 from kairix.search.intent import QueryIntent, classify
 
 # Module-level state (simple, test-scoped)

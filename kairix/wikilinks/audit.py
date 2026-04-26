@@ -31,7 +31,9 @@ _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 # ---------------------------------------------------------------------------
 
 
-def find_broken_links(document_root: str = str(Path.home() / "kairix-vault"), vault_root: str | None = None) -> list[dict]:
+def find_broken_links(
+    document_root: str = str(Path.home() / "kairix-vault"), vault_root: str | None = None
+) -> list[dict]:
     """
     Scan document store for [[wikilinks]] pointing to non-existent files/folders.
 

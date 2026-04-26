@@ -7,7 +7,7 @@ all read from this registry.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -106,7 +106,11 @@ _SOURCES: list[SourceDef] = [
         licence="CC-BY-4.0",
         licence_tier=3,
         source_url="https://github.com/microsoft/autogen",
-        exclude_patterns=("test/", "samples/", "notebook/",),
+        exclude_patterns=(
+            "test/",
+            "samples/",
+            "notebook/",
+        ),
     ),
     SourceDef(
         name="EleutherAI LM Evaluation Harness",
@@ -124,7 +128,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=2,
         source_url="https://github.com/stanford-crfm/helm",
     ),
-
     # ── data-and-analysis ──────────────────────────────────────────────────
     SourceDef(
         name="dbt Core Documentation",
@@ -185,7 +188,6 @@ _SOURCES: list[SourceDef] = [
         source_url="https://github.com/growthbook/growthbook",
         exclude_patterns=("packages/",),
     ),
-
     # ── engineering ────────────────────────────────────────────────────────
     SourceDef(
         name="Architecture Decision Records (JPH)",
@@ -266,7 +268,11 @@ _SOURCES: list[SourceDef] = [
         licence="CC-BY-4.0",
         licence_tier=3,
         source_url="https://github.com/open-telemetry/opentelemetry.io",
-        exclude_patterns=("static/", "layouts/", "i18n/",),
+        exclude_patterns=(
+            "static/",
+            "layouts/",
+            "i18n/",
+        ),
     ),
     SourceDef(
         name="arc42 Architecture Template",
@@ -292,7 +298,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=2,
         source_url="https://github.com/jorgef/engineeringladders",
     ),
-
     # ── security ───────────────────────────────────────────────────────────
     SourceDef(
         name="OWASP Cheat Sheet Series",
@@ -326,7 +331,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=2,
         source_url="https://github.com/theopenlane/core",
     ),
-
     # ── operating-models ───────────────────────────────────────────────────
     SourceDef(
         name="CNCF TAG App Delivery (Platform Engineering)",
@@ -344,7 +348,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=1,
         source_url="https://github.com/joelparkerhenderson/ways-of-working",
     ),
-
     # ── product-and-design ─────────────────────────────────────────────────
     SourceDef(
         name="Gong Product Practices",
@@ -370,7 +373,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=1,
         source_url="https://github.com/josephearl/awesome-retrospectives",
     ),
-
     # ── leadership-and-culture ─────────────────────────────────────────────
     SourceDef(
         name="Awesome Open Company",
@@ -404,7 +406,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=3,
         source_url="https://github.com/ongov/Service-Design-Playbook",
     ),
-
     # ── economics-and-strategy ─────────────────────────────────────────────
     SourceDef(
         name="Business Model Canvas (JPH)",
@@ -446,7 +447,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=2,
         source_url="https://github.com/pymc-labs/pymc-marketing",
     ),
-
     # ── personal-effectiveness ─────────────────────────────────────────────
     SourceDef(
         name="Objectives and Key Results (JPH)",
@@ -472,7 +472,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=1,
         source_url="https://github.com/code-in-flow/mindful-programming",
     ),
-
     # ── health-and-fitness ─────────────────────────────────────────────────
     SourceDef(
         name="Free Exercise Database",
@@ -515,7 +514,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=4,
         source_url="https://github.com/Circadiaware/VLiDACMel-entrainment-therapy-non24",
     ),
-
     # ── philosophy ─────────────────────────────────────────────────────────
     SourceDef(
         name="Tao Te Ching (Standard Ebooks)",
@@ -586,7 +584,6 @@ _SOURCES: list[SourceDef] = [
         source_url="https://www.gutenberg.org",
         format="text",
     ),
-
     # ── family-and-education ───────────────────────────────────────────────
     SourceDef(
         name="Awesome Parenting",
@@ -598,7 +595,6 @@ _SOURCES: list[SourceDef] = [
     ),
     # Note: Montessori Method and Dewey are at collection root, not in subdirs.
     # They are registered as dir_name="" with the collection as the key.
-
     # ── industry-standards ─────────────────────────────────────────────────
     SourceDef(
         name="BIAN Semantic APIs",
@@ -617,7 +613,6 @@ _SOURCES: list[SourceDef] = [
         licence_tier=2,
         source_url="https://github.com/mosip/documentation",
     ),
-
     # ── foundations ─────────────────────────────────────────────────────────
     SourceDef(
         name="Open Logic Project",
@@ -638,9 +633,7 @@ _SOURCES: list[SourceDef] = [
 ]
 
 # Build lookup dict
-SOURCES: dict[str, SourceDef] = {
-    _key(s.collection, s.dir_name): s for s in _SOURCES
-}
+SOURCES: dict[str, SourceDef] = {_key(s.collection, s.dir_name): s for s in _SOURCES}
 
 
 def get_source(collection: str, dir_name: str) -> SourceDef | None:

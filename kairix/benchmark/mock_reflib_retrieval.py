@@ -9,6 +9,7 @@ collections.
 Design mirrors mock_retrieval.py: keyword matching against body text, scored by
 overlap count, returned in score order. Registered as system name "mock-reflib".
 """
+
 from __future__ import annotations
 
 import re
@@ -33,8 +34,20 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "human-in-the-loop checkpoints to keep agents within operational bounds."
         ),
         "keywords": {
-            "agent", "loop", "pattern", "observe", "orient", "decide", "act",
-            "react", "plan", "execute", "reflexion", "agentic", "llm", "tool",
+            "agent",
+            "loop",
+            "pattern",
+            "observe",
+            "orient",
+            "decide",
+            "act",
+            "react",
+            "plan",
+            "execute",
+            "reflexion",
+            "agentic",
+            "llm",
+            "tool",
         },
     },
     {
@@ -50,8 +63,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "cost attribution are essential for multi-tenant deployments."
         ),
         "keywords": {
-            "tool", "use", "protocol", "function", "calling", "sandbox",
-            "parallel", "error", "retry", "anthropic", "openai", "agent",
+            "tool",
+            "use",
+            "protocol",
+            "function",
+            "calling",
+            "sandbox",
+            "parallel",
+            "error",
+            "retry",
+            "anthropic",
+            "openai",
+            "agent",
         },
     },
     {
@@ -71,8 +94,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "knowledge."
         ),
         "keywords": {
-            "memory", "architecture", "working", "episodic", "semantic",
-            "rag", "retrieval", "vector", "graph", "hybrid", "knowledge",
+            "memory",
+            "architecture",
+            "working",
+            "episodic",
+            "semantic",
+            "rag",
+            "retrieval",
+            "vector",
+            "graph",
+            "hybrid",
+            "knowledge",
         },
     },
     {
@@ -92,8 +124,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "automated scoring."
         ),
         "keywords": {
-            "prompt", "engineering", "pattern", "chain-of-thought", "few-shot",
-            "system", "instruction", "template", "reasoning", "constitutional",
+            "prompt",
+            "engineering",
+            "pattern",
+            "chain-of-thought",
+            "few-shot",
+            "system",
+            "instruction",
+            "template",
+            "reasoning",
+            "constitutional",
         },
     },
     {
@@ -108,8 +148,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "detection compares consecutive runs and flags score drops exceeding a threshold."
         ),
         "keywords": {
-            "evaluation", "framework", "benchmark", "metric", "ndcg", "mrr",
-            "judge", "regression", "score", "task", "completion", "accuracy",
+            "evaluation",
+            "framework",
+            "benchmark",
+            "metric",
+            "ndcg",
+            "mrr",
+            "judge",
+            "regression",
+            "score",
+            "task",
+            "completion",
+            "accuracy",
         },
     },
     # --- engineering (5) ---
@@ -126,9 +176,19 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "reliable message processing in event-driven architectures."
         ),
         "keywords": {
-            "distributed", "systems", "cap", "theorem", "consistency",
-            "availability", "partition", "raft", "paxos", "consensus",
-            "replication", "failure", "heartbeat",
+            "distributed",
+            "systems",
+            "cap",
+            "theorem",
+            "consistency",
+            "availability",
+            "partition",
+            "raft",
+            "paxos",
+            "consensus",
+            "replication",
+            "failure",
+            "heartbeat",
         },
     },
     {
@@ -144,9 +204,19 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "should answer the four golden signals: latency, traffic, errors, and saturation."
         ),
         "keywords": {
-            "observability", "logs", "metrics", "traces", "prometheus",
-            "opentelemetry", "slo", "alerting", "latency", "dashboard",
-            "structured", "logging", "tracing",
+            "observability",
+            "logs",
+            "metrics",
+            "traces",
+            "prometheus",
+            "opentelemetry",
+            "slo",
+            "alerting",
+            "latency",
+            "dashboard",
+            "structured",
+            "logging",
+            "tracing",
         },
     },
     {
@@ -162,8 +232,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "readable messages improve developer experience."
         ),
         "keywords": {
-            "api", "design", "rest", "graphql", "versioning", "rate",
-            "limiting", "http", "resource", "schema", "error", "backwards",
+            "api",
+            "design",
+            "rest",
+            "graphql",
+            "versioning",
+            "rate",
+            "limiting",
+            "http",
+            "resource",
+            "schema",
+            "error",
+            "backwards",
             "compatibility",
         },
     },
@@ -180,9 +260,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "and checking whether tests detect them."
         ),
         "keywords": {
-            "testing", "strategy", "unit", "integration", "end-to-end",
-            "pyramid", "property", "hypothesis", "contract", "pact",
-            "mutation", "test",
+            "testing",
+            "strategy",
+            "unit",
+            "integration",
+            "end-to-end",
+            "pyramid",
+            "property",
+            "hypothesis",
+            "contract",
+            "pact",
+            "mutation",
+            "test",
         },
     },
     {
@@ -198,8 +287,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "committed to source control."
         ),
         "keywords": {
-            "ci", "cd", "pipeline", "continuous", "integration", "delivery",
-            "deploy", "canary", "blue-green", "github", "actions", "build",
+            "ci",
+            "cd",
+            "pipeline",
+            "continuous",
+            "integration",
+            "delivery",
+            "deploy",
+            "canary",
+            "blue-green",
+            "github",
+            "actions",
+            "build",
             "automation",
         },
     },
@@ -217,8 +316,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "stable during iterative development."
         ),
         "keywords": {
-            "data", "modelling", "schema", "star", "graph", "document",
-            "normalisation", "denormalisation", "dimension", "fact", "model",
+            "data",
+            "modelling",
+            "schema",
+            "star",
+            "graph",
+            "document",
+            "normalisation",
+            "denormalisation",
+            "dimension",
+            "fact",
+            "model",
         },
     },
     {
@@ -234,9 +342,19 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "required sample sizes before running experiments."
         ),
         "keywords": {
-            "statistics", "statistical", "bayesian", "inference", "hypothesis",
-            "testing", "p-value", "confidence", "effect", "size", "power",
-            "analysis", "probability",
+            "statistics",
+            "statistical",
+            "bayesian",
+            "inference",
+            "hypothesis",
+            "testing",
+            "p-value",
+            "confidence",
+            "effect",
+            "size",
+            "power",
+            "analysis",
+            "probability",
         },
     },
     {
@@ -251,8 +369,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "automatically in the CI pipeline to catch issues before they reach dashboards."
         ),
         "keywords": {
-            "analytics", "engineering", "dbt", "warehouse", "sql", "metrics",
-            "data", "quality", "contract", "transform", "pipeline",
+            "analytics",
+            "engineering",
+            "dbt",
+            "warehouse",
+            "sql",
+            "metrics",
+            "data",
+            "quality",
+            "contract",
+            "transform",
+            "pipeline",
         },
     },
     {
@@ -267,8 +394,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "deployment from experiment activation, enabling safe incremental rollouts."
         ),
         "keywords": {
-            "experiment", "design", "ab", "testing", "bandit", "control",
-            "treatment", "hypothesis", "feature", "flag", "stratified",
+            "experiment",
+            "design",
+            "ab",
+            "testing",
+            "bandit",
+            "control",
+            "treatment",
+            "hypothesis",
+            "feature",
+            "flag",
+            "stratified",
             "rollout",
         },
     },
@@ -286,8 +422,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "actually answers the user's question?"
         ),
         "keywords": {
-            "epistemology", "knowledge", "belief", "justification", "gettier",
-            "reliabilism", "epistemic", "humility", "truth", "certainty",
+            "epistemology",
+            "knowledge",
+            "belief",
+            "justification",
+            "gettier",
+            "reliabilism",
+            "epistemic",
+            "humility",
+            "truth",
+            "certainty",
         },
     },
     {
@@ -302,8 +446,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "principle suggests constraining autonomous action until safety can be demonstrated."
         ),
         "keywords": {
-            "ethics", "automation", "accountability", "transparency", "fairness",
-            "bias", "explainability", "responsibility", "autonomous", "safety",
+            "ethics",
+            "automation",
+            "accountability",
+            "transparency",
+            "fairness",
+            "bias",
+            "explainability",
+            "responsibility",
+            "autonomous",
+            "safety",
         },
     },
     {
@@ -318,8 +470,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "diagnose cascading failures and identify root causes beyond the immediate symptom."
         ),
         "keywords": {
-            "systems", "thinking", "feedback", "loop", "leverage", "emergence",
-            "interconnected", "root", "cause", "cascade", "holistic",
+            "systems",
+            "thinking",
+            "feedback",
+            "loop",
+            "leverage",
+            "emergence",
+            "interconnected",
+            "root",
+            "cause",
+            "cascade",
+            "holistic",
         },
     },
     # --- operating-models (2) ---
@@ -336,8 +497,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "so intentional team design shapes software architecture."
         ),
         "keywords": {
-            "team", "topologies", "stream-aligned", "platform", "enabling",
-            "conway", "organisation", "structure", "interaction", "delivery",
+            "team",
+            "topologies",
+            "stream-aligned",
+            "platform",
+            "enabling",
+            "conway",
+            "organisation",
+            "structure",
+            "interaction",
+            "delivery",
         },
     },
     {
@@ -353,8 +522,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "metrics to avoid sandbagging."
         ),
         "keywords": {
-            "okr", "objectives", "key", "results", "goals", "alignment",
-            "quarterly", "measurable", "stretch", "target", "framework",
+            "okr",
+            "objectives",
+            "key",
+            "results",
+            "goals",
+            "alignment",
+            "quarterly",
+            "measurable",
+            "stretch",
+            "target",
+            "framework",
         },
     },
     # --- product-and-design (2) ---
@@ -371,8 +549,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "features alone cannot address."
         ),
         "keywords": {
-            "jobs", "done", "jtbd", "product", "customer", "demand",
-            "progress", "outcome", "functional", "emotional", "hire",
+            "jobs",
+            "done",
+            "jtbd",
+            "product",
+            "customer",
+            "demand",
+            "progress",
+            "outcome",
+            "functional",
+            "emotional",
+            "hire",
         },
     },
     {
@@ -388,8 +575,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "designers and developers in sync."
         ),
         "keywords": {
-            "design", "system", "component", "atomic", "token", "accessibility",
-            "wcag", "consistency", "typography", "colour", "reusable",
+            "design",
+            "system",
+            "component",
+            "atomic",
+            "token",
+            "accessibility",
+            "wcag",
+            "consistency",
+            "typography",
+            "colour",
+            "reusable",
         },
     },
     # --- leadership (2) ---
@@ -405,8 +601,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "all of which degrade innovation and learning velocity."
         ),
         "keywords": {
-            "psychological", "safety", "team", "trust", "vulnerability",
-            "aristotle", "effectiveness", "leadership", "dissent", "risk",
+            "psychological",
+            "safety",
+            "team",
+            "trust",
+            "vulnerability",
+            "aristotle",
+            "effectiveness",
+            "leadership",
+            "dissent",
+            "risk",
         },
     },
     {
@@ -422,8 +626,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "ones deserve deliberation."
         ),
         "keywords": {
-            "decision", "making", "framework", "daci", "pre-mortem", "cynefin",
-            "bias", "cognitive", "reversible", "classification", "leadership",
+            "decision",
+            "making",
+            "framework",
+            "daci",
+            "pre-mortem",
+            "cynefin",
+            "bias",
+            "cognitive",
+            "reversible",
+            "classification",
+            "leadership",
         },
     },
     # --- security (2) ---
@@ -440,9 +653,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "policies."
         ),
         "keywords": {
-            "zero", "trust", "architecture", "security", "authentication",
-            "authorisation", "identity", "token", "micro-segmentation",
-            "least-privilege", "encrypted",
+            "zero",
+            "trust",
+            "architecture",
+            "security",
+            "authentication",
+            "authorisation",
+            "identity",
+            "token",
+            "micro-segmentation",
+            "least-privilege",
+            "encrypted",
         },
     },
     {
@@ -457,8 +678,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "limit the blast radius of leaked credentials by ensuring short-lived validity."
         ),
         "keywords": {
-            "secrets", "management", "vault", "key", "credential", "rotation",
-            "api", "certificate", "hashicorp", "azure", "audit", "security",
+            "secrets",
+            "management",
+            "vault",
+            "key",
+            "credential",
+            "rotation",
+            "api",
+            "certificate",
+            "hashicorp",
+            "azure",
+            "audit",
+            "security",
         },
     },
     # --- economics (2) ---
@@ -475,8 +706,18 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "incentives must balance supply and demand participants."
         ),
         "keywords": {
-            "incentive", "design", "economics", "principal", "agent", "moral",
-            "hazard", "mechanism", "game", "theory", "platform", "behaviour",
+            "incentive",
+            "design",
+            "economics",
+            "principal",
+            "agent",
+            "moral",
+            "hazard",
+            "mechanism",
+            "game",
+            "theory",
+            "platform",
+            "behaviour",
         },
     },
     {
@@ -491,8 +732,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "removed without reducing capability. The goal is essential complexity only."
         ),
         "keywords": {
-            "complexity", "cost", "brooks", "law", "technical", "debt",
-            "cognitive", "load", "simplification", "coordination", "overhead",
+            "complexity",
+            "cost",
+            "brooks",
+            "law",
+            "technical",
+            "debt",
+            "cognitive",
+            "load",
+            "simplification",
+            "coordination",
+            "overhead",
         },
     },
     # --- personal-effectiveness (1) ---
@@ -509,8 +759,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "competitive advantage for knowledge workers."
         ),
         "keywords": {
-            "deep", "work", "focus", "distraction", "newport", "time-blocking",
-            "attention", "shallow", "productivity", "concentration",
+            "deep",
+            "work",
+            "focus",
+            "distraction",
+            "newport",
+            "time-blocking",
+            "attention",
+            "shallow",
+            "productivity",
+            "concentration",
         },
     },
     # --- foundations (1) ---
@@ -527,8 +785,16 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "fraction of the finished rocket."
         ),
         "keywords": {
-            "first", "principles", "reasoning", "fundamental", "analogy",
-            "assumptions", "aristotle", "basis", "truth", "engineering",
+            "first",
+            "principles",
+            "reasoning",
+            "fundamental",
+            "analogy",
+            "assumptions",
+            "aristotle",
+            "basis",
+            "truth",
+            "engineering",
         },
     },
     # --- health (1) ---
@@ -545,8 +811,17 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "Team Topologies applies this principle to organisational design."
         ),
         "keywords": {
-            "cognitive", "load", "management", "intrinsic", "extraneous",
-            "germane", "mental", "effort", "working", "memory", "capacity",
+            "cognitive",
+            "load",
+            "management",
+            "intrinsic",
+            "extraneous",
+            "germane",
+            "mental",
+            "effort",
+            "working",
+            "memory",
+            "capacity",
         },
     },
 ]

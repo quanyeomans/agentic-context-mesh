@@ -27,9 +27,12 @@ from .schema import (
 )
 
 LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "embed.log")))
+
+
 def _default_lockfile() -> Path:
     """Lockfile in user cache dir — avoids world-writable /tmp on multi-user systems."""
     from kairix.db import get_db_path
+
     return get_db_path().parent / "embed.lock"
 
 
@@ -95,13 +98,15 @@ def cmd_embed(args: argparse.Namespace) -> int:
         # create_schema is idempotent — safe on every run.
         load_extensions(db)
         from kairix.db.schema import create_schema
+
         create_schema(db)
         validate_schema(db)
 
         # Scan document store for new/changed documents before embedding.
         # This ensures first-run embed works without a separate scan step.
-        from kairix.db.scanner import DocumentScanner, CollectionConfig
+        from kairix.db.scanner import CollectionConfig, DocumentScanner
         from kairix.paths import document_root
+
         droot = document_root()
         scanner = DocumentScanner(db, document_root=droot)
         # Default: scan the entire document root as a single collection
@@ -109,10 +114,13 @@ def cmd_embed(args: argparse.Namespace) -> int:
         if scan_report.new > 0 or scan_report.updated > 0:
             logging.info(
                 "Scanned documents: %d new, %d updated, %d unchanged",
-                scan_report.new, scan_report.updated, scan_report.unchanged,
+                scan_report.new,
+                scan_report.updated,
+                scan_report.unchanged,
             )
             # Rebuild FTS index after scanning new/changed documents
             from kairix.db.fts import rebuild_fts
+
             fts_count = rebuild_fts(db)
             logging.info("FTS index rebuilt: %d documents", fts_count)
 

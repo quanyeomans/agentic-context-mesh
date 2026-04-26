@@ -26,7 +26,9 @@ from pathlib import Path
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant"})
 SHARED_AGENT = "shared"
 
-_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(
+    "KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")
+)
 _WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 _KNOWLEDGE_ROOT = f"{_DOCUMENT_ROOT}/04-Agent-Knowledge"
 

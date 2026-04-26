@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from kairix.reflib.extract import (
     RawEntity,
     RawRelationship,
@@ -17,10 +15,10 @@ from kairix.reflib.extract import (
     scan_reference_library,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_md(title: str, source: str, domain: str, subdomain: str, body: str) -> str:
     return (
@@ -154,12 +152,17 @@ class TestScanReferenceLibrary:
         """Scan a small temporary reference library."""
         col = tmp_path / "engineering" / "test-source"
         col.mkdir(parents=True)
-        (col / "doc.md").write_text(_make_md(
-            "Test Framework Guide", "Test Org", "engineering", "test-source",
-            "## OWASP Best Practices\n\nSecurity guidance.\n\n## Risk Model\n\nContent.",
-        ))
+        (col / "doc.md").write_text(
+            _make_md(
+                "Test Framework Guide",
+                "Test Org",
+                "engineering",
+                "test-source",
+                "## OWASP Best Practices\n\nSecurity guidance.\n\n## Risk Model\n\nContent.",
+            )
+        )
 
-        entities, rels = scan_reference_library(tmp_path)
+        entities, _rels = scan_reference_library(tmp_path)
         assert len(entities) > 0
         types = {e.entity_type for e in entities}
         assert "Document" in types
@@ -172,6 +175,6 @@ class TestScanReferenceLibrary:
         col.mkdir(parents=True)
         (col / "a.md").write_text(_make_md("A", "Src", "eng", "src", "Body"))
 
-        entities, rels = scan_reference_library(tmp_path)
+        entities, _rels = scan_reference_library(tmp_path)
         names = [e.name for e in entities]
         assert "Catalogue" not in names

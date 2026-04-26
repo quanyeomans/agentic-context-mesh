@@ -7,17 +7,16 @@ deduplication, and catalogue generation.
 from __future__ import annotations
 
 import logging
-import shutil
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
 from kairix.reflib.catalogue import CatalogueEntry, generate_catalogue, generate_licence_notices
 from kairix.reflib.dedup import choose_canonical, find_exact_duplicates, hash_content
-from kairix.reflib.filters import filter_collection, should_include
+from kairix.reflib.filters import filter_collection
 from kairix.reflib.frontmatter import build_frontmatter, inject_frontmatter
 from kairix.reflib.markdown import clean_markdown
-from kairix.reflib.sources import SourceDef, get_allowed_sources, get_source
+from kairix.reflib.sources import SourceDef, get_source
 from kairix.reflib.splitter import (
     is_too_small,
     needs_split,
@@ -135,8 +134,9 @@ def normalise(config: NormaliseConfig) -> NormaliseReport:
         if source.licence_tier > config.max_tier:
             md_files = list(source_path.rglob("*.md"))
             report.filtered_licence += len(md_files)
-            logger.info("Excluded (tier %d): %s/%s (%d files)",
-                       source.licence_tier, collection, dir_name, len(md_files))
+            logger.info(
+                "Excluded (tier %d): %s/%s (%d files)", source.licence_tier, collection, dir_name, len(md_files)
+            )
             continue
 
         # Collect and filter files
@@ -177,8 +177,7 @@ def normalise(config: NormaliseConfig) -> NormaliseReport:
             # Compute relative output path
             rel = file_path.relative_to(source_path)
             # Normalise each path component to kebab-case
-            parts = [to_kebab_case(str(p)) if p.suffix else p.name.lower()
-                     for p in [Path(seg) for seg in rel.parts]]
+            parts = [to_kebab_case(str(p)) if p.suffix else p.name.lower() for p in [Path(seg) for seg in rel.parts]]
             # Ensure .md extension on the final file
             if parts and not parts[-1].endswith(".md"):
                 parts[-1] = parts[-1] + ".md"
@@ -211,21 +210,23 @@ def normalise(config: NormaliseConfig) -> NormaliseReport:
 
         report.collections[f"{collection}/{dir_name}"] = source_output_count
 
-        catalogue_entries.append(CatalogueEntry(
-            collection=collection,
-            source_name=source.name,
-            source_url=source.source_url,
-            licence=source.licence,
-            licence_tier=source.licence_tier,
-            file_count=source_output_count,
-            total_size_kb=source_output_size / 1024,
-            date_verified=today,
-        ))
+        catalogue_entries.append(
+            CatalogueEntry(
+                collection=collection,
+                source_name=source.name,
+                source_url=source.source_url,
+                licence=source.licence,
+                licence_tier=source.licence_tier,
+                file_count=source_output_count,
+                total_size_kb=source_output_size / 1024,
+                date_verified=today,
+            )
+        )
 
     # Deduplication
     if config.dedup:
         duplicates = find_exact_duplicates(all_hashed)
-        for dup_hash, dup_paths in duplicates.items():
+        for _dup_hash, dup_paths in duplicates.items():
             canonical = choose_canonical(dup_paths)
             for p in dup_paths:
                 if p != canonical and p in output_files:

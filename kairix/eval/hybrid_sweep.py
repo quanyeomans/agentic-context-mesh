@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Sweep configuration space
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class HybridSweepConfig:
     """A single configuration to evaluate in the sweep."""
@@ -63,143 +64,169 @@ def build_default_configs() -> list[HybridSweepConfig]:
     configs: list[HybridSweepConfig] = []
 
     # --- Baseline: BM25-only (current best = 0.749 NDCG) ---
-    configs.append(HybridSweepConfig(
-        name="bm25-only",
-        mode="bm25_only",
-    ))
+    configs.append(
+        HybridSweepConfig(
+            name="bm25-only",
+            mode="bm25_only",
+        )
+    )
 
     # --- RRF k sweep (hybrid, minimal boosts) ---
     for k in [10, 20, 40, 60, 100]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-k{k}-minimal",
-            mode="hybrid",
-            rrf_k=k,
-            entity_enabled=False,
-            procedural_enabled=False,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-k{k}-minimal",
+                mode="hybrid",
+                rrf_k=k,
+                entity_enabled=False,
+                procedural_enabled=False,
+            )
+        )
 
     # --- RRF k sweep (hybrid, default boosts) ---
     for k in [20, 40, 60]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-k{k}-defaults",
-            mode="hybrid",
-            rrf_k=k,
-            entity_enabled=True,
-            procedural_enabled=True,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-k{k}-defaults",
+                mode="hybrid",
+                rrf_k=k,
+                entity_enabled=True,
+                procedural_enabled=True,
+            )
+        )
 
     # --- Entity boost factor sweep (k=60) ---
     for ef in [0.10, 0.20, 0.30, 0.50]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-entity-f{ef}",
-            mode="hybrid",
-            rrf_k=60,
-            entity_enabled=True,
-            entity_factor=ef,
-            procedural_enabled=True,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-entity-f{ef}",
+                mode="hybrid",
+                rrf_k=60,
+                entity_enabled=True,
+                entity_factor=ef,
+                procedural_enabled=True,
+            )
+        )
 
     # --- Entity cap sweep ---
     for cap in [1.5, 2.0, 3.0]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-entity-cap{cap}",
-            mode="hybrid",
-            rrf_k=60,
-            entity_enabled=True,
-            entity_cap=cap,
-            procedural_enabled=True,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-entity-cap{cap}",
+                mode="hybrid",
+                rrf_k=60,
+                entity_enabled=True,
+                entity_cap=cap,
+                procedural_enabled=True,
+            )
+        )
 
     # --- Procedural factor sweep ---
     for pf in [1.0, 1.2, 1.4, 1.6, 2.0]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-proc-f{pf}",
-            mode="hybrid",
-            rrf_k=60,
-            entity_enabled=True,
-            procedural_enabled=True,
-            procedural_factor=pf,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-proc-f{pf}",
+                mode="hybrid",
+                rrf_k=60,
+                entity_enabled=True,
+                procedural_enabled=True,
+                procedural_factor=pf,
+            )
+        )
 
     # --- BM25 limit sweep (more/fewer candidates for RRF) ---
     for lim in [10, 20, 30, 50]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-bm25lim{lim}",
-            mode="hybrid",
-            rrf_k=60,
-            entity_enabled=False,
-            procedural_enabled=False,
-            bm25_limit=lim,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-bm25lim{lim}",
+                mode="hybrid",
+                rrf_k=60,
+                entity_enabled=False,
+                procedural_enabled=False,
+                bm25_limit=lim,
+            )
+        )
 
     # --- Vector limit sweep ---
     for vlim in [5, 10, 20, 30]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-vlim{vlim}",
-            mode="hybrid",
-            rrf_k=60,
-            entity_enabled=False,
-            procedural_enabled=False,
-            vec_limit=vlim,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-vlim{vlim}",
+                mode="hybrid",
+                rrf_k=60,
+                entity_enabled=False,
+                procedural_enabled=False,
+                vec_limit=vlim,
+            )
+        )
 
     # --- Distance-gated hybrid (filter poor vector results before RRF) ---
     for threshold in [0.3, 0.4, 0.5]:
-        configs.append(HybridSweepConfig(
-            name=f"hybrid-gate-d{threshold}",
-            mode="hybrid",
-            rrf_k=60,
-            entity_enabled=False,
-            procedural_enabled=False,
-            vec_distance_threshold=threshold,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"hybrid-gate-d{threshold}",
+                mode="hybrid",
+                rrf_k=60,
+                entity_enabled=False,
+                procedural_enabled=False,
+                vec_distance_threshold=threshold,
+            )
+        )
 
     # --- BM25-primary mode (BM25 ranked first, vector-only appended) ---
     for vlim in [5, 10, 20]:
-        configs.append(HybridSweepConfig(
-            name=f"bm25primary-v{vlim}",
-            mode="bm25_primary",
-            bm25_limit=20,
-            vec_limit=vlim,
-            entity_enabled=False,
-            procedural_enabled=False,
-        ))
+        configs.append(
+            HybridSweepConfig(
+                name=f"bm25primary-v{vlim}",
+                mode="bm25_primary",
+                bm25_limit=20,
+                vec_limit=vlim,
+                entity_enabled=False,
+                procedural_enabled=False,
+            )
+        )
 
     # BM25-primary with more BM25 candidates
-    configs.append(HybridSweepConfig(
-        name="bm25primary-bm30-v10",
-        mode="bm25_primary",
-        bm25_limit=30,
-        vec_limit=10,
-        entity_enabled=False,
-        procedural_enabled=False,
-    ))
+    configs.append(
+        HybridSweepConfig(
+            name="bm25primary-bm30-v10",
+            mode="bm25_primary",
+            bm25_limit=30,
+            vec_limit=10,
+            entity_enabled=False,
+            procedural_enabled=False,
+        )
+    )
 
     # --- Best combo candidates (informed by individual sweeps) ---
-    configs.append(HybridSweepConfig(
-        name="hybrid-tuned-a",
-        mode="hybrid",
-        rrf_k=20,
-        entity_enabled=True,
-        entity_factor=0.30,
-        entity_cap=2.0,
-        procedural_enabled=True,
-        procedural_factor=1.4,
-        bm25_limit=30,
-        vec_limit=10,
-    ))
-    configs.append(HybridSweepConfig(
-        name="hybrid-tuned-b",
-        mode="hybrid",
-        rrf_k=40,
-        entity_enabled=True,
-        entity_factor=0.20,
-        entity_cap=2.0,
-        procedural_enabled=True,
-        procedural_factor=1.2,
-        bm25_limit=20,
-        vec_limit=20,
-    ))
+    configs.append(
+        HybridSweepConfig(
+            name="hybrid-tuned-a",
+            mode="hybrid",
+            rrf_k=20,
+            entity_enabled=True,
+            entity_factor=0.30,
+            entity_cap=2.0,
+            procedural_enabled=True,
+            procedural_factor=1.4,
+            bm25_limit=30,
+            vec_limit=10,
+        )
+    )
+    configs.append(
+        HybridSweepConfig(
+            name="hybrid-tuned-b",
+            mode="hybrid",
+            rrf_k=40,
+            entity_enabled=True,
+            entity_factor=0.20,
+            entity_cap=2.0,
+            procedural_enabled=True,
+            procedural_factor=1.2,
+            bm25_limit=20,
+            vec_limit=20,
+        )
+    )
 
     return configs
 
@@ -207,6 +234,7 @@ def build_default_configs() -> list[HybridSweepConfig]:
 # ---------------------------------------------------------------------------
 # Metrics (reused from sweep.py with minor adaptations)
 # ---------------------------------------------------------------------------
+
 
 def _build_rel_map(gold: list[dict]) -> tuple[dict[str, int], str]:
     """Build relevance map from gold_titles or gold_paths format."""
@@ -265,11 +293,10 @@ def compute_mrr(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> fl
     return 0.0
 
 
-
-
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HybridSweepResult:
@@ -311,6 +338,7 @@ def _get_embedding_cached(query: str) -> bytes | None:
     """Get embedding bytes for a query, caching across configs."""
     if query not in _embedding_cache:
         from kairix.search.hybrid import embed_text_as_bytes
+
         _embedding_cache[query] = embed_text_as_bytes(query)
     return _embedding_cache[query]
 
@@ -323,6 +351,7 @@ def _clear_embedding_cache() -> None:
 # ---------------------------------------------------------------------------
 # Retrieval functions (per-config)
 # ---------------------------------------------------------------------------
+
 
 def _retrieve_bm25_only(
     query: str,
@@ -373,7 +402,10 @@ def _retrieve_hybrid(
     # Parallel dispatch
     with ThreadPoolExecutor(max_workers=2) as executor:
         bm25_fut = executor.submit(
-            bm25_search, query, collections, config.bm25_limit,
+            bm25_search,
+            query,
+            collections,
+            config.bm25_limit,
         )
 
         def _vec_search() -> list[VecResult]:
@@ -418,6 +450,7 @@ def _retrieve_hybrid(
     if config.entity_enabled:
         try:
             from kairix.graph.client import get_client as _get_neo4j
+
             neo4j_client = _get_neo4j()
             entity_cfg = EntityBoostConfig(
                 enabled=True,
@@ -528,6 +561,7 @@ def _retrieve_bm25_primary(
 # Main sweep
 # ---------------------------------------------------------------------------
 
+
 def sweep_hybrid_params(
     suite_path: Path,
     output_path: Path | None = None,
@@ -558,17 +592,16 @@ def sweep_hybrid_params(
         logger.error("hybrid_sweep: no cases in suite %s", suite_path)
         return HybridSweepReport()
 
-    ndcg_cases = [
-        c for c in cases
-        if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))
-    ]
+    ndcg_cases = [c for c in cases if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))]
     if not ndcg_cases:
         logger.error("hybrid_sweep: no ndcg-scored cases with gold in suite")
         return HybridSweepReport()
 
     logger.info(
         "hybrid_sweep: %d configs x %d cases = %d evaluations",
-        len(configs), len(ndcg_cases), len(configs) * len(ndcg_cases),
+        len(configs),
+        len(ndcg_cases),
+        len(configs) * len(ndcg_cases),
     )
 
     # Determine collections from suite metadata or use None (all)
@@ -628,14 +661,8 @@ def sweep_hybrid_params(
             category_ndcg[category].append(ndcg)
 
         n = len(ndcg_cases)
-        cat_scores = {
-            cat: sum(scores) / len(scores) if scores else 0.0
-            for cat, scores in category_ndcg.items()
-        }
-        weighted_total = sum(
-            cat_scores.get(cat, 0.0) * weight
-            for cat, weight in CATEGORY_WEIGHTS.items()
-        )
+        cat_scores = {cat: sum(scores) / len(scores) if scores else 0.0 for cat, scores in category_ndcg.items()}
+        weighted_total = sum(cat_scores.get(cat, 0.0) * weight for cat, weight in CATEGORY_WEIGHTS.items())
 
         result = HybridSweepResult(
             config=cfg,
@@ -655,10 +682,14 @@ def sweep_hybrid_params(
         report.results.append(result)
 
         logger.info(
-            "hybrid_sweep: %-30s → weighted=%.4f NDCG=%.4f Hit@5=%.3f "
-            "vec_fail=%d latency=%.0fms (%ds)",
-            cfg.name, weighted_total, result.ndcg_at_10, result.hit_at_5,
-            n_vec_failed, result.avg_latency_ms, int(result.duration_s),
+            "hybrid_sweep: %-30s → weighted=%.4f NDCG=%.4f Hit@5=%.3f vec_fail=%d latency=%.0fms (%ds)",
+            cfg.name,
+            weighted_total,
+            result.ndcg_at_10,
+            result.hit_at_5,
+            n_vec_failed,
+            result.avg_latency_ms,
+            int(result.duration_s),
         )
 
     # Sort by weighted total
@@ -685,30 +716,58 @@ def _write_csv(output_path: Path, report: HybridSweepReport) -> None:
     cat_names = sorted(CATEGORY_WEIGHTS.keys())
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "config_name", "mode", "rrf_k",
-            "entity_enabled", "entity_factor", "entity_cap",
-            "proc_enabled", "proc_factor",
-            "bm25_limit", "vec_limit",
-            "weighted_total", "ndcg_at_10", "hit_at_5", "mrr_at_10",
-            *cat_names,
-            "n_vec_failed", "avg_bm25", "avg_vec", "avg_fused",
-            "avg_latency_ms", "duration_s",
-        ])
+        writer.writerow(
+            [
+                "config_name",
+                "mode",
+                "rrf_k",
+                "entity_enabled",
+                "entity_factor",
+                "entity_cap",
+                "proc_enabled",
+                "proc_factor",
+                "bm25_limit",
+                "vec_limit",
+                "weighted_total",
+                "ndcg_at_10",
+                "hit_at_5",
+                "mrr_at_10",
+                *cat_names,
+                "n_vec_failed",
+                "avg_bm25",
+                "avg_vec",
+                "avg_fused",
+                "avg_latency_ms",
+                "duration_s",
+            ]
+        )
         for r in report.results:
             c = r.config
-            writer.writerow([
-                c.name, c.mode, c.rrf_k,
-                c.entity_enabled, c.entity_factor, c.entity_cap,
-                c.procedural_enabled, c.procedural_factor,
-                c.bm25_limit, c.vec_limit,
-                f"{r.weighted_total:.4f}", f"{r.ndcg_at_10:.4f}",
-                f"{r.hit_at_5:.4f}", f"{r.mrr_at_10:.4f}",
-                *[f"{r.category_scores.get(cat, 0):.4f}" for cat in cat_names],
-                r.n_vec_failed, f"{r.avg_bm25_count:.1f}",
-                f"{r.avg_vec_count:.1f}", f"{r.avg_fused_count:.1f}",
-                f"{r.avg_latency_ms:.0f}", f"{r.duration_s:.1f}",
-            ])
+            writer.writerow(
+                [
+                    c.name,
+                    c.mode,
+                    c.rrf_k,
+                    c.entity_enabled,
+                    c.entity_factor,
+                    c.entity_cap,
+                    c.procedural_enabled,
+                    c.procedural_factor,
+                    c.bm25_limit,
+                    c.vec_limit,
+                    f"{r.weighted_total:.4f}",
+                    f"{r.ndcg_at_10:.4f}",
+                    f"{r.hit_at_5:.4f}",
+                    f"{r.mrr_at_10:.4f}",
+                    *[f"{r.category_scores.get(cat, 0):.4f}" for cat in cat_names],
+                    r.n_vec_failed,
+                    f"{r.avg_bm25_count:.1f}",
+                    f"{r.avg_vec_count:.1f}",
+                    f"{r.avg_fused_count:.1f}",
+                    f"{r.avg_latency_ms:.0f}",
+                    f"{r.duration_s:.1f}",
+                ]
+            )
 
 
 def _print_summary(report: HybridSweepReport) -> None:
@@ -718,34 +777,55 @@ def _print_summary(report: HybridSweepReport) -> None:
 
     logger.info("")
     logger.info("=" * 100)
-    logger.info("HYBRID CALIBRATION SWEEP — %d configs, %.0fs total",
-                report.total_configs, report.total_duration_s)
+    logger.info("HYBRID CALIBRATION SWEEP — %d configs, %.0fs total", report.total_configs, report.total_duration_s)
     logger.info("=" * 100)
     logger.info(
         "%-30s  %6s  %6s  %6s  %6s  %5s  %6s",
-        "Config", "Weight", "NDCG", "Hit@5", "MRR", "VecF", "Lat ms",
+        "Config",
+        "Weight",
+        "NDCG",
+        "Hit@5",
+        "MRR",
+        "VecF",
+        "Lat ms",
     )
     logger.info("-" * 100)
 
     for r in report.results[:20]:  # Top 20
         logger.info(
             "%-30s  %6.4f  %6.4f  %6.3f  %6.4f  %5d  %6.0f",
-            r.config.name, r.weighted_total, r.ndcg_at_10,
-            r.hit_at_5, r.mrr_at_10, r.n_vec_failed, r.avg_latency_ms,
+            r.config.name,
+            r.weighted_total,
+            r.ndcg_at_10,
+            r.hit_at_5,
+            r.mrr_at_10,
+            r.n_vec_failed,
+            r.avg_latency_ms,
         )
 
     if report.best:
         logger.info("-" * 100)
         b = report.best
         logger.info("BEST: %s", b.config.name)
-        logger.info("  Mode: %s | RRF k=%d | Entity: %s (f=%.2f, cap=%.1f) | Proc: %s (f=%.1f)",
-                     b.config.mode, b.config.rrf_k,
-                     b.config.entity_enabled, b.config.entity_factor, b.config.entity_cap,
-                     b.config.procedural_enabled, b.config.procedural_factor)
-        logger.info("  Weighted=%.4f  NDCG=%.4f  Hit@5=%.3f  MRR=%.4f",
-                     b.weighted_total, b.ndcg_at_10, b.hit_at_5, b.mrr_at_10)
-        logger.info("  Categories: %s",
-                     "  ".join(f"{cat}={b.category_scores.get(cat, 0):.3f}"
-                               for cat in sorted(CATEGORY_WEIGHTS.keys())
-                               if CATEGORY_WEIGHTS[cat] > 0))
+        logger.info(
+            "  Mode: %s | RRF k=%d | Entity: %s (f=%.2f, cap=%.1f) | Proc: %s (f=%.1f)",
+            b.config.mode,
+            b.config.rrf_k,
+            b.config.entity_enabled,
+            b.config.entity_factor,
+            b.config.entity_cap,
+            b.config.procedural_enabled,
+            b.config.procedural_factor,
+        )
+        logger.info(
+            "  Weighted=%.4f  NDCG=%.4f  Hit@5=%.3f  MRR=%.4f", b.weighted_total, b.ndcg_at_10, b.hit_at_5, b.mrr_at_10
+        )
+        logger.info(
+            "  Categories: %s",
+            "  ".join(
+                f"{cat}={b.category_scores.get(cat, 0):.3f}"
+                for cat in sorted(CATEGORY_WEIGHTS.keys())
+                if CATEGORY_WEIGHTS[cat] > 0
+            ),
+        )
     logger.info("=" * 100)

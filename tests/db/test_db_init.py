@@ -57,9 +57,7 @@ def test_get_db_path_falls_back_to_qmd(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 
 @pytest.mark.unit
-def test_get_db_path_returns_default_when_nothing_exists(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_get_db_path_returns_default_when_nothing_exists(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Returns default kairix path when no DB exists anywhere."""
     from kairix.db import get_db_path
 

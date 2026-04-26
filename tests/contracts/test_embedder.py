@@ -1,5 +1,7 @@
 """Contract: EmbedderProtocol conformance."""
+
 import pytest
+
 from kairix.contracts.embed import EmbedderProtocol
 
 
@@ -17,6 +19,7 @@ def test_embedder_embed_returns_correct_dim(fake_llm_backend):
 @pytest.mark.contract
 def test_embedder_embed_bytes_length(fake_llm_backend):
     import struct
+
     b = fake_llm_backend.embed_as_bytes("hello")
     assert b is not None
     dim = len(struct.unpack(f"{len(b) // 4}f", b))

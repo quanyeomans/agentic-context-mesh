@@ -2,6 +2,7 @@
 Tests for kairix.benchmark.mock_reflib_retrieval — verify the mock-reflib backend
 returns results for known queries and matches expected fixture documents.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -31,9 +32,7 @@ class TestMockReflibFixtures:
     def test_body_length_in_range(self) -> None:
         for doc in FIXTURE_DOCUMENTS:
             word_count = len(doc["body"].split())
-            assert 50 <= word_count <= 250, (
-                f"{doc['title']} body has {word_count} words, expected 50-250"
-            )
+            assert 50 <= word_count <= 250, f"{doc['title']} body has {word_count} words, expected 50-250"
 
     def test_unique_paths(self) -> None:
         paths = [doc["path"] for doc in FIXTURE_DOCUMENTS]
@@ -49,37 +48,29 @@ class TestMockReflibRetrieval:
     """Verify retrieval returns expected documents for known queries."""
 
     def test_returns_results_for_agent_query(self) -> None:
-        paths, snippets, meta = mock_reflib_retrieve("agent loop pattern observe act")
+        paths, _snippets, meta = mock_reflib_retrieve("agent loop pattern observe act")
         assert len(paths) > 0
         assert "reflib/agentic-ai/agent-loop-patterns.md" in paths
         assert meta["system"] == "mock-reflib"
 
     def test_returns_results_for_distributed_systems(self) -> None:
-        paths, snippets, meta = mock_reflib_retrieve(
-            "distributed systems cap theorem consistency"
-        )
+        paths, _snippets, _meta = mock_reflib_retrieve("distributed systems cap theorem consistency")
         assert "reflib/engineering/distributed-systems-fundamentals.md" in paths[:3]
 
     def test_returns_results_for_epistemology(self) -> None:
-        paths, snippets, meta = mock_reflib_retrieve(
-            "epistemology knowledge belief justification"
-        )
+        paths, _snippets, _meta = mock_reflib_retrieve("epistemology knowledge belief justification")
         assert "reflib/philosophy/epistemology-and-knowledge.md" in paths[:3]
 
     def test_returns_results_for_security(self) -> None:
-        paths, snippets, meta = mock_reflib_retrieve(
-            "zero trust architecture security authentication"
-        )
+        paths, _snippets, _meta = mock_reflib_retrieve("zero trust architecture security authentication")
         assert "reflib/security/zero-trust-architecture.md" in paths[:3]
 
     def test_returns_results_for_team_topologies(self) -> None:
-        paths, snippets, meta = mock_reflib_retrieve(
-            "team topologies stream-aligned platform enabling conway"
-        )
+        paths, _snippets, _meta = mock_reflib_retrieve("team topologies stream-aligned platform enabling conway")
         assert "reflib/operating-models/team-topologies.md" in paths[:3]
 
     def test_returns_empty_for_unrelated_query(self) -> None:
-        paths, snippets, meta = mock_reflib_retrieve("xyzzy plugh nothing")
+        paths, _snippets, meta = mock_reflib_retrieve("xyzzy plugh nothing")
         assert len(paths) == 0
         assert meta["n_matched"] == 0
 
@@ -95,7 +86,5 @@ class TestMockReflibRetrieval:
 
     def test_top_result_is_best_match(self) -> None:
         """The document with the most keyword overlap should rank first."""
-        paths, _, _ = mock_reflib_retrieve(
-            "secrets management vault key credential rotation api security"
-        )
+        paths, _, _ = mock_reflib_retrieve("secrets management vault key credential rotation api security")
         assert paths[0] == "reflib/security/secrets-management.md"

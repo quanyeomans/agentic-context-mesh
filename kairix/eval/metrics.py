@@ -3,6 +3,7 @@
 These are extracted from kairix.benchmark.runner and exposed here so that
 both the benchmark runner and the eval reporter can share the same implementations.
 """
+
 from __future__ import annotations
 
 import math
@@ -10,10 +11,7 @@ import math
 
 def _dcg(relevances: list[float]) -> float:
     """Discounted Cumulative Gain for a ranked list of relevance scores."""
-    return sum(
-        rel / math.log2(rank + 2)
-        for rank, rel in enumerate(relevances)
-    )
+    return sum(rel / math.log2(rank + 2) for rank, rel in enumerate(relevances))
 
 
 def _ideal_dcg(relevances: list[float], k: int) -> float:

@@ -96,7 +96,7 @@ def test_relative_temporal_boosts_recent_paths() -> None:
     """'recently' boosts results with a path date within the last 90 days."""
     today = datetime.date.today()
     recent_date = (today - datetime.timedelta(days=10)).isoformat()  # 10 days ago
-    old_date = (today - datetime.timedelta(days=200)).isoformat()    # well outside window
+    old_date = (today - datetime.timedelta(days=200)).isoformat()  # well outside window
 
     results = [
         _result(f"daily/{recent_date}.md", score=0.5),

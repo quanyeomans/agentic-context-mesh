@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-_DOCUMENT_ROOT = _os.environ.get("KAIRIX_DOCUMENT_ROOT") or _os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
+_DOCUMENT_ROOT = _os.environ.get("KAIRIX_DOCUMENT_ROOT") or _os.environ.get(
+    "KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")
+)
 _WORKSPACE_ROOT = _os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
 # override with KAIRIX_BOARDS_DIR env var
 _BOARDS_DIR = _os.environ.get("KAIRIX_BOARDS_DIR", f"{_DOCUMENT_ROOT}/01-Projects/Boards")

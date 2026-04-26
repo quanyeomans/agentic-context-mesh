@@ -6,13 +6,11 @@ import pytest
 
 from kairix.reflib.extract import RawEntity
 from kairix.reflib.resolve import (
-    ResolvedEntity,
     _levenshtein,
     _similarity,
     _to_slug,
     resolve_entities,
 )
-
 
 # ---------------------------------------------------------------------------
 # Slug tests
@@ -68,8 +66,14 @@ class TestLevenshtein:
 # ---------------------------------------------------------------------------
 
 
-def _raw(name: str, etype: str, domain: str = "test", docs: list[str] | None = None,
-         aliases: list[str] | None = None, confidence: float = 0.9) -> RawEntity:
+def _raw(
+    name: str,
+    etype: str,
+    domain: str = "test",
+    docs: list[str] | None = None,
+    aliases: list[str] | None = None,
+    confidence: float = 0.9,
+) -> RawEntity:
     return RawEntity(
         name=name,
         entity_type=etype,

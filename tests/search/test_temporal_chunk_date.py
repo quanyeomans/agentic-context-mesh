@@ -1,4 +1,5 @@
 """Tests for TMP-7B chunk_date proximity boost."""
+
 import datetime
 
 import pytest
@@ -37,8 +38,8 @@ class TestChunkDateBoost:
     @pytest.mark.unit
     def test_recent_doc_boosted_more_than_old(self):
         results = [
-            _make("notes/recent.md", 0.5, "2026-04-15"),   # 2 days ago
-            _make("notes/old.md", 0.5, "2025-01-01"),       # ~16 months ago
+            _make("notes/recent.md", 0.5, "2026-04-15"),  # 2 days ago
+            _make("notes/old.md", 0.5, "2025-01-01"),  # ~16 months ago
         ]
         out = chunk_date_boost(results, _TODAY, config=_ENABLED)
         recent = next(r for r in out if "recent" in r.path)

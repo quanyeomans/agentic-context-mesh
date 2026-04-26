@@ -112,10 +112,11 @@ def test_collections_for_no_config_returns_none() -> None:
 @pytest.mark.unit
 def test_collections_for_with_agent_includes_agent_pattern() -> None:
     """scope='shared+agent' appends agent-specific collection."""
-    import kairix.search.hybrid as _mod
-
     # Simulate having collections config with env var
     import os
+
+    import kairix.search.hybrid as _mod
+
     old = os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "")
     os.environ["KAIRIX_EXTRA_COLLECTIONS"] = "test-collection"
     _mod._COLLECTIONS_CONFIG = None  # reset cache
@@ -640,10 +641,13 @@ def test_enrich_chunk_dates_populates_matching_paths(tmp_path: Path) -> None:
     from kairix.search.hybrid import _enrich_chunk_dates
     from kairix.search.rrf import FusedResult
 
-    db_path = _make_chunk_date_db(tmp_path, [
-        ("h1", "/vault/doc-a.md", "2026-04-20"),
-        ("h2", "/vault/doc-b.md", "2026-04-21"),
-    ])
+    db_path = _make_chunk_date_db(
+        tmp_path,
+        [
+            ("h1", "/vault/doc-a.md", "2026-04-20"),
+            ("h2", "/vault/doc-b.md", "2026-04-21"),
+        ],
+    )
     fused = [
         FusedResult(path="/vault/doc-a.md", collection="c", title="A", snippet="s", rrf_score=0.5, boosted_score=0.5),
         FusedResult(path="/vault/doc-b.md", collection="c", title="B", snippet="s", rrf_score=0.4, boosted_score=0.4),
@@ -661,7 +665,9 @@ def test_enrich_chunk_dates_handles_missing_db(tmp_path: Path) -> None:
     from kairix.search.hybrid import _enrich_chunk_dates
     from kairix.search.rrf import FusedResult
 
-    fused = [FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)]
+    fused = [
+        FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)
+    ]
     _enrich_chunk_dates(fused, tmp_path / "nonexistent.sqlite")
     assert fused[0].chunk_date == ""
 
@@ -670,6 +676,7 @@ def test_enrich_chunk_dates_handles_missing_db(tmp_path: Path) -> None:
 def test_enrich_chunk_dates_empty_list(tmp_path: Path) -> None:
     """_enrich_chunk_dates is a no-op for empty list."""
     from kairix.search.hybrid import _enrich_chunk_dates
+
     db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/doc.md", "2026-04-20")])
     _enrich_chunk_dates([], db_path)
 
@@ -681,6 +688,8 @@ def test_enrich_chunk_dates_no_matching_paths(tmp_path: Path) -> None:
     from kairix.search.rrf import FusedResult
 
     db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/other.md", "2026-04-20")])
-    fused = [FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)]
+    fused = [
+        FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)
+    ]
     _enrich_chunk_dates(fused, db_path)
     assert fused[0].chunk_date == ""

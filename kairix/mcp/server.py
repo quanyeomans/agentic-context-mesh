@@ -112,18 +112,21 @@ def tool_search(
             if entity_name:
                 entity_result = tool_entity(name=entity_name)
                 if not entity_result.get("error"):
-                    results_list.insert(0, {
-                        "path": entity_result.get("vault_path", ""),
-                        "score": 1.0,
-                        "snippet": entity_result.get("summary", ""),
-                        "tokens": len(entity_result.get("summary", "")) // 4,
-                        "source": "entity_graph",
-                        "entity": {
-                            "id": entity_result.get("id", ""),
-                            "name": entity_result.get("name", ""),
-                            "type": entity_result.get("type", ""),
+                    results_list.insert(
+                        0,
+                        {
+                            "path": entity_result.get("vault_path", ""),
+                            "score": 1.0,
+                            "snippet": entity_result.get("summary", ""),
+                            "tokens": len(entity_result.get("summary", "")) // 4,
+                            "source": "entity_graph",
+                            "entity": {
+                                "id": entity_result.get("id", ""),
+                                "name": entity_result.get("name", ""),
+                                "type": entity_result.get("type", ""),
+                            },
                         },
-                    })
+                    )
 
         return {
             "query": result.query,
@@ -136,8 +139,12 @@ def tool_search(
     except Exception as exc:
         logger.warning("mcp.search failed: %s", exc, exc_info=True)
         return {
-            "query": query, "intent": "", "results": [], "total_tokens": 0,
-            "latency_ms": 0.0, "error": "Search failed — check server logs for details.",
+            "query": query,
+            "intent": "",
+            "results": [],
+            "total_tokens": 0,
+            "latency_ms": 0.0,
+            "error": "Search failed — check server logs for details.",
         }
 
 
@@ -215,7 +222,10 @@ def tool_prep(
     except Exception as exc:
         logger.warning("mcp.prep failed: %s", exc, exc_info=True)
         return {
-            "query": query, "tier": tier, "summary": "", "tokens": 0,
+            "query": query,
+            "tier": tier,
+            "summary": "",
+            "tokens": 0,
             "error": "Prep failed — check server logs for details.",
         }
 
@@ -404,7 +414,7 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_server(host: str = "0.0.0.0", port: int = 8080) -> Any:
+def build_server(host: str = "0.0.0.0", port: int = 8080) -> Any:  # noqa: S104
     """
     Construct and return the FastMCP server with all tools registered.
 

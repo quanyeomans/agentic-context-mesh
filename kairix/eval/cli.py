@@ -128,6 +128,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
 
     if args.output:
         from pathlib import Path
+
         Path(args.output).write_text(report, encoding="utf-8")
         print(f"Report written to {args.output}")
     else:
@@ -160,7 +161,9 @@ def _cmd_build_gold(args: argparse.Namespace) -> int:
     print(f"  Candidates pooled: {report.total_candidates_pooled}")
     print(f"  Avg candidates/query: {report.avg_candidates_per_query:.1f}")
     print(f"  Judge calls: {report.total_judge_calls}")
-    print(f"  Grades: 2={report.grade_distribution.get(2, 0)} 1={report.grade_distribution.get(1, 0)} 0={report.grade_distribution.get(0, 0)}")
+    print(
+        f"  Grades: 2={report.grade_distribution.get(2, 0)} 1={report.grade_distribution.get(1, 0)} 0={report.grade_distribution.get(0, 0)}"
+    )
     print(f"  Output: {args.output}")
     return 0
 
@@ -176,11 +179,21 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
     configs = build_default_configs()
     if args.quick:
         # Quick mode: baselines + key hybrid variants + bm25_primary
-        configs = [c for c in configs if c.name in (
-            "bm25-only", "hybrid-k20-minimal", "hybrid-k40-minimal",
-            "hybrid-k60-minimal", "hybrid-k60-defaults",
-            "bm25primary-v5", "bm25primary-v10", "bm25primary-v20",
-        )]
+        configs = [
+            c
+            for c in configs
+            if c.name
+            in (
+                "bm25-only",
+                "hybrid-k20-minimal",
+                "hybrid-k40-minimal",
+                "hybrid-k60-minimal",
+                "hybrid-k60-defaults",
+                "bm25primary-v5",
+                "bm25primary-v10",
+                "bm25primary-v20",
+            )
+        ]
 
     print(f"Running hybrid calibration sweep: {len(configs)} configs x suite {args.suite}")
 
@@ -194,7 +207,7 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
     if report.best:
         b = report.best
         c = b.config
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("BEST CONFIG:")
         print(f"  Name: {c.name}")
         print(f"  Mode: {c.mode} | RRF k={c.rrf_k}")
@@ -207,14 +220,16 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
         print(f"  MRR@10: {b.mrr_at_10:.4f}")
         print(f"  Vec failures: {b.n_vec_failed}/{b.n_cases}")
         print(f"  Avg latency: {b.avg_latency_ms:.0f}ms")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
     # Show top 10
     print("\nTop 10 configs:")
     for i, r in enumerate(report.results[:10], 1):
-        print(f"  {i:2d}. {r.config.name:30s} → weighted={r.weighted_total:.4f} "
-              f"NDCG={r.ndcg_at_10:.4f} Hit@5={r.hit_at_5:.3f} "
-              f"vecfail={r.n_vec_failed}")
+        print(
+            f"  {i:2d}. {r.config.name:30s} → weighted={r.weighted_total:.4f} "
+            f"NDCG={r.ndcg_at_10:.4f} Hit@5={r.hit_at_5:.3f} "
+            f"vecfail={r.n_vec_failed}"
+        )
 
     if args.output:
         print(f"\nFull results: {args.output}")
@@ -237,7 +252,7 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     print(f"\nSweep complete: {report.total_configs} configs, {report.total_duration_s:.0f}s")
     if report.best:
         b = report.best
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("BEST CONFIG:")
         print(f"  Weights: filepath={b.weights[0]} title={b.weights[1]} doc={b.weights[2]}")
         print(f"  Query style: {b.query_style}")
@@ -245,12 +260,14 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         print(f"  NDCG@10: {b.ndcg_at_10:.4f}")
         print(f"  Hit@5: {b.hit_at_5:.4f}")
         print(f"  MRR@10: {b.mrr_at_10:.4f}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
     # Show top 5
     print("\nTop 5 configs:")
     for i, r in enumerate(report.results[:5], 1):
-        print(f"  {i}. w=({r.weights[0]},{r.weights[1]},{r.weights[2]}) style={r.query_style:7s} → {r.weighted_total:.4f}")
+        print(
+            f"  {i}. w=({r.weights[0]},{r.weights[1]},{r.weights[2]}) style={r.query_style:7s} → {r.weighted_total:.4f}"
+        )
 
     if args.output:
         print(f"\nFull results: {args.output}")
@@ -270,8 +287,11 @@ def main(argv: list[str] | None = None) -> None:
     p_gen.add_argument("--output", required=True, help="Output suite YAML path")
     p_gen.add_argument("--count", type=int, default=100, help="Target case count (default: 100)")
     p_gen.add_argument("--categories", help="Comma-separated categories (default: all)")
-    p_gen.add_argument("--db", default=str(__import__("pathlib").Path.home() / ".cache/qmd/index.sqlite"),
-                       help="QMD SQLite path (default: ~/.cache/qmd/index.sqlite)")
+    p_gen.add_argument(
+        "--db",
+        default=str(__import__("pathlib").Path.home() / ".cache/qmd/index.sqlite"),
+        help="QMD SQLite path (default: ~/.cache/qmd/index.sqlite)",
+    )
     p_gen.add_argument("--deployment", default="gpt-4o-mini", help="Azure deployment (default: gpt-4o-mini)")
     p_gen.add_argument("--no-calibrate", action="store_true", help="Skip calibration anchor check")
     p_gen.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
@@ -281,26 +301,34 @@ def main(argv: list[str] | None = None) -> None:
     p_enr = subparsers.add_parser("enrich", help="Enrich an existing suite with graded gold_titles")
     p_enr.add_argument("--suite", required=True, help="Input suite YAML path")
     p_enr.add_argument("--output", required=True, help="Output suite YAML path")
-    p_enr.add_argument("--db", default=str(__import__("pathlib").Path.home() / ".cache/qmd/index.sqlite"),
-                       help="QMD SQLite path")
+    p_enr.add_argument(
+        "--db", default=str(__import__("pathlib").Path.home() / ".cache/qmd/index.sqlite"), help="QMD SQLite path"
+    )
     p_enr.add_argument("--deployment", default="gpt-4o-mini", help="Azure deployment (default: gpt-4o-mini)")
     p_enr.add_argument("--agent", default="shape", help="Agent for retrieval scoping (default: shape)")
 
     # --- monitor ---
     p_mon = subparsers.add_parser("monitor", help="Run canary suite and check for regression")
     p_mon.add_argument("--suite", required=True, help="Canary suite YAML path")
-    p_mon.add_argument("--log", default=None,
-                       help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)")
-    p_mon.add_argument("--alert-threshold", type=float, default=0.05,
-                       help="Relative NDCG drop that triggers regression (default: 0.05)")
-    p_mon.add_argument("--window-days", type=int, default=7,
-                       help="Rolling window for baseline average in days (default: 7)")
+    p_mon.add_argument(
+        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)"
+    )
+    p_mon.add_argument(
+        "--alert-threshold",
+        type=float,
+        default=0.05,
+        help="Relative NDCG drop that triggers regression (default: 0.05)",
+    )
+    p_mon.add_argument(
+        "--window-days", type=int, default=7, help="Rolling window for baseline average in days (default: 7)"
+    )
     p_mon.add_argument("--agent", default="shape", help="Agent for retrieval scoping (default: shape)")
 
     # --- report ---
     p_rep = subparsers.add_parser("report", help="Generate markdown report from monitor log")
-    p_rep.add_argument("--log", default=None,
-                       help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)")
+    p_rep.add_argument(
+        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)"
+    )
     p_rep.add_argument("--days", type=int, default=30, help="Days of history to include (default: 30)")
     p_rep.add_argument("--output", default=None, help="Markdown output path (stdout if omitted)")
 
@@ -308,8 +336,11 @@ def main(argv: list[str] | None = None) -> None:
     p_gold = subparsers.add_parser("build-gold", help="Build independent gold suite via TREC pooling + LLM judge")
     p_gold.add_argument("--suite", required=True, help="Input suite YAML (queries + categories)")
     p_gold.add_argument("--output", required=True, help="Output enriched suite YAML")
-    p_gold.add_argument("--systems", default="bm25-equal,bm25-qmd,bm25-title,vector",
-                        help="Retrieval systems to pool (default: bm25-equal,bm25-qmd,bm25-title,vector)")
+    p_gold.add_argument(
+        "--systems",
+        default="bm25-equal,bm25-qmd,bm25-title,vector",
+        help="Retrieval systems to pool (default: bm25-equal,bm25-qmd,bm25-title,vector)",
+    )
     p_gold.add_argument("--judge-runs", type=int, default=2, help="Judge runs per query (default: 2)")
     p_gold.add_argument("--no-calibrate", action="store_true", help="Skip judge calibration")
     p_gold.add_argument("--limit", type=int, default=10, help="Top-k per system (default: 10)")
@@ -320,12 +351,12 @@ def main(argv: list[str] | None = None) -> None:
     p_sweep.add_argument("--output", default=None, help="CSV output path (stdout summary if omitted)")
 
     # --- hybrid-sweep ---
-    p_hsweep = subparsers.add_parser("hybrid-sweep",
-                                      help="Grid search over hybrid pipeline: RRF k, boosts, retrieval modes")
+    p_hsweep = subparsers.add_parser(
+        "hybrid-sweep", help="Grid search over hybrid pipeline: RRF k, boosts, retrieval modes"
+    )
     p_hsweep.add_argument("--suite", required=True, help="Independent gold suite YAML")
     p_hsweep.add_argument("--output", default=None, help="CSV output path")
-    p_hsweep.add_argument("--quick", action="store_true",
-                          help="Quick mode: run only baseline + key RRF k variants")
+    p_hsweep.add_argument("--quick", action="store_true", help="Quick mode: run only baseline + key RRF k variants")
 
     args = parser.parse_args(argv)
 
@@ -333,6 +364,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.subcommand in ("monitor", "report") and args.log is None:
         import os
         from pathlib import Path
+
         args.log = os.environ.get("KAIRIX_MONITOR_LOG", str(Path.home() / ".cache/kairix/monitor.jsonl"))
 
     dispatch = {

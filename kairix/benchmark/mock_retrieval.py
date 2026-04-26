@@ -17,6 +17,7 @@ The fixture corpus is defined below. It is small (~20 documents) and stable.
 Do not change fixture paths once the baseline is committed — path changes will
 shift the baseline score and require a new baseline run.
 """
+
 from __future__ import annotations
 
 import re
@@ -140,7 +141,9 @@ FIXTURE_DOCUMENTS: list[dict] = [
     {
         "path": "concept/vector-embeddings.md",
         "title": "Vector Embeddings",
-        "snippet": "Vector embeddings encode text as dense float32 arrays. kairix uses 1536-dim Azure OpenAI embeddings.",
+        "snippet": (
+            "Vector embeddings encode text as dense float32 arrays. kairix uses 1536-dim Azure OpenAI embeddings."
+        ),
         "keywords": {"vector", "embeddings", "dense", "float", "azure", "dimensions", "encode"},
     },
     {

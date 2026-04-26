@@ -1,4 +1,5 @@
 """kairix entities CLI — entity management commands."""
+
 from __future__ import annotations
 
 import argparse
@@ -13,6 +14,7 @@ def cmd_suggest(args: argparse.Namespace) -> int:
     text = args.text
     if args.file:
         from pathlib import Path
+
         try:
             text = Path(args.file).read_text(encoding="utf-8")
         except OSError as exc:
@@ -85,8 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_suggest.add_argument("text", nargs="?", default="", help="Text to analyse (or use --file)")
     p_suggest.add_argument("--file", "-f", default=None, help="Read text from file")
     p_suggest.add_argument(
-        "--format", choices=["table", "jsonl"], default="table",
-        help="Output format (default: table)"
+        "--format", choices=["table", "jsonl"], default="table", help="Output format (default: table)"
     )
     p_suggest.set_defaults(func=cmd_suggest)
 

@@ -59,12 +59,16 @@ def main(args: list[str] | None = None) -> None:
         print(f"Briefing written to: {out_path}", file=sys.stderr)
 
         if parsed.print_output:
-            print(content)  # lgtm[py/clear-text-logging-sensitive-data] — intentional: user requested --print-output flag; briefing is user's own document
+            print(
+                content
+            )  # lgtm[py/clear-text-logging-sensitive-data] — intentional: user requested --print-output flag; briefing is user's own document
         else:
             # Print first 30 lines to stdout
             lines = content.splitlines()
             preview = "\n".join(lines[:30])
-            print(preview)  # lgtm[py/clear-text-logging-sensitive-data] — intentional: CLI preview output for user review
+            print(
+                preview
+            )  # lgtm[py/clear-text-logging-sensitive-data] — intentional: CLI preview output for user review
             if len(lines) > 30:
                 print(f"\n... ({len(lines) - 30} more lines — see {out_path})")
 

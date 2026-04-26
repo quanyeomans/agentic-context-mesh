@@ -5,10 +5,11 @@ Tests CLI output format and argument parsing.
 """
 
 from __future__ import annotations
-import pytest
 
 import json
 from unittest.mock import patch
+
+import pytest
 
 
 def run_classify_cli(args: list[str]) -> tuple[str, str, int]:

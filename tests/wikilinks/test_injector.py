@@ -8,9 +8,10 @@ Covers:
 """
 
 from __future__ import annotations
-import pytest
 
 from pathlib import Path
+
+import pytest
 
 from kairix.wikilinks.injector import inject_wikilinks, should_inject
 from kairix.wikilinks.resolver import WikiEntity

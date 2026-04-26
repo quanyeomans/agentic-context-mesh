@@ -21,6 +21,7 @@ def _make_fused(path: str, rrf_score: float = 0.1) -> FusedResult:
 
 # --- RetrievalConfig factory methods ---
 
+
 @pytest.mark.unit
 class TestRetrievalConfigFactories:
     @pytest.mark.unit
@@ -88,6 +89,7 @@ class TestRetrievalConfigFactories:
 
 # --- EntityBoostConfig integration ---
 
+
 @pytest.mark.unit
 class TestEntityBoostConfig:
     @pytest.mark.unit
@@ -96,6 +98,7 @@ class TestEntityBoostConfig:
 
         class _FakeNeo4j:
             available = True
+
             def cypher(self, q):
                 return [{"vault_path": "entity/builder.md", "in_degree": 10}]
 
@@ -109,6 +112,7 @@ class TestEntityBoostConfig:
 
         class _FakeNeo4j:
             available = True
+
             def cypher(self, q):
                 return [{"vault_path": "entity/builder.md", "in_degree": 10}]
 
@@ -123,6 +127,7 @@ class TestEntityBoostConfig:
 
         class _FakeNeo4j:
             available = True
+
             def cypher(self, q):
                 return [{"vault_path": "entity/builder.md", "in_degree": 10}]
 
@@ -132,6 +137,7 @@ class TestEntityBoostConfig:
 
 
 # --- ProceduralBoostConfig integration ---
+
 
 @pytest.mark.unit
 class TestProceduralBoostConfig:
@@ -172,6 +178,7 @@ class TestProceduralBoostConfig:
 
 # --- TemporalBoostConfig integration (date-path) ---
 
+
 @pytest.mark.unit
 class TestTemporalDatePathBoost:
     @pytest.mark.unit
@@ -192,6 +199,7 @@ class TestTemporalDatePathBoost:
 
 
 # --- Backward compatibility ---
+
 
 @pytest.mark.unit
 class TestBackwardCompatibility:

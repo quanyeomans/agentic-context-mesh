@@ -84,12 +84,12 @@ def strip_gutenberg_boilerplate(text: str) -> str:
     # Remove header (everything up to and including the START marker)
     start_match = _GUTENBERG_START_RE.search(text)
     if start_match:
-        text = text[start_match.end():]
+        text = text[start_match.end() :]
 
     # Remove footer (everything from the END marker onwards)
     end_match = _GUTENBERG_END_RE.search(text)
     if end_match:
-        text = text[:end_match.start()]
+        text = text[: end_match.start()]
 
     return text.strip()
 

@@ -177,7 +177,7 @@ def _extract_aliases(entity_name: str, link: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _neo4j_get_client() -> "Neo4jClient":
+def _neo4j_get_client() -> Neo4jClient:
     """Thin wrapper around graph.get_client() — isolated here for test monkeypatching."""
     from kairix.graph.client import get_client
 

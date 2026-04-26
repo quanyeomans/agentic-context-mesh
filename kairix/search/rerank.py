@@ -40,7 +40,7 @@ _cross_encoder = None  # lazy singleton
 
 def _get_cross_encoder(model: str):
     """Load and cache the cross-encoder model. Returns None on any import/load failure."""
-    global _cross_encoder  # noqa: PLW0603
+    global _cross_encoder
     if _cross_encoder is not None:
         return _cross_encoder
     try:
@@ -101,7 +101,7 @@ def rerank(
         pairs = [(query, r.snippet[:500] if r.snippet else r.title) for r in candidates]
         scores: list[float] = encoder.predict(pairs).tolist()
 
-        for r, score in zip(candidates, scores):
+        for r, score in zip(candidates, scores, strict=False):
             r.rerank_score = float(score)
             r.boosted_score = float(score)  # overwrite so apply_budget respects new order
 

@@ -187,9 +187,11 @@ def test_scan_excludes_patterns(tmp_path: __import__("pathlib").Path) -> None:
     """)
 
     scanner = VaultScanner(db, vault)
-    report = scanner.scan([
-        CollectionConfig(name="test", path="02-Areas", exclude=["templates"]),
-    ])
+    report = scanner.scan(
+        [
+            CollectionConfig(name="test", path="02-Areas", exclude=["templates"]),
+        ]
+    )
     assert report.new == 1
 
 

@@ -165,7 +165,12 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_guide(args: argparse.Namespace) -> int:
     """Install the agent usage guide into the document store's shared knowledge base."""
-    doc_root = args.vault_root or os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT") or os.environ.get("VAULT_ROOT", "")
+    doc_root = (
+        args.vault_root
+        or os.environ.get("KAIRIX_DOCUMENT_ROOT")
+        or os.environ.get("KAIRIX_VAULT_ROOT")
+        or os.environ.get("VAULT_ROOT", "")
+    )
     if not doc_root:
         print("Error: --vault-root is required (or set KAIRIX_DOCUMENT_ROOT)", file=sys.stderr)
         return 1
@@ -246,7 +251,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if args.json:
         cmd += ["--json"]
 
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd)  # noqa: S603 — cmd built from trusted CLI args above
     return result.returncode
 
 

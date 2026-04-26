@@ -1,7 +1,6 @@
 """Tests for kairix.paths — centralised path resolution."""
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 

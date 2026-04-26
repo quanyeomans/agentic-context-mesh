@@ -12,10 +12,11 @@ Verifies:
 """
 
 from __future__ import annotations
-import pytest
 
 import sqlite3
 from datetime import date
+
+import pytest
 
 from kairix.embed.schema import get_date_filtered_paths
 

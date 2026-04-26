@@ -90,8 +90,8 @@ def _build_node(label: str, data: dict) -> Any:
     # Validate label
     try:
         NodeLabel(label)
-    except ValueError:
-        raise ValueError(f"Unknown node label: {label!r}")
+    except ValueError as exc:
+        raise ValueError(f"Unknown node label: {label!r}") from exc
 
     # Filter data to only keys accepted by the dataclass
     if label in _LABEL_DISPATCH:
@@ -117,8 +117,8 @@ def _build_edge(data: dict) -> GraphEdge:
     kind_str = data.get("kind", data.get("type", ""))
     try:
         kind = EdgeKind(kind_str)
-    except ValueError:
-        raise ValueError(f"Unknown edge kind: {kind_str!r}")
+    except ValueError as exc:
+        raise ValueError(f"Unknown edge kind: {kind_str!r}") from exc
 
     return GraphEdge(
         from_id=data["from_id"],
@@ -203,7 +203,7 @@ def load_entity_stubs(
             report.errors.append(f"Failed to read {edges_path}: {e}")
             raw_edges = []
 
-        for i, entry in enumerate(raw_edges):
+        for _i, entry in enumerate(raw_edges):
             edge_desc = f"{entry.get('from_id', '?')}→{entry.get('to_id', '?')}"
             try:
                 edge = _build_edge(entry)
