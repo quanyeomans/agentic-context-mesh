@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create runtime directories
 RUN mkdir -p /data/vault /data/kairix /opt/kairix/bin /opt/kairix/cron
 
-# Install kairix with all production extras
-# Pin to a specific version in production: kairix==2026.4.24
-RUN pip install --no-cache-dir "kairix[neo4j,agents]"
+# Install kairix from local source with all production extras
+COPY pyproject.toml setup.cfg* setup.py* README.md /opt/kairix/src/
+COPY kairix/ /opt/kairix/src/kairix/
+RUN pip install --no-cache-dir "/opt/kairix/src[neo4j,agents]"
 
 # Copy entrypoint and default config
 COPY docker/entrypoint.sh /entrypoint.sh

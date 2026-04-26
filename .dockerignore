@@ -11,7 +11,9 @@ build
 *.egg-info
 tests/
 docs/
-docker/
+docker/vault-agent/
+reference-library/
+vault
 .env
 .env.*
 !.env.example

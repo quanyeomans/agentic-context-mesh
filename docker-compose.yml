@@ -22,7 +22,8 @@ services:
     volumes:
       - ./vault:/data/vault:ro
       - kairix-data:/data/kairix
-      - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
+      # Optional: mount a custom config file (created by kairix setup)
+      # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
     env_file:
       - .env
     environment:
@@ -46,7 +47,8 @@ services:
     volumes:
       - ./vault:/data/vault:ro
       - kairix-data:/data/kairix
-      - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
+      # Optional: mount a custom config file
+      # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
     env_file:
       - .env
     environment:
