@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from kairix.eval.judge import (
     JudgeCalibrationError,
@@ -351,13 +351,13 @@ def build_case(
         return None
 
     # Build gold_titles from grades
-    gold_titles = []
+    gold_titles: list[dict[str, Any]] = []
     for stem, grade in judge_result.grades.items():
         if grade >= 1:
             gold_titles.append({"title": stem, "relevance": grade})
 
     # Sort by relevance desc for readability
-    gold_titles.sort(key=lambda x: -x["relevance"])
+    gold_titles.sort(key=lambda x: -int(x["relevance"]))
 
     return {
         "id": case_id,
@@ -671,12 +671,12 @@ def enrich_suite(
             continue
 
         # Build gold_titles
-        gold_titles = [
+        gold_titles: list[dict[str, Any]] = [
             {"title": stem, "relevance": grade}
             for stem, grade in result.grades.items()
             if grade >= 1
         ]
-        gold_titles.sort(key=lambda x: -x["relevance"])
+        gold_titles.sort(key=lambda x: -int(x["relevance"]))
 
         # Update case: add gold_titles, update score_method, preserve other fields
         updated = dict(case)

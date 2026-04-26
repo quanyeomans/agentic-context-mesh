@@ -23,7 +23,7 @@ from kairix.research.state import DEFAULT_MAX_TURNS, ResearcherState
 logger = logging.getLogger(__name__)
 
 
-def build_researcher_graph():
+def build_researcher_graph() -> Any:
     """Build the LangGraph state machine for iterative research.
 
     Returns a compiled graph ready to invoke with an initial state.

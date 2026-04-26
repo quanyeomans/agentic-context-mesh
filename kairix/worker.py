@@ -32,7 +32,7 @@ def _run_embed() -> None:
         from kairix.embed.cli import main as embed_main
 
         logger.info("worker: starting incremental embed")
-        embed_main([])
+        embed_main()
         logger.info("worker: embed complete")
     except Exception as exc:
         logger.warning("worker: embed failed — %s", exc)
@@ -56,7 +56,7 @@ def _run_health_check() -> None:
         from kairix.onboard.check import run_all_checks
 
         results = run_all_checks()
-        passed = sum(1 for r in results if r.get("ok"))
+        passed = sum(1 for r in results if r.ok)
         total = len(results)
         logger.info("worker: health check %d/%d passed", passed, total)
     except Exception as exc:
@@ -80,7 +80,7 @@ def main() -> None:
     # Graceful shutdown
     running = True
 
-    def _shutdown(signum, frame):
+    def _shutdown(signum: int, frame: object) -> None:
         nonlocal running
         logger.info("worker: shutdown signal received")
         running = False

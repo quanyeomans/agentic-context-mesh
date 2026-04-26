@@ -32,14 +32,15 @@ class PerformanceReporter:
         self._path = Path(results_path)
         self._results = self._load(self._path)
         if gates:
-            self.GATES = {**self.GATES, **gates}
+            type(self).GATES = {**type(self).GATES, **gates}
 
     @staticmethod
     def _load(path: Path) -> dict[str, Any]:
         if not path.exists():
             return {}
         text = path.read_text(encoding="utf-8")
-        return json.loads(text)
+        result: dict[str, Any] = json.loads(text)
+        return result
 
     def _category_scores(self, results: dict) -> dict[str, float]:
         scores: dict[str, float] = {}

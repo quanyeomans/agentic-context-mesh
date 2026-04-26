@@ -13,6 +13,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from kairix.graph.client import Neo4jClient
 
 DEFAULT_BOOTSTRAP_PATH = "<document-root>/agent-knowledge/shared/wikilink-entity-index.md"
 
@@ -173,7 +177,7 @@ def _extract_aliases(entity_name: str, link: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _neo4j_get_client() -> object:
+def _neo4j_get_client() -> "Neo4jClient":
     """Thin wrapper around graph.get_client() — isolated here for test monkeypatching."""
     from kairix.graph.client import get_client
 

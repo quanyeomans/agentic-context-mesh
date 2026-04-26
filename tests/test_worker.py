@@ -39,7 +39,7 @@ def test_run_embed_calls_embed_main() -> None:
 
     with patch("kairix.embed.cli.main") as mock:
         _run_embed()
-    mock.assert_called_once_with([])
+    mock.assert_called_once_with()
 
 
 @pytest.mark.unit

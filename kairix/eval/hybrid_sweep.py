@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from kairix.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
 
@@ -467,13 +467,13 @@ def _retrieve_bm25_primary(
     from kairix.search.vector import vector_search_bytes
 
     bm25_results = []
-    vec_results = []
+    vec_results: list[Any] = []
     vec_failed = False
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         bm25_fut = executor.submit(bm25_search, query, collections, config.bm25_limit)
 
-        def _vec_search():
+        def _vec_search() -> list[Any]:
             try:
                 query_bytes = _get_embedding_cached(query)
                 if not query_bytes:

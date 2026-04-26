@@ -10,7 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 
 def _prompt(question: str, default: str = "") -> str:
@@ -345,7 +345,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
             try:
                 from kairix.embed.cli import main as embed_main
 
-                embed_main([])
+                embed_main()
                 print("  \u2713 Index built\n")
             except Exception as exc:
                 print(f"  Indexing failed: {exc}")
@@ -362,7 +362,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         from kairix.onboard.check import run_all_checks
 
         results = run_all_checks()
-        passed = sum(1 for r in results if r.get("ok"))
+        passed = sum(1 for r in results if r.ok)
         total = len(results)
         print(f"  \u2713 {passed}/{total} checks passed\n")
     except Exception:

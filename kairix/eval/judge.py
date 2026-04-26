@@ -272,7 +272,8 @@ def _call_llm(
     )
     with urllib.request.urlopen(req, timeout=JUDGE_TIMEOUT_S) as resp:  # noqa: S310  # nosec B310
         body = json.loads(resp.read())
-    return body["choices"][0]["message"]["content"].strip()
+    content: str = body["choices"][0]["message"]["content"].strip()
+    return content
 
 
 # ---------------------------------------------------------------------------

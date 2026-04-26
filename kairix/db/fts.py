@@ -38,7 +38,8 @@ def rebuild_fts(db: sqlite3.Connection) -> int:
         WHERE d.active = 1
     """)
 
-    count = db.execute("SELECT COUNT(*) FROM documents_fts").fetchone()[0]
+    row = db.execute("SELECT COUNT(*) FROM documents_fts").fetchone()
+    count: int = int(row[0]) if row else 0
     db.commit()
     logger.info("db.fts: rebuilt FTS5 index — %d documents indexed", count)
     return count

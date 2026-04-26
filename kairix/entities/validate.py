@@ -44,7 +44,7 @@ def search_wikidata(name: str, language: str = "en") -> list[WikidataMatch]:
         List of WikidataMatch (up to 5), ordered by Wikidata relevance.
         Returns [] on any network error or API failure. Never raises.
     """
-    params = {
+    params: dict[str, str | int] = {
         "action": "wbsearchentities",
         "search": name,
         "language": language,

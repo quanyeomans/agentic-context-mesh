@@ -84,9 +84,10 @@ def _find_sqlite_vec() -> str | None:
 
     # 2. PyPI package
     try:
-        import sqlite_vec  # type: ignore[import-untyped]
+        import sqlite_vec
 
-        return sqlite_vec.loadable_path()
+        result: str = sqlite_vec.loadable_path()
+        return result
     except (ImportError, AttributeError):
         pass
 

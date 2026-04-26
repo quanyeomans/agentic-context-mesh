@@ -177,7 +177,7 @@ def normalise(config: NormaliseConfig) -> NormaliseReport:
             # Compute relative output path
             rel = file_path.relative_to(source_path)
             # Normalise each path component to kebab-case
-            parts = [to_kebab_case(p) if p.suffix else p.name.lower()
+            parts = [to_kebab_case(str(p)) if p.suffix else p.name.lower()
                      for p in [Path(seg) for seg in rel.parts]]
             # Ensure .md extension on the final file
             if parts and not parts[-1].endswith(".md"):
