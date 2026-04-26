@@ -5,9 +5,9 @@ Derives entity nodes and relationship edges from the natural Obsidian document
 store structure, then upserts them into Neo4j Community Edition via Neo4jClient.
 
 Document store structure expected:
-  {vault_root}/02-Areas/00-Clients/{Org}/          → OrganisationNode per directory
-  {vault_root}/**/Network/People-Notes/             → PersonNode per .md file
-  {vault_root}/05-Knowledge/01-Domain-Outcomes/     → OutcomeNode per .md file (optional)
+  {document_root}/02-Areas/00-Clients/{Org}/          → OrganisationNode per directory
+  {document_root}/**/Network/People-Notes/             → PersonNode per .md file
+  {document_root}/05-Knowledge/01-Domain-Outcomes/     → OutcomeNode per .md file (optional)
   Wikilinks ([[Name]]) across all .md files         → GraphEdge (MENTIONS)
   Frontmatter: org, role, interests, tier, etc.     → node properties
 
@@ -43,7 +43,7 @@ _PEOPLE_DIRS = {"People-Notes", "people-notes"}
 class CrawlReport:
     """Summary of a document store crawl run."""
 
-    vault_root: str
+    document_root: str
     dry_run: bool
     organisations_found: int = 0
     persons_found: int = 0
@@ -61,7 +61,7 @@ class CrawlReport:
 
 
 def crawl(
-    vault_root: str | Path,
+    document_root: str | Path,
     neo4j_client: Any,
     dry_run: bool = False,
 ) -> CrawlReport:
@@ -69,7 +69,7 @@ def crawl(
     Crawl the document store and upsert entity nodes + edges into Neo4j.
 
     Args:
-        vault_root: Absolute path to the Obsidian document store root.
+        document_root: Absolute path to the Obsidian document store root.
         neo4j_client: An open Neo4jClient instance. Pass a mock for testing.
         dry_run: When True, discover and log entities without writing to Neo4j.
 
@@ -78,11 +78,11 @@ def crawl(
     """
     from kairix.graph.models import EdgeKind, GraphEdge, OrganisationNode, OutcomeNode, PersonNode
 
-    root = Path(vault_root)
-    report = CrawlReport(vault_root=str(root), dry_run=dry_run)
+    root = Path(document_root)
+    report = CrawlReport(document_root=str(root), dry_run=dry_run)
 
     if not root.exists():
-        report.errors.append(f"vault_root does not exist: {root}")
+        report.errors.append(f"document_root does not exist: {root}")
         return report
 
     # ── 1. Organisation nodes ─────────────────────────────────────────────────
@@ -262,10 +262,10 @@ def _parse_frontmatter(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _find_people_dirs(vault_root: Path) -> list[Path]:
+def _find_people_dirs(document_root: Path) -> list[Path]:
     """Find all People-Notes directories under the vault root."""
     found: list[Path] = []
-    for candidate in vault_root.rglob("*"):
+    for candidate in document_root.rglob("*"):
         if candidate.is_dir() and candidate.name in _PEOPLE_DIRS:
             found.append(candidate)
     return found

@@ -11,9 +11,9 @@ import pytest
 
 from kairix.onboard.check import (
     CheckResult,
+    check_document_root_configured,
     check_neo4j_reachable,
     check_secrets_loaded,
-    check_vault_root_configured,
     check_wrapper_installed,
     run_all_checks,
 )
@@ -144,33 +144,33 @@ def test_secrets_loaded_ok_from_file(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 # ---------------------------------------------------------------------------
-# check_vault_root_configured (document root configuration check)
+# check_document_root_configured (document root configuration check)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_vault_root_configured_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_document_root_configured_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     md_file = tmp_path / "note.md"
     md_file.write_text("# test")
-    monkeypatch.setenv("KAIRIX_VAULT_ROOT", str(tmp_path))
-    result = check_vault_root_configured()
+    monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", str(tmp_path))
+    result = check_document_root_configured()
     assert result.ok
     assert str(tmp_path) in result.detail
 
 
 @pytest.mark.unit
-def test_vault_root_configured_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("KAIRIX_VAULT_ROOT", "/nonexistent/path/vault")
-    result = check_vault_root_configured()
+def test_document_root_configured_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", "/nonexistent/path/vault")
+    result = check_document_root_configured()
     assert not result.ok
     assert result.fix is not None
 
 
 @pytest.mark.unit
-def test_vault_root_configured_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("KAIRIX_VAULT_ROOT", raising=False)
+def test_document_root_configured_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("KAIRIX_DOCUMENT_ROOT", raising=False)
     monkeypatch.delenv("VAULT_ROOT", raising=False)
-    result = check_vault_root_configured()
+    result = check_document_root_configured()
     assert not result.ok
     assert result.fix is not None
 

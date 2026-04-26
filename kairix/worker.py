@@ -44,7 +44,7 @@ def _run_entity_seed() -> None:
         from kairix.store.cli import main as store_main
 
         logger.info("worker: starting entity seed")
-        store_main(["crawl", "--vault-root", os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))])
+        store_main(["crawl", "--document-root", os.environ.get("KAIRIX_DOCUMENT_ROOT", str(Path.home() / "Documents"))])
         logger.info("worker: entity seed complete")
     except Exception as exc:
         logger.warning("worker: entity seed failed — %s", exc)

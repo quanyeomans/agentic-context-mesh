@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_DOCUMENT_ROOT = Path(
-    os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
-)
+_DOCUMENT_ROOT = Path(os.environ.get("KAIRIX_DOCUMENT_ROOT", str(Path.home() / "Documents")))
 _WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces")))
 _MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", str(Path.home() / ".kairix" / "workspaces")))
 

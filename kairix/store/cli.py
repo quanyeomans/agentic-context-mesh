@@ -2,8 +2,8 @@
 kairix.store.cli — CLI entry point for document store operations.
 
 Usage:
-    kairix store crawl [--vault-root PATH] [--dry-run] [--verbose]
-    kairix store health [--vault-root PATH] [--json]
+    kairix store crawl [--document-root PATH] [--dry-run] [--verbose]
+    kairix store health [--document-root PATH] [--json]
 """
 
 from __future__ import annotations
@@ -22,13 +22,15 @@ def main(argv: list[str] | None = None) -> None:
 
     # ── crawl ────────────────────────────────────────────────────────────────
     crawl_p = sub.add_parser("crawl", help="Crawl document store structure → upsert entities into Neo4j")
-    crawl_p.add_argument("--vault-root", default=None, help="Vault root directory (default: KAIRIX_VAULT_ROOT env var)")
+    crawl_p.add_argument(
+        "--document-root", default=None, help="Document root directory (default: KAIRIX_DOCUMENT_ROOT env var)"
+    )
     crawl_p.add_argument("--dry-run", action="store_true", help="Print what would be written without writing")
     crawl_p.add_argument("--verbose", action="store_true", help="Log each entity discovered")
 
     # ── health ───────────────────────────────────────────────────────────────
     health_p = sub.add_parser("health", help="Document store and entity graph health summary")
-    health_p.add_argument("--vault-root", default=None, help="Vault root directory")
+    health_p.add_argument("--document-root", default=None, help="Document root directory")
     health_p.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
 
     args = parser.parse_args(argv)
@@ -42,15 +44,15 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
 
-def _resolve_vault_root(arg: str | None) -> str:
+def _resolve_document_root(arg: str | None) -> str:
     import os
 
     if arg:
         return arg
-    env = os.environ.get("KAIRIX_VAULT_ROOT")
+    env = os.environ.get("KAIRIX_DOCUMENT_ROOT")
     if env:
         return env
-    print("Error: --vault-root or KAIRIX_VAULT_ROOT required", file=sys.stderr)
+    print("Error: --document-root or KAIRIX_DOCUMENT_ROOT required", file=sys.stderr)
     sys.exit(1)
 
 
@@ -62,7 +64,7 @@ def _cmd_crawl(args: argparse.Namespace) -> None:
     else:
         logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
 
-    vault_root = _resolve_vault_root(args.vault_root)
+    document_root = _resolve_document_root(args.document_root)
 
     from kairix.graph.client import get_client
     from kairix.store.crawler import crawl
@@ -73,10 +75,10 @@ def _cmd_crawl(args: argparse.Namespace) -> None:
         print("Warning: Neo4j unavailable — running in dry-run mode", file=sys.stderr)
         args.dry_run = True
 
-    report = crawl(vault_root=vault_root, neo4j_client=neo4j_client, dry_run=args.dry_run)
+    report = crawl(document_root=document_root, neo4j_client=neo4j_client, dry_run=args.dry_run)
 
     mode = "[DRY RUN] " if report.dry_run else ""
-    print(f"{mode}Vault crawl complete: {vault_root}")
+    print(f"{mode}Document store crawl complete: {document_root}")
     print(f"  Organisations: {report.organisations_found} found", end="")
     if not report.dry_run:
         print(f", {report.organisations_upserted} upserted")
@@ -111,10 +113,10 @@ def _cmd_health(args: argparse.Namespace) -> None:
     from kairix.graph.client import get_client
     from kairix.store.health import run_store_health
 
-    vault_root = args.vault_root  # optional for health check
+    document_root = args.document_root  # optional for health check
 
     neo4j_client = get_client()
-    report = run_store_health(neo4j_client=neo4j_client, vault_root=vault_root)
+    report = run_store_health(neo4j_client=neo4j_client, document_root=document_root)
 
     if args.json_out:
         import dataclasses

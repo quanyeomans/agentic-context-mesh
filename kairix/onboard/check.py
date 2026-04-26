@@ -209,11 +209,7 @@ def check_secrets_loaded() -> CheckResult:
 
 def check_document_root_configured() -> CheckResult:
     """KAIRIX_DOCUMENT_ROOT is set and the directory exists."""
-    doc_root = (
-        os.environ.get("KAIRIX_DOCUMENT_ROOT")
-        or os.environ.get("KAIRIX_VAULT_ROOT")
-        or os.environ.get("VAULT_ROOT", "")
-    )
+    doc_root = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("VAULT_ROOT", "")
     if not doc_root:
         return CheckResult(
             name="document_root_configured",
@@ -241,7 +237,6 @@ def check_document_root_configured() -> CheckResult:
 
 
 # Backwards-compat alias
-check_vault_root_configured = check_document_root_configured
 
 
 def check_vector_search_working() -> CheckResult:
