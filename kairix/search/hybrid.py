@@ -365,6 +365,117 @@ def _run_multi_hop(
 
 
 # ---------------------------------------------------------------------------
+# Extracted pipeline stages (I7 — independently testable)
+# ---------------------------------------------------------------------------
+
+
+def _apply_entity_boost(
+    fused: list[FusedResult],
+    query: str,
+    neo4j_client: object,
+    cfg: RetrievalConfig,
+) -> list[FusedResult]:
+    """Apply entity boosting via Neo4j graph in-degree.
+
+    Boosts entity canonical notes so they rank higher in results.
+    Returns the fused list unchanged on any failure.
+    """
+    try:
+        fused = entity_boost_neo4j(fused, neo4j_client, config=cfg.entity)
+    except Exception as _eb_e:
+        logger.warning("hybrid: entity_boost_neo4j failed — %s", _eb_e)
+    return fused
+
+
+def _build_search_result(
+    fused: list[FusedResult],
+    query: str,
+    intent: QueryIntent,
+    budget: int,
+    t_start: float,
+    *,
+    bm25_count: int,
+    vec_count: int,
+    collections: list[str],
+    vec_failed: bool,
+    fallback_used: bool,
+    temporal_chunks: list | None = None,
+    agent: str | None = None,
+    scope: str = "shared+agent",
+) -> SearchResult:
+    """Apply token budget, compute diagnostics, build SearchResult, and log.
+
+    This is the final assembly stage of the search pipeline — everything
+    after boosting and re-ranking is done here.
+    """
+    budgeted = apply_budget(fused, budget=budget)
+
+    total_tokens = sum(r.token_estimate for r in budgeted)
+    tiers_used = sorted(set(r.tier for r in budgeted))
+
+    t_end = time.monotonic()
+    latency_ms = (t_end - t_start) * 1000.0
+
+    result = SearchResult(
+        query=query,
+        intent=intent,
+        results=budgeted,
+        bm25_count=bm25_count,
+        vec_count=vec_count,
+        fused_count=len(fused),
+        collections=collections,
+        tiers_used=tiers_used,
+        total_tokens=total_tokens,
+        latency_ms=latency_ms,
+        vec_failed=vec_failed,
+        fallback_used=fallback_used,
+    )
+
+    # Attach temporal chunks for TEMPORAL intent (accessible to callers)
+    if temporal_chunks:
+        result.error = ""  # ensure no error state masks chunks
+        result._temporal_chunks = temporal_chunks
+
+    # Log event
+    query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
+    _log_search_event(
+        {
+            "query_hash": query_hash,
+            "intent": intent.value,
+            "agent": agent,
+            "scope": scope,
+            "bm25_count": bm25_count,
+            "vec_count": vec_count,
+            "fused_count": len(fused),
+            "collections": collections,
+            "tiers_used": tiers_used,
+            "total_tokens": total_tokens,
+            "latency_ms": round(latency_ms, 1),
+            "vec_failed": vec_failed,
+            "fallback_used": fallback_used,
+            "ts": int(time.time()),
+        }
+    )
+
+    # Optional raw query log (privacy-sensitive — controlled by KAIRIX_LOG_QUERIES)
+    _log_query_event(
+        {
+            "ts": int(time.time()),
+            "query": query,
+            "query_hash": query_hash,
+            "intent": intent.value,
+            "agent": agent,
+            "fused_count": len(fused),
+            "vec_failed": vec_failed,
+            "latency_ms": round(latency_ms, 1),
+            "top_paths": [r.result.path for r in budgeted[:3]],
+        }
+    )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Search pipeline
 # ---------------------------------------------------------------------------
 
@@ -531,10 +642,7 @@ def search(
         logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
 
     # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
-    try:
-        fused = entity_boost_neo4j(fused, neo4j_client, config=cfg.entity)
-    except Exception as _eb_e:
-        logger.warning("hybrid: entity_boost_neo4j failed — %s", _eb_e)
+    fused = _apply_entity_boost(fused, active_query, neo4j_client, cfg)
 
     # Procedural boosting for PROCEDURAL intent
     if intent == QueryIntent.PROCEDURAL:
@@ -610,74 +718,22 @@ def search(
         except Exception as _rr_e:
             logger.warning("hybrid: rerank failed — %s — using unmodified order", _rr_e)
 
-    # Apply token budget
-    budgeted = apply_budget(fused, budget=budget)
-
-    # Compute diagnostics
-    total_tokens = sum(r.token_estimate for r in budgeted)
-    tiers_used = sorted(set(r.tier for r in budgeted))
-
-    t_end = time.monotonic()
-    latency_ms = (t_end - t_start) * 1000.0
-
-    # Build result
-    result = SearchResult(
-        query=query,
-        intent=intent,
-        results=budgeted,
+    # Build final result: apply budget, compute diagnostics, log events
+    return _build_search_result(
+        fused,
+        query,
+        intent,
+        budget,
+        t_start,
         bm25_count=len(bm25_results),
         vec_count=len(vec_results),
-        fused_count=len(fused),
         collections=collections,
-        tiers_used=tiers_used,
-        total_tokens=total_tokens,
-        latency_ms=latency_ms,
         vec_failed=vec_failed,
         fallback_used=fallback_used,
+        temporal_chunks=temporal_chunks or None,
+        agent=agent,
+        scope=scope,
     )
-
-    # Attach temporal chunks for TEMPORAL intent (accessible to callers)
-    if temporal_chunks:
-        result.error = ""  # ensure no error state masks chunks
-        result._temporal_chunks = temporal_chunks
-
-    # Log event
-    query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
-    _log_search_event(
-        {
-            "query_hash": query_hash,
-            "intent": intent.value,
-            "agent": agent,
-            "scope": scope,
-            "bm25_count": len(bm25_results),
-            "vec_count": len(vec_results),
-            "fused_count": len(fused),
-            "collections": collections,
-            "tiers_used": tiers_used,
-            "total_tokens": total_tokens,
-            "latency_ms": round(latency_ms, 1),
-            "vec_failed": vec_failed,
-            "fallback_used": fallback_used,
-            "ts": int(time.time()),
-        }
-    )
-
-    # Optional raw query log (privacy-sensitive — controlled by KAIRIX_LOG_QUERIES)
-    _log_query_event(
-        {
-            "ts": int(time.time()),
-            "query": query,
-            "query_hash": query_hash,
-            "intent": intent.value,
-            "agent": agent,
-            "fused_count": len(fused),
-            "vec_failed": vec_failed,
-            "latency_ms": round(latency_ms, 1),
-            "top_paths": [r.result.path for r in budgeted[:3]],
-        }
-    )
-
-    return result
 
 
 def _run_vector_search(

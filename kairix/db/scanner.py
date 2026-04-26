@@ -20,11 +20,12 @@ Usage::
 
 import hashlib
 import logging
-import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+from kairix.reflib.frontmatter import extract_title
 
 logger = logging.getLogger(__name__)
 
@@ -65,36 +66,6 @@ class ScanReport:
 def _hash_content(text: str) -> str:
     """SHA-256 hex digest of document content."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _extract_title(text: str, path: Path) -> str:
-    """
-    Extract title from YAML frontmatter or first heading.
-
-    Priority:
-      1. ``title:`` field in YAML frontmatter
-      2. First ``# heading`` in the document
-      3. Filename stem (fallback)
-    """
-    # Try YAML frontmatter
-    if text.startswith("---"):
-        parts = text.split("---", 2)
-        if len(parts) >= 3:
-            frontmatter = parts[1]
-            for line in frontmatter.splitlines():
-                line = line.strip()
-                if line.lower().startswith("title:"):
-                    title = line.split(":", 1)[1].strip().strip("\"'")
-                    if title:
-                        return title
-
-    # Try first heading
-    match = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
-    if match:
-        return match.group(1).strip()
-
-    # Fallback to filename
-    return path.stem.replace("-", " ").replace("_", " ").title()
 
 
 class DocumentScanner:
@@ -179,7 +150,7 @@ class DocumentScanner:
                 continue
 
             content_hash = _hash_content(text)
-            title = _extract_title(text, file_path)
+            title = extract_title(text, file_path)
 
             old_hash = existing.get(rel_to_vault)
 

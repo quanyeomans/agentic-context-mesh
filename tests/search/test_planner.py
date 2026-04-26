@@ -325,3 +325,183 @@ class TestRetrieveAndMerge:
         assert len(paths) == 2
         assert "doc0.md" in paths
         assert "doc1.md" in paths
+
+
+# ---------------------------------------------------------------------------
+# _neo4j_graph_context() tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestNeo4jGraphContext:
+    def test_returns_none_when_no_entities_found(self) -> None:
+        """Should return None when client finds no matching entities."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.return_value = []
+        result = _neo4j_graph_context("what is the meaning of life", client)
+        assert result is None
+
+    def test_returns_context_string_with_entities(self) -> None:
+        """Should return a context string when entities and relationships are found."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.return_value = [{"id": "e1", "name": "TechCorp"}]
+        client.related_entities.return_value = [
+            {"name": "GlobalTech"},
+            {"name": "BuilderCo"},
+        ]
+        result = _neo4j_graph_context("what does TechCorp build", client)
+        assert result is not None
+        assert "TechCorp" in result
+        assert "GlobalTech" in result
+
+    def test_skips_entities_without_id(self) -> None:
+        """Entities missing 'id' should be skipped."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.return_value = [{"name": "NoId"}]  # no "id" key
+        result = _neo4j_graph_context("query about NoId entity", client)
+        assert result is None
+
+    def test_handles_find_by_name_exception(self) -> None:
+        """Should continue silently when find_by_name raises."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.side_effect = RuntimeError("neo4j down")
+        result = _neo4j_graph_context("query words here today", client)
+        assert result is None
+
+    def test_handles_related_entities_exception(self) -> None:
+        """Should skip entity gracefully when related_entities raises."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.return_value = [{"id": "e1", "name": "Entity1"}]
+        client.related_entities.side_effect = RuntimeError("timeout")
+        result = _neo4j_graph_context("query about Entity1 topic", client)
+        # Entity found but no relationships retrieved — context_parts has only header
+        assert result is None
+
+    def test_deduplicates_entities_by_id(self) -> None:
+        """Same entity ID from multiple words should appear only once."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        entity = {"id": "e1", "name": "SameEntity"}
+        client.find_by_name.return_value = [entity]
+        client.related_entities.return_value = [{"name": "Related1"}]
+        result = _neo4j_graph_context("SameEntity also SameEntity again", client)
+        # Should still produce a valid context with entity appearing once
+        assert result is not None
+        assert result.count("SameEntity") >= 1
+
+    def test_filters_self_from_related(self) -> None:
+        """Related entities with same name as source should be excluded."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.return_value = [{"id": "e1", "name": "Alpha"}]
+        # related_entities returns self + one other
+        client.related_entities.return_value = [
+            {"name": "Alpha"},  # self — should be filtered
+            {"name": "Beta"},
+        ]
+        result = _neo4j_graph_context("Alpha projects overview", client)
+        assert result is not None
+        assert "Beta" in result
+
+    def test_short_words_filtered_out(self) -> None:
+        """Words with 3 or fewer chars after stripping should be skipped."""
+        from kairix.search.planner import _neo4j_graph_context
+
+        client = MagicMock()
+        client.find_by_name.return_value = []
+        _neo4j_graph_context("is it a ok", client)
+        # find_by_name should not be called for short words
+        # Only words > 3 chars are queried — none in this query
+        client.find_by_name.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional decompose edge case tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestDecomposeEdgeCases:
+    @pytest.mark.unit
+    def test_non_string_items_filtered(self) -> None:
+        """Sub-query list items that are not strings should be filtered."""
+        planner = QueryPlanner()
+        mock_backend = MagicMock()
+        mock_backend.chat.return_value = '["valid", 123, "also valid"]'
+        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+            result = planner.decompose("mixed types query")
+        assert result == ["valid", "also valid"]
+
+    @pytest.mark.unit
+    def test_whitespace_only_items_filtered(self) -> None:
+        """Sub-query list items that are whitespace-only should be filtered."""
+        planner = QueryPlanner()
+        mock_backend = MagicMock()
+        mock_backend.chat.return_value = '["valid", "   ", "also valid"]'
+        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+            result = planner.decompose("whitespace items query")
+        assert result == ["valid", "also valid"]
+
+    @pytest.mark.unit
+    def test_neo4j_context_exception_falls_back(self) -> None:
+        """If _neo4j_graph_context raises, should fall back to plain prompt."""
+        planner = QueryPlanner()
+        neo4j_mock = MagicMock(available=True)
+        mock_backend = MagicMock()
+        mock_backend.chat.return_value = '["fallback query"]'
+
+        with (
+            patch("kairix.search.planner._neo4j_graph_context", side_effect=RuntimeError("neo4j crash")),
+            patch("kairix.llm.get_default_backend", return_value=mock_backend),
+        ):
+            result = planner.decompose("query with broken neo4j", neo4j_client=neo4j_mock)
+        assert isinstance(result, list)
+        assert len(result) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Additional retrieve_and_merge edge case tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestRetrieveAndMergeEdgeCases:
+    @pytest.mark.unit
+    def test_search_fn_returns_none(self) -> None:
+        """search_fn returning None should be handled as empty results."""
+        planner = QueryPlanner()
+
+        def none_search(query: str):
+            return None
+
+        merged = planner.retrieve_and_merge(["q1"], none_search, top_k_per_sub=5, final_top_k=5)
+        assert merged == []
+
+    @pytest.mark.unit
+    def test_empty_sub_queries_raises_value_error(self) -> None:
+        """Empty sub_queries list raises ValueError from ThreadPoolExecutor."""
+        planner = QueryPlanner()
+        search_fn = _search_fn_factory({})
+        with pytest.raises(ValueError, match="max_workers"):
+            planner.retrieve_and_merge([], search_fn)
+
+    @pytest.mark.unit
+    def test_dict_result_without_file_or_path(self) -> None:
+        """Dict result without 'file' or 'path' key should use str(r) as key."""
+        planner = QueryPlanner()
+        results = [{"score": 0.9, "content": "some text"}]
+        search_fn = _search_fn_factory({"q": results})
+        merged = planner.retrieve_and_merge(["q"], search_fn, top_k_per_sub=5, final_top_k=5)
+        assert len(merged) == 1

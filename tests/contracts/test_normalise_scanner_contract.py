@@ -1,17 +1,15 @@
-"""Contract test: normalised frontmatter is parseable by the scanner's _extract_title().
+"""Contract test: normalised frontmatter is parseable by extract_title().
 
 Verifies that the output of the normalisation pipeline's frontmatter injection
-produces documents whose titles are correctly extracted by the scanner module.
-This guards the integration boundary between reflib/frontmatter.py and
-db/scanner.py.
+produces documents whose titles are correctly extracted by the shared
+extract_title() in reflib/frontmatter.py (used by both reflib and db/scanner).
 """
 
 from pathlib import Path
 
 import pytest
 
-from kairix.db.scanner import _extract_title
-from kairix.reflib.frontmatter import build_frontmatter, inject_frontmatter
+from kairix.reflib.frontmatter import build_frontmatter, extract_title, inject_frontmatter
 from kairix.reflib.sources import SourceDef
 
 pytestmark = pytest.mark.contract
@@ -41,7 +39,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         fm = build_frontmatter(file_path, source, raw_text)
         normalised = inject_frontmatter(raw_text, fm)
 
-        extracted = _extract_title(normalised, file_path)
+        extracted = extract_title(normalised, file_path)
         assert extracted == fm.title, f"Scanner extracted {extracted!r} but normalisation set {fm.title!r}"
 
     def test_frontmatter_with_quoted_title(self, tmp_path: Path) -> None:
@@ -54,7 +52,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         fm = build_frontmatter(file_path, source, raw_text)
         normalised = inject_frontmatter(raw_text, fm)
 
-        extracted = _extract_title(normalised, file_path)
+        extracted = extract_title(normalised, file_path)
         assert extracted, "Scanner should extract a non-empty title"
 
     def test_frontmatter_with_no_heading_uses_filename(self, tmp_path: Path) -> None:
@@ -67,7 +65,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         fm = build_frontmatter(file_path, source, raw_text)
         normalised = inject_frontmatter(raw_text, fm)
 
-        extracted = _extract_title(normalised, file_path)
+        extracted = extract_title(normalised, file_path)
         assert extracted, "Scanner should extract a title even without headings"
 
     def test_existing_frontmatter_preserved(self, tmp_path: Path) -> None:
@@ -78,7 +76,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         file_path = tmp_path / "existing.md"
         file_path.write_text(text_with_fm)
 
-        extracted = _extract_title(text_with_fm, file_path)
+        extracted = extract_title(text_with_fm, file_path)
         assert extracted == "Existing Title", f"Expected 'Existing Title', got {extracted!r}"
 
     def test_fixture_docs_all_have_extractable_titles(self) -> None:
@@ -92,7 +90,7 @@ class TestNormalisedFrontmatterParsedByScanner:
             if md_file.name == "README.md":
                 continue
             text = md_file.read_text(encoding="utf-8", errors="replace")
-            title = _extract_title(text, md_file)
+            title = extract_title(text, md_file)
             if not title or title == md_file.stem.replace("-", " ").replace("_", " ").title():
                 # Filename fallback means no real title was found
                 # This is acceptable but worth noting

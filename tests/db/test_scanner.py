@@ -4,7 +4,8 @@ import sqlite3
 
 import pytest
 
-from kairix.db.scanner import CollectionConfig, ScanReport, VaultScanner, _extract_title, _hash_content
+from kairix.db.scanner import CollectionConfig, ScanReport, VaultScanner, _hash_content
+from kairix.reflib.frontmatter import extract_title as _extract_title
 
 
 @pytest.mark.unit

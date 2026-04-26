@@ -8,11 +8,11 @@ NLP libraries — just string distance.
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 
 from kairix.reflib.extract import RawEntity
+from kairix.utils import slugify
 
 # ---------------------------------------------------------------------------
 # Dataclass
@@ -37,11 +37,12 @@ class ResolvedEntity:
 # Slug generation
 # ---------------------------------------------------------------------------
 
-_NON_ALNUM = re.compile(r"[^a-z0-9]+")
-
 
 def _to_slug(name: str) -> str:
     """Convert a name to a lowercase, hyphenated slug.
+
+    Delegates to ``kairix.utils.slugify`` — kept as a local alias for
+    backwards compatibility (tests and ``kairix.reflib.emit`` import this name).
 
     >>> _to_slug("Marcus Aurelius")
     'marcus-aurelius'
@@ -50,9 +51,7 @@ def _to_slug(name: str) -> str:
     >>> _to_slug("dbt Labs")
     'dbt-labs'
     """
-    s = name.lower().strip()
-    s = _NON_ALNUM.sub("-", s)
-    return s.strip("-")
+    return slugify(name)
 
 
 # ---------------------------------------------------------------------------

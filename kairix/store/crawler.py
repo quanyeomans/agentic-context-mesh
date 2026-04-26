@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from kairix.utils import slugify
+
 if TYPE_CHECKING:
     from kairix.graph.models import OrganisationNode
 
@@ -272,8 +274,12 @@ def _find_people_dirs(document_root: Path) -> list[Path]:
 
 
 def _to_slug(name: str) -> str:
-    """Convert a vault directory/file name to a lowercase hyphenated slug."""
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    """Convert a vault directory/file name to a lowercase hyphenated slug.
+
+    Delegates to ``kairix.utils.slugify`` — kept as a local alias for
+    backwards compatibility (tests import this private name).
+    """
+    return slugify(name)
 
 
 def _to_display_name(name: str) -> str:

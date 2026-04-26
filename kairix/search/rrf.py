@@ -51,6 +51,7 @@ from pathlib import Path
 from kairix.search.bm25 import BM25Result
 from kairix.search.config import EntityBoostConfig, ProceduralBoostConfig, TemporalBoostConfig
 from kairix.search.vector import VecResult
+from kairix.utils import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +89,12 @@ def canonical_path(raw: str) -> str:
 
 
 def _slugify(name: str) -> str:
-    """Convert entity name to QMD path slug (lowercase, hyphens for separators)."""
-    s = name.lower()
-    s = re.sub(r"[^a-z0-9]+", "-", s)
-    return s.strip("-")
+    """Convert entity name to QMD path slug (lowercase, hyphens for separators).
+
+    Delegates to ``kairix.utils.slugify`` — kept as a local alias for
+    backwards compatibility.
+    """
+    return slugify(name)
 
 
 _LABEL_TO_DIR: dict[str, str] = {

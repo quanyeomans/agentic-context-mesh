@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from kairix.reflib.frontmatter import strip_frontmatter
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -71,9 +73,6 @@ _DATE_FIELD_RE = re.compile(
 # Memory log filename pattern: YYYY-MM-DD.md
 _MEMORY_LOG_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md$")
 
-# Frontmatter delimiter
-_FRONTMATTER_RE = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
-
 # Card line: starts with "- [ ]" or "- [x]" (checklist item)
 _CARD_LINE_RE = re.compile(r"^[-*]\s+\[[ xX]\]\s+", re.MULTILINE)
 
@@ -116,11 +115,6 @@ def _extract_date_from_card(text: str) -> tuple[date | None, str | None]:
     return None, None
 
 
-def _strip_frontmatter(content: str) -> str:
-    """Remove YAML frontmatter block if present."""
-    return _FRONTMATTER_RE.sub("", content, count=1)
-
-
 def _make_card_id(source_path: str, column: str, index: int) -> str:
     """Generate a deterministic card ID from path + column + index."""
     stem = Path(source_path).stem
@@ -154,7 +148,7 @@ def chunk_board(path: str) -> list[TemporalChunk]:
         return []
 
     # Strip kanban plugin frontmatter if present
-    content = _strip_frontmatter(content)
+    content = strip_frontmatter(content)
 
     chunks: list[TemporalChunk] = []
 
@@ -276,7 +270,7 @@ def chunk_memory_log(path: str) -> list[TemporalChunk]:
         return []
 
     # Strip frontmatter
-    content = _strip_frontmatter(content)
+    content = strip_frontmatter(content)
 
     chunks: list[TemporalChunk] = []
     lines = content.splitlines()

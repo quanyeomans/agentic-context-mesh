@@ -30,9 +30,7 @@ Failure modes:
 """
 
 import logging
-import os
 import struct
-import subprocess
 from functools import lru_cache
 
 import requests
@@ -47,11 +45,6 @@ logger = logging.getLogger(__name__)
 
 # Azure OpenAI embedding dimensions
 EMBED_DIMS = 1536
-
-# Key Vault name — read from environment. Required when using Key Vault auth.
-# Set KAIRIX_KV_NAME (or the shorter alias KV_NAME used by deploy.sh) in
-# your service env file. KAIRIX_KV_NAME takes precedence if both are set.
-_KEY_VAULT_NAME = os.environ.get("KAIRIX_KV_NAME") or os.environ.get("KV_NAME", "")
 
 # Default deployment
 _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"
@@ -68,20 +61,12 @@ def _get_secrets() -> dict[str, str]:
     Cached for the process lifetime (lru_cache with maxsize=1).
     Returns {} on any failure — callers check for missing keys.
     Never raises.
+
+    Delegates to kairix.secrets.get_secret() for single-source secret
+    resolution (env var -> sidecar file -> Key Vault CLI).
     """
-    # Environment variable overrides (useful for tests and local dev)
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-    deployment = os.environ.get("AZURE_OPENAI_EMBED_DEPLOYMENT", _DEFAULT_EMBED_DEPLOYMENT)
+    from kairix.secrets import get_secret
 
-    if api_key and endpoint:
-        return {
-            "api_key": api_key,
-            "endpoint": endpoint.rstrip("/"),
-            "deployment": deployment,
-        }
-
-    # Fetch from Key Vault
     secrets: dict[str, str] = {}
 
     secret_map = {
@@ -92,33 +77,11 @@ def _get_secrets() -> dict[str, str]:
 
     for key, secret_name in secret_map.items():
         try:
-            result = subprocess.run(
-                [
-                    "az",
-                    "keyvault",
-                    "secret",
-                    "show",
-                    "--vault-name",
-                    _KEY_VAULT_NAME,
-                    "--name",
-                    secret_name,
-                    "--query",
-                    "value",
-                    "-o",
-                    "tsv",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                secrets[key] = result.stdout.strip()
-            else:
-                logger.warning(
-                    "_azure: failed to fetch KV secret %r (exit=%d)", secret_name, result.returncode
-                )  # lgtm[py/clear-text-logging-sensitive-data] — logs secret name, not value
+            value = get_secret(secret_name, required=False)
+            if value:
+                secrets[key] = value
         except Exception:
-            logger.warning("_azure: error fetching KV secret %r", secret_name)
+            logger.warning("_azure: error resolving secret %r", secret_name)
 
     if "deployment" not in secrets:
         secrets["deployment"] = _DEFAULT_EMBED_DEPLOYMENT
@@ -208,32 +171,13 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
         return ""
 
     # Fetch GPT-4o-mini deployment name separately (different KV secret)
-    deployment = os.environ.get("AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT", "")
-    if not deployment:
-        try:
-            result = subprocess.run(
-                [
-                    "az",
-                    "keyvault",
-                    "secret",
-                    "show",
-                    "--vault-name",
-                    _KEY_VAULT_NAME,
-                    "--name",
-                    "azure-openai-gpt4o-mini-deployment",
-                    "--query",
-                    "value",
-                    "-o",
-                    "tsv",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                deployment = result.stdout.strip()
-        except Exception as e:
-            logger.warning("chat_completion: error fetching GPT-4o-mini deployment secret — %s", e)
+    try:
+        from kairix.secrets import get_secret
+
+        deployment = get_secret("azure-openai-gpt4o-mini-deployment", required=False) or ""
+    except Exception as e:
+        logger.warning("chat_completion: error resolving GPT-4o-mini deployment secret — %s", e)
+        deployment = ""
 
     if not deployment:
         # Fall back to a common default

@@ -33,10 +33,8 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import random
 import re
-import subprocess
 import urllib.request
 from dataclasses import dataclass
 
@@ -192,60 +190,21 @@ def fetch_llm_credentials() -> tuple[str, str, str]:
     """
     Fetch Azure OpenAI credentials for the LLM judge.
 
-    Resolution order:
-    1. AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT env vars (direct)
-    2. Key Vault via KAIRIX_KV_NAME (or KV_NAME) env var + az CLI
+    Delegates to ``kairix.secrets.get_secret()`` which resolves via:
+    1. Direct env vars (AZURE_OPENAI_API_KEY etc.)
+    2. Sidecar secrets file (/run/secrets/kairix.env)
+    3. Azure Key Vault CLI fallback (KAIRIX_KV_NAME)
 
     Returns:
-        (api_key, endpoint, deployment) — deployment defaults to "gpt-4o-mini"
+        (api_key, endpoint, deployment) -- deployment defaults to "gpt-4o-mini"
 
-    Never raises — returns empty strings on failure (judge returns all-zero grades).
+    Never raises -- returns empty strings on failure (judge returns all-zero grades).
     """
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-    deployment = JUDGE_DEPLOYMENT
+    from kairix.secrets import get_secret
 
-    if api_key and endpoint:
-        return api_key, endpoint, deployment
-
-    kv_name = os.environ.get("KAIRIX_KV_NAME") or os.environ.get("KV_NAME", "")
-    if not kv_name:
-        logger.warning(
-            "LLM judge: no credentials found. Set AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT "
-            "or KAIRIX_KV_NAME for Key Vault resolution."
-        )
-        return "", "", deployment
-
-    try:
-
-        def _kv_secret(name: str) -> str:
-            return subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
-                [  # noqa: S607
-                    "az",
-                    "keyvault",
-                    "secret",
-                    "show",
-                    "--vault-name",
-                    kv_name,
-                    "--name",
-                    name,
-                    "--query",
-                    "value",
-                    "-o",
-                    "tsv",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            ).stdout.strip()
-
-        api_key = _kv_secret("azure-openai-api-key")
-        endpoint = _kv_secret("azure-openai-endpoint")
-        dep = _kv_secret("azure-openai-gpt4o-mini-deployment")
-        if dep:
-            deployment = dep
-    except Exception as e:
-        logger.warning("LLM judge: failed to fetch credentials from Key Vault %r — %s", kv_name, e)
+    api_key = get_secret("azure-openai-api-key", required=False) or ""
+    endpoint = get_secret("azure-openai-endpoint", required=False) or ""
+    deployment = get_secret("azure-openai-gpt4o-mini-deployment", required=False) or JUDGE_DEPLOYMENT
 
     return api_key, endpoint, deployment
 

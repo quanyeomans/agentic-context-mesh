@@ -72,6 +72,47 @@ def _extract_entity_name(query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Shared service helpers — MCP tools call these, not each other
+# ---------------------------------------------------------------------------
+
+
+def _fetch_entity_card(name: str) -> dict | None:
+    """Fetch entity card directly from Neo4j, bypassing MCP tool layer.
+
+    Returns a dict with id, name, type, summary, vault_path on success,
+    or None if the entity is not found or Neo4j is unavailable.
+    """
+    try:
+        from kairix.graph.client import get_client
+        from kairix.utils import slugify as _slugify
+
+        neo4j = get_client()
+        if not neo4j.available:
+            return None
+
+        slug = _slugify(name)
+        rows = neo4j.cypher(
+            "MATCH (n) WHERE n.id = $id OR toLower(n.name) = toLower($name) "
+            "RETURN labels(n)[0] AS type, n.id AS id, n.name AS name, "
+            "n.summary AS summary, n.vault_path AS vault_path LIMIT 1",
+            {"id": slug, "name": name},
+        )
+        if rows:
+            r = rows[0]
+            return {
+                "id": r.get("id", ""),
+                "name": r.get("name", ""),
+                "type": r.get("type", ""),
+                "summary": r.get("summary") or "",
+                "vault_path": r.get("vault_path") or "",
+            }
+    except (ImportError, RuntimeError, OSError, KeyError) as exc:
+        logger.warning("_fetch_entity_card failed: %s", exc, exc_info=True)
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Tool implementations — pure Python, no mcp dependency
 # ---------------------------------------------------------------------------
 
@@ -110,23 +151,25 @@ def tool_search(
 
         # AFF-3: When the question is about a known person/company, show
         # their knowledge graph summary at the top of results.
+        # Uses _fetch_entity_card (direct Neo4j call) — MCP tools should
+        # not call other MCP tools; they share underlying services.
         if intent_value == "entity":
             entity_name = _extract_entity_name(query)
             if entity_name:
-                entity_result = tool_entity(name=entity_name)
-                if not entity_result.get("error"):
+                card = _fetch_entity_card(entity_name)
+                if card is not None:
                     results_list.insert(
                         0,
                         {
-                            "path": entity_result.get("vault_path", ""),
+                            "path": card.get("vault_path", ""),
                             "score": 1.0,
-                            "snippet": entity_result.get("summary", ""),
-                            "tokens": len(entity_result.get("summary", "")) // 4,
+                            "snippet": card.get("summary", ""),
+                            "tokens": len(card.get("summary", "")) // 4,
                             "source": "entity_graph",
                             "entity": {
-                                "id": entity_result.get("id", ""),
-                                "name": entity_result.get("name", ""),
-                                "type": entity_result.get("type", ""),
+                                "id": card.get("id", ""),
+                                "name": card.get("name", ""),
+                                "type": card.get("type", ""),
                             },
                         },
                     )
@@ -170,33 +213,9 @@ def tool_entity(
     This is a quick, direct lookup from the knowledge graph (Neo4j) —
     use it when you already know the name of what you're looking for.
     """
-    try:
-        # Try Neo4j first
-        from kairix.graph.client import get_client
-
-        neo4j = get_client()
-        if neo4j.available:
-            import re
-
-            slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-            rows = neo4j.cypher(
-                "MATCH (n) WHERE n.id = $id OR toLower(n.name) = toLower($name) "
-                "RETURN labels(n)[0] AS type, n.id AS id, n.name AS name, "
-                "n.summary AS summary, n.vault_path AS vault_path LIMIT 1",
-                {"id": slug, "name": name},
-            )
-            if rows:
-                r = rows[0]
-                return {
-                    "id": r.get("id", ""),
-                    "name": r.get("name", ""),
-                    "type": r.get("type", ""),
-                    "summary": r.get("summary") or "",
-                    "vault_path": r.get("vault_path") or "",
-                    "error": "",
-                }
-    except (ImportError, RuntimeError, OSError, KeyError) as exc:
-        logger.warning("mcp.entity neo4j lookup failed: %s", exc, exc_info=True)
+    card = _fetch_entity_card(name)
+    if card is not None:
+        return {**card, "error": ""}
 
     return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": f"Entity not found: {name}"}
 
@@ -419,7 +438,7 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
 
     except Exception as exc:
         logger.warning("mcp.usage_guide failed: %s", exc)
-        return {"topic": topic, "content": "", "error": str(exc)}
+        return {"topic": topic, "content": "", "error": "Usage guide lookup failed — check server logs for details."}
 
 
 # ---------------------------------------------------------------------------

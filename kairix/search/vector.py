@@ -17,19 +17,13 @@ VecResult fields:
 """
 
 import logging
-import re
 import sqlite3
 import struct
 from typing import TypedDict
 
+from kairix.reflib.frontmatter import strip_frontmatter as _strip_frontmatter
+
 logger = logging.getLogger(__name__)
-
-_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
-
-
-def _strip_frontmatter(text: str) -> str:
-    """Remove YAML frontmatter block from the start of text."""
-    return _FRONTMATTER_RE.sub("", text, count=1).lstrip()
 
 
 # Default number of vector results to return.

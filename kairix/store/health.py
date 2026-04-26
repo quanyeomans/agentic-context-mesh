@@ -69,14 +69,14 @@ class StoreHealthReport:
 
 def run_store_health(
     neo4j_client: Any,
-    vault_root: str | None = None,
+    document_root: str | None = None,
 ) -> StoreHealthReport:
     """
     Run document store + entity graph health check.
 
     Args:
         neo4j_client: Neo4jClient instance. When unavailable, returns minimal report.
-        vault_root: Optional vault root for file-system checks (not yet used in v0).
+        document_root: Optional document root for file-system checks (not yet used in v0).
 
     Returns:
         StoreHealthReport describing entity graph state.

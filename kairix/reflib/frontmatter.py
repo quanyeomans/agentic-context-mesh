@@ -12,8 +12,11 @@ from pathlib import Path
 
 from kairix.reflib.sources import SourceDef
 
-# YAML frontmatter block
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+# YAML frontmatter block — \A anchor ensures match only at string start
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+# Same pattern without capture group, for strip_frontmatter
+_FRONTMATTER_STRIP_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
 
 # First markdown heading
 _FIRST_HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
@@ -57,6 +60,14 @@ def extract_existing_frontmatter(text: str) -> tuple[dict[str, str] | None, str]
                 parsed[key] = value
 
     return parsed, body
+
+
+def strip_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter block from the start of text.
+
+    Uses \\A anchor to match only at string start (not mid-string with DOTALL).
+    """
+    return _FRONTMATTER_STRIP_RE.sub("", text, count=1)
 
 
 def extract_title(text: str, path: Path) -> str:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from typing import Any
 
 from kairix.benchmark.suite import BenchmarkSuite
 from kairix.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
+from kairix.secrets import get_secret
 
 # Re-export so existing `from kairix.benchmark.runner import CATEGORY_WEIGHTS` keeps working
 __all__ = ["CATEGORY_ALIASES", "CATEGORY_WEIGHTS"]
@@ -55,7 +57,12 @@ EXACT_MATCH_TOPK = 5
 FUZZY_MATCH_TOPK = 10
 
 # ---------------------------------------------------------------------------
-# NDCG@10 helpers (ported from run-benchmark-v2.py, VM private repo)
+# NDCG@10 helpers — graded-relevance path-based variants
+#
+# These use the gold_paths list[dict] format ({"path": ..., "relevance": 0/1/2})
+# which supports graded relevance and suffix-based path matching. The simpler
+# binary-relevance functions live in kairix.eval.metrics (ndcg_score, hit_at_k,
+# mean_reciprocal_rank).
 # ---------------------------------------------------------------------------
 
 
@@ -108,7 +115,7 @@ def _ndcg_score(retrieved: list[str], gold_paths: list[dict], k: int = 10) -> fl
 
 
 def _hit_at_k(retrieved: list[str], gold_paths: list[dict], k: int) -> bool:
-    """True if any gold path (any relevance ≥ 1) appears in top-k retrieved."""
+    """True if any gold path (any relevance >= 1) appears in top-k retrieved."""
     gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
     return any(_path_in_set(p, gold_set) for p in retrieved[:k])
 
@@ -472,83 +479,14 @@ def run_benchmark(
     Returns:
         BenchmarkResult with summary, category scores, and per-case results.
     """
-    # Fetch Azure credentials for LLM judge
-    api_key = ""
-    endpoint = ""
-    deployment = "gpt-4o-mini"
-    try:
-        import os
-        import subprocess
-
-        _kv_name = os.environ.get("KAIRIX_KV_NAME") or os.environ.get("KV_NAME", "")
-        if not _kv_name:
-            raise ValueError(
-                "Key Vault name not set — cannot fetch LLM judge credentials. "
-                "Set KAIRIX_KV_NAME (or KV_NAME) to your Azure Key Vault name, "
-                "or set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT directly to skip Key Vault."
-            )
-
-        api_key = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
-            [  # noqa: S607
-                "az",
-                "keyvault",
-                "secret",
-                "show",
-                "--vault-name",
-                _kv_name,
-                "--name",
-                "azure-openai-api-key",
-                "--query",
-                "value",
-                "-o",
-                "tsv",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        ).stdout.strip()
-        endpoint = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
-            [  # noqa: S607
-                "az",
-                "keyvault",
-                "secret",
-                "show",
-                "--vault-name",
-                _kv_name,
-                "--name",
-                "azure-openai-endpoint",
-                "--query",
-                "value",
-                "-o",
-                "tsv",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        ).stdout.strip()
-        dep = subprocess.run(  # noqa: S603 — az keyvault is a trusted CLI binary
-            [  # noqa: S607
-                "az",
-                "keyvault",
-                "secret",
-                "show",
-                "--vault-name",
-                _kv_name,
-                "--name",
-                "azure-openai-gpt4o-mini-deployment",
-                "--query",
-                "value",
-                "-o",
-                "tsv",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        ).stdout.strip()
-        if dep:
-            deployment = dep
-    except Exception:  # noqa: S110
-        pass  # Graceful: LLM judge returns 0.0 if creds unavailable
+    # Fetch Azure credentials for LLM judge via kairix.secrets (env → sidecar → KV)
+    api_key = get_secret("azure-openai-api-key", required=False) or os.environ.get("AZURE_OPENAI_API_KEY", "")
+    endpoint = get_secret("azure-openai-endpoint", required=False) or os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+    deployment = (
+        get_secret("azure-openai-gpt4o-mini-deployment", required=False)
+        or os.environ.get("AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT", "")
+        or "gpt-4o-mini"
+    )
 
     case_results: list[dict[str, Any]] = []
     # Include all valid categories including classification

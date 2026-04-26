@@ -124,131 +124,42 @@ class Neo4jClient:
     # Upsert methods — idempotent MERGE on node id
     # -------------------------------------------------------------------------
 
-    def upsert_organisation(self, node: OrganisationNode) -> bool:
+    def _upsert_node(self, label: str, node_id: str, props: dict) -> bool:
+        """Generic node upsert — MERGE on id, SET properties."""
         if not self._driver:
             return False
         try:
             with self._driver.session() as session:
                 session.run(
-                    """
-                    MERGE (n:Organisation {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
+                    f"MERGE (n:{label} {{id: $id}}) SET n += $props",
+                    id=node_id,
+                    props=props,
                 )
             return True
         except Exception as e:
-            logger.warning("upsert_organisation(%s): %s", node.id, e)
+            logger.warning("upsert_%s(%s): %s", label.lower(), node_id, e)
             return False
+
+    def upsert_organisation(self, node: OrganisationNode) -> bool:
+        return self._upsert_node("Organisation", node.id, node.to_neo4j_props())
 
     def upsert_person(self, node: PersonNode) -> bool:
-        if not self._driver:
-            return False
-        try:
-            with self._driver.session() as session:
-                session.run(
-                    """
-                    MERGE (n:Person {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
-                )
-            return True
-        except Exception as e:
-            logger.warning("upsert_person(%s): %s", node.id, e)
-            return False
+        return self._upsert_node("Person", node.id, node.to_neo4j_props())
 
     def upsert_outcome(self, node: OutcomeNode) -> bool:
-        if not self._driver:
-            return False
-        try:
-            with self._driver.session() as session:
-                session.run(
-                    """
-                    MERGE (n:Outcome {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
-                )
-            return True
-        except Exception as e:
-            logger.warning("upsert_outcome(%s): %s", node.id, e)
-            return False
+        return self._upsert_node("Outcome", node.id, node.to_neo4j_props())
 
     def upsert_concept(self, node: ConceptNode) -> bool:
-        if not self._driver:
-            return False
-        try:
-            with self._driver.session() as session:
-                session.run(
-                    """
-                    MERGE (n:Concept {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
-                )
-            return True
-        except Exception as e:
-            logger.warning("upsert_concept(%s): %s", node.id, e)
-            return False
+        return self._upsert_node("Concept", node.id, node.to_neo4j_props())
 
     def upsert_framework(self, node: FrameworkNode) -> bool:
-        if not self._driver:
-            return False
-        try:
-            with self._driver.session() as session:
-                session.run(
-                    """
-                    MERGE (n:Framework {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
-                )
-            return True
-        except Exception as e:
-            logger.warning("upsert_framework(%s): %s", node.id, e)
-            return False
+        return self._upsert_node("Framework", node.id, node.to_neo4j_props())
 
     def upsert_technology(self, node: TechnologyNode) -> bool:
-        if not self._driver:
-            return False
-        try:
-            with self._driver.session() as session:
-                session.run(
-                    """
-                    MERGE (n:Technology {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
-                )
-            return True
-        except Exception as e:
-            logger.warning("upsert_technology(%s): %s", node.id, e)
-            return False
+        return self._upsert_node("Technology", node.id, node.to_neo4j_props())
 
     def upsert_publication(self, node: PublicationNode) -> bool:
-        if not self._driver:
-            return False
-        try:
-            with self._driver.session() as session:
-                session.run(
-                    """
-                    MERGE (n:Publication {id: $id})
-                    SET n += $props
-                    """,
-                    id=node.id,
-                    props=node.to_neo4j_props(),
-                )
-            return True
-        except Exception as e:
-            logger.warning("upsert_publication(%s): %s", node.id, e)
-            return False
+        return self._upsert_node("Publication", node.id, node.to_neo4j_props())
 
     def upsert_edge(self, edge: GraphEdge) -> bool:
         if not self._driver:
