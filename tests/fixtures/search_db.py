@@ -66,8 +66,7 @@ _TEST_DOCUMENTS = [
         "path": "research/openclaw-acme-partners-partnership.md",
         "title": "OpenClaw Acme Partners Partnership",
         "body": (
-            "The connection between OpenClaw and Acme Partners is a strategic partnership"
-            " for enterprise AI deployment."
+            "The connection between OpenClaw and Acme Partners is a strategic partnership for enterprise AI deployment."
         ),
     },
     {
@@ -115,8 +114,7 @@ _TEST_DOCUMENTS = [
         "path": "notes/curator.md",
         "title": "Curator Health",
         "body": (
-            "Curator health checks entity graph completeness:"
-            " missing vault_path, stale entities, synthesis failures."
+            "Curator health checks entity graph completeness: missing vault_path, stale entities, synthesis failures."
         ),
     },
 ]
@@ -191,8 +189,7 @@ _REFLIB_DOCUMENTS = [
         "path": "agentic-ai/ms-gen-ai-beginners/rag.md",
         "title": "Retrieval-Augmented Generation",
         "body": (
-            "RAG combines information retrieval with text generation,"
-            " grounding model output in retrieved documents."
+            "RAG combines information retrieval with text generation, grounding model output in retrieved documents."
         ),
     },
     {
@@ -258,8 +255,7 @@ _REFLIB_DOCUMENTS = [
         "path": "data-and-analysis/posthog-docs/experiments.md",
         "title": "Running Experiments",
         "body": (
-            "A/B tests require a hypothesis, control group,"
-            " treatment group, and statistical significance threshold."
+            "A/B tests require a hypothesis, control group, treatment group, and statistical significance threshold."
         ),
     },
     # philosophy (3)
@@ -350,8 +346,7 @@ _REFLIB_DOCUMENTS = [
         "path": "personal-effectiveness/jph-okrs/examples.md",
         "title": "OKR Examples",
         "body": (
-            "Objective: Improve customer retention."
-            " Key Result: Reduce churn from 5% to 3%. Key Result: NPS above 60."
+            "Objective: Improve customer retention. Key Result: Reduce churn from 5% to 3%. Key Result: NPS above 60."
         ),
     },
     # foundations (1)

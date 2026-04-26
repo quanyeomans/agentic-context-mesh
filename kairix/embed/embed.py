@@ -446,7 +446,10 @@ def run_embed(
             embedded += len(batch)
             logger.info(
                 "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
-                embedded, total, 100.0 * embedded / total if total > 0 else 0, batch_idx + 1,
+                embedded,
+                total,
+                100.0 * embedded / total if total > 0 else 0,
+                batch_idx + 1,
             )
         except Exception as e:
             logger.error(f"DB write for batch {batch_idx} failed: {e}")
@@ -481,7 +484,10 @@ def run_embed(
                     embedded += len(batch)
                     logger.info(
                         "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
-                        embedded, total, 100.0 * embedded / total if total > 0 else 0, batch_idx + 1,
+                        embedded,
+                        total,
+                        100.0 * embedded / total if total > 0 else 0,
+                        batch_idx + 1,
                     )
                     logger.info(f"Batch {batch_idx} retry succeeded after schema repair.")
                     continue
