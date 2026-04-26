@@ -1,5 +1,5 @@
 """
-Core embedding logic — fetches vectors from Azure OpenAI and writes to QMD's SQLite.
+Core embedding logic — fetches vectors from Azure OpenAI and writes to kairix's SQLite.
 """
 
 import logging
@@ -29,7 +29,7 @@ DEFAULT_BATCH_SIZE = 500
 MAX_RETRIES = 6
 RETRY_BASE_DELAY = 1.0  # seconds, doubles per retry (with jitter)
 
-# Chunking — mirrors QMD's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
+# Chunking — mirrors kairix's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
 CHUNK_SIZE_CHARS = 3600  # ~900 tokens at 4 chars/token
 CHUNK_OVERLAP_CHARS = 200
 
@@ -46,7 +46,7 @@ def encode_vector(vec: list[float]) -> bytes:
 
 
 def build_hash_seq(content_hash: str, seq: int) -> str:
-    """Build the hash_seq primary key used by vectors_vec. Matches QMD exactly."""
+    """Build the hash_seq primary key used by vectors_vec. Matches legacy format."""
     return f"{content_hash}_{seq}"
 
 
@@ -56,7 +56,7 @@ def build_hash_seq(content_hash: str, seq: int) -> str:
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> list[dict]:
     """
     Split text into overlapping chunks. Returns list of {seq, pos, text}.
-    Mirrors QMD's chunkDocument() logic for consistency.
+    Mirrors kairix's chunkDocument() logic for consistency.
     Tries to split on paragraph boundaries first, falls back to char splits.
     """
     if len(text) <= chunk_size:
@@ -459,12 +459,12 @@ def run_embed(
                 db.commit()
             except sqlite3.Error:
                 logger.debug("Non-critical cleanup failed", exc_info=True)
-            # Dimension mismatch: QMD cron may have recreated vectors_vec with wrong dims.
+            # Dimension mismatch: Legacy cron may have recreated vectors_vec with wrong dims.
             # Repair schema and retry the batch once.
             if "dimension" in str(e).lower():
                 logger.warning(
                     f"Dimension mismatch on batch {batch_idx} -- "
-                    "QMD cron may have recreated vectors_vec. Repairing schema and retrying."
+                    "Legacy cron may have recreated vectors_vec. Repairing schema and retrying."
                 )
                 try:
                     ensure_vec_table(db, actual_dims)

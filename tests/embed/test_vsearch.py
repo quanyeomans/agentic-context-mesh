@@ -39,9 +39,9 @@ def embedded_db(tmp_path_factory):
     Copy the live QMD DB to a temp path, embed 50 chunks via Azure,
     and return the path. Restores env after.
     """
-    from kairix.embed.schema import get_qmd_db_path
+    from kairix.db import get_db_path
 
-    src = get_qmd_db_path()
+    src = get_db_path()
     tmp_dir = tmp_path_factory.mktemp("qmd_e2e")
     tmp_db_path = tmp_dir / "index.sqlite"
     shutil.copy2(src, tmp_db_path)

@@ -18,7 +18,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from kairix.embed.schema import get_qmd_db_path
+from kairix.db import get_db_path
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -41,7 +41,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     run_p.add_argument("--output", default=None, help="Directory to save JSON result")
 
     # validate
-    val_p = sub.add_parser("validate", help="Validate suite YAML against QMD index")
+    val_p = sub.add_parser("validate", help="Validate suite YAML against kairix index")
     val_p.add_argument("--suite", required=True, help="Path to suite YAML file")
 
     # compare
@@ -80,11 +80,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Lightweight validation — warn but don't block on missing gold paths
     try:
-        _qmd_db = get_qmd_db_path()
+        _db_path = get_db_path()
     except FileNotFoundError:
-        _qmd_db = None
-    if _qmd_db is not None:
-        db = sqlite3.connect(str(_qmd_db))
+        _db_path = None
+    if _db_path is not None:
+        db = sqlite3.connect(str(_db_path))
         errors = validate_suite(suite, db, strict=False)
         db.close()
         if errors:
@@ -120,15 +120,15 @@ def cmd_validate(args: argparse.Namespace) -> int:
     print(f"Suite: {suite.meta.get('name', args.suite)}  ({len(suite.cases)} cases)")
 
     try:
-        _qmd_db = get_qmd_db_path()
+        _db_path = get_db_path()
     except FileNotFoundError:
-        _qmd_db = None
-    if _qmd_db is None:
-        print("⚠️  QMD index not found — skipping path validation")
+        _db_path = None
+    if _db_path is None:
+        print("⚠️  kairix index not found — skipping path validation")
         print("✅ Schema validation passed")
         return 0
 
-    db = sqlite3.connect(str(_qmd_db))
+    db = sqlite3.connect(str(_db_path))
     errors = validate_suite(suite, db, strict=True)
     db.close()
 
@@ -139,7 +139,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         return 1
 
     recall_cases = [c for c in suite.cases if c.category == "recall"]
-    print(f"✅ Validation passed — {len(recall_cases)} recall gold paths verified in QMD index")
+    print(f"✅ Validation passed — {len(recall_cases)} recall gold paths verified in kairix index")
     return 0
 
 

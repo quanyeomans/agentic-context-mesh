@@ -2,7 +2,7 @@
 Additional tests for kairix.embed.schema — covers previously-untested paths:
 - find_sqlite_vec(): env override, fallback, missing
 - load_sqlite_vec(): missing extension error
-- get_qmd_db_path(): env override, missing file
+- get_db_path(): env override, missing file
 - ensure_vec_table(): create, dimension mismatch re-create
 - get_pending_chunks(): synthetic DB
 - get_all_chunks_needing_embedding(): synthetic DB
@@ -22,8 +22,8 @@ from kairix.embed.schema import (
     ensure_vec_table,
     find_sqlite_vec,
     get_all_chunks_needing_embedding,
+    get_db_path,
     get_pending_chunks,
-    get_qmd_db_path,
     load_sqlite_vec,
     save_run_log,
 )
@@ -67,28 +67,28 @@ def test_load_sqlite_vec_raises_when_not_found() -> None:
 
 
 # ---------------------------------------------------------------------------
-# get_qmd_db_path
+# get_db_path
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_get_qmd_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_get_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Uses KAIRIX_DB_PATH env var when set."""
     db_file = tmp_path / "index.sqlite"
     db_file.touch()
     monkeypatch.setenv("KAIRIX_DB_PATH", str(db_file))
-    result = get_qmd_db_path()
+    result = get_db_path()
     assert result == db_file
 
 
 @pytest.mark.unit
-def test_get_qmd_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_get_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Returns default kairix DB path when no DB exists (for fresh installs)."""
     monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
     monkeypatch.delenv("QMD_CACHE_DIR", raising=False)
     # Redirect home to tmp_path so default path resolves to a temp location
     monkeypatch.setenv("HOME", str(tmp_path))
-    result = get_qmd_db_path()
+    result = get_db_path()
     assert str(result).endswith("kairix/index.sqlite")
 
 
@@ -148,7 +148,7 @@ def test_ensure_vec_table_skips_recreate_when_dims_match() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_minimal_qmd_db() -> sqlite3.Connection:
+def _make_minimal_db() -> sqlite3.Connection:
     """Create minimal in-memory QMD schema for testing."""
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
@@ -160,7 +160,7 @@ def _make_minimal_qmd_db() -> sqlite3.Connection:
 @pytest.mark.unit
 def test_get_pending_chunks_returns_empty_when_all_embedded() -> None:
     """Returns [] when no chunks need embedding."""
-    db = _make_minimal_qmd_db()
+    db = _make_minimal_db()
     db.execute("INSERT INTO documents VALUES ('abc123', 'test/doc.md', 1)")
     db.execute("INSERT INTO content VALUES ('abc123', 'some content')")
     # No content_vectors rows → content_vectors LEFT JOIN won't exclude them
@@ -176,7 +176,7 @@ def test_get_pending_chunks_returns_empty_when_all_embedded() -> None:
 @pytest.mark.unit
 def test_get_pending_chunks_skips_inactive_docs() -> None:
     """Skips documents with active=0."""
-    db = _make_minimal_qmd_db()
+    db = _make_minimal_db()
     db.execute("INSERT INTO documents VALUES ('abc123', 'test/doc.md', 0)")  # inactive
     db.execute("INSERT INTO content VALUES ('abc123', 'some content')")
 
@@ -187,7 +187,7 @@ def test_get_pending_chunks_skips_inactive_docs() -> None:
 @pytest.mark.unit
 def test_get_pending_chunks_skips_empty_content() -> None:
     """Skips chunks with empty doc text."""
-    db = _make_minimal_qmd_db()
+    db = _make_minimal_db()
     db.execute("INSERT INTO documents VALUES ('abc123', 'test/doc.md', 1)")
     db.execute("INSERT INTO content VALUES ('abc123', '')")  # empty content
 
@@ -198,7 +198,7 @@ def test_get_pending_chunks_skips_empty_content() -> None:
 @pytest.mark.unit
 def test_get_all_chunks_needing_embedding_returns_empty_without_content_vectors() -> None:
     """Returns [] when content_vectors table is empty."""
-    db = _make_minimal_qmd_db()
+    db = _make_minimal_db()
     # Need vectors_vec table too (no vec0 extension — just a regular table)
     db.execute("CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY)")
 
@@ -215,11 +215,11 @@ def test_get_all_chunks_needing_embedding_returns_empty_without_content_vectors(
 def test_save_run_log_creates_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Creates the run log file on first call."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    (tmp_path / ".cache" / "qmd").mkdir(parents=True)
+    (tmp_path / ".cache" / "kairix").mkdir(parents=True)
 
     save_run_log({"run": 1, "status": "ok"})
 
-    log_path = tmp_path / ".cache" / "qmd" / "azure-embed-runs.json"
+    log_path = tmp_path / ".cache" / "kairix" / "embed-runs.json"
     assert log_path.exists()
     runs = json.loads(log_path.read_text())
     assert runs == [{"run": 1, "status": "ok"}]
@@ -229,9 +229,9 @@ def test_save_run_log_creates_file(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 def test_save_run_log_appends_and_rotates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Appends to existing log and rotates to keep last 90 runs."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    log_dir = tmp_path / ".cache" / "qmd"
+    log_dir = tmp_path / ".cache" / "kairix"
     log_dir.mkdir(parents=True)
-    log_path = log_dir / "azure-embed-runs.json"
+    log_path = log_dir / "embed-runs.json"
 
     # Write 90 existing entries
     existing = [{"run": i} for i in range(90)]

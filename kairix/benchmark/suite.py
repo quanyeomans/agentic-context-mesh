@@ -1,7 +1,7 @@
 """
 Benchmark suite loader and validator.
 
-Loads YAML suite files and validates them against the QMD index.
+Loads YAML suite files and validates them against the kairix index.
 """
 
 from __future__ import annotations
@@ -189,7 +189,7 @@ def validate_suite(
     strict: bool = True,
 ) -> list[str]:
     """
-    Validate a benchmark suite against the QMD index.
+    Validate a benchmark suite against the kairix index.
 
     Checks:
     - Gold paths for recall cases exist in the index (case-insensitive)
@@ -197,7 +197,7 @@ def validate_suite(
 
     Args:
         suite:  The BenchmarkSuite to validate.
-        db:     Open sqlite3.Connection to the QMD index.
+        db:     Open sqlite3.Connection to the kairix index.
         strict: If True, missing gold paths are errors. If False, they are warnings.
 
     Returns:
@@ -221,10 +221,10 @@ def validate_suite(
         else:
             seen_gold[gp_lower] = case_id
 
-    # Check gold paths exist in the QMD index (path-based only; title-based is path-agnostic)
+    # Check gold paths exist in the kairix index (path-based only; title-based is path-agnostic)
     for case_id, gp in path_based_recall:
         if not _gold_path_in_index(db, gp):
-            msg = f"Case {case_id!r}: gold_path {gp!r} not found in QMD index"
+            msg = f"Case {case_id!r}: gold_path {gp!r} not found in kairix index"
             errors.append(msg)
 
     # Check for duplicate gold_title values across recall cases
@@ -245,9 +245,9 @@ def validate_suite(
 
 def _gold_path_in_index(db: sqlite3.Connection, gold_path: str) -> bool:
     """
-    Check whether a gold path exists in the QMD index (case-insensitive substring match).
+    Check whether a gold path exists in the kairix index (case-insensitive substring match).
 
-    QMD stores paths as full filesystem paths like:
+    kairix stores paths as full filesystem paths like:
       /data/obsidian-vault/01-projects/...
     or relative paths like:
       01-projects/...

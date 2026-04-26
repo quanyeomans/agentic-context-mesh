@@ -8,7 +8,7 @@ Priority order:
 Returns an ISO 8601 date string (e.g. "2026-04-09") or None if no reliable
 date signal is found.
 
-documents.modified_at is intentionally excluded -- that is the QMD index time,
+documents.modified_at is intentionally excluded -- that is the index time,
 not the document date, and including it would pollute temporal queries with
 false signal.
 """

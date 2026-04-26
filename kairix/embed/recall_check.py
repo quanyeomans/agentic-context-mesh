@@ -1,12 +1,12 @@
 """
 Post-embed recall quality gate.
 
-Runs recall queries via direct SQLite vector search (bypasses qmd vsearch,
+Runs recall queries via direct SQLite vector search (bypasses legacy vsearch,
 which loads a local llama.cpp model and hangs on CPU-only deployments).
 
 Embeds each query via Azure OpenAI, then queries vectors_vec directly.
 Detects silent degradation (wrong dims, corrupt vectors, schema mismatch).
-Writes results to ~/.cache/qmd/recall-check.json.
+Writes results to ~/.cache/kairix/recall-check.json.
 Alerts if score drops >10% from previous run.
 """
 
@@ -81,7 +81,7 @@ def _embed_query(query: str) -> bytes | None:
 def _vsearch_direct(db: sqlite3.Connection, query_vec: bytes, limit: int = RECALL_LIMIT) -> list[str]:
     """
     Run vector similarity search directly against vectors_vec.
-    Bypasses qmd vsearch (which loads llama.cpp and hangs on CPU-only VMs).
+    Bypasses legacy vsearch (which loads llama.cpp and hangs on CPU-only VMs).
     Returns list of document paths in similarity order.
     """
     try:
@@ -210,8 +210,8 @@ def run_recall_gate(alert_callback: Callable[[str], None] | None = None) -> tupl
         delta = score - prev_score
         if delta < -DEGRADATION_THRESHOLD:
             msg = (
-                f"⚠️ QMD recall degraded: {score:.0%} (was {prev_score:.0%}, Δ{delta:+.0%}). "
-                f"Check azure-embed.log and run qmd status."
+                f"⚠️ Recall degraded: {score:.0%} (was {prev_score:.0%}, Δ{delta:+.0%}). "
+                f"Check azure-embed.log and run kairix onboard check."
             )
             logger.warning(msg)
             if alert_callback:

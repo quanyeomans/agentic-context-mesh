@@ -268,7 +268,7 @@ def check_vector_search_working() -> CheckResult:
                     "Vector search failure usually means Azure credentials aren't loaded.\n"
                     "Check: kairix onboard check  — look at secrets_loaded result.\n"
                     "If secrets are loaded, check the embed ran:\n"
-                    "  sqlite3 ~/.cache/qmd/index.sqlite 'SELECT COUNT(*) FROM vectors_vec;'\n"
+                    "  sqlite3 ~/.cache/kairix/index.sqlite 'SELECT COUNT(*) FROM vectors_vec;'\n"
                     "  Should be > 0. If 0: run kairix embed --limit 20 to test."
                 ),
             )
@@ -472,7 +472,7 @@ def check_chunk_date_populated() -> CheckResult:
         return CheckResult(
             name="chunk_date_populated",
             ok=False,
-            detail="QMD index not found — vault not embedded yet",
+            detail="Index not found — vault not embedded yet",
             fix="Run: kairix embed",
         )
     except Exception as exc:
@@ -480,7 +480,7 @@ def check_chunk_date_populated() -> CheckResult:
             name="chunk_date_populated",
             ok=False,
             detail=f"chunk_date check failed: {exc}",
-            fix="Check QMD index at ~/.cache/qmd/index.sqlite",
+            fix="Check QMD index at ~/.cache/kairix/index.sqlite",
         )
 
 

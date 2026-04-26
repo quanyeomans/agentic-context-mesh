@@ -32,8 +32,8 @@ __all__ = [
     "find_sqlite_vec",
     "get_all_chunks_needing_embedding",
     "get_date_filtered_paths",
+    "get_db_path",
     "get_pending_chunks",
-    "get_qmd_db_path",
     "load_sqlite_vec",
     "migrate_content_vectors",
     "save_run_log",
@@ -65,16 +65,8 @@ def load_sqlite_vec(db: sqlite3.Connection) -> None:
     load_extensions(db)
 
 
-def get_qmd_db_path() -> Path:
-    """
-    Return path to the kairix database.
-
-    Delegates to ``kairix.db.get_db_path()`` which searches:
-      1. KAIRIX_DB_PATH env var
-      2. ~/.cache/kairix/index.sqlite
-      3. Legacy fallback: ~/.cache/qmd/index.sqlite
-    """
-    return get_db_path()
+# get_db_path is re-exported from kairix.db for backwards compatibility.
+# Callers should import from kairix.db directly.
 
 
 def validate_schema(db: sqlite3.Connection) -> None:
@@ -117,7 +109,7 @@ def ensure_vec_table(db: sqlite3.Connection, dims: int = EMBED_VECTOR_DIMS) -> N
 def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     Return chunks that need embedding.
-    Mirrors QMD's getHashesNeedingEmbedding() logic.
+    Mirrors kairix's getHashesNeedingEmbedding() logic.
 
     Returns list of dicts: {hash, text, path}
     """
@@ -166,10 +158,9 @@ def get_all_chunks_needing_embedding(db: sqlite3.Connection) -> list[dict[str, A
 
 def save_run_log(entry: dict[str, Any]) -> None:
     """Append run metadata to the kairix cache directory."""
-    # Use kairix cache dir; fall back to legacy qmd path if it exists
-    kairix_log = Path.home() / ".cache" / "kairix" / "embed-runs.json"
-    legacy_log = Path.home() / ".cache" / "qmd" / "azure-embed-runs.json"
-    log_path = kairix_log if kairix_log.parent.exists() else legacy_log
+    # Use kairix cache dir
+    log_path = Path.home() / ".cache" / "kairix" / "embed-runs.json"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     runs = []
     if log_path.exists():
@@ -221,7 +212,7 @@ def get_date_filtered_paths(
     Falls back to empty frozenset on any DB error rather than raising.
 
     Args:
-        db:    Open sqlite3.Connection (QMD index — no sqlite-vec extension needed).
+        db:    Open sqlite3.Connection (kairix index — no sqlite-vec extension needed).
         start: Lower bound (inclusive). None means no lower bound.
         end:   Upper bound (inclusive). None means no upper bound.
 

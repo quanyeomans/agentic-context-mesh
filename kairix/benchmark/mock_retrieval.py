@@ -2,7 +2,7 @@
 Mock retrieval backend for the contract benchmark suite.
 
 Provides a deterministic, API-free retrieval fixture for CI benchmark runs.
-Instead of querying QMD + Azure, the mock returns results from a small in-process
+Instead of querying kairix, the mock returns results from a small in-process
 fixture corpus whose keyword-to-document mappings are committed to the repo.
 
 Design:

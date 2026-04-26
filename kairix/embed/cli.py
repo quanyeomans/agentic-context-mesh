@@ -53,7 +53,7 @@ def setup_logging(verbose: bool = False) -> None:
 
 def acquire_lock() -> IO[str]:
     """
-    Acquire exclusive lock using the same lockfile as qmd-maintenance.sh.
+    Acquire exclusive lock using the same lockfile as kairix-maintenance.sh.
     Waits up to LOCK_WAIT_SECS. Exits with code 3 if timeout.
     """
     lock_fh = open(LOCKFILE, "w")
