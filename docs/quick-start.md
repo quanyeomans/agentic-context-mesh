@@ -49,6 +49,14 @@ ln -s ~/Documents/my-vault ./vault
 # cp -r ~/Documents/my-vault ./vault
 ```
 
+**Don't have documents ready?** Try kairix with the built-in reference library — 6,000+ curated open-source documents covering AI, engineering, data science, philosophy, and more:
+
+```bash
+ln -s ./reference-library ./documents
+```
+
+This gives you a working search engine immediately. Add your own documents later.
+
 ### 4. Start everything
 
 ```bash
@@ -63,7 +71,7 @@ This starts three services:
 ### 5. Run the setup wizard
 
 ```bash
-docker compose exec kairix kairix setup
+docker compose exec -it kairix kairix setup
 ```
 
 The wizard walks you through:
@@ -79,10 +87,38 @@ This takes about 5 minutes.
 ### 6. Search
 
 ```bash
-docker compose exec kairix kairix search "your question here"
+docker compose exec -it kairix kairix search "your question here"
 ```
 
 That's it. Your knowledge base is running.
+
+### Verify your setup
+
+After embedding completes, check that everything is working:
+
+```bash
+docker compose exec -it kairix kairix onboard check
+```
+
+You should see output like:
+
+```
+kairix deployment check
+──────────────────────────────────────────────────
+  ✓ kairix_on_path
+  ✓ wrapper_installed — Running in Docker
+  ✓ secrets_loaded — Azure credentials present
+  ✓ vault_root_configured — Document store: /data/vault (N files found)
+  ✓ vector_search_working — Vector search working
+  ✓ neo4j_reachable — Neo4j connected
+──────────────────────────────────────────────────
+  6/9 checks passed
+```
+
+If any checks fail, the output explains what to fix. Common issues:
+- **secrets_loaded fails**: Check your `.env` file has the correct API key
+- **vector_search_working fails**: Run `docker compose exec -it kairix kairix embed` to index documents
+- **neo4j_reachable fails**: Wait 30 seconds for Neo4j to finish starting
 
 ---
 
@@ -91,8 +127,6 @@ That's it. Your knowledge base is running.
 - **Documents are indexed automatically** every hour by the worker service
 - **The MCP server** runs on port 8080 — connect any MCP-compatible agent (Claude, OpenClaw, etc.)
 - **Verify the server is running**: `curl http://localhost:8080/sse` should return an SSE stream header
-- **Run diagnostics**: `docker compose exec -it kairix kairix onboard check`
-- **Run quality checks** anytime: `docker compose exec kairix kairix onboard check`
 
 ## Connecting agents
 
@@ -113,11 +147,11 @@ Want to know how well kairix works on your documents? Build a test suite:
 
 ```bash
 # Create test queries + relevance judgments from your data
-docker compose exec kairix kairix eval build-gold \
+docker compose exec -it kairix kairix eval build-gold \
   --suite queries.yaml --output gold.yaml
 
 # Test different search configurations
-docker compose exec kairix kairix eval hybrid-sweep \
+docker compose exec -it kairix kairix eval hybrid-sweep \
   --suite gold.yaml
 ```
 
@@ -156,6 +190,6 @@ See [OPERATIONS.md](../OPERATIONS.md) for full deployment details.
 |---------|-----|
 | "No module named 'kairix'" | Run `docker compose build` to rebuild the image |
 | "Connection refused" on search | Wait 30 seconds for services to start, then try again |
-| "0 results" on search | Run `docker compose exec kairix kairix embed` to index documents |
+| "0 results" on search | Run `docker compose exec -it kairix kairix embed` to index documents |
 | Neo4j won't start | Check `NEO4J_PASSWORD` in `.env` — it must be at least 8 characters |
 | "Rate limited" during embed | The system retries automatically — wait a few minutes |
