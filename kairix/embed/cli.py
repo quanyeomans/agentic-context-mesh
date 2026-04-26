@@ -91,9 +91,11 @@ def cmd_embed(args: argparse.Namespace) -> int:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA busy_timeout=10000")
 
-        # Note: load_sqlite_vec is called inside run_embed before any vec0 operations.
-        # We still need it here for schema validation which checks the vectors_vec table.
+        # Load sqlite-vec extension and ensure schema exists.
+        # create_schema is idempotent — safe on every run.
         load_extensions(db)
+        from kairix.db.schema import create_schema
+        create_schema(db)
         validate_schema(db)
 
         result = run_embed(
