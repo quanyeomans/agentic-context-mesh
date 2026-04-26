@@ -208,6 +208,7 @@ class TestSqliteVecInsertConstraints:
         db.execute("""
             CREATE TABLE content_vectors (
                 hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at TEXT,
+                chunk_date TEXT,
                 PRIMARY KEY (hash, seq)
             )
         """)
