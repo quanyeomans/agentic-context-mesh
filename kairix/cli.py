@@ -1,8 +1,8 @@
 """
-kairix — contextual intelligence layer for QMD + Obsidian agent stacks.
+kairix — private knowledge retrieval for AI agents and teams.
 
 Subcommands:
-  embed       Embed vault documents into QMD sqlite-vec (text-embedding-3-large)
+  embed       Embed documents into kairix sqlite-vec index (text-embedding-3-large)
   search      Hybrid search: BM25 + vector via RRF
   entity      Entity management: suggest (NER), validate (Wikidata)
   curator     Curator agent: entity health monitoring and enrichment (CA-1)
