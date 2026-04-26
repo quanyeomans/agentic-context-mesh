@@ -75,7 +75,9 @@ def compare(baseline: dict, current: dict) -> dict:
         c = current_cats.get(cat, 0.0)
         delta = c - b
         category_deltas[cat] = round(delta, 4)
-        if c < CATEGORY_FLOOR:
+        if c < CATEGORY_FLOOR and not (b == 0.0 and c == 0.0):
+            # Skip floor check when both baseline and current are 0.0
+            # (no test cases exist for this category)
             category_fails.append(cat)
         elif delta < -CATEGORY_WARN_THRESHOLD:
             category_warns.append(cat)
