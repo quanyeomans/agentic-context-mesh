@@ -2,20 +2,20 @@
 
 **Status:** Planned — not yet started  
 **Target version:** v1.0.0  
-**Primary motivation:** The current embed cron runs every 60 seconds. A file added to the vault is invisible to search for up to 59 seconds. Session prep queries against recently-added content (today's meeting notes, last-minute decision records) return stale results during that window.
+**Primary motivation:** The current embed cron runs every 60 seconds. A file added to the document store is invisible to search for up to 59 seconds. Session prep queries against recently-added content (today's meeting notes, last-minute decision records) return stale results during that window.
 
 ---
 
 ## Problem statement
 
-`kairix embed --changed` is triggered by a cron job every 60 seconds. This is the only mechanism for indexing vault changes. Two failure modes:
+`kairix embed --changed` is triggered by a cron job every 60 seconds. This is the only mechanism for indexing document changes. Two failure modes:
 
-1. **Staleness window** — new vault content is invisible to search for up to 59 seconds after write
+1. **Staleness window** — new document store content is invisible to search for up to 59 seconds after write
 2. **Missed changes** — if a file is written and deleted/renamed within a 60-second window, the cron never sees it
 
 Both matter most during active work sessions, exactly when session-prep queries are most likely.
 
-A file watcher eliminates the cron gap: the watcher triggers `kairix embed --paths <changed_file>` within seconds of each vault write.
+A file watcher eliminates the cron gap: the watcher triggers `kairix embed --paths <changed_file>` within seconds of each document write.
 
 ---
 
@@ -52,7 +52,7 @@ Debouncing is important: Obsidian writes in bursts (save + frontmatter update + 
 kairix.watcher.daemon
 ~~~~~~~~~~~~~~~~~~~~~
 
-Incremental vault file watcher daemon.
+Incremental document file watcher daemon.
 
 Watches KAIRIX_VAULT_ROOT for .md file changes. Debounces events over a
 configurable window, then dispatches kairix.embed.run() for changed paths.
@@ -61,13 +61,13 @@ Runs until interrupted (SIGINT / SIGTERM). Designed to run as a sidecar
 process alongside the main kairix service.
 
 Inputs:
-  vault_root: Path — directory to watch (recursively)
+  document_root: Path — directory to watch (recursively)
   debounce_seconds: float — accumulation window before triggering embed (default 2.0)
   extensions: frozenset[str] — file extensions to watch (default: {'.md'})
 
 Failure modes:
   - Single file embed failure: logged as ERROR; watcher continues for subsequent events
-  - vault_root does not exist: raises ValueError at startup
+  - document_root does not exist: raises ValueError at startup
   - watchfiles unavailable: raises ImportError with install instructions
 """
 from __future__ import annotations
@@ -86,12 +86,12 @@ WATCH_EXTENSIONS: frozenset[str] = frozenset({".md"})
 
 
 def watch(
-    vault_root: Path,
+    document_root: Path,
     embed_fn: Callable[[list[Path]], None],
     debounce_seconds: float = DEBOUNCE_SECONDS,
     extensions: frozenset[str] = WATCH_EXTENSIONS,
 ) -> None:
-    """Watch vault_root and call embed_fn with batches of changed paths.
+    """Watch document_root and call embed_fn with batches of changed paths.
 
     Blocks until interrupted. embed_fn receives a deduplicated list of
     changed Path objects. Any exception from embed_fn is caught and logged;
@@ -104,15 +104,15 @@ def watch(
             "kairix.watcher requires 'watchfiles'. Install: pip install watchfiles"
         ) from exc
 
-    if not vault_root.exists():
-        raise ValueError(f"vault_root does not exist: {vault_root}")
+    if not document_root.exists():
+        raise ValueError(f"document_root does not exist: {document_root}")
 
-    logger.info("watcher: watching %s (debounce %.1fs)", vault_root, debounce_seconds)
+    logger.info("watcher: watching %s (debounce %.1fs)", document_root, debounce_seconds)
 
     pending: set[Path] = set()
     last_event_time: float = 0.0
 
-    for changes in _watch(vault_root, recursive=True):
+    for changes in _watch(document_root, recursive=True):
         changed_paths = {
             Path(path)
             for change_type, path in changes
@@ -189,10 +189,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.vault_root:
+    if not args.document_root:
         parser.error("--vault-root or KAIRIX_VAULT_ROOT is required")
 
-    vault_root = Path(args.vault_root)
+    document_root = Path(args.document_root)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 
@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _handle_signal)
 
     from kairix.watcher.daemon import watch
-    watch(vault_root, _embed_changed, debounce_seconds=args.debounce)
+    watch(document_root, _embed_changed, debounce_seconds=args.debounce)
     return 0
 ```
 
@@ -274,7 +274,7 @@ For single-container deployments, `supervisord` runs both the main kairix proces
 The existing 60-second embed cron is **not removed** when the watcher is deployed. The watcher handles new and modified files; the cron acts as a safety net for:
 - Files written while the watcher was restarting
 - Vault syncs that bypass inotify (e.g., remote rsync writes)
-- Bulk vault changes during watcher downtime
+- Bulk document changes during watcher downtime
 
 The cron interval can be increased to 10 minutes once the watcher is confirmed stable on VM, reducing redundant embed calls.
 
@@ -291,7 +291,7 @@ The cron interval can be increased to 10 minutes once the watcher is confirmed s
 | `test_watch_ignores_delete_events` | unit | Yield `Change.deleted` event; assert embed_fn not called |
 | `test_watch_batches_concurrent_changes` | unit | Yield 3 .md changes in single iteration; embed_fn called once with 3 paths |
 | `test_watch_continues_after_embed_error` | unit | embed_fn raises on first call; second change event still processed |
-| `test_watch_raises_on_missing_vault_root` | unit | `ValueError` raised when vault_root does not exist |
+| `test_watch_raises_on_missing_document_root` | unit | `ValueError` raised when document_root does not exist |
 | `test_watch_raises_on_missing_watchfiles` | unit | Simulate import error; `ImportError` with install instructions |
 | `test_debounce_accumulates_burst` | unit | Two changes in quick succession → single embed_fn call with both paths |
 
@@ -299,8 +299,8 @@ The cron interval can be increased to 10 minutes once the watcher is confirmed s
 
 | Test | Type | Description |
 |---|---|---|
-| `test_cli_requires_vault_root` | unit | No `--vault-root` and no env var → sys.exit with error |
-| `test_cli_reads_vault_root_from_env` | unit | `KAIRIX_VAULT_ROOT` set → passed to `watch()` |
+| `test_cli_requires_document_root` | unit | No `--vault-root` and no env var → sys.exit with error |
+| `test_cli_reads_document_root_from_env` | unit | `KAIRIX_VAULT_ROOT` set → passed to `watch()` |
 | `test_cli_custom_debounce` | unit | `--debounce 5.0` → passed to `watch()` |
 
 Coverage target: `kairix/watcher/` ≥ 80% (per ENGINEERING.md general module target).
@@ -313,7 +313,7 @@ Coverage target: `kairix/watcher/` ≥ 80% (per ENGINEERING.md general module ta
 2. Add `watchfiles>=0.21` to `pyproject.toml`; run `pip-audit` to confirm no CVEs
 3. Wire `kairix watch` subcommand into `kairix/cli.py`
 4. Deploy to VM as a manual foreground process (`kairix watch --vault-root /path/to/vault`) to verify event capture
-5. Measure time from vault write to search availability (target: < 5 seconds)
+5. Measure time from document write to search availability (target: < 5 seconds)
 6. Add to `docker-compose.yml` as `kairix-watcher` service
 7. Reduce cron interval from 60s to 10 minutes (safety net only)
 8. Update OPERATIONS.md with watcher deployment and monitoring instructions
@@ -324,7 +324,7 @@ Coverage target: `kairix/watcher/` ≥ 80% (per ENGINEERING.md general module ta
 
 | Metric | Target |
 |---|---|
-| Time from vault write to search availability | < 5 seconds (p95) |
+| Time from document write to search availability | < 5 seconds (p95) |
 | False positive embeds (non-.md changes trigger embed) | 0 |
 | Watcher stability (mean time between crashes) | > 7 days on VM |
 | Embed CPU overhead vs cron | ≤ cron overhead (batch sizes should be smaller) |

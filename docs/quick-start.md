@@ -212,7 +212,7 @@ kairix search "your question"
 
 **What you miss without Docker:** The entity graph (people, companies, relationships) requires Neo4j, which is included automatically in the Docker Compose stack. Without Docker, install Neo4j separately or skip entity features.
 
-For server deployments, see the [deployment architecture guide](../docs/deployment.md).
+For server deployments, see the comments in [docker-compose.yml](../docker-compose.yml) and [OPERATIONS.md](../OPERATIONS.md).
 
 ## Troubleshooting
 

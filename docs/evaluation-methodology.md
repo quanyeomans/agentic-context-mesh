@@ -128,7 +128,7 @@ If more than 3 anchors receive unexpected grades, `JudgeCalibrationError` is rai
 - Prompt injection or unexpected model behaviour
 - Misconfigured API endpoints returning garbage
 
-Anchors are stored as frozen constants in `kairix/eval/judge.py` and are corpus-agnostic (they reference generic software topics, not vault content), making them portable across Kairix installations.
+Anchors are stored as frozen constants in `kairix/eval/judge.py` and are corpus-agnostic (they reference generic software topics, not document store content), making them portable across Kairix installations.
 
 ---
 
