@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from kairix.eval.constants import CATEGORY_ALIASES as _CATEGORY_ALIASES
 from kairix.eval.constants import CATEGORY_WEIGHTS as _CATEGORY_WEIGHTS

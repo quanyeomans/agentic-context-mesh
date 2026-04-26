@@ -161,7 +161,7 @@ def _load_paths_from_config() -> dict[str, str]:
     """Load the paths: section from kairix.config.yaml if it exists."""
     config_path = os.environ.get("KAIRIX_CONFIG_PATH", "kairix.config.yaml")
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
 
         p = Path(config_path).expanduser()
         if p.exists():

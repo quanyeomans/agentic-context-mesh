@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from kairix.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
 

@@ -22,7 +22,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from kairix.eval.judge import JudgeResult, calibrate, fetch_llm_credentials, judge_batch
 

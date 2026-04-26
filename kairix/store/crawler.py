@@ -256,7 +256,7 @@ def _parse_frontmatter(path: Path) -> dict[str, Any]:
         return {}
 
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
 
         result = yaml.safe_load(match.group(1))
         return result if isinstance(result, dict) else {}
