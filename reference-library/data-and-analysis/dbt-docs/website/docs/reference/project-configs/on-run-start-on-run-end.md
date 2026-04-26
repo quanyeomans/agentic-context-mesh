@@ -1,0 +1,59 @@
+---
+title: "on-run-start & on-run-end"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+import OnRunCommands from '/snippets/_onrunstart-onrunend-commands.md';
+
+<File name='dbt_project.yml'>
+
+```yml
+on-run-start: sql-statement | [sql-statement]
+on-run-end: sql-statement | [sql-statement]
+```
+
+</File>
+
+
+## Definition
+
+A SQL statement (or list of SQL statements) to be run at the start or end of the following commands: <OnRunCommands />
+
+`on-run-start` and `on-run-end` hooks can also [call macros](#call-a-macro-to-grant-privileges) that return SQL statements.
+
+## Usage notes
+* The `on-run-end` hook has additional Jinja variables available in the context — check out the [docs](/reference/dbt-jinja-functions/on-run-end-context).
+
+## Examples
+
+### Grant privileges on all schemas that dbt uses at the end of a run
+This leverages the [schemas](/reference/dbt-jinja-functions/schemas) variable that is only available in an `on-run-end` hook.
+
+<File name='dbt_project.yml'>
+
+```yml
+on-run-end:
+  - "{% for schema in schemas %}grant usage on schema {{ schema }} to group reporter; {% endfor %}"
+
+```
+
+</File>
+
+### Call a macro to grant privileges
+
+<File name='dbt_project.yml'>
+
+```yml
+on-run-end: "{{ grant_select(schemas) }}"
+
+```
+
+</File>
+
+### Additional examples
+We've compiled some more in-depth examples [here](/docs/build/hooks-operations#additional-examples).

@@ -1,0 +1,13 @@
+---
+title: "Legacy Snapshot Config"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+:::info
+Starting from [the <Constant name="dbt" /> **Latest** release track](/docs/dbt-versions/cloud-release-tracks) and dbt Core v1.9, defining snapshots in a `.sql` file using a config block is a legacy method. You can define snapshots in properties YAML files using the latest [snapshot-specific configurations](/docs/build/snapshots#configuring-snapshots). For new snapshots, we recommend using these latest configs. If applying them to existing snapshots, you'll need to [migrate](#snapshot-configuration-migration) over.
+:::

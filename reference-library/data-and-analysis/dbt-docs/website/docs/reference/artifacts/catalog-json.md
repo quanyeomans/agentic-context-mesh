@@ -1,0 +1,40 @@
+---
+title: "Catalog JSON file"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+**Current schema**: [`v1`](https://schemas.getdbt.com/dbt/catalog/v1.json)
+    
+**Produced by:** <VersionBlock lastVersion="1.99">[`docs generate`](/reference/commands/cmd-docs)</VersionBlock><VersionBlock firstVersion="2.0">[`--write-catalog`](/reference/commands/cmd-docs) flag</VersionBlock>
+
+This file contains information from your <Term id="data-warehouse" /> about the tables and <Term id="view">views</Term> produced and defined by the resources in your project. Today, dbt uses this file to populate metadata, such as column types and <Term id="table" /> statistics, in the [docs site](/docs/explore/build-and-view-your-docs).
+
+### Top-level keys
+
+- [`metadata`](/reference/artifacts/dbt-artifacts#common-metadata)
+- `nodes`: Dictionary containing information about database objects corresponding to dbt models, seeds, and snapshots.
+- `sources`: Dictionary containing information about database objects corresponding to dbt sources.
+- `errors`: Errors received while running metadata queries during <VersionBlock lastVersion="1.99">`dbt docs generate`</VersionBlock><VersionBlock firstVersion="2.0">catalog generation (via `--write-catalog` flag)</VersionBlock>.
+
+### Resource details
+
+Within `sources` and `nodes`, each dictionary key is a resource `unique_id`. Each nested resource contains:
+- `unique_id`: `<resource_type>.<package>.<resource_name>`, same as dictionary key, maps to `nodes` and `sources` in the [manifest](/reference/artifacts/manifest-json)
+- `metadata`
+    - `type`: table, view, etc.
+    - `database`
+    - `schema`
+    - `name`
+    - `comment`
+    - `owner`
+- `columns` (array)
+    - `name`
+    - `type`: data type
+    - `comment`
+    - `index`: ordinal
+- `stats`: differs by database and relation type

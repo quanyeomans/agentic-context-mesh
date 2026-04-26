@@ -23,6 +23,9 @@ class NodeLabel(str, Enum):
     Person = "Person"
     Outcome = "Outcome"
     Concept = "Concept"
+    Framework = "Framework"
+    Technology = "Technology"
+    Publication = "Publication"
 
 
 class EdgeKind(str, Enum):
@@ -31,6 +34,12 @@ class EdgeKind(str, Enum):
     MENTIONS = "MENTIONS"
     RELATED_TO = "RELATED_TO"
     CLIENT_OF = "CLIENT_OF"
+    TEACHES = "TEACHES"
+    PUBLISHES = "PUBLISHES"
+    AUTHORED_BY = "AUTHORED_BY"
+    IMPLEMENTS = "IMPLEMENTS"
+    PART_OF = "PART_OF"
+    DESCRIBED_IN = "DESCRIBED_IN"
 
 
 @dataclass
@@ -139,6 +148,121 @@ class OutcomeNode:
             "name": self.name,
             "domain": self.domain,
             "vault_path": self.vault_path,
+        }
+
+
+@dataclass
+class ConceptNode:
+    """
+    Represents a concept entity (e.g. 'zero-trust', 'design-thinking').
+
+    id: slug
+    name: canonical display name
+    domain: parent domain
+    vault_path: relative path to canonical note
+    aliases: alternative names
+    """
+
+    id: str
+    name: str
+    domain: str = ""
+    vault_path: str = ""
+    aliases: list[str] = field(default_factory=list)
+
+    def to_neo4j_props(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "domain": self.domain,
+            "vault_path": self.vault_path,
+            "aliases": self.aliases,
+        }
+
+
+@dataclass
+class FrameworkNode:
+    """
+    Represents a framework entity (e.g. 'togaf', 'safe', 'itil').
+
+    id: slug
+    name: canonical display name
+    domain: parent domain
+    vault_path: relative path to canonical note
+    aliases: alternative names
+    """
+
+    id: str
+    name: str
+    domain: str = ""
+    vault_path: str = ""
+    aliases: list[str] = field(default_factory=list)
+
+    def to_neo4j_props(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "domain": self.domain,
+            "vault_path": self.vault_path,
+            "aliases": self.aliases,
+        }
+
+
+@dataclass
+class TechnologyNode:
+    """
+    Represents a technology entity (e.g. 'neo4j', 'kubernetes', 'azure-openai').
+
+    id: slug
+    name: canonical display name
+    category: technology category (e.g. 'database', 'cloud', 'ai-ml')
+    vault_path: relative path to canonical note
+    aliases: alternative names
+    """
+
+    id: str
+    name: str
+    category: str = ""
+    vault_path: str = ""
+    aliases: list[str] = field(default_factory=list)
+
+    def to_neo4j_props(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+            "vault_path": self.vault_path,
+            "aliases": self.aliases,
+        }
+
+
+@dataclass
+class PublicationNode:
+    """
+    Represents a publication entity (e.g. a book, whitepaper, standard).
+
+    id: slug
+    name: canonical display name
+    authors: list of author names
+    year: publication year
+    vault_path: relative path to canonical note
+    aliases: alternative names
+    """
+
+    id: str
+    name: str
+    authors: list[str] = field(default_factory=list)
+    year: str = ""
+    vault_path: str = ""
+    aliases: list[str] = field(default_factory=list)
+
+    def to_neo4j_props(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "authors": self.authors,
+            "year": self.year,
+            "vault_path": self.vault_path,
+            "aliases": self.aliases,
         }
 
 

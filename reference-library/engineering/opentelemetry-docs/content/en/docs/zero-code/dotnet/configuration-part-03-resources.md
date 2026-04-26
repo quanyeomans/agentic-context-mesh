@@ -1,0 +1,30 @@
+## Resources
+
+A resource is the immutable representation of the entity producing the
+telemetry. See [Resource semantic conventions](/docs/specs/semconv/resource/)
+for more details.
+
+### Resource attributes
+
+| Environment variable       | Description                                                                                                                                                                                                       | Default value                                                                                                                       | Status                                              |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| `OTEL_RESOURCE_ATTRIBUTES` | Key-value pairs to be used as resource attributes. See [Resource SDK](/docs/specs/otel/resource/sdk#specifying-resource-information-via-an-environment-variable) for more details.                                | See [Resource semantic conventions](/docs/specs/semconv/resource/#semantic-attributes-with-sdk-provided-default-value) for details. | [Stable](/docs/specs/otel/versioning-and-stability) |
+| `OTEL_SERVICE_NAME`        | Sets the value of the [`service.name`](/docs/specs/semconv/resource/#service) resource attribute. If `service.name` is provided in `OTEL_RESOURCE_ATTRIBUTES`, the value of `OTEL_SERVICE_NAME` takes precedence. | See [Service name automatic detection](#configuration-methods) under Configuration method section.                                  | [Stable](/docs/specs/otel/versioning-and-stability) |
+
+### Resource detectors
+
+| Environment variable                             | Description                                                                                                                                                                                           | Default value | Status                                                    |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------- |
+| `OTEL_DOTNET_AUTO_RESOURCE_DETECTOR_ENABLED`     | Enables all resource detectors.                                                                                                                                                                       | `true`        | [Experimental](/docs/specs/otel/versioning-and-stability) |
+| `OTEL_DOTNET_AUTO_{0}_RESOURCE_DETECTOR_ENABLED` | Configuration pattern for enabling a specific resource detector, where `{0}` is the uppercase ID of the resource detector you want to enable. Overrides `OTEL_DOTNET_AUTO_RESOURCE_DETECTOR_ENABLED`. | `true`        | [Experimental](/docs/specs/otel/versioning-and-stability) |
+
+The following resource detectors are included and enabled by default:
+
+| ID                | Description                | Documentation                                                                                                                                                                                                                          | Status                                                    |
+| ----------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `AZUREAPPSERVICE` | Azure App Service detector | [Azure resource detector documentation](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/blob/Resources.Azure-1.15.1-beta.1/src/OpenTelemetry.Resources.Azure/README.md)                                                 | [Experimental](/docs/specs/otel/versioning-and-stability) |
+| `CONTAINER`       | Container detector         | [Container resource detector documentation](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/blob/Resources.Container-1.15.1-beta.1/src/OpenTelemetry.Resources.Container/README.md) **Not supported on .NET Framework** | [Experimental](/docs/specs/otel/versioning-and-stability) |
+| `HOST`            | Host detector              | [Host resource detector documentation](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/blob/Resources.Host-1.15.1-beta.1/src/OpenTelemetry.Resources.Host/README.md)                                                    | [Experimental](/docs/specs/otel/versioning-and-stability) |
+| `OPERATINGSYSTEM` | Operating System detector  | [Operating System resource detector documentation](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/blob/Resources.OperatingSystem-1.15.1-beta.1/src/OpenTelemetry.Resources.OperatingSystem/README.md)                  | [Experimental](/docs/specs/otel/versioning-and-stability) |
+| `PROCESS`         | Process detector           | [Process resource detector documentation](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/blob/Resources.Process-1.15.1-beta.1/src/OpenTelemetry.Resources.Process/README.md)                                           | [Experimental](/docs/specs/otel/versioning-and-stability) |
+| `PROCESSRUNTIME`  | Process Runtime detector   | [Process Runtime resource detector documentation](https://github.com/open-telemetry/opentelemetry-dotnet-contrib/blob/Resources.ProcessRuntime-1.15.1-beta.1/src/OpenTelemetry.Resources.ProcessRuntime/README.md)                     | [Experimental](/docs/specs/otel/versioning-and-stability) |

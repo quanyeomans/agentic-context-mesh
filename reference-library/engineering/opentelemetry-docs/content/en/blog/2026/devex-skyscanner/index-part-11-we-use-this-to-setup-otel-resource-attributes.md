@@ -1,0 +1,1 @@
+# We use this to setup OTel resource attributes

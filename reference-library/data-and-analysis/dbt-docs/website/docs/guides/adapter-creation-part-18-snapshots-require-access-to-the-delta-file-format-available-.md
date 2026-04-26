@@ -1,0 +1,1 @@
+# Snapshots require access to the Delta file format, available on our Databricks connection,

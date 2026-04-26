@@ -1,0 +1,98 @@
+---
+title: "Data Visualisation"
+source: The Turing Way
+source_url: https://github.com/the-turing-way/the-turing-way
+licence: CC-BY-4.0
+domain: data-and-analysis
+subdomain: turing-way
+date_added: 2026-04-25
+---
+
+(rr-rdm-visualisation)=
+# Data Visualisation
+
+Data visualisation allows you to: 
+* Extract valuable information and patterns from data
+* Communicate this in a clear and comprehensible visual representation
+* Enhance the communication of research findings, making it accessible to a broader audience
+* Identify data quality issues, as outliers and data errors may become more visible in visualisations
+
+Therefore, data visualisation is an aspect of research data management!
+
+Below follow some resources that may help you in creating clearer, more accessible and more transparent data visualisations. 
+
+
+(rr-rdm-visualisation-tools)=
+## Tools
+
+-  [Datawrapper](https://www.datawrapper.de/), where you can upload your data to generate tables and charts.
+-  [upset graphs](https://upset.app/) are a straightforward way to visualize set intersections in a matrix layout, which can help in analysing multiple datasets at once.
+-  Using **Python Plotly** you can add annotations and animations as extra visual cues to highlight important features.
+  - [Annotating visualisations in Python plotly](https://medium.com/nerd-for-tech/enriching-data-visualizations-with-annotations-in-plotly-using-python-6127ff6e0f80) (blog and video)
+  - [Animations using Python plotly](https://youtu.be/kMFvpmOaF2I)
+
+(rr-rdm-visualisation-accessibility)=
+## Accessibility
+
+- [Tips to improve interpretability and accessibility](https://www.youtube.com/watch?v=RzT95DVUMnw) by Dr Tracey Weissgerber (video)
+- [Writing Meaningful Alt-Texts for Data Visualisations in R](https://www.youtube.com/watch?v=dXV5bx1WQTM)
+- Writing Alt Text to communicate the meaning in data visualizations by @Hare2022dataviz
+- [Alt-texts](https://axesslab.com/alt-texts/)
+- [Writing Alt Text](https://dataabinitio.com/?p=1161) for a Scientific Figure by Kristin Briney
+- [Writing Alt Text for Data Visualization](https://medium.com/nightingale/writing-alt-text-for-data-visualization-2a218ef43f81)
+  To get started, use Amy Cesal's quick formula: [alt text = `chart type` of `type of data` where `reason for including chart`. `Link to data`.]
+
+(rr-rdm-visualisation-colours)=
+## Colours
+- [A detailed guide to colors in data vis style guides](https://blog.datawrapper.de/colors-for-data-vis-style-guides/) (blog)
+
+(rr-rdm-visualisation-resources)=
+## Resources
+
+### Books and Articles
+
+- [Fundamentals of Data Visualisation](https://serialmentor.com/dataviz/) by {cite:ps}`Wilke2019dataviz`
+- Data Visualisation, A practical introduction by @Healy2018dataviz
+- Creating clear and informative image-based figures for scientific publications by @Jambor2021dataviz
+- A layered grammar of graphics by @Wickham2010dataviz
+- A Field Guide to Digital Color by @Stone2003dataviz
+- The Grammar of Graphics by @Wilkinson1999dataviz
+- The Visual Display of Quantitative Information by @Tufte2001dataviz
+- Avoiding Twisted Pixels: Ethical Guidelines for the Appropriate Use and Manipulation of Scientific Digital Images by [](https://doi.org/10.1007/s11948-010-9201-y)
+
+### Other text resources and examples
+
+- [Data Visualisation Course](https://exploratory-data-visualization.netlify.app/)
+- [Free visual and communication resources](https://padlet.com/evansemporiumstore/lks3aoyyhkpnkmpe)
+- [A collection of notebooks demonstrating plotting with matplotlib](https://github.com/KirstieJane/NH19-Visualization/)
+- [A Comprehensive Guide to the Grammar of Graphics for Effective Visualization of Multi-dimensional Data](https://towardsdatascience.com/a-comprehensive-guide-to-the-grammar-of-graphics-for-effective-visualization-of-multi-dimensional-1f92b4ed4149)
+- [Friends Don't let Friends Write Bad Graphs](https://github.com/cxli233/FriendsDontLetFriends) by @li2023dataviz
+- [Data by Design](https://dataxdesign.io/)
+- [Parallel Coordinates Plots (PCP)](https://visualizationcheatsheets.github.io/pcp.html)
+- [I’ve Stopped Using Box Plots. Should You?](https://nightingaledvs.com/ive-stopped-using-box-plots-should-you/)
+
+### Videos
+
+- 5 minute videos on [Data visualisation - Introduction and motivation](https://www.youtube.com/watch?v=7t2qYO2zEWQ) and [Figure design, design process, fundamentals](https://www.youtube.com/watch?v=WtYArH4EIRg)
+- [Create Effective Data Visualizations](https://youtu.be/jt-VdyFzjj0) (second part focuses primarily on Tableau)
+- [Data visualisation for scientific papers](https://www.youtube.com/playlist?list=PLWb8IFSVeQ62NbG-u4vQlh4srFcC2KH5g) videos by ReproducibiliTeach
+- Outline of grammar of graphics
+    -   [A Grammar of Graphics](https://www.youtube.com/watch?v=RCaFBJWXfZc) - Excellent summary of the grammar of graphics layers or 'functional pipeline'
+    -   [Leland Wilkinson - The Grammar of Graphics](https://www.youtube.com/watch?v=1X93Sum_SyM) - Leland himself giving a quick high level summary of the grammar of graphics
+-   [Martin Krzywinski: A pandemic of bad charts](https://www.youtube.com/watch?v=_YGmfsKL8N8)
+-   [EMBL Keynote Lecture 2019 - Data visualization and data science, Hadley Wickham](https://www.youtube.com/watch?v=9YTNYT1maa4)
+-   Practical high level intros to Tufte's principles
+    -   [What should we do to improve our graphics and figures?](https://www.youtube.com/watch?v=00Fha1lkRxk)
+    -   [Graphical Excellence](https://www.youtube.com/watch?v=VkyzSAPkQ50)
+- Workshop: [Missing Data Exploration, Imputation, and Evaluation](https://www.youtube.com/watch?v=MTHgZNB5Wxw) by Hanne Oberman
+- [Violin plots should not exist](https://www.youtube.com/watch?v=_0QMKFzW9fw) by Angela Collier 
+
+### Podcasts
+
+-   [Data Viz Today](https://dataviztoday.com/)
+-   [Data Stories](https://datastori.es/)
+-   [PolicyViz](https://policyviz.com/podcast/)
+
+### Other
+
+-   [biovis](http://biovis.net/)

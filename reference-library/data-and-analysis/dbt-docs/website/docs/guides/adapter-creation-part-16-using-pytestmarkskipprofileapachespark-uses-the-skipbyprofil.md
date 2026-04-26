@@ -1,0 +1,1 @@
+# Using @pytest.mark.skip_profile('apache_spark') uses the 'skip_by_profile_type'

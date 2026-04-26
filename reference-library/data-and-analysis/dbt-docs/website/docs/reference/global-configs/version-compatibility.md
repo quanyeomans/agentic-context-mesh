@@ -1,0 +1,24 @@
+---
+title: "Checking version compatibility"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+For the first several years of <Constant name="core" />'s development, breaking changes were more common. For this reason, we encouraged setting [dbt version requirements](/reference/project-configs/require-dbt-version) &mdash; especially if they use features that are newer or which may break in future versions of <Constant name="core" />. By default, if you run a project with an incompatible dbt version, dbt will raise an error.
+
+You can use the `VERSION_CHECK` config to disable this check and suppress the error message:
+
+```
+$ dbt run --no-version-check
+Running with dbt=1.0.0
+Found 13 models, 2 tests, 1 archives, 0 analyses, 204 macros, 2 operations....
+```
+
+:::note <Constant name="dbt" /> release tracks
+<Snippet path="_config-dbt-version-check" />
+
+:::

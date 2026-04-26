@@ -1,0 +1,5 @@
+# 16_daca_hitl: Human-in-the-Loop (HITL) Integration with DACA
+
+Welcome to the sixteenth tutorial in our **Dapr Agentic Cloud Ascent (DACA)** series! In this step, we’ll introduce **Human-in-the-Loop (HITL)** integration into our microservices architecture. We’ll modify the Chat Service to include a workflow where an agent flags certain messages as requiring human review (e.g., potentially sensitive content). The agent will emit a "HumanReviewRequired" event, pause the workflow, and wait for human input. We’ll build a simple **Streamlit** UI for a human to approve or reject the agent’s decision, and integrate the feedback loop with Dapr by publishing a "HumanDecisionMade" event. The workflow will then resume based on the human’s decision. This HITL integration ensures that critical decisions involve human oversight, enhancing the reliability and safety of our system. Let’s dive in!
+
+---

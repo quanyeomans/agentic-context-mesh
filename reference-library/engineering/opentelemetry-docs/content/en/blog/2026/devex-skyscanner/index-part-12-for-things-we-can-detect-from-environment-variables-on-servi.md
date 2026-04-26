@@ -1,0 +1,1 @@
+# for things we can detect from environment variables on service launch

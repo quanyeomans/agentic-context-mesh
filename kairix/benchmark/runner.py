@@ -324,6 +324,7 @@ def _retrieve(
     system: str,
     agent: str,
     limit: int = 10,
+    db_path: str | None = None,
 ) -> tuple[list[str], list[str], dict[str, Any]]:
     """
     Run retrieval and return (paths, snippets, metadata).
@@ -364,8 +365,13 @@ def _retrieve(
 
         return mock_retrieve(query=query, limit=limit)
 
+    elif system == "mock-reflib":
+        from kairix.benchmark.mock_reflib_retrieval import mock_reflib_retrieve
+
+        return mock_reflib_retrieve(query=query, limit=limit)
+
     else:
-        raise ValueError(f"Unknown system: {system!r}. Use 'hybrid', 'bm25', 'vector', or 'mock'.")
+        raise ValueError(f"Unknown system: {system!r}. Use 'hybrid', 'bm25', 'vector', 'mock', or 'mock-reflib'.")
 
 
 # ---------------------------------------------------------------------------
@@ -450,15 +456,18 @@ def run_benchmark(
     system: str = "hybrid",
     agent: str = "shape",
     output_dir: str | None = None,
+    db_path: str | None = None,
 ) -> BenchmarkResult:
     """
     Run all benchmark cases and return a BenchmarkResult.
 
     Args:
         suite:      Loaded and validated BenchmarkSuite.
-        system:     Retrieval system: 'hybrid', 'bm25', or 'vector'.
+        system:     Retrieval system: 'hybrid', 'bm25', 'vector', 'mock', or 'mock-reflib'.
         agent:      Agent name for collection scoping.
         output_dir: If set, write JSON result file here.
+        db_path:    Optional path to a specific database. Propagated to the retrieval
+                    backend so it can target a specific store. None means use the default.
 
     Returns:
         BenchmarkResult with summary, category scores, and per-case results.
@@ -558,6 +567,7 @@ def run_benchmark(
                     query=case.query,
                     system=system,
                     agent=case.agent or agent,
+                    db_path=db_path,
                 )
             except Exception as exc:
                 paths, snippets, retrieval_meta = [], [], {"error": str(exc)}

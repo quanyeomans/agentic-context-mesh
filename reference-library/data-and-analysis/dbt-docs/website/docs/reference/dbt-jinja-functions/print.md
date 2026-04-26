@@ -1,0 +1,21 @@
+---
+title: "About print function"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+Use the `print()` function when you want to print messages to both the log file and standard output (stdout).
+
+When used in conjunction with the `QUIET` global config, which suppresses non-error logs, you will only see error logs and the print messages in stdout. For more information, see [Global configs](/reference/global-configs/about-global-configs).
+
+## Example 
+
+```sql
+  {% macro some_macro(arg1, arg2) %}
+    {{ print("Running some_macro: " ~ arg1 ~ ", " ~ arg2) }}
+  {% endmacro %}
+```

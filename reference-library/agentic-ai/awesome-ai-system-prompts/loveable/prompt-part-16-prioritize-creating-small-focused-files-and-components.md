@@ -1,0 +1,1 @@
+# Prioritize creating small, focused files and components.

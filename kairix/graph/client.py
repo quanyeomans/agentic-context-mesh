@@ -20,7 +20,16 @@ import logging
 import os
 from typing import Any
 
-from kairix.graph.models import GraphEdge, OrganisationNode, OutcomeNode, PersonNode
+from kairix.graph.models import (
+    ConceptNode,
+    FrameworkNode,
+    GraphEdge,
+    OrganisationNode,
+    OutcomeNode,
+    PersonNode,
+    PublicationNode,
+    TechnologyNode,
+)
 from kairix.secrets import load_secrets as _load_secrets
 
 # Load vault-agent sidecar secrets before env-var reads.
@@ -39,6 +48,10 @@ _CONSTRAINT_QUERIES = [
     "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (n:Person) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT outcome_id IF NOT EXISTS FOR (n:Outcome) REQUIRE n.id IS UNIQUE",
     "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (n:Document) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT concept_id IF NOT EXISTS FOR (n:Concept) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT framework_id IF NOT EXISTS FOR (n:Framework) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT technology_id IF NOT EXISTS FOR (n:Technology) REQUIRE n.id IS UNIQUE",
+    "CREATE CONSTRAINT publication_id IF NOT EXISTS FOR (n:Publication) REQUIRE n.id IS UNIQUE",
 ]
 
 
@@ -160,6 +173,78 @@ class Neo4jClient:
             return True
         except Exception as e:
             logger.warning("upsert_outcome(%s): %s", node.id, e)
+            return False
+
+    def upsert_concept(self, node: ConceptNode) -> bool:
+        if not self._driver:
+            return False
+        try:
+            with self._driver.session() as session:
+                session.run(
+                    """
+                    MERGE (n:Concept {id: $id})
+                    SET n += $props
+                    """,
+                    id=node.id,
+                    props=node.to_neo4j_props(),
+                )
+            return True
+        except Exception as e:
+            logger.warning("upsert_concept(%s): %s", node.id, e)
+            return False
+
+    def upsert_framework(self, node: FrameworkNode) -> bool:
+        if not self._driver:
+            return False
+        try:
+            with self._driver.session() as session:
+                session.run(
+                    """
+                    MERGE (n:Framework {id: $id})
+                    SET n += $props
+                    """,
+                    id=node.id,
+                    props=node.to_neo4j_props(),
+                )
+            return True
+        except Exception as e:
+            logger.warning("upsert_framework(%s): %s", node.id, e)
+            return False
+
+    def upsert_technology(self, node: TechnologyNode) -> bool:
+        if not self._driver:
+            return False
+        try:
+            with self._driver.session() as session:
+                session.run(
+                    """
+                    MERGE (n:Technology {id: $id})
+                    SET n += $props
+                    """,
+                    id=node.id,
+                    props=node.to_neo4j_props(),
+                )
+            return True
+        except Exception as e:
+            logger.warning("upsert_technology(%s): %s", node.id, e)
+            return False
+
+    def upsert_publication(self, node: PublicationNode) -> bool:
+        if not self._driver:
+            return False
+        try:
+            with self._driver.session() as session:
+                session.run(
+                    """
+                    MERGE (n:Publication {id: $id})
+                    SET n += $props
+                    """,
+                    id=node.id,
+                    props=node.to_neo4j_props(),
+                )
+            return True
+        except Exception as e:
+            logger.warning("upsert_publication(%s): %s", node.id, e)
             return False
 
     def upsert_edge(self, edge: GraphEdge) -> bool:

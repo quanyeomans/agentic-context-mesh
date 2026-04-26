@@ -1,0 +1,17 @@
+---
+title: "Why is Run on Pull request grayed out?"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+If you're unable to enable Run on Pull requests, you'll want to make sure your existing repo was not added via the Deploy Key auth method.
+
+If it was added via a deploy key method, you'll want to use the [GitHub auth method](/docs/cloud/git/connect-github) to enable CI in <Constant name="dbt" />.
+
+To go ahead and enable 'Run on Pull requests', you'll want to remove <Constant name="dbt" /> from the Apps & Integration on GitHub and re-integrate it again via the GitHub app method.
+
+If you've tried the workaround above and are still experiencing this behavior - reach out to the Support team at support@getdbt.com and we'll be happy to help!

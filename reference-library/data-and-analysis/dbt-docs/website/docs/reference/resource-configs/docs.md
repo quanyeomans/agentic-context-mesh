@@ -1,0 +1,350 @@
+---
+title: "Definition"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+<Tabs
+  defaultValue="models"
+  values={[
+    { label: 'Models', value: 'models', },
+    { label: 'Sources', value: 'sources', },
+    { label: 'Seeds', value: 'seeds', },
+    { label: 'Snapshots', value: 'snapshots', },
+    { label: 'Analyses', value: 'analyses', },
+    { label: 'Macros', value: 'macros', },
+  ]
+}>
+
+<TabItem value="models">
+
+You can configure `docs` behavior for many resources at once by setting in `dbt_project.yml`. You can also use the `docs` config in `properties.yaml` files, to set or override documentation behaviors for specific resources:
+
+
+<File name='dbt_project.yml'>
+
+```yml
+models:
+  [<resource-path>](/reference/resource-configs/resource-path):
+    +docs:
+      show: true | false
+      node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+
+```
+
+</File>
+
+<File name='models/schema.yml'>
+
+  ```yml
+
+models:
+  - name: model_name
+    config:
+      docs: # changed to config in v1.10
+        show: true | false
+        node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+```
+</File>
+
+</TabItem>
+
+<TabItem value="sources">
+
+The `docs` config isn’t supported for sources.
+
+</TabItem>
+
+<TabItem value="seeds">
+
+You can use the `docs` config in YAML files, including the `dbt_project.yml`:
+
+<File name='dbt_project.yml'>
+
+```yml
+seeds:
+  [<resource-path>](/reference/resource-configs/resource-path):
+    +docs:
+      show: true | false
+      node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+```
+
+</File>
+
+<File name='seeds/schema.yml'>
+
+```yml
+
+seeds:
+  - name: seed_name
+    config:
+      docs: # changed to config in v1.10
+        show: true | false
+        node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+```
+</File>
+
+</TabItem>
+
+<TabItem value="snapshots">
+
+You can use the `docs` config in YAML files, including the `dbt_project.yml`:
+
+<File name='dbt_project.yml'>
+
+```yml
+snapshots:
+  [<resource-path>](/reference/resource-configs/resource-path):
+    +docs:
+      show: true | false
+      node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+
+```
+
+</File>
+
+<File name='snapshots/schema.yml'>
+
+```yml
+
+snapshots:
+  - name: snapshot_name
+    config:
+      docs: # changed to config in v1.10
+        show: true | false
+        node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+```
+</File>
+
+</TabItem>
+
+<TabItem value="analyses">
+
+You can configure `docs` for analyses in the `config` block under `analyses:` in your YAML file. Refer to [Analysis properties](/reference/analysis-properties) for more information.
+
+
+<File name='analysis/schema.yml'>
+
+```yml
+
+analyses:
+  - name: analysis_name
+    config:
+      docs: # changed to config in v1.10
+        show: true | false
+        node_color: color_id # Use name (such as node_color: purple) or hex code with quotes (such as node_color: "#cd7f32")
+```
+</File>
+
+</TabItem>
+
+<TabItem value="macros">
+
+You can configure `docs` for macros in the `config` block under `macros:` in your YAML file. Refer to [Macro properties](/reference/macro-properties) for more information.
+
+<File name='macros/schema.yml'>
+
+```yml
+macros:
+  - name: macro_name
+    config: 
+      docs: # changed to config in v1.11
+        show: true | false
+```
+
+</File>
+
+</TabItem>
+
+</Tabs>
+
+Note that for backwards compatibility, `docs` is supported as a top-level key, but without the capabilities of config inheritance.
+
+## Definition
+You can use the `docs` config to provide documentation-specific configuration for resources. It supports the following attributes:
+- `show`: Controls whether nodes appears in the auto-generated documentation website.
+- `node_color`: Controls the colors of nodes displayed in the DAG. This is supported for models, seeds, snapshots, and analyses. Other node types are not supported.
+
+**Note:** Hidden models will still appear in the dbt DAG visualization but will be identified as "hidden.”
+
+## Default
+The default value for `show` is `true`.
+
+## Examples
+### Mark a model as hidden
+
+```yml
+models:
+  - name: sessions__tmp
+    docs:
+      show: false
+```
+
+### Mark a subfolder of models as hidden
+
+**Note:** This can also hide dbt packages.
+
+<File name='dbt_project.yml'>
+
+```yml
+models:
+  # hiding models within the staging subfolder
+  tpch:
+    staging:
+      +materialized: view
+      +docs:
+        show: false
+  
+  # hiding a dbt package
+  dbt_artifacts:
+    +docs:
+      show: false
+```
+
+</File>
+
+## Custom node colors
+
+The `docs` attribute supports `node_color` to customize the display color of some node types in the DAG within [dbt Docs](/docs/build/view-documentation). You can define node colors in the following files and apply overrides where needed. 
+
+- `node_color` hierarchy:
+  - `<example-sql-file.sql>` overrides `schema.yml` overrides `dbt_project.yml`
+
+Note, you need to run or re-run the `dbt docs generate` command to apply and view the customized colors.
+
+:::info Custom node colors not applicable in <Constant name="catalog" />
+
+The custom `node_color` attribute isn't applicable in <Constant name="catalog" />. Instead, Explorer provides [lenses](/docs/explore/explore-projects#lenses), which are map layers for your <Term id="dag"/>. Lenses help you better understand your project's contextual metadata at scale and distinguish specific models or subsets of models.
+
+:::
+
+## Examples
+
+Add custom `node_colors` to models that support it within subdirectories based on hex codes or a plain color name.
+
+![Example](../../../../website/static/img/node_color_example.png)
+
+`marts/core/fct_orders.sql` with `node_color: red` overrides `dbt_project.yml` with `node_color: gold`
+
+`marts/core/schema.yml` with `node_color: #000000` overrides `dbt_project.yml` with `node_color: gold`
+<File name='dbt_project.yml'>
+
+```yml
+models:
+  tpch:
+    staging:
+      +materialized: view
+      +docs:
+        node_color: "#cd7f32"
+
+    marts:
+      core:
+        materialized: table
+        +docs:
+          node_color: "gold"
+```
+
+</File>
+
+<File name='marts/core/schema.yml'>
+
+```yml
+models:
+  - name: dim_customers
+    description: Customer dimensions table
+    docs:
+      node_color: '#000000'
+```
+
+</File>
+
+<File name='marts/core/fct_orders.sql'>
+
+```sql
+{{
+    config(
+        materialized = 'view',
+        tags=['finance'],
+        docs={'node_color': 'red'}
+    )
+}}
+
+with orders as (
+    
+    select * from {{ ref('stg_tpch_orders') }} 
+
+),
+order_item as (
+    
+    select * from {{ ref('order_items') }}
+
+),
+order_item_summary as (
+
+    select 
+        order_key,
+        sum(gross_item_sales_amount) as gross_item_sales_amount,
+        sum(item_discount_amount) as item_discount_amount,
+        sum(item_tax_amount) as item_tax_amount,
+        sum(net_item_sales_amount) as net_item_sales_amount
+    from order_item
+    group by
+        1
+),
+final as (
+
+    select 
+
+        orders.order_key, 
+        orders.order_date,
+        orders.customer_key,
+        orders.status_code,
+        orders.priority_code,
+        orders.clerk_name,
+        orders.ship_priority,
+                
+        1 as order_count,                
+        order_item_summary.gross_item_sales_amount,
+        order_item_summary.item_discount_amount,
+        order_item_summary.item_tax_amount,
+        order_item_summary.net_item_sales_amount
+    from
+        orders
+        inner join order_item_summary
+            on orders.order_key = order_item_summary.order_key
+)
+select 
+    *
+from
+    final
+
+order by
+    order_date
+
+```
+
+</File>
+
+If a `node_color` is incompatible with dbt docs, you will see a compile error, as in the example below.
+
+```shell
+Invalid color name for docs.node_color: aweioohafio23f. It is neither a valid HTML color name nor a valid HEX code.
+```
+
+<File name='dbt_project.yml'>
+
+```yml
+models:
+  tpch:
+    marts:
+      core:
+        materialized: table
+        +docs:
+          node_color: "aweioohafio23f"
+```
+
+</File>

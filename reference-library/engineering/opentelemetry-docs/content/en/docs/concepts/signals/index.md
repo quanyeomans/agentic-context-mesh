@@ -1,0 +1,35 @@
+---
+title: "Signals"
+source: OpenTelemetry Documentation
+source_url: https://github.com/open-telemetry/opentelemetry.io
+licence: CC-BY-4.0
+domain: engineering
+subdomain: opentelemetry-docs
+date_added: 2026-04-25
+---
+
+The purpose of OpenTelemetry is to collect, process, and export [signals][].
+Signals are system outputs that describe the underlying activity of the
+operating system and applications running on a platform. A signal can be
+something you want to measure at a specific point in time, like temperature or
+memory usage, or an event that goes through the components of your distributed
+system that you'd like to trace. You can group different signals together to
+observe the inner workings of the same piece of technology under different
+angles.
+
+OpenTelemetry currently supports:
+
+- [Traces](traces)
+- [Metrics](metrics)
+- [Logs](logs)
+- [Baggage](baggage)
+
+Also under development or at the [proposal][] stage:
+
+- [Events][], a specific type of [log](logs)
+- [Profiles](profiles)
+
+[Events]: /docs/specs/otel/logs/data-model/#events
+[proposal]:
+  https://github.com/open-telemetry/opentelemetry-specification/tree/main/oteps/#readme
+[signals]: /docs/specs/otel/glossary/#signals

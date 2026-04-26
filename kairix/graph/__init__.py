@@ -16,17 +16,25 @@ Returns empty results rather than raising when Neo4j is unavailable.
 
 from kairix.graph.client import Neo4jClient, get_client
 from kairix.graph.models import (
+    ConceptNode,
     EdgeKind,
+    FrameworkNode,
     OrganisationNode,
     OutcomeNode,
     PersonNode,
+    PublicationNode,
+    TechnologyNode,
 )
 
 __all__ = [
+    "ConceptNode",
     "EdgeKind",
+    "FrameworkNode",
     "Neo4jClient",
     "OrganisationNode",
     "OutcomeNode",
     "PersonNode",
+    "PublicationNode",
+    "TechnologyNode",
     "get_client",
 ]

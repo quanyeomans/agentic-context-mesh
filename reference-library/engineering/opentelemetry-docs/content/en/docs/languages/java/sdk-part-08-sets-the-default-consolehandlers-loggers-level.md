@@ -1,0 +1,1 @@
+## Sets the default ConsoleHandler's logger's level

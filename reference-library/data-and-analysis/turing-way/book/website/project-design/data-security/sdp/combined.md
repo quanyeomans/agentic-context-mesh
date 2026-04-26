@@ -1,0 +1,33 @@
+---
+title: "Combination of different datasets"
+source: The Turing Way
+source_url: https://github.com/the-turing-way/the-turing-way
+licence: CC-BY-4.0
+domain: data-and-analysis
+subdomain: turing-way
+date_added: 2026-04-25
+---
+
+(pd-sdp-combined)=
+# Combination of different datasets
+
+(pd-sdp-combined-def)=
+## Definitions of combinations of different datasets
+
+Even when data may not seem sensitive, it can become sensitive through triangulation or data linkage.
+
+In triangulation, pieces of information within the same dataset are not identifiable on their own, but become identifiable when combined with other data. 
+For example, merging information about a participant's age with information about a particular medical condition may make them identifiable.
+
+In data linkage, two or more anonymised datasets containing the same individuals are combined, which in turn increases the risk of identification. 
+For example, combining a dataset of hospital episode statistics with a dataset of educational information may make it possible to identify individuals within the dataset.
+
+A useful link about this issue is the section on planning, and particularly triangulation, in the guide for [Research Data and Information management](https://www.jcu.edu.au/rdim/step-1-plan) by James Cook University.
+
+(pd-sdp-combined-examples)=
+## Examples of projects with a combination of different datasets
+
+* [Hardelid 2014](https://doi.org/10.1136/bmjopen-2014-005331) on chronic conditions in children in the UK
+
+## Resources
+* [Privacy Meter](https://github.com/privacytrustlab/ml_privacy_meter), a Github repository with resources that enable users to evaluate the privacy risk of algorithms.

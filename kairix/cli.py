@@ -16,6 +16,7 @@ Subcommands:
   brief       Session briefing synthesis
   benchmark   Run retrieval quality benchmark
   wikilinks   Inject [[wikilinks]] on first mention in agent-written vault files
+  reference-library  Reference library: install entities, check status, run extraction
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -114,6 +115,11 @@ def main() -> None:
         from kairix.eval.cli import main as eval_main
 
         eval_main(sys.argv[2:])
+
+    elif cmd == "reference-library":
+        from kairix.reflib.cli import main as reflib_main
+
+        reflib_main(sys.argv[2:])
 
     elif cmd == "setup":
         from kairix.setup.cli import main as setup_main

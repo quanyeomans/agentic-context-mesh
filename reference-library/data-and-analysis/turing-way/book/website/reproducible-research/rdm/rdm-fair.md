@@ -1,0 +1,98 @@
+---
+title: "The FAIR Principles"
+source: The Turing Way
+source_url: https://github.com/the-turing-way/the-turing-way
+licence: CC-BY-4.0
+domain: data-and-analysis
+subdomain: turing-way
+date_added: 2026-04-25
+---
+
+(rr-rdm-fair)=
+# The FAIR Principles
+
+The FAIR guiding principles for scientific data management and stewardship @Wilkinson2016fair were developed as guidelines to improve the **F**indability, **A**ccessibility, **I**nteroperability and **R**eusability of digital assets; all of which support research reproducibility.
+The FAIR principles play an important role in making your data available to others for reuse.
+The [majority of European funders and research institutes](https://doi.org/10.5281/zenodo.13961123) now also require their researchers to make their research outputs FAIR. 
+
+It is much easier to make data FAIR if you plan to do this from the beginning of your research project.
+You can plan for this in your Data Management Plan (DMP) (see points 4 and 5 in [](#rr-rdm-dmp).
+
+Even though the FAIR principles have been defined to allow machines to find and use digital objects automatically, they improve the reusability of data by humans as well.
+The capacity of computational systems to find, access, interoperate, and reuse data, with none or minimal human intervention, is essential in today's data-driven era, where humans increasingly rely on computational support to deal with data as a result of the increase in [volume, velocity and
+variety](https://www.zdnet.com/article/volume-velocity-and-variety-understanding-the-three-vs-of-big-data/).
+
+This chapter provides an abstract and broad view of what the FAIR principles are, how to put the FAIR principles into practice is discussed in other sub chapters ([](#rr-rdm-spreadsheets), [](#rr-rdm-metadata) and [](#rr-rdm-sharing)).
+You can also use the [Wellcome Getting Started Guide](https://f1000researchdata.s3.amazonaws.com/resources/FAIR_Open_GettingStarted.pdf) or the [How To FAIR](https://howtofair.dk/) website to find out more about the FAIR principles and how to get started.
+
+```{figure} ../../../figures/fair-principles.*
+---
+name: fair-principles
+alt: >
+  Image in green and grey scale showing a winding, climbing pathway made of jigsaw pieces representing the FAIR principles, with stick figures continuing to build the pathway at the top.
+  In the top left hand corner, a highlight bubble shows a signposted pathway with a location marker labelled persistent as a visual representation of findable.
+  In the top right hand corner a highlight bubble shows a key unlocking a padlock with the text meaningful interaction as a visual representation of accessible.
+  In the bottom left hand corner a highlight bubble shows sharing between two computers as a visual representation of interoperable.
+  In the bottom right hand corner a highlight bubble shows a completed puzzle with the text full disclosure as a visual representation of reusable.
+---
+_The Turing Way_ project illustration by Scriberia. Used under a CC-BY 4.0 licence. DOI: [10.5281/zenodo.3332807](https://doi.org/10.5281/zenodo.3332807).
+```
+
+(rr-rdm-fair-theory)=
+## Theory
+
+In brief, FAIR data should be:
+
+**Findable:** The first step in (re)using data is to find it!
+Descriptive metadata (information about the data such as keywords) is essential.
+[Persistent identifiers (PIDs)](#rr-rdm-pid) are fundamental to making research findable - they provide globally unique identifiers that resolve to landing pages with rich metadata. 
+
+**Accessible:** Once the user finds the data and software they need to know how to access it.
+Data could be openly available but it is also possible that authentication and authorisation procedures are necessary.
+PIDs resolve to landing pages that describe access conditions even for restricted resources.
+Learn more in our [PIDs and FAIR Principles](#rr-rdm-pid-fair) section.
+
+**Interoperable:** Data needs to be integrated with other data and interoperate with applications or workflows.
+
+**Reusable:** Data should be well-described so that they can be used, combined, and extended in different settings.
+
+You can find a more detailed [overview of the FAIR principles by GO FAIR](https://www.go-fair.org/fair-principles) of what the FAIR principles recommend.
+You can also read [A FAIRy tale](https://doi.org/10.5281/zenodo.2248200) for an understandable explanation of each principle.
+
+Making data 'FAIR' is not the same as making it 'open'.
+Accessible means that there is a procedure in place to access the data.
+Data should be as open as possible, and as closed as necessary.
+
+It is also important to say that the FAIR principles are aspirational: they do not strictly define how to achieve a state of FAIRness, but rather describe a continuum of features, attributes, and behaviours that will move a digital resource closer to that goal.
+
+The FAIR principles are also applied to software (see [Chue Hong et al. 2022](https://doi.org/10.15497/RDA00068) and [Barker et al. 2022](https://doi.org/10.1038/s41597-022-01710-x)). 
+Watch a [ten minute video on FAIR software](https://www.youtube.com/watch?v=ME8_NRGRhSs&list=PL1CvC6Ez54KDvJbbdLn5rPvf1kInifEh9&index=16) for a short explanation.
+
+## FAIR principles and environmental sustainability
+
+> "FAIR practices can result in highly efficient code implementations, reduce the need to retrain models, and reduce unnecessary data generation/storage, thus reducing the overall carbon footprint.
+> As a result, green computing and FAIR practices may boht stimulate innovation and reduce financial costs." - {cite:ps}`Lannelongue2023greener`
+
+## FAIR principles and accessibility
+
+The Accessible in FAIR is not equal to ensuring that your research objects are accessibles to all users. 
+For this, the term “actually accessible” has been coined by {cite:ps}`Colon2023accessibility` to refer to data that is "easy to locate, obtain, interpret, use, share, and analyze for everybody, including disabled people."
+
+(rr-rdm-fair-community)=
+## Community involvement
+
+Various online resources with tools and advice for good data management are available, such as: 
+* The [FAIR Cookbook](https://faircookbook.elixir-europe.org/content/home.html), designed to serve a variety of audience types and involved in different stages of data management life cycle.
+The FAIR Cookbook is developed and maintained by life sciences professionals, both in the academia and industry sectors, including members of the ELIXIR community. 
+* The [ELIXIR Research Data Management Kit (RDMkit)](https://rdmkit.elixir-europe.org/), with resources for individual life scientists and collaborative workspaces.
+The RDMkit is open for suggestions from anyone, as long as they abide by the [contributor responsibilities](https://rdmkit.elixir-europe.org/how_to_contribute).
+
+Many groups and organisations are working to define guidance and tools to help researchers and other stakeholders (like librarians, funders, publishers, and trainers) make data more FAIR.
+There are two global initiatives that act as umbrella organisations and reference points for many discipline-specific efforts, including the ones listed above: [GOFAIR](https://www.go-fair.org) and the [Research Data Alliance (RDA)](https://www.rd-alliance.org).
+* Under GOFAIR, there are many [Implementation Networks (INs)](https://www.go-fair.org/implementation-networks) committed to implementing the FAIR principles.
+* Under the RDA, there are several groups tackling different aspects relevant to the RDM life cycle. Among these, one group, the [FAIR Data Maturity Model Working Group](https://www.rd-alliance.org/groups/fair-data-maturity-model-wg) is reviewing existing efforts, building on them to define a standard set of common assessment criteria for the evaluation of FAIRness.
+
+## More information
+- Deep dive into the [FAIR principles by Dr. Maryann Martone](https://www.youtube.com/watch?v=xx2wHxQfcnA) (45 minute video)
+- [Reproducible and FAIR Teaching Materials](https://lennartwittkuhn.com/dra-fair-teaching/#/title-slide)
+- [FAIR: Guía de Referencia General](https://doi.org/10.5281/zenodo.15856491)

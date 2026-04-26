@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 STALENESS_THRESHOLD_DAYS = 90
 
-_ENTITY_LABELS = ("Organisation", "Person", "Outcome", "Concept", "Project")
+_ENTITY_LABELS = ("Organisation", "Person", "Outcome", "Concept", "Project", "Framework", "Technology", "Publication")
 
 
 @dataclass
