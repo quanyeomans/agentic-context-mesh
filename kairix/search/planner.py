@@ -40,7 +40,8 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
                 if m.get("id") and m["id"] not in seen_ids:
                     seen_ids.add(m["id"])
                     found_entities.append(m)
-        except Exception:  # noqa: S112
+        except Exception:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
+            logger.debug("planner: Neo4j find_by_name failed for word %r", word)
             continue
 
     if not found_entities:
@@ -57,7 +58,8 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
             rel_names = [r.get("name") for r in related[:4] if r.get("name") and r.get("name") != ename]
             if rel_names:
                 context_parts.append(f"- {ename} → {', '.join(rel_names)}")
-        except Exception:  # noqa: S112
+        except Exception:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
+            logger.debug("planner: Neo4j related_entities failed for entity %r", eid)
             continue
 
     return "\n".join(context_parts) if len(context_parts) > 1 else None
@@ -111,7 +113,7 @@ class QueryPlanner:
             if neo4j_client is not None and getattr(neo4j_client, "available", False):
                 try:
                     ctx = _neo4j_graph_context(query, neo4j_client)
-                except Exception:
+                except Exception:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
                     logger.debug("planner: Neo4j graph context unavailable")
             if ctx:
                 prompt = _DECOMPOSE_PROMPT_WITH_CONTEXT.format(entity_context=ctx, query=query)

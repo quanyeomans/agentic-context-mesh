@@ -96,6 +96,9 @@ def synthesise(
         return result.strip()
     except Exception as e:
         logger.warning("synthesiser: synthesis API call failed - %s", e)
+        # str(e) is acceptable here: _fallback_briefing embeds it in a markdown
+        # block that is written to a local file, not returned to an external caller.
+        # The briefing is consumed by the agent operator, not an untrusted API client.
         return _fallback_briefing(agent, str(e))
 
 

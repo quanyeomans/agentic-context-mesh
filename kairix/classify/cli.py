@@ -90,8 +90,14 @@ def main(args: list[str] | None = None) -> None:
         print(json.dumps(output))
 
     except ValueError as e:
-        print(json.dumps({"error": str(e)}), file=sys.stderr)
+        print(json.dumps({"error": "Classification failed — check server logs"}), file=sys.stderr)
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning("classify CLI ValueError: %s", e)
         sys.exit(1)
     except Exception as e:
-        print(json.dumps({"error": f"Unexpected error: {e}"}), file=sys.stderr)
+        print(json.dumps({"error": "Classification failed — check server logs"}), file=sys.stderr)
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning("classify CLI unexpected error: %s", e)
         sys.exit(1)

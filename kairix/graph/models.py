@@ -47,7 +47,7 @@ class OrganisationNode:
     """
     Represents an organisation entity.
 
-    id: slug derived from vault directory name (e.g. 'bupa', 'avanade')
+    id: slug derived from vault directory name (e.g. 'bupa', 'acme-corp')
     name: canonical display name
     industry: list of industry tags (e.g. ['healthcare', 'insurance'])
     geography: list of geography tags (e.g. ['ANZ', 'AU'])
@@ -96,7 +96,7 @@ class PersonNode:
     org: organisation id this person belongs to
     role: job title / role description
     interests: list of interest/topic tags for CONTEXTUAL_PREP expansion
-    relationship_type: 'client-stakeholder' | 'network' | 'avanade-colleague'
+    relationship_type: 'client-stakeholder' | 'network' | 'professional-network'
     last_interaction: ISO date string of most recent interaction (YYYY-MM-DD)
     vault_path: relative path to canonical note in vault
     aliases: alternative names

@@ -252,7 +252,7 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
             ).fetchall()
         finally:
             db.close()
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         logger.warning("hybrid: _enrich_chunk_dates DB query failed — %s", e)
         return
 
@@ -461,7 +461,7 @@ def _apply_entity_boost(
     """
     try:
         fused = entity_boost_neo4j(fused, neo4j_client, config=cfg.entity)
-    except Exception as _eb_e:
+    except Exception as _eb_e:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
         logger.warning("hybrid: entity_boost_neo4j failed — %s", _eb_e)
     return fused
 
@@ -612,7 +612,7 @@ def search(
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
         try:
             return _run_multi_hop(query, agent, scope, budget, cfg, neo4j_client, collections, t_start)
-        except Exception as _mh_e:
+        except Exception as _mh_e:  # broad catch justified: planner involves LLM + Neo4j — diverse failure modes
             logger.warning("hybrid: MULTI_HOP planner failed (%s) — falling back to SEMANTIC", _mh_e)
             intent = QueryIntent.SEMANTIC
 
@@ -663,7 +663,7 @@ def search(
     # Populate chunk_date metadata for TMP-7B (only when DB available)
     try:
         _enrich_chunk_dates(fused, get_db_path())
-    except Exception as _cde:
+    except (sqlite3.Error, OSError) as _cde:
         logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
 
     # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
@@ -799,6 +799,6 @@ def _run_vector_search(
             )
         finally:
             db.close()
-    except Exception as e:
+    except Exception as e:  # broad catch justified: embed + sqlite-vec; never-raises contract
         logger.warning("hybrid: _run_vector_search failed — %s", e)
         return []

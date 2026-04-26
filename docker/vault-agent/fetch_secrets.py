@@ -12,7 +12,7 @@ Authentication via DefaultAzureCredential — supports (in order):
   3. Azure CLI         — for local dev (`az login`)
 
 Required environment variables:
-  KAIRIX_KV_NAME   Azure Key Vault name (e.g. kv-tc-exp)
+  KAIRIX_KV_NAME   Azure Key Vault name (e.g. kv-example)
 
 Optional:
   SECRETS_DIR              Where to write the secrets file (default: /run/secrets)

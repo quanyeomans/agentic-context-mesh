@@ -125,7 +125,7 @@ def _bm25_search_config(
             JOIN content c ON c.hash = d.hash
             WHERE documents_fts MATCH ?
               AND d.active = 1
-            ORDER BY bm25(documents_fts, {w_fp}, {w_title}, {w_doc}) ASC
+            ORDER BY bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) ASC
             LIMIT ?
             """,
             (fts_query, limit),

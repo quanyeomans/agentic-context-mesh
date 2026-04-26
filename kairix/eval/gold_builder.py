@@ -101,7 +101,7 @@ def _bm25_search_with_weights(
             placeholders = ",".join("?" * len(collections))
             sql = f"""
                 SELECT d.collection, d.path, d.title, c.doc,
-                       bm25(documents_fts, {w_fp}, {w_title}, {w_doc}) AS score
+                       bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) AS score
                 FROM documents_fts
                 JOIN documents d ON d.id = documents_fts.rowid
                 JOIN content c ON c.hash = d.hash
@@ -115,7 +115,7 @@ def _bm25_search_with_weights(
         else:
             sql = f"""
                 SELECT d.collection, d.path, d.title, c.doc,
-                       bm25(documents_fts, {w_fp}, {w_title}, {w_doc}) AS score
+                       bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) AS score
                 FROM documents_fts
                 JOIN documents d ON d.id = documents_fts.rowid
                 JOIN content c ON c.hash = d.hash
