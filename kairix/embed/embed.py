@@ -421,7 +421,7 @@ def run_embed(
 
         try:
             vectors = embed_batch(texts, api_key, endpoint, deployment, actual_dims)
-        except Exception as e:
+        except (requests.RequestException, RuntimeError, KeyError, ValueError) as e:
             logger.error(f"Batch {batch_idx} failed: {e} — logging {len(batch)} chunks as failed")
             failed_chunks.extend(batch)
             continue
@@ -451,13 +451,13 @@ def run_embed(
                 100.0 * embedded / total if total > 0 else 0,
                 batch_idx + 1,
             )
-        except Exception as e:
+        except (sqlite3.Error, struct.error) as e:
             logger.error(f"DB write for batch {batch_idx} failed: {e}")
             # Clear staging so the next batch starts clean
             try:
                 db.execute("DELETE FROM vec_staging")
                 db.commit()
-            except Exception:
+            except sqlite3.Error:
                 logger.debug("Non-critical cleanup failed", exc_info=True)
             # Dimension mismatch: QMD cron may have recreated vectors_vec with wrong dims.
             # Repair schema and retry the batch once.
@@ -491,7 +491,7 @@ def run_embed(
                     )
                     logger.info(f"Batch {batch_idx} retry succeeded after schema repair.")
                     continue
-                except Exception as retry_e:
+                except (sqlite3.Error, struct.error) as retry_e:
                     logger.error(f"DB write retry for batch {batch_idx} failed after schema repair: {retry_e}")
             failed_chunks.extend(batch)
             continue

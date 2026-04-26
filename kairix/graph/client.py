@@ -102,7 +102,7 @@ class Neo4jClient:
             self.available = True
             logger.info("Neo4jClient: connected to %s", self._uri)
             self._init_constraints()
-        except Exception as e:
+        except (OSError, RuntimeError, Exception) as e:  # broad: neo4j raises diverse types on connect fail
             logger.warning("Neo4jClient: connection failed — %s", e)
             self._driver = None
 
@@ -113,7 +113,7 @@ class Neo4jClient:
             for q in _CONSTRAINT_QUERIES:
                 try:
                     session.run(q)
-                except Exception as e:
+                except (RuntimeError, OSError) as e:
                     logger.warning("Neo4jClient: constraint init failed — %s", e)
 
     def close(self) -> None:

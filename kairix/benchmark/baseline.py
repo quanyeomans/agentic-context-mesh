@@ -24,8 +24,11 @@ Gate rules:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 REGRESSION_THRESHOLD: float = 0.02  # fail if weighted_total drops more than this
 CATEGORY_FLOOR: float = 0.50  # fail if any category drops below this
@@ -138,24 +141,25 @@ def run_gate(baseline_path: str, current_path: str) -> int:
     try:
         baseline = load_result(baseline_path)
     except (FileNotFoundError, ValueError) as e:
-        print(f"ERROR loading baseline: {e}", file=sys.stderr)
+        logger.error("Loading baseline: %s", e)
         return 1
 
     try:
         current = load_result(current_path)
     except (FileNotFoundError, ValueError) as e:
-        print(f"ERROR loading current result: {e}", file=sys.stderr)
+        logger.error("Loading current result: %s", e)
         return 1
 
     result = compare(baseline, current)
     for line in result["summary_lines"]:
-        print(line)
+        logger.info(line)
 
     return 0 if result["passed"] else 1
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     if len(sys.argv) != 3:
-        print("Usage: python -m kairix.benchmark.baseline <baseline.json> <current.json>")
+        logger.error("Usage: python -m kairix.benchmark.baseline <baseline.json> <current.json>")
         sys.exit(1)
     sys.exit(run_gate(sys.argv[1], sys.argv[2]))

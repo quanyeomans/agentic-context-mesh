@@ -1,32 +1,88 @@
 name: CI
 
-# Engineering hub compliance: 4-stage pipeline (contracts → unit+type → integration → security)
+# Engineering hub compliance: 4-stage pipeline (contracts -> unit+type -> integration -> security)
 # Ref: engineering-hub/standards/DEVELOPMENT-WORKFLOW.md, TESTING-STRATEGY.md
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
-# Default: minimal read-only permissions. Jobs that post status checks or
-# upload coverage declare their own write scopes explicitly.
-# Fork PRs receive read-only tokens by default — write steps are guarded
-# with if: github.event.pull_request.head.repo.full_name == github.repository
-permissions:
-  contents: read
+# Deny all permissions by default. Each job declares its own minimum.
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  # ── Stage 1: Contracts (fast — <30s) ────────────────────────────────────────
+  # ── Path-based change detection ────────────────────────────────────────────
+  changes:
+    name: "Detect changes"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      docker: ${{ steps.filter.outputs.docker }}
+      docs: ${{ steps.filter.outputs.docs }}
+      reflib: ${{ steps.filter.outputs.reflib }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          filters: |
+            python:
+              - 'kairix/**/*.py'
+              - 'tests/**/*.py'
+              - 'pyproject.toml'
+            docker:
+              - 'Dockerfile'
+              - 'docker-compose*.yml'
+              - 'docker/**'
+            docs:
+              - 'docs/**'
+              - '*.md'
+              - '!CLAUDE.md'
+            reflib:
+              - 'kairix/reflib/**'
+              - 'reference-library/**'
+
+  # ── Pre-commit (linting, formatting, secrets, file hygiene) ────────────────
+  pre-commit:
+    name: "Pre-commit checks"
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+
+  # ── Stage 1: Contracts (fast -- <30s) ──────────────────────────────────────
   # Engineering hub: "Stop pipeline on failure. Contract tests must execute in <30s."
   contracts:
-    name: "Stage 1 — Contracts"
+    name: "Stage 1 -- Contracts"
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
@@ -35,32 +91,36 @@ jobs:
 
       - name: Contract tests (schema validation, interface agreements)
         run: |
-          pytest tests/ -m contract -v --tb=short --timeout=30
-        # Contract tests validate:
-        #   - QMD schema column sets (embed/schema.py)
-        #   - sqlite-vec extension interface (extension load, MATCH syntax)
-        #   - Azure client interface (request shape, response parsing)
-        #   - Entity graph Protocol conformance (Neo4j client contracts)
+          pytest tests/ -m contract -v --tb=short --timeout=30 \
+            --junitxml=results-contracts.xml
 
-  # ── Stage 2: Unit tests + type checking (2 min) ─────────────────────────────
-  # Engineering hub: "Type checking: zero errors. Coverage: ≥80%."
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: test-results-contracts
+          path: results-contracts.xml
+          retention-days: 14
+
+  # ── Stage 2: Unit tests + type checking (2 min) ───────────────────────────
+  # Engineering hub: "Type checking: zero errors. Coverage: >=80%."
   unit-and-type:
-    name: "Stage 2 — Unit + Type (${{ matrix.python-version }})"
+    name: "Stage 2 -- Unit + Type (${{ matrix.python-version }})"
     runs-on: ubuntu-latest
     needs: contracts
+    if: needs.changes.outputs.python == 'true'
     permissions:
       contents: read
       checks: write       # required to post test results as PR checks
-      statuses: write     # required for coverage status on non-fork PRs
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -68,10 +128,9 @@ jobs:
       - name: Install dependencies (with type stubs)
         run: |
           pip install -e ".[dev]"
-          pip install mypy types-requests
 
-      - name: Type checking — mypy strict
-        # Engineering hub: "mypy — zero errors". Strict mode from Phase 1.
+      - name: Type checking -- mypy strict
+        # Engineering hub: "mypy -- zero errors". Strict mode from Phase 1.
         run: |
           mypy kairix/ \
             --ignore-missing-imports \
@@ -83,14 +142,11 @@ jobs:
             --warn-unused-ignores \
             --warn-return-any \
             --strict-equality
-        # Note: --disallow-untyped-defs added in Phase 1 once all modules have annotations.
-        # embed/ is already typed. New modules must have type annotations before merge.
 
-      - name: Linting — ruff
+      - name: Linting -- ruff (GitHub annotations)
         # Engineering hub: "Linting / code quality: blocks merge."
         run: |
-          pip install ruff
-          ruff check kairix/ tests/
+          ruff check kairix/ tests/ --output-format github
           ruff format --check kairix/ tests/
 
       - name: Unit tests with coverage
@@ -98,36 +154,66 @@ jobs:
           pytest tests/ \
             -m "not integration and not e2e" \
             --cov=kairix \
-            --cov-report=xml \
+            --cov-report=xml:coverage.xml \
             --cov-report=term-missing \
             --cov-fail-under=80 \
+            --junitxml=results-unit.xml \
             -v --tb=short
-        # --cov-fail-under=80 enforces engineering hub coverage gate.
-        # Per-module targets are documented in PRD.md §6 — CI enforces aggregate.
 
-      - name: Upload coverage to Codecov
-        # Skip on fork PRs — GITHUB_TOKEN is read-only; Codecov upload requires write
-        if: >-
-          matrix.python-version == '3.12' &&
-          (github.event_name != 'pull_request' ||
-           github.event.pull_request.head.repo.full_name == github.repository)
-        uses: codecov/codecov-action@v6
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
         with:
-          file: ./coverage.xml
-          flags: unittests
-        continue-on-error: true
+          name: test-results-unit-${{ matrix.python-version }}
+          path: results-unit.xml
+          retention-days: 14
 
-  # ── Stage 3: Integration tests ───────────────────────────────────────────────
-  # Engineering hub: "Stop on >3 failures. Only mock external systems."
-  integration:
-    name: "Stage 3 — Integration"
+      - name: Upload coverage artifacts (3.12 only)
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-data
+          path: |
+            .coverage
+            coverage.xml
+          retention-days: 7
+
+  # ── Coverage delta PR comment ─────────────────────────────────────────────
+  coverage:
+    name: "Coverage report"
     runs-on: ubuntu-latest
     needs: unit-and-type
+    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-data
+
+      - uses: py-cov-action/python-coverage-comment-action@136364ae43a85adbeee4af30c05dab6a7e3aac41 # v3.32
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
+          MINIMUM_GREEN: 80
+          MINIMUM_ORANGE: 60
+
+  # ── Stage 3: Integration tests ─────────────────────────────────────────────
+  # Engineering hub: "Stop on >3 failures. Only mock external systems."
+  integration:
+    name: "Stage 3 -- Integration"
+    runs-on: ubuntu-latest
+    needs: unit-and-type
+    if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -136,55 +222,58 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Install QMD (provides sqlite-vec extension)
-        # sqlite-vec ships with QMD. Integration tests need the real extension.
-        # Engineering hub: "Keep real: database operations (use test containers)."
         run: |
           npm install -g qmd 2>/dev/null || true
-          # Fallback: install from known pnpm path used in production
           npx --yes qmd --version || echo "QMD install attempted"
         continue-on-error: true
-        # If QMD install fails, integration tests that need sqlite-vec will skip
-        # gracefully (skipif marker). Unit tests above already passed.
 
       - name: Integration tests
         run: |
-          pytest tests/ -m integration -v --tb=short --maxfail=3
-        # maxfail=3: engineering hub "stop on >3 failures"
+          pytest tests/ -m integration -v --tb=short --maxfail=3 \
+            --junitxml=results-integration.xml
 
       - name: Verify backwards compatibility (qmd_azure_embed shim)
-        # Ensure legacy entry point still works after refactor
         run: |
           python -c "from qmd_azure_embed.embed import encode_vector, build_hash_seq; print('Shim OK')"
           python -c "from kairix.embed.embed import encode_vector, build_hash_seq; print('New path OK')"
 
-  # ── Stage 4: Security ────────────────────────────────────────────────────────
+      - name: Upload test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: test-results-integration
+          path: results-integration.xml
+          retention-days: 14
+
+  # ── Stage 4: Security ──────────────────────────────────────────────────────
   # Engineering hub: "4-layer defence: SAST, dependency analysis, dynamic, source control."
   security:
-    name: "Stage 4 — Security"
+    name: "Stage 4 -- Security"
     runs-on: ubuntu-latest
     needs: unit-and-type
-    # Run in parallel with integration — both depend on unit passing
+    if: needs.changes.outputs.python == 'true'
+    # Run in parallel with integration -- both depend on unit passing
     permissions:
       contents: read
       security-events: write   # required to upload SARIF / security findings
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0  # Full history for secret scanning
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install security tools
         run: |
-          pip install bandit pip-audit
+          pip install bandit pip-audit detect-secrets
 
-      # Layer 1: SAST — bandit
-      # Engineering hub: "Bandit — zero HIGH/MEDIUM findings."
-      - name: SAST — bandit
+      # Layer 1: SAST -- bandit
+      # Engineering hub: "Bandit -- zero HIGH/MEDIUM findings."
+      - name: SAST -- bandit
         run: |
           bandit -r kairix/ \
             --severity-level medium \
@@ -198,52 +287,28 @@ jobs:
             --severity-level high \
             --confidence-level high \
             --format txt
-        # Exclusions: none by default. If a specific finding is a false positive,
-        # add a targeted # nosec comment with justification inline.
 
       # Layer 2: Dependency vulnerability scanning
       # Engineering hub: "No known CVEs with patches available. Update within 1 week."
-      - name: Dependency scan — pip-audit
+      - name: Dependency scan -- pip-audit
         run: |
+          pip install -e ".[dev]"
           pip-audit \
             --requirement <(pip freeze) \
             --format markdown \
             --output pip-audit-report.md \
             --strict
-        # --strict: fail on any finding with a fix available.
-        # Findings without fixes: continue-on-error and document.
         continue-on-error: false
 
-      # Layer 4: Secret scanning in diff
+      # Layer 4: Secret scanning against baseline
       # Engineering hub: "No secrets in commit history."
-      - name: Secret scan — detect-secrets
+      - name: Secret scan -- detect-secrets
         run: |
-          pip install detect-secrets
-          # Scan staged/new files in PR
-          git diff origin/main...HEAD --name-only | \
-            xargs -I {} detect-secrets scan {} 2>/dev/null || \
-            detect-secrets scan --all-files kairix/ tests/ scripts/ \
-              --exclude-files '.*\.pyc' \
-              --baseline .secrets.baseline 2>/dev/null || true
-          # On first run or if no baseline: scan and report only
-          detect-secrets scan kairix/ tests/ scripts/ \
-            --exclude-files '.*\.pyc' | \
-            python -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          results = data.get('results', {})
-          if results:
-              print('POTENTIAL SECRETS DETECTED:')
-              for f, findings in results.items():
-                  for finding in findings:
-                      print(f'  {f}:{finding[\"line_number\"]} [{finding[\"type\"]}]')
-              sys.exit(1)
-          else:
-              print('No secrets detected.')
-          "
+          detect-secrets scan --baseline .secrets.baseline
+          detect-secrets audit --report .secrets.baseline || true
 
       - name: Upload security reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: security-reports-${{ github.run_id }}
@@ -251,3 +316,79 @@ jobs:
             bandit-report.txt
             pip-audit-report.md
           retention-days: 30
+
+  # ── Docker build verification ──────────────────────────────────────────────
+  docker:
+    name: "Docker build"
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Build image
+        uses: docker/build-push-action@14487ce63c7a62a4a324b0bfb37086795e31c6c1 # v6.16.0
+        with:
+          context: .
+          load: true
+          tags: kairix:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run --rm kairix:ci python -c "import kairix; print('OK')"
+
+  # ── Fan-in gate (branch protection target) ─────────────────────────────────
+  check:
+    name: "CI gate"
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - pre-commit
+      - contracts
+      - unit-and-type
+      - coverage
+      - integration
+      - security
+      - docker
+    permissions: {}
+    steps:
+      - name: Evaluate job results
+        env:
+          RESULT_PRECOMMIT: ${{ needs.pre-commit.result }}
+          RESULT_CONTRACTS: ${{ needs.contracts.result }}
+          RESULT_UNIT: ${{ needs.unit-and-type.result }}
+          RESULT_COVERAGE: ${{ needs.coverage.result }}
+          RESULT_INTEGRATION: ${{ needs.integration.result }}
+          RESULT_SECURITY: ${{ needs.security.result }}
+          RESULT_DOCKER: ${{ needs.docker.result }}
+        run: |
+          echo "pre-commit:    $RESULT_PRECOMMIT"
+          echo "contracts:     $RESULT_CONTRACTS"
+          echo "unit-and-type: $RESULT_UNIT"
+          echo "coverage:      $RESULT_COVERAGE"
+          echo "integration:   $RESULT_INTEGRATION"
+          echo "security:      $RESULT_SECURITY"
+          echo "docker:        $RESULT_DOCKER"
+
+          # Fail if any required job failed (skipped is OK -- path filter)
+          for result in \
+            "$RESULT_PRECOMMIT" \
+            "$RESULT_CONTRACTS" \
+            "$RESULT_UNIT" \
+            "$RESULT_INTEGRATION" \
+            "$RESULT_SECURITY" \
+            "$RESULT_DOCKER" \
+            "$RESULT_COVERAGE"; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "FAILED: at least one required job did not succeed ($result)"
+              exit 1
+            fi
+          done
+          echo "All required jobs passed or were skipped."

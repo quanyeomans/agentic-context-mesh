@@ -88,8 +88,8 @@ def load_secrets(path: str | Path | None = None) -> int:
                 continue
             os.environ[key] = value
             count += 1
-    except Exception:
-        logger.warning("secrets: failed to load secrets file")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("secrets: failed to load secrets file — %s", exc)
         return 0
 
     if count:
@@ -112,8 +112,8 @@ def _load_secrets_file(path: Path) -> dict[str, str]:
             key = key.strip()
             if key:
                 result[key] = value
-    except Exception:
-        logger.warning("secrets: failed to parse secrets file")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("secrets: failed to parse secrets file — %s", exc)
     return result
 
 
@@ -181,7 +181,7 @@ def get_secret(name: str, required: bool = True) -> str | None:
                 return result.stdout.strip()
             else:
                 logger.warning("get_secret: KV fetch failed for %r (exit=%d)", name, result.returncode)
-        except Exception as exc:
+        except (subprocess.SubprocessError, OSError, ValueError) as exc:
             logger.warning("get_secret: error fetching KV secret %r — %s", name, exc)
 
     # Not found

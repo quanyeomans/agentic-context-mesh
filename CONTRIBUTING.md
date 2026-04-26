@@ -3,19 +3,32 @@
 ## Setup
 
 ```bash
-git clone https://github.com/quanyeomans/agentic-context-mesh
-cd agentic-context-mesh
+git clone https://github.com/quanyeomans/kairix
+cd kairix
 pip install -e ".[dev]"
 ```
 
 ## Running tests
 
 ```bash
-# Unit + integration (fast, no external deps required)
-pytest tests/unit/ tests/integration/ -v
+# Unit tests (fast, no external deps required)
+pytest tests/ -m unit -x --timeout=30
+
+# Integration (requires sqlite-vec)
+pytest tests/ -m integration -v
 
 # E2E (requires real kairix index + Azure credentials)
 KAIRIX_E2E=1 pytest tests/e2e/ -v -s
+```
+
+## Pre-commit checks
+
+```bash
+ruff check kairix/ tests/
+ruff format --check kairix/ tests/
+mypy kairix/ --ignore-missing-imports
+pytest tests/ -x --timeout=30 -m unit
+bash scripts/pre-commit-confidential-check.sh
 ```
 
 ### About skipped tests
@@ -36,8 +49,11 @@ pytest tests/integration/
 ```
 kairix/
   cli.py              — top-level dispatcher (kairix <subcommand>)
+  db/                 — Database schema, scanner, migrations
+    scanner.py        — Document discovery + ingestion
+    schema.py         — Single source of truth for DB schema
   embed/              — Azure OpenAI embedding pipeline → sqlite-vec
-    schema.py         — DB path resolution, schema validation, pending chunk queries
+    schema.py         — Vec table management, pending chunk queries
     embed.py          — Azure API client, chunking, vector encoding, DB writes
     recall_check.py   — Post-embed quality gate
     cli.py            — argparse entrypoint, lockfile, run logging
@@ -48,9 +64,8 @@ kairix/
     vector.py         — sqlite-vec wrapper
     rrf.py            — Reciprocal Rank Fusion + entity/procedural boosts
     budget.py         — Token budget management (L0/L1/L2 tiering)
-  entities/           — Entity graph (entities.db, alias resolution, multi-hop)
   graph/              — Neo4j client + graph models (OrganisationNode, PersonNode, etc.)
-  vault/              — Vault crawler → Neo4j; vault health check
+  store/              — Document store operations
   temporal/           — Date-aware query rewriting + chunking
   summaries/          — L0/L1 tiered summary generation
   wikilinks/          — Wikilink injection + entity resolver
@@ -58,8 +73,10 @@ kairix/
   classify/           — Memory write auto-classification
   contradict/         — Contradiction detection on new knowledge writes
   curator/            — Entity health monitoring (CA-1)
-  mcp/                — MCP server (search/entity/prep/timeline tools)
+  mcp/                — MCP server (search/entity/prep/timeline/research tools)
   benchmark/          — YAML-driven benchmark runner (NDCG@10/Hit@5/MRR@10)
+  research/           — Multi-turn research agent (iterative search + synthesis)
+  secrets.py          — Secret resolution (env → sidecar → Key Vault)
 ```
 
 **Key invariant:** `kairix/db/schema.py` is the single source of truth for the database schema.

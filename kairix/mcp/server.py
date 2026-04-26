@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 from typing import Any
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +58,7 @@ def _infer_budget(query: str, explicit_budget: int) -> int:
         intent = classify(query)
         if intent in (QueryIntent.ENTITY, QueryIntent.KEYWORD):
             return 1500
-    except Exception:
+    except (ImportError, ValueError, TypeError, RuntimeError):
         logger.debug("_infer_budget: classify failed, using heuristics", exc_info=True)
     if _RESEARCH_WORDS.search(query):
         return 5000
@@ -136,8 +139,18 @@ def tool_search(
             "latency_ms": result.latency_ms,
             "error": result.error,
         }
-    except Exception as exc:
+    except (ImportError, sqlite3.Error, requests.RequestException, KeyError, ValueError) as exc:
         logger.warning("mcp.search failed: %s", exc, exc_info=True)
+        return {
+            "query": query,
+            "intent": "",
+            "results": [],
+            "total_tokens": 0,
+            "latency_ms": 0.0,
+            "error": "Search failed — check server logs for details.",
+        }
+    except Exception as exc:  # broad catch justified: tool_search must never raise to MCP callers
+        logger.warning("mcp.search failed (unexpected): %s", exc, exc_info=True)
         return {
             "query": query,
             "intent": "",
@@ -182,7 +195,7 @@ def tool_entity(
                     "vault_path": r.get("vault_path") or "",
                     "error": "",
                 }
-    except Exception as exc:
+    except (ImportError, RuntimeError, OSError, KeyError) as exc:
         logger.warning("mcp.entity neo4j lookup failed: %s", exc, exc_info=True)
 
     return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": f"Entity not found: {name}"}
@@ -219,7 +232,7 @@ def tool_prep(
             "tokens": len(summary) // 4,
             "error": "",
         }
-    except Exception as exc:
+    except (ImportError, requests.RequestException, OSError, RuntimeError, KeyError, ValueError) as exc:
         logger.warning("mcp.prep failed: %s", exc, exc_info=True)
         return {
             "query": query,
@@ -414,7 +427,7 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_server(host: str = "0.0.0.0", port: int = 8080) -> Any:  # noqa: S104
+def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
     """
     Construct and return the FastMCP server with all tools registered.
 

@@ -87,7 +87,7 @@ def _get_shared_collections() -> list[str]:
             from kairix.search.config_loader import load_collections
 
             _COLLECTIONS_CONFIG = load_collections()
-        except Exception:
+        except (ImportError, OSError, ValueError):
             _COLLECTIONS_CONFIG = False  # mark as "tried and failed"
 
     if _COLLECTIONS_CONFIG:
@@ -159,7 +159,7 @@ def _log_search_event(event: dict) -> None:
         SEARCH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event) + "\n")
-    except Exception as e:
+    except OSError as e:
         logger.warning("hybrid: failed to write search log — %s", e)
 
 
@@ -181,7 +181,7 @@ def _log_query_event(event: dict) -> None:
             _rotate_query_log(_QUERY_LOG_PATH)
         with _QUERY_LOG_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event) + "\n")
-    except Exception as e:
+    except OSError as e:
         logger.warning("hybrid: failed to write query log — %s", e)
 
 
@@ -213,7 +213,7 @@ def _open_vec_db() -> sqlite3.Connection | None:
         db = sqlite3.connect(str(db_path))
         load_extensions(db)
         return db
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         logger.warning("hybrid: cannot open vec DB — %s", e)
         return None
 

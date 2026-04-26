@@ -4,9 +4,9 @@
 
 | Version | Supported |
 |---|---|
-| 0.9.x (current) | ✅ |
-| 0.8.x | ✅ security fixes only |
-| < 0.8.0 | ✗ |
+| 2026.x.x (current CalVer) | Fully supported |
+| 2026.x.xaN (alpha pre-releases) | Best-effort; upgrade to stable |
+| Older than current CalVer quarter | Not supported |
 
 ## Reporting a Vulnerability
 
