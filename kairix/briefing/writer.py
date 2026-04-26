@@ -15,7 +15,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_BRIEFING_DIR = Path(os.environ.get("KAIRIX_BRIEFING_DIR", str(Path.home() / ".cache" / "kairix" / "briefing")))
+BRIEFING_DIR = Path(os.environ.get("KAIRIXBRIEFING_DIR", str(Path.home() / ".cache" / "kairix" / "briefing")))
 
 
 def write_briefing(
@@ -42,9 +42,9 @@ def write_briefing(
     Raises:
         OSError: If the file cannot be written.
     """
-    _BRIEFING_DIR.mkdir(parents=True, exist_ok=True)
+    BRIEFING_DIR.mkdir(parents=True, exist_ok=True)
 
-    out_path = _BRIEFING_DIR / f"{agent}-latest.md"
+    out_path = BRIEFING_DIR / f"{agent}-latest.md"
 
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y-%m-%d %H:%M UTC")

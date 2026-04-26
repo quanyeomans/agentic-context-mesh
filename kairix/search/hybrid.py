@@ -30,6 +30,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from kairix.db import get_db_path, load_extensions
 from kairix.graph.client import get_client as _get_neo4j
@@ -141,7 +142,7 @@ class SearchResult:
 # ---------------------------------------------------------------------------
 
 
-def _collections_for(agent: str | None, scope: str) -> list[str]:
+def _collections_for(agent: str | None, scope: Literal["shared", "agent", "shared+agent"]) -> list[str]:
     """Build collection list from config, agent name, and scope.
 
     If no collections are configured, returns an empty list (search all documents).
@@ -401,7 +402,7 @@ def _build_search_result(
     fallback_used: bool,
     temporal_chunks: list | None = None,
     agent: str | None = None,
-    scope: str = "shared+agent",
+    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
 ) -> SearchResult:
     """Apply token budget, compute diagnostics, build SearchResult, and log.
 
@@ -483,7 +484,7 @@ def _build_search_result(
 def search(
     query: str,
     agent: str | None = None,
-    scope: str = "shared+agent",
+    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
     budget: int = 3000,
     _no_multi_hop: bool = False,
     config: RetrievalConfig | None = None,

@@ -17,6 +17,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+from kairix.search.rrf import RRF_K
+
 logger = logging.getLogger(__name__)
 
 
@@ -182,11 +184,10 @@ class QueryPlanner:
                 rank_lists.append(rank_list)
 
         # Reciprocal Rank Fusion
-        rrf_k = 60
         rrf_scores: dict[str, float] = {}
         for rank_list in rank_lists:
             for rank, key in enumerate(rank_list):
-                rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
+                rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (RRF_K + rank + 1)
 
         ranked_keys = sorted(rrf_scores, key=lambda k: rrf_scores[k], reverse=True)
         merged = [all_results[k] for k in ranked_keys[:final_top_k] if k in all_results]

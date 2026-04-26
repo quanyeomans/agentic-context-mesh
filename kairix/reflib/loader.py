@@ -67,19 +67,7 @@ _GENERIC_LABELS: dict[str, type] = {
 
 def _upsert_generic_node(neo4j_client: Any, label: str, node: Any) -> bool:
     """MERGE a node type that has no dedicated upsert method on the client."""
-    if not neo4j_client._driver:
-        return False
-    try:
-        with neo4j_client._driver.session() as session:
-            session.run(
-                f"MERGE (n:{label} {{id: $id}}) SET n += $props",
-                id=node.id,
-                props=node.to_neo4j_props(),
-            )
-        return True
-    except Exception as e:
-        logger.warning("upsert_generic(%s, %s): %s", label, node.id, e)
-        return False
+    return neo4j_client.upsert_node(label, node.id, node.to_neo4j_props())
 
 
 def _build_node(label: str, data: dict) -> Any:

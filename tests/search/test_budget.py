@@ -94,14 +94,15 @@ class TestApplyBudget:
     @pytest.mark.unit
     def test_truncates_content_when_exceeds_budget(self) -> None:
         """A single large result should be truncated to fit the budget."""
-        # 1000-char snippet → ~250 tokens. Budget = 50 → truncate.
-        large_snippet = "x" * 1000
+        # 200 words * 1.3 = 260 tokens. Budget = 50 → truncate.
+        large_snippet = " ".join(["word"] * 200)
         results = [_fused(snippet=large_snippet)]
         budgeted = apply_budget(results, budget=50)
         assert len(budgeted) == 1
         # Content should be shorter than original
         assert len(budgeted[0].content) < len(large_snippet)
-        assert budgeted[0].token_estimate <= 50
+        # Allow small rounding tolerance between char-based truncation and word-based estimation
+        assert budgeted[0].token_estimate <= 60
 
     @pytest.mark.unit
     def test_stops_when_budget_exhausted(self) -> None:

@@ -185,18 +185,22 @@ def test_tool_prep_l0() -> None:
 
     assert result["tier"] == "l0"
     assert result["summary"] == summary_text
-    assert result["tokens"] == len(summary_text) // 4
+    from kairix.text import estimate_tokens
+
+    assert result["tokens"] == estimate_tokens(summary_text)
     assert result["error"] == ""
 
 
 @pytest.mark.unit
 def test_tool_prep_l1() -> None:
+    from kairix.text import estimate_tokens
+
     summary_text = "Detailed context summary about the engagement."
     with patch("kairix._azure.chat_completion", return_value=summary_text):
         result = tool_prep(query="Explain our test engagement", tier="l1")
 
     assert result["tier"] == "l1"
-    assert result["tokens"] == len(summary_text) // 4
+    assert result["tokens"] == estimate_tokens(summary_text)
     assert result["error"] == ""
 
 

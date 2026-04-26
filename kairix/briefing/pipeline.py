@@ -23,6 +23,8 @@ import logging
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
+from kairix.text import estimate_tokens, truncate_to_tokens
+
 logger = logging.getLogger(__name__)
 
 # Token caps per source (approximate)
@@ -48,20 +50,6 @@ _TRUNCATION_ORDER = [
     "memory_logs",
 ]
 
-_WORDS_PER_TOKEN = 1.3
-
-
-def _estimate_tokens(text: str) -> int:
-    return int(len(text.split()) * _WORDS_PER_TOKEN)
-
-
-def _truncate_to_tokens(text: str, max_tokens: int) -> str:
-    words = text.split()
-    limit_words = int(max_tokens / _WORDS_PER_TOKEN)
-    if len(words) <= limit_words:
-        return text
-    return " ".join(words[:limit_words]) + "\n... [truncated]"
-
 
 def _run_source(name: str, fn, *args) -> tuple[str, str]:
     """
@@ -81,7 +69,7 @@ def _trim_context(context: dict[str, str]) -> dict[str, str]:
     Trim context sources if total token estimate exceeds _TOTAL_CONTEXT_CAP.
     Truncates lowest-priority sources first.
     """
-    total = sum(_estimate_tokens(v) for v in context.values())
+    total = sum(estimate_tokens(v) for v in context.values())
     if total <= _TOTAL_CONTEXT_CAP:
         return context
 
@@ -91,13 +79,13 @@ def _trim_context(context: dict[str, str]) -> dict[str, str]:
             break
         if trimmed.get(source_name):
             current = trimmed[source_name]
-            current_tokens = _estimate_tokens(current)
+            current_tokens = estimate_tokens(current)
             cap = _SOURCE_TOKEN_CAPS.get(source_name, 200)
             if current_tokens > cap // 2:
                 # Halve the allocation
                 new_cap = max(cap // 2, 50)
-                trimmed[source_name] = _truncate_to_tokens(current, new_cap)
-                total -= current_tokens - _estimate_tokens(trimmed[source_name])
+                trimmed[source_name] = truncate_to_tokens(current, new_cap)
+                total -= current_tokens - estimate_tokens(trimmed[source_name])
 
     return trimmed
 
@@ -157,7 +145,7 @@ def generate_briefing(agent: str) -> str:
                     logger.debug(
                         "pipeline: source %r returned %d tokens",
                         source_name,
-                        _estimate_tokens(content),
+                        estimate_tokens(content),
                     )
             except Exception as e:
                 name = future_map[future]
@@ -173,7 +161,7 @@ def generate_briefing(agent: str) -> str:
     briefing_body = synthesise(agent, context, max_tokens=800)
 
     # Token estimate for output
-    token_estimate = _estimate_tokens(briefing_body)
+    token_estimate = estimate_tokens(briefing_body)
 
     # Step 8: Write to file
     try:
@@ -194,9 +182,9 @@ def generate_briefing(agent: str) -> str:
 
     # Read back what was written (includes header added by writer)
     try:
-        from kairix.briefing.writer import _BRIEFING_DIR
+        from kairix.briefing.writer import BRIEFING_DIR
 
-        out_path = _BRIEFING_DIR / f"{agent}-latest.md"
+        out_path = BRIEFING_DIR / f"{agent}-latest.md"
         if out_path.exists():
             return out_path.read_text(encoding="utf-8")
     except Exception as _exc:

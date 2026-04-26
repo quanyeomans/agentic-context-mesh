@@ -12,6 +12,8 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
+from kairix.text import truncate_to_tokens
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -21,23 +23,6 @@ logger = logging.getLogger(__name__)
 _DOCUMENT_ROOT = Path(os.environ.get("KAIRIX_DOCUMENT_ROOT", str(Path.home() / "Documents")))
 _WORKSPACE_ROOT = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces")))
 _MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", str(Path.home() / ".kairix" / "workspaces")))
-
-# Approximate token estimator: words * 1.3
-_WORDS_PER_TOKEN = 1.3
-
-
-def _estimate_tokens(text: str) -> int:
-    """Estimate token count from word count."""
-    return int(len(text.split()) * _WORDS_PER_TOKEN)
-
-
-def _truncate_to_tokens(text: str, max_tokens: int) -> str:
-    """Truncate text to approximately max_tokens."""
-    words = text.split()
-    limit_words = int(max_tokens / _WORDS_PER_TOKEN)
-    if len(words) <= limit_words:
-        return text
-    return " ".join(words[:limit_words]) + "\n... [truncated]"
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +65,7 @@ def fetch_memory_logs(agent: str, max_tokens: int = 500) -> str:
             return ""
 
         result = "\n".join(lines)
-        return _truncate_to_tokens(result, max_tokens)
+        return truncate_to_tokens(result, max_tokens)
 
     except Exception as e:
         logger.warning("sources: fetch_memory_logs failed for %r — %s", agent, e)
@@ -119,7 +104,7 @@ def fetch_recent_memory(agent: str, max_tokens: int = 300) -> str:
             return ""
 
         combined = "\n\n".join(parts)
-        return _truncate_to_tokens(combined, max_tokens)
+        return truncate_to_tokens(combined, max_tokens)
 
     except Exception as e:
         logger.warning("sources: fetch_recent_memory failed for %r — %s", agent, e)
@@ -148,7 +133,7 @@ def fetch_entity_stub(agent: str, max_tokens: int = 400) -> str:
             if path.exists():
                 try:
                     content = path.read_text(encoding="utf-8", errors="replace")
-                    return _truncate_to_tokens(content, max_tokens)
+                    return truncate_to_tokens(content, max_tokens)
                 except Exception as e:
                     logger.warning("sources: error reading entity stub %s — %s", path, e)
 
@@ -189,7 +174,7 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300) -> str:
             return ""
 
         combined = "\n\n".join(parts)
-        return _truncate_to_tokens(combined, max_tokens)
+        return truncate_to_tokens(combined, max_tokens)
 
     except Exception as e:
         logger.warning("sources: fetch_knowledge_rules failed for %r — %s", agent, e)
@@ -225,7 +210,7 @@ def fetch_recent_decisions(agent: str, max_tokens: int = 400) -> str:
             return ""
 
         combined = "\n\n".join(parts)
-        return _truncate_to_tokens(combined, max_tokens)
+        return truncate_to_tokens(combined, max_tokens)
 
     except Exception as e:
         logger.warning("sources: fetch_recent_decisions failed for %r — %s", agent, e)
@@ -257,7 +242,7 @@ def fetch_hybrid_search(agent: str, max_tokens: int = 600) -> str:
             chunks.append(f"**{path}**\n{content}")
 
         combined = "\n\n---\n\n".join(chunks)
-        return _truncate_to_tokens(combined, max_tokens)
+        return truncate_to_tokens(combined, max_tokens)
 
     except Exception as e:
         logger.warning("sources: fetch_hybrid_search failed for %r — %s", agent, e)

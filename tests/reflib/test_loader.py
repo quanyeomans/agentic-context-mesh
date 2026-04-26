@@ -131,8 +131,8 @@ class TestLoadFromFixtures:
         # Edges via upsert_edge
         assert client.upsert_edge.call_count == 2
 
-    def test_generic_node_upsert_uses_driver_session(self, tmp_path: Path):
-        """Concept, Framework, Technology, Publication go through generic MERGE."""
+    def test_generic_node_upsert_uses_upsert_node(self, tmp_path: Path):
+        """Concept, Framework, Technology, Publication go through upsert_node."""
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"
         # Only generic-label nodes
@@ -141,16 +141,14 @@ class TestLoadFromFixtures:
         _write_json(edges_path, [])
 
         client = _make_mock_client()
-        mock_session = MagicMock()
-        client._driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
-        client._driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        client.upsert_node.return_value = True
 
         report = load_entity_stubs(nodes_path, edges_path, client)
 
         assert report.nodes_loaded == 4
         assert report.nodes_skipped == 0
-        # The driver session.run should have been called for each generic node
-        assert mock_session.run.call_count == 4
+        # upsert_node should have been called for each generic node
+        assert client.upsert_node.call_count == 4
 
     def test_skips_unknown_label(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"

@@ -124,7 +124,7 @@ class Neo4jClient:
     # Upsert methods — idempotent MERGE on node id
     # -------------------------------------------------------------------------
 
-    def _upsert_node(self, label: str, node_id: str, props: dict) -> bool:
+    def upsert_node(self, label: str, node_id: str, props: dict) -> bool:
         """Generic node upsert — MERGE on id, SET properties."""
         if not self._driver:
             return False
@@ -141,25 +141,25 @@ class Neo4jClient:
             return False
 
     def upsert_organisation(self, node: OrganisationNode) -> bool:
-        return self._upsert_node("Organisation", node.id, node.to_neo4j_props())
+        return self.upsert_node("Organisation", node.id, node.to_neo4j_props())
 
     def upsert_person(self, node: PersonNode) -> bool:
-        return self._upsert_node("Person", node.id, node.to_neo4j_props())
+        return self.upsert_node("Person", node.id, node.to_neo4j_props())
 
     def upsert_outcome(self, node: OutcomeNode) -> bool:
-        return self._upsert_node("Outcome", node.id, node.to_neo4j_props())
+        return self.upsert_node("Outcome", node.id, node.to_neo4j_props())
 
     def upsert_concept(self, node: ConceptNode) -> bool:
-        return self._upsert_node("Concept", node.id, node.to_neo4j_props())
+        return self.upsert_node("Concept", node.id, node.to_neo4j_props())
 
     def upsert_framework(self, node: FrameworkNode) -> bool:
-        return self._upsert_node("Framework", node.id, node.to_neo4j_props())
+        return self.upsert_node("Framework", node.id, node.to_neo4j_props())
 
     def upsert_technology(self, node: TechnologyNode) -> bool:
-        return self._upsert_node("Technology", node.id, node.to_neo4j_props())
+        return self.upsert_node("Technology", node.id, node.to_neo4j_props())
 
     def upsert_publication(self, node: PublicationNode) -> bool:
-        return self._upsert_node("Publication", node.id, node.to_neo4j_props())
+        return self.upsert_node("Publication", node.id, node.to_neo4j_props())
 
     def upsert_edge(self, edge: GraphEdge) -> bool:
         if not self._driver:

@@ -51,11 +51,11 @@ def main(args: list[str] | None = None) -> None:
 
     try:
         from kairix.briefing.pipeline import generate_briefing
-        from kairix.briefing.writer import _BRIEFING_DIR
+        from kairix.briefing.writer import BRIEFING_DIR
 
         content = generate_briefing(agent)
 
-        out_path = _BRIEFING_DIR / f"{agent}-latest.md"
+        out_path = BRIEFING_DIR / f"{agent}-latest.md"
         print(f"Briefing written to: {out_path}", file=sys.stderr)
 
         if parsed.print_output:

@@ -25,9 +25,12 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from typing import Any
+from typing import Any, Literal
 
 import requests
+
+from kairix.search.intent import QueryIntent
+from kairix.text import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +123,7 @@ def _fetch_entity_card(name: str) -> dict | None:
 def tool_search(
     query: str,
     agent: str | None = None,
-    scope: str = "shared+agent",
+    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
     budget: int = 3000,
 ) -> dict[str, Any]:
     """Search for anything in the knowledge base.
@@ -153,7 +156,7 @@ def tool_search(
         # their knowledge graph summary at the top of results.
         # Uses _fetch_entity_card (direct Neo4j call) — MCP tools should
         # not call other MCP tools; they share underlying services.
-        if intent_value == "entity":
+        if intent_value == QueryIntent.ENTITY.value:
             entity_name = _extract_entity_name(query)
             if entity_name:
                 card = _fetch_entity_card(entity_name)
@@ -164,7 +167,7 @@ def tool_search(
                             "path": card.get("vault_path", ""),
                             "score": 1.0,
                             "snippet": card.get("summary", ""),
-                            "tokens": len(card.get("summary", "")) // 4,
+                            "tokens": estimate_tokens(card.get("summary", "")),
                             "source": "entity_graph",
                             "entity": {
                                 "id": card.get("id", ""),
@@ -206,7 +209,6 @@ def tool_search(
 
 def tool_entity(
     name: str,
-    action: str = "lookup",
 ) -> dict[str, Any]:
     """Look up a specific person, company, or topic by name.
 
@@ -223,7 +225,7 @@ def tool_entity(
 def tool_prep(
     query: str,
     agent: str | None = None,
-    tier: str = "l0",
+    tier: Literal["l0", "l1"] = "l0",
 ) -> dict[str, Any]:
     """Get a short summary of a topic before committing to a full search.
 
@@ -248,7 +250,7 @@ def tool_prep(
             "query": query,
             "tier": tier,
             "summary": summary,
-            "tokens": len(summary) // 4,
+            "tokens": estimate_tokens(summary),
             "error": "",
         }
     except (ImportError, requests.RequestException, OSError, RuntimeError, KeyError, ValueError) as exc:
@@ -470,19 +472,19 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
     def search(
         query: str,
         agent: str | None = None,
-        scope: str = "shared+agent",
+        scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
         budget: int = 3000,
     ) -> dict[str, Any]:
         """Hybrid BM25 + vector search over the vault."""
         return tool_search(query=query, agent=agent, scope=scope, budget=budget)
 
     @server.tool()
-    def entity(name: str, action: str = "lookup") -> dict[str, Any]:
+    def entity(name: str) -> dict[str, Any]:
         """Entity lookup from Neo4j."""
-        return tool_entity(name=name, action=action)
+        return tool_entity(name=name)
 
     @server.tool()
-    def prep(query: str, agent: str | None = None, tier: str = "l0") -> dict[str, Any]:
+    def prep(query: str, agent: str | None = None, tier: Literal["l0", "l1"] = "l0") -> dict[str, Any]:
         """Context preparation: tiered L0/L1 summary generation."""
         return tool_prep(query=query, agent=agent, tier=tier)
 

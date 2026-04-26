@@ -12,14 +12,13 @@ from unittest.mock import patch
 import pytest
 
 from kairix.briefing.sources import (
-    _estimate_tokens,
-    _truncate_to_tokens,
     fetch_entity_stub,
     fetch_knowledge_rules,
     fetch_memory_logs,
     fetch_recent_decisions,
     fetch_recent_memory,
 )
+from kairix.text import estimate_tokens, truncate_to_tokens
 
 # ---------------------------------------------------------------------------
 # Utility function tests
@@ -29,26 +28,26 @@ from kairix.briefing.sources import (
 @pytest.mark.unit
 class TestTokenHelpers:
     @pytest.mark.unit
-    def test_estimate_tokens_empty(self):
-        assert _estimate_tokens("") == 0
+    def testestimate_tokens_empty(self):
+        assert estimate_tokens("") == 0
 
     @pytest.mark.unit
-    def test_estimate_tokens_small(self):
+    def testestimate_tokens_small(self):
         # "hello world" = 2 words * 1.3 = 2
-        count = _estimate_tokens("hello world")
+        count = estimate_tokens("hello world")
         assert count >= 2
 
     @pytest.mark.unit
-    def test_truncate_to_tokens_short(self):
+    def testtruncate_to_tokens_short(self):
         text = "hello world"
-        result = _truncate_to_tokens(text, 100)
+        result = truncate_to_tokens(text, 100)
         assert result == text  # no truncation needed
 
     @pytest.mark.unit
-    def test_truncate_to_tokens_truncates(self):
+    def testtruncate_to_tokens_truncates(self):
         words = ["word"] * 1000
         text = " ".join(words)
-        result = _truncate_to_tokens(text, 50)
+        result = truncate_to_tokens(text, 50)
         assert len(result) < len(text)
         assert "[truncated]" in result
 
@@ -112,7 +111,7 @@ class TestFetchMemoryLogs:
         with patch("kairix.briefing.sources._WORKSPACE_ROOT", tmp_path):
             result = fetch_memory_logs("builder", max_tokens=50)
 
-        assert _estimate_tokens(result) <= 100  # some buffer
+        assert estimate_tokens(result) <= 100  # some buffer
 
 
 # ---------------------------------------------------------------------------

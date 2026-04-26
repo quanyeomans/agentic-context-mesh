@@ -12,22 +12,22 @@ import pytest
 
 from kairix.briefing.pipeline import (
     _TOTAL_CONTEXT_CAP,
-    _estimate_tokens,
     _trim_context,
     generate_briefing,
 )
+from kairix.text import estimate_tokens
 
 
 @pytest.mark.unit
 class TestTokenHelpers:
     @pytest.mark.unit
-    def test_estimate_tokens_empty(self):
-        assert _estimate_tokens("") == 0
+    def testestimate_tokens_empty(self):
+        assert estimate_tokens("") == 0
 
     @pytest.mark.unit
-    def test_estimate_tokens_scales_with_words(self):
-        t10 = _estimate_tokens(" ".join(["word"] * 10))
-        t100 = _estimate_tokens(" ".join(["word"] * 100))
+    def testestimate_tokens_scales_with_words(self):
+        t10 = estimate_tokens(" ".join(["word"] * 10))
+        t100 = estimate_tokens(" ".join(["word"] * 100))
         assert t100 > t10
 
 
@@ -48,7 +48,7 @@ class TestTrimContext:
             "memory_logs": long_text,
         }
         result = _trim_context(context)
-        total = sum(_estimate_tokens(v) for v in result.values())
+        total = sum(estimate_tokens(v) for v in result.values())
         assert total <= _TOTAL_CONTEXT_CAP * 2  # some tolerance
 
     @pytest.mark.unit
@@ -86,7 +86,7 @@ class TestGenerateBriefing:
             patch("kairix.briefing.sources.fetch_recent_decisions", return_value="decisions"),
             patch("kairix.briefing.sources.fetch_hybrid_search", return_value="search results"),
             patch("kairix.briefing.synthesiser.synthesise", return_value=mock_briefing_body),
-            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.writer.BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -104,7 +104,7 @@ class TestGenerateBriefing:
             patch("kairix.briefing.sources.fetch_recent_decisions", return_value=""),
             patch("kairix.briefing.sources.fetch_hybrid_search", return_value=""),
             patch("kairix.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.writer.BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -126,7 +126,7 @@ class TestGenerateBriefing:
             patch("kairix.briefing.sources.fetch_recent_decisions", return_value=""),
             patch("kairix.briefing.sources.fetch_hybrid_search", return_value=""),
             patch("kairix.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.writer.BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -143,7 +143,7 @@ class TestGenerateBriefing:
             patch("kairix.briefing.sources.fetch_recent_decisions", return_value=""),
             patch("kairix.briefing.sources.fetch_hybrid_search", return_value=""),
             patch("kairix.briefing.synthesiser.synthesise", return_value="synthesis unavailable"),
-            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.writer.BRIEFING_DIR", tmp_path),
         ):
             result = generate_briefing("builder")
 
@@ -160,7 +160,7 @@ class TestGenerateBriefing:
             patch("kairix.briefing.sources.fetch_recent_decisions", return_value="decisions"),
             patch("kairix.briefing.sources.fetch_hybrid_search", return_value="search"),
             patch("kairix.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("kairix.briefing.writer._BRIEFING_DIR", tmp_path),
+            patch("kairix.briefing.writer.BRIEFING_DIR", tmp_path),
         ):
             generate_briefing("builder")
 

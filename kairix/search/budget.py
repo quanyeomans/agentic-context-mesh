@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Literal
 
 from kairix.search.rrf import FusedResult
+from kairix.text import estimate_tokens as _estimate_tokens_word
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +68,10 @@ class BudgetedResult:
 
 
 def _estimate_tokens(text: str) -> int:
-    """Rough token count estimate: len(text) / APPROX_CHARS_PER_TOKEN."""
+    """Estimate token count using the canonical word-based estimator."""
     if not text:
         return 0
-    return max(1, len(text) // APPROX_CHARS_PER_TOKEN)
+    return _estimate_tokens_word(text)
 
 
 # ---------------------------------------------------------------------------
