@@ -41,10 +41,10 @@ def _run_embed() -> None:
 def _run_entity_seed() -> None:
     """Run entity relationship seeding from vault structure."""
     try:
-        from kairix.vault.cli import main as vault_main
+        from kairix.store.cli import main as store_main
 
         logger.info("worker: starting entity seed")
-        vault_main(["crawl", "--vault-root", os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))])
+        store_main(["crawl", "--vault-root", os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))])
         logger.info("worker: entity seed complete")
     except Exception as exc:
         logger.warning("worker: entity seed failed — %s", exc)

@@ -7,7 +7,7 @@ Subcommands:
   entity      Entity management: suggest (NER), validate (Wikidata)
   curator     Curator agent: entity health monitoring and enrichment (CA-1)
   contradict  Contradiction detection: check new content against vault knowledge
-  vault       Vault operations: crawl entities into Neo4j, health check
+  store       Document store operations: crawl entities into Neo4j, health check (alias: vault)
   mcp         MCP server: expose search/entity/prep/timeline as MCP tools
   onboard     Deployment diagnostics and agent onboarding (check, guide, verify)
   timeline    Temporal query rewriting + date-aware retrieval
@@ -96,10 +96,10 @@ def main() -> None:
 
         contradict_main(sys.argv[2:])
 
-    elif cmd == "vault":
-        from kairix.vault.cli import main as vault_main
+    elif cmd in ("store", "vault"):
+        from kairix.store.cli import main as store_main
 
-        vault_main(sys.argv[2:])
+        store_main(sys.argv[2:])
 
     elif cmd == "mcp":
         from kairix.mcp.cli import main as mcp_main

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.paths import KairixPaths, clear_cache
+from kairix.paths import KairixPaths, clear_cache, document_root
 
 
 @pytest.fixture(autouse=True)
@@ -69,3 +69,26 @@ class TestKairixPaths:
         paths = KairixPaths.resolve()
         assert "~" not in str(paths.vault_root)
         assert str(paths.vault_root).endswith("/my-vault")
+
+
+@pytest.mark.unit
+class TestDocumentRootEnvVar:
+    def test_document_root_env_var(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", str(tmp_path))
+        monkeypatch.delenv("KAIRIX_VAULT_ROOT", raising=False)
+        assert document_root() == tmp_path
+
+    def test_vault_root_backwards_compat(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("KAIRIX_DOCUMENT_ROOT", raising=False)
+        monkeypatch.setenv("KAIRIX_VAULT_ROOT", str(tmp_path))
+        with pytest.warns(DeprecationWarning, match="KAIRIX_VAULT_ROOT"):
+            result = document_root()
+        assert result == tmp_path
+
+    def test_document_root_takes_precedence(self, monkeypatch, tmp_path):
+        """KAIRIX_DOCUMENT_ROOT wins when both are set."""
+        new_path = tmp_path / "new"
+        old_path = tmp_path / "old"
+        monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", str(new_path))
+        monkeypatch.setenv("KAIRIX_VAULT_ROOT", str(old_path))
+        assert document_root() == new_path

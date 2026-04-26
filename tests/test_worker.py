@@ -19,7 +19,7 @@ def test_run_entity_seed_catches_exceptions() -> None:
     """_run_entity_seed should catch exceptions and not re-raise."""
     from kairix.worker import _run_entity_seed
 
-    with patch("kairix.vault.cli.main", side_effect=RuntimeError("vault crawl failed")):
+    with patch("kairix.store.cli.main", side_effect=RuntimeError("store crawl failed")):
         _run_entity_seed()  # should not raise
 
 

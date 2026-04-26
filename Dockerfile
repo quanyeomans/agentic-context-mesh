@@ -21,8 +21,9 @@ RUN chmod +x /entrypoint.sh
 COPY kairix.example.config.yaml /opt/kairix/kairix.config.yaml
 
 # Default environment
-# KAIRIX_VAULT_ROOT = document store root
+# KAIRIX_DOCUMENT_ROOT = document store root (KAIRIX_VAULT_ROOT kept for backwards compat)
 ENV KAIRIX_DB_PATH=/data/kairix/index.sqlite \
+    KAIRIX_DOCUMENT_ROOT=/data/vault \
     KAIRIX_VAULT_ROOT=/data/vault \
     KAIRIX_WORKSPACE_ROOT=/data/kairix/workspaces \
     KAIRIX_DATA_DIR=/data/kairix \

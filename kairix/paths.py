@@ -4,7 +4,8 @@ Every module that needs a file path imports from here instead of
 hardcoding defaults. Paths are resolved once and cached.
 
 Resolution order (highest wins):
-  1. Environment variables (KAIRIX_VAULT_ROOT, KAIRIX_DB_PATH, etc.)
+  1. Environment variables (KAIRIX_DOCUMENT_ROOT, KAIRIX_DB_PATH, etc.)
+     - KAIRIX_VAULT_ROOT is accepted as a deprecated fallback
   2. Config file paths: section (kairix.config.yaml)
   3. Platform-aware defaults (macOS, Linux, Docker)
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -32,11 +34,16 @@ def _is_service_install() -> bool:
     return Path("/opt/kairix/.venv").exists()
 
 
-def _default_vault_root() -> Path:
-    """Platform-appropriate default vault location."""
+def _default_document_root() -> Path:
+    """Platform-appropriate default document store location."""
     if _is_docker():
         return Path("/data/vault")
     return Path.home() / "kairix-vault"
+
+
+def _default_vault_root() -> Path:
+    """Deprecated alias for _default_document_root."""
+    return _default_document_root()
 
 
 def _default_cache_dir() -> Path:
@@ -87,10 +94,19 @@ def _resolve_cached() -> KairixPaths:
     # Try loading paths from config file
     config_paths = _load_paths_from_config()
 
+    env_doc_root = os.environ.get("KAIRIX_DOCUMENT_ROOT")
+    env_vault_root = os.environ.get("KAIRIX_VAULT_ROOT")
+    if env_vault_root and not env_doc_root:
+        warnings.warn(
+            "KAIRIX_VAULT_ROOT is deprecated, use KAIRIX_DOCUMENT_ROOT instead",
+            DeprecationWarning,
+            stacklevel=3,
+        )
     vault_root = Path(
-        os.environ.get("KAIRIX_VAULT_ROOT")
+        env_doc_root
+        or env_vault_root
         or config_paths.get("vault_root")
-        or str(_default_vault_root())
+        or str(_default_document_root())
     ).expanduser()
 
     db_path = Path(
@@ -143,9 +159,14 @@ def clear_cache() -> None:
 
 # Convenience functions — import these directly instead of calling KairixPaths.resolve()
 
-def vault_root() -> Path:
-    """Get the vault root path."""
+def document_root() -> Path:
+    """Return the document store root path (was: vault_root)."""
     return KairixPaths.resolve().vault_root
+
+
+def vault_root() -> Path:
+    """Deprecated alias for document_root()."""
+    return document_root()
 
 
 def db_path() -> Path:

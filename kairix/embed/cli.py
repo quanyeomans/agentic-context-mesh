@@ -111,6 +111,10 @@ def cmd_embed(args: argparse.Namespace) -> int:
                 "Scanned vault: %d new, %d updated, %d unchanged",
                 scan_report.new, scan_report.updated, scan_report.unchanged,
             )
+            # Rebuild FTS index after scanning new/changed documents
+            from kairix.db.fts import rebuild_fts
+            fts_count = rebuild_fts(db)
+            logging.info("FTS index rebuilt: %d documents", fts_count)
 
         result = run_embed(
             db=db,
