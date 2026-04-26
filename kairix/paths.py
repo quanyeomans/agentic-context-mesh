@@ -35,10 +35,17 @@ def _is_service_install() -> bool:
 
 
 def _default_document_root() -> Path:
-    """Platform-appropriate default document store location."""
+    """Platform-appropriate default document store location.
+
+    Docker: /data/vault (bind mount from host)
+    Server: /var/lib/kairix/documents (admin configures)
+    User (all platforms): ~/Documents (most common document location)
+    """
     if _is_docker():
         return Path("/data/vault")
-    return Path.home() / "kairix-vault"
+    if _is_service_install():
+        return Path("/var/lib/kairix/documents")
+    return Path.home() / "Documents"
 
 
 def _default_vault_root() -> Path:
@@ -46,12 +53,47 @@ def _default_vault_root() -> Path:
     return _default_document_root()
 
 
-def _default_cache_dir() -> Path:
-    """Platform-appropriate cache directory for index and logs."""
+def _default_data_dir() -> Path:
+    """Platform-appropriate data directory for DB, vectors, and state.
+
+    Docker: /data/kairix
+    Server: /var/lib/kairix
+    Linux/macOS user: ~/.local/share/kairix (XDG_DATA_HOME)
+    Windows user: %LOCALAPPDATA%/kairix
+    """
     if _is_docker():
         return Path("/data/kairix")
     if _is_service_install():
-        return Path("/opt/kairix/data")
+        return Path("/var/lib/kairix")
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return Path(local) / "kairix"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg) / "kairix"
+    return Path.home() / ".local" / "share" / "kairix"
+
+
+def _default_cache_dir() -> Path:
+    """Platform-appropriate cache directory for temporary data.
+
+    Docker: /data/kairix (same as data dir)
+    Server: /var/cache/kairix
+    Linux/macOS user: ~/.cache/kairix (XDG_CACHE_HOME)
+    Windows user: %LOCALAPPDATA%/kairix/cache
+    """
+    if _is_docker():
+        return Path("/data/kairix")
+    if _is_service_install():
+        return Path("/var/cache/kairix")
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return Path(local) / "kairix" / "cache"
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        return Path(xdg) / "kairix"
     return Path.home() / ".cache" / "kairix"
 
 

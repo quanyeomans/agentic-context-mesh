@@ -130,7 +130,33 @@ If any checks fail, the output explains what to fix. Common issues:
 
 ## Connecting agents
 
-Any MCP-compatible agent can connect to kairix at `http://localhost:8080`. Available tools:
+Any MCP-compatible agent can connect to kairix via SSE at `http://localhost:8080`.
+
+**OpenClaw:**
+```json
+{
+  "mcp": {
+    "servers": {
+      "mcp-kairix": {
+        "url": "http://localhost:8080"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop** (add to `claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "kairix": {
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
+```
+
+**Available tools:**
 
 | Tool | What it does |
 |------|-------------|
@@ -173,16 +199,20 @@ docker compose up -d      # Start again
 
 ## Without Docker
 
-If you prefer to run kairix directly:
+If Docker is not available in your environment, you can run kairix directly:
 
 ```bash
-pip install "kairix[neo4j,agents]"
+pip install "kairix[agents]"
 kairix setup
 kairix embed
 kairix search "your question"
 ```
 
-See [OPERATIONS.md](../OPERATIONS.md) for full deployment details.
+**What you get without Docker:** Search and embedding work fully. The MCP server runs via `kairix mcp serve`. Background indexing requires running `kairix embed` manually after adding documents.
+
+**What you miss without Docker:** The entity graph (people, companies, relationships) requires Neo4j, which is included automatically in the Docker Compose stack. Without Docker, install Neo4j separately or skip entity features.
+
+For server deployments, see the [deployment architecture guide](../docs/deployment.md).
 
 ## Troubleshooting
 
