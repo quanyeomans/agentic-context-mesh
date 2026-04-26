@@ -536,6 +536,7 @@ def _probe_openclaw_harness() -> tuple[bool, str]:
 
     # Fallback: try openclaw CLI
     try:
+        # safe: subprocess with trusted system binary (openclaw)
         result = subprocess.run(
             ["openclaw", "mcp", "list"],  # noqa: S607 — openclaw is a known trusted binary
             capture_output=True,
@@ -584,6 +585,7 @@ def _probe_sse_harness() -> tuple[bool, str]:
 
     # Fallback: check systemd unit exists and is active
     try:
+        # safe: subprocess with trusted system binary (systemctl)
         result = subprocess.run(
             ["systemctl", "is-active", "kairix-mcp.service"],  # noqa: S607 — systemctl is a trusted binary
             capture_output=True,

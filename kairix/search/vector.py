@@ -122,6 +122,7 @@ def _vsearch_with_bytes(
         # in its own SELECT; JOINs in the outer CTE cause "near MATCH: syntax error".
         # Collection filter applied in outer query after the CTE.
         if collections:
+            # safe: structural SQL only, all values bound via params
             placeholders = ",".join("?" * len(collections))
             sql = (
                 "WITH knn AS ("

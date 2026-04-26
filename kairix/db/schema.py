@@ -147,6 +147,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "content_vectors": {"hash", "seq", "pos"},
     }
     for table, expected in expected_cols.items():
+        # safe: table name from expected_cols keys (hardcoded)
         actual = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
         missing = expected - actual
         if missing:

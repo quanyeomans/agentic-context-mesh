@@ -243,6 +243,7 @@ def bm25_search(
         # Default weights from sweep: equal weights work well; prefix query style
         # has more impact than weight tuning.
         if collections:
+            # safe: placeholders are "?" strings, values bound via params
             placeholders = ",".join("?" * len(collections))
             sql = f"""
                 SELECT d.collection,

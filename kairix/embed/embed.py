@@ -184,7 +184,7 @@ def embed_batch(
                 if retry_after_hdr is not None:
                     delay = float(retry_after_hdr)
                 else:
-                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311
+                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security-relevant
                 logger.warning(
                     f"Rate limited (batch size {len(texts)}) — sleeping {delay:.1f}s "
                     f"(attempt {attempt + 1}/{MAX_RETRIES})"
@@ -193,7 +193,7 @@ def embed_batch(
                 continue
 
             if resp.status_code in (500, 502, 503):
-                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311
+                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security-relevant
                 logger.warning(f"Server error {resp.status_code} — retrying in {delay:.1f}s")
                 time.sleep(delay)
                 continue
@@ -205,7 +205,7 @@ def embed_batch(
             return [r["embedding"] for r in results]
 
         except requests.Timeout:
-            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311
+            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security-relevant
             logger.warning(f"Request timeout — retrying in {delay:.1f}s")
             time.sleep(delay)
 

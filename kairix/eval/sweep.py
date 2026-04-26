@@ -116,6 +116,7 @@ def _bm25_search_config(
         return []
 
     w_fp, w_title, w_doc = weights
+    # safe: float() cast on bm25 weights, no ? binding available for bm25 args
     try:
         rows = db.execute(
             f"""

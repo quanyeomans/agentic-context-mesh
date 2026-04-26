@@ -144,6 +144,7 @@ def sample_documents(
     try:
         if collections:
             placeholders = ",".join("?" * len(collections))
+            # safe: placeholders are "?" strings, values bound via params
             rows = db.execute(
                 f"""
                 SELECT d.path, d.title, d.collection, c.doc

@@ -99,6 +99,7 @@ def _bm25_search_with_weights(
     try:
         if collections:
             placeholders = ",".join("?" * len(collections))
+            # safe: float() cast on bm25 weights, no ? binding available for bm25 args
             sql = f"""
                 SELECT d.collection, d.path, d.title, c.doc,
                        bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) AS score
@@ -113,6 +114,7 @@ def _bm25_search_with_weights(
             """
             params: list = [fts_query, *collections, limit]
         else:
+            # safe: float() cast on bm25 weights, no ? binding available for bm25 args
             sql = f"""
                 SELECT d.collection, d.path, d.title, c.doc,
                        bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) AS score
