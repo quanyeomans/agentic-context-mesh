@@ -57,11 +57,11 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    server = build_server()
+    server = build_server(host=args.host, port=args.port)
 
     if args.transport == "sse":
         print(f"Starting kairix MCP server on {args.host}:{args.port} (SSE transport)", file=sys.stderr)
-        server.run(transport="sse", host=args.host, port=args.port)
+        server.run(transport="sse")
     else:
         print("Starting kairix MCP server (stdio transport)", file=sys.stderr)
         server.run(transport="stdio")

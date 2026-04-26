@@ -404,9 +404,13 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_server() -> Any:
+def build_server(host: str = "0.0.0.0", port: int = 8080) -> Any:
     """
-    Construct and return the FastMCP server with all four tools registered.
+    Construct and return the FastMCP server with all tools registered.
+
+    Args:
+        host: Bind address for SSE transport.
+        port: Port for SSE transport.
 
     Raises ImportError when the ``mcp`` package is not installed.
     Install via: pip install kairix[agents]
@@ -418,7 +422,7 @@ def build_server() -> Any:
             "The 'mcp' package is required to run the MCP server. Install it with: pip install 'kairix[agents]'"
         ) from exc
 
-    server = FastMCP("kairix")
+    server = FastMCP("kairix", host=host, port=port)
 
     @server.tool()
     def search(
