@@ -2,7 +2,7 @@
 Extract a document date from frontmatter fields or filename patterns.
 
 Priority order:
-  1. YAML frontmatter (date / created / updated / created_at fields)
+  1. YAML frontmatter (date / created / updated / created_at / date_added fields)
   2. ISO date pattern YYYY-MM-DD in the file path
 
 Returns an ISO 8601 date string (e.g. "2026-04-09") or None if no reliable
@@ -23,7 +23,7 @@ _FRONTMATTER_HEAD = 2000
 
 # Fields recognised in YAML frontmatter (in priority order of appearance).
 _FRONTMATTER_PATTERN = re.compile(
-    r"^[ \t]*(?:date|created|updated|created_at)[ \t]*:[ \t]*[\"']?"
+    r"^[ \t]*(?:date|created|updated|created_at|date_added)[ \t]*:[ \t]*[\"']?"
     r"(\d{4}-\d{2}-\d{2})(?:[T ][\d:]+)?[\"']?[ \t]*$",
     re.MULTILINE | re.IGNORECASE,
 )
@@ -35,7 +35,7 @@ _PATH_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 # Maps to first day of month (YYYY-MM-01) for temporal filtering purposes.
 _FRONTMATTER_YEARMONTH_PATTERN = re.compile(
     # Match YYYY-MM date fields but NOT YYYY-MM-DD (negative lookahead for -DD)
-    r"^[ \t]*(?:date|created|updated|created_at)[ \t]*:[ \t]*"
+    r"^[ \t]*(?:date|created|updated|created_at|date_added)[ \t]*:[ \t]*"
     r"[\"']*([0-9]{4}-[0-9]{2})(?!-[0-9]{2})[\"'\s]*$",
     re.MULTILINE | re.IGNORECASE,
 )

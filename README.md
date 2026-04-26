@@ -4,8 +4,8 @@
 Your documents, your servers, your agents — finding the right answer in under a second.
 
 [![Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1192%20passing-brightgreen)]()
-[![NDCG@10](https://img.shields.io/badge/NDCG%4010-0.803-orange)]()
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
+[![NDCG@10](https://img.shields.io/badge/NDCG%4010-0.818-orange)]()
 
 ---
 
@@ -63,27 +63,22 @@ For agent platforms like [OpenClaw](https://github.com/three-cubes/openclaw) tha
 ## Quick start
 
 ```bash
-# Install
-pip install kairix
-
-# Configure (edit with your LLM API credentials and document path)
-cp kairix.example.config.yaml kairix.config.yaml
-
-# Index your documents
-kairix embed
-
-# Search
-kairix search "what are our engineering standards" --agent builder
+git clone https://github.com/quanyeomans/kairix && cd kairix
+cp .env.example .env        # add your LLM API key
+ln -s ~/my-notes ./documents # point to your documents
+docker compose up -d         # start all services
+docker compose exec -it kairix kairix embed  # index your documents
+docker compose exec -it kairix kairix search "your question"
 ```
 
-**What you need:**
-- Python 3.10+
-- An LLM API key (Azure OpenAI, or any OpenAI-compatible endpoint)
-- A folder of documents (Obsidian vault, markdown files, or any text)
+See the [full quick-start guide](docs/quick-start.md) for detailed setup, configuration, and troubleshooting.
 
-**Optional (recommended):**
-- Neo4j Community Edition — for knowledge graph features (people, companies, relationships)
-- `pip install "kairix[neo4j]"` to enable
+**What you need:**
+- Docker and Docker Compose
+- An LLM API key (Azure OpenAI or standard OpenAI)
+- A folder of documents (markdown, text, or any structured notes)
+
+**Optional:** Neo4j for knowledge graph features (people, companies, relationships). Included in the Docker Compose stack.
 
 ---
 

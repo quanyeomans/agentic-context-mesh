@@ -1,4 +1,5 @@
 FROM python:3.12-slim AS base
+# Pin to a specific Python patch for production: FROM python:3.12.7-slim
 
 # System dependencies for sqlite-vec native extension and Neo4j driver
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -7,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create runtime directories
-RUN mkdir -p /data/vault /data/kairix /opt/kairix/bin /opt/kairix/cron
+RUN mkdir -p /data/vault /data/kairix /opt/kairix/bin /opt/kairix/cron  # document store
 
 # Install kairix from local source with all production extras
 COPY pyproject.toml setup.cfg* setup.py* README.md /opt/kairix/src/
@@ -20,6 +21,7 @@ RUN chmod +x /entrypoint.sh
 COPY kairix.example.config.yaml /opt/kairix/kairix.config.yaml
 
 # Default environment
+# KAIRIX_VAULT_ROOT = document store root
 ENV KAIRIX_DB_PATH=/data/kairix/index.sqlite \
     KAIRIX_VAULT_ROOT=/data/vault \
     KAIRIX_DATA_DIR=/data/kairix \

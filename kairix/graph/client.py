@@ -36,6 +36,9 @@ from kairix.secrets import load_secrets as _load_secrets
 # No-op when /run/secrets/kairix.env is absent (local dev, CI).
 _load_secrets()
 
+# Suppress verbose Neo4j driver notifications (harmless on empty graphs)
+logging.getLogger("neo4j").setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 _NEO4J_URI = os.environ.get("KAIRIX_NEO4J_URI", "bolt://localhost:7687")

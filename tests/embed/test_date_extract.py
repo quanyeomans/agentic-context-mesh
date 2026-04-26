@@ -214,3 +214,15 @@ def test_yearmonth_not_matched_if_dd_follows() -> None:
     from kairix.embed.date_extract import _FRONTMATTER_YEARMONTH_PATTERN
 
     assert _FRONTMATTER_YEARMONTH_PATTERN.search("date: 2026-04-10") is None
+
+
+# ---------------------------------------------------------------------------
+# date_added frontmatter field
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_date_added_frontmatter():
+    """date_added: YYYY-MM-DD is recognised as a valid frontmatter date field."""
+    doc = "---\ndate_added: 2026-03-15\ntags: [test]\n---\nContent here"
+    assert extract_chunk_date(doc, "notes/test.md") == "2026-03-15"
