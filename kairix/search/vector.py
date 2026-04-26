@@ -17,11 +17,20 @@ VecResult fields:
 """
 
 import logging
+import re
 import sqlite3
 import struct
 from typing import TypedDict
 
 logger = logging.getLogger(__name__)
+
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
+
+
+def _strip_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter block from the start of text."""
+    return _FRONTMATTER_RE.sub("", text, count=1).lstrip()
+
 
 # Default number of vector results to return.
 # More candidates improve recall at minimal latency cost (~200ms for k=20).
@@ -169,7 +178,7 @@ def _vsearch_with_bytes(
                     path=str(row[2]),
                     collection=str(row[3]),
                     title=str(row[4] or ""),
-                    snippet=str(row[5] or ""),
+                    snippet=_strip_frontmatter(str(row[5] or "")),
                 )
             )
         return results

@@ -249,3 +249,44 @@ def test_vec_result_typeddict_fields() -> None:
     )
     assert r["hash_seq"] == "x_0"
     assert r["distance"] == 0.1
+
+
+# ---------------------------------------------------------------------------
+# _strip_frontmatter — T3-3: YAML frontmatter removal
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_strip_frontmatter():
+    from kairix.search.vector import _strip_frontmatter
+
+    text = "---\ntitle: Test Doc\nlicence: MIT\n---\n\n# Real Content\n\nBody text here."
+    result = _strip_frontmatter(text)
+    assert result.startswith("# Real Content")
+    assert "---" not in result
+    assert "title:" not in result
+
+
+@pytest.mark.unit
+def test_strip_frontmatter_no_frontmatter():
+    from kairix.search.vector import _strip_frontmatter
+
+    text = "Just plain text without frontmatter."
+    assert _strip_frontmatter(text) == text
+
+
+@pytest.mark.unit
+def test_vector_search_strips_frontmatter_from_snippet() -> None:
+    """vector_search should strip YAML frontmatter from snippet content."""
+    row = _make_mock_row(
+        snippet="---\ntitle: My Doc\ntags: [a, b]\n---\n\nActual content here."
+    )
+    mock_db = MagicMock(spec=sqlite3.Connection)
+    mock_db.execute.return_value.fetchall.return_value = [row]
+
+    results = vector_search(mock_db, _make_query_vec())
+
+    assert len(results) == 1
+    assert results[0]["snippet"].startswith("Actual content here.")
+    assert "---" not in results[0]["snippet"]
+    assert "title:" not in results[0]["snippet"]

@@ -15,6 +15,9 @@ Get kairix running and searching your documents in under 30 minutes.
 ```bash
 git clone https://github.com/quanyeomans/kairix
 cd kairix
+
+# Optional: pin to a specific release
+# git checkout v1.0.0
 ```
 
 ### 2. Set up your credentials
@@ -71,6 +74,8 @@ The wizard walks you through:
 
 This takes about 5 minutes.
 
+> **Cost note:** Embedding uses your LLM API key. For 1,000 documents (~4,000 chunks), expect ~$0.50-1.00 with text-embedding-3-large. The reference library (~14,000 chunks) costs ~$2-3 to embed initially. Incremental updates are much cheaper.
+
 ### 6. Search
 
 ```bash
@@ -85,6 +90,8 @@ That's it. Your knowledge base is running.
 
 - **Documents are indexed automatically** every hour by the worker service
 - **The MCP server** runs on port 8080 — connect any MCP-compatible agent (Claude, OpenClaw, etc.)
+- **Verify the server is running**: `curl http://localhost:8080/sse` should return an SSE stream header
+- **Run diagnostics**: `docker compose exec -it kairix kairix onboard check`
 - **Run quality checks** anytime: `docker compose exec kairix kairix onboard check`
 
 ## Connecting agents
@@ -120,6 +127,14 @@ docker compose exec kairix kairix eval hybrid-sweep \
 docker compose down        # Stop (data preserved in volumes)
 docker compose up -d       # Start again
 docker compose logs -f     # Watch logs
+```
+
+## Rebuilding after code changes
+
+```bash
+docker compose down       # Stop all services
+docker compose build      # Rebuild images
+docker compose up -d      # Start again
 ```
 
 ## Without Docker

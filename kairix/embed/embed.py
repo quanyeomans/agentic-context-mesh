@@ -444,6 +444,10 @@ def run_embed(
                     )
                 flush_staging_to_vec(db)
             embedded += len(batch)
+            logger.info(
+                "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
+                embedded, total, 100.0 * embedded / total if total > 0 else 0, batch_idx + 1,
+            )
         except Exception as e:
             logger.error(f"DB write for batch {batch_idx} failed: {e}")
             # Clear staging so the next batch starts clean
@@ -475,20 +479,16 @@ def run_embed(
                             )
                         flush_staging_to_vec(db)
                     embedded += len(batch)
+                    logger.info(
+                        "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
+                        embedded, total, 100.0 * embedded / total if total > 0 else 0, batch_idx + 1,
+                    )
                     logger.info(f"Batch {batch_idx} retry succeeded after schema repair.")
                     continue
                 except Exception as retry_e:
                     logger.error(f"DB write retry for batch {batch_idx} failed after schema repair: {retry_e}")
             failed_chunks.extend(batch)
             continue
-
-        # Progress log every 10 batches
-        if (batch_idx + 1) % 10 == 0:
-            pct = (embedded / total) * 100
-            elapsed = time.time() - start_time
-            rate = embedded / elapsed if elapsed > 0 else 0
-            eta_s = (total - embedded) / rate if rate > 0 else 0
-            logger.info(f"Progress: {embedded}/{total} ({pct:.1f}%) — {rate:.1f} chunks/s — ETA {eta_s / 60:.1f}m")
 
         # No unconditional sleep — rate limiting is handled reactively via
         # Retry-After headers in embed_batch() when Azure actually pushes back.

@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create runtime directories
-RUN mkdir -p /data/vault /data/kairix /opt/kairix/bin /opt/kairix/cron  # document store
+RUN mkdir -p /data/vault /data/kairix /data/kairix/workspaces /opt/kairix/bin /opt/kairix/cron  # document store
 
 # Install kairix from local source with all production extras
 COPY pyproject.toml setup.cfg* setup.py* README.md /opt/kairix/src/
@@ -24,6 +24,7 @@ COPY kairix.example.config.yaml /opt/kairix/kairix.config.yaml
 # KAIRIX_VAULT_ROOT = document store root
 ENV KAIRIX_DB_PATH=/data/kairix/index.sqlite \
     KAIRIX_VAULT_ROOT=/data/vault \
+    KAIRIX_WORKSPACE_ROOT=/data/kairix/workspaces \
     KAIRIX_DATA_DIR=/data/kairix \
     KAIRIX_CONFIG_PATH=/opt/kairix/kairix.config.yaml
 

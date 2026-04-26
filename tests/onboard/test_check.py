@@ -14,8 +14,23 @@ from kairix.onboard.check import (
     check_neo4j_reachable,
     check_secrets_loaded,
     check_vault_root_configured,
+    check_wrapper_installed,
     run_all_checks,
 )
+
+# ---------------------------------------------------------------------------
+# check_wrapper_installed — Docker skip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_wrapper_check_skipped_in_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In Docker, wrapper_installed check returns ok=True without probing the binary."""
+    monkeypatch.setenv("KAIRIX_DOCKER", "1")
+    result = check_wrapper_installed()
+    assert result.ok is True
+    assert "Docker" in result.detail
+
 
 # ---------------------------------------------------------------------------
 # check_neo4j_reachable — fix hint content

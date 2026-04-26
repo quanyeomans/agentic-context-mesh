@@ -62,6 +62,15 @@ def check_kairix_on_path() -> CheckResult:
 
 def check_wrapper_installed() -> CheckResult:
     """The kairix symlink points to a shell wrapper, not the raw Python binary."""
+    from kairix.paths import _is_docker
+
+    if _is_docker():
+        return CheckResult(
+            name="wrapper_installed",
+            ok=True,
+            detail="Running in Docker — wrapper check skipped (pip install in image)",
+        )
+
     path = shutil.which("kairix")
     if path is None:
         return CheckResult(
@@ -497,7 +506,7 @@ _CLAUDE_DESKTOP_CONFIG_PATHS = (
 )
 
 # ── SSE / HTTP ────────────────────────────────────────────────────────────────
-_MCP_SSE_PORT = int(os.environ.get("KAIRIX_MCP_PORT", "7443"))
+_MCP_SSE_PORT = int(os.environ.get("KAIRIX_MCP_PORT", "8080"))
 
 
 def _probe_openclaw_harness() -> tuple[bool, str]:
