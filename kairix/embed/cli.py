@@ -106,11 +106,20 @@ def cmd_embed(args: argparse.Namespace) -> int:
         # This ensures first-run embed works without a separate scan step.
         from kairix.db.scanner import CollectionConfig, DocumentScanner
         from kairix.paths import document_root
+        from kairix.search.config_loader import load_collections
 
         droot = document_root()
         scanner = DocumentScanner(db, document_root=droot)
-        # Default: scan the entire document root as a single collection
-        scan_report = scanner.scan([CollectionConfig(name="default", path=".")])
+
+        # Load collections from config; fall back to scanning entire document root
+        collections_cfg = load_collections()
+        if collections_cfg and collections_cfg.shared:
+            scan_collections = [CollectionConfig(name=c.name, path=c.path, glob=c.glob) for c in collections_cfg.shared]
+            logging.info("Using %d configured collections", len(scan_collections))
+        else:
+            scan_collections = [CollectionConfig(name="default", path=".")]
+
+        scan_report = scanner.scan(scan_collections)
         if scan_report.new > 0 or scan_report.updated > 0:
             logging.info(
                 "Scanned documents: %d new, %d updated, %d unchanged",

@@ -224,6 +224,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
     collection_options = [
         "Search everything — all documents in one collection (simplest)",
         "Use template collections (based on your preset above)",
+        "Include agent workspace memories (for agent platforms)",
         "Skip — I'll configure collections later",
     ]
     coll_idx = _prompt_choice("How do you want to organise your documents?", collection_options)
@@ -258,6 +259,15 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
                 "shared": [{"name": "all", "path": ".", "glob": "**/*.md"}],
             }
         print(f"  \u2713 {len(collections_config['shared'])} collections configured.\n")
+    elif coll_idx == 2:
+        workspace_root = os.environ.get("KAIRIX_WORKSPACE_ROOT", "~/.kairix/workspaces")
+        collections_config = {
+            "shared": [
+                {"name": "all", "path": ".", "glob": "**/*.md"},
+                {"name": "workspaces", "path": workspace_root, "glob": "**/memory/**/*.md"},
+            ],
+        }
+        print(f"  \u2713 Documents + agent workspace memories ({workspace_root}) configured.\n")
 
     # ── Step 7: Agent Integration ────────────────────────────────────────
     print("Step 7 of 7: Agent Integration\n")
