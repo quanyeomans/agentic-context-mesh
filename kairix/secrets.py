@@ -192,3 +192,20 @@ def get_secret(name: str, required: bool = True) -> str | None:
         )
         raise OSError(f"Secret {name!r} not available. Check environment, secrets file, or Key Vault configuration.")
     return None
+
+
+def refresh_secrets(path: str | Path | None = None) -> int:
+    """Clear cached secrets and reload from the secrets file.
+
+    Clears the lru_cache on ``_load_secrets_file`` so the next
+    ``get_secret`` call re-reads the file. Then calls ``load_secrets``
+    to re-populate ``os.environ`` with any new or rotated values.
+
+    Use this after rotating credentials in Azure Key Vault and
+    re-fetching the secrets file (e.g., via a cron job or systemd
+    timer).
+
+    Returns the number of environment variables loaded.
+    """
+    _load_secrets_file.cache_clear()
+    return load_secrets(path)

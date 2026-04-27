@@ -8,6 +8,7 @@ No external services required.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -303,3 +304,45 @@ def test_get_secret_oserror_message_is_informative(monkeypatch) -> None:
     assert "azure-openai-api-key" in msg
     # Error message should be generic — no internal paths or env var names leaked
     assert "not available" in msg
+
+
+# ---------------------------------------------------------------------------
+# refresh_secrets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_refresh_secrets_clears_cache_and_reloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """refresh_secrets clears lru_cache and re-reads the secrets file."""
+    from kairix.secrets import _load_secrets_file, refresh_secrets
+
+    secrets_file = tmp_path / "kairix.env"
+    secrets_file.write_text("MY_SECRET_A=original\n")
+    monkeypatch.setenv("KAIRIX_SECRETS_FILE", str(secrets_file))
+
+    # First load
+    _load_secrets_file.cache_clear()
+    loaded = refresh_secrets(str(secrets_file))
+    assert loaded >= 1
+    assert os.environ.get("MY_SECRET_A") == "original"
+
+    # Rotate the secret
+    secrets_file.write_text("MY_SECRET_A=rotated\nMY_SECRET_B=new\n")
+
+    # Without refresh, cache would return old value
+    # After refresh, new value should be picked up
+    monkeypatch.delenv("MY_SECRET_A", raising=False)
+    monkeypatch.delenv("MY_SECRET_B", raising=False)
+    loaded = refresh_secrets(str(secrets_file))
+    assert loaded >= 2
+    assert os.environ.get("MY_SECRET_A") == "rotated"
+    assert os.environ.get("MY_SECRET_B") == "new"
+
+
+@pytest.mark.unit
+def test_refresh_secrets_returns_zero_when_no_file(tmp_path: Path) -> None:
+    """refresh_secrets returns 0 when secrets file doesn't exist."""
+    from kairix.secrets import refresh_secrets
+
+    result = refresh_secrets(str(tmp_path / "nonexistent.env"))
+    assert result == 0
