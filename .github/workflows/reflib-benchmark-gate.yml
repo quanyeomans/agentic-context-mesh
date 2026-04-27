@@ -11,6 +11,9 @@ on:
       - "benchmark-results/reflib-contract-baseline.json"
       - "reference-library/**"
 
+permissions:
+  contents: read
+
 jobs:
   reflib-benchmark-gate:
     name: Reference library contract suite

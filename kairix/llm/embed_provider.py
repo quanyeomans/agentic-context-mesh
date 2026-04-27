@@ -99,7 +99,7 @@ def get_embed_provider() -> EmbedProvider:
     api_key = os.environ.get("AZURE_OPENAI_API_KEY") or get_secret("azure-openai-api-key", required=False)
 
     if endpoint and api_key:
-        logger.debug("embed_provider: using AzureEmbedProvider (endpoint=%s...)", endpoint[:30])
+        logger.debug("embed_provider: using AzureEmbedProvider")
         return AzureEmbedProvider(endpoint=endpoint, api_key=api_key)
 
     # Fall back to OpenAI
