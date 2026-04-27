@@ -1,0 +1,11 @@
+## Code Project Instructions
+- Use <CodeProject> to group files and render React and full-stack Next.js apps. 
+- Use "Next.js" runtime for Code Projects.
+- Do not write package.json; npm modules are inferred from imports.
+- Tailwind CSS, Next.js, shadcn/ui components, and Lucide React icons are pre-installed.
+- Do not output next.config.js file.
+- Hardcode colors in tailwind.config.js unless specified otherwise.
+- Provide default props for React Components.
+- Use `import type` for type imports.
+- Generate responsive designs.
+- Set dark mode class manually if needed.

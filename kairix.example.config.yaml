@@ -1,0 +1,104 @@
+# kairix.example.config.yaml
+# Copy to kairix.config.yaml and adjust for your corpus type.
+#
+# Corpus type presets:
+#   consulting   — entity + procedural boost on; temporal off (default)
+#   daily-log    — date-path temporal boost on; entity optional
+#   technical    — entity off; procedural extended patterns on
+#
+# Set KAIRIX_CONFIG_PATH=/path/to/kairix.config.yaml to use a custom location.
+
+# ── Paths ───────────────────────────────────────────────────────────────────
+# Where your documents and data live. Defaults work for most setups.
+# Environment variables (KAIRIX_VAULT_ROOT, KAIRIX_DB_PATH, etc.) take
+# precedence over these values.
+#
+# paths:
+#   vault_root: ~/Documents/my-vault     # your documents folder
+#   db_path: ~/.cache/kairix/index.sqlite # search index
+#   log_dir: ~/.cache/kairix/logs         # search and embed logs
+#   workspace_root: ~/.kairix/workspaces  # agent memory logs
+
+# ── Collections ─────────────────────────────────────────────────────────────
+# Organise your documents into named collections for search scoping.
+# Each collection maps a name to a folder inside your vault.
+# If not configured, all documents in your vault are searched as one collection.
+#
+# collections:
+#   # Shared collections — searched by all agents
+#   shared:
+#     - name: projects
+#       path: "01-Projects"
+#       glob: "**/*.md"
+#     - name: areas
+#       path: "02-Areas"
+#       glob: "**/*.md"
+#     - name: knowledge
+#       path: "05-Knowledge"
+#       glob: "**/*.md"
+#     # Add more as needed:
+#     # - name: archive
+#     #   path: "06-Archive"
+#     #   glob: "**/*.md"
+#
+#   # Per-agent collections — each agent gets its own memory scope
+#   agent_pattern: "{agent}-memory"
+#   agent_paths:
+#     builder: "workspaces/builder/memory"
+#     shape: "workspaces/shape/memory"
+
+retrieval:
+  # Fusion strategy: how keyword (BM25) and meaning-based (vector) search results are combined.
+  #
+  # "bm25_primary" (default) — keyword results ranked first, meaning-based results appended.
+  #   Best for structured knowledge bases with keyword-rich filenames and headings
+  #   (wikis, runbooks, Obsidian vaults, consulting/enterprise knowledge).
+  #
+  # "rrf" — standard Reciprocal Rank Fusion, equal weight to both approaches.
+  #   Better for corpora where meaning-based similarity is the primary signal
+  #   (research papers, long-form prose, multilingual content).
+  #
+  # To find the best strategy for YOUR data, run:
+  #   kairix eval build-gold --suite queries.yaml --output gold.yaml
+  #   kairix eval hybrid-sweep --suite gold.yaml
+  fusion_strategy: "bm25_primary"
+
+  # RRF constant (only used when fusion_strategy is "rrf").
+  # Higher values flatten the ranking. Default: 60.
+  # rrf_k: 60
+
+  boosts:
+    entity:
+      enabled: true          # Boost documents for known named entities (Neo4j MENTIONS in-degree)
+      factor: 0.20           # Log-scale weight. Raise for entity-dense corpora.
+      cap: 2.0               # Max boost multiplier. Prevents runaway scores.
+
+    procedural:
+      enabled: true          # Boost procedural docs (how-to guides, runbooks, SOPs)
+      factor: 1.4            # Score multiplier for matching paths.
+      path_patterns:
+        - "(?:^|/)how-to-"
+        - "(?:^|/)runbooks?/"
+        - "(?:^|/)runbook-"
+        - "(?:^|/)procedure"
+        - "(?:^|/)sop-"
+        - "(?:^|/)guide-"
+        - "(?:^|/)playbook-"
+        # Uncomment for technical documentation corpora:
+        # - "(?:^|/)tutorial-"
+        # - "/docs?/"
+        # - "/reference/"
+
+    temporal:
+      # Date-path boost: boosts docs whose FILE PATH contains a date (e.g. 2026-03-22.md).
+      # Enable ONLY for corpora where YYYY-MM-DD.md daily log files are the primary query target.
+      date_path_boost:
+        enabled: false
+        factor: 1.35
+        recency_window_days: 90
+
+      # Chunk-date boost: boosts docs by chunk_date metadata proximity to the query date.
+      # Enable when chunk_date is populated at index time (see kairix index build --date-metadata).
+      chunk_date_boost:
+        enabled: false        # Enable for indexed corpora with chunk_date populated
+        decay_halflife_days: 30

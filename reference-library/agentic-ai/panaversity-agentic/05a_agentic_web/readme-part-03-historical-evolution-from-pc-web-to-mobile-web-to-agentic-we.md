@@ -1,0 +1,25 @@
+## Historical Evolution: From PC Web to Mobile Web to Agentic Web
+
+![Evolution](./images/agentic_web.webp)
+
+Understanding the Agentic Web is easier if we trace how the Web has evolved over time in terms of user interaction:
+
+* **PC Web Era (1990s–2000s):** In the early Personal Computer era of the Web, content was mostly static and institutionally produced. Users primarily **consumed information** by browsing web pages or searching via keywords. Interaction was largely one-way (user -> content) and human-driven; the user manually navigated links, entered queries, and made decisions at each step. There were some intelligent tools like search engines and basic recommender systems, but the user remained the active operator of each task.
+
+* **Mobile Web Era (2010s):** The rise of smartphones and social media brought an explosion of **user-generated content (UGC)** and mobile apps. The web’s scale and diversity grew tremendously, which made pure search less effective and led to the dominance of **recommendation systems** to match users with content. Interaction became more two-way: users both **consume and produce content** (posting, commenting, uploading). The “attention economy” emerged, as services competed to capture user attention with personalized feeds and notifications. Still, tasks were largely done manually by users through apps – albeit with more assistance from AI-driven features (like smart suggestions).
+
+* **Agentic Web Era (mid-2020s):** Now, we are at the cusp of the Agentic Web era. This is fueled by advances in large language models (LLMs) and AI agents that can handle complex, multi-step reasoning tasks. In the Agentic Web, **users delegate intents to autonomous agents** instead of directly interacting with pages or apps. Web content is no longer just static documents for humans, but becomes an **ecosystem of agents and services** that are interoperable. Hyperlinks evolve into actionable channels for agent coordination. In practical terms, the Web transforms from “a web of pages” to a **“web of agents”**. A human’s role shifts from clicking and typing to specifying goals and reviewing results, while agents take over browsing, data gathering, and execution tasks across sites and APIs.
+
+One useful way to visualize this shift is to compare the primary mode of interaction in each era. In the PC Web, a user might visit a dozen websites to plan a trip (searching flights, comparing prices, booking on an airline site). In the Agentic Web, the user simply tells their agent the goal (“plan a budget trip to London next month”), and the agent will orchestrate all those steps for them. The diagram below (from Yang et al., 2025) illustrates how an **Agentic Web task lifecycle** works as a continuous loop from user intent to multi-agent execution and back to the user:
+
+It’s important to note that the **end-users are still humans**, but *“mid-users”* in this paradigm are the AI agents themselves, which actively navigate and operate online resources on our behalf. This has deep implications: the Web is becoming **machine-first**, meaning web services and content must be accessible and understandable to agents just as they are to humans. We’ll discuss standards emerging to facilitate this (like agent communication protocols) shortly.
+
+### Why the Agentic Web Emerged
+
+Two driving forces enabled the Agentic Web:
+
+1. **Advanced AI Capabilities:** Modern AI models (especially LLMs) have gained the ability to reason, plan, and use tools in a way that goes far beyond traditional chatbots. They are not limited to single-turn Q\&A; they can remember context, decompose complex tasks, and even collaborate with other agents. This made it feasible to trust agents with non-trivial tasks (research projects, coding, customer service dialogues, etc.) that were once only human-led. Essentially, AI moved from being a *response generator* to a *proactive task solver*.
+
+2. **User Willingness to Delegate:** At the same time, people have grown more comfortable letting AI handle tasks. The success of digital assistants and automation tools showed that users appreciate offloading routine work. Now we see users delegating entire workflows lasting minutes or days to AI (e.g. “monitor these news sources and summarize any development on X”) rather than just asking one-off questions. This trend pushes the need for new interfaces and web mechanisms that support **long-running, autonomous agent activities**, as opposed to the click-refresh model of the past.
+
+In summary, the Agentic Web arises from a **mismatch between powerful AI agents and the legacy Web**. The legacy Web is stateless and human-centric (each request–response is isolated, initiated by a person), whereas AI agents need a more persistent, dynamic environment to operate effectively. The Agentic Web is about bridging that gap – enabling the internet’s infrastructure to support *persistent, goal-oriented, multi-agent processes* instead of just static content retrieval.

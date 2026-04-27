@@ -1,0 +1,19 @@
+---
+title: "Agile/Scrum Roles"
+source: Microsoft Code-With Engineering Playbook
+source_url: https://github.com/microsoft/code-with-engineering-playbook
+licence: CC-BY-4.0
+domain: engineering
+subdomain: microsoft-code-with-playbook
+date_added: 2026-04-25
+---
+
+# Agile/Scrum Roles
+
+- We prefer using "process lead" over "scrum master". It describes the same role.
+
+This section has links directing you to definitions for the traditional roles within Agile/Scrum.  After reading through the best practices you should have a basic understanding of the key Agile roles in terms of what they are and the expectations for the role.
+
+- [Product Owner](https://scrumguides.org/scrum-guide.html#product-owner 'Product Owner')
+- [Scrum Master](https://scrumguides.org/scrum-guide.html#scrum-master 'Scrum Master')
+- [Development Team](https://scrumguides.org/scrum-guide.html#developers 'Developers')

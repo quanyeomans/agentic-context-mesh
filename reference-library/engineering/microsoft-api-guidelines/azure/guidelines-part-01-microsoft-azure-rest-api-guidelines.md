@@ -1,0 +1,1 @@
+# Microsoft Azure REST API Guidelines

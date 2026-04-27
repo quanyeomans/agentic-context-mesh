@@ -1,0 +1,20 @@
+# CODEOWNERS
+# Each line maps a path pattern to one or more owners (GitHub usernames or teams).
+# The last matching rule takes precedence.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @quanyeomans
+
+# Core retrieval modules — require maintainer review
+/kairix/embed/       @quanyeomans
+/kairix/search/      @quanyeomans
+/kairix/graph/       @quanyeomans
+
+# Schema and migrations — high-risk changes
+/kairix/embed/schema.py      @quanyeomans
+/kairix/db/schema.py         @quanyeomans
+
+# CI/CD and security configuration
+/.github/                       @quanyeomans
+/pyproject.toml                 @quanyeomans

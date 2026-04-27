@@ -1,0 +1,74 @@
+---
+title: "{short title, representative of solved problem and found solution}"
+source: Markdown ADR (MADR)
+source_url: https://github.com/adr/madr
+licence: MIT
+domain: engineering
+subdomain: madr
+date_added: 2026-04-25
+---
+
+# {short title, representative of solved problem and found solution}
+
+## Context and Problem Statement
+
+{Describe the context and problem statement, e.g., in free form using two to three sentences or in the form of an illustrative story. You may want to articulate the problem in form of a question. Consider adding links to collaboration boards or issue management systems. Make the scope of the decision explicit, for instance, by calling out or pointing at structural architecture elements (components, connectors, ...).}
+
+
+## Decision Drivers
+
+* {decision driver 1, for instance, a desired software quality, faced concern, constraint or force}
+* {decision driver 2}
+* … 
+
+## Considered Options
+
+* {title of option 1}
+* {title of option 2}
+* {title of option 3}
+* … 
+
+## Decision Outcome
+
+Chosen option: "{title of option 1}", because {justification. e.g., only option, which meets k.o. criterion decision driver | which resolves force {force} | … | comes out best (see below)}.
+
+
+### Consequences
+
+* Good, because {positive consequence, e.g., improvement of one or more desired qualities, …}
+* Bad, because {negative consequence, e.g., compromising one or more desired qualities, …}
+* … 
+
+
+### Confirmation
+
+{Describe how the implementation / compliance of the ADR can/will be confirmed. Is there any automated or manual fitness function? If so, list it and explain how it is applied. Is the chosen design and its implementation in line with the decision? E.g., a design/code review or a test with a library such as ArchUnit can help validate this. Note that although we classify this element as optional, it is included in many ADRs.}
+
+
+## Pros and Cons of the Options
+
+### {title of option 1}
+
+
+{example | description | pointer to more information | …}
+
+* Good, because {argument a}
+* Good, because {argument b}
+
+* Neutral, because {argument c}
+* Bad, because {argument d}
+* … 
+
+### {title of other option}
+
+{example | description | pointer to more information | …}
+
+* Good, because {argument a}
+* Neutral, because {argument b}
+* Bad, because {argument c}
+* …
+
+
+## More Information
+
+{You might want to provide additional evidence/confidence for the decision outcome here and/or document the team agreement on the decision and/or define when/how this decision the decision should be realized and if/when it should be re-visited. Links to other decisions and resources might appear here as well.}

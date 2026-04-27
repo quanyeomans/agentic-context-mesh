@@ -1,0 +1,45 @@
+---
+title: "Archetypes"
+source: 18F Guides
+source_url: https://github.com/18F/guides
+licence: CC0-1.0
+domain: engineering
+subdomain: 18f-guides
+date_added: 2026-04-25
+---
+
+## How to do it{#how-archetypes}
+1. Gather findings from research activities such as  [contextual inquiry]({{ "/methods/discover/contextual-inquiry/" | url }}) or [stakeholder interviews]({{ "/methods/discover/stakeholder-and-user-interviews/" | url }}), user surveys, and analysis of customer data and organize them in a way that’s easy to review.
+1. Analyze and [affinity map]({{ "/methods/decide/affinity-mapping/" | url }}) your research findings for patterns. Note frequently observed goals, motivations, behaviors, pain points, and potential harms (e.g. lack of consent, physical danger, being retraumatized). These patterns help form the foundation of each archetype.
+1. Create sets of user archetypes based on how you believe people will use your solution and the journeys they are on. These archetypes typically get titles, for example, “the marketing specialist” and will include narratives that describe motivations in a relatable way. 
+
+
+<section class="method--section method--section--18f-example" markdown="1" >
+
+## Example at 18F{#ex-personas}
+
+- [18F Blog post - how user archetypes informed the Draft U.S. Web Design Standards
+](https://18f.gsa.gov/2016/03/18/how-user-archetypes-informed-the-draft-us-web-design-standards/)
+
+</section>
+<section class="method--section method--section--18f-example" markdown="1" >
+
+## Tips for remote participation{#remote}
+
+Archetypes can be created virtually using any variety of digital whiteboards or word-processing tools.
+
+</section>
+
+<section class="method--section method--section--additional-resources" markdown="1">
+
+## Additional resources{#add-archetypes}
+- [Difference Between User Personas and Archetypes](https://uxtbe.medium.com/difference-between-user-personas-and-archetypes-6b21a35c6bac){.usa-link .usa-link--external}
+
+</section>
+
+<section class="method--section method--section--government-considerations" markdown="1" >
+
+## Government considerations{#con-personas}
+
+No PRA implications. No information is collected from members of the public.
+</section>

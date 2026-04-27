@@ -1,0 +1,20 @@
+name: technical
+description: Technical documentation, guides, API references, runbooks
+retrieval:
+  fusion_strategy: bm25_primary
+  boosts:
+    entity:
+      enabled: false
+    procedural:
+      enabled: true
+      factor: 1.5
+      path_patterns:
+        - "(?:^|/)how-to-"
+        - "(?:^|/)runbooks?/"
+        - "(?:^|/)tutorial-"
+        - "/docs?/"
+        - "/reference/"
+        - "(?:^|/)guide-"
+    temporal:
+      chunk_date_boost:
+        enabled: false

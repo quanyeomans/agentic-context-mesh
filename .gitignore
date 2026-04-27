@@ -1,0 +1,52 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Cross-model review artefacts
+.reviews/
+
+# Benchmark result JSON files (contain vault snippets) — not committed
+# Exception: the contract suite baseline is safe (mock data only, no vault content)
+benchmark-results/*.json
+!benchmark-results/contract-baseline.json
+
+# Live database file — not a repo artefact
+entities.db
+
+# Backup files from recall_check scaffolding
+*.bak-*
+*.bak
+
+# Stray cache directory (created by run-command agent context)
+None/
+
+# Benchmark suites contain vault-specific gold documents and query content — not suitable for public repos.
+# Generate your own with: kairix eval generate
+# See suites/example.yaml for the format.
+suites/v2-real-world.yaml
+suites/*.yaml
+!suites/example.yaml
+!suites/contract-suite.yaml
+!suites/reflib-*.yaml
+
+# Operator-specific benchmark build scripts — keep in your private operator config repo
+scripts/build-eval-gold.py
+scripts/mine-eval-queries.py
+scripts/benchmark-path-audit.py
+
+# Local environment files — copy env.example and fill in your values
+# Never commit files with real credentials or infrastructure names
+.env
+*.env
+!env.example
+PRD.md
+.claude/
+.confidential-patterns

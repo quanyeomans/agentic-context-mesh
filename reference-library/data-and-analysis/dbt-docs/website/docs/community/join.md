@@ -1,0 +1,63 @@
+---
+title: "Join the Community"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+<section className="community-home">
+
+Want to learn how organizations around the world are tackling the biggest challenges in data while making new friends from the best analytics teams? Join the dbt Community — data practitioners’ favorite place to learn new skills, keep on top of industry trends, and forge connections.
+
+
+<Card
+    title="Join us on Slack"
+    body="Follow the pulse of the dbt Community! Chat with other practitioners in your city, country or worldwide about data work, tech stacks, or simply share a killer meme."
+link="https://www.getdbt.com/community/join-the-community/"
+    icon="slack"
+/>
+
+<Card
+    title="Community Forum"
+    body="Have a question about how to do something in dbt? Hop into the Community Forum and work with others to create long lived community knowledge."
+    link="https://discourse.getdbt.com/"
+    icon="discussions"
+/>
+
+<Card
+    title="How to contribute"
+    body="Want to get involved? This is the place! Learn how to contribute to our public repositories, write for the blog, speak at a meetup and more."
+    link="community/contribute" icon="pencil-paper"
+/>
+
+<Card
+    title="Code of Conduct"
+    body="We are committed to creating a space where everyone can feel welcome and safe. Our Code of Conduct reflects the agreement that all Community members make to uphold these ideals."
+    link="community/resources/code-of-conduct/"
+    icon="folder"
+/>
+
+<Card
+    title="Webinars"
+    body="Browse upcoming and on-demand dbt Labs webinars and workshops."
+    link="https://www.getdbt.com/resources/webinars"
+    icon="calendar" />
+
+<Card
+    title="Events"
+    body="Find meetups, conferences, training, and other dbt community events online and in person."
+    link="https://www.getdbt.com/events"
+    icon="globe" />
+
+<Card
+    title="Watch past events"
+    body="Get a taste for the energy of our live events, get inspired, or prepare for an upcoming event by watching recordings from our YouTube archives."
+    link="https://www.youtube.com/playlist?list=PL0QYlrC86xQl1DGKBopQZiZ6tSqrMlD2M"
+    icon="star"
+/>
+
+
+</section>

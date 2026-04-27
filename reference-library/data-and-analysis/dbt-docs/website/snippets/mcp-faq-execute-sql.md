@@ -1,0 +1,22 @@
+---
+title: "Mcp Faq Execute Sql"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+<Expandable alt_header="execute_sql tool not working">
+
+**Symptoms:** The `execute_sql` tool returns an authentication error or is unavailable.
+
+**Cause:** `execute_sql` requires a Personal Access Token (PAT). Service tokens do not work for this tool.
+
+**Solution:**
+
+1. Generate a [Personal Access Token (PAT)](/docs/dbt-cloud-apis/user-tokens) in **Account settings** → **API tokens** → **Personal tokens**.
+2. Use the PAT as your `DBT_TOKEN` value.
+3. Also ensure `DBT_DEV_ENV_ID` and `DBT_USER_ID` are set — these are required for `execute_sql`.
+</Expandable>

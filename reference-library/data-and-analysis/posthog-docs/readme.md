@@ -1,0 +1,144 @@
+---
+title: "PostHog.com - Website, docs, blog, and handbook"
+source: PostHog Documentation
+source_url: https://github.com/PostHog/posthog.com
+licence: MIT
+domain: data-and-analysis
+subdomain: posthog-docs
+date_added: 2026-04-25
+---
+
+<p align="center">
+  
+</p>
+
+# PostHog.com - Website, docs, blog, and handbook
+
+<p align="center">
+  [](http://makeapullrequest.com)
+  
+  [](https://posthog.com/community)
+  
+  
+</p>
+
+<p align="center">
+  [Support](https://app.posthog.com/home#supportModal) - [Roadmap](https://posthog.com/roadmap) - [Open an issue](https://github.com/PostHog/posthog.com/issues/new) - [Style guide](https://github.com/PostHog/posthog.com/blob/master/STYLEGUIDE.md)
+</p>
+
+
+This is the repository for the PostHog website. We treat it like a product. It contains:
+
+- All of our written content and visuals including product features, manuals, docs, blogs, case studies, tutorials, and the handbook
+- Features like questions and answers (using [Squeak!](https://github.com/PostHog/squeak)), job listings (using [Ashby](https://www.ashbyhq.com/customers/posthog-customer-story)), pricing calculator, roadmap, API docs, and more
+- All the components, templates, logic, and styling to make this work, look pretty, and spark joy
+
+## Table of contents
+- [Quick start](#quick-start)
+- [Advanced setup](#advanced-setup)
+- [Contributing](#contributing)
+
+## Quick start
+
+> `AGENTS.md` is equipped with instructions for the most fundamental parts of running the app.
+>
+> If you find places where current documentation is lacking, email cory@posthog.com with the subject, "AGENTS.md".
+
+1. **Pre-installation**
+
+    Install [Node](https://nodejs.org/en/download/) (version 22) - if you installed Node using nvm, you can run `nvm use` to automatically switch to the correct version.
+
+    Install `pnpm`. The easiest way to do this is via `corepack use pnpm@latest-10`.
+
+
+2.  **Start developing**
+
+    Clone the repo and navigate into your new site’s directory:
+
+    ```bash
+    git clone git@github.com:PostHog/posthog.com.git && cd posthog.com/
+    ```
+
+    If you're using an Apple Silicon Mac (M1 or later) you'll need to run the following commands:
+
+    ```bash
+    rm -rf ./node_modules
+    brew install vips
+    ```
+
+    Then install the site dependencies, and start it up:
+
+    ```bash
+    pnpm install
+    pnpm start
+    ```
+
+    > **Tip:** Seeing a discrepancy between local development and staging/production? Preview the production build locally by running `gatsby build && gatsby serve`
+
+3.  **Open the source code and start editing!**
+
+    Your site is now running at `http://localhost:8001`!
+    
+    > **Note:** You'll also see a second link: `http://localhost:8001/___graphql`. This is a tool you can use to experiment with querying your data. Learn more about using this tool in the [Gatsby tutorial](https://www.gatsbyjs.org/tutorial/part-five/#introducing-graphiql).
+
+See full instructions on [developing PostHog.com locally in our manual](https://posthog.com/handbook/engineering/posthog-com/developing-the-website).
+
+## Advanced setup
+
+### Debugging errors on start
+1. Pull the latest changes from `master`
+2. Run `pnpm clean && mkdir .cache & pnpm start` or delete `node_modules` and `.cache`
+3. Make sure you're not in an activated flox environment for a different project
+4. Check builds are passing in [deployment to Vercel](https://github.com/PostHog/posthog.com/deployments)
+
+### Working on `/docs/api`?
+
+The site will load the API schema from US Cloud by default. You can override this to use your local PostHog instance with an env var:
+
+```
+POSTHOG_OPEN_API_SPEC_URL="http://127.0.0.1:8000/api/schema/" pnpm start
+```
+
+
+### Want Ashby job listings or GitHub contributors to load?
+
+You’ll need to set environment variables for these. [See (private) instructions](https://github.com/PostHog/company-internal/blob/master/website-api-keys.md) for this.
+
+### Developing the posts section
+To see your local version of the posts section, `/posts` needs to be visited directly (`http://localhost:8001/posts`)
+
+### Cloudflare PR previews
+
+[PR previews](https://github.com/PostHog/posthog.com/blob/master/.github/workflows/deploy-preview.yml) build with **`GATSBY_MINIMAL=true`** (same idea as `pnpm build:minimal`). **Post listing pages** such as `/tutorials`, `/blog`, and `/posts` are **not** generated, so those URLs may break in the preview. **Open the direct URL** to your doc or post (e.g. `/tutorials/your-slug`) to review changes. Listings and search stay aligned with production after merge to `master`. More detail: [Developing the website → PR preview deployments](https://posthog.com/handbook/engineering/posthog-com/developing-the-website#pr-preview-deployments-cloudflare-pages).
+
+### Developing the merch store
+Additional environment variables are needed to develop the merch store:
+- `SHOPIFY_APP_PASSWORD`
+- `GATSBY_MYSHOPIFY_URL`
+- `GATSBY_SHOPIFY_STOREFRONT_TOKEN`
+
+Currently, these environment variables are excluded from Vercel preview builds to disable merch store node creation and speed up build times on non-merch related PRs.
+
+### Dynamic open graph images
+
+To develop a dynamic open graph image:
+
+1. Run `pnpm build` with both the `ASHBY_API_KEY` and `GITHUB_API_KEY` set.
+1. In `gatsby/onPostBuild.ts`, temporarily comment out the following:
+    ```
+    if (process.env.VERCEL_GIT_COMMIT_REF !== 'master') return
+    ```
+1. Find the generated open graph image in `public/og-images/`
+
+## Contributing
+
+We <3 contributions big and small. In priority order (although everything is appreciated) with the most helpful first:
+
+- Ask a [question in our community](https://posthog.com/questions)
+- Submit [bug reports and give us feedback in the app](https://app.posthog.com/home#supportModal)! 
+- Vote on features or get early access to beta functionality in our [roadmap](https://posthog.com/roadmap)
+- Open a PR
+    - Read [our instructions above](#quick-start) on developing PostHog.com locally
+    - Read more [detailed instructions in our manual](https://posthog.com/handbook/engineering/posthog-com/developing-the-website)
+    - For basic edits, go to the file in GitHub and click the edit button (pencil icon)
+- Open [an issue](https://github.com/PostHog/posthog.com/issues/new) or [content idea](https://github.com/PostHog/posthog.com/issues/new?assignees=andyvan-ph&labels=content&template=blog-post-idea-template.md&title=%7BContent+type%7D+-+%7Btitle%7D)

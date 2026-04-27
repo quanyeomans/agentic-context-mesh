@@ -1,0 +1,1 @@
+# Stored in a file which OTEL_EXPERIMENTAL_METRICS_VIEW_CONFIG points to

@@ -1,0 +1,22 @@
+name: consulting
+description: Advisory, consulting, law, accounting — structured client work with named entities
+retrieval:
+  fusion_strategy: bm25_primary
+  boosts:
+    entity:
+      enabled: true
+      factor: 0.20
+      cap: 2.0
+    procedural:
+      enabled: true
+      factor: 1.4
+      path_patterns:
+        - "(?:^|/)how-to-"
+        - "(?:^|/)runbooks?/"
+        - "(?:^|/)sop-"
+        - "(?:^|/)guide-"
+        - "(?:^|/)playbook-"
+    temporal:
+      chunk_date_boost:
+        enabled: true
+        decay_halflife_days: 30

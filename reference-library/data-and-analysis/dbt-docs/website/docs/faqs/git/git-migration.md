@@ -1,0 +1,28 @@
+---
+title: "How to migrate git providers"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+To migrate from one git provider to another, refer to the following steps to avoid minimal disruption:
+
+1. Outside of <Constant name="dbt" />, you'll need to import your existing repository into your new provider. By default, connecting your repository in one account won't automatically disconnected it from another account.
+   
+   As an example, if you're migrating from GitHub to Azure DevOps, you'll need to import your existing repository (GitHub) into your new <Constant name="git" /> provider (Azure DevOps). For detailed steps on how to do this, refer to your <Constant name="git" /> provider's documentation (Such as [GitHub](https://docs.github.com/en/migrations/importing-source-code/using-github-importer/importing-a-repository-with-github-importer), [GitLab](https://docs.gitlab.com/ee/user/project/import/repo_by_url.html), [Azure DevOps](https://learn.microsoft.com/en-us/azure/devops/repos/git/import-git-repository?view=azure-devops)) 
+   
+2. Go back to <Constant name="dbt" /> and set up your [integration for the new <Constant name="git" /> provider](/docs/cloud/git/git-configuration-in-dbt-cloud), if needed. 
+3. Disconnect the old repository in <Constant name="dbt" /> by going to **Account Settings** and then **Projects**.
+4. Click on the **Repository** link, then click **Edit** and **Disconnect**.
+      <Lightbox src="/img/docs/dbt-cloud/disconnect-repo.png" width="80%" title="Disconnect and reconnect your Git repository in your dbt Account settings page."/>
+
+5. Click **Confirm Disconnect**.
+6. On the same page, connect to the new <Constant name="git" /> provider repository by clicking **Configure Repository**
+   - If you're using the native integration, you may need to OAuth to it.
+  
+7. That's it, you should now be connected to the new <Constant name="git" /> provider! 🎉
+
+Note &mdash; As a tip, we recommend you refresh your page and <Constant name="studio_ide" /> before performing any actions.

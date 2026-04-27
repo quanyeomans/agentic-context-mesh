@@ -1,0 +1,35 @@
+---
+title: "Privacy"
+source: 18F Guides
+source_url: https://github.com/18F/guides
+licence: CC0-1.0
+domain: engineering
+subdomain: 18f-guides
+date_added: 2026-04-25
+---
+
+## How to do it{#how-to-privacy}
+
+  1. Familiarize yourself with the [Fair Information Practice Principles](https://www.fpc.gov/resources/fipps/){.usa-link .usa-link--external}, a set of precepts at the heart of the U.S. Privacy Act of 1974.
+  1. Consult your organization’s privacy office, which may include your general counsel, if you plan to substantially make use of information that could potentially identify specific individuals.
+  1. Inform and collect the voluntary consent of anyone who participates in moderated design research. Ensure that all unmoderated forms of research (for example, web analytics) are covered by an easy-to-access privacy policy.
+  1. Pay special attention to all categories of information used throughout the design process. Note contexts in which it’s not okay to share certain categories of information.
+
+<section class="method--section method--section--additional-resources" markdown="1">
+
+## Additional resources{#add-privacy}
+
+- [Doing research at TTS — TTS Handbook](https://handbook.18f.gov/research-guidelines/){.usa-link .usa-link--external}
+- [Privacy — TTS Handbook](https://handbook.tts.gsa.gov/launching-software/privacy){.usa-link .usa-link--external}
+</section>
+
+<section class="method--section method--section--government-considerations" markdown="1" >
+
+## Government considerations{#con-privacy}
+
+The government’s use of information about people is subject to a number of laws and policies, including: [the Privacy Act of 1974](https://www.justice.gov/opcl/overview-privacy-act-1974-2020-edition), the Federal Information Security Management Act of 2002, and the eGovernment Act of 2002.
+
+Conduct a Privacy Threshold Analysis in collaboration your agency’s privacy office whenever a design calls for the creation of a new data store (for example, a database).
+
+Ensure all collections of personally identifiable information (PII) are accompanied by a Privacy Act Notice. See, for example, [GSA’s Privacy Act Notice for Design Research](https://www.gsa.gov/reference/gsa-privacy-program/privacy-act-statement-for-design-research).
+</section>

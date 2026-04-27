@@ -1,0 +1,1 @@
+# Drop http and rpc metrics, because we have metrics from Istio already

@@ -1,0 +1,268 @@
+"""
+CLI entrypoint for kairix embed.
+
+Usage:
+  kairix embed [--force] [--limit N] [--batch-size N] [--skip-recall-check]
+  kairix embed recall-check
+  kairix embed status
+"""
+
+import argparse
+import fcntl
+import logging
+import os
+import sqlite3
+import sys
+import time
+from pathlib import Path
+from typing import IO
+
+from kairix.db import get_db_path, load_extensions
+
+from .embed import DEFAULT_BATCH_SIZE, run_embed
+from .recall_check import run_recall_gate
+from .schema import (
+    save_run_log,
+    validate_schema,
+)
+
+LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "embed.log")))
+
+
+def _default_lockfile() -> Path:
+    """Lockfile in user cache dir — avoids world-writable /tmp on multi-user systems."""
+    from kairix.db import get_db_path
+
+    return get_db_path().parent / "embed.lock"
+
+
+LOCKFILE = _default_lockfile()
+LOCK_WAIT_SECS = 60
+
+
+def setup_logging(verbose: bool = False) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    fmt = "%(asctime)s %(levelname)s %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handlers.append(logging.FileHandler(LOG_FILE))
+
+    logging.basicConfig(level=level, format=fmt, handlers=handlers)
+
+
+def acquire_lock() -> IO[str]:
+    """
+    Acquire exclusive lock using the same lockfile as kairix-maintenance.sh.
+    Waits up to LOCK_WAIT_SECS. Exits with code 3 if timeout.
+    """
+    lock_fh = open(LOCKFILE, "w")
+    deadline = time.time() + LOCK_WAIT_SECS
+    while time.time() < deadline:
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_fh.write(str(os.getpid()))
+            lock_fh.flush()
+            return lock_fh
+        except BlockingIOError:
+            logging.info("Waiting for qmd lock...")
+            time.sleep(5)
+    logging.error(f"Could not acquire lock after {LOCK_WAIT_SECS}s — another embed may be running")
+    sys.exit(3)
+
+
+def release_lock(lock_fh: IO[str]) -> None:
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        lock_fh.close()
+        LOCKFILE.unlink(missing_ok=True)
+    except (OSError, ValueError):
+        pass
+
+
+def cmd_embed(args: argparse.Namespace) -> int:
+    """Run the embedding pipeline."""
+    logging.info(f"kairix embed starting — force={args.force} limit={args.limit} batch_size={args.batch_size}")
+
+    lock_fh = acquire_lock()
+    db_path = get_db_path()
+    start = time.time()
+    result = None
+
+    try:
+        db = sqlite3.connect(str(db_path))
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA busy_timeout=10000")
+
+        # Load sqlite-vec extension and ensure schema exists.
+        # create_schema is idempotent — safe on every run.
+        load_extensions(db)
+        from kairix.db.schema import create_schema
+
+        create_schema(db)
+        validate_schema(db)
+
+        # Scan document store for new/changed documents before embedding.
+        # This ensures first-run embed works without a separate scan step.
+        from kairix.db.scanner import CollectionConfig, DocumentScanner
+        from kairix.paths import document_root
+        from kairix.search.config_loader import load_collections
+
+        droot = document_root()
+        scanner = DocumentScanner(db, document_root=droot)
+
+        # Load collections from config; fall back to scanning entire document root
+        collections_cfg = load_collections()
+        if collections_cfg and collections_cfg.shared:
+            scan_collections = [CollectionConfig(name=c.name, path=c.path, glob=c.glob) for c in collections_cfg.shared]
+            logging.info("Using %d configured collections", len(scan_collections))
+        else:
+            scan_collections = [CollectionConfig(name="default", path=".")]
+
+        scan_report = scanner.scan(scan_collections)
+        if scan_report.new > 0 or scan_report.updated > 0:
+            logging.info(
+                "Scanned documents: %d new, %d updated, %d unchanged",
+                scan_report.new,
+                scan_report.updated,
+                scan_report.unchanged,
+            )
+            # Rebuild FTS index after scanning new/changed documents
+            from kairix.db.fts import rebuild_fts
+
+            fts_count = rebuild_fts(db)
+            logging.info("FTS index rebuilt: %d documents", fts_count)
+
+        result = run_embed(
+            db=db,
+            force=args.force,
+            batch_size=args.batch_size,
+            limit=args.limit,
+        )
+
+        result["command"] = "embed"
+        result["db_path"] = str(db_path)
+        result["timestamp"] = int(start)
+        save_run_log(result)
+
+        logging.info(
+            f"Done — embedded={result['embedded']} failed={result['failed']} "
+            f"duration={result['duration_s']}s cost=${result['estimated_cost_usd']:.4f}"
+        )
+
+        if result["failed"] > 0:
+            logging.warning(f"{result['failed']} chunks failed. Re-run without --force to retry failed chunks.")
+
+        db.close()
+
+    except Exception as e:
+        logging.exception(f"Embed failed: {e}")
+        return 2
+    finally:
+        release_lock(lock_fh)
+
+    if args.skip_recall_check:
+        logging.info("Skipping recall check (--skip-recall-check)")
+        return 0 if result["failed"] == 0 else 1
+
+    # Recall gate
+    logging.info("Running post-embed recall check...")
+    gate_passed, recall_result = run_recall_gate()
+    logging.info(f"Recall: {recall_result['passed']}/{recall_result['total']} ({recall_result['score']:.0%})")
+
+    if not gate_passed:
+        logging.error("Recall gate FAILED — search quality degraded. Check logs.")
+        return 1
+
+    return 0 if result["failed"] == 0 else 1
+
+
+def cmd_recall(args: argparse.Namespace) -> int:
+    """Run the recall check standalone."""
+    passed, result = run_recall_gate()
+    print(f"Recall: {result['passed']}/{result['total']} ({result['score']:.0%})")
+    for d in result["detail"]:
+        status = "✓" if d["hit"] else "✗"
+        print(f"  {status} [{d['id']}] {d['query'][:60]}")
+    return 0 if passed else 1
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Show current embedding status."""
+    from .schema import get_pending_chunks
+
+    db_path = get_db_path()
+    db = sqlite3.connect(str(db_path))
+
+    pending = get_pending_chunks(db)
+    total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
+    total_docs = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
+
+    print(f"Kairix index: {db_path}")
+    print(f"Documents: {total_docs}")
+    print(f"Vectors:   {total_vecs}")
+    print(f"Pending:   {len(pending)} documents need embedding")
+
+    # Last run
+    log_path = Path.home() / ".cache" / "qmd" / "azure-embed-runs.json"
+    if log_path.exists():
+        import json
+
+        try:
+            runs = json.loads(log_path.read_text())
+            if runs:
+                last = runs[-1]
+                import datetime
+
+                ts = datetime.datetime.fromtimestamp(last.get("timestamp", 0))
+                print(
+                    f"Last run:  {ts.strftime('%Y-%m-%d %H:%M')} — "
+                    f"embedded={last.get('embedded')} cost=${last.get('estimated_cost_usd'):.4f}"
+                )
+        except Exception:  # nosec S110 display failure is non-critical, logging not yet initialised
+            pass  # non-critical: status display failed
+
+    db.close()
+    return 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="kairix embed",
+        description="Embed documents into the kairix vector index",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true")
+    sub = parser.add_subparsers(dest="command")
+
+    # embed (default)
+    embed_p = sub.add_parser("embed", help="Run embedding pipeline (default)")
+    embed_p.add_argument("--force", action="store_true", help="Re-embed all chunks (clears existing vectors)")
+    embed_p.add_argument("--limit", type=int, default=None, help="Cap total chunks (for validation)")
+    embed_p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Chunks per Azure API call")
+    embed_p.add_argument("--skip-recall-check", action="store_true", help="Skip post-embed quality gate")
+
+    # recall-check
+    sub.add_parser("recall-check", help="Run recall quality check standalone")
+
+    # status
+    sub.add_parser("status", help="Show embedding status")
+
+    args = parser.parse_args()
+    setup_logging(args.verbose)
+
+    if args.command is None or args.command == "embed":
+        if not hasattr(args, "force"):
+            # Default subcommand
+            args.force = False
+            args.limit = None
+            args.batch_size = DEFAULT_BATCH_SIZE
+            args.skip_recall_check = False
+        sys.exit(cmd_embed(args))
+    elif args.command == "recall-check":
+        sys.exit(cmd_recall(args))
+    elif args.command == "status":
+        sys.exit(cmd_status(args))
+
+
+if __name__ == "__main__":
+    main()

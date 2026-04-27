@@ -1,0 +1,15 @@
+---
+title: "How do I access documentation in dbt Catalog?"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+If you're using <Constant name="dbt" /> to deploy your project and have a [Starter, Enterprise, or Enterprise+ plan](https://www.getdbt.com/pricing/), you can use <Constant name="catalog" /> to view your project's [resources](/docs/build/projects) (such as models, tests, and metrics) and their <Term id="data-lineage">lineage</Term> to gain a better understanding of its latest production state. 
+
+Access <Constant name="catalog" /> in <Constant name="dbt" /> by clicking the **Catalog** link in the navigation. You can have up to 5 read-only users access the documentation for your project.
+
+<Constant name="dbt" /> developer plan and <Constant name="core" /> users can use [dbt Docs](/docs/explore/build-and-view-your-docs#dbt-docs), which generates basic documentation but it doesn't offer the same speed, metadata, or visibility as <Constant name="catalog" />.

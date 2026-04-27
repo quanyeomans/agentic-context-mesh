@@ -1,0 +1,290 @@
+"""
+kairix.curator.health — Entity graph health check (CA-1).
+
+Neo4j is the canonical entity store. All health checks query the graph
+directly via Cypher. No SQLite dependency.
+
+Checks:
+  - Entity count by type
+  - Synthesis failures (entities with no summary property)
+  - Missing vault_path (entities not linked to canonical vault note)
+  - Staleness (entities with last_seen before threshold, if tracked)
+
+Never raises — returns a HealthReport reflecting available data.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+STALENESS_THRESHOLD_DAYS = 90
+
+_ENTITY_LABELS = ("Organisation", "Person", "Outcome", "Concept", "Project", "Framework", "Technology", "Publication")
+
+
+@dataclass
+class HealthIssue:
+    """A single entity-level health issue."""
+
+    entity_id: str
+    name: str
+    entity_type: str
+    detail: str
+
+
+@dataclass
+class HealthReport:
+    """
+    Result of a single Curator health check run.
+
+    All list fields are empty when no issues are found.
+    Use report.ok to test overall health at a glance.
+    """
+
+    generated_at: str  # ISO UTC timestamp
+    total_entities: int
+    entities_by_type: dict[str, int]
+    synthesis_failures: list[HealthIssue] = field(default_factory=list)
+    stale_entities: list[HealthIssue] = field(default_factory=list)
+    missing_vault_path: list[HealthIssue] = field(default_factory=list)
+    neo4j_available: bool = False
+    neo4j_node_counts: dict[str, int] = field(default_factory=dict)
+    staleness_threshold_days: int = STALENESS_THRESHOLD_DAYS
+
+    @property
+    def issue_count(self) -> int:
+        """Total number of entity-level issues found."""
+        return len(self.synthesis_failures) + len(self.stale_entities) + len(self.missing_vault_path)
+
+    @property
+    def ok(self) -> bool:
+        """True when no issues were found."""
+        return self.issue_count == 0
+
+
+def run_health_check(
+    neo4j_client: Any,
+    staleness_days: int = STALENESS_THRESHOLD_DAYS,
+) -> HealthReport:
+    """
+    Run a full entity graph health check against Neo4j.
+
+    Args:
+        neo4j_client: Neo4jClient instance (from kairix.graph.client.get_client()).
+            When unavailable, returns an empty report with neo4j_available=False.
+        staleness_days: Entities with no activity for this many days are flagged
+            as stale. Defaults to STALENESS_THRESHOLD_DAYS (90).
+
+    Returns:
+        HealthReport describing the current state of the entity graph.
+    """
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if neo4j_client is None or not getattr(neo4j_client, "available", False):
+        return HealthReport(
+            generated_at=generated_at,
+            total_entities=0,
+            entities_by_type={},
+            neo4j_available=False,
+            staleness_threshold_days=staleness_days,
+        )
+
+    label_filter = "['" + "','".join(_ENTITY_LABELS) + "']"
+    label_where = " OR ".join(f"n:{lbl}" for lbl in _ENTITY_LABELS)
+
+    # ── Entity counts ─────────────────────────────────────────────────────────
+    entities_by_type: dict[str, int] = {}
+    total_entities = 0
+    try:
+        rows = neo4j_client.cypher(
+            f"MATCH (n) WHERE labels(n)[0] IN {label_filter} RETURN labels(n)[0] AS label, COUNT(*) AS cnt"
+        )
+        for r in rows:
+            label = r.get("label")
+            cnt = r.get("cnt")
+            if label is not None and cnt is not None:
+                entities_by_type[str(label).lower()] = int(cnt)
+                total_entities += int(cnt)
+    except Exception as exc:
+        logger.warning("health: entity count query failed — %s", exc)
+
+    # ── Synthesis failures (no summary) ──────────────────────────────────────
+    synthesis_failures: list[HealthIssue] = []
+    try:
+        rows = neo4j_client.cypher(
+            f"MATCH (n) WHERE ({label_where}) "
+            "AND (n.summary IS NULL OR trim(toString(n.summary)) = '') "
+            "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label "
+            "ORDER BY labels(n)[0], n.name"
+        )
+        for r in rows:
+            eid = str(r.get("id") or "")
+            name = str(r.get("name") or "")
+            label = str(r.get("label") or "unknown")
+            if eid or name:
+                synthesis_failures.append(
+                    HealthIssue(entity_id=eid, name=name, entity_type=label.lower(), detail="no summary")
+                )
+    except Exception as exc:
+        logger.warning("health: synthesis failure query failed — %s", exc)
+
+    # ── Missing vault_path ────────────────────────────────────────────────────
+    missing_vault_path: list[HealthIssue] = []
+    try:
+        rows = neo4j_client.cypher(
+            f"MATCH (n) WHERE ({label_where}) "
+            "AND (n.vault_path IS NULL OR trim(toString(n.vault_path)) = '') "
+            "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label "
+            "ORDER BY labels(n)[0], n.name"
+        )
+        for r in rows:
+            eid = str(r.get("id") or "")
+            name = str(r.get("name") or "")
+            label = str(r.get("label") or "unknown")
+            if eid or name:
+                missing_vault_path.append(
+                    HealthIssue(entity_id=eid, name=name, entity_type=label.lower(), detail="vault_path not set")
+                )
+    except Exception as exc:
+        logger.warning("health: missing vault_path query failed — %s", exc)
+
+    # ── Stale entities ────────────────────────────────────────────────────────
+    # Best-effort: only flags entities that have a last_seen property and it
+    # predates the threshold. Entities without last_seen are not flagged as stale.
+    stale_entities: list[HealthIssue] = []
+    threshold_str = (datetime.now(timezone.utc) - timedelta(days=staleness_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        rows = neo4j_client.cypher(
+            f"MATCH (n) WHERE ({label_where}) "
+            "AND n.last_seen IS NOT NULL AND toString(n.last_seen) < $threshold "
+            "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label, "
+            "n.last_seen AS last_seen "
+            "ORDER BY labels(n)[0], n.name",
+            {"threshold": threshold_str},
+        )
+        for r in rows:
+            eid = str(r.get("id") or "")
+            name = str(r.get("name") or "")
+            label = str(r.get("label") or "unknown")
+            last_seen = r.get("last_seen") or "never"
+            if eid or name:
+                stale_entities.append(
+                    HealthIssue(
+                        entity_id=eid,
+                        name=name,
+                        entity_type=label.lower(),
+                        detail=f"last seen: {last_seen}",
+                    )
+                )
+    except Exception as exc:
+        logger.debug("health: stale entity query failed (last_seen may not be indexed) — %s", exc)
+
+    # neo4j_node_counts mirrors entities_by_type with original label casing
+    neo4j_node_counts = {k.capitalize(): v for k, v in entities_by_type.items()}
+
+    return HealthReport(
+        generated_at=generated_at,
+        total_entities=total_entities,
+        entities_by_type=entities_by_type,
+        synthesis_failures=synthesis_failures,
+        stale_entities=stale_entities,
+        missing_vault_path=missing_vault_path,
+        neo4j_available=True,
+        neo4j_node_counts=neo4j_node_counts,
+        staleness_threshold_days=staleness_days,
+    )
+
+
+def format_report_text(report: HealthReport) -> str:
+    """Format a HealthReport as vault-ready Markdown."""
+    lines: list[str] = [
+        "# Kairix — Entity Health Report",
+        f"_Generated: {report.generated_at}_",
+        "",
+        f"## Entity Counts (total: {report.total_entities})",
+        "",
+    ]
+
+    if report.entities_by_type:
+        lines += [
+            "| Type | Count |",
+            "|------|-------|",
+        ]
+        for etype, cnt in sorted(report.entities_by_type.items()):
+            lines.append(f"| {etype} | {cnt} |")
+    else:
+        lines.append("_No entities found._")
+
+    lines += [
+        "",
+        f"## Synthesis Failures ({len(report.synthesis_failures)})",
+        "",
+    ]
+    if report.synthesis_failures:
+        for issue in report.synthesis_failures:
+            lines.append(f"- ⚠ `{issue.entity_id}` ({issue.entity_type}) — {issue.detail}")
+    else:
+        lines.append("✅ None.")
+
+    lines += [
+        "",
+        f"## Stale Entities ({len(report.stale_entities)}, threshold: {report.staleness_threshold_days} days)",
+        "",
+    ]
+    if report.stale_entities:
+        for issue in report.stale_entities:
+            lines.append(f"- ⚠ `{issue.entity_id}` ({issue.entity_type}) — {issue.detail}")
+    else:
+        lines.append("✅ None.")
+
+    lines += [
+        "",
+        f"## Missing Vault Path ({len(report.missing_vault_path)})",
+        "",
+    ]
+    if report.missing_vault_path:
+        for issue in report.missing_vault_path:
+            lines.append(f"- ⚠ `{issue.entity_id}` ({issue.entity_type}) — {issue.detail}")
+    else:
+        lines.append("✅ None.")
+
+    lines += [
+        "",
+        "## Graph (Neo4j)",
+        "",
+    ]
+    if report.neo4j_available:
+        if report.neo4j_node_counts:
+            node_summary = ", ".join(f"{cnt} {label}" for label, cnt in sorted(report.neo4j_node_counts.items()))
+            lines.append(f"✅ Connected — {node_summary}")
+        else:
+            lines.append("✅ Connected — no nodes found")
+    else:
+        lines.append("⚠ Unavailable.")
+
+    lines += ["", "---"]
+    if report.ok:
+        lines.append("**Status: ✅ HEALTHY** — no issues found")
+    else:
+        parts = []
+        if report.synthesis_failures:
+            parts.append(f"{len(report.synthesis_failures)} synthesis failure(s)")
+        if report.stale_entities:
+            parts.append(f"{len(report.stale_entities)} stale")
+        if report.missing_vault_path:
+            parts.append(f"{len(report.missing_vault_path)} missing vault path")
+        lines.append(f"**Status: ⚠ ISSUES FOUND** — {', '.join(parts)}")
+
+    return "\n".join(lines) + "\n"
+
+
+def format_report_json(report: HealthReport) -> str:
+    """Format a HealthReport as indented JSON."""
+    return json.dumps(dataclasses.asdict(report), indent=2)
