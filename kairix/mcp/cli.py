@@ -50,6 +50,35 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
 
+def _resolve_port(args: argparse.Namespace) -> int:
+    """Resolve MCP port: CLI flag → env var → config → auto-detect."""
+    import os
+
+    # CLI flag takes precedence (argparse default is 8080)
+    if "--port" in sys.argv:
+        return args.port
+
+    # Environment variable
+    env_port = os.environ.get("KAIRIX_MCP_PORT")
+    if env_port:
+        return int(env_port)
+
+    # Auto-detect: check if default port is available
+    from kairix.onboard.ports import find_available_port, is_port_available
+
+    default = 8080
+    if is_port_available(default):
+        return default
+
+    suggested = find_available_port(preferred=default)
+    print(
+        f"Port {default} is in use — using {suggested} instead. "
+        f"Set KAIRIX_MCP_PORT={suggested} to make this permanent.",
+        file=sys.stderr,
+    )
+    return suggested
+
+
 def _cmd_serve(args: argparse.Namespace) -> None:
     try:
         from kairix.mcp.server import build_server
@@ -57,10 +86,11 @@ def _cmd_serve(args: argparse.Namespace) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    server = build_server(host=args.host, port=args.port)
+    port = _resolve_port(args) if args.transport == "sse" else args.port
+    server = build_server(host=args.host, port=port)
 
     if args.transport == "sse":
-        print(f"Starting kairix MCP server on {args.host}:{args.port} (SSE transport)", file=sys.stderr)
+        print(f"Starting kairix MCP server on {args.host}:{port} (SSE transport)", file=sys.stderr)
         server.run(transport="sse")
     else:
         print("Starting kairix MCP server (stdio transport)", file=sys.stderr)

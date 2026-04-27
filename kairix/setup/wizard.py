@@ -291,8 +291,16 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
     elif agent_idx == 1:
         print('\n  Run: openclaw mcp set mcp-kairix "kairix mcp serve"\n')
     elif agent_idx == 2:
-        print("\n  MCP endpoint: http://localhost:8080")
-        print("  Start with: kairix mcp serve --transport sse --port 8080\n")
+        from kairix.onboard.ports import find_available_port, is_port_available
+
+        default_port = 8080
+        if is_port_available(default_port):
+            mcp_port = default_port
+        else:
+            mcp_port = find_available_port(preferred=default_port)
+            print(f"\n  Port {default_port} is in use — suggesting {mcp_port} instead.")
+        print(f"\n  MCP endpoint: http://localhost:{mcp_port}")
+        print(f"  Start with: kairix mcp serve --transport sse --port {mcp_port}\n")
     elif agent_idx == 3:
         print("\n  Import directly in Python:")
         print("  from kairix.mcp.server import tool_search, tool_research\n")
