@@ -45,6 +45,30 @@ Your documents (notes, markdown, PDFs, exports — whatever you have)
 
 It works with any agent platform that supports [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). Your agent asks kairix a question with one tool call; kairix handles the searching, ranking, entity lookup, and budget management behind the scenes.
 
+### Works well with
+
+- **[OpenClaw](https://openclaw.ai)** — register kairix as an MCP server and every OpenClaw agent gets search tools automatically. Runs on the same VM — kairix adds ~200MB RAM alongside your gateway. Agents search before every task instead of guessing from memory.
+- **[Claude Code](https://claude.ai/claude-code)** / **Claude Desktop** — add kairix to your MCP config and Claude uses it as a knowledge source during conversations and coding sessions.
+- **[LangGraph](https://github.com/langchain-ai/langgraph)** / **[CrewAI](https://github.com/crewAIInc/crewAI)** — kairix's `tool_research` MCP tool does iterative multi-turn search, so your agent graph gets a retrieval node that refines its own queries until it finds a good answer.
+- **Any MCP-compatible agent** — stdio or SSE transport, no custom integration code needed.
+
+---
+
+## Token cost: kairix vs stuffing the context window
+
+Most approaches to giving an agent knowledge involve dumping documents into the prompt. This gets expensive fast.
+
+| Method | Tokens per query | Cost per 1,000 queries (Sonnet) | Quality |
+|--------|-----------------|-------------------------------|---------|
+| **Stuff everything** (paste all docs) | 50,000–200,000 | $150–600 | Poor — LLM drowns in noise |
+| **Naive RAG** (top-5 full docs) | 10,000–30,000 | $30–90 | OK — but no ranking, no budget |
+| **Kairix search** (budget-managed) | 1,500–5,000 | $4.50–15 | Good — ranked, entity-aware, right-sized |
+| **Kairix prep** (quick summary) | 500–1,500 | $1.50–4.50 | Good for quick lookups |
+
+Kairix controls how much context each query returns. A quick fact check gets 1,500 tokens. A research question gets 5,000. Your agents never send the LLM more than it needs — which means lower cost and better answers (less noise for the model to sort through).
+
+**Embedding cost** (one-time per document): indexing 10,000 documents costs about $3 with Azure OpenAI `text-embedding-3-large`. Hourly incremental updates cost fractions of a cent.
+
 ---
 
 ## How it compares
