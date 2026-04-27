@@ -141,7 +141,7 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
         dimensions=DEFAULT_DIMS,
     )
     dims = len(response.data[0].embedding)
-    logger.info("Preflight OK — deployment=%s dims=%d", deployment, dims)
+    logger.info("Preflight OK — dims=%d", dims)
     return dims
 
 

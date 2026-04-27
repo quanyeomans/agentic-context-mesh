@@ -182,15 +182,13 @@ def get_secret(name: str, required: bool = True) -> str | None:
             else:
                 logger.warning("get_secret: KV fetch failed for %r (exit=%d)", name, result.returncode)
         except (subprocess.SubprocessError, OSError, ValueError) as exc:
-            logger.warning("get_secret: error fetching KV secret %r — %s", name, exc)
+            logger.warning("get_secret: error fetching KV secret %r — %s", name, type(exc).__name__)
 
     # Not found
     if required:
         logger.error(
-            "get_secret: %r not found in env (%s), secrets file (%s), or Key Vault",
+            "get_secret: %r not found in env, secrets file, or Key Vault",
             name,
-            env_var,
-            secrets_file,
         )
         raise OSError(f"Secret {name!r} not available. Check environment, secrets file, or Key Vault configuration.")
     return None

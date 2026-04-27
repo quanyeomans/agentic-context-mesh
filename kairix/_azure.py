@@ -80,7 +80,7 @@ def _get_secrets() -> dict[str, str]:
             if value:
                 secrets[key] = value
         except Exception:  # broad catch justified: Key Vault SDK can raise varied exceptions (network, auth, parse)
-            logger.warning("_azure: error resolving secret %r", secret_name)
+            logger.warning("_azure: error resolving secret for key %r", key)
 
     if "deployment" not in secrets:
         secrets["deployment"] = _DEFAULT_EMBED_DEPLOYMENT
