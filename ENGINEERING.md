@@ -37,7 +37,7 @@ Every merge to `main` must pass all four CI stages. No exceptions without a docu
 - `search/`, `classify/`: ≥ 85%
 - `entities/`, `temporal/`: ≥ 80%
 - `summaries/`, `briefing/`, `contradict/`: ≥ 75%
-- `_azure.py`, `_qmd.py`, `_db.py` (shared utilities): ≥ 95%
+- `_azure.py`, `_db.py` (shared utilities): ≥ 95%
 
 CI enforces the aggregate 80% gate. Per-module targets are verified manually during phase review.
 
@@ -80,7 +80,6 @@ push/PR
 |---|---|---|
 | `.github/workflows/ci.yml` | Every push + PR | Four-stage pipeline (all gates) |
 | `.github/workflows/integration.yml` | PR to main | Full integration suite + PR compliance checks |
-| `.github/workflows/qmd-compat.yml` | Weekly Monday 02:00 UTC | QMD schema drift detection |
 | `.github/workflows/benchmark-gate.yml` | Manual dispatch | Benchmark comparison (required for retrieval PRs) |
 | `.github/dependabot.yml` | Weekly Monday 03:00 AEST | Automated dependency updates |
 
@@ -98,7 +97,7 @@ kairix onboard check
 kairix search "test query" --agent <your-agent>
 ```
 
-**Rollback:** `pip install git+https://github.com/quanyeomans/kairix@<previous-tag>`. All state is in SQLite/vault — safe.
+**Rollback:** `pip install git+https://github.com/quanyeomans/kairix@<previous-tag>`. All state is in SQLite/document store — safe.
 
 ### 2.4 Override process (emergency only)
 
@@ -151,7 +150,6 @@ KAIRIX_E2E=1 pytest -m e2e      # Manual only
 
 **Mock only external services:**
 - Azure OpenAI API (use `unittest.mock.patch` or `responses` library)
-- `qmd` subprocess calls
 - File system (use `tempfile.TemporaryDirectory()`)
 
 **Keep real:**
@@ -355,22 +353,13 @@ Weekly automated PRs (Monday 03:00 AEST):
 
 All Dependabot PRs require CI to pass before merge. No manual merge without CI green.
 
-### 6.2 QMD version compatibility
+### 6.2 sqlite-vec version
 
-QMD (`qmd`) is the critical external dependency. It ships sqlite-vec and defines the SQLite schema we write into.
-
-- Tested QMD version pinned in `pyproject.toml` (`[tool.kairix]` section)
-- Weekly CI job (`qmd-compat.yml`) checks schema drift
-- On drift: GitHub issue opened automatically, work required within 1 week
-- QMD upgrades: run `kairix embed --limit 0` to validate schema before full run
-
-### 6.3 sqlite-vec version
-
-sqlite-vec is bundled with QMD. We do not install it independently. The `find_sqlite_vec()` function in `kairix/embed/schema.py` searches for the `.so` path dynamically. If QMD is upgraded and the sqlite-vec version changes, this function will find the new path automatically.
+sqlite-vec is installed as a pip dependency (`sqlite-vec>=0.1.6`). No manual extension path configuration needed.
 
 The `SQLITE_VEC_PATH` env var can be used to specify the location explicitly if auto-discovery fails.
 
-### 6.4 Adding a new dependency
+### 6.3 Adding a new dependency
 
 1. Is it really necessary? Can we use stdlib?
 2. Check `pip-audit` for known CVEs before adding
@@ -503,6 +492,5 @@ RETRIEVAL LOGIC CHANGES ONLY
 
 SCHEMA CHANGES ONLY
 [ ] Migration script added under the relevant migrations directory
-[ ] QMD schema guard updated (kairix/embed/schema.py) if QMD schema affected
 ```
 

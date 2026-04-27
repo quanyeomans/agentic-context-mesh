@@ -2,6 +2,8 @@
 
 **Symptom:** `kairix benchmark run` reports NDCG@10 below acceptable levels. This occurs after a config change, full re-embed cycle, embedding model change, or kairix binary upgrade.
 
+**Production baseline (v2026.4.27):** weighted 0.8171, NDCG@10 0.8385.
+
 Note: NDCG thresholds below are suggested starting points — calibrate against your own baseline before treating them as hard gates.
 
 ---
@@ -129,5 +131,4 @@ kairix onboard check
 
 - [how-to-run-benchmark](how-to-run-benchmark.md) — full benchmark procedure
 - [how-to-upgrade-kairix](how-to-upgrade-kairix.md) — safe upgrade with eval gate
-- [INDEX](INDEX.md) — full runbook registry
 - [INDEX](INDEX.md) — full runbook registry
