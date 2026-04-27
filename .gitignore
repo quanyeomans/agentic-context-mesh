@@ -35,6 +35,7 @@ suites/v2-real-world.yaml
 suites/*.yaml
 !suites/example.yaml
 !suites/contract-suite.yaml
+!suites/reflib-*.yaml
 
 # Operator-specific benchmark build scripts — keep in your private operator config repo
 scripts/build-eval-gold.py
