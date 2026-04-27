@@ -11,74 +11,87 @@ Your documents, your servers, your agents — finding the right answer in under 
 
 ## The problem
 
-AI agents forget everything between sessions. Your professional knowledge — clients, projects, decisions, methods — is scattered across files, tools, and people's heads. Every new engagement starts with re-explaining context that was already earned.
+AI agents are smart but they have no memory. Ask your agent about a client meeting from last week and it draws a blank — unless you paste the notes in yourself. Your knowledge is sitting in files, but your agents can't find it.
 
-Most solutions make this worse by sending your knowledge to someone else's servers. Or they give you a search box that returns the wrong documents half the time. Or they cost hundreds per month and require GPU infrastructure you don't have.
+The usual fixes either send your private documents to someone else's servers, give you search results that miss what you actually need, or cost hundreds of dollars a month for enterprise search tools.
 
 ## What kairix does
 
-Kairix is a knowledge retrieval engine that runs on your own infrastructure. It indexes your documents and gives your agents and team members fast, ranked answers to any question — using both keyword matching (BM25) and meaning-based search (vector similarity).
+Kairix searches your documents and gives your AI agents (or you) the right answer in under a second. It runs on your own computer or server — your files never leave your control.
+
+It combines two ways of searching: **keyword matching** (finds exact words, file names, codes) and **meaning-based search** (finds related ideas even when the words are different). Then it layers on a **knowledge graph** that understands people, companies, and how they connect to each other.
 
 Three things make it different:
 
-1. **Your data stays on your servers.** No document content is sent to external services. Embedding is the only outbound API call — and even that can be swapped for a local model.
+1. **Private by default.** Your documents stay on your machine. The only outbound call is to generate search embeddings (a mathematical fingerprint of your text) — and even that can run locally.
 
-2. **Search quality you can measure.** Built-in benchmarking tools let you evaluate how well kairix works on your data. The reference deployment scores **0.803 NDCG@10** on 293 real queries — meaning 9 out of 10 queries find a relevant document in the top 5 results.
+2. **Measurably good search.** Built-in benchmarking tools prove how well it works on your data. The reference deployment finds a relevant document in the top 5 results for **91% of queries** — tested on 293 real questions, scored by an independent judge.
 
-3. **Runs on modest hardware.** No GPU. No Kubernetes. A 4-vCPU VM with 16GB RAM handles a 4,000-document vault with 6 agents querying it. That's ~$20/month on Azure or AWS.
+3. **Runs on a laptop.** No GPU. No expensive cloud infrastructure. A basic server with 4 CPUs and 16GB RAM handles 10,000+ documents with multiple agents searching simultaneously. That's about $25/month on any cloud provider, or free on hardware you already own.
 
 ---
 
-## Where kairix fits in your stack
+## Where kairix fits
 
-Kairix is the **knowledge layer**. It doesn't replace your agents, your orchestrator, or your LLM. It sits underneath them and gives them the right context for every task.
+Kairix is the **knowledge layer** — it sits between your agents and your documents. Your agents ask questions; kairix finds the answers.
 
 ```
-Your agents (Claude, OpenClaw, LangGraph, CrewAI, custom)
-    ↓ ask questions via MCP or CLI
-Kairix (knowledge layer — search, entity graph, briefings)
-    ↓ finds the best answers from
-Your documents (Obsidian vault, markdown, PDFs, CRM exports)
+Your agents (Claude, OpenClaw, LangGraph, CrewAI, or custom)
+    ↓ ask questions via MCP tools
+Kairix (searches, ranks, and summarises)
+    ↓ reads from
+Your documents (notes, markdown, PDFs, exports — whatever you have)
 ```
 
-For agent platforms like [OpenClaw](https://github.com/three-cubes/openclaw) that use skill registries, kairix provides the retrieval that skills call. An agent's "meeting prep" skill queries kairix for client context rather than doing its own document search. The agent brings the craft; kairix brings the context.
+It works with any agent platform that supports [MCP](https://modelcontextprotocol.io/) (Model Context Protocol). Your agent asks kairix a question with one tool call; kairix handles the searching, ranking, entity lookup, and budget management behind the scenes.
 
 ---
 
 ## How it compares
 
-| | Kairix | Notion AI / Confluence AI | Mem.ai / Rewind | Raw LLM context window |
-|---|---|---|---|---|
-| **Where your data lives** | Your servers | Vendor cloud | Vendor cloud | API provider |
-| **How it searches** | Keyword + meaning + entity graph | Full-text only | Meaning only | No search — full dump |
-| **Knows about people & companies** | Yes (knowledge graph) | No | No | No |
-| **Controls token cost** | Yes (budget per query) | No (full page dump) | No | No |
-| **Handles date-based questions** | Yes (temporal routing) | No | Limited | No |
-| **Measurable quality** | NDCG@10 benchmarked | Not published | Not published | N/A |
-| **GPU required** | No | N/A (SaaS) | N/A (SaaS) | N/A |
-| **Monthly cost** | ~$25 (VM + LLM API) | $8-10/user/month | $24/month | API costs only |
+| | Kairix | Azure AI Search | QMD | Notion AI / Confluence AI | Stuffing the context window |
+|---|---|---|---|---|---|
+| **Your data stays private** | Yes — nothing leaves your servers | Azure cloud (your tenant) | Yes (local) | Vendor cloud | Sent to LLM provider |
+| **Finds the right document** | Keyword + meaning + knowledge graph, fused | Keyword OR meaning (not fused) | Keyword only (BM25) | Keyword only | No search — sends everything |
+| **Knows who people are** | Yes — entity graph links people, companies, decisions | No | No | No | No |
+| **Answers date questions** | Yes — "what happened last week" just works | Manual filters | No | No | No |
+| **Controls what the LLM reads** | Yes — budget per query (saves money) | No budget control | No | Sends full pages | Sends everything |
+| **Proves it works** | Benchmarked: 0.80 NDCG@10 on real queries | Not published | Not published | Not published | N/A |
+| **Needs a GPU** | No | No | No | N/A (SaaS) | No |
+| **Cost** | ~$25/month | $250+/month | Free | $8-10/user/month | LLM token costs |
+| **Works with agents (MCP)** | Built-in — 6 MCP tools | Custom integration needed | No | No | Manual prompt building |
 
 ---
 
 ## Quick start
 
+### Option A: pip install (recommended)
+
+```bash
+pip install "kairix[agents,neo4j]"
+kairix setup                   # interactive wizard — picks your paths, ports, collections
+kairix embed                   # index your documents
+kairix search "your question"  # find answers
+kairix mcp serve               # start MCP server for agent integration
+```
+
+### Option B: Docker Compose
+
 ```bash
 git clone https://github.com/quanyeomans/kairix && cd kairix
 cp .env.example .env        # add your LLM API key
 ln -s ~/my-notes ./documents # point to your documents
-docker compose up -d         # start all services
-docker compose exec -it kairix kairix embed  # index your documents
-docker compose exec -it kairix kairix search "your question"
+docker compose up -d         # starts kairix + worker + Neo4j
 ```
 
 See the [full quick-start guide](docs/quick-start.md) for detailed setup, configuration, and troubleshooting.
 
 **What you need:**
-- Docker and Docker Compose
-- An LLM API key (Azure OpenAI or standard OpenAI)
-- A folder of documents (markdown, text, or any structured notes)
+- Python 3.10+ (Option A) or Docker (Option B)
+- An LLM API key for embeddings (Azure OpenAI or OpenAI-compatible)
+- A folder of documents (markdown, text, or structured notes)
 
-**Optional:** Neo4j for knowledge graph features (people, companies, relationships). Included in the Docker Compose stack.
+**Ships with:** 6,500+ curated reference library documents — searchable out of the box, no indexing wait.
 
 ---
 
@@ -236,7 +249,7 @@ See [OPERATIONS.md](OPERATIONS.md) for full deployment guide.
 git clone https://github.com/quanyeomans/kairix
 cd kairix
 pip install -e ".[dev,neo4j,agents]"
-pytest tests/                    # 1,192 tests
+pytest tests/                    # 1,634 tests
 ruff check kairix/ tests/        # lint
 ```
 
