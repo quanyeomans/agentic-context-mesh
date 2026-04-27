@@ -4,6 +4,8 @@
 **Target version:** v1.0.0  
 **Primary motivation:** The current embed cron runs every 60 seconds. A file added to the document store is invisible to search for up to 59 seconds. Session prep queries against recently-added content (today's meeting notes, last-minute decision records) return stale results during that window.
 
+> **Note (2026-04-27):** Docker Compose is now the primary deployment method. The systemd references below apply to the legacy pip install path. For Docker deployments, the watcher would run as a Docker Compose sidecar service (see Pattern A below).
+
 ---
 
 ## Problem statement
@@ -21,10 +23,10 @@ A file watcher eliminates the cron gap: the watcher triggers `kairix embed --pat
 
 ## Approach
 
-Use `watchfiles` (wraps `inotify` on Linux, `kqueue` on macOS, `ReadDirectoryChangesW` on Windows). The watcher runs as a long-lived daemon alongside the main kairix process. On each vault change event, it calls `kairix embed` for the changed paths.
+Use `watchfiles` (wraps `inotify` on Linux, `kqueue` on macOS, `ReadDirectoryChangesW` on Windows). The watcher runs as a long-lived daemon alongside the main kairix process. On each document store change event, it calls `kairix embed` for the changed paths.
 
 ```
-Vault write (Obsidian / sync)
+Document store write (Obsidian / sync)
         │
         ▼
 watchfiles inotify event (< 1s)
@@ -273,7 +275,7 @@ For single-container deployments, `supervisord` runs both the main kairix proces
 
 The existing 60-second embed cron is **not removed** when the watcher is deployed. The watcher handles new and modified files; the cron acts as a safety net for:
 - Files written while the watcher was restarting
-- Vault syncs that bypass inotify (e.g., remote rsync writes)
+- Document store syncs that bypass inotify (e.g., remote rsync writes)
 - Bulk document changes during watcher downtime
 
 The cron interval can be increased to 10 minutes once the watcher is confirmed stable on VM, reducing redundant embed calls.
@@ -336,6 +338,6 @@ Coverage target: `kairix/watcher/` ≥ 80% (per ENGINEERING.md general module ta
 
 - `watchfiles>=0.21` — wraps OS-native filesystem notifications (inotify on Linux VM). Pure Python fallback uses polling at 0.2s intervals if inotify unavailable.
 - The `embed_fn` passed to `watch()` must be idempotent — already-indexed files re-embedded return unchanged vectors (this is the existing embed pipeline behaviour)
-- Vault root is mounted read-only in the watcher container — no write access required
+- Document store root is mounted read-only in the watcher container — no write access required
 - Signal handling (SIGTERM) is required for Docker `stop` graceful shutdown
-- Debounce window of 2.0s is configurable; Obsidian's auto-save + wikilink injection pattern typically completes within 1.5s. Adjust via `--debounce` if vault sync produces longer burst windows.
+- Debounce window of 2.0s is configurable; Obsidian's auto-save + wikilink injection pattern typically completes within 1.5s. Adjust via `--debounce` if document store sync produces longer burst windows.

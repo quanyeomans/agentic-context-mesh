@@ -1,6 +1,6 @@
 # Retrieval Boost Configuration
 
-**Status:** Planned  
+**Status:** Partially Implemented — Layer 1 (RetrievalConfig) shipped in v2026.4.27  
 **Scope:** `kairix/search/config.py`, `rrf.py`, `hybrid.py`
 
 ---

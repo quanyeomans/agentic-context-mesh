@@ -4,22 +4,22 @@ Kairix is evaluated against a curated real-world benchmark derived from actual a
 
 ---
 
-## Current Performance — v2026.4.18
+## Current Performance — v2026.4.27
 
-**NDCG@10: 0.845 · Hit@5: 0.969 · MRR@10: 0.764**
+**R10: 0.8171 · NDCG@10: 0.8385 · Hit@5: 0.9629 · MRR@10: 0.7614**
 
-Evaluated on 350 real-world cases across six query types.
+Evaluated on a 160-query reference library gold suite across six query types.
 
 | Query type | NDCG@10 | What this means |
 |---|---|---|
-| Keyword / proper noun | **0.848** | Version strings, error codes, specific document names resolve accurately via hybrid BM25 + vector |
-| Entity lookups | **0.869** | Named entities (people, organisations, concepts) surface canonical stub plus related documents; see note below |
-| Procedural queries | **0.872** | How-to questions and runbook lookups return step-relevant documents ahead of tangentially related content |
-| Temporal queries | **0.794** | "What happened last week", "decisions in March" route to date-scoped results |
-| Multi-hop queries | **0.752** | Questions spanning multiple entities or topics decompose into sub-queries and fuse results |
-| Semantic queries | **0.781** | Abstract conceptual questions retrieve relevant documents without exact term overlap |
+| Keyword / proper noun | **0.775** | Version strings, error codes, specific document names resolve accurately via hybrid BM25 + vector |
+| Entity lookups | **0.8626** | Named entities (people, organisations, concepts) surface canonical stub plus related documents; see note below |
+| Procedural queries | **0.8716** | How-to questions and runbook lookups return step-relevant documents ahead of tangentially related content |
+| Temporal queries | **0.7930** | "What happened last week", "decisions in March" route to date-scoped results |
+| Multi-hop queries | **0.721** | Questions spanning multiple entities or topics decompose into sub-queries and fuse results |
+| Semantic queries | **0.842** | Abstract conceptual questions retrieve relevant documents without exact term overlap |
 
-A relevant document appears in the top 5 results for **97% of queries**.
+A relevant document appears in the top 5 results for **96% of queries**.
 
 > **Entity NDCG note:** The entity score reflects knowledge base composition at the time of evaluation. Scores are expected to improve as the Neo4j entity graph densifies. Entity NDCG optimisation is on the roadmap.
 
@@ -98,12 +98,12 @@ The CLI output reports both the **weighted total** (category-weighted average us
 ============================================================
 BENCHMARK RESULTS
 ============================================================
-Weighted total: 0.845  [Strong]
-NDCG@10:       0.845  (Hit@5: 0.969  MRR@10: 0.764)
+Weighted total: 0.8171  [Strong]
+NDCG@10:       0.8385  (Hit@5: 0.9629  MRR@10: 0.7614)
 
 Category breakdown:
-  temporal     0.794  (weight 10%, n=8)  ...
-  entity       0.869  (weight 20%, n=12) ...
+  temporal     0.7930  (weight 10%, n=8)  ...
+  entity       0.8626  (weight 20%, n=12) ...
   ...
 ```
 

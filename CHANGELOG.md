@@ -7,6 +7,21 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.4.27] - 2026-04-27 — Reference library gold suite, Docker-first deployment
+
+### Added
+- **160-query reference library gold suite** — curated benchmark covering all six query categories against the open-source reference library. Reproducible scores without a private knowledge store.
+- **OpenAI SDK embed client** (#43) — `OpenAIEmbedProvider` using the `openai` SDK for direct OpenAI API embedding (non-Azure).
+- **Multi-collection support** — `hybrid_search()` accepts multiple collection names; results fused across collections.
+- **Port auto-detection** — `kairix mcp serve` and `kairix setup` auto-select an available port if the default is in use.
+
+### Changed
+- **Docker Compose is now the primary deployment method** — `docker compose up -d` replaces pip install as the recommended path. pip install remains as an alternative.
+- **Benchmark scores updated** — weighted R10=0.8171, NDCG@10=0.8385, Hit@5=0.9629, MRR@10=0.7614 (160-query reference library suite).
+
+### Tests
+- **1,634 tests**, 86% coverage. Up from 1,222 at v2026.4.24a3.
+
 ## [2026.4.24a3] - 2026-04-24 — Researcher Agent, Embed SDK, security hardening
 
 ### Added

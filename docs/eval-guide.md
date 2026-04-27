@@ -4,6 +4,8 @@
 
 For the methodology and research basis, see [evaluation-methodology.md](evaluation-methodology.md).
 
+> **Current baseline (v2026.4.27):** weighted 0.8171, NDCG@10 0.8385.
+
 ---
 
 ## Prerequisites

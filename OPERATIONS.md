@@ -175,16 +175,33 @@ Kairix expects:
 
 ## Installation
 
-Kairix is installed as a pip package — the source repo is not required on the VM.
+### Docker Compose (recommended)
+
+Docker Compose is the primary deployment method. It bundles kairix, Neo4j, and the secrets sidecar in a single stack.
+
+```bash
+# Clone and start
+git clone https://github.com/quanyeomans/kairix.git
+cd kairix/docker
+cp .env.example .env
+# Edit .env with your values (Key Vault name, vault path, etc.)
+docker compose up -d
+```
+
+See `docker/docker-compose.yml` for the full service definition. `kairix onboard check` runs inside the container on startup.
+
+### Alternative: pip install
+
+For environments where Docker is unavailable, kairix can be installed as a pip package.
 
 ```bash
 # One-line deploy (downloads and runs install.sh from the public repo)
 bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/install.sh)
 ```
 
-This creates `/opt/kairix/.venv/`, installs kairix into it, installs the wrapper script, and creates the `/usr/local/bin/kairix` symlink. After this, `kairix --help` works from any shell.
+This creates `/opt/kairix/.venv/` (legacy pip path), installs kairix into it, installs the wrapper script, and creates the `/usr/local/bin/kairix` symlink. After this, `kairix --help` works from any shell.
 
-**Manual install (alternative):**
+**Manual pip install:**
 
 ```bash
 # Create venv and install (core)
@@ -208,7 +225,7 @@ Kairix itself is the retrieval engine. Operator-specific configuration (vault pa
 The expected layout on the VM:
 ```
 /opt/kairix/
-  .venv/              ← kairix package installed here
+  .venv/              ← kairix package installed here (legacy pip path)
   bin/
     kairix-wrapper.sh ← env loader; /usr/local/bin/kairix symlinks here
   service.env         ← operator config (KAIRIX_KV_NAME, KAIRIX_VAULT_ROOT, etc.)
@@ -697,7 +714,7 @@ For deeper diagnostic procedures and less common failure modes, see [`docs/runbo
 /opt/kairix/.venv/bin/pip install --upgrade kairix
 
 # Or pin to a specific version
-/opt/kairix/.venv/bin/pip install "kairix==0.9.1"
+/opt/kairix/.venv/bin/pip install "kairix==2026.4.27"
 
 # Verify
 kairix onboard check

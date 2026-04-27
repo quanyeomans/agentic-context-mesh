@@ -4,7 +4,20 @@
 
 ---
 
-## Before You Start
+## Docker Compose Upgrade (recommended)
+
+```bash
+cd /path/to/kairix/docker
+docker compose pull
+docker compose up -d
+kairix onboard check   # verify after upgrade
+```
+
+Gate: overall >= 0.80 (current baseline: 0.8385 NDCG@10).
+
+---
+
+## Before You Start (pip install path)
 
 ```bash
 # Record current version and baseline benchmark score
@@ -22,7 +35,7 @@ kairix search "test"
 
 ---
 
-## Step 1 — Install New Version
+## Step 1 — Install New Version (Alternative: pip install, legacy)
 
 Kairix is installed into a virtualenv at `/opt/kairix/.venv`.
 
