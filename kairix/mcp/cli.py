@@ -56,7 +56,7 @@ def _resolve_port(args: argparse.Namespace) -> int:
 
     # CLI flag takes precedence (argparse default is 8080)
     if "--port" in sys.argv:
-        return args.port
+        return int(args.port)
 
     # Environment variable
     env_port = os.environ.get("KAIRIX_MCP_PORT")
