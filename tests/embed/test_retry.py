@@ -1,9 +1,8 @@
-"""Unit tests for Azure API retry logic and error handling."""
+"""Unit tests for embed_batch using OpenAI SDK."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
 from kairix.embed.embed import embed_batch
 
@@ -12,118 +11,113 @@ ENDPOINT = "https://test.openai.azure.com"
 DEPLOYMENT = "text-embedding-3-large"
 DIMS = 1536
 
-
-def make_mock_response(status_code=200, data=None, headers=None):
-    mock = MagicMock()
-    mock.status_code = status_code
-    mock.headers = headers or {}
-    if data:
-        mock.json.return_value = data
-    if status_code >= 400:
-        mock.raise_for_status.side_effect = requests.HTTPError(response=mock)
-    else:
-        mock.raise_for_status.return_value = None
-    return mock
+pytestmark = pytest.mark.unit
 
 
-def make_embed_response(texts):
-    return {"data": [{"index": i, "embedding": [0.1] * DIMS} for i in range(len(texts))]}
+def _mock_embedding(index: int, value: float = 0.1) -> MagicMock:
+    """Create a mock embedding data item."""
+    m = MagicMock()
+    m.index = index
+    m.embedding = [value] * DIMS
+    return m
 
 
-@pytest.mark.unit
+def _mock_response(texts: list[str], value: float = 0.1) -> MagicMock:
+    """Create a mock embeddings.create() response."""
+    resp = MagicMock()
+    resp.data = [_mock_embedding(i, value) for i in range(len(texts))]
+    return resp
+
+
 class TestEmbedBatch:
-    @pytest.mark.unit
-    def test_success(self):
+    def test_success(self) -> None:
         texts = ["hello", "world"]
-        with patch("requests.post") as mock_post:
-            mock_post.return_value = make_mock_response(200, make_embed_response(texts))
+        with patch("openai.AzureOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.embeddings.create.return_value = _mock_response(texts)
             result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
         assert len(result) == 2
         assert all(len(v) == DIMS for v in result)
 
-    @pytest.mark.unit
-    def test_results_ordered_by_index(self):
+    def test_empty_batch_returns_empty(self) -> None:
+        result = embed_batch([], API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
+        assert result == []
+
+    def test_results_ordered_by_index(self) -> None:
         texts = ["a", "b", "c"]
+        resp = MagicMock()
         # Return out-of-order
-        resp_data = {
-            "data": [
-                {"index": 2, "embedding": [0.3] * DIMS},
-                {"index": 0, "embedding": [0.1] * DIMS},
-                {"index": 1, "embedding": [0.2] * DIMS},
-            ]
-        }
-        with patch("requests.post") as mock_post:
-            mock_post.return_value = make_mock_response(200, resp_data)
+        resp.data = [
+            _mock_embedding(2, 0.3),
+            _mock_embedding(0, 0.1),
+            _mock_embedding(1, 0.2),
+        ]
+        with patch("openai.AzureOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.embeddings.create.return_value = resp
             result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
-        # Should be reordered by index
         assert result[0][0] == pytest.approx(0.1)
         assert result[1][0] == pytest.approx(0.2)
         assert result[2][0] == pytest.approx(0.3)
 
-    @pytest.mark.unit
-    def test_retries_on_429(self):
-        texts = ["hello"]
-        rate_limit = make_mock_response(429, headers={"Retry-After": "0"})
-        success = make_mock_response(200, make_embed_response(texts))
+    def test_bad_request_splits_batch(self) -> None:
+        """BadRequestError on a multi-item batch splits and retries."""
+        import openai
 
-        with patch("requests.post", side_effect=[rate_limit, success]):
-            with patch("time.sleep"):
-                result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
-        assert len(result) == 1
+        texts = ["a", "b"]
+        call_count = 0
 
-    @pytest.mark.unit
-    def test_retries_on_500(self):
-        texts = ["hello"]
-        server_error = make_mock_response(500)
-        success = make_mock_response(200, make_embed_response(texts))
+        def side_effect(**kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            inp = kwargs.get("input", [])
+            if len(inp) > 1:
+                raise openai.BadRequestError(
+                    message="batch too large",
+                    response=MagicMock(status_code=400),
+                    body=None,
+                )
+            return _mock_response(inp)
 
-        with patch("requests.post", side_effect=[server_error, success]):
-            with patch("time.sleep"):
-                result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
-        assert len(result) == 1
+        with patch("openai.AzureOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.embeddings.create.side_effect = side_effect
+            result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
+        assert len(result) == 2
+        assert call_count == 3  # 1 failed + 2 single-item retries
 
-    @pytest.mark.unit
-    def test_raises_after_max_retries(self):
-        texts = ["hello"]
-        server_error = make_mock_response(500)
+    def test_bad_request_single_item_raises(self) -> None:
+        """BadRequestError on a single-item batch raises."""
+        import openai
 
-        with patch("requests.post", return_value=server_error):
-            with patch("time.sleep"):
-                with pytest.raises(RuntimeError, match="failed after"):
-                    embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
-
-    @pytest.mark.unit
-    def test_400_raises_immediately(self):
-        texts = ["hello"]
-        bad_request = make_mock_response(400)
-
-        with patch("requests.post", return_value=bad_request):
-            with pytest.raises(requests.HTTPError):
+        texts = ["a"]
+        with patch("openai.AzureOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.embeddings.create.side_effect = openai.BadRequestError(
+                message="bad input",
+                response=MagicMock(status_code=400),
+                body=None,
+            )
+            with pytest.raises(openai.BadRequestError):
                 embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
 
-    @pytest.mark.unit
-    def test_timeout_retries(self):
+    def test_sdk_creates_client_with_correct_params(self) -> None:
+        """Verify the SDK client is configured with the right retry and timeout."""
         texts = ["hello"]
-        success = make_mock_response(200, make_embed_response(texts))
+        with patch("openai.AzureOpenAI") as mock_cls:
+            mock_client = MagicMock()
+            mock_cls.return_value = mock_client
+            mock_client.embeddings.create.return_value = _mock_response(texts)
+            embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
 
-        with patch("requests.post", side_effect=[requests.Timeout, success]):
-            with patch("time.sleep"):
-                result = embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
-        assert len(result) == 1
-
-    @pytest.mark.unit
-    def test_missing_api_key_raises(self):
-        import os
-
-        env_backup = os.environ.pop("AZURE_OPENAI_API_KEY", None)
-        env_backup2 = os.environ.pop("AZURE_OPENAI_ENDPOINT", None)
-        try:
-            from kairix.embed.embed import _get_azure_config
-
-            with pytest.raises(EnvironmentError, match="AZURE_OPENAI_API_KEY"):
-                _get_azure_config()
-        finally:
-            if env_backup:
-                os.environ["AZURE_OPENAI_API_KEY"] = env_backup
-            if env_backup2:
-                os.environ["AZURE_OPENAI_ENDPOINT"] = env_backup2
+        mock_cls.assert_called_once_with(
+            api_key=API_KEY,
+            azure_endpoint=ENDPOINT,
+            api_version="2024-02-01",
+            max_retries=6,
+            timeout=60.0,
+        )

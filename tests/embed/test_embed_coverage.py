@@ -140,23 +140,33 @@ def test_get_azure_config_raises_without_endpoint(monkeypatch: pytest.MonkeyPatc
 @pytest.mark.unit
 def test_preflight_check_returns_dims_on_success() -> None:
     fake_vec = [0.1] * 1536
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status = MagicMock()
-    mock_resp.json.return_value = {"data": [{"embedding": fake_vec}]}
+    mock_embedding = MagicMock()
+    mock_embedding.embedding = fake_vec
+    mock_response = MagicMock()
+    mock_response.data = [mock_embedding]
 
-    with patch("kairix.embed.embed.requests.post", return_value=mock_resp):
+    with patch("openai.AzureOpenAI") as mock_cls:
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.embeddings.create.return_value = mock_response
         dims = preflight_check("key", "https://fake.example.com", "text-embedding-3-large")
 
     assert dims == 1536
 
 
 @pytest.mark.unit
-def test_preflight_check_raises_on_http_error() -> None:
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status.side_effect = Exception("HTTP 401")
+def test_preflight_check_raises_on_api_error() -> None:
+    import openai
 
-    with patch("kairix.embed.embed.requests.post", return_value=mock_resp):
-        with pytest.raises(Exception, match="401"):
+    with patch("openai.AzureOpenAI") as mock_cls:
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        mock_client.embeddings.create.side_effect = openai.AuthenticationError(
+            message="HTTP 401",
+            response=MagicMock(status_code=401),
+            body=None,
+        )
+        with pytest.raises(openai.AuthenticationError):
             preflight_check("bad-key", "https://fake.example.com", "deploy")
 
 

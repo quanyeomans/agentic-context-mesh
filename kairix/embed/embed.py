@@ -9,8 +9,6 @@ import struct
 import time
 from collections.abc import Generator
 
-import requests
-
 from .date_extract import extract_chunk_date
 from .schema import (
     EMBED_VECTOR_DIMS,
@@ -26,8 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DEPLOYMENT = "text-embedding-3-large"
 DEFAULT_DIMS = EMBED_VECTOR_DIMS
 DEFAULT_BATCH_SIZE = 500
-MAX_RETRIES = 6
-RETRY_BASE_DELAY = 1.0  # seconds, doubles per retry (with jitter)
+MAX_RETRIES = 6  # used by OpenAI SDK max_retries
 
 # Chunking — mirrors kairix's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
 CHUNK_SIZE_CHARS = 3600  # ~900 tokens at 4 chars/token
@@ -129,20 +126,23 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
     Returns embedding dimensions on success, raises on failure.
     Does NOT touch the DB — safe to call before any writes.
     """
-    url = f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version=2024-02-01"
-    resp = requests.post(
-        url,
-        headers={"api-key": api_key, "Content-Type": "application/json"},
-        json={"input": ["preflight check"], "dimensions": DEFAULT_DIMS},
-        timeout=30,
+    from openai import AzureOpenAI
+
+    client = AzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=endpoint,
+        api_version="2024-02-01",
+        max_retries=2,
+        timeout=30.0,
     )
-    resp.raise_for_status()
-    data = (
-        resp.json()
-    )  # lgtm[py/clear-text-logging-sensitive-data] — false positive: response data is not passed to a log sink
-    vec = data["data"][0]["embedding"]
-    logger.info(f"Preflight OK — deployment={deployment} dims={len(vec)}")
-    return len(vec)
+    response = client.embeddings.create(
+        model=deployment,
+        input=["preflight check"],
+        dimensions=DEFAULT_DIMS,
+    )
+    dims = len(response.data[0].embedding)
+    logger.info("Preflight OK — deployment=%s dims=%d", deployment, dims)
+    return dims
 
 
 def embed_batch(
@@ -153,72 +153,47 @@ def embed_batch(
     dims: int = DEFAULT_DIMS,
 ) -> list[list[float]]:
     """
-    Embed a batch of texts via Azure OpenAI. Retries on 429/500 with
-    exponential backoff + jitter. On retry exhaustion, splits the batch
-    in half and recurses rather than failing the entire batch.
+    Embed a batch of texts via Azure OpenAI using the OpenAI SDK.
+
+    The SDK handles retry with exponential backoff, rate-limit headers
+    (Retry-After), and proper error classification automatically.
 
     Returns list of float vectors in same order as input texts.
-    Raises on 400 (bad request) or after MAX_RETRIES exhausted on a
-    single-item batch.
+    Raises on persistent failures after SDK retries are exhausted.
+    On BadRequestError (batch too large), splits and recurses.
     """
-    import random
+    import openai
+    from openai import AzureOpenAI
 
-    # Base case: empty batch
     if not texts:
         return []
 
-    url = f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version=2024-02-01"
+    client = AzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=endpoint,
+        api_version="2024-02-01",
+        max_retries=MAX_RETRIES,
+        timeout=60.0,
+    )
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            resp = requests.post(
-                url,
-                headers={"api-key": api_key, "Content-Type": "application/json"},
-                json={"input": texts, "dimensions": dims},
-                timeout=60,
-            )
-
-            if resp.status_code == 429:
-                # Honour Retry-After if present; otherwise exponential backoff + jitter
-                retry_after_hdr = resp.headers.get("Retry-After")
-                if retry_after_hdr is not None:
-                    delay = float(retry_after_hdr)
-                else:
-                    delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security-relevant
-                logger.warning(
-                    f"Rate limited (batch size {len(texts)}) — sleeping {delay:.1f}s "
-                    f"(attempt {attempt + 1}/{MAX_RETRIES})"
-                )
-                time.sleep(delay)
-                continue
-
-            if resp.status_code in (500, 502, 503):
-                delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security-relevant
-                logger.warning(f"Server error {resp.status_code} — retrying in {delay:.1f}s")
-                time.sleep(delay)
-                continue
-
-            resp.raise_for_status()
-            data = resp.json()
-            # Sort by index to preserve order (API may return out of order)
-            results = sorted(data["data"], key=lambda x: x["index"])
-            return [r["embedding"] for r in results]
-
-        except requests.Timeout:
-            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 1)  # noqa: S311 — retry jitter, not security-relevant
-            logger.warning(f"Request timeout — retrying in {delay:.1f}s")
-            time.sleep(delay)
-
-    # Retries exhausted — split and recurse rather than failing the whole batch.
-    # Single-item batches that still fail are a genuine error.
-    if len(texts) == 1:
-        raise RuntimeError(f"Azure embed failed after {MAX_RETRIES} attempts on single chunk")
-
-    mid = len(texts) // 2
-    logger.warning(f"Batch of {len(texts)} exhausted retries — splitting into {mid} + {len(texts) - mid} and retrying")
-    left = embed_batch(texts[:mid], api_key, endpoint, deployment, dims)
-    right = embed_batch(texts[mid:], api_key, endpoint, deployment, dims)
-    return left + right
+    try:
+        response = client.embeddings.create(
+            model=deployment,
+            input=texts,
+            dimensions=dims,
+        )
+        # Sort by index to preserve order (API may return out of order)
+        results = sorted(response.data, key=lambda x: x.index)
+        return [list(r.embedding) for r in results]
+    except openai.BadRequestError:
+        # Batch too large for model — split and recurse
+        if len(texts) == 1:
+            raise
+        mid = len(texts) // 2
+        logger.warning("BadRequestError on batch of %d — splitting into %d + %d", len(texts), mid, len(texts) - mid)
+        left = embed_batch(texts[:mid], api_key, endpoint, deployment, dims)
+        right = embed_batch(texts[mid:], api_key, endpoint, deployment, dims)
+        return left + right
 
 
 # ── DB writes ─────────────────────────────────────────────────────────────────
@@ -421,7 +396,7 @@ def run_embed(
 
         try:
             vectors = embed_batch(texts, api_key, endpoint, deployment, actual_dims)
-        except (requests.RequestException, RuntimeError, KeyError, ValueError) as e:
+        except (RuntimeError, KeyError, ValueError, OSError) as e:
             logger.error(f"Batch {batch_idx} failed: {e} — logging {len(batch)} chunks as failed")
             failed_chunks.extend(batch)
             continue

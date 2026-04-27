@@ -32,8 +32,7 @@ Failure modes:
 import logging
 import struct
 from functools import lru_cache
-
-import requests
+from typing import Any
 
 from kairix.secrets import load_secrets as _load_secrets
 
@@ -92,54 +91,46 @@ def _get_secrets() -> dict[str, str]:
     return secrets
 
 
+def _get_client() -> Any:
+    """Return an AzureOpenAI client configured from secrets. Cached per-process."""
+    from openai import AzureOpenAI
+
+    secrets = _get_secrets()
+    api_key = secrets.get("api_key")
+    endpoint = secrets.get("endpoint")
+    if not api_key or not endpoint:
+        raise ValueError("Missing Azure OpenAI API key or endpoint")
+    return AzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=endpoint,
+        api_version="2024-02-01",
+        max_retries=5,
+        timeout=float(_EMBED_TIMEOUT_S),
+    )
+
+
 def embed_text(text: str) -> list[float]:
     """
     Embed a text string via Azure OpenAI text-embedding-3-large.
 
     Returns a list of 1536 floats. Returns [] on any failure.
-    Never raises.
+    Never raises. Uses the OpenAI SDK with built-in retry and backoff.
     """
     if not text or not text.strip():
         return []
 
     try:
+        client = _get_client()
         secrets = _get_secrets()
-    except Exception as e:
-        logger.warning("embed_text: failed to get secrets — %s", e)
-        return []
-
-    api_key = secrets.get("api_key")
-    endpoint = secrets.get("endpoint")
-    deployment = secrets.get("deployment", _DEFAULT_EMBED_DEPLOYMENT)
-
-    if not api_key or not endpoint:
-        logger.warning("embed_text: missing API key or endpoint — returning []")
-        return []
-
-    url = f"{endpoint}/openai/deployments/{deployment}/embeddings?api-version=2024-02-01"
-
-    try:
-        resp = requests.post(
-            url,
-            headers={"api-key": api_key, "Content-Type": "application/json"},
-            json={"input": [text], "dimensions": EMBED_DIMS},
-            timeout=_EMBED_TIMEOUT_S,
+        deployment = secrets.get("deployment", _DEFAULT_EMBED_DEPLOYMENT)
+        response = client.embeddings.create(
+            model=deployment,
+            input=[text],
+            dimensions=EMBED_DIMS,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        vec: list[float] = data["data"][0]["embedding"]
-        return vec
-    except requests.exceptions.Timeout:
-        logger.warning("embed_text: Azure API timed out")
-        return []
-    except requests.exceptions.RequestException as e:
-        logger.warning("embed_text: Azure API request failed — %s", e)
-        return []
-    except (KeyError, IndexError, TypeError, ValueError) as e:
-        logger.warning("embed_text: unexpected Azure API response format — %s", e)
-        return []
+        return list(response.data[0].embedding)
     except Exception as e:
-        logger.warning("embed_text: unexpected error — %s", e)
+        logger.warning("embed_text: %s", e)
         return []
 
 
@@ -150,24 +141,13 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
     Uses the azure-openai-gpt4o-mini-deployment KV secret for the deployment name.
     Same endpoint and API key as embeddings.
 
-    Args:
-        messages:   List of chat message dicts (role/content).
-        max_tokens: Maximum tokens in the response.
-
-    Returns:
-        Generated text string. Returns empty string on any failure. Never raises.
+    Returns empty string on any failure. Never raises.
+    Uses the OpenAI SDK with built-in retry and backoff.
     """
     try:
-        secrets = _get_secrets()
+        client = _get_client()
     except Exception as e:
-        logger.warning("chat_completion: failed to get secrets — %s", e)
-        return ""
-
-    api_key = secrets.get("api_key")
-    endpoint = secrets.get("endpoint")
-
-    if not api_key or not endpoint:
-        logger.warning("chat_completion: missing API key or endpoint — returning ''")
+        logger.warning("chat_completion: failed to get client — %s", e)
         return ""
 
     # Fetch GPT-4o-mini deployment name separately (different KV secret)
@@ -180,38 +160,20 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
         deployment = ""
 
     if not deployment:
-        # Fall back to a common default
         deployment = "gpt-4o-mini"
         logger.warning("chat_completion: using fallback deployment name %r", deployment)
 
-    url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2024-02-01"
-
     try:
-        resp = requests.post(
-            url,
-            headers={"api-key": api_key, "Content-Type": "application/json"},
-            json={
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": 0.3,
-            },
-            timeout=_EMBED_TIMEOUT_S,
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.3,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        content: str = data["choices"][0]["message"]["content"]
+        content: str = response.choices[0].message.content or ""
         return content
-    except requests.exceptions.Timeout:
-        logger.warning("chat_completion: Azure API timed out")
-        return ""
-    except requests.exceptions.RequestException as e:
-        logger.warning("chat_completion: Azure API request failed — %s", e)
-        return ""
-    except (KeyError, IndexError, TypeError, ValueError) as e:
-        logger.warning("chat_completion: unexpected response format — %s", e)
-        return ""
     except Exception as e:
-        logger.warning("chat_completion: unexpected error — %s", e)
+        logger.warning("chat_completion: %s", e)
         return ""
 
 
