@@ -385,8 +385,10 @@ jobs:
             "$RESULT_UNIT" \
             "$RESULT_INTEGRATION" \
             "$RESULT_SECURITY" \
-            "$RESULT_DOCKER" \
-            "$RESULT_COVERAGE"; do
+            "$RESULT_DOCKER"; do
+            # Note: RESULT_COVERAGE excluded from gate — coverage enforcement
+            # is done by --cov-fail-under=80 in the unit test job. The coverage
+            # report action only posts a PR comment (non-critical).
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               echo "FAILED: at least one required job did not succeed ($result)"
               exit 1
