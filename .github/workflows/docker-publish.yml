@@ -1,8 +1,8 @@
 name: Build and publish Docker image
 
 on:
-  push:
-    tags: ['v*']
+  release:
+    types: [created]
 
 env:
   GHCR_IMAGE: ghcr.io/quanyeomans/kairix

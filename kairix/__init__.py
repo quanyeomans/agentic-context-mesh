@@ -1,6 +1,11 @@
 """kairix — Self-contained knowledge retrieval engine."""
 
-__version__ = "2026.4.25a1"
+try:
+    from importlib.metadata import version
+
+    __version__ = version("kairix")
+except Exception:
+    __version__ = "0.0.0"  # fallback for editable installs without metadata
 
 __all__ = ["QueryIntent", "RetrievalConfig", "SearchResult", "__version__", "hybrid_search"]
 

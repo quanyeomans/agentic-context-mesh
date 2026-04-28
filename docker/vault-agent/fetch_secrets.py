@@ -77,11 +77,11 @@ def fetch_from_keyvault() -> dict[str, str]:
             secret = client.get_secret(secret_name)
             if secret.value:
                 fetched[env_var] = secret.value
-                logger.info("Fetched secret: %s", secret_name)
+                logger.info("Fetched secret successfully")
             else:
-                logger.warning("Secret %s has empty value — skipping", secret_name)
+                logger.warning("Secret has empty value — skipping")
         except Exception:
-            logger.warning("Failed to fetch secret: %s", secret_name)
+            logger.warning("Failed to fetch secret")
 
     return fetched
 
@@ -102,7 +102,10 @@ def write_secrets_file(secrets: dict[str, str]) -> None:
         safe_value = value.replace("\n", "").replace("\r", "")
         lines.append(f"{env_var}={safe_value}")
 
-    SECRETS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")  # nosec B110 — intentional: vault-agent writes to tmpfs /run/secrets/ (chmod 600, ephemeral)
+    # Intentional: vault-agent writes secrets to tmpfs (chmod 600, ephemeral).
+    # Documented in SECURITY.md. CodeQL alert dismissed as by-design.
+    content = "\n".join(lines) + "\n"
+    SECRETS_FILE.write_text(content, encoding="utf-8")
     SECRETS_FILE.chmod(0o600)
     logger.info("Wrote %d secret(s) to secrets file", len(secrets))
 

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kairix"
-version = "2026.4.28"
+dynamic = ["version"]
 description = "Self-contained knowledge retrieval engine — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -189,3 +189,12 @@ overall = 0.78
 temporal = 0.55
 entity = 0.80
 contextual_prep = 0.60
+
+# ── setuptools-scm — version derived from git tags ─────────────────────────
+# No manual version editing. Tagged commits = clean version (2026.4.28).
+# Untagged commits = dev version (2026.4.28.dev3 = 3 commits since tag).
+# pip install kairix never installs dev versions unless --pre is passed.
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+fallback_version = "0.0.0"
