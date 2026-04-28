@@ -99,13 +99,15 @@ kairix search "your question"  # find answers
 kairix mcp serve               # start MCP server for agent integration
 ```
 
-### Option B: Docker Compose
+### Option B: Docker Compose (no clone needed)
 
 ```bash
-git clone https://github.com/quanyeomans/kairix && cd kairix
+# Download the compose file and env template
+curl -O https://raw.githubusercontent.com/quanyeomans/kairix/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/quanyeomans/kairix/main/.env.example
 cp .env.example .env        # add your LLM API key
 ln -s ~/my-notes ./documents # point to your documents
-docker compose up -d         # starts kairix + worker + Neo4j
+docker compose up -d         # pulls pre-built image + starts kairix + worker + Neo4j
 ```
 
 See the [full quick-start guide](docs/quick-start.md) for detailed setup, configuration, and troubleshooting.
