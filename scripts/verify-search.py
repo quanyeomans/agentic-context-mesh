@@ -55,7 +55,9 @@ def _run_search(
     # Strip any warning lines before JSON
     stdout = result.stdout.strip()
     lines = stdout.splitlines()
-    json_start = next((i for i, l in enumerate(lines) if l.lstrip().startswith("{")), 0)
+    json_start = next(
+        (i for i, l in enumerate(lines) if l.lstrip().startswith("{")), 0
+    )
     return json.loads("\n".join(lines[json_start:]))
 
 
