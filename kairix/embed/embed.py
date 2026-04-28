@@ -290,6 +290,27 @@ def batched(items: list, size: int) -> Generator[list, None, None]:
         yield items[i : i + size]
 
 
+# ── usearch index update ─────────────────────────────────────────────────────
+
+
+def _update_usearch_index(hash_seqs: list[str], vectors: list[list[float]]) -> None:
+    """Write batch of vectors to the usearch ANN index (non-critical)."""
+    try:
+        from kairix.paths import db_path as get_db_path
+        from kairix.search.vec_index import VectorIndex
+
+        db_p = get_db_path()
+        index_path = db_p.parent / "vectors.usearch"
+        meta_path = db_p.parent / "vectors.meta.json"
+        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p)
+        idx.load()
+        count = idx.add_vectors(hash_seqs, vectors)
+        if count > 0:
+            logger.debug("usearch: added %d vectors", count)
+    except Exception as e:
+        logger.warning("usearch index update failed (non-critical): %s", e)
+
+
 # ── Main embed runner ─────────────────────────────────────────────────────────
 
 
@@ -418,6 +439,9 @@ def run_embed(
                         chunk_date=chunk.get("chunk_date"),
                     )
                 flush_staging_to_vec(db)
+                # Also write to usearch ANN index for fast search
+                batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
+                _update_usearch_index(batch_hash_seqs, vectors)
             embedded += len(batch)
             logger.info(
                 "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
