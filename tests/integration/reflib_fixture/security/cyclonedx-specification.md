@@ -11,20 +11,20 @@ date_added: 2026-04-25
 # CycloneDX Bill of Materials Specification (ECMA-424)
 
 [![License][license-image]][license-url]
- 
 
 
-  
 
 
-    
+
+
+
 
 ----
 
-OWASP CycloneDX is a full-stack Bill of Materials (BOM) standard that provides advanced supply chain capabilities for 
-cyber risk reduction. CycloneDX is an [Ecma International](https://ecma-international.org/) standard published as 
-[ECMA-424](https://ecma-international.org/publications-and-standards/standards/ecma-424/). 
-The [OWASP Foundation](https://owasp.org/) and Ecma International [Technical Committee for Software & System Transparency (TC54)](https://tc54.org/) 
+OWASP CycloneDX is a full-stack Bill of Materials (BOM) standard that provides advanced supply chain capabilities for
+cyber risk reduction. CycloneDX is an [Ecma International](https://ecma-international.org/) standard published as
+[ECMA-424](https://ecma-international.org/publications-and-standards/standards/ecma-424/).
+The [OWASP Foundation](https://owasp.org/) and Ecma International [Technical Committee for Software & System Transparency (TC54)](https://tc54.org/)
 drive the continued advancement of the specification.
 
 The specification supports:
@@ -40,9 +40,9 @@ The specification supports:
 * CycloneDX Attestations (CDXA)
 
 ## A Note on the Standard and Schemas
-CycloneDX is an Ecma International standard published as ECMA-424 under a [royalty-free patent policy](https://ecma-international.org/policies/by-ipr/royalty-free-patent-policy-extension-option/). 
+CycloneDX is an Ecma International standard published as ECMA-424 under a [royalty-free patent policy](https://ecma-international.org/policies/by-ipr/royalty-free-patent-policy-extension-option/).
 The CycloneDX schemas in this repository are the official interpretations of the standard and are available under the
-[Apache 2.0 license](https://www.apache.org/licenses/LICENSE-2.0.txt). The JSON Schema is the reference implementation 
+[Apache 2.0 license](https://www.apache.org/licenses/LICENSE-2.0.txt). The JSON Schema is the reference implementation
 for the standard.
 
 ## Use Cases
@@ -51,8 +51,8 @@ use case are provided in both XML and JSON.
 
 
 ## Tool Center
-The [CycloneDX Tool Center](https://cyclonedx.org/tool-center/) is a community effort to establish a marketplace of 
-free, open source, and proprietary tools and solutions that support the CycloneDX specification. 
+The [CycloneDX Tool Center](https://cyclonedx.org/tool-center/) is a community effort to establish a marketplace of
+free, open source, and proprietary tools and solutions that support the CycloneDX specification.
 
 
 ## Media Types
@@ -77,7 +77,7 @@ The following file names are conventionally used for storing CycloneDX BOM files
 Alternatively, files that match the glob pattern below are also recognized:
 * `*.cdx.json` for JSON encoded CycloneDX BOM files.
 * `*.cdx.xml` for XML encoded CycloneDX BOM files.
-    
+
 
 ## Release History
 

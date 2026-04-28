@@ -1,7 +1,7 @@
 # kairix Benchmark Framework — Design Spec
 
-**Version:** 1.0  
-**Status:** Draft — pending Phase 1 validation  
+**Version:** 1.0
+**Status:** Draft — pending Phase 1 validation
 **Purpose:** Define a reusable, agent-owner-runnable benchmark for memory/search capability assessment
 
 ---

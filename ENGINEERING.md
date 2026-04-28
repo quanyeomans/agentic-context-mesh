@@ -338,7 +338,7 @@ docs: add ENGINEERING.md — engineering disciplines
 chore(deps): bump requests from 2.31 to 2.32
 ```
 
-Types: `feat`, `fix`, `test`, `docs`, `refactor`, `chore`, `perf`  
+Types: `feat`, `fix`, `test`, `docs`, `refactor`, `chore`, `perf`
 Scope: module name or area (`embed`, `search`, `entities`, `ci`, `deps`)
 
 ---

@@ -1,7 +1,7 @@
 # Planning: Incremental File Watcher
 
-**Status:** Planned — not yet started  
-**Target version:** v1.0.0  
+**Status:** Planned — not yet started
+**Target version:** v1.0.0
 **Primary motivation:** The current embed cron runs every 60 seconds. A file added to the document store is invisible to search for up to 59 seconds. Session prep queries against recently-added content (today's meeting notes, last-minute decision records) return stale results during that window.
 
 > **Note (2026-04-27):** Docker Compose is now the primary deployment method. The systemd references below apply to the legacy pip install path. For Docker deployments, the watcher would run as a Docker Compose sidecar service (see Pattern A below).

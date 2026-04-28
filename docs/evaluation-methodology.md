@@ -46,7 +46,7 @@ Representative document sample
     ▼ generate_queries()
 Synthetic queries per document (2 per doc, labelled by intent)
     │
-    ▼ hybrid_search() 
+    ▼ hybrid_search()
 Top-10 retrieved documents per query
     │
     ▼ judge_batch()
@@ -120,7 +120,7 @@ The judge prompt explicitly instructs the model: *"order is random — do not us
 
 Before each generation run, `kairix eval generate` validates the judge against 15 frozen anchor cases:
 - 5 cases with expected grade 2 (clearly on-topic primary sources)
-- 5 cases with expected grade 1 (on-topic but indirect)  
+- 5 cases with expected grade 1 (on-topic but indirect)
 - 5 cases with expected grade 0 (clearly irrelevant)
 
 If more than 3 anchors receive unexpected grades, `JudgeCalibrationError` is raised and generation stops. This guards against:
