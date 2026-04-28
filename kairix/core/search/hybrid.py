@@ -569,11 +569,17 @@ def search(
     """
     t_start = time.monotonic()
 
-    cfg = config if config is not None else RetrievalConfig.defaults()
-
     intent = classify(query)
     if collections is None:
         collections = _collections_for(agent, scope)
+
+    # Resolve config: explicit > per-collection > global > defaults
+    from kairix.core.search.config_loader import resolve_retrieval_config
+
+    cfg = resolve_retrieval_config(
+        collections=collections,
+        explicit_config=config,
+    )
 
     bm25_results: list[BM25Result] = []
     vec_results: list[VecResult] = []

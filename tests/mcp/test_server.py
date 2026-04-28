@@ -84,7 +84,7 @@ def test_tool_search_passes_agent_and_scope() -> None:
         assert call_kwargs["agent"] == "builder"
         assert call_kwargs["scope"] == "agent"
         assert call_kwargs["budget"] == 1000
-        assert "config" in call_kwargs  # load_config() now passed through
+        # config is no longer passed explicitly — search() resolves per-collection config internally
 
 
 @pytest.mark.unit

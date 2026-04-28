@@ -179,6 +179,7 @@ class CollectionDef:
     name: str
     path: str  # relative to document_root
     glob: str = "**/*.md"
+    retrieval_overrides: dict | None = None  # per-collection retrieval config (raw YAML dict)
 
 
 @dataclass
@@ -205,6 +206,7 @@ def parse_collections(data: dict) -> CollectionsConfig | None:
                     name=item["name"],
                     path=item.get("path", "."),
                     glob=item.get("glob", "**/*.md"),
+                    retrieval_overrides=item.get("retrieval"),
                 )
             )
 
@@ -274,3 +276,113 @@ def _parse_rerank(d: dict) -> RerankConfig:
         model=str(d.get("model", defaults.model)),
         candidate_limit=int(d.get("candidate_limit", defaults.candidate_limit)),
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-collection config resolution
+# ---------------------------------------------------------------------------
+
+
+def _merge_retrieval_config(base: RetrievalConfig, overrides: dict) -> RetrievalConfig:
+    """Apply a partial YAML override dict on top of a base RetrievalConfig.
+
+    Only keys present in the override dict are applied. Sub-configs (entity,
+    procedural, temporal, rerank) are merged at their own level — overriding
+    entity.factor does not reset entity.cap to its default.
+    """
+    from dataclasses import replace
+
+    top_fields: dict = {}
+    for key in ("fusion_strategy", "rrf_k", "bm25_limit", "vec_limit", "skip_vector"):
+        if key in overrides:
+            top_fields[key] = type(getattr(base, key))(overrides[key])
+
+    boosts = overrides.get("boosts", {}) or {}
+    if "entity" in boosts:
+        merged = {
+            "enabled": base.entity.enabled,
+            "factor": base.entity.factor,
+            "cap": base.entity.cap,
+            **boosts["entity"],
+        }
+        top_fields["entity"] = _parse_entity(merged)
+    if "procedural" in boosts:
+        merged = {
+            "enabled": base.procedural.enabled,
+            "factor": base.procedural.factor,
+            **boosts["procedural"],
+        }
+        top_fields["procedural"] = _parse_procedural(merged)
+    if "temporal" in boosts:
+        merged = {
+            "date_path_boost_enabled": base.temporal.date_path_boost_enabled,
+            "date_path_boost_factor": base.temporal.date_path_boost_factor,
+            "chunk_date_boost_enabled": base.temporal.chunk_date_boost_enabled,
+            **boosts["temporal"],
+        }
+        top_fields["temporal"] = _parse_temporal(merged)
+
+    rerank = overrides.get("rerank", {})
+    if rerank:
+        merged = {
+            "enabled": base.rerank.enabled,
+            "model": base.rerank.model,
+            "candidate_limit": base.rerank.candidate_limit,
+            **rerank,
+        }
+        top_fields["rerank"] = _parse_rerank(merged)
+
+    return replace(base, **top_fields) if top_fields else base
+
+
+def _get_collection_overrides() -> dict[str, dict]:
+    """Load per-collection retrieval override dicts from config YAML."""
+    collections_cfg = load_collections()
+    if not collections_cfg:
+        return {}
+    return {
+        c.name: c.retrieval_overrides
+        for c in collections_cfg.shared
+        if c.retrieval_overrides
+    }
+
+
+def resolve_retrieval_config(
+    collection: str | None = None,
+    collections: list[str] | None = None,
+    explicit_config: RetrievalConfig | None = None,
+) -> RetrievalConfig:
+    """Resolve the retrieval config for a search request.
+
+    Priority:
+      1. explicit_config (passed by caller, e.g. sweep override) — use as-is
+      2. Single collection "reference-library" — hardcoded baseline
+      3. Single collection with per-collection YAML config — merge over global
+      4. Multi-collection or no collection — global config
+      5. No config file — RetrievalConfig.defaults()
+    """
+    if explicit_config is not None:
+        return explicit_config
+
+    global_cfg = load_config()
+
+    # Determine target collection (only for single-collection searches)
+    target = collection
+    if target is None and collections and len(collections) == 1:
+        target = collections[0]
+
+    if target is None:
+        return global_cfg
+
+    # Hardcoded reference library baseline
+    if target == "reference-library":
+        from kairix.knowledge.reflib.retrieval_config import REFLIB_RETRIEVAL_CONFIG
+
+        return REFLIB_RETRIEVAL_CONFIG
+
+    # Per-collection YAML overrides
+    overrides = _get_collection_overrides().get(target)
+    if overrides:
+        return _merge_retrieval_config(global_cfg, overrides)
+
+    return global_cfg

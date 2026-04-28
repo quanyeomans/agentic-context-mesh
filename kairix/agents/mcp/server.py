@@ -135,11 +135,10 @@ def tool_search(
     """
     logger.info("mcp.search: agent=%r scope=%r", agent, scope)
     try:
-        from kairix.core.search.config_loader import load_config
         from kairix.core.search.hybrid import search
 
         budget = _infer_budget(query, budget)
-        result = search(query=query, agent=agent, scope=scope, budget=budget, config=load_config())
+        result = search(query=query, agent=agent, scope=scope, budget=budget)
 
         intent_value = result.intent.value if hasattr(result.intent, "value") else str(result.intent)
         results_list = [
