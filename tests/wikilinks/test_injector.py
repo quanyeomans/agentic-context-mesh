@@ -40,8 +40,8 @@ def make_entity(
 
 
 ACME_CORP = make_entity("Acme Corp", "02-Areas/Clients/Acme-Corp/", link="[[Acme-Corp]]")
-THREE_CUBES = make_entity("Acme Corp", "02-Areas/Acme Corp/", link="[[AcmeCorp]]")
-BURGER_CHAIN = make_entity(
+ACME_CORP_ALT = make_entity("Acme Corp", "02-Areas/Acme Corp/", link="[[AcmeCorp]]")
+GAMMA_SYSTEMS = make_entity(
     "Gamma Systems",
     "02-Areas/Clients/Gamma-Systems/",
     link="[[Gamma-Systems|Gamma Systems]]",
@@ -199,7 +199,7 @@ def test_self_link_check_different_entity() -> None:
     content = "Acme Corp works with Gamma Systems on strategy."
     modified, injected = inject_wikilinks(
         content,
-        [ACME_CORP, BURGER_CHAIN],
+        [ACME_CORP, GAMMA_SYSTEMS],
         source_path="/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md",
     )
     # Acme Corp suppressed (self-link on own page); Gamma Systems still linked
@@ -218,7 +218,7 @@ def test_self_link_check_different_entity() -> None:
 def test_alias_triggers_link() -> None:
     """Alias 'Gamma Systems' should trigger the [[Gamma-Systems|Gamma Systems]] link."""
     content = "Gamma Systems is a fast food chain."
-    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
+    modified, injected = inject_wikilinks(content, [GAMMA_SYSTEMS])
     assert "[[Gamma-Systems|Gamma Systems]]" in modified
     assert injected == ["Gamma Systems"]
 
@@ -227,7 +227,7 @@ def test_alias_triggers_link() -> None:
 def test_primary_name_triggers_link() -> None:
     """Primary name 'Gamma Systems' should also trigger."""
     content = "Gamma Systems is a fast food chain."
-    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
+    modified, injected = inject_wikilinks(content, [GAMMA_SYSTEMS])
     assert "[[Gamma-Systems|Gamma Systems]]" in modified
     assert injected == ["Gamma Systems"]
 
@@ -363,9 +363,9 @@ def test_only_first_alias_mention_linked() -> None:
 
 
 @pytest.mark.unit
-def test_burger_chain_alias_produces_canonical_link() -> None:
+def test_gamma_systems_alias_produces_canonical_link() -> None:
     """'Gamma Systems' → '[[Gamma-Systems|Gamma Systems]]' (alias → canonical display)."""
     content = "Gamma Systems is a major fast food chain."
-    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
+    modified, injected = inject_wikilinks(content, [GAMMA_SYSTEMS])
     assert "[[Gamma-Systems|Gamma Systems]]" in modified
     assert injected == ["Gamma Systems"]

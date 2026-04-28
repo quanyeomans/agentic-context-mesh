@@ -64,10 +64,9 @@ def main(args: list[str] | None = None) -> None:
         from kairix.classify.judge import classify_with_llm
         from kairix.classify.rules import VALID_AGENTS, classify_content
 
-        valid = VALID_AGENTS | {"shared"}
-        if agent not in valid:
+        if agent not in VALID_AGENTS:
             print(
-                f"Error: invalid agent {agent!r}. Must be one of: {sorted(valid)}",
+                f"Error: invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)}",
                 file=sys.stderr,
             )
             sys.exit(1)

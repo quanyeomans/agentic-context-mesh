@@ -58,7 +58,7 @@ def search_wikidata(name: str, language: str = "en") -> list[WikidataMatch]:
             WIKIDATA_SEARCH_URL,
             params=params,
             timeout=_DEFAULT_TIMEOUT,
-            headers={"User-Agent": "kairix-entity-validator/0.9 (https://github.com/quanyeomans/agentic-context-mesh)"},
+            headers={"User-Agent": "kairix-entity-validator/0.9 (https://github.com/quanyeomans/kairix)"},
         )
         resp.raise_for_status()
         data = resp.json()

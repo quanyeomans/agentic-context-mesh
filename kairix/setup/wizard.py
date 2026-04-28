@@ -6,12 +6,15 @@ search preset, and initial indexing. Produces a kairix.config.yaml.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 import yaml
 
 from kairix.setup.prompts import SetupContext, prompt, prompt_choice, prompt_yn
+
+logger = logging.getLogger(__name__)
 
 # Old _prompt, _prompt_choice, _prompt_yn removed — replaced by
 # kairix.setup.prompts which supports interactive, non-interactive, and JSON modes.
@@ -44,7 +47,8 @@ def _test_llm_connection(provider: str, endpoint: str, api_key: str, embed_model
             return False
         return True
     except Exception as exc:
-        print(f"  Connection failed: {exc}")
+        logger.warning("wizard: connection check failed — %s", exc)
+        print("  Connection failed — check your Azure endpoint and API key.")
         return False
 
 
@@ -359,7 +363,8 @@ def run_setup(
                 embed_main()
                 print("  \u2713 Index built\n")
             except Exception as exc:
-                print(f"  Indexing failed: {exc}")
+                logger.warning("wizard: indexing failed — %s", exc)
+                print("  Indexing failed — check server logs for details.")
                 print("  You can run 'kairix embed' manually later.\n")
         else:
             print("  Skipped. Run 'kairix embed' when you're ready.\n")

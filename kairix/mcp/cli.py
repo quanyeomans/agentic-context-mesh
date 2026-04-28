@@ -82,8 +82,8 @@ def _resolve_port(args: argparse.Namespace) -> int:
 def _cmd_serve(args: argparse.Namespace) -> None:
     try:
         from kairix.mcp.server import build_server
-    except ImportError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+    except ImportError:
+        print("Error: MCP dependencies not installed. Run: pip install 'kairix[agents]'", file=sys.stderr)
         sys.exit(1)
 
     port = _resolve_port(args) if args.transport == "sse" else args.port

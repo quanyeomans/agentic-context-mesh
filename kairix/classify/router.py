@@ -23,7 +23,7 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant"})
+VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant", "shared"})
 SHARED_AGENT = "shared"
 
 _DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(

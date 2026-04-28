@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from kairix.classify.router import VALID_AGENTS
+
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
@@ -24,8 +26,6 @@ from dataclasses import dataclass, field
 VALID_TYPES = frozenset(
     {"episodic", "procedural-rule", "procedural-pattern", "semantic-decision", "semantic-fact", "entity"}
 )
-
-VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant", "shared"})
 
 
 @dataclass

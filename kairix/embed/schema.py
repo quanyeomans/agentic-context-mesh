@@ -84,26 +84,10 @@ def validate_schema(db: sqlite3.Connection) -> None:
 
 
 def ensure_vec_table(db: sqlite3.Connection, dims: int = EMBED_VECTOR_DIMS) -> None:
-    """
-    Ensure vectors_vec virtual table exists with the correct dimensions.
-    If it exists with different dimensions, drops and recreates it.
-    """
-    cur = db.execute("SELECT sql FROM sqlite_master WHERE name='vectors_vec'").fetchone()
+    """Ensure vec0 virtual table exists. Delegates to kairix.db.schema."""
+    from kairix.db.schema import _ensure_vec_table
 
-    if cur:
-        existing_sql = cur[0] or ""
-        expected_fragment = f"float[{dims}]"
-        if expected_fragment in existing_sql:
-            return  # Already correct
-        # Dimension mismatch — drop and recreate
-        db.execute("DROP TABLE IF EXISTS vectors_vec")
-
-    db.execute(
-        f"CREATE VIRTUAL TABLE vectors_vec USING vec0("
-        f"hash_seq TEXT PRIMARY KEY, "
-        f"embedding float[{dims}] distance_metric=cosine)"
-    )
-    db.commit()
+    return _ensure_vec_table(db, dims)
 
 
 def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -160,7 +144,6 @@ def save_run_log(entry: dict[str, Any]) -> None:
     """Append run metadata to the kairix cache directory."""
     # Use kairix cache dir
     log_path = Path.home() / ".cache" / "kairix" / "embed-runs.json"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     runs = []
     if log_path.exists():

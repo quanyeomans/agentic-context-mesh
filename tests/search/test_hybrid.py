@@ -479,16 +479,6 @@ def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.
     assert rotated.exists()
 
 
-@pytest.mark.unit
-def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_open_vec_db() returns None when kairix DB is unavailable."""
-    from kairix.search import hybrid as hybrid_mod
-
-    monkeypatch.setattr(hybrid_mod, "get_db_path", lambda: (_ for _ in ()).throw(FileNotFoundError("no db")))
-    result = hybrid_mod._open_vec_db()
-    assert result is None
-
-
 # ---------------------------------------------------------------------------
 # ENTITY intent — Neo4j required
 # ---------------------------------------------------------------------------
@@ -594,7 +584,6 @@ def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) 
     with (
         patch("kairix.search.intent.classify", return_value=QueryIntent.TEMPORAL),
         patch("kairix.search.bm25.bm25_search", return_value=bm25_items),
-        patch("kairix.search.hybrid._open_vec_db", return_value=None),
         patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
         patch(
             "kairix.temporal.rewriter.rewrite_temporal_query",

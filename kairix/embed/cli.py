@@ -91,72 +91,75 @@ def cmd_embed(args: argparse.Namespace) -> int:
 
     try:
         db = sqlite3.connect(str(db_path))
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=10000")
+        try:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA busy_timeout=10000")
 
-        # Load sqlite-vec extension and ensure schema exists.
-        # create_schema is idempotent — safe on every run.
-        load_extensions(db)
-        from kairix.db.schema import create_schema
+            # Load sqlite-vec extension and ensure schema exists.
+            # create_schema is idempotent — safe on every run.
+            load_extensions(db)
+            from kairix.db.schema import create_schema
 
-        create_schema(db)
-        validate_schema(db)
+            create_schema(db)
+            validate_schema(db)
 
-        # Scan document store for new/changed documents before embedding.
-        # This ensures first-run embed works without a separate scan step.
-        from kairix.db.scanner import CollectionConfig, DocumentScanner
-        from kairix.paths import document_root
-        from kairix.search.config_loader import load_collections
+            # Scan document store for new/changed documents before embedding.
+            # This ensures first-run embed works without a separate scan step.
+            from kairix.db.scanner import CollectionConfig, DocumentScanner
+            from kairix.paths import document_root
+            from kairix.search.config_loader import load_collections
 
-        droot = document_root()
-        scanner = DocumentScanner(db, document_root=droot)
+            droot = document_root()
+            scanner = DocumentScanner(db, document_root=droot)
 
-        # Load collections from config; fall back to scanning entire document root
-        collections_cfg = load_collections()
-        if collections_cfg and collections_cfg.shared:
-            scan_collections = [CollectionConfig(name=c.name, path=c.path, glob=c.glob) for c in collections_cfg.shared]
-            logging.info("Using %d configured collections", len(scan_collections))
-        else:
-            scan_collections = [CollectionConfig(name="default", path=".")]
+            # Load collections from config; fall back to scanning entire document root
+            collections_cfg = load_collections()
+            if collections_cfg and collections_cfg.shared:
+                scan_collections = [
+                    CollectionConfig(name=c.name, path=c.path, glob=c.glob) for c in collections_cfg.shared
+                ]
+                logging.info("Using %d configured collections", len(scan_collections))
+            else:
+                scan_collections = [CollectionConfig(name="default", path=".")]
 
-        scan_report = scanner.scan(scan_collections)
-        if scan_report.new > 0 or scan_report.updated > 0:
-            logging.info(
-                "Scanned documents: %d new, %d updated, %d unchanged",
-                scan_report.new,
-                scan_report.updated,
-                scan_report.unchanged,
+            scan_report = scanner.scan(scan_collections)
+            if scan_report.new > 0 or scan_report.updated > 0:
+                logging.info(
+                    "Scanned documents: %d new, %d updated, %d unchanged",
+                    scan_report.new,
+                    scan_report.updated,
+                    scan_report.unchanged,
+                )
+                # Rebuild FTS index after scanning new/changed documents
+                from kairix.db.fts import rebuild_fts
+
+                fts_count = rebuild_fts(db)
+                logging.info("FTS index rebuilt: %d documents", fts_count)
+
+            result = run_embed(
+                db=db,
+                force=args.force,
+                batch_size=args.batch_size,
+                limit=args.limit,
             )
-            # Rebuild FTS index after scanning new/changed documents
-            from kairix.db.fts import rebuild_fts
 
-            fts_count = rebuild_fts(db)
-            logging.info("FTS index rebuilt: %d documents", fts_count)
+            result["command"] = "embed"
+            result["db_path"] = str(db_path)
+            result["timestamp"] = int(start)
+            save_run_log(result)
 
-        result = run_embed(
-            db=db,
-            force=args.force,
-            batch_size=args.batch_size,
-            limit=args.limit,
-        )
+            logging.info(
+                f"Done — embedded={result['embedded']} failed={result['failed']} "
+                f"duration={result['duration_s']}s cost=${result['estimated_cost_usd']:.4f}"
+            )
 
-        result["command"] = "embed"
-        result["db_path"] = str(db_path)
-        result["timestamp"] = int(start)
-        save_run_log(result)
+            if result["failed"] > 0:
+                logging.warning(f"{result['failed']} chunks failed. Re-run without --force to retry failed chunks.")
+        finally:
+            db.close()
 
-        logging.info(
-            f"Done — embedded={result['embedded']} failed={result['failed']} "
-            f"duration={result['duration_s']}s cost=${result['estimated_cost_usd']:.4f}"
-        )
-
-        if result["failed"] > 0:
-            logging.warning(f"{result['failed']} chunks failed. Re-run without --force to retry failed chunks.")
-
-        db.close()
-
-    except Exception as e:
-        logging.exception(f"Embed failed: {e}")
+    except Exception:
+        logging.exception("Embed failed")
         return 2
     finally:
         release_lock(lock_fh)
@@ -193,36 +196,36 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     db_path = get_db_path()
     db = sqlite3.connect(str(db_path))
+    try:
+        pending = get_pending_chunks(db)
+        total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
+        total_docs = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
 
-    pending = get_pending_chunks(db)
-    total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
-    total_docs = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
+        print(f"Kairix index: {db_path}")
+        print(f"Documents: {total_docs}")
+        print(f"Vectors:   {total_vecs}")
+        print(f"Pending:   {len(pending)} documents need embedding")
 
-    print(f"Kairix index: {db_path}")
-    print(f"Documents: {total_docs}")
-    print(f"Vectors:   {total_vecs}")
-    print(f"Pending:   {len(pending)} documents need embedding")
+        # Last run
+        log_path = Path.home() / ".cache" / "qmd" / "azure-embed-runs.json"
+        if log_path.exists():
+            import json
 
-    # Last run
-    log_path = Path.home() / ".cache" / "qmd" / "azure-embed-runs.json"
-    if log_path.exists():
-        import json
+            try:
+                runs = json.loads(log_path.read_text())
+                if runs:
+                    last = runs[-1]
+                    import datetime
 
-        try:
-            runs = json.loads(log_path.read_text())
-            if runs:
-                last = runs[-1]
-                import datetime
-
-                ts = datetime.datetime.fromtimestamp(last.get("timestamp", 0))
-                print(
-                    f"Last run:  {ts.strftime('%Y-%m-%d %H:%M')} — "
-                    f"embedded={last.get('embedded')} cost=${last.get('estimated_cost_usd'):.4f}"
-                )
-        except Exception:  # nosec S110 display failure is non-critical, logging not yet initialised
-            pass  # non-critical: status display failed
-
-    db.close()
+                    ts = datetime.datetime.fromtimestamp(last.get("timestamp", 0))
+                    print(
+                        f"Last run:  {ts.strftime('%Y-%m-%d %H:%M')} — "
+                        f"embedded={last.get('embedded')} cost=${last.get('estimated_cost_usd'):.4f}"
+                    )
+            except Exception:  # nosec S110 display failure is non-critical, logging not yet initialised
+                pass  # non-critical: status display failed
+    finally:
+        db.close()
     return 0
 
 

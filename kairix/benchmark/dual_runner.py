@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from kairix.benchmark.baseline import REGRESSION_THRESHOLD
 from kairix.benchmark.runner import BenchmarkResult, run_benchmark
 from kairix.benchmark.suite import load_suite
 
@@ -22,10 +23,6 @@ class DualBenchmarkResult:
     comparison: BenchmarkResult | None
     deltas: dict[str, float] = field(default_factory=dict)
     regression_detected: bool = False
-
-
-# Regression threshold: comparison score drop > this triggers a flag
-_REGRESSION_THRESHOLD = 0.02
 
 
 def run_dual_benchmark(
@@ -76,7 +73,7 @@ def run_dual_benchmark(
         )
 
         # Regression detected if comparison weighted total drops below baseline by threshold
-        regression_detected = deltas["weighted_total"] < -_REGRESSION_THRESHOLD
+        regression_detected = deltas["weighted_total"] < -REGRESSION_THRESHOLD
 
     return DualBenchmarkResult(
         baseline=baseline,

@@ -51,9 +51,8 @@ def classify_with_llm(content: str, agent: str = "shared") -> ClassificationResu
     from kairix.classify.rules import VALID_AGENTS, ClassificationResult
 
     # Validate agent
-    valid = VALID_AGENTS | {"shared"}
-    if agent not in valid:
-        raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(valid)}")
+    if agent not in VALID_AGENTS:
+        raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)}")
 
     if not content or not content.strip():
         return ClassificationResult(
@@ -107,6 +106,6 @@ def classify_with_llm(content: str, agent: str = "shared") -> ClassificationResu
             type="unknown",
             target_path="",
             confidence=0.0,
-            reason=f"LLM classification failed: {e}",
+            reason="LLM classification failed — check server logs for details.",
             needs_confirmation=True,
         )

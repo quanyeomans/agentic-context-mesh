@@ -245,8 +245,12 @@ class Neo4jClient:
         """
         if not self._driver:
             return []
-        # Clamp max_hops to prevent unbounded graph traversal (DoS mitigation)
-        max_hops = min(max(1, max_hops), 5)
+        # Clamp max_hops to prevent unbounded graph traversal (DoS mitigation).
+        # Strict int() cast prevents type-confusion injection.
+        # Note: Cypher range literals (e.g. [*1..N]) do not support $param
+        # binding, so f-string interpolation is required here — the int cast
+        # and clamp guarantee a safe literal value.
+        max_hops = min(max(1, int(max_hops)), 5)
         try:
             with self._driver.session() as session:
                 result = session.run(

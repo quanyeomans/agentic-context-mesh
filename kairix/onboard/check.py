@@ -96,7 +96,7 @@ def check_wrapper_installed() -> CheckResult:
                 fix=(
                     "The symlink should point to kairix-wrapper.sh, not the Python binary.\n"
                     "Run the deploy script to fix:\n"
-                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/deploy-vm.sh)\n"
+                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/deploy-vm.sh)\n"
                     "This installs the wrapper at /opt/kairix/bin/kairix-wrapper.sh\n"
                     "and updates /usr/local/bin/kairix to point to it."
                 ),
@@ -317,7 +317,7 @@ def check_neo4j_reachable() -> CheckResult:
                 detail="Neo4j client unavailable (KAIRIX_NEO4J_URI not set or connection refused)",
                 fix=(
                     "Install Neo4j:\n"
-                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/agentic-context-mesh/main/scripts/install-neo4j.sh)\n"
+                    "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/install-neo4j.sh)\n"
                     "Or run with Docker:\n"
                     "  docker run -d --name neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/changeme neo4j:5-community\n"
                     "Then set KAIRIX_NEO4J_URI in /opt/kairix/service.env:\n"

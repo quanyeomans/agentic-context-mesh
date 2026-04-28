@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from kairix.db import get_db_path, load_extensions
+from kairix.db import get_db_path
 from kairix.graph.client import get_client as _get_neo4j
 from kairix.llm import get_default_backend as _get_llm
 from kairix.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
@@ -142,7 +142,7 @@ class SearchResult:
 # ---------------------------------------------------------------------------
 
 
-def _collections_for(agent: str | None, scope: Literal["shared", "agent", "shared+agent"]) -> list[str]:
+def _collections_for(agent: str | None, scope: Literal["shared", "agent", "shared+agent"]) -> list[str] | None:
     """Build collection list from config, agent name, and scope.
 
     If no collections are configured, returns an empty list (search all documents).
@@ -205,18 +205,6 @@ def _query_has_temporal_marker(query: str) -> bool:
         _re.IGNORECASE,
     )
     return bool(iso_date.search(query) or rel_term.search(query))
-
-
-def _open_vec_db() -> sqlite3.Connection | None:
-    """Open kairix DB with sqlite-vec extension loaded. Returns None on any failure."""
-    try:
-        db_path = get_db_path()
-        db = sqlite3.connect(str(db_path))
-        load_extensions(db)
-        return db
-    except (sqlite3.Error, OSError) as e:
-        logger.warning("hybrid: cannot open vec DB — %s", e)
-        return None
 
 
 def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
@@ -552,6 +540,7 @@ def search(
     budget: int = 3000,
     _no_multi_hop: bool = False,
     config: RetrievalConfig | None = None,
+    collections: list[str] | None = None,
 ) -> SearchResult:
     """
     Run the full hybrid search pipeline.
@@ -568,10 +557,11 @@ def search(
     Falls back to BM25-only if vector search fails.
 
     Args:
-        query:   Search query string.
-        agent:   Agent name for collection scoping (e.g. "shape", "builder").
-        scope:   Collection scope: "shared", "agent", or "shared+agent".
-        budget:  Token budget cap. Default 3000.
+        query:       Search query string.
+        agent:       Agent name for collection scoping (e.g. "shape", "builder").
+        scope:       Collection scope: "shared", "agent", or "shared+agent".
+        budget:      Token budget cap. Default 3000.
+        collections: Explicit collection list. Overrides scope-based resolution when set.
 
     Returns:
         SearchResult with results and diagnostic metadata.
@@ -582,7 +572,8 @@ def search(
     cfg = config if config is not None else RetrievalConfig.defaults()
 
     intent = classify(query)
-    collections = _collections_for(agent, scope)
+    if collections is None:
+        collections = _collections_for(agent, scope)
 
     bm25_results: list[BM25Result] = []
     vec_results: list[VecResult] = []
