@@ -103,7 +103,7 @@ az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpo
 
 ### 3. Kairix Index
 
-Kairix owns its own SQLite database for full-text search (FTS5) and vector storage (sqlite-vec). No external search tool is required.
+Kairix owns its own SQLite database for full-text search (FTS5) and vector storage (usearch HNSW). No external search tool is required.
 
 ```bash
 # Run the initial index build
@@ -116,7 +116,7 @@ ls ~/.cache/kairix/index.sqlite
 kairix onboard check
 ```
 
-**sqlite-vec:** Installed automatically as a pip dependency (`sqlite-vec>=0.1.6`). No manual extension path configuration needed.
+**usearch:** Installed automatically as a pip dependency (`usearch>=2.0`). No manual extension path configuration needed.
 
 ### 4. Neo4j (optional — entity graph)
 
@@ -342,7 +342,7 @@ INFO  Recall: 4/5 (80%)
 INFO  Done — embedded=20 failed=0 duration=12s cost=$0.0005
 ```
 
-If you see `SchemaVersionError` or `sqlite-vec extension load failed`, see [Troubleshooting](#troubleshooting).
+If you see `SchemaVersionError` or `usearch index load failed`, see [Troubleshooting](#troubleshooting).
 
 ### Step 5: Full vault embed
 

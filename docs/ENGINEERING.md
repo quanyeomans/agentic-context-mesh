@@ -1,6 +1,6 @@
 # Engineering Disciplines
 
-Standards, quality gates, and compliance requirements for Agentic Context Mesh contributors.
+Standards, quality gates, and compliance requirements for Kairix contributors.
 
 ---
 
@@ -35,7 +35,7 @@ Every merge to `main` must pass all four CI stages. No exceptions without a docu
 **Per-module coverage targets:**
 - `embed/`: ≥ 90%
 - `search/`, `classify/`: ≥ 85%
-- `entities/`, `temporal/`: ≥ 80%
+- `temporal/`: ≥ 80%
 - `summaries/`, `briefing/`, `contradict/`: ≥ 75%
 - `_azure.py`, `_db.py` (shared utilities): ≥ 95%
 
@@ -64,7 +64,7 @@ push/PR
   │
   ├── Stage 3: Integration (5min)  ─┐
   │     pytest -m integration       │ parallel
-  │     sqlite-vec required          │
+  │     usearch required          │
   │     backward compat shim check  │
   │                                  │
   └── Stage 4: Security (5min)    ──┘
@@ -118,7 +118,7 @@ If a gate must be bypassed:
      ┌─────────┐
      │   E2E   │  ~5%  KAIRIX_E2E=1 required. Never in CI.
      ├─────────┤
-     │Integr.  │  ~25%  Real sqlite-vec. Skips cleanly if unavailable.
+     │Integr.  │  ~25%  Real usearch. Skips cleanly if unavailable.
      ├─────────┤
      │Contract │  ~15%  Interface agreements. Zero tolerance. <30s total.
      ├─────────┤
@@ -133,7 +133,7 @@ Mark every test class or function with the appropriate marker:
 ```python
 @pytest.mark.contract    # interface agreement — schema, API shape, data format
 @pytest.mark.unit        # individual component logic
-@pytest.mark.integration # multi-component, real sqlite-vec
+@pytest.mark.integration # multi-component, real usearch
 @pytest.mark.e2e         # live Azure API (requires KAIRIX_E2E=1)
 @pytest.mark.slow        # takes >5s
 ```
@@ -142,7 +142,7 @@ Run by stage:
 ```bash
 pytest -m contract               # Stage 1: <30s, must pass
 pytest -m "not integration"      # Stage 2: unit only (CI)
-pytest -m integration            # Stage 3: requires sqlite-vec
+pytest -m integration            # Stage 3: requires usearch
 KAIRIX_E2E=1 pytest -m e2e      # Manual only
 ```
 
@@ -155,7 +155,7 @@ KAIRIX_E2E=1 pytest -m e2e      # Manual only
 **Keep real:**
 - SQLite operations (use test DB via `KAIRIX_TEST_DB` env var)
 - Internal logic and data structures
-- sqlite-vec extension (integration tests load the real `.so`)
+- usearch extension (integration tests load the real `.so`)
 
 **Never mock the thing under test.** If the test requires mocking the module being tested, the test is testing the wrong thing.
 
@@ -332,7 +332,7 @@ Use `logging` in all non-CLI modules. `print()` is allowed only in `cli.py` file
 
 ```
 feat(search): implement RRF fusion with entity boosting (#42)
-fix(embed): load sqlite-vec before --force DELETE (#38)
+fix(embed): load usearch before --force DELETE (#38)
 test(embed): add TestExtensionLoadOrder for production bug (#39)
 docs: add ENGINEERING.md — engineering disciplines
 chore(deps): bump requests from 2.31 to 2.32
@@ -353,9 +353,9 @@ Weekly automated PRs (Monday 03:00 AEST):
 
 All Dependabot PRs require CI to pass before merge. No manual merge without CI green.
 
-### 6.2 sqlite-vec version
+### 6.2 usearch version
 
-sqlite-vec is installed as a pip dependency (`sqlite-vec>=0.1.6`). No manual extension path configuration needed.
+usearch is installed as a pip dependency (`usearch>=0.1.6`). No manual extension path configuration needed.
 
 The `SQLITE_VEC_PATH` env var can be used to specify the location explicitly if auto-discovery fails.
 

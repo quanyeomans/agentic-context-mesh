@@ -5,7 +5,7 @@ Your documents, your servers, your agents — finding the right answer in under 
 
 [![Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen)]()
-[![NDCG@10](https://img.shields.io/badge/NDCG%4010-0.818-orange)]()
+[![NDCG@10](https://img.shields.io/badge/NDCG%4010-0.839-orange)]()
 
 ---
 
@@ -80,7 +80,7 @@ Kairix controls how much context each query returns. A quick fact check gets 1,5
 | **Knows who people are** | Yes — entity graph links people, companies, decisions | No | No | No |
 | **Answers date questions** | Yes — "what happened last week" just works | Manual filters | No | No |
 | **Controls what the LLM reads** | Yes — budget per query (saves money) | No budget control | No | Sends full pages | Sends everything |
-| **Proves it works** | Benchmarked: 0.80 NDCG@10 on real queries | Not published | Not published | Not published | N/A |
+| **Proves it works** | Benchmarked: 0.84 NDCG@10 on real queries | Not published | Not published | Not published | N/A |
 | **Needs a GPU** | No | No | No | N/A (SaaS) | No |
 | **Cost** | ~$25/month | $250+/month | Free | $8-10/user/month | LLM token costs |
 | **Works with agents (MCP)** | Built-in — 6 MCP tools | Custom integration needed | No | No | Manual prompt building |
@@ -184,9 +184,9 @@ The evaluation methodology uses TREC-style pooling (the same approach used by ac
 
 | Metric | Score | What it means |
 |--------|-------|--------------|
-| NDCG@10 | 0.803 | Documents are found AND ranked in the right order |
-| Hit@5 | 91.1% | 9 out of 10 queries find a relevant document in the top 5 |
-| MRR@10 | 0.746 | The first relevant result appears at position 1.3 on average |
+| NDCG@10 | 0.839 | Documents are found AND ranked in the right order |
+| Hit@5 | 96.3% | 96 out of 100 queries find a relevant document in the top 5 |
+| MRR@10 | 0.761 | The first relevant result appears at position 1.3 on average |
 
 ---
 
@@ -234,9 +234,9 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 - Connector framework — ingest from SharePoint, CRM, email headers
 - Curator agent — proactive knowledge harvesting and gap detection
 - Cross-encoder re-ranking evaluation
-- Multi-hop query improvement (weakest category at 0.572)
+- Multi-hop query improvement (weakest category at 0.721)
 
-See [ROADMAP.md](ROADMAP.md) for detail.
+See [ROADMAP.md](docs/ROADMAP.md) for detail.
 
 ---
 
@@ -265,7 +265,7 @@ pip install "kairix[neo4j,agents,nlp]"
 - Neo4j Community Edition — for knowledge graph features
 - Azure Key Vault — for production secret management
 
-See [OPERATIONS.md](OPERATIONS.md) for full deployment guide.
+See [OPERATIONS.md](docs/OPERATIONS.md) for full deployment guide.
 
 ---
 
@@ -306,4 +306,4 @@ See [SECURITY.md](SECURITY.md) for the full security posture.
 
 Apache 2.0 — see [LICENSE](LICENSE).
 
-Built on: [sqlite-vec](https://github.com/asg017/sqlite-vec) (Alex Garcia), [SQLite FTS5](https://www.sqlite.org/fts5.html), [Neo4j Community Edition](https://neo4j.com/).
+Built on: [usearch](https://github.com/unum-cloud/usearch) (Unum Cloud), [SQLite FTS5](https://www.sqlite.org/fts5.html), [Neo4j Community Edition](https://neo4j.com/).

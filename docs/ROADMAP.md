@@ -1,6 +1,6 @@
 # Roadmap
 
-Agentic Context Mesh is a contextual retrieval platform for human-agent teams that keeps your knowledge private and on your own infrastructure. This document describes the current state and near-term direction.
+Kairix is a contextual retrieval platform for human-agent teams that keeps your knowledge private and on your own infrastructure. This document describes the current state and near-term direction.
 
 Discussion of priorities and feature direction happens in [GitHub Discussions → Roadmap & Priorities](https://github.com/quanyeomans/kairix/discussions).
 
@@ -14,7 +14,7 @@ The dominant pattern for AI agent memory is to send your knowledge to a third-pa
 2. **Context quality** — generic retrieval without entity awareness, temporal reasoning, or team-specific patterns produces mediocre results
 3. **Team coherence** — agents and humans draw from different sources, breaking the shared context that makes teams effective
 
-Agentic Context Mesh is the alternative: a private, on-infrastructure retrieval layer that both human team members and AI agents query against the same indexed knowledge base. Your data never leaves your servers.
+Kairix is the alternative: a private, on-infrastructure retrieval layer that both human team members and AI agents query against the same indexed knowledge base. Your data never leaves your servers.
 
 ---
 
