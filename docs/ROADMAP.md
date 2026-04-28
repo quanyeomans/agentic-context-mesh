@@ -101,5 +101,5 @@ If you want to influence the roadmap, the most effective approaches are:
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing standards, and PR process.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for setup, testing standards, and PR process.
 The issues labelled [`good first issue`](https://github.com/quanyeomans/kairix/issues?q=label%3A%22good+first+issue%22) are explicitly scoped for new contributors.

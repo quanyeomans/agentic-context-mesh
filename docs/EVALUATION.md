@@ -117,4 +117,4 @@ The public example suite (`suites/example.yaml`) contains anonymised, domain-neu
 
 All vectors and entity data are stored locally on your own infrastructure. Vault content is sent to your configured embedding provider (Azure OpenAI, Ollama, or sentence-transformers) only for embedding. No content is retained by any third party beyond the API request.
 
-See [SECURITY.md](SECURITY.md) for full data handling detail.
+See [SECURITY.md](../SECURITY.md) for full data handling detail.

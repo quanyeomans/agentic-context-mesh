@@ -419,7 +419,7 @@ kairix embed
 export AZURE_OPENAI_API_KEY=$(az keyvault secret show ...)
 ```
 
-For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](SECURITY.md) for setup detail.
+For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](../SECURITY.md) for setup detail.
 
 ### Incremental embed (new vault files)
 
@@ -479,7 +479,7 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 | `KAIRIX_NEO4J_URI` | Neo4j Bolt URI | `bolt://localhost:7687` |
 | `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
 | `KAIRIX_LOG_QUERIES` | Set to `1` to log all search queries | Off |
-| `SQLITE_VEC_PATH` | Override sqlite-vec `.so` path | Auto-discovered via pip package |
+| `KAIRIX_USEARCH_PATH` | Override usearch index file path | `~/.cache/kairix/vectors.usearch` |
 
 ---
 
@@ -584,17 +584,19 @@ az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-k
 
 If `az account show` fails, run `az login` or check the VM's managed identity assignment.
 
-### `sqlite-vec extension load failed`
+### `usearch index load failed`
 
-The sqlite-vec `.so` file can't be found.
+The usearch library or index file can't be found.
 
 ```bash
-# Check if sqlite-vec is available
-python3 -c "import sqlite_vec; print(sqlite_vec)"
-find $(dirname $(python3 -c "import sqlite_vec; print(sqlite_vec)"))/../ -name "vec0.so" 2>/dev/null
+# Check if usearch is available
+python3 -c "import usearch; print(usearch.__version__)"
 
-# Override manually
-export SQLITE_VEC_PATH="/path/to/vec0.so"
+# Check if the index file exists
+ls -la ~/.cache/kairix/vectors.usearch
+
+# Override index path manually
+export KAIRIX_USEARCH_PATH="/path/to/vectors.usearch"
 kairix embed --limit 5
 ```
 
@@ -701,7 +703,7 @@ KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 
 ### More detailed runbooks
 
-For deeper diagnostic procedures and less common failure modes, see [`docs/runbooks/INDEX.md`](docs/runbooks/INDEX.md).
+For deeper diagnostic procedures and less common failure modes, see [`docs/runbooks/INDEX.md`](runbooks/INDEX.md).
 
 ---
 
@@ -750,4 +752,4 @@ Vault content is sent to Azure OpenAI (Australia East) for:
 
 No vault content is stored externally beyond the duration of the API request. All vectors, entity data, and briefings live in SQLite and Neo4j on your own infrastructure.
 
-See [SECURITY.md](SECURITY.md) for the full data handling and secret management policy.
+See [SECURITY.md](../SECURITY.md) for the full data handling and secret management policy.
