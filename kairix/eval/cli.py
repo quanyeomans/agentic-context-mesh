@@ -197,10 +197,14 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
 
     print(f"Running hybrid calibration sweep: {len(configs)} configs x suite {args.suite}")
 
+    collection = getattr(args, "collection", None)
+    collections_override = [collection] if collection else None
+
     report = sweep_hybrid_params(
         suite_path=Path(args.suite),
         output_path=Path(args.output) if args.output else None,
         configs=configs,
+        collections_override=collections_override,
     )
 
     print(f"\nSweep complete: {report.total_configs} configs, {report.total_duration_s:.0f}s")
@@ -233,6 +237,109 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
 
     if args.output:
         print(f"\nFull results: {args.output}")
+
+    return 0
+
+
+def _cmd_auto_gold(args: argparse.Namespace) -> int:
+    import sqlite3
+    from pathlib import Path
+
+    from kairix.db import get_db_path
+    from kairix.eval.auto_gold import analyse_corpus, build_suite, generate_template_queries
+
+    try:
+        db_path = get_db_path()
+    except FileNotFoundError:
+        print("ERROR: kairix index not found. Run 'kairix embed' first.", file=sys.stderr)
+        return 1
+
+    db = sqlite3.connect(str(db_path))
+    profile = analyse_corpus(db)
+    db.close()
+
+    print(f"Corpus: {profile.total_docs} documents across {len(profile.collections)} collections")
+    print(
+        f"  Procedural: {profile.procedural_count}  Date files: {profile.date_filename_count}  Entity: {profile.entity_doc_count}"
+    )
+
+    queries = generate_template_queries(profile, n=args.count)
+    print(f"\nGenerated {len(queries)} evaluation queries")
+
+    # Show category distribution
+    cats: dict[str, int] = {}
+    for q in queries:
+        cats[q["category"]] = cats.get(q["category"], 0) + 1
+    for cat, n in sorted(cats.items()):
+        print(f"  {cat}: {n}")
+
+    output = args.output or "suites/auto-gold.yaml"
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    build_suite(queries, output)
+    print(f"\nSuite written to: {output}")
+    print(f"Next: kairix eval build-gold --suite {output} --output {output.replace('.yaml', '-graded.yaml')}")
+    return 0
+
+
+def _cmd_tune(args: argparse.Namespace) -> int:
+    import json
+    import sqlite3
+
+    from kairix.eval.tune import CorpusHints, analyse_results, recommend
+
+    # Load benchmark result
+    try:
+        with open(args.result) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    scores = data.get("summary", {}).get("category_scores", {})
+    if not scores:
+        print("ERROR: No category_scores found in result file.", file=sys.stderr)
+        return 1
+
+    analysis = analyse_results(scores, floor=args.floor)
+
+    print(f"Category scores (floor={args.floor}):")
+    for cat, score in sorted(scores.items()):
+        marker = "  " if score >= args.floor else "!!"
+        print(f"  {marker} {cat:12s} {score:.3f}")
+
+    if not analysis.weak_categories:
+        print("\nAll categories above floor. No tuning needed.")
+        return 0
+
+    print(f"\nWeak categories: {', '.join(analysis.weak_categories)}")
+
+    # Build corpus hints from the index if available
+    hints = CorpusHints()
+    try:
+        from kairix.db import get_db_path
+        from kairix.eval.auto_gold import analyse_corpus
+
+        db_path = get_db_path()
+        db = sqlite3.connect(str(db_path))
+        profile = analyse_corpus(db)
+        db.close()
+        hints = CorpusHints(
+            has_date_files=profile.date_filename_count > 0,
+            has_procedural_docs=profile.procedural_count > 0,
+            has_entity_folders=profile.entity_doc_count > 0,
+        )
+    except Exception:
+        print("  (index not available — using generic recommendations)")
+
+    recs = recommend(analysis.weak_categories, hints)
+    if recs:
+        print("\nRecommendations:")
+        for r in recs:
+            print(f"\n  [{r.parameter}] {r.action}")
+            print(f"    Reason: {r.reason}")
+            print(f"    Expected: {r.expected_impact}")
+    else:
+        print("\nNo specific recommendations. Consider running a hybrid sweep.")
 
     return 0
 
@@ -345,6 +452,16 @@ def main(argv: list[str] | None = None) -> None:
     p_gold.add_argument("--no-calibrate", action="store_true", help="Skip judge calibration")
     p_gold.add_argument("--limit", type=int, default=10, help="Top-k per system (default: 10)")
 
+    # --- auto-gold ---
+    p_ag = subparsers.add_parser("auto-gold", help="Generate evaluation suite from corpus analysis (no LLM needed)")
+    p_ag.add_argument("--output", default=None, help="Output suite YAML path (default: suites/auto-gold.yaml)")
+    p_ag.add_argument("--count", type=int, default=50, help="Target query count (default: 50)")
+
+    # --- tune ---
+    p_tune = subparsers.add_parser("tune", help="Analyse benchmark results and recommend parameter tuning")
+    p_tune.add_argument("--result", required=True, help="Benchmark result JSON file")
+    p_tune.add_argument("--floor", type=float, default=0.50, help="Category floor threshold (default: 0.50)")
+
     # --- sweep ---
     p_sweep = subparsers.add_parser("sweep", help="Grid search BM25 column weights and query styles")
     p_sweep.add_argument("--suite", required=True, help="Benchmark suite YAML with gold_titles")
@@ -356,6 +473,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_hsweep.add_argument("--suite", required=True, help="Independent gold suite YAML")
     p_hsweep.add_argument("--output", default=None, help="CSV output path")
+    p_hsweep.add_argument("--collection", default=None, help="Restrict search to this collection only")
     p_hsweep.add_argument("--quick", action="store_true", help="Quick mode: run only baseline + key RRF k variants")
 
     args = parser.parse_args(argv)
@@ -373,6 +491,8 @@ def main(argv: list[str] | None = None) -> None:
         "monitor": _cmd_monitor,
         "report": _cmd_report,
         "build-gold": _cmd_build_gold,
+        "auto-gold": _cmd_auto_gold,
+        "tune": _cmd_tune,
         "sweep": _cmd_sweep,
         "hybrid-sweep": _cmd_hybrid_sweep,
     }

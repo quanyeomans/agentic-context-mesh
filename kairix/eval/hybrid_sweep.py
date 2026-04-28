@@ -566,6 +566,7 @@ def sweep_hybrid_params(
     suite_path: Path,
     output_path: Path | None = None,
     configs: list[HybridSweepConfig] | None = None,
+    collections_override: list[str] | None = None,
 ) -> HybridSweepReport:
     """
     Grid search over hybrid pipeline configurations.
@@ -574,9 +575,10 @@ def sweep_hybrid_params(
     (or BM25-only) and computes NDCG@10, Hit@5, MRR@10 against the gold suite.
 
     Args:
-        suite_path:   Path to benchmark suite YAML (independent gold).
-        output_path:  Optional CSV output for results.
-        configs:      Configurations to evaluate. Defaults to build_default_configs().
+        suite_path:            Path to benchmark suite YAML (independent gold).
+        output_path:           Optional CSV output for results.
+        configs:               Configurations to evaluate. Defaults to build_default_configs().
+        collections_override:  Explicit collection list. Overrides suite metadata when set.
 
     Returns:
         HybridSweepReport with results sorted by weighted_total descending.
@@ -604,8 +606,8 @@ def sweep_hybrid_params(
         len(configs) * len(ndcg_cases),
     )
 
-    # Determine collections from suite metadata or use None (all)
-    collections = suite_data.get("collections")
+    # Determine collections: CLI override > suite metadata > None (all)
+    collections = collections_override or suite_data.get("collections")
 
     report = HybridSweepReport()
     report.total_configs = len(configs)

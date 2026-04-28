@@ -38,6 +38,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Retrieval system (default: hybrid)",
     )
     run_p.add_argument("--agent", default="shape", help="Agent name for collection scoping")
+    run_p.add_argument("--collection", default=None, help="Restrict search to this collection only")
+    run_p.add_argument(
+        "--fusion",
+        default=None,
+        choices=["bm25_primary", "rrf"],
+        help="Override fusion strategy for this run",
+    )
     run_p.add_argument("--output", default=None, help="Directory to save JSON result")
 
     # validate
@@ -97,6 +104,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         system=args.system,
         agent=args.agent,
         output_dir=args.output,
+        collection=getattr(args, "collection", None),
+        fusion_override=getattr(args, "fusion", None),
     )
 
     print(format_interpretation(result))

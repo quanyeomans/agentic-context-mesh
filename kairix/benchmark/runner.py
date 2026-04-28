@@ -364,20 +364,34 @@ def _retrieve(
     agent: str,
     limit: int = 10,
     db_path: str | None = None,
+    collection: str | None = None,
+    fusion_override: str | None = None,
 ) -> tuple[list[str], list[str], dict[str, Any]]:
     """
     Run retrieval and return (paths, snippets, metadata).
     """
     if system == "hybrid":
+        from dataclasses import replace
+
         from kairix.search.hybrid import search
 
-        # Use a large budget to avoid the token-budget system truncating results.
-        # The budget allocator loads full document content; with a 5000-token budget,
-        # 3-4 long documents exhaust it before positions 5-10 are filled. For
-        # benchmark scoring we need all fused results ranked by RRF score, not
-        # truncated by context-window budget. 500_000 tokens is effectively unlimited
-        # for a typical 25-result fused set.
-        sr = search(query=query, agent=agent, scope="shared+agent", budget=500_000)
+        config = None
+        if fusion_override:
+            from kairix.search.config_loader import load_config
+
+            config = replace(load_config(), fusion_strategy=fusion_override)
+
+        # Build explicit collections list when --collection is set
+        collections = [collection] if collection else None
+
+        sr = search(
+            query=query,
+            agent=agent,
+            scope="shared+agent",
+            budget=500_000,
+            config=config,
+            collections=collections,
+        )
         paths = [b.result.path for b in sr.results]
         snippets = [b.content[:500] for b in sr.results]
         meta = {
@@ -496,6 +510,8 @@ def run_benchmark(
     agent: str = "shape",
     output_dir: str | None = None,
     db_path: str | None = None,
+    collection: str | None = None,
+    fusion_override: str | None = None,
 ) -> BenchmarkResult:
     """
     Run all benchmark cases and return a BenchmarkResult.
@@ -538,6 +554,8 @@ def run_benchmark(
                     system=system,
                     agent=case.agent or agent,
                     db_path=db_path,
+                    collection=collection,
+                    fusion_override=fusion_override,
                 )
             except Exception as exc:
                 paths, snippets, retrieval_meta = [], [], {"error": str(exc)}
@@ -644,6 +662,8 @@ def run_benchmark(
             "suite_name": suite.meta.get("name", "unknown"),
             "system": system,
             "agent": agent,
+            "collection": collection,
+            "fusion_override": fusion_override,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "n_cases": len(suite.cases),
             "weighted_total": weighted_total,

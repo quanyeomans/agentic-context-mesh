@@ -24,8 +24,8 @@ def cmd_suggest(args: argparse.Namespace) -> int:
     try:
         neo4j = get_client()
         suggestions = suggest_entities(text, neo4j)
-    except ImportError as exc:
-        print(str(exc), file=sys.stderr)
+    except ImportError:
+        print("ERROR: Entity suggestion requires Neo4j driver. Run: pip install 'kairix[neo4j]'", file=sys.stderr)
         return 1
 
     print(format_suggestions(suggestions, fmt=args.format))
@@ -75,6 +75,49 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seed(args: argparse.Namespace) -> int:
+    """kairix entity seed — discover entities from indexed documents and seed Neo4j."""
+    import sqlite3
+
+    from kairix.db import get_db_path
+    from kairix.entities.seed import scan_for_entities, seed_graph
+
+    try:
+        db_path = get_db_path()
+    except FileNotFoundError:
+        print("ERROR: kairix index not found. Run 'kairix embed' first.", file=sys.stderr)
+        return 1
+
+    db = sqlite3.connect(str(db_path))
+    candidates = scan_for_entities(db, limit=args.limit)
+    db.close()
+
+    if not candidates:
+        print("No entity candidates found in indexed documents.")
+        return 0
+
+    print(f"Found {len(candidates)} entity candidates:")
+    for c in candidates[:20]:
+        print(f"  [{c.entity_type:13s}] {c.name} (confidence: {c.confidence:.2f}, docs: {len(c.source_docs)})")
+    if len(candidates) > 20:
+        print(f"  ... and {len(candidates) - 20} more")
+
+    if args.dry_run:
+        print("\nDry run — no changes made. Remove --dry-run to seed Neo4j.")
+        return 0
+
+    from kairix.graph.client import get_client
+
+    neo4j = get_client()
+    if not neo4j.available:
+        print("ERROR: Neo4j not available. Check connection settings.", file=sys.stderr)
+        return 1
+
+    count = seed_graph(neo4j, candidates)
+    print(f"\nSeeded {count}/{len(candidates)} entities into Neo4j.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kairix entity",
@@ -97,6 +140,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("--update", action="store_true", help="Write wikidata_qid to Neo4j node")
     p_validate.add_argument("--format", choices=["table", "json"], default="table")
     p_validate.set_defaults(func=cmd_validate)
+
+    # seed subcommand
+    p_seed = sub.add_parser("seed", help="Discover entities from indexed documents and seed Neo4j")
+    p_seed.add_argument("--limit", type=int, default=500, help="Max entities to discover (default: 500)")
+    p_seed.add_argument("--dry-run", action="store_true", help="Show candidates without seeding")
+    p_seed.set_defaults(func=cmd_seed)
 
     return parser
 
