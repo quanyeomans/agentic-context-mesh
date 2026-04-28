@@ -23,7 +23,7 @@ from kairix.search.budget import DEFAULT_BUDGET, apply_budget
 from kairix.search.hybrid import SearchResult, _collections_for, search
 from kairix.search.intent import QueryIntent
 from kairix.search.rrf import rrf
-from kairix.search.vector import VecResult
+from kairix.search.vec_index import VecResult
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -15,7 +15,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 
@@ -23,6 +23,20 @@ logger = logging.getLogger(__name__)
 
 # Default dimensions for text-embedding-3-large
 DIMS = 1536
+
+# Default number of vector results to retrieve before fusion
+VECTOR_DEFAULT_K: int = 20
+
+
+class VecResult(TypedDict):
+    """Single vector search result."""
+
+    hash_seq: str
+    distance: float
+    path: str
+    collection: str
+    title: str
+    snippet: str
 
 
 class VectorIndex:

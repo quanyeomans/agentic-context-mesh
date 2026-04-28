@@ -50,7 +50,7 @@ from pathlib import Path
 
 from kairix.search.bm25 import BM25Result
 from kairix.search.config import EntityBoostConfig, ProceduralBoostConfig, TemporalBoostConfig
-from kairix.search.vector import VecResult
+from kairix.search.vec_index import VecResult
 from kairix.temporal.rewriter import (
     QUERY_ISO_DATE_RE as _QUERY_ISO_DATE_RE,
 )

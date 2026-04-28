@@ -35,7 +35,7 @@ from typing import Any, Literal
 from kairix.db import get_db_path
 from kairix.graph.client import get_client as _get_neo4j
 from kairix.llm import get_default_backend as _get_llm
-from kairix.search.bm25 import BM25_DEFAULT_LIMIT, BM25Result, bm25_search
+from kairix.search.bm25 import BM25Result, bm25_search
 from kairix.search.budget import BudgetedResult, apply_budget
 from kairix.search.config import RetrievalConfig
 from kairix.search.intent import QueryIntent, classify
@@ -48,7 +48,7 @@ from kairix.search.rrf import (
     rrf,
     temporal_date_boost,
 )
-from kairix.search.vector import VECTOR_DEFAULT_K, VecResult
+from kairix.search.vec_index import VECTOR_DEFAULT_K, VecResult
 
 logger = logging.getLogger(__name__)
 
@@ -621,9 +621,12 @@ def search(
         futures: dict[str, Future] = {}
 
         futures["bm25"] = executor.submit(
-            bm25_search, active_query, collections, BM25_DEFAULT_LIMIT, None, date_filter_paths
+            bm25_search, active_query, collections, cfg.bm25_limit, None, date_filter_paths
         )
-        futures["vec"] = executor.submit(_run_vector_search, active_query, collections, date_filter_paths)
+        if not cfg.skip_vector:
+            futures["vec"] = executor.submit(
+                _run_vector_search, active_query, collections, date_filter_paths, cfg.vec_limit
+            )
 
         # Collect results
         for name, future in futures.items():
@@ -638,7 +641,9 @@ def search(
                 if name == "vec":
                     vec_failed = True
 
-    if not vec_results:
+    if cfg.skip_vector:
+        vec_failed = False  # not a failure — intentionally skipped
+    elif not vec_results:
         vec_failed = True
         logger.info("hybrid: vector search returned no results, using BM25 only (query=%r)", query[:60])
 
@@ -759,6 +764,7 @@ def _run_vector_search(
     query: str,
     collections: list[str],
     date_filter_paths: frozenset[str] | None = None,
+    k: int = VECTOR_DEFAULT_K,
 ) -> list[VecResult]:
     """
     Embed query and run ANN vector search via usearch. Returns [] on any failure.
@@ -791,7 +797,7 @@ def _run_vector_search(
         if index is None or len(index) == 0:
             return []
 
-        results = index.search(query_vec, k=VECTOR_DEFAULT_K, collections=collections or None)
+        results = index.search(query_vec, k=k, collections=collections or None)
 
         # Apply date filter if present (TMP-2 temporal filtering)
         if date_filter_paths and results:

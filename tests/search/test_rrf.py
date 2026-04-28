@@ -30,7 +30,7 @@ from kairix.search.rrf import (
 # Constants kept for backward-compat test math (values from EntityBoostConfig / ProceduralBoostConfig defaults)
 ENTITY_BOOST_CAP = EntityBoostConfig().cap
 PROCEDURAL_BOOST_FACTOR = ProceduralBoostConfig().factor
-from kairix.search.vector import VecResult  # noqa: E402
+from kairix.search.vec_index import VecResult  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -134,6 +134,14 @@ class RetrievalConfig:
     # give more weight to documents appearing in both lists.
     rrf_k: int = 60
 
+    # Result limits — controls how many candidates each backend returns before fusion.
+    bm25_limit: int = 20
+    vec_limit: int = 20
+
+    # Skip vector search entirely. Use for BM25-only baseline evaluation
+    # or when the vector index is unavailable.
+    skip_vector: bool = False
+
     entity: EntityBoostConfig = field(default_factory=EntityBoostConfig)
     procedural: ProceduralBoostConfig = field(default_factory=ProceduralBoostConfig)
     temporal: TemporalBoostConfig = field(default_factory=TemporalBoostConfig)

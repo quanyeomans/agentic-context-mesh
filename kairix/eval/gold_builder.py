@@ -174,20 +174,27 @@ def _vector_search(
     collections: list[str] | None = None,
     limit: int = 10,
 ) -> list[dict[str, str]]:
-    """Run vector search. Returns list of {path, title, snippet, collection} dicts."""
+    """Run vector search via usearch. Returns list of {path, title, snippet, collection} dicts."""
     try:
-        from kairix.db import open_db
-        from kairix.search.hybrid import embed_text_as_bytes
-        from kairix.search.vector import vector_search_bytes
+        import numpy as np
 
-        query_bytes = embed_text_as_bytes(query)
-        if not query_bytes:
+        from kairix._azure import embed_text
+        from kairix.search.hybrid import _get_vector_index
+
+        vec = embed_text(query)
+        if not vec:
             return []
 
-        db = open_db()
-        results = vector_search_bytes(db, query_bytes, k=limit, collections=collections)
-        db.close()
+        query_vec = np.array(vec, dtype=np.float32)
+        norm = np.linalg.norm(query_vec)
+        if norm > 0:
+            query_vec /= norm
 
+        index = _get_vector_index()
+        if index is None:
+            return []
+
+        results = index.search(query_vec, k=limit, collections=collections)
         return [
             {
                 "path": r["path"],

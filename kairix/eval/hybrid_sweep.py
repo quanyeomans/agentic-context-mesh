@@ -319,233 +319,63 @@ class HybridSweepReport:
 
 
 # ---------------------------------------------------------------------------
-# Embedding cache (avoids redundant API calls across configs)
-# ---------------------------------------------------------------------------
-
-_embedding_cache: dict[str, bytes | None] = {}
-
-
-def _get_embedding_cached(query: str) -> bytes | None:
-    """Get embedding bytes for a query, caching across configs."""
-    if query not in _embedding_cache:
-        from kairix.search.hybrid import embed_text_as_bytes
-
-        _embedding_cache[query] = embed_text_as_bytes(query)
-    return _embedding_cache[query]
-
-
-def _clear_embedding_cache() -> None:
-    """Clear the embedding cache."""
-    _embedding_cache.clear()
-
-
-# ---------------------------------------------------------------------------
-# Retrieval functions (per-config)
+# Retrieval — delegates to the main search pipeline (DRY)
 # ---------------------------------------------------------------------------
 
 
-def _retrieve_bm25_only(
-    query: str,
-    collections: list[str] | None,
-    limit: int = 20,
-) -> tuple[list[str], dict[str, Any]]:
-    """BM25-only retrieval. Returns (paths, metadata)."""
-    from kairix.search.bm25 import bm25_search
-
-    results = bm25_search(query=query, collections=collections, limit=limit)
-    paths = [r["file"] for r in results]
-    return paths, {"bm25_count": len(results), "vec_count": 0, "fused_count": len(results)}
-
-
-def _retrieve_hybrid(
-    query: str,
-    collections: list[str] | None,
-    config: HybridSweepConfig,
-) -> tuple[list[str], dict[str, Any]]:
-    """
-    Full hybrid retrieval with configurable parameters.
-
-    Runs BM25 + vector in parallel, fuses with RRF at the specified k,
-    then applies boost layers per config.
-    """
-    import sqlite3
-    from concurrent.futures import ThreadPoolExecutor
-
-    from kairix.db import get_db_path, load_extensions
-    from kairix.search.bm25 import BM25Result, bm25_search
+def _sweep_config_to_retrieval_config(cfg: HybridSweepConfig) -> Any:
+    """Convert a sweep config to a RetrievalConfig for the main search pipeline."""
     from kairix.search.config import (
         EntityBoostConfig,
         ProceduralBoostConfig,
+        RetrievalConfig,
+        TemporalBoostConfig,
     )
-    from kairix.search.intent import QueryIntent, classify
-    from kairix.search.rrf import (
-        entity_boost_neo4j,
-        procedural_boost,
-        rrf,
+
+    return RetrievalConfig(
+        fusion_strategy="bm25_primary" if cfg.mode in ("bm25_only", "bm25_primary") else "rrf",
+        rrf_k=cfg.rrf_k,
+        bm25_limit=cfg.bm25_limit,
+        vec_limit=cfg.vec_limit,
+        skip_vector=(cfg.mode == "bm25_only"),
+        entity=EntityBoostConfig(
+            enabled=cfg.entity_enabled,
+            factor=cfg.entity_factor,
+            cap=cfg.entity_cap,
+        ),
+        procedural=ProceduralBoostConfig(
+            enabled=cfg.procedural_enabled,
+            factor=cfg.procedural_factor,
+        ),
+        temporal=TemporalBoostConfig(
+            chunk_date_boost_enabled=cfg.chunk_date_enabled,
+        ),
     )
-    from kairix.search.vector import VecResult, vector_search_bytes
-
-    intent = classify(query)
-    bm25_results: list[BM25Result] = []
-    vec_results: list[VecResult] = []
-    vec_failed = False
-
-    # Parallel dispatch
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        bm25_fut = executor.submit(
-            bm25_search,
-            query,
-            collections,
-            config.bm25_limit,
-        )
-
-        def _vec_search() -> list[VecResult]:
-            try:
-                query_bytes = _get_embedding_cached(query)
-                if not query_bytes:
-                    return []
-                db_path = get_db_path()
-                db = sqlite3.connect(str(db_path))
-                try:
-                    load_extensions(db)
-                    return vector_search_bytes(db, query_bytes, k=config.vec_limit, collections=collections)
-                finally:
-                    db.close()
-            except Exception as e:
-                logger.debug("hybrid_sweep: vec search failed — %s", e)
-                return []
-
-        vec_fut = executor.submit(_vec_search)
-
-        try:
-            bm25_results = bm25_fut.result(timeout=10) or []
-        except Exception:
-            bm25_results = []
-
-        try:
-            vec_results = vec_fut.result(timeout=30) or []
-        except Exception:
-            vec_failed = True
-
-    if not vec_results:
-        vec_failed = True
-
-    # Distance gating: filter out vector results above threshold
-    if config.vec_distance_threshold > 0 and vec_results:
-        vec_results = [v for v in vec_results if v["distance"] <= config.vec_distance_threshold]
-
-    # RRF fusion with configurable k
-    fused = rrf(bm25_results, vec_results, k=config.rrf_k)
-
-    # Entity boost
-    if config.entity_enabled:
-        try:
-            from kairix.graph.client import get_client as _get_neo4j
-
-            neo4j_client = _get_neo4j()
-            entity_cfg = EntityBoostConfig(
-                enabled=True,
-                factor=config.entity_factor,
-                cap=config.entity_cap,
-            )
-            fused = entity_boost_neo4j(fused, neo4j_client, config=entity_cfg)
-        except Exception as e:
-            logger.debug("hybrid_sweep: entity boost failed — %s", e)
-
-    # Procedural boost (only for PROCEDURAL intent)
-    if config.procedural_enabled and intent == QueryIntent.PROCEDURAL:
-        proc_cfg = ProceduralBoostConfig(
-            enabled=True,
-            factor=config.procedural_factor,
-        )
-        fused = procedural_boost(fused, config=proc_cfg)
-
-    paths = [r.path for r in fused]
-    meta = {
-        "bm25_count": len(bm25_results),
-        "vec_count": len(vec_results),
-        "fused_count": len(fused),
-        "vec_failed": vec_failed,
-        "intent": intent.value,
-    }
-    return paths, meta
 
 
-def _retrieve_bm25_primary(
+def _retrieve(
     query: str,
     collections: list[str] | None,
-    config: HybridSweepConfig,
+    cfg: HybridSweepConfig,
 ) -> tuple[list[str], dict[str, Any]]:
-    """
-    BM25-primary retrieval: BM25 results first (in BM25 rank order),
-    then vector-only results appended at the bottom.
+    """Run retrieval via the main search pipeline."""
+    from kairix.search.hybrid import search
 
-    This preserves BM25's strong NDCG while gaining vector's recall advantage.
-    Deduplicates vector results that already appear in BM25.
-    """
-    import sqlite3
-    from concurrent.futures import ThreadPoolExecutor
-
-    from kairix.db import get_db_path, load_extensions
-    from kairix.search.bm25 import bm25_search
-    from kairix.search.vector import vector_search_bytes
-
-    bm25_results = []
-    vec_results: list[Any] = []
-    vec_failed = False
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        bm25_fut = executor.submit(bm25_search, query, collections, config.bm25_limit)
-
-        def _vec_search() -> list[Any]:
-            try:
-                query_bytes = _get_embedding_cached(query)
-                if not query_bytes:
-                    return []
-                db_path = get_db_path()
-                db = sqlite3.connect(str(db_path))
-                try:
-                    load_extensions(db)
-                    return vector_search_bytes(db, query_bytes, k=config.vec_limit, collections=collections)
-                finally:
-                    db.close()
-            except Exception:
-                return []
-
-        vec_fut = executor.submit(_vec_search)
-
-        try:
-            bm25_results = bm25_fut.result(timeout=10) or []
-        except Exception as e:
-            logger.debug("bm25_primary: BM25 failed — %s", e)
-        try:
-            vec_results = vec_fut.result(timeout=30) or []
-        except Exception:
-            vec_failed = True
-
-    if not vec_results:
-        vec_failed = True
-
-    # BM25 paths first (in rank order)
-    bm25_paths = [r["file"] for r in bm25_results]
-    seen = set(p.lower() for p in bm25_paths)
-
-    # Append vector-only results (not already in BM25) at the end
-    vec_only_paths = []
-    for vr in vec_results:
-        if vr["path"].lower() not in seen:
-            vec_only_paths.append(vr["path"])
-            seen.add(vr["path"].lower())
-
-    paths = bm25_paths + vec_only_paths
-    meta = {
-        "bm25_count": len(bm25_results),
-        "vec_count": len(vec_results),
-        "fused_count": len(paths),
-        "vec_failed": vec_failed,
-        "vec_only_appended": len(vec_only_paths),
+    config = _sweep_config_to_retrieval_config(cfg)
+    sr = search(
+        query=query,
+        scope="shared+agent",
+        budget=500_000,
+        config=config,
+        collections=collections,
+    )
+    paths = [b.result.path for b in sr.results]
+    return paths, {
+        "bm25_count": sr.bm25_count,
+        "vec_count": sr.vec_count,
+        "fused_count": sr.fused_count,
+        "vec_failed": sr.vec_failed,
     }
-    return paths, meta
 
 
 # ---------------------------------------------------------------------------
@@ -625,12 +455,7 @@ def sweep_hybrid_params(
 
             t_q_start = time.monotonic()
 
-            if cfg.mode == "bm25_only":
-                paths, meta = _retrieve_bm25_only(query, collections, limit=cfg.bm25_limit)
-            elif cfg.mode == "bm25_primary":
-                paths, meta = _retrieve_bm25_primary(query, collections, cfg)
-            else:
-                paths, meta = _retrieve_hybrid(query, collections, cfg)
+            paths, meta = _retrieve(query, collections, cfg)
 
             t_q_end = time.monotonic()
             total_latency += (t_q_end - t_q_start) * 1000.0
@@ -693,9 +518,6 @@ def sweep_hybrid_params(
     # Write CSV
     if output_path and report.results:
         _write_csv(output_path, report)
-
-    # Clean up embedding cache
-    _clear_embedding_cache()
 
     # Print summary table
     _print_summary(report)
