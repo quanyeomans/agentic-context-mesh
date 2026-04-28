@@ -122,26 +122,28 @@ def load_extensions(db: sqlite3.Connection) -> None:
     """
     Load the sqlite-vec extension into an open SQLite connection.
 
-    Raises RuntimeError if the extension cannot be found.
-    Must be called before any ``vectors_vec`` virtual table operations.
+    Since usearch replaced sqlite-vec as the primary vector store (Sprint 17),
+    this is now best-effort: logs a warning if the extension is unavailable
+    instead of raising. The embed pipeline writes to usearch; sqlite-vec
+    is only needed for legacy vectors_vec access.
     """
     vec_path = _find_sqlite_vec()
     if not vec_path:
-        raise RuntimeError(
-            "sqlite-vec extension not found. "
-            "Install it with: pip install sqlite-vec\n"
-            f"Or set {_SQLITE_VEC_ENV}=/path/to/vec0.so to specify the location explicitly."
-        )
+        logger.info("sqlite-vec extension not found — using usearch for vector operations")
+        return
 
-    db.enable_load_extension(True)
-    # SQLite strips the platform suffix (.so / .dylib) itself
-    load_path = vec_path
-    for suffix in (".so", ".dylib", ".dll"):
-        if load_path.endswith(suffix):
-            load_path = load_path.removesuffix(suffix)
-            break
-    db.load_extension(load_path)
-    db.enable_load_extension(False)
+    try:
+        db.enable_load_extension(True)
+        # SQLite strips the platform suffix (.so / .dylib) itself
+        load_path = vec_path
+        for suffix in (".so", ".dylib", ".dll"):
+            if load_path.endswith(suffix):
+                load_path = load_path.removesuffix(suffix)
+                break
+        db.load_extension(load_path)
+        db.enable_load_extension(False)
+    except Exception as exc:
+        logger.warning("sqlite-vec extension failed to load: %s — using usearch", exc)
 
 
 def open_db(path: Path | None = None, *, extensions: bool = True) -> sqlite3.Connection:

@@ -10,8 +10,7 @@ from kairix.eval.hybrid_sweep import (
     HybridSweepConfig,
     HybridSweepReport,
     HybridSweepResult,
-    _build_rel_map,
-    _match_path,
+    _match_relevance,
     build_default_configs,
     compute_hit_at_k,
     compute_mrr,
@@ -111,53 +110,40 @@ class TestBuildDefaultConfigs:
 
 
 # ---------------------------------------------------------------------------
-# Metrics: _build_rel_map / _match_path
+# Metrics: _match_relevance (path-based gold matching)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-class TestRelMap:
+class TestMatchRelevance:
     @pytest.mark.unit
-    def test_gold_titles_format(self) -> None:
-        gold = [{"title": "My Doc", "relevance": 2}]
-        rel_map, mode = _build_rel_map(gold)
-        assert mode == "stem"
-        assert rel_map == {"my doc": 2}
+    def test_stem_only_match(self) -> None:
+        gold = [{"title": "patterns", "relevance": 2}]
+        assert _match_relevance("vault/knowledge/patterns.md", gold) == 2
+
+    @pytest.mark.unit
+    def test_path_based_match(self) -> None:
+        gold = [{"title": "engineering/adr-examples/readme", "relevance": 2}]
+        assert _match_relevance("reference-library/engineering/adr-examples/readme.md", gold) == 2
+
+    @pytest.mark.unit
+    def test_path_based_rejects_different_stem(self) -> None:
+        gold = [{"title": "engineering/adr-examples/readme", "relevance": 2}]
+        assert _match_relevance("data-and-analysis/dbt-docs/readme.md", gold) == 0
+
+    @pytest.mark.unit
+    def test_no_match(self) -> None:
+        gold = [{"title": "other-doc", "relevance": 1}]
+        assert _match_relevance("areas/kairix.md", gold) == 0
+
+    @pytest.mark.unit
+    def test_empty_gold(self) -> None:
+        assert _match_relevance("any/path.md", []) == 0
 
     @pytest.mark.unit
     def test_gold_paths_format(self) -> None:
         gold = [{"path": "areas/kairix.md", "relevance": 1}]
-        rel_map, mode = _build_rel_map(gold)
-        assert mode == "path"
-        assert rel_map == {"areas/kairix.md": 1}
-
-    @pytest.mark.unit
-    def test_empty_gold(self) -> None:
-        rel_map, _mode = _build_rel_map([])
-        assert rel_map == {}
-
-
-@pytest.mark.unit
-class TestMatchPath:
-    @pytest.mark.unit
-    def test_stem_match(self) -> None:
-        rel_map = {"kairix platform": 2}
-        assert _match_path("areas/kairix platform.md", rel_map, "stem") == 2
-
-    @pytest.mark.unit
-    def test_path_exact_match(self) -> None:
-        rel_map = {"areas/kairix.md": 2}
-        assert _match_path("areas/kairix.md", rel_map, "path") == 2
-
-    @pytest.mark.unit
-    def test_path_suffix_match(self) -> None:
-        rel_map = {"areas/kairix.md": 2}
-        assert _match_path("vault/areas/kairix.md", rel_map, "path") == 2
-
-    @pytest.mark.unit
-    def test_no_match(self) -> None:
-        rel_map = {"other.md": 1}
-        assert _match_path("areas/kairix.md", rel_map, "path") == 0
+        assert _match_relevance("vault/areas/kairix.md", gold) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -149,8 +149,8 @@ def test_open_db_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
 
 
 @pytest.mark.unit
-def test_load_extensions_raises_when_vec_not_found(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """load_extensions() raises RuntimeError when sqlite-vec is not found."""
+def test_load_extensions_skips_gracefully_when_vec_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """load_extensions() logs and returns without error when sqlite-vec is not found."""
     import sqlite3
 
     from kairix.db import load_extensions
@@ -160,8 +160,7 @@ def test_load_extensions_raises_when_vec_not_found(monkeypatch: pytest.MonkeyPat
 
     conn = sqlite3.connect(":memory:")
     try:
-        with pytest.raises(RuntimeError, match="sqlite-vec extension not found"):
-            load_extensions(conn)
+        load_extensions(conn)  # should not raise
     finally:
         conn.close()
 

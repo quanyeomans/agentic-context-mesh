@@ -5,7 +5,6 @@ Core embedding logic — fetches vectors from Azure OpenAI and writes to kairix'
 import logging
 import os
 import sqlite3
-import struct
 import time
 from collections.abc import Generator
 
@@ -13,8 +12,6 @@ from .date_extract import extract_chunk_date
 from .schema import (
     EMBED_VECTOR_DIMS,
     SchemaVersionError,
-    ensure_vec_table,
-    load_sqlite_vec,
     migrate_content_vectors,
 )
 
@@ -34,16 +31,8 @@ CHUNK_OVERLAP_CHARS = 200
 # ── Encoding ──────────────────────────────────────────────────────────────────
 
 
-def encode_vector(vec: list[float]) -> bytes:
-    """
-    Encode a float list as packed binary float32 — the format sqlite-vec expects.
-    sqlite-vec uses little-endian IEEE 754 float32.
-    """
-    return struct.pack(f"<{len(vec)}f", *vec)
-
-
 def build_hash_seq(content_hash: str, seq: int) -> str:
-    """Build the hash_seq primary key used by vectors_vec. Matches legacy format."""
+    """Build the hash_seq key used by usearch index metadata."""
     return f"{content_hash}_{seq}"
 
 
@@ -199,53 +188,6 @@ def embed_batch(
 # ── DB writes ─────────────────────────────────────────────────────────────────
 
 
-def ensure_staging_table(db: sqlite3.Connection) -> None:
-    """
-    Create a temporary staging table for vector upserts.
-
-    sqlite-vec virtual tables (vec0) do not support INSERT OR REPLACE/IGNORE.
-    We write vectors to a normal TEMPORARY table first (which supports all
-    conflict clauses), then merge into vectors_vec in bulk at the end of each
-    batch via DELETE WHERE hash_seq IN (...) + INSERT INTO ... SELECT.
-
-    The TEMPORARY table is scoped to the connection — it auto-drops on close.
-    """
-    db.execute("""
-        CREATE TEMPORARY TABLE IF NOT EXISTS vec_staging (
-            hash_seq TEXT PRIMARY KEY,
-            embedding BLOB NOT NULL
-        )
-    """)
-
-
-def flush_staging_to_vec(db: sqlite3.Connection) -> int:
-    """
-    Merge vec_staging into vectors_vec atomically within the current transaction.
-
-    Steps:
-      1. DELETE existing vectors_vec rows whose hash_seq is in staging
-         (handles the upsert case — vec0 has no native upsert)
-      2. INSERT all rows from staging into vectors_vec
-      3. Clear staging for the next batch
-
-    Returns number of rows merged.
-    """
-    count = int(db.execute("SELECT COUNT(*) FROM vec_staging").fetchone()[0])
-    if count == 0:
-        return 0
-
-    db.execute("""
-        DELETE FROM vectors_vec
-        WHERE hash_seq IN (SELECT hash_seq FROM vec_staging)
-    """)
-    db.execute("""
-        INSERT INTO vectors_vec (hash_seq, embedding)
-        SELECT hash_seq, embedding FROM vec_staging
-    """)
-    db.execute("DELETE FROM vec_staging")
-    return count
-
-
 def stage_embedding(
     db: sqlite3.Connection,
     content_hash: str,
@@ -257,27 +199,19 @@ def stage_embedding(
     chunk_date: str | None = None,
 ) -> None:
     """
-    Write chunk metadata to content_vectors and queue the vector in vec_staging.
+    Write chunk metadata to content_vectors.
 
     content_vectors is a normal SQLite table and supports INSERT OR REPLACE.
-    The vector goes into vec_staging (also normal SQLite) — it will be merged
-    into vectors_vec (sqlite-vec virtual table) via flush_staging_to_vec()
-    at batch commit time.
+    Vectors are written to the usearch ANN index separately via
+    _update_usearch_index() at batch commit time.
 
     chunk_date is the ISO date extracted from the document (frontmatter or path).
     It is the same for all chunks of a given document (document-level property).
     """
-    hash_seq = build_hash_seq(content_hash, seq)
-    packed = encode_vector(vector)
-
     db.execute(
         "INSERT OR REPLACE INTO content_vectors"
         " (hash, seq, pos, model, embedded_at, chunk_date) VALUES (?, ?, ?, ?, ?, ?)",
         (content_hash, seq, pos, model, embedded_at, chunk_date),
-    )
-    db.execute(
-        "INSERT OR REPLACE INTO vec_staging (hash_seq, embedding) VALUES (?, ?)",
-        (hash_seq, packed),
     )
 
 
@@ -333,9 +267,6 @@ def run_embed(
     """
     api_key, endpoint, deployment = _get_azure_config()
 
-    # Load sqlite-vec extension — must happen before any vec0 table operations
-    load_sqlite_vec(db)
-
     # Preflight — verify Azure before touching DB
     actual_dims = preflight_check(api_key, endpoint, deployment)
     if actual_dims != DEFAULT_DIMS:
@@ -343,10 +274,6 @@ def run_embed(
             f"Azure returned {actual_dims} dims but expected {DEFAULT_DIMS}. "
             f"Check AZURE_OPENAI_EMBED_DEPLOYMENT and dimensions setting."
         )
-
-    # Ensure vec table exists at correct dims, and staging table for upserts
-    ensure_vec_table(db, actual_dims)
-    ensure_staging_table(db)
 
     # Ensure chunk_date column exists (idempotent — no-op when already present)
     migrate_content_vectors(db)
@@ -356,7 +283,6 @@ def run_embed(
         # Clear existing vectors first (after successful preflight)
         logger.info("--force: clearing all existing vectors")
         db.execute("DELETE FROM content_vectors")
-        db.execute("DELETE FROM vectors_vec")
         db.commit()
 
     # Get all document bodies that need chunking + embedding
@@ -426,7 +352,7 @@ def run_embed(
         # Stage all vectors first (normal SQLite, supports OR REPLACE),
         # then flush staging → vectors_vec in one transaction.
         try:
-            with db:  # transaction: stage + flush are atomic
+            with db:  # transaction: write metadata atomically
                 for chunk, vector in zip(batch, vectors, strict=False):
                     stage_embedding(
                         db,
@@ -438,10 +364,9 @@ def run_embed(
                         now,
                         chunk_date=chunk.get("chunk_date"),
                     )
-                flush_staging_to_vec(db)
-                # Also write to usearch ANN index for fast search
-                batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
-                _update_usearch_index(batch_hash_seqs, vectors)
+            # Write to usearch ANN index (outside transaction — file-based)
+            batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
+            _update_usearch_index(batch_hash_seqs, vectors)
             embedded += len(batch)
             logger.info(
                 "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
@@ -450,48 +375,8 @@ def run_embed(
                 100.0 * embedded / total if total > 0 else 0,
                 batch_idx + 1,
             )
-        except (sqlite3.Error, struct.error) as e:
-            logger.error(f"DB write for batch {batch_idx} failed: {e}")
-            # Clear staging so the next batch starts clean
-            try:
-                db.execute("DELETE FROM vec_staging")
-                db.commit()
-            except sqlite3.Error:
-                logger.debug("Non-critical cleanup failed", exc_info=True)
-            # Dimension mismatch: Legacy cron may have recreated vectors_vec with wrong dims.
-            # Repair schema and retry the batch once.
-            if "dimension" in str(e).lower():
-                logger.warning(
-                    f"Dimension mismatch on batch {batch_idx} -- "
-                    "Legacy cron may have recreated vectors_vec. Repairing schema and retrying."
-                )
-                try:
-                    ensure_vec_table(db, actual_dims)
-                    with db:
-                        for chunk, vector in zip(batch, vectors, strict=False):
-                            stage_embedding(
-                                db,
-                                chunk["hash"],
-                                chunk["seq"],
-                                chunk["pos"],
-                                vector,
-                                deployment,
-                                now,
-                                chunk_date=chunk.get("chunk_date"),
-                            )
-                        flush_staging_to_vec(db)
-                    embedded += len(batch)
-                    logger.info(
-                        "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
-                        embedded,
-                        total,
-                        100.0 * embedded / total if total > 0 else 0,
-                        batch_idx + 1,
-                    )
-                    logger.info(f"Batch {batch_idx} retry succeeded after schema repair.")
-                    continue
-                except (sqlite3.Error, struct.error) as retry_e:
-                    logger.error(f"DB write retry for batch {batch_idx} failed after schema repair: {retry_e}")
+        except sqlite3.Error as e:
+            logger.error("DB write for batch %d failed: %s", batch_idx, e)
             failed_chunks.extend(batch)
             continue
 

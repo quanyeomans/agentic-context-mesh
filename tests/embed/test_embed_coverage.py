@@ -2,10 +2,7 @@
 Tests for kairix.embed.embed — covers previously-untested paths:
 - _get_azure_config(): env vars, missing key/endpoint errors
 - preflight_check(): mocked HTTP success + error
-- embed_batch(): mocked API + staging + vec write
-- ensure_staging_table(): creation
-- flush_staging_to_vec(): count + merge
-- stage_embedding(): insert into staging
+- stage_embedding(): insert into content_vectors
 - batched(): chunk iteration
 - chunk_text(): boundary + overlap
 """
@@ -13,7 +10,6 @@ Tests for kairix.embed.embed — covers previously-untested paths:
 from __future__ import annotations
 
 import sqlite3
-import struct
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,34 +19,13 @@ from kairix.embed.embed import (
     batched,
     build_hash_seq,
     chunk_text,
-    encode_vector,
-    ensure_staging_table,
-    flush_staging_to_vec,
     preflight_check,
     stage_embedding,
 )
 
 # ---------------------------------------------------------------------------
-# encode_vector / build_hash_seq
+# build_hash_seq
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_encode_vector_returns_bytes() -> None:
-    vec = [0.1, 0.2, 0.3]
-    result = encode_vector(vec)
-    assert isinstance(result, bytes)
-    assert len(result) == 3 * 4  # 3 float32s x 4 bytes
-
-
-@pytest.mark.unit
-def test_encode_vector_round_trips() -> None:
-    vec = [1.0, -0.5, 0.0, 0.25]
-    result = encode_vector(vec)
-    unpacked = list(struct.unpack(f"<{len(vec)}f", result))
-    assert len(unpacked) == len(vec)
-    for a, b in zip(unpacked, vec, strict=False):
-        assert abs(a - b) < 1e-6
 
 
 @pytest.mark.unit
@@ -171,34 +146,8 @@ def test_preflight_check_raises_on_api_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# ensure_staging_table + stage_embedding + flush_staging_to_vec
+# stage_embedding
 # ---------------------------------------------------------------------------
-
-
-def _make_staging_db() -> sqlite3.Connection:
-    """Create an in-memory DB with a minimal vectors_vec replacement."""
-    db = sqlite3.connect(":memory:")
-    # vectors_vec as a regular table (no vec0 extension in CI)
-    db.execute("CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY, source_path TEXT, embedding BLOB)")
-    return db
-
-
-@pytest.mark.unit
-def test_ensure_staging_table_creates_table() -> None:
-    db = sqlite3.connect(":memory:")
-    ensure_staging_table(db)
-    # TEMPORARY tables are in sqlite_temp_master
-    cur = db.execute("SELECT name FROM sqlite_temp_master WHERE name='vec_staging'")
-    assert cur.fetchone() is not None
-
-
-@pytest.mark.unit
-def test_ensure_staging_table_idempotent() -> None:
-    db = sqlite3.connect(":memory:")
-    ensure_staging_table(db)
-    ensure_staging_table(db)  # CREATE TEMPORARY TABLE IF NOT EXISTS — should not raise
-    cur = db.execute("SELECT name FROM sqlite_temp_master WHERE name='vec_staging'")
-    assert cur.fetchone() is not None
 
 
 @pytest.mark.unit
@@ -209,43 +158,10 @@ def test_stage_embedding_inserts_row() -> None:
         "CREATE TABLE content_vectors"
         " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)"
     )
-    ensure_staging_table(db)
     vec = [0.1] * 1536
     stage_embedding(db, "hash123", 0, 0, vec, "text-embedding-3-large", 1711111111)
-    count = db.execute("SELECT COUNT(*) FROM vec_staging").fetchone()[0]
+    count = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
     assert count == 1
-
-
-@pytest.mark.unit
-def test_flush_staging_to_vec_returns_zero_when_empty() -> None:
-    db = _make_staging_db()
-    ensure_staging_table(db)
-    result = flush_staging_to_vec(db)
-    assert result == 0
-
-
-@pytest.mark.unit
-def test_flush_staging_to_vec_moves_rows() -> None:
-    db = _make_staging_db()
-    ensure_staging_table(db)
-    vec_bytes = encode_vector([0.1] * 1536)
-
-    # Stage a row (TEMPORARY table, no commit needed)
-    db.execute(
-        "INSERT INTO vec_staging (hash_seq, embedding) VALUES (?, ?)",
-        ("hash123_0", vec_bytes),
-    )
-
-    merged = flush_staging_to_vec(db)
-    assert merged == 1
-
-    # Staging should be empty after flush
-    remaining = db.execute("SELECT COUNT(*) FROM vec_staging").fetchone()[0]
-    assert remaining == 0
-
-    # vectors_vec should have the row
-    vv_count = db.execute("SELECT COUNT(*) FROM vectors_vec").fetchone()[0]
-    assert vv_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -324,9 +240,7 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
 
     with (
         patch("kairix.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
-        patch("kairix.embed.embed.load_sqlite_vec"),
         patch("kairix.embed.embed.preflight_check", return_value=1536),
-        patch("kairix.embed.embed.ensure_vec_table"),
     ):
         result = run_embed(db, batch_size=10)
 
@@ -345,7 +259,6 @@ def test_run_embed_raises_on_dim_mismatch() -> None:
 
     with (
         patch("kairix.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
-        patch("kairix.embed.embed.load_sqlite_vec"),
         patch("kairix.embed.embed.preflight_check", return_value=512),  # wrong dims
     ):
         with pytest.raises(SchemaVersionError):

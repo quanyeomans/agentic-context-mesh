@@ -24,7 +24,6 @@ from kairix.embed.schema import (
     get_all_chunks_needing_embedding,
     get_db_path,
     get_pending_chunks,
-    load_sqlite_vec,
     save_run_log,
 )
 
@@ -50,20 +49,6 @@ def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyP
     with patch("kairix.db._find_sqlite_vec", return_value=None):
         result = find_sqlite_vec()
     assert result is None
-
-
-# ---------------------------------------------------------------------------
-# load_sqlite_vec
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_load_sqlite_vec_raises_when_not_found() -> None:
-    """Raises RuntimeError with helpful message when extension is not found."""
-    db = sqlite3.connect(":memory:")
-    with patch("kairix.db._find_sqlite_vec", return_value=None):
-        with pytest.raises(RuntimeError, match="sqlite-vec extension"):
-            load_sqlite_vec(db)
 
 
 # ---------------------------------------------------------------------------

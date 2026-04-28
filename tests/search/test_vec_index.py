@@ -148,3 +148,46 @@ class TestVectorIndex:
         query = rng.random(1536).astype(np.float32)
         results = idx.search(query, k=5)
         assert results == []
+
+    def test_search_results_have_required_fields(self, test_index: Any) -> None:
+        """Each search result must have path, title, snippet, collection, distance."""
+        rng = np.random.default_rng(99)
+        query = rng.random(1536).astype(np.float32)
+        query /= np.linalg.norm(query)
+        results = test_index.search(query, k=5)
+        for r in results:
+            assert "path" in r, "result missing 'path'"
+            assert "title" in r, "result missing 'title'"
+            assert "snippet" in r, "result missing 'snippet'"
+            assert "collection" in r, "result missing 'collection'"
+            assert "distance" in r, "result missing 'distance'"
+            assert isinstance(r["distance"], float)
+
+    def test_add_vectors_updates_existing_doc(self, test_index: Any) -> None:
+        """Adding a vector for an existing document's hash_seq makes it searchable."""
+        # Use hash0_0 which exists in the DB. Replace its vector with a known value.
+        target = np.ones(1536, dtype=np.float32)
+        target /= np.linalg.norm(target)
+        test_index.add_vectors(["hash0_0"], [target])
+
+        # Search with that vector — should find hash0's document
+        results = test_index.search(target, k=1)
+        assert len(results) == 1
+        assert results[0]["distance"] < 0.01  # near-zero distance
+
+    def test_multiple_collection_filter(self, test_index: Any) -> None:
+        """Filtering by multiple collections returns docs from both."""
+        rng = np.random.default_rng(99)
+        query = rng.random(1536).astype(np.float32)
+        query /= np.linalg.norm(query)
+        results = test_index.search(query, k=20, collections=["reference-library", "vault-projects"])
+        collections = {r["collection"] for r in results}
+        assert collections <= {"reference-library", "vault-projects"}
+
+    def test_nonexistent_collection_returns_empty(self, test_index: Any) -> None:
+        """Filtering by a collection with no docs returns empty results."""
+        rng = np.random.default_rng(99)
+        query = rng.random(1536).astype(np.float32)
+        query /= np.linalg.norm(query)
+        results = test_index.search(query, k=10, collections=["nonexistent"])
+        assert results == []

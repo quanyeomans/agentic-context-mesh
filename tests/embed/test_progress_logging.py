@@ -75,14 +75,11 @@ def test_embed_progress_logging_emitted(embed_db, caplog):
 
     with (
         patch("kairix.embed.embed._get_azure_config", return_value=("key", "https://endpoint", "deploy")),
-        patch("kairix.embed.embed.load_sqlite_vec"),
         patch("kairix.embed.embed.preflight_check", return_value=dims),
-        patch("kairix.embed.embed.ensure_vec_table"),
-        patch("kairix.embed.embed.ensure_staging_table"),
         patch("kairix.embed.embed.migrate_content_vectors"),
         patch("kairix.embed.embed.embed_batch", return_value=[_fake_vec(dims)]),
         patch("kairix.embed.embed.stage_embedding"),
-        patch("kairix.embed.embed.flush_staging_to_vec"),
+        patch("kairix.embed.embed._update_usearch_index"),
     ):
         with caplog.at_level(logging.INFO, logger="kairix.embed.embed"):
             result = run_embed(embed_db, batch_size=50, limit=2)

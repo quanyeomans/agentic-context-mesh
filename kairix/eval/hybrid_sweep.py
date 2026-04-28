@@ -236,28 +236,22 @@ def build_default_configs() -> list[HybridSweepConfig]:
 # ---------------------------------------------------------------------------
 
 
-def _build_rel_map(gold: list[dict]) -> tuple[dict[str, int], str]:
-    """Build relevance map from gold_titles or gold_paths format."""
-    if not gold:
-        return {}, "stem"
-    if "title" in gold[0]:
-        return {str(g["title"]).lower().strip(): int(g.get("relevance", 0)) for g in gold}, "stem"
-    elif "path" in gold[0]:
-        return {str(g["path"]).lower().strip(): int(g.get("relevance", 0)) for g in gold}, "path"
-    return {}, "stem"
+def _match_relevance(retrieved_path: str, gold: list[dict]) -> int:
+    """Look up relevance grade for a retrieved path against gold list.
 
+    Uses the same path-based matching as the benchmark runner:
+    gold titles containing '/' match as suffix of the retrieved path,
+    titles without '/' match against the filename stem only.
+    """
+    from kairix.benchmark.runner import _match_gold_to_path
 
-def _match_path(retrieved: str, rel_map: dict[str, int], mode: str) -> int:
-    """Look up relevance grade for a retrieved path."""
-    if mode == "stem":
-        return rel_map.get(Path(retrieved).stem.lower(), 0)
-    elif mode == "path":
-        retrieved_lower = retrieved.lower()
-        if retrieved_lower in rel_map:
-            return rel_map[retrieved_lower]
-        for gold_path, rel in rel_map.items():
-            if retrieved_lower.endswith(gold_path) or gold_path.endswith(retrieved_lower):
-                return rel
+    for g in gold:
+        title = g.get("title") or g.get("path", "")
+        # Strip .md extension from path-format gold entries to match runner convention
+        if title.endswith(".md"):
+            title = title[:-3]
+        if _match_gold_to_path(title, retrieved_path):
+            return int(g.get("relevance", 0))
     return 0
 
 
@@ -265,30 +259,27 @@ def compute_ndcg(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> f
     """Compute NDCG@k for a single query."""
     if not gold:
         return 0.0
-    rel_map, mode = _build_rel_map(gold)
     dcg = 0.0
     for i, path in enumerate(retrieved_paths[:k]):
-        rel = _match_path(path, rel_map, mode)
+        rel = _match_relevance(path, gold)
         dcg += rel / math.log2(i + 2)
-    ideal_rels = sorted(rel_map.values(), reverse=True)[:k]
+    ideal_rels = sorted([int(g.get("relevance", 0)) for g in gold], reverse=True)[:k]
     idcg = sum(r / math.log2(i + 2) for i, r in enumerate(ideal_rels))
     return dcg / idcg if idcg > 0 else 0.0
 
 
 def compute_hit_at_k(retrieved_paths: list[str], gold: list[dict], k: int = 5) -> bool:
     """Check if any relevant gold doc appears in top-k."""
-    rel_map, mode = _build_rel_map(gold)
     for path in retrieved_paths[:k]:
-        if _match_path(path, rel_map, mode) >= 1:
+        if _match_relevance(path, gold) >= 1:
             return True
     return False
 
 
 def compute_mrr(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
     """Compute MRR@k (reciprocal rank of first relevant doc)."""
-    rel_map, mode = _build_rel_map(gold)
     for i, path in enumerate(retrieved_paths[:k]):
-        if _match_path(path, rel_map, mode) >= 1:
+        if _match_relevance(path, gold) >= 1:
             return 1.0 / (i + 1)
     return 0.0
 
