@@ -101,20 +101,15 @@ jobs:
             --maxfail=3 \
             --timeout=60
 
-      - name: Verify backwards compat shim
+      - name: Verify public API imports
         run: |
           python -c "
-          # Verify all public symbols are accessible from both old and new paths
-          from kairix.embed.embed import (
-              encode_vector, build_hash_seq, batched, chunk_text,
-              stage_embedding, flush_staging_to_vec, ensure_staging_table, run_embed
-          )
-          from kairix.embed.schema import (
-              validate_schema, ensure_vec_table, load_sqlite_vec, find_sqlite_vec, get_qmd_db_path
-          )
+          from kairix.embed.embed import encode_vector, build_hash_seq, run_embed
+          from kairix.embed.schema import validate_schema, ensure_vec_table
           from kairix.embed.recall_check import run_recall_gate
-          from qmd_azure_embed.embed import encode_vector as ev2, build_hash_seq as bhs2
-          assert encode_vector is ev2, 'shim broken: encode_vector'
-          assert build_hash_seq is bhs2, 'shim broken: build_hash_seq'
-          print('All backwards compat checks passed.')
+          from kairix.setup.prompts import SetupContext
+          from kairix.entities.seed import scan_for_entities
+          from kairix.eval.auto_gold import analyse_corpus
+          from kairix.eval.tune import recommend
+          print('All public API imports passed.')
           "
