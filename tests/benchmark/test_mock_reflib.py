@@ -1,5 +1,5 @@
 """
-Tests for kairix.benchmark.mock_reflib_retrieval — verify the mock-reflib backend
+Tests for kairix.quality.benchmark.mock_reflib_retrieval — verify the mock-reflib backend
 returns results for known queries and matches expected fixture documents.
 """
 
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.benchmark.mock_reflib_retrieval import (
+from kairix.quality.benchmark.mock_reflib_retrieval import (
     FIXTURE_DOCUMENTS,
     mock_reflib_retrieve,
 )

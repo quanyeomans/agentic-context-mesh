@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.rrf.temporal_date_boost (TMP-7).
+Tests for kairix.core.search.rrf.temporal_date_boost (TMP-7).
 
 Tests cover:
   - Exact date in path gets boosted when query contains that ISO date
@@ -16,8 +16,8 @@ import datetime
 
 import pytest
 
-from kairix.search.config import TemporalBoostConfig
-from kairix.search.rrf import (
+from kairix.core.search.config import TemporalBoostConfig
+from kairix.core.search.rrf import (
     FusedResult,
     temporal_date_boost,
 )

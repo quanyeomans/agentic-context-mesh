@@ -1,4 +1,4 @@
-"""Tests for kairix.research.nodes — individual node functions."""
+"""Tests for kairix.agents.research.nodes — individual node functions."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.research.nodes import (
+from kairix.agents.research.nodes import (
     classify_intent,
     evaluate_sufficiency,
     give_up,
@@ -16,7 +16,7 @@ from kairix.research.nodes import (
     route_after_evaluation,
     synthesise,
 )
-from kairix.research.state import ResearcherState
+from kairix.agents.research.state import ResearcherState
 
 
 def _state(**overrides) -> ResearcherState:
@@ -40,13 +40,13 @@ def _state(**overrides) -> ResearcherState:
 @pytest.mark.unit
 class TestClassifyIntent:
     def test_sets_intent(self) -> None:
-        with patch("kairix.search.intent.classify") as mock_classify:
+        with patch("kairix.core.search.intent.classify") as mock_classify:
             mock_classify.return_value = MagicMock(value="entity")
             result = classify_intent(_state(query="who is Jordan Blake"))
         assert result["intent"] == "entity"
 
     def test_defaults_to_semantic_on_error(self) -> None:
-        with patch("kairix.search.intent.classify", side_effect=RuntimeError("boom")):
+        with patch("kairix.core.search.intent.classify", side_effect=RuntimeError("boom")):
             result = classify_intent(_state())
         assert result["intent"] == "semantic"
 
@@ -54,7 +54,7 @@ class TestClassifyIntent:
 @pytest.mark.unit
 class TestRetrieve:
     def test_calls_tool_search(self) -> None:
-        with patch("kairix.mcp.server.tool_search") as mock_search:
+        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
             mock_search.return_value = {"results": [{"path": "a.md", "snippet": "hello"}]}
             result = retrieve(_state())
         assert len(result["retrieved_chunks"]) == 1
@@ -62,20 +62,20 @@ class TestRetrieve:
 
     def test_accumulates_across_turns(self) -> None:
         existing = [{"path": "old.md", "snippet": "existing"}]
-        with patch("kairix.mcp.server.tool_search") as mock_search:
+        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
             mock_search.return_value = {"results": [{"path": "new.md", "snippet": "new"}]}
             result = retrieve(_state(retrieved_chunks=existing, turns=1))
         assert len(result["retrieved_chunks"]) == 2
 
     def test_deduplicates_by_path(self) -> None:
         existing = [{"path": "same.md", "snippet": "v1"}]
-        with patch("kairix.mcp.server.tool_search") as mock_search:
+        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
             mock_search.return_value = {"results": [{"path": "same.md", "snippet": "v2"}]}
             result = retrieve(_state(retrieved_chunks=existing))
         assert len(result["retrieved_chunks"]) == 1
 
     def test_higher_budget_on_refinement(self) -> None:
-        with patch("kairix.mcp.server.tool_search") as mock_search:
+        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
             mock_search.return_value = {"results": []}
             retrieve(_state(turns=2))
         mock_search.assert_called_once()
@@ -88,7 +88,7 @@ class TestEvaluateSufficiency:
         llm_response = json.dumps({"confidence": 0.85, "sufficient": True, "refined_query": None, "reasoning": "good"})
         mock_backend = MagicMock()
         mock_backend.chat.return_value = llm_response
-        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "content"}]))
         assert result["confidence"] == 0.85
 
@@ -99,7 +99,7 @@ class TestEvaluateSufficiency:
     def test_returns_zero_on_llm_failure(self) -> None:
         mock_backend = MagicMock()
         mock_backend.chat.side_effect = RuntimeError("llm down")
-        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "x"}]))
         assert result["confidence"] == 0.0
 
@@ -116,14 +116,14 @@ class TestSynthesise:
     def test_calls_llm(self) -> None:
         mock_backend = MagicMock()
         mock_backend.chat.return_value = "Here is the answer based on sources."
-        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = synthesise(_state(retrieved_chunks=[{"path": "doc.md", "snippet": "content"}]))
         assert "answer" in result["synthesis"].lower()
 
     def test_handles_llm_failure(self) -> None:
         mock_backend = MagicMock()
         mock_backend.chat.side_effect = RuntimeError("down")
-        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = synthesise(_state(retrieved_chunks=[{"path": "a.md"}]))
         assert "failed" in result["synthesis"].lower()
 

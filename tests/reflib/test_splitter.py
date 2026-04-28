@@ -2,7 +2,7 @@
 
 import pytest
 
-from kairix.reflib.splitter import (
+from kairix.knowledge.reflib.splitter import (
     is_too_small,
     needs_split,
     split_at_headings,

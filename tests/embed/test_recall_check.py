@@ -1,5 +1,5 @@
 """
-Tests for kairix.embed.recall_check
+Tests for kairix.core.embed.recall_check
 
 Covers:
 - _get_recall_queries(): default, env override, adaptive from DB
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from kairix.embed.recall_check import (
+from kairix.core.embed.recall_check import (
     _build_adaptive_queries,
     _embed_query,
     _get_recall_queries,
@@ -173,7 +173,7 @@ def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.unit
 def test_vsearch_usearch_returns_empty_when_index_unavailable() -> None:
     """Returns [] when usearch index is not available."""
-    with patch("kairix.search.hybrid._get_vector_index", return_value=None):
+    with patch("kairix.core.search.hybrid._get_vector_index", return_value=None):
         result = _vsearch_usearch(np.zeros(1536, dtype=np.float32))
     assert result == []
 
@@ -188,7 +188,7 @@ def test_check_recall_skips_when_embed_returns_none() -> None:
     """check_recall() marks queries as skipped when _embed_query returns None."""
     db = sqlite3.connect(":memory:")
 
-    with patch("kairix.embed.recall_check._embed_query", return_value=None):
+    with patch("kairix.core.embed.recall_check._embed_query", return_value=None):
         result = check_recall(db=db)
 
     assert result["score"] == 0.0
@@ -201,7 +201,7 @@ def test_check_recall_returns_structure() -> None:
     """check_recall() always returns a dict with required keys."""
     db = sqlite3.connect(":memory:")
 
-    with patch("kairix.embed.recall_check._embed_query", return_value=None):
+    with patch("kairix.core.embed.recall_check._embed_query", return_value=None):
         result = check_recall(db=db)
 
     assert "score" in result
@@ -220,10 +220,10 @@ def test_check_recall_counts_hit_when_gold_in_results() -> None:
     fake_files = ["04-Agent-Knowledge/builder/patterns.md"]
 
     with (
-        patch("kairix.embed.recall_check._embed_query", return_value=fake_vec),
-        patch("kairix.embed.recall_check._vsearch_usearch", return_value=fake_files),
+        patch("kairix.core.embed.recall_check._embed_query", return_value=fake_vec),
+        patch("kairix.core.embed.recall_check._vsearch_usearch", return_value=fake_files),
         patch(
-            "kairix.embed.recall_check._get_recall_queries",
+            "kairix.core.embed.recall_check._get_recall_queries",
             return_value=[("R1", "engineering patterns", "builder/patterns")],
         ),
     ):

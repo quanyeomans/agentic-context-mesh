@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.briefing.synthesiser import _fallback_briefing, synthesise
+from kairix.agents.briefing.synthesiser import _fallback_briefing, synthesise
 
 
 @pytest.mark.unit

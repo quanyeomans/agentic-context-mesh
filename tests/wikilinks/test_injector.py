@@ -1,5 +1,5 @@
 """
-Tests for kairix.wikilinks.injector
+Tests for kairix.knowledge.wikilinks.injector
 
 Covers:
 - inject_wikilinks(): first mention, skip second, skip existing, skip code blocks,
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from kairix.wikilinks.injector import inject_wikilinks, should_inject
-from kairix.wikilinks.resolver import WikiEntity
+from kairix.knowledge.wikilinks.injector import inject_wikilinks, should_inject
+from kairix.knowledge.wikilinks.resolver import WikiEntity
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -304,7 +304,7 @@ def test_should_not_inject_large_file(tmp_path: Path) -> None:
     # Since we can't easily place it in /tmp/test-vault, we test inject_file instead.
     # Here we just verify should_inject skips large files by placing one in a tmp dir
     # and calling it directly (the path won't match eligible prefixes, so test inject_file).
-    from kairix.wikilinks.injector import inject_file
+    from kairix.knowledge.wikilinks.injector import inject_file
 
     result = inject_file(str(large_file), [ACME_CORP])
     assert result == []

@@ -1,5 +1,5 @@
 """
-Additional tests for kairix.embed.schema — covers previously-untested paths:
+Additional tests for kairix.core.embed.schema — covers previously-untested paths:
 - find_sqlite_vec(): env override, fallback, missing
 - load_sqlite_vec(): missing extension error
 - get_db_path(): env override, missing file
@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.embed.schema import (
+from kairix.core.embed.schema import (
     ensure_vec_table,
     find_sqlite_vec,
     get_all_chunks_needing_embedding,
@@ -46,7 +46,7 @@ def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when no vec0.so can be located."""
     monkeypatch.delenv("SQLITE_VEC_PATH", raising=False)
-    with patch("kairix.db._find_sqlite_vec", return_value=None):
+    with patch("kairix.core.db._find_sqlite_vec", return_value=None):
         result = find_sqlite_vec()
     assert result is None
 

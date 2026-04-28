@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.db.fts import rebuild_fts
-from kairix.db.scanner import CollectionConfig, DocumentScanner
-from kairix.search.bm25 import bm25_search
+from kairix.core.db.fts import rebuild_fts
+from kairix.core.db.scanner import CollectionConfig, DocumentScanner
+from kairix.core.search.bm25 import bm25_search
 
 pytestmark = pytest.mark.bdd
 

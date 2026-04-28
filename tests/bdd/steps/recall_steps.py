@@ -9,7 +9,7 @@ import sqlite3
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.embed.recall_check import (
+from kairix.core.embed.recall_check import (
     DEFAULT_RECALL_QUERIES,
     DEGRADATION_THRESHOLD,
     _build_adaptive_queries,

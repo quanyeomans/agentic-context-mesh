@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.db.scanner import CollectionConfig, DocumentScanner
+from kairix.core.db.scanner import CollectionConfig, DocumentScanner
 
 pytestmark = pytest.mark.integration
 
@@ -102,7 +102,7 @@ class TestMultiCollectionScanning:
 
     def test_fallback_when_no_collections_configured(self, multi_collection_dirs: dict) -> None:
         """When no collections config exists, embed falls back to single default collection."""
-        from kairix.search.config_loader import parse_collections
+        from kairix.core.search.config_loader import parse_collections
 
         result = parse_collections({})
         assert result is None  # triggers fallback in embed CLI

@@ -24,7 +24,7 @@ from pathlib import Path
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from kairix.reflib.normalise import NormaliseConfig, normalise
+from kairix.knowledge.reflib.normalise import NormaliseConfig, normalise
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -1,5 +1,5 @@
 """
-Tests for kairix.temporal.rewriter.
+Tests for kairix.core.temporal.rewriter.
 
 Covers:
   - extract_time_window(): all supported temporal patterns
@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from kairix.temporal.rewriter import extract_time_window, rewrite_temporal_query
+from kairix.core.temporal.rewriter import extract_time_window, rewrite_temporal_query
 
 # Fixed reference date for deterministic tests
 REFERENCE = date(2026, 3, 22)  # A Sunday

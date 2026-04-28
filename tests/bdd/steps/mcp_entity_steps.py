@@ -66,12 +66,12 @@ def neo4j_has_no_entity(name):
 
 @when(parsers.re(r'the agent calls tool_entity with name "(?P<name>[^"]*)"'))
 def call_tool_entity(name):
-    from kairix.mcp.server import tool_entity
+    from kairix.agents.mcp.server import tool_entity
 
     _state["exception"] = None
     _state["result"] = None
     fake = _state.get("fake_neo4j", _EntityAwareFakeNeo4j(entities=[]))
-    with patch("kairix.graph.client.get_client", return_value=fake):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
         try:
             _state["result"] = tool_entity(name=name)
         except Exception as exc:

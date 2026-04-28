@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.search.bm25 import bm25_search
+from kairix.core.search.bm25 import bm25_search
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,7 +61,7 @@ def _create_test_db(tmp_path: Path) -> Path:
 def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
     """date_filter_paths=None -> results not filtered."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("test document filtering", date_filter_paths=None)
 
     assert len(results) == 2
@@ -71,7 +71,7 @@ def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
 def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
     """date_filter_paths=frozenset() -> results not filtered (empty = no-filter)."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("test document filtering", date_filter_paths=frozenset())
 
     assert len(results) == 2
@@ -81,7 +81,7 @@ def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
 def test_bm25_date_filter_applied(tmp_path: Path) -> None:
     """date_filter_paths with one path -> only matching result returned."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search(
             "test document filtering",
             date_filter_paths=frozenset({"02-Areas/good.md"}),

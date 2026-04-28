@@ -1,5 +1,5 @@
 """
-Unit tests for kairix.eval.judge.
+Unit tests for kairix.quality.eval.judge.
 
 All Azure OpenAI API calls are mocked. No live calls in CI.
 """
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.eval.judge import (
+from kairix.quality.eval.judge import (
     JudgeCalibrationError,
     JudgeResult,
     _parse_grade_response,
@@ -235,7 +235,7 @@ def test_parse_grade_response_ignores_extra_labels() -> None:
 def test_calibrate_passes_when_all_anchors_correct() -> None:
     """Calibration passes when all anchors get expected grades."""
     # Patch judge_batch to always return expected grades from anchors
-    from kairix.eval.judge import _CALIBRATION_ANCHORS
+    from kairix.quality.eval.judge import _CALIBRATION_ANCHORS
 
     def _perfect_judge(query, candidates, api_key, endpoint, deployment, shuffle):
         # Find the matching anchor and return its expected grade
@@ -250,7 +250,7 @@ def test_calibrate_passes_when_all_anchors_correct() -> None:
                 )
         return JudgeResult(query=query, grades={stem: 0}, shuffle_order=[stem], judge_model=deployment)
 
-    with patch("kairix.eval.judge.judge_batch", side_effect=_perfect_judge):
+    with patch("kairix.quality.eval.judge.judge_batch", side_effect=_perfect_judge):
         result = calibrate("test-key", "https://test.openai.azure.com")
 
     assert result is True
@@ -259,7 +259,7 @@ def test_calibrate_passes_when_all_anchors_correct() -> None:
 @pytest.mark.unit
 def test_calibrate_raises_when_too_many_anchors_wrong() -> None:
     """Calibration raises JudgeCalibrationError when >3 anchors are wrong."""
-    from kairix.eval.judge import CALIBRATION_MAX_ERRORS
+    from kairix.quality.eval.judge import CALIBRATION_MAX_ERRORS
 
     call_count = [0]
 
@@ -274,7 +274,7 @@ def test_calibrate_raises_when_too_many_anchors_wrong() -> None:
             judge_model=deployment,
         )
 
-    with patch("kairix.eval.judge.judge_batch", side_effect=_wrong_judge):
+    with patch("kairix.quality.eval.judge.judge_batch", side_effect=_wrong_judge):
         with pytest.raises(JudgeCalibrationError) as exc_info:
             calibrate("test-key", "https://test.openai.azure.com")
 

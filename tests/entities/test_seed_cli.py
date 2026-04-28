@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.entities.cli import build_parser, main
+from kairix.knowledge.entities.cli import build_parser, main
 
 pytestmark = pytest.mark.unit
 
@@ -29,16 +29,16 @@ class TestSeedCLIParsing:
 
 
 class TestSeedCLIExecution:
-    @patch("kairix.db.get_db_path")
+    @patch("kairix.core.db.get_db_path")
     def test_exits_1_when_no_index(self, mock_db: MagicMock) -> None:
         mock_db.side_effect = FileNotFoundError("no index")
         result = main(["seed"])
         assert result == 1
 
-    @patch("kairix.entities.seed.scan_for_entities")
-    @patch("kairix.db.get_db_path")
+    @patch("kairix.knowledge.entities.seed.scan_for_entities")
+    @patch("kairix.core.db.get_db_path")
     def test_dry_run_does_not_seed(self, mock_db: MagicMock, mock_scan: MagicMock, tmp_path) -> None:
-        from kairix.entities.seed import EntityCandidate
+        from kairix.knowledge.entities.seed import EntityCandidate
 
         mock_db.return_value = tmp_path / "index.sqlite"
         # Create a minimal sqlite DB
@@ -55,8 +55,8 @@ class TestSeedCLIExecution:
         result = main(["seed", "--dry-run"])
         assert result == 0
 
-    @patch("kairix.entities.seed.scan_for_entities")
-    @patch("kairix.db.get_db_path")
+    @patch("kairix.knowledge.entities.seed.scan_for_entities")
+    @patch("kairix.core.db.get_db_path")
     def test_returns_0_when_no_candidates(self, mock_db: MagicMock, mock_scan: MagicMock, tmp_path) -> None:
         mock_db.return_value = tmp_path / "index.sqlite"
         import sqlite3

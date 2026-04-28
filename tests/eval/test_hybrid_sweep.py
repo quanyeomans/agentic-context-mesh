@@ -1,10 +1,10 @@
 """
-Tests for kairix.eval.hybrid_sweep — hybrid pipeline calibration sweep.
+Tests for kairix.quality.eval.hybrid_sweep — hybrid pipeline calibration sweep.
 """
 
 import pytest
 
-from kairix.eval.hybrid_sweep import (
+from kairix.quality.eval.hybrid_sweep import (
     CATEGORY_ALIASES,
     CATEGORY_WEIGHTS,
     HybridSweepConfig,

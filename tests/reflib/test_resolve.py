@@ -1,11 +1,11 @@
-"""Tests for kairix.reflib.resolve — entity resolution and dedup."""
+"""Tests for kairix.knowledge.reflib.resolve — entity resolution and dedup."""
 
 from __future__ import annotations
 
 import pytest
 
-from kairix.reflib.extract import RawEntity
-from kairix.reflib.resolve import (
+from kairix.knowledge.reflib.extract import RawEntity
+from kairix.knowledge.reflib.resolve import (
     _levenshtein,
     _similarity,
     _to_slug,

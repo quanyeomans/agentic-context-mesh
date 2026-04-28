@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.emit import emit_entity_stubs
-from kairix.reflib.extract import RawRelationship, scan_reference_library
-from kairix.reflib.loader import _build_node, load_entity_stubs
-from kairix.reflib.resolve import ResolvedEntity, resolve_entities
+from kairix.knowledge.reflib.emit import emit_entity_stubs
+from kairix.knowledge.reflib.extract import RawRelationship, scan_reference_library
+from kairix.knowledge.reflib.loader import _build_node, load_entity_stubs
+from kairix.knowledge.reflib.resolve import ResolvedEntity, resolve_entities
 
 pytestmark = pytest.mark.contract
 
@@ -158,7 +158,7 @@ class TestEmitEdgesFormat:
 
     def test_emitted_edge_kind_is_valid(self, tmp_path: Path) -> None:
         """Edge kinds emitted are valid EdgeKind enum values."""
-        from kairix.graph.models import EdgeKind
+        from kairix.knowledge.graph.models import EdgeKind
 
         entities = [
             ResolvedEntity(

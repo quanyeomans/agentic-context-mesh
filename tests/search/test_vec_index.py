@@ -1,4 +1,4 @@
-"""Tests for kairix.search.vec_index — usearch-backed ANN vector index."""
+"""Tests for kairix.core.search.vec_index — usearch-backed ANN vector index."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def _make_test_db(tmp_path: Path, n_docs: int = 20) -> sqlite3.Connection:
 @pytest.fixture()
 def test_index(tmp_path: Path) -> Any:
     """Create a VectorIndex with test data."""
-    from kairix.search.vec_index import VectorIndex
+    from kairix.core.search.vec_index import VectorIndex
 
     db = _make_test_db(tmp_path, n_docs=20)
     db_path = tmp_path / "index.sqlite"
@@ -110,7 +110,7 @@ class TestVectorIndex:
         assert len(filtered) <= len(all_results)
 
     def test_save_and_load(self, test_index: Any, tmp_path: Path) -> None:
-        from kairix.search.vec_index import VectorIndex
+        from kairix.core.search.vec_index import VectorIndex
 
         # Save is done in build_from_vectors
         # Load fresh instance
@@ -137,7 +137,7 @@ class TestVectorIndex:
         assert len(test_index) == 21
 
     def test_empty_index_returns_empty(self, tmp_path: Path) -> None:
-        from kairix.search.vec_index import VectorIndex
+        from kairix.core.search.vec_index import VectorIndex
 
         idx = VectorIndex(
             index_path=tmp_path / "empty.usearch",

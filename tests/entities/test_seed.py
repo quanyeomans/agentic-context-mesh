@@ -1,4 +1,4 @@
-"""Tests for kairix.entities.seed — entity discovery from indexed documents."""
+"""Tests for kairix.knowledge.entities.seed — entity discovery from indexed documents."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def _make_test_db() -> sqlite3.Connection:
 
 class TestScanForEntities:
     def test_discovers_entities_from_titles(self) -> None:
-        from kairix.entities.seed import scan_for_entities
+        from kairix.knowledge.entities.seed import scan_for_entities
 
         db = _make_test_db()
         candidates = scan_for_entities(db, limit=100)
@@ -43,14 +43,14 @@ class TestScanForEntities:
         assert len(candidates) > 0
 
     def test_respects_limit(self) -> None:
-        from kairix.entities.seed import scan_for_entities
+        from kairix.knowledge.entities.seed import scan_for_entities
 
         db = _make_test_db()
         candidates = scan_for_entities(db, limit=2)
         assert len(candidates) <= 2
 
     def test_returns_entity_candidates_with_required_fields(self) -> None:
-        from kairix.entities.seed import scan_for_entities
+        from kairix.knowledge.entities.seed import scan_for_entities
 
         db = _make_test_db()
         candidates = scan_for_entities(db, limit=100)
@@ -62,7 +62,7 @@ class TestScanForEntities:
             assert 0.0 <= c.confidence <= 1.0
 
     def test_deduplicates_by_name(self) -> None:
-        from kairix.entities.seed import scan_for_entities
+        from kairix.knowledge.entities.seed import scan_for_entities
 
         db = _make_test_db()
         candidates = scan_for_entities(db, limit=100)
@@ -72,7 +72,7 @@ class TestScanForEntities:
 
 class TestSeedGraph:
     def test_upserts_confirmed_candidates(self) -> None:
-        from kairix.entities.seed import EntityCandidate, seed_graph
+        from kairix.knowledge.entities.seed import EntityCandidate, seed_graph
 
         mock_client = MagicMock()
         mock_client.available = True
@@ -87,7 +87,7 @@ class TestSeedGraph:
         assert mock_client.upsert_node.call_count == 2
 
     def test_returns_zero_when_neo4j_unavailable(self) -> None:
-        from kairix.entities.seed import EntityCandidate, seed_graph
+        from kairix.knowledge.entities.seed import EntityCandidate, seed_graph
 
         mock_client = MagicMock()
         mock_client.available = False
@@ -99,7 +99,7 @@ class TestSeedGraph:
         assert count == 0
 
     def test_handles_upsert_failure_gracefully(self) -> None:
-        from kairix.entities.seed import EntityCandidate, seed_graph
+        from kairix.knowledge.entities.seed import EntityCandidate, seed_graph
 
         mock_client = MagicMock()
         mock_client.available = True

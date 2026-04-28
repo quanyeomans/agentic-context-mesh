@@ -2,7 +2,7 @@
 
 from pytest_bdd import parsers, then, when
 
-from kairix.mcp.server import tool_timeline
+from kairix.agents.mcp.server import tool_timeline
 
 # Module-level state (simple, test-scoped)
 _state: dict = {}

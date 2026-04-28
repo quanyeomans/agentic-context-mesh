@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from pytest_bdd import given, then, when
 
-from kairix.reflib.extract import scan_reference_library
-from kairix.reflib.resolve import resolve_entities
+from kairix.knowledge.reflib.extract import scan_reference_library
+from kairix.knowledge.reflib.resolve import resolve_entities
 
 pytestmark = pytest.mark.bdd
 

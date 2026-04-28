@@ -1,4 +1,4 @@
-"""Tests for kairix.reflib.loader — entity stub loading into Neo4j."""
+"""Tests for kairix.knowledge.reflib.loader — entity stub loading into Neo4j."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.reflib.loader import load_entity_stubs
+from kairix.knowledge.reflib.loader import load_entity_stubs
 
 # ---------------------------------------------------------------------------
 # Fixtures

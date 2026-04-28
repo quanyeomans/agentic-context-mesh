@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from kairix.eval.cli import main
+from kairix.quality.eval.cli import main
 
 pytestmark = pytest.mark.unit
 

@@ -6,8 +6,8 @@ structurally (no live API calls made).
 
 import pytest
 
-from kairix.llm.backends import AzureOpenAIBackend
-from kairix.llm.protocol import LLMBackend
+from kairix.platform.llm.backends import AzureOpenAIBackend
+from kairix.platform.llm.protocol import LLMBackend
 
 
 @pytest.mark.contract

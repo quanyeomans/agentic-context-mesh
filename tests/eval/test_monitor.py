@@ -1,5 +1,5 @@
 """
-Unit tests for kairix.eval.monitor.
+Unit tests for kairix.quality.eval.monitor.
 
 Benchmark runner is mocked — no live retrieval in CI.
 """
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.eval.monitor import MonitorResult, _load_log, _rolling_average, generate_report, run_monitor
+from kairix.quality.eval.monitor import MonitorResult, _load_log, _rolling_average, generate_report, run_monitor
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -108,8 +108,8 @@ def test_run_monitor_returns_result_with_correct_weighted_ndcg(tmp_path: Path) -
     )
 
     with (
-        patch("kairix.benchmark.suite.load_suite") as mock_load,
-        patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result),
+        patch("kairix.quality.benchmark.suite.load_suite") as mock_load,
+        patch("kairix.quality.benchmark.runner.run_benchmark", return_value=mock_result),
     ):
         mock_suite = MagicMock()
         mock_suite.cases = [MagicMock()] * 10
@@ -140,8 +140,8 @@ def test_run_monitor_detects_regression(tmp_path: Path) -> None:
     mock_result = _mock_benchmark_result(0.60)  # 25% drop from 0.80
 
     with (
-        patch("kairix.benchmark.suite.load_suite") as mock_load,
-        patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result),
+        patch("kairix.quality.benchmark.suite.load_suite") as mock_load,
+        patch("kairix.quality.benchmark.runner.run_benchmark", return_value=mock_result),
     ):
         mock_suite = MagicMock()
         mock_suite.cases = [MagicMock()] * 5
@@ -173,8 +173,8 @@ def test_run_monitor_no_regression_within_threshold(tmp_path: Path) -> None:
     mock_result = _mock_benchmark_result(0.73)  # 2.7% drop — within 5% threshold
 
     with (
-        patch("kairix.benchmark.suite.load_suite") as mock_load,
-        patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result),
+        patch("kairix.quality.benchmark.suite.load_suite") as mock_load,
+        patch("kairix.quality.benchmark.runner.run_benchmark", return_value=mock_result),
     ):
         mock_suite = MagicMock()
         mock_suite.cases = [MagicMock()] * 5
@@ -198,8 +198,8 @@ def test_run_monitor_no_regression_on_first_run(tmp_path: Path) -> None:
     mock_result = _mock_benchmark_result(0.72)
 
     with (
-        patch("kairix.benchmark.suite.load_suite") as mock_load,
-        patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result),
+        patch("kairix.quality.benchmark.suite.load_suite") as mock_load,
+        patch("kairix.quality.benchmark.runner.run_benchmark", return_value=mock_result),
     ):
         mock_suite = MagicMock()
         mock_suite.cases = [MagicMock()] * 5
@@ -216,7 +216,7 @@ def test_run_monitor_returns_false_on_benchmark_error(tmp_path: Path) -> None:
     log_path = str(tmp_path / "monitor.jsonl")
     suite_path = str(tmp_path / "canary.yaml")
 
-    with patch("kairix.benchmark.suite.load_suite", side_effect=FileNotFoundError("suite not found")):
+    with patch("kairix.quality.benchmark.suite.load_suite", side_effect=FileNotFoundError("suite not found")):
         result = run_monitor(suite_path=suite_path, log_path=log_path)
 
     assert isinstance(result, MonitorResult)
@@ -233,8 +233,8 @@ def test_run_monitor_appends_to_log(tmp_path: Path) -> None:
 
     for _ in range(3):
         with (
-            patch("kairix.benchmark.suite.load_suite") as mock_load,
-            patch("kairix.benchmark.runner.run_benchmark", return_value=mock_result),
+            patch("kairix.quality.benchmark.suite.load_suite") as mock_load,
+            patch("kairix.quality.benchmark.runner.run_benchmark", return_value=mock_result),
         ):
             mock_suite = MagicMock()
             mock_suite.cases = [MagicMock()] * 3

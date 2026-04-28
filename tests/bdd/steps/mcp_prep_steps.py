@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.search.budget import BudgetedResult
-from kairix.search.hybrid import SearchResult
-from kairix.search.intent import QueryIntent
-from kairix.search.rrf import FusedResult
+from kairix.core.search.budget import BudgetedResult
+from kairix.core.search.hybrid import SearchResult
+from kairix.core.search.intent import QueryIntent
+from kairix.core.search.rrf import FusedResult
 
 _state: dict = {}
 
@@ -63,17 +63,17 @@ def given_llm_returns_summary():
 
 @when(parsers.re(r'the agent calls tool_prep with query "(?P<query>.*)" at tier "(?P<tier>.*)"'))
 def when_agent_calls_prep(query, tier):
-    from kairix.mcp.server import tool_prep
+    from kairix.agents.mcp.server import tool_prep
 
     _state["exception"] = None
     try:
         if _state.get("search_raises"):
-            with patch("kairix.search.hybrid.search", side_effect=ValueError("test error")):
+            with patch("kairix.core.search.hybrid.search", side_effect=ValueError("test error")):
                 _state["response"] = tool_prep(query=query, tier=tier)
         else:
             mock_summary = _state.get("mock_summary", "A summary.")
             with (
-                patch("kairix.search.hybrid.search", return_value=_state.get("mock_search")),
+                patch("kairix.core.search.hybrid.search", return_value=_state.get("mock_search")),
                 patch("kairix._azure.chat_completion", return_value=mock_summary),
             ):
                 _state["response"] = tool_prep(query=query, tier=tier)

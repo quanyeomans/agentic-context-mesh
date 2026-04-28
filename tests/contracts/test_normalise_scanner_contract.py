@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.frontmatter import build_frontmatter, extract_title, inject_frontmatter
-from kairix.reflib.sources import SourceDef
+from kairix.knowledge.reflib.frontmatter import build_frontmatter, extract_title, inject_frontmatter
+from kairix.knowledge.reflib.sources import SourceDef
 
 pytestmark = pytest.mark.contract
 

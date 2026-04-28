@@ -42,87 +42,87 @@ def main() -> None:
         sys.exit(0)
 
     elif cmd == "embed":
-        from kairix.embed.cli import main as embed_main
+        from kairix.core.embed.cli import main as embed_main
 
         embed_main()
 
     elif cmd == "entity":
-        from kairix.entities.cli import main as entity_main
+        from kairix.knowledge.entities.cli import main as entity_main
 
         sys.exit(entity_main(sys.argv[2:]))
 
     elif cmd == "curator":
-        from kairix.curator.cli import main as curator_main
+        from kairix.agents.curator.cli import main as curator_main
 
         curator_main(sys.argv[2:])
 
     elif cmd == "search":
-        from kairix.search.cli import main as search_main
+        from kairix.core.search.cli import main as search_main
 
         search_main(sys.argv[2:])
 
     elif cmd == "benchmark":
-        from kairix.benchmark.cli import main as benchmark_main
+        from kairix.quality.benchmark.cli import main as benchmark_main
 
         benchmark_main(sys.argv[2:])
 
     elif cmd == "summarise":
-        from kairix.summaries.cli import main as summarise_main
+        from kairix.knowledge.summaries.cli import main as summarise_main
 
         summarise_main(sys.argv[2:])
 
     elif cmd == "timeline":
-        from kairix.temporal.cli import main as timeline_main
+        from kairix.core.temporal.cli import main as timeline_main
 
         timeline_main(sys.argv[2:])
 
     elif cmd == "wikilinks":
-        from kairix.wikilinks.cli import main as wikilinks_main
+        from kairix.knowledge.wikilinks.cli import main as wikilinks_main
 
         wikilinks_main(sys.argv[2:])
 
     elif cmd == "classify":
-        from kairix.classify.cli import main as classify_main
+        from kairix.core.classify.cli import main as classify_main
 
         classify_main(sys.argv[2:])
 
     elif cmd == "brief":
-        from kairix.briefing.cli import main as brief_main
+        from kairix.agents.briefing.cli import main as brief_main
 
         brief_main(sys.argv[2:])
 
     elif cmd == "contradict":
-        from kairix.contradict.cli import main as contradict_main
+        from kairix.knowledge.contradict.cli import main as contradict_main
 
         contradict_main(sys.argv[2:])
 
     elif cmd in ("store", "vault"):
-        from kairix.store.cli import main as store_main
+        from kairix.knowledge.store.cli import main as store_main
 
         store_main(sys.argv[2:])
 
     elif cmd == "mcp":
-        from kairix.mcp.cli import main as mcp_main
+        from kairix.agents.mcp.cli import main as mcp_main
 
         mcp_main(sys.argv[2:])
 
     elif cmd == "onboard":
-        from kairix.onboard.cli import main as onboard_main
+        from kairix.platform.onboard.cli import main as onboard_main
 
         onboard_main(sys.argv[2:])
 
     elif cmd == "eval":
-        from kairix.eval.cli import main as eval_main
+        from kairix.quality.eval.cli import main as eval_main
 
         eval_main(sys.argv[2:])
 
     elif cmd == "reference-library":
-        from kairix.reflib.cli import main as reflib_main
+        from kairix.knowledge.reflib.cli import main as reflib_main
 
         reflib_main(sys.argv[2:])
 
     elif cmd == "setup":
-        from kairix.setup.cli import main as setup_main
+        from kairix.platform.setup.cli import main as setup_main
 
         setup_main(sys.argv[2:])
 

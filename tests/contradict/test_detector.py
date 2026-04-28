@@ -1,5 +1,5 @@
 """
-Tests for kairix.contradict.detector — contradiction detection.
+Tests for kairix.knowledge.contradict.detector — contradiction detection.
 
 All tests use mocked hybrid search and mocked LLM backend.
 No external services required.
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.contradict.detector import (
+from kairix.knowledge.contradict.detector import (
     ContradictionResult,
     _parse_llm_response,
     check_contradiction,
@@ -129,7 +129,7 @@ def test_parse_llm_response_non_numeric_score() -> None:
 def test_check_contradiction_returns_empty_on_search_failure() -> None:
     """Returns [] when hybrid search raises an exception."""
     llm = MagicMock()
-    with patch("kairix.search.hybrid.search", side_effect=RuntimeError("no db")):
+    with patch("kairix.core.search.hybrid.search", side_effect=RuntimeError("no db")):
         results = check_contradiction("some claim", llm=llm)
     assert results == []
 
@@ -141,7 +141,7 @@ def test_check_contradiction_returns_empty_when_no_results_above_threshold() -> 
     llm.chat.return_value = _llm_response(0.2)  # well below default threshold 0.6
 
     bundles = [_make_search_result("a/doc.md", "some content")]
-    with patch("kairix.search.hybrid.search", return_value=_make_sr(bundles)):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr(bundles)):
         results = check_contradiction("new claim", llm=llm)
 
     assert results == []
@@ -154,7 +154,7 @@ def test_check_contradiction_returns_result_above_threshold() -> None:
     llm.chat.return_value = _llm_response(0.9, "directly conflicts with existing record")
 
     bundles = [_make_search_result("decisions/d01.md", "The project was cancelled in Q3.")]
-    with patch("kairix.search.hybrid.search", return_value=_make_sr(bundles)):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr(bundles)):
         results = check_contradiction("The project launched in Q3.", llm=llm, threshold=0.6)
 
     assert len(results) == 1
@@ -171,7 +171,7 @@ def test_check_contradiction_respects_top_k() -> None:
     llm.chat.return_value = _llm_response(0.8)
 
     bundles = [_make_search_result(f"doc{i}.md", f"content {i}") for i in range(10)]
-    with patch("kairix.search.hybrid.search", return_value=_make_sr(bundles)):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr(bundles)):
         check_contradiction("claim", llm=llm, top_k=3, threshold=0.0)
 
     # Only 3 LLM calls should have been made
@@ -190,7 +190,7 @@ def test_check_contradiction_sorts_by_score_descending() -> None:
     ]
 
     bundles = [_make_search_result(f"doc{i}.md", "content") for i in range(3)]
-    with patch("kairix.search.hybrid.search", return_value=_make_sr(bundles)):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr(bundles)):
         results = check_contradiction("claim", llm=llm, threshold=0.0)
 
     scores = [r.score for r in results]
@@ -208,7 +208,7 @@ def test_check_contradiction_handles_llm_exception() -> None:
         _make_search_result("fail.md", "will fail"),
         _make_search_result("ok.md", "will succeed"),
     ]
-    with patch("kairix.search.hybrid.search", return_value=_make_sr(bundles)):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr(bundles)):
         results = check_contradiction("claim", llm=llm, threshold=0.0)
 
     assert len(results) == 1
@@ -219,7 +219,7 @@ def test_check_contradiction_handles_llm_exception() -> None:
 def test_check_contradiction_no_search_results() -> None:
     """Returns [] when search returns no results."""
     llm = MagicMock()
-    with patch("kairix.search.hybrid.search", return_value=_make_sr([])):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr([])):
         results = check_contradiction("claim", llm=llm)
     assert results == []
     llm.chat.assert_not_called()
@@ -248,7 +248,7 @@ def test_check_contradiction_snippet_truncated_to_300_chars() -> None:
 
     long_content = "X" * 1000
     bundles = [_make_search_result("doc.md", long_content)]
-    with patch("kairix.search.hybrid.search", return_value=_make_sr(bundles)):
+    with patch("kairix.core.search.hybrid.search", return_value=_make_sr(bundles)):
         results = check_contradiction("claim", llm=llm, threshold=0.0)
 
     assert len(results[0].snippet) <= 300

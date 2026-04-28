@@ -10,7 +10,7 @@ from datetime import date
 
 import pytest
 
-from kairix.classify.router import VALID_AGENTS, resolve_target_path
+from kairix.core.classify.router import VALID_AGENTS, resolve_target_path
 
 
 @pytest.mark.unit

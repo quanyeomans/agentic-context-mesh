@@ -1,5 +1,5 @@
 """
-Tests for kairix.temporal.chunker.
+Tests for kairix.core.temporal.chunker.
 
 Covers:
   - chunk_board(): column parsing, date extraction, cards without dates
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.temporal.chunker import (
+from kairix.core.temporal.chunker import (
     chunk_board,
     chunk_file,
     chunk_memory_log,

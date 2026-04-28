@@ -1,14 +1,14 @@
 """Contract: SearchBackendProtocol — verify hybrid.search signature conformance.
 
-Checks that kairix.search.hybrid.search has parameters compatible with
-the SearchBackendProtocol defined in kairix.contracts.search.
+Checks that kairix.core.search.hybrid.search has parameters compatible with
+the SearchBackendProtocol defined in kairix.quality.contracts.search.
 """
 
 import inspect
 
 import pytest
 
-from kairix.contracts.search import SearchBackendProtocol
+from kairix.quality.contracts.search import SearchBackendProtocol
 
 
 @pytest.mark.contract
@@ -30,8 +30,8 @@ def test_search_backend_protocol_search_signature():
 
 @pytest.mark.contract
 def test_hybrid_search_has_query_param():
-    """kairix.search.hybrid.search accepts 'query' parameter."""
-    from kairix.search.hybrid import search
+    """kairix.core.search.hybrid.search accepts 'query' parameter."""
+    from kairix.core.search.hybrid import search
 
     sig = inspect.signature(search)
     assert "query" in sig.parameters
@@ -39,8 +39,8 @@ def test_hybrid_search_has_query_param():
 
 @pytest.mark.contract
 def test_hybrid_search_has_agent_param():
-    """kairix.search.hybrid.search accepts 'agent' parameter."""
-    from kairix.search.hybrid import search
+    """kairix.core.search.hybrid.search accepts 'agent' parameter."""
+    from kairix.core.search.hybrid import search
 
     sig = inspect.signature(search)
     assert "agent" in sig.parameters
@@ -48,8 +48,8 @@ def test_hybrid_search_has_agent_param():
 
 @pytest.mark.contract
 def test_hybrid_search_agent_default_is_none():
-    """kairix.search.hybrid.search 'agent' defaults to None."""
-    from kairix.search.hybrid import search
+    """kairix.core.search.hybrid.search 'agent' defaults to None."""
+    from kairix.core.search.hybrid import search
 
     sig = inspect.signature(search)
     assert sig.parameters["agent"].default is None
@@ -57,8 +57,8 @@ def test_hybrid_search_agent_default_is_none():
 
 @pytest.mark.contract
 def test_hybrid_search_has_budget_param():
-    """kairix.search.hybrid.search accepts 'budget' parameter (token budget)."""
-    from kairix.search.hybrid import search
+    """kairix.core.search.hybrid.search accepts 'budget' parameter (token budget)."""
+    from kairix.core.search.hybrid import search
 
     sig = inspect.signature(search)
     assert "budget" in sig.parameters
@@ -67,7 +67,7 @@ def test_hybrid_search_has_budget_param():
 @pytest.mark.contract
 def test_hybrid_search_query_is_first_positional():
     """'query' is the first positional parameter of hybrid.search."""
-    from kairix.search.hybrid import search
+    from kairix.core.search.hybrid import search
 
     sig = inspect.signature(search)
     params = list(sig.parameters.keys())
@@ -77,7 +77,7 @@ def test_hybrid_search_query_is_first_positional():
 @pytest.mark.contract
 def test_search_result_protocol_fields():
     """SearchResultProtocol defines the expected attributes."""
-    from kairix.contracts.search import SearchResultProtocol
+    from kairix.quality.contracts.search import SearchResultProtocol
 
     annotations = (
         SearchResultProtocol.__protocol_attrs__

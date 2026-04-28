@@ -1,4 +1,4 @@
-"""Tests for kairix.setup.prompts — prompt abstraction layer.
+"""Tests for kairix.platform.setup.prompts — prompt abstraction layer.
 
 Verifies interactive, non-interactive, and JSON modes behave correctly.
 """
@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.setup.prompts import SetupContext, prompt, prompt_choice, prompt_yn
+from kairix.platform.setup.prompts import SetupContext, prompt, prompt_choice, prompt_yn
 
 pytestmark = pytest.mark.unit
 

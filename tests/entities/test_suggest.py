@@ -1,4 +1,4 @@
-"""Tests for kairix.entities.suggest — NER entity suggestions."""
+"""Tests for kairix.knowledge.entities.suggest — NER entity suggestions."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.entities.suggest import SuggestedEntity, format_suggestions, suggest_entities
+from kairix.knowledge.entities.suggest import SuggestedEntity, format_suggestions, suggest_entities
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
 
@@ -37,11 +37,11 @@ def test_suggest_entities_new_entity():
     mock_nlp = _make_mock_spacy([("AcmeCorp", "ORG")])
 
     with (
-        patch("kairix.entities.suggest._load_model", return_value=mock_nlp),
-        patch("kairix.entities.suggest.spacy", create=True),
+        patch("kairix.knowledge.entities.suggest._load_model", return_value=mock_nlp),
+        patch("kairix.knowledge.entities.suggest.spacy", create=True),
     ):
         # Patch the import inside suggest_entities
-        import kairix.entities.suggest as suggest_mod
+        import kairix.knowledge.entities.suggest as suggest_mod
 
         _ = suggest_mod._load_model  # kept to verify attribute exists
 

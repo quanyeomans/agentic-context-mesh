@@ -29,7 +29,7 @@ HEALTH_CHECK_INTERVAL = 21600  # 6 hours
 def _run_embed() -> None:
     """Run incremental embed — indexes new and changed documents."""
     try:
-        from kairix.embed.cli import main as embed_main
+        from kairix.core.embed.cli import main as embed_main
 
         logger.info("worker: starting incremental embed")
         embed_main()
@@ -41,7 +41,7 @@ def _run_embed() -> None:
 def _run_entity_seed() -> None:
     """Run entity relationship seeding from vault structure."""
     try:
-        from kairix.store.cli import main as store_main
+        from kairix.knowledge.store.cli import main as store_main
 
         logger.info("worker: starting entity seed")
         store_main(["crawl", "--document-root", os.environ.get("KAIRIX_DOCUMENT_ROOT", str(Path.home() / "Documents"))])
@@ -53,7 +53,7 @@ def _run_entity_seed() -> None:
 def _run_health_check() -> None:
     """Log a health check."""
     try:
-        from kairix.onboard.check import run_all_checks
+        from kairix.platform.onboard.check import run_all_checks
 
         results = run_all_checks()
         passed = sum(1 for r in results if r.ok)

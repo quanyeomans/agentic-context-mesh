@@ -7,13 +7,13 @@ No external API calls.
 import pytest
 from pytest_bdd import given, then, when
 
-from kairix.reflib.filters import filter_collection
-from kairix.reflib.frontmatter import (
+from kairix.knowledge.reflib.filters import filter_collection
+from kairix.knowledge.reflib.frontmatter import (
     build_frontmatter,
     extract_existing_frontmatter,
     inject_frontmatter,
 )
-from kairix.reflib.sources import SourceDef
+from kairix.knowledge.reflib.sources import SourceDef
 
 pytestmark = pytest.mark.bdd
 

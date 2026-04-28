@@ -1,5 +1,5 @@
 """
-Unit tests for kairix.eval.generate.
+Unit tests for kairix.quality.eval.generate.
 
 All external calls (SQLite, hybrid search, LLM API) are mocked.
 """
@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from kairix.eval.generate import (
+from kairix.quality.eval.generate import (
     EnrichmentResult,
     GeneratedQuery,
     GenerationResult,
@@ -22,7 +22,7 @@ from kairix.eval.generate import (
     generate_queries,
     generate_suite,
 )
-from kairix.eval.judge import JudgeResult
+from kairix.quality.eval.judge import JudgeResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -68,7 +68,7 @@ def test_generate_queries_returns_list_on_valid_response() -> None:
         ]
     )
 
-    with patch("kairix.eval.generate._call_llm", return_value=mock_response):
+    with patch("kairix.quality.eval.generate._call_llm", return_value=mock_response):
         results = generate_queries(
             doc_title="docker-guide",
             doc_body="Deploy with docker build, tag, push, run -d.",
@@ -87,7 +87,7 @@ def test_generate_queries_returns_list_on_valid_response() -> None:
 @pytest.mark.unit
 def test_generate_queries_returns_empty_on_parse_failure() -> None:
     """generate_queries returns [] on JSON parse failure after 2 attempts."""
-    with patch("kairix.eval.generate._call_llm", return_value="not a json array"):
+    with patch("kairix.quality.eval.generate._call_llm", return_value="not a json array"):
         results = generate_queries(
             doc_title="test-doc",
             doc_body="some content",
@@ -102,7 +102,7 @@ def test_generate_queries_returns_empty_on_parse_failure() -> None:
 @pytest.mark.unit
 def test_generate_queries_returns_empty_on_api_error() -> None:
     """generate_queries returns [] on API error."""
-    with patch("kairix.eval.generate._call_llm", side_effect=OSError("connection error")):
+    with patch("kairix.quality.eval.generate._call_llm", side_effect=OSError("connection error")):
         results = generate_queries(
             doc_title="test-doc",
             doc_body="some content",
@@ -136,7 +136,7 @@ def test_generate_queries_defaults_unknown_intent_to_recall() -> None:
         ]
     )
 
-    with patch("kairix.eval.generate._call_llm", return_value=mock_response):
+    with patch("kairix.quality.eval.generate._call_llm", return_value=mock_response):
         results = generate_queries(
             doc_title="test",
             doc_body="content",
@@ -251,14 +251,14 @@ def test_generate_suite_writes_valid_yaml(tmp_path: Path) -> None:
     mock_judge = _JUDGE_RESULT_WITH_GRADE2
 
     with (
-        patch("kairix.eval.generate.sample_documents", return_value=mock_docs),
-        patch("kairix.eval.generate.generate_queries", return_value=mock_queries),
+        patch("kairix.quality.eval.generate.sample_documents", return_value=mock_docs),
+        patch("kairix.quality.eval.generate.generate_queries", return_value=mock_queries),
         patch(
-            "kairix.eval.generate._retrieve",
+            "kairix.quality.eval.generate._retrieve",
             return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"]),
         ),
-        patch("kairix.eval.generate.judge_batch", return_value=mock_judge),
-        patch("kairix.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
+        patch("kairix.quality.eval.generate.judge_batch", return_value=mock_judge),
+        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
     ):
         generate_suite(
             output_path=str(output),
@@ -280,8 +280,8 @@ def test_generate_suite_returns_result_on_empty_docs(tmp_path: Path) -> None:
     output = tmp_path / "empty-suite.yaml"
 
     with (
-        patch("kairix.eval.generate.sample_documents", return_value=[]),
-        patch("kairix.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
+        patch("kairix.quality.eval.generate.sample_documents", return_value=[]),
+        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
     ):
         result = generate_suite(
             output_path=str(output),
@@ -323,11 +323,11 @@ def test_enrich_suite_writes_valid_yaml_with_gold_titles(tmp_path: Path) -> None
 
     with (
         patch(
-            "kairix.eval.generate._retrieve",
+            "kairix.quality.eval.generate._retrieve",
             return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"]),
         ),
-        patch("kairix.eval.generate.judge_batch", return_value=_JUDGE_RESULT_WITH_GRADE2),
-        patch("kairix.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
+        patch("kairix.quality.eval.generate.judge_batch", return_value=_JUDGE_RESULT_WITH_GRADE2),
+        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
     ):
         result = enrich_suite(
             suite_path=str(input_path),
@@ -370,14 +370,14 @@ def test_enrich_suite_preserves_existing_fields(tmp_path: Path) -> None:
         yaml.dump(input_suite, f)
 
     with (
-        patch("kairix.eval.generate._retrieve", return_value=(["daily-log.md"], ["snippet"])),
+        patch("kairix.quality.eval.generate._retrieve", return_value=(["daily-log.md"], ["snippet"])),
         patch(
-            "kairix.eval.generate.judge_batch",
+            "kairix.quality.eval.generate.judge_batch",
             return_value=JudgeResult(
                 query="q", grades={"daily-log": 2}, shuffle_order=["daily-log"], judge_model="gpt-4o-mini"
             ),
         ),
-        patch("kairix.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
+        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
     ):
         enrich_suite(suite_path=str(input_path), output_path=str(output_path))
 
@@ -412,9 +412,9 @@ def test_enrich_suite_skips_case_when_no_relevant_doc(tmp_path: Path) -> None:
         yaml.dump(input_suite, f)
 
     with (
-        patch("kairix.eval.generate._retrieve", return_value=(["unrelated.md"], ["snippet"])),
-        patch("kairix.eval.generate.judge_batch", return_value=_JUDGE_RESULT_ALL_ZERO),
-        patch("kairix.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
+        patch("kairix.quality.eval.generate._retrieve", return_value=(["unrelated.md"], ["snippet"])),
+        patch("kairix.quality.eval.generate.judge_batch", return_value=_JUDGE_RESULT_ALL_ZERO),
+        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
     ):
         result = enrich_suite(suite_path=str(input_path), output_path=str(output_path))
 

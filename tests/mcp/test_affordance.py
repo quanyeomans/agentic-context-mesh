@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.mcp.server import (
+from kairix.agents.mcp.server import (
     _extract_entity_name,
     _infer_budget,
     tool_entity,
@@ -36,58 +36,58 @@ class TestBudgetInference:
 
     @pytest.mark.unit
     def test_entity_intent_returns_1500(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.ENTITY):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.ENTITY):
             assert _infer_budget("tell me about Acme", 3000) == 1500
 
     @pytest.mark.unit
     def test_keyword_intent_returns_1500(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.KEYWORD):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.KEYWORD):
             assert _infer_budget("KFEAT-010", 3000) == 1500
 
     @pytest.mark.unit
     def test_research_query_returns_5000(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.SEMANTIC):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
             assert _infer_budget("research the competitive landscape", 3000) == 5000
 
     @pytest.mark.unit
     def test_compare_query_returns_5000(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.SEMANTIC):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
             assert _infer_budget("compare the two frameworks", 3000) == 5000
 
     @pytest.mark.unit
     def test_analyse_query_returns_5000(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.SEMANTIC):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
             assert _infer_budget("analyse the quarterly results", 3000) == 5000
 
     @pytest.mark.unit
     def test_comprehensive_query_returns_5000(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.SEMANTIC):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
             assert _infer_budget("give me a comprehensive overview", 3000) == 5000
 
     @pytest.mark.unit
     def test_detailed_query_returns_5000(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.SEMANTIC):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
             assert _infer_budget("detailed breakdown of costs", 3000) == 5000
 
     @pytest.mark.unit
     def test_default_returns_3000(self) -> None:
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.search.intent.classify", return_value=QueryIntent.SEMANTIC):
+        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
             assert _infer_budget("how does the build system work", 3000) == 3000
 
     @pytest.mark.unit
@@ -99,13 +99,13 @@ class TestBudgetInference:
     @pytest.mark.unit
     def test_classify_failure_falls_back_to_heuristics(self) -> None:
         """When classify raises, research words still trigger 5000."""
-        with patch("kairix.search.intent.classify", side_effect=RuntimeError("broken")):
+        with patch("kairix.core.search.intent.classify", side_effect=RuntimeError("broken")):
             assert _infer_budget("research the topic", 3000) == 5000
 
     @pytest.mark.unit
     def test_classify_failure_default_3000(self) -> None:
         """When classify raises and no research words, default is 3000."""
-        with patch("kairix.search.intent.classify", side_effect=RuntimeError("broken")):
+        with patch("kairix.core.search.intent.classify", side_effect=RuntimeError("broken")):
             assert _infer_budget("hello world", 3000) == 3000
 
 
@@ -197,8 +197,8 @@ class TestEntityFirstHint:
             }
         ]
 
-        with patch("kairix.search.hybrid.search", return_value=mock_result):
-            with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
+        with patch("kairix.core.search.hybrid.search", return_value=mock_result):
+            with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
                 result = tool_search(query="tell me about Acme")
 
         assert len(result["results"]) == 2
@@ -228,8 +228,8 @@ class TestEntityFirstHint:
         mock_neo4j.available = True
         mock_neo4j.cypher.return_value = []  # not found
 
-        with patch("kairix.search.hybrid.search", return_value=mock_result):
-            with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
+        with patch("kairix.core.search.hybrid.search", return_value=mock_result):
+            with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
                 result = tool_search(query="tell me about UnknownCorp")
 
         assert len(result["results"]) == 1
@@ -247,7 +247,7 @@ class TestEntityFirstHint:
             error="",
         )
 
-        with patch("kairix.search.hybrid.search", return_value=mock_result):
+        with patch("kairix.core.search.hybrid.search", return_value=mock_result):
             result = tool_search(query="how to deploy")
 
         assert all(r.get("source") != "entity_graph" for r in result["results"])

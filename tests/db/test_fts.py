@@ -1,10 +1,10 @@
-"""Tests for kairix.db.fts — FTS5 index management."""
+"""Tests for kairix.core.db.fts — FTS5 index management."""
 
 import sqlite3
 
 import pytest
 
-from kairix.db.fts import rebuild_fts, sync_fts
+from kairix.core.db.fts import rebuild_fts, sync_fts
 
 
 def _create_test_db() -> sqlite3.Connection:

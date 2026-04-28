@@ -2,7 +2,7 @@
 
 import pytest
 
-from kairix.embed.embed import batched, chunk_text
+from kairix.core.embed.embed import batched, chunk_text
 
 
 @pytest.mark.unit
@@ -85,7 +85,7 @@ class TestChunkText:
     @pytest.mark.unit
     def test_exact_chunk_size_boundary(self):
         # At exactly chunk_size, should still be one chunk
-        from kairix.embed.embed import CHUNK_SIZE_CHARS
+        from kairix.core.embed.embed import CHUNK_SIZE_CHARS
 
         text = "a" * CHUNK_SIZE_CHARS
         chunks = chunk_text(text)

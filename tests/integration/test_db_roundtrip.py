@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from kairix.embed.embed import stage_embedding
-from kairix.embed.schema import (
+from kairix.core.embed.embed import stage_embedding
+from kairix.core.embed.schema import (
     SchemaVersionError,
     ensure_vec_table,
     validate_schema,

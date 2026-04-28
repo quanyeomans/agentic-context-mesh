@@ -1,5 +1,5 @@
 """
-Tests for kairix.store.health — Neo4j-primary document store health check.
+Tests for kairix.knowledge.store.health — Neo4j-primary document store health check.
 
 All Neo4j calls are mocked. Never raises.
 """
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.store.health import StoreHealthReport, format_health_text, run_store_health
+from kairix.knowledge.store.health import StoreHealthReport, format_health_text, run_store_health
 
 # Backwards-compat aliases verified below — kept so old test references still work
 VaultHealthReport = StoreHealthReport

@@ -2,8 +2,8 @@
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.benchmark.runner import BenchmarkResult, run_benchmark
-from kairix.benchmark.suite import BenchmarkCase, BenchmarkSuite
+from kairix.quality.benchmark.runner import BenchmarkResult, run_benchmark
+from kairix.quality.benchmark.suite import BenchmarkCase, BenchmarkSuite
 
 # Module-level state (simple, test-scoped)
 _state: dict = {}

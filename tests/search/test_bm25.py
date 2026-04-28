@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.bm25 — direct SQLite FTS5 search.
+Tests for kairix.core.search.bm25 — direct SQLite FTS5 search.
 
 Tests use in-memory SQLite databases with the kairix schema.
 No subprocess calls — BM25 search is now fully internal.
@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.search.bm25 import BM25Result, _normalise_fts_query, bm25_search
+from kairix.core.search.bm25 import BM25Result, _normalise_fts_query, bm25_search
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,7 +73,7 @@ def _create_test_db(tmp_path: Path) -> Path:
 def test_bm25_search_returns_results(tmp_path: Path) -> None:
     """Successful FTS query returns BM25Result list."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("knowledge management platform")
 
     assert len(results) >= 1
@@ -84,7 +84,7 @@ def test_bm25_search_returns_results(tmp_path: Path) -> None:
 def test_bm25_search_filters_by_collection(tmp_path: Path) -> None:
     """Collection filter restricts results to matching collections."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("VM vCPUs", collections=["knowledge-shared"])
 
     assert len(results) >= 1
@@ -95,7 +95,7 @@ def test_bm25_search_filters_by_collection(tmp_path: Path) -> None:
 def test_bm25_search_multiple_collections(tmp_path: Path) -> None:
     """Multiple collections are searched simultaneously."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("safety", collections=["knowledge-shared", "knowledge-builder"])
 
     assert len(results) >= 1
@@ -105,7 +105,7 @@ def test_bm25_search_multiple_collections(tmp_path: Path) -> None:
 def test_bm25_search_returns_bare_paths(tmp_path: Path) -> None:
     """Result file field is a bare document-store-relative path, not a scheme URI."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("knowledge management")
 
     for r in results:
@@ -116,7 +116,7 @@ def test_bm25_search_returns_bare_paths(tmp_path: Path) -> None:
 def test_bm25_search_excludes_inactive_documents(tmp_path: Path) -> None:
     """Inactive (active=0) documents are excluded from results."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("inactive document")
 
     assert all("inactive" not in r["file"] for r in results)
@@ -126,7 +126,7 @@ def test_bm25_search_excludes_inactive_documents(tmp_path: Path) -> None:
 def test_bm25_search_respects_limit(tmp_path: Path) -> None:
     """Limit parameter caps results."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("management platform", limit=1)
 
     assert len(results) <= 1
@@ -136,7 +136,7 @@ def test_bm25_search_respects_limit(tmp_path: Path) -> None:
 def test_bm25_search_applies_date_filter(tmp_path: Path) -> None:
     """date_filter_paths filters results to matching paths only."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search(
             "knowledge management",
             date_filter_paths=frozenset(["areas/kairix.md"]),
@@ -167,7 +167,7 @@ def test_bm25_search_returns_empty_for_stop_words_only() -> None:
 @pytest.mark.unit
 def test_bm25_search_returns_empty_on_db_error() -> None:
     """Database error → []."""
-    with patch("kairix.search.bm25.get_db_path", return_value=Path("/nonexistent/db.sqlite")):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=Path("/nonexistent/db.sqlite")):
         results = bm25_search("query")
     assert results == []
 

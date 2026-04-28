@@ -1,5 +1,5 @@
 """
-Tests for kairix.llm — LLM backend abstraction (P1-2).
+Tests for kairix.platform.llm — LLM backend abstraction (P1-2).
 """
 
 from __future__ import annotations
@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.llm import AzureOpenAIBackend, get_default_backend
-from kairix.llm.protocol import LLMBackend
+from kairix.platform.llm import AzureOpenAIBackend, get_default_backend
+from kairix.platform.llm.protocol import LLMBackend
 
 # ---------------------------------------------------------------------------
 # Protocol conformance

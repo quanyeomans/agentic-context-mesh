@@ -1,5 +1,5 @@
 """
-Tests for kairix.store.crawler — document-store-to-Neo4j entity crawler.
+Tests for kairix.knowledge.store.crawler — document-store-to-Neo4j entity crawler.
 
 All Neo4j calls are mocked. Filesystem is provided via tmp_path.
 """
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.store.crawler import (
+from kairix.knowledge.store.crawler import (
     CrawlReport,
     _as_list,
     _parse_frontmatter,

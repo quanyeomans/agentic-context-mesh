@@ -1,5 +1,5 @@
 """
-Tests for kairix.summaries.loader
+Tests for kairix.knowledge.summaries.loader
 """
 
 import sqlite3
@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from kairix.summaries.generate import SummaryResult
-from kairix.summaries.loader import get_l0, get_l1, load_tiered_content
-from kairix.summaries.staleness import init_summaries_db, write_summary
+from kairix.knowledge.summaries.generate import SummaryResult
+from kairix.knowledge.summaries.loader import get_l0, get_l1, load_tiered_content
+from kairix.knowledge.summaries.staleness import init_summaries_db, write_summary
 
 # ---------------------------------------------------------------------------
 # Fixtures

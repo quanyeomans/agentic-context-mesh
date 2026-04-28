@@ -123,7 +123,7 @@ _TEST_DOCUMENTS = [
 @pytest.fixture
 def tmp_db_path(tmp_path):
     """Return a tmp path for a SQLite DB."""
-    return tmp_path / "test-kairix.db"
+    return tmp_path / "test-kairix.core.db"
 
 
 @pytest.fixture

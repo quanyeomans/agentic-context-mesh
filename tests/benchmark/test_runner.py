@@ -1,5 +1,5 @@
 """
-Tests for kairix.benchmark.runner — covers previously-untested paths:
+Tests for kairix.quality.benchmark.runner — covers previously-untested paths:
 - _exact_match(): gold path matching variants
 - _fuzzy_match(): partial path matching
 - _classification_score(): rule classifier integration
@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.benchmark.runner import (
+from kairix.quality.benchmark.runner import (
     BenchmarkResult,
     _category_diagnosis,
     _classification_score,
@@ -117,8 +117,8 @@ def test_classification_score_returns_1_for_correct_type() -> None:
     mock_result.type = "decision"
 
     with (
-        patch("kairix.classify.rules.classify_content", return_value=mock_result),
-        patch("kairix.benchmark.runner.classify_content", return_value=mock_result, create=True),
+        patch("kairix.core.classify.rules.classify_content", return_value=mock_result),
+        patch("kairix.quality.benchmark.runner.classify_content", return_value=mock_result, create=True),
     ):
         score = _classification_score("We decided to use PostgreSQL.", "decision")
 
@@ -132,8 +132,8 @@ def test_classification_score_returns_0_for_wrong_type() -> None:
     mock_result.type = "pattern"
 
     with (
-        patch("kairix.classify.rules.classify_content", return_value=mock_result),
-        patch("kairix.benchmark.runner.classify_content", return_value=mock_result, create=True),
+        patch("kairix.core.classify.rules.classify_content", return_value=mock_result),
+        patch("kairix.quality.benchmark.runner.classify_content", return_value=mock_result, create=True),
     ):
         score = _classification_score("We decided to use PostgreSQL.", "decision")
 
@@ -143,7 +143,7 @@ def test_classification_score_returns_0_for_wrong_type() -> None:
 @pytest.mark.unit
 def test_classification_score_returns_0_on_exception() -> None:
     """Returns 0.0 when classifier raises an exception."""
-    with patch("kairix.classify.rules.classify_content", side_effect=RuntimeError("oops")):
+    with patch("kairix.core.classify.rules.classify_content", side_effect=RuntimeError("oops")):
         score = _classification_score("anything", "decision")
 
     assert score == 0.0
@@ -159,8 +159,8 @@ def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyP
     llm_result.type = "decision"
 
     with (
-        patch("kairix.classify.rules.classify_content", return_value=unknown_result),
-        patch("kairix.classify.judge.classify_with_llm", return_value=llm_result),
+        patch("kairix.core.classify.rules.classify_content", return_value=unknown_result),
+        patch("kairix.core.classify.judge.classify_with_llm", return_value=llm_result),
     ):
         score = _classification_score("We decided to use PostgreSQL.", "decision")
 

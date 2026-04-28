@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.eval.cli import main
+from kairix.quality.eval.cli import main
 
 pytestmark = pytest.mark.unit
 
@@ -24,23 +24,23 @@ class TestAutoGoldCLIParsing:
 
 
 class TestAutoGoldCLIExecution:
-    @patch("kairix.db.get_db_path")
+    @patch("kairix.core.db.get_db_path")
     def test_exits_1_when_no_index(self, mock_db: MagicMock) -> None:
         mock_db.side_effect = FileNotFoundError("no index")
         with pytest.raises(SystemExit) as exc_info:
             main(["auto-gold"])
         assert exc_info.value.code == 1
 
-    @patch("kairix.eval.auto_gold.build_suite")
-    @patch("kairix.eval.auto_gold.generate_template_queries")
-    @patch("kairix.eval.auto_gold.analyse_corpus")
-    @patch("kairix.db.get_db_path")
+    @patch("kairix.quality.eval.auto_gold.build_suite")
+    @patch("kairix.quality.eval.auto_gold.generate_template_queries")
+    @patch("kairix.quality.eval.auto_gold.analyse_corpus")
+    @patch("kairix.core.db.get_db_path")
     def test_generates_suite(
         self, mock_db: MagicMock, mock_analyse: MagicMock, mock_gen: MagicMock, mock_build: MagicMock, tmp_path
     ) -> None:
         import sqlite3
 
-        from kairix.eval.auto_gold import CorpusProfile
+        from kairix.quality.eval.auto_gold import CorpusProfile
 
         db_path = tmp_path / "index.sqlite"
         sqlite3.connect(str(db_path)).close()

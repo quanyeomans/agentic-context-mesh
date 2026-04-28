@@ -4,7 +4,7 @@ import sqlite3
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.eval.auto_gold import analyse_corpus, generate_template_queries
+from kairix.quality.eval.auto_gold import analyse_corpus, generate_template_queries
 
 # Module-level state (simple, test-scoped)
 _state: dict = {}

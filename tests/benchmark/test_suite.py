@@ -1,5 +1,5 @@
 """
-Tests for kairix.benchmark.suite and kairix.benchmark.runner.
+Tests for kairix.quality.benchmark.suite and kairix.quality.benchmark.runner.
 
 Covers:
   - load_suite(): valid YAML loads correctly
@@ -19,12 +19,12 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.benchmark.runner import (
+from kairix.quality.benchmark.runner import (
     BenchmarkResult,
     _exact_match,
     run_benchmark,
 )
-from kairix.benchmark.suite import (
+from kairix.quality.benchmark.suite import (
     BenchmarkCase,
     BenchmarkSuite,
     load_suite,
@@ -467,7 +467,7 @@ def test_run_benchmark_mocked_retrieval_correct_scores() -> None:
     r01_paths = ["vault/01-projects/arize/report.md", "vault/other.md"]
     r02_paths = ["vault/something-else.md"]
 
-    with patch("kairix.benchmark.runner._retrieve") as mock_retrieve:
+    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
         mock_retrieve.side_effect = [
             _mock_retrieve_result(r01_paths),
             _mock_retrieve_result(r02_paths),
@@ -522,9 +522,9 @@ def test_run_benchmark_weighted_total_calculation() -> None:
         _mock_retrieve_result([]),  # P01
     ]
 
-    with patch("kairix.benchmark.runner._retrieve") as mock_retrieve:
+    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
         mock_retrieve.side_effect = retrieve_results
-        with patch("kairix.benchmark.runner._llm_judge", return_value=0.0):
+        with patch("kairix.quality.benchmark.runner._llm_judge", return_value=0.0):
             result = run_benchmark(suite, system="hybrid", agent="test")
 
     assert result.summary["category_scores"]["recall"] == pytest.approx(1.0)
@@ -549,7 +549,7 @@ def test_run_benchmark_all_scores_1_gives_weighted_total_1() -> None:
         ],
     )
 
-    with patch("kairix.benchmark.runner._retrieve") as mock_retrieve:
+    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
         mock_retrieve.side_effect = [
             _mock_retrieve_result(["path/to/doc.md"]),
             _mock_retrieve_result(["result.md"]),
@@ -558,7 +558,7 @@ def test_run_benchmark_all_scores_1_gives_weighted_total_1() -> None:
             _mock_retrieve_result(["result.md"]),
             _mock_retrieve_result(["result.md"]),
         ]
-        with patch("kairix.benchmark.runner._llm_judge", return_value=1.0):
+        with patch("kairix.quality.benchmark.runner._llm_judge", return_value=1.0):
             result = run_benchmark(suite, system="hybrid", agent="test")
 
     assert result.summary["category_scores"]["recall"] == pytest.approx(1.0)
@@ -578,7 +578,7 @@ def test_run_benchmark_saves_json_to_output_dir(tmp_path: Path) -> None:
     )
     output_dir = str(tmp_path / "results")
 
-    with patch("kairix.benchmark.runner._retrieve") as mock_retrieve:
+    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
         mock_retrieve.return_value = _mock_retrieve_result([])
         _ = run_benchmark(suite, system="bm25", agent="test", output_dir=output_dir)
 

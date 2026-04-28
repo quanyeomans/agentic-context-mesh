@@ -34,7 +34,7 @@ def embedded_db(tmp_path_factory):
     Copy the live kairix DB to a temp path, embed 50 chunks via Azure,
     and return the path. Restores env after.
     """
-    from kairix.db import get_db_path
+    from kairix.core.db import get_db_path
 
     src = get_db_path()
     tmp_dir = tmp_path_factory.mktemp("kairix_e2e")
@@ -51,8 +51,8 @@ def embedded_db(tmp_path_factory):
     # Run embed on the copy with --limit 50
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("KAIRIX_DB_PATH", str(tmp_db_path))
-        from kairix.embed.embed import run_embed
-        from kairix.embed.schema import ensure_vec_table, validate_schema
+        from kairix.core.embed.embed import run_embed
+        from kairix.core.embed.schema import ensure_vec_table, validate_schema
 
         db = sqlite3.connect(str(tmp_db_path))
         validate_schema(db)
@@ -71,7 +71,7 @@ class TestVsearchQuality:
         """After embedding, vector search should find known docs in top-3."""
         monkeypatch.setenv("KAIRIX_DB_PATH", str(embedded_db))
 
-        from kairix.search.vector import vector_search
+        from kairix.core.search.vector import vector_search
 
         passed = 0
         for query, gold_fragment in GOLD_QUERIES:
@@ -93,7 +93,7 @@ class TestVsearchQuality:
         """Every query should return at least 1 result after embedding."""
         monkeypatch.setenv("KAIRIX_DB_PATH", str(embedded_db))
 
-        from kairix.search.vector import vector_search
+        from kairix.core.search.vector import vector_search
 
         results = vector_search("test query", limit=3)
         assert len(results) > 0, "vector search returned zero results after embedding"

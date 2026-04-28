@@ -25,7 +25,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from kairix.graph.client import get_client
+from kairix.knowledge.graph.client import get_client
 
 VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault"))
 BRIEF_DIRS = [

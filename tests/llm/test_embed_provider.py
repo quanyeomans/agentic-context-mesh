@@ -1,4 +1,4 @@
-"""Tests for kairix.llm.embed_provider — SDK-based embedding clients."""
+"""Tests for kairix.platform.llm.embed_provider — SDK-based embedding clients."""
 
 from __future__ import annotations
 
@@ -20,11 +20,11 @@ def _mock_openai_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "openai", _mock_openai)
     yield
     # Re-import to clear cached provider instances
-    if "kairix.llm.embed_provider" in sys.modules:
-        del sys.modules["kairix.llm.embed_provider"]
+    if "kairix.platform.llm.embed_provider" in sys.modules:
+        del sys.modules["kairix.platform.llm.embed_provider"]
 
 
-from kairix.llm.embed_provider import (  # noqa: E402
+from kairix.platform.llm.embed_provider import (  # noqa: E402
     AzureEmbedProvider,
     EmbedProvider,
     OpenAIEmbedProvider,

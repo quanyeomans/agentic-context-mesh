@@ -2,7 +2,7 @@
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.eval.tune import CorpusHints, analyse_results, recommend
+from kairix.quality.eval.tune import CorpusHints, analyse_results, recommend
 
 # Module-level state (simple, test-scoped)
 _state: dict = {}

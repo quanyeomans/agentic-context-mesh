@@ -18,7 +18,7 @@ Usage:
 
     # On VM:
     python3 scripts/build-reflib-queries.py \
-        --db-path /data/kairix-reference-library/.kairix/kairix.db \
+        --db-path /data/kairix-reference-library/.kairix/kairix.core.db \
         --output /data/kairix-reference-library/eval/reference-library.yaml \
         --n-cases 160
 """

@@ -2,7 +2,7 @@
 
 import pytest
 
-from kairix.contracts.embed import EmbedderProtocol
+from kairix.quality.contracts.embed import EmbedderProtocol
 
 
 @pytest.mark.contract

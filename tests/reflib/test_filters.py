@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.filters import (
+from kairix.knowledge.reflib.filters import (
     filter_collection,
     is_boilerplate_filename,
     is_boilerplate_path,
@@ -12,7 +12,7 @@ from kairix.reflib.filters import (
     matches_source_excludes,
     should_include,
 )
-from kairix.reflib.sources import SourceDef
+from kairix.knowledge.reflib.sources import SourceDef
 
 
 @pytest.mark.unit

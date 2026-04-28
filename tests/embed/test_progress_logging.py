@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.embed.embed import run_embed
+from kairix.core.embed.embed import run_embed
 
 pytestmark = pytest.mark.unit
 
@@ -74,14 +74,14 @@ def test_embed_progress_logging_emitted(embed_db, caplog):
     dims = 1536
 
     with (
-        patch("kairix.embed.embed._get_azure_config", return_value=("key", "https://endpoint", "deploy")),
-        patch("kairix.embed.embed.preflight_check", return_value=dims),
-        patch("kairix.embed.embed.migrate_content_vectors"),
-        patch("kairix.embed.embed.embed_batch", return_value=[_fake_vec(dims)]),
-        patch("kairix.embed.embed.stage_embedding"),
-        patch("kairix.embed.embed._update_usearch_index"),
+        patch("kairix.core.embed.embed._get_azure_config", return_value=("key", "https://endpoint", "deploy")),
+        patch("kairix.core.embed.embed.preflight_check", return_value=dims),
+        patch("kairix.core.embed.embed.migrate_content_vectors"),
+        patch("kairix.core.embed.embed.embed_batch", return_value=[_fake_vec(dims)]),
+        patch("kairix.core.embed.embed.stage_embedding"),
+        patch("kairix.core.embed.embed._update_usearch_index"),
     ):
-        with caplog.at_level(logging.INFO, logger="kairix.embed.embed"):
+        with caplog.at_level(logging.INFO, logger="kairix.core.embed.embed"):
             result = run_embed(embed_db, batch_size=50, limit=2)
 
     # Verify the progress log line was actually emitted

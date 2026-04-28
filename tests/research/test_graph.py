@@ -1,4 +1,4 @@
-"""Tests for kairix.research.graph — full graph execution."""
+"""Tests for kairix.agents.research.graph — full graph execution."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 @pytest.mark.unit
 def test_run_research_sufficient_first_pass() -> None:
     """Graph completes in one pass when results are sufficient."""
-    from kairix.research.graph import run_research
+    from kairix.agents.research.graph import run_research
 
     mock_backend = MagicMock()
     # evaluate_sufficiency returns high confidence
@@ -21,9 +21,11 @@ def test_run_research_sufficient_first_pass() -> None:
     ]
 
     with (
-        patch("kairix.mcp.server.tool_search", return_value={"results": [{"path": "doc.md", "snippet": "content"}]}),
-        patch("kairix.llm.get_default_backend", return_value=mock_backend),
-        patch("kairix.search.intent.classify", return_value=MagicMock(value="semantic")),
+        patch(
+            "kairix.agents.mcp.server.tool_search", return_value={"results": [{"path": "doc.md", "snippet": "content"}]}
+        ),
+        patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
+        patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
     ):
         result = run_research("simple question", max_turns=4)
 
@@ -35,7 +37,7 @@ def test_run_research_sufficient_first_pass() -> None:
 @pytest.mark.unit
 def test_run_research_refines_then_succeeds() -> None:
     """Graph refines query and succeeds on second pass."""
-    from kairix.research.graph import run_research
+    from kairix.agents.research.graph import run_research
 
     mock_backend = MagicMock()
     mock_backend.chat.side_effect = [
@@ -55,9 +57,9 @@ def test_run_research_refines_then_succeeds() -> None:
         return {"results": [{"path": f"doc{call_count}.md", "snippet": f"content {call_count}"}]}
 
     with (
-        patch("kairix.mcp.server.tool_search", side_effect=mock_search),
-        patch("kairix.llm.get_default_backend", return_value=mock_backend),
-        patch("kairix.search.intent.classify", return_value=MagicMock(value="semantic")),
+        patch("kairix.agents.mcp.server.tool_search", side_effect=mock_search),
+        patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
+        patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
     ):
         result = run_research("complex question", max_turns=4)
 
@@ -69,7 +71,7 @@ def test_run_research_refines_then_succeeds() -> None:
 @pytest.mark.unit
 def test_run_research_gives_up_after_max_turns() -> None:
     """Graph gives up when max turns reached without sufficient results."""
-    from kairix.research.graph import run_research
+    from kairix.agents.research.graph import run_research
 
     mock_backend = MagicMock()
     # Always insufficient
@@ -83,9 +85,9 @@ def test_run_research_gives_up_after_max_turns() -> None:
     )
 
     with (
-        patch("kairix.mcp.server.tool_search", return_value={"results": [{"path": "a.md", "snippet": "x"}]}),
-        patch("kairix.llm.get_default_backend", return_value=mock_backend),
-        patch("kairix.search.intent.classify", return_value=MagicMock(value="semantic")),
+        patch("kairix.agents.mcp.server.tool_search", return_value={"results": [{"path": "a.md", "snippet": "x"}]}),
+        patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
+        patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
     ):
         result = run_research("impossible question", max_turns=2)
 
@@ -96,9 +98,9 @@ def test_run_research_gives_up_after_max_turns() -> None:
 @pytest.mark.unit
 def test_run_research_handles_exception() -> None:
     """Graph returns error dict when something goes wrong."""
-    from kairix.research.graph import run_research
+    from kairix.agents.research.graph import run_research
 
-    with patch("kairix.research.graph.build_researcher_graph", side_effect=RuntimeError("boom")):
+    with patch("kairix.agents.research.graph.build_researcher_graph", side_effect=RuntimeError("boom")):
         result = run_research("broken query")
 
     assert result["error"] != ""
