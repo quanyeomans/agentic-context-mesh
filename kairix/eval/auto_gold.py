@@ -16,9 +16,7 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-_PROCEDURAL_PATTERNS = re.compile(
-    r"(?:^|/)(?:how-to|runbook|procedure|sop|guide|playbook|tutorial)", re.IGNORECASE
-)
+_PROCEDURAL_PATTERNS = re.compile(r"(?:^|/)(?:how-to|runbook|procedure|sop|guide|playbook|tutorial)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -38,9 +36,7 @@ def analyse_corpus(db: sqlite3.Connection) -> CorpusProfile:
     """Analyse indexed documents to determine corpus profile."""
     total = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
     collections: dict[str, int] = {}
-    for row in db.execute(
-        "SELECT collection, COUNT(*) FROM documents WHERE active=1 GROUP BY collection"
-    ).fetchall():
+    for row in db.execute("SELECT collection, COUNT(*) FROM documents WHERE active=1 GROUP BY collection").fetchall():
         collections[row[0]] = row[1]
 
     paths = db.execute("SELECT path, title FROM documents WHERE active=1").fetchall()
@@ -93,23 +89,27 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]
     for title in titles[:n_recall]:
         idx += 1
         readable = title.replace("-", " ").replace("_", " ")
-        queries.append({
-            "id": f"AG-R{idx:03d}",
-            "category": "recall",
-            "query": f"{readable}",
-            "score_method": "ndcg",
-        })
+        queries.append(
+            {
+                "id": f"AG-R{idx:03d}",
+                "category": "recall",
+                "query": f"{readable}",
+                "score_method": "ndcg",
+            }
+        )
 
     # Conceptual queries — "explain the concept of X"
     for title in titles[n_recall : n_recall + n_conceptual]:
         idx += 1
         readable = title.replace("-", " ").replace("_", " ")
-        queries.append({
-            "id": f"AG-C{idx:03d}",
-            "category": "conceptual",
-            "query": f"explain the concept of {readable}",
-            "score_method": "ndcg",
-        })
+        queries.append(
+            {
+                "id": f"AG-C{idx:03d}",
+                "category": "conceptual",
+                "query": f"explain the concept of {readable}",
+                "score_method": "ndcg",
+            }
+        )
 
     # Procedural queries
     proc_titles = [t for t in titles if _PROCEDURAL_PATTERNS.search(t)][:n_procedural]
@@ -118,36 +118,42 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]
     for title in proc_titles:
         idx += 1
         readable = title.replace("-", " ").replace("_", " ")
-        queries.append({
-            "id": f"AG-P{idx:03d}",
-            "category": "procedural",
-            "query": f"how to {readable}",
-            "score_method": "ndcg",
-        })
+        queries.append(
+            {
+                "id": f"AG-P{idx:03d}",
+                "category": "procedural",
+                "query": f"how to {readable}",
+                "score_method": "ndcg",
+            }
+        )
 
     # Temporal queries
     for i in range(n_temporal):
         idx += 1
         if i < len(titles):
             readable = titles[i].replace("-", " ").replace("_", " ")
-            queries.append({
-                "id": f"AG-T{idx:03d}",
-                "category": "temporal",
-                "query": f"recent changes to {readable}",
-                "score_method": "ndcg",
-            })
+            queries.append(
+                {
+                    "id": f"AG-T{idx:03d}",
+                    "category": "temporal",
+                    "query": f"recent changes to {readable}",
+                    "score_method": "ndcg",
+                }
+            )
 
     # Entity queries
     for i in range(n_entity):
         idx += 1
         if i < len(titles):
             readable = titles[i].replace("-", " ").replace("_", " ")
-            queries.append({
-                "id": f"AG-E{idx:03d}",
-                "category": "entity",
-                "query": f"what is {readable}",
-                "score_method": "ndcg",
-            })
+            queries.append(
+                {
+                    "id": f"AG-E{idx:03d}",
+                    "category": "entity",
+                    "query": f"what is {readable}",
+                    "score_method": "ndcg",
+                }
+            )
 
     # Multi-hop — combine two titles
     for i in range(n_multi_hop):
@@ -155,12 +161,14 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]
         if i + 1 < len(titles):
             t1 = titles[i].replace("-", " ")
             t2 = titles[i + 1].replace("-", " ")
-            queries.append({
-                "id": f"AG-M{idx:03d}",
-                "category": "multi_hop",
-                "query": f"how does {t1} relate to {t2}",
-                "score_method": "ndcg",
-            })
+            queries.append(
+                {
+                    "id": f"AG-M{idx:03d}",
+                    "category": "multi_hop",
+                    "query": f"how does {t1} relate to {t2}",
+                    "score_method": "ndcg",
+                }
+            )
 
     # Pad to reach target count by cycling titles with variant templates
     variant_templates = [
@@ -175,12 +183,14 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]
         title = titles[vi % len(titles)]
         idx += 1
         readable = title.replace("-", " ").replace("_", " ")
-        queries.append({
-            "id": f"AG-V{idx:03d}",
-            "category": cat,
-            "query": tmpl.format(title=readable),
-            "score_method": "ndcg",
-        })
+        queries.append(
+            {
+                "id": f"AG-V{idx:03d}",
+                "category": cat,
+                "query": tmpl.format(title=readable),
+                "score_method": "ndcg",
+            }
+        )
         vi += 1
 
     return queries[:n]
