@@ -117,7 +117,7 @@ def seed_brief_entities(dry_run: bool = False, vault_root: Path = VAULT_ROOT) ->
 
     if not dry_run and edges:
         now = datetime.now(timezone.utc).isoformat()
-        for brief_path_str, entity_id, entity_name in edges:
+        for brief_path_str, entity_id, _entity_name in edges:
             try:
                 # Store brief cross-reference as a property on the entity node
                 neo4j.cypher(  # type: ignore[attr-defined]
