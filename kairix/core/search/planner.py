@@ -35,7 +35,7 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
     seen_ids: set[str] = set()
     for word in words[:6]:
         try:
-            matches = client.find_by_name(word)  # type: ignore[union-attr]
+            matches = client.find_by_name(word)
             for m in matches[:2]:
                 if m.get("id") and m["id"] not in seen_ids:
                     seen_ids.add(m["id"])
@@ -54,7 +54,7 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
         if not eid:
             continue
         try:
-            related = client.related_entities(eid, max_hops=1)  # type: ignore[union-attr]
+            related = client.related_entities(eid, max_hops=1)
             rel_names = [r.get("name") for r in related[:4] if r.get("name") and r.get("name") != ename]
             if rel_names:
                 context_parts.append(f"- {ename} → {', '.join(rel_names)}")

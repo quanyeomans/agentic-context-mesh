@@ -365,7 +365,7 @@ def entity_boost_neo4j(
         return results
 
     try:
-        rows = client.cypher(  # type: ignore[union-attr]
+        rows = client.cypher(
             "MATCH (n) WHERE n.vault_path IS NOT NULL AND n.vault_path <> '' "
             "OPTIONAL MATCH ()-[:MENTIONS]->(n) "
             "RETURN n.vault_path AS vault_path, n.name AS name, labels(n) AS labels, count(*) AS in_degree"
