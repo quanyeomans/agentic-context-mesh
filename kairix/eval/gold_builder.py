@@ -37,6 +37,20 @@ _WEIGHT_PRESETS: dict[str, tuple[float, float, float]] = {
 }
 
 
+def _path_title(path: str) -> str:
+    """Build a path-based gold title from a document path.
+
+    Uses the last 3 path segments (without .md extension) to create
+    a title that's unique even when filenames are generic ("readme").
+
+    Example: "reference-library/engineering/adr-examples/readme.md"
+           → "engineering/adr-examples/readme"
+    """
+    parts = Path(path).with_suffix("").parts
+    # Use last 3 segments (or fewer if path is short)
+    return "/".join(parts[-3:]) if len(parts) >= 3 else "/".join(parts)
+
+
 @dataclass
 class PooledCandidate:
     """A document candidate from the retrieval pool."""
@@ -348,7 +362,7 @@ def build_independent_gold(
             if c.grade >= 1:
                 gold_titles.append(
                     {
-                        "title": Path(c.path).stem,
+                        "title": _path_title(c.path),
                         "relevance": c.grade,
                     }
                 )

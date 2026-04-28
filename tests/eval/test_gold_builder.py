@@ -217,7 +217,7 @@ class TestBuildIndependentGold:
 
         output = yaml.safe_load(output_path.read_text())
         gold_titles = output["cases"][0]["gold_titles"]
-        assert any(g["title"] == "relevant" for g in gold_titles)
+        assert any("relevant" in g["title"] for g in gold_titles)
         assert output["meta"]["gold_method"] == "trec-pooling-llm-judge"
 
     @pytest.mark.unit

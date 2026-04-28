@@ -149,21 +149,53 @@ def _stem_from_path(path: str) -> str:
     return _normalise_title(Path(path).stem)
 
 
+def _path_suffix_from_path(path: str) -> str:
+    """Normalise a full path for suffix matching (remove .md, lowercase, hyphens)."""
+    return _normalise_title(path.replace(".md", ""))
+
+
+def _match_gold_to_path(gold_title: str, result_path: str) -> bool:
+    """Check if a gold title matches a retrieved path.
+
+    Path-based (contains '/'): match as suffix of the result path.
+      gold="engineering/adr-examples/readme" matches
+      "reference-library/engineering/adr-examples/readme.md"
+
+    Stem-only (no '/'): match against filename stem only.
+      gold="patterns" matches "vault/patterns.md"
+    """
+    norm_gold = _normalise_title(gold_title)
+    if "/" in gold_title:
+        norm_path = _path_suffix_from_path(result_path)
+        return norm_path.endswith(norm_gold)
+    return _stem_from_path(result_path) == norm_gold
+
+
 def _title_in_retrieved(gold_title: str, retrieved_paths: list[str], top_k: int) -> bool:
     """True if any of the top-k retrieved paths resolves to the gold title."""
-    norm = _normalise_title(gold_title)
-    return any(_stem_from_path(p) == norm for p in retrieved_paths[:top_k])
+    return any(_match_gold_to_path(gold_title, p) for p in retrieved_paths[:top_k])
+
+
+def _relevance_for_path(path: str, gold_titles: list[dict]) -> int:
+    """Return the relevance grade for a retrieved path against gold titles."""
+    for g in gold_titles:
+        if _match_gold_to_path(g["title"], path):
+            return g.get("relevance", 0)
+    return 0
 
 
 def _ndcg_score_by_title(retrieved_paths: list[str], gold_titles: list[dict], k: int = 10) -> float:
-    """NDCG@k using title-based document identity (path-agnostic)."""
+    """NDCG@k using title-based document identity.
+
+    Supports both stem-only ("patterns") and path-based
+    ("engineering/adr-examples/readme") gold titles.
+    """
     if not gold_titles:
         return 0.0
-    idcg = _ideal_dcg(gold_titles, k)  # _ideal_dcg reads "relevance" key, works for both formats
+    idcg = _ideal_dcg(gold_titles, k)
     if idcg == 0.0:
         return 0.0
-    gold_map = {_normalise_title(g["title"]): g["relevance"] for g in gold_titles}
-    rels = [gold_map.get(_stem_from_path(p), 0) for p in retrieved_paths[:k]]
+    rels = [_relevance_for_path(p, gold_titles) for p in retrieved_paths[:k]]
     return _dcg(rels, k) / idcg
 
 
