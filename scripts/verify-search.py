@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import time
@@ -44,7 +43,7 @@ def _run_search(
     query: str, agent: str, kairix_bin: str, timeout: int = 60
 ) -> dict:
     """Run kairix search --json and return parsed result dict."""
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 — intentional: runs the kairix CLI binary
         [kairix_bin, "search", query, "--agent", agent, "--json"],
         capture_output=True,
         text=True,
@@ -56,7 +55,7 @@ def _run_search(
     stdout = result.stdout.strip()
     lines = stdout.splitlines()
     json_start = next(
-        (i for i, l in enumerate(lines) if l.lstrip().startswith("{")), 0
+        (i for i, line in enumerate(lines) if line.lstrip().startswith("{")), 0
     )
     return json.loads("\n".join(lines[json_start:]))
 
@@ -124,13 +123,12 @@ def check_curator_health() -> CheckResult:
         if not report.neo4j_available:
             note = "Neo4j unavailable"
         elif not structural_ok:
-            note = "issues: {} synth failures, {} missing vault, {} stale".format(
-                len(report.synthesis_failures),
-                len(report.missing_vault_path),
-                len(report.stale_entities),
-            )
+            synth = len(report.synthesis_failures)
+            missing = len(report.missing_vault_path)
+            stale = len(report.stale_entities)
+            note = f"issues: {synth} synth failures, {missing} missing vault, {stale} stale"
         elif report.synthesis_failures:
-            note = "{} synth failures (no summary — expected)".format(len(report.synthesis_failures))
+            note = f"{len(report.synthesis_failures)} synth failures (no summary — expected)"
         return CheckResult(
             name="curator-health",
             intent=None,

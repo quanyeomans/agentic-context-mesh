@@ -493,4 +493,3 @@ RETRIEVAL LOGIC CHANGES ONLY
 SCHEMA CHANGES ONLY
 [ ] Migration script added under the relevant migrations directory
 ```
-
