@@ -131,14 +131,40 @@ class VectorIndex:
 
         return results
 
-    def add_vectors(self, hash_seqs: list[str], vectors: list[list[float]]) -> int:
-        """Add new vectors incrementally. Saves index after adding."""
+    def _ensure_mutable(self) -> None:
+        """Ensure the index is mutable (not a read-only mmap view).
+
+        usearch Index.restore(view=True) creates an immutable memory-mapped
+        index. To add vectors we need a mutable copy. This rebuilds the
+        index from the existing vectors when needed.
+        """
         from usearch.index import Index
 
-        if not hash_seqs:
-            return 0
         if self._index is None:
             self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")
+            return
+
+        # Check if the index is immutable by attempting a dummy operation
+        try:
+            # If this succeeds, the index is already mutable
+            test_key = np.array([self._next_key], dtype=np.int64)
+            test_vec = np.zeros((1, self._ndim), dtype=np.float32)
+            self._index.add(test_key, test_vec)
+            self._index.remove(test_key)
+        except Exception:
+            # Index is immutable — rebuild as mutable
+            logger.info("vec_index: converting immutable index to mutable (%d vectors)", len(self._index))
+            old_keys = np.array(list(self._key_to_hash_seq.keys()), dtype=np.int64)
+            old_vecs = np.array([self._index[k] for k in old_keys], dtype=np.float32)
+            self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")
+            if len(old_keys) > 0:
+                self._index.add(old_keys, old_vecs)
+
+    def add_vectors(self, hash_seqs: list[str], vectors: list[list[float]]) -> int:
+        """Add new vectors incrementally. Saves index after adding."""
+        if not hash_seqs:
+            return 0
+        self._ensure_mutable()
 
         arr = np.array(vectors, dtype=np.float32)
         keys = np.arange(self._next_key, self._next_key + len(hash_seqs), dtype=np.int64)
