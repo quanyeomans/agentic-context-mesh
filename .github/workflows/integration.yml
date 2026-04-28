@@ -86,13 +86,6 @@ jobs:
       - name: Install package + dev deps
         run: pip install -e ".[dev]" pytest-timeout
 
-      - name: Install QMD to get sqlite-vec
-        run: |
-          npm install -g qmd 2>/dev/null || \
-          npx --yes qmd --version 2>/dev/null || \
-          echo "QMD not available — integration tests requiring sqlite-vec will skip"
-        continue-on-error: true
-
       - name: Run integration tests
         run: |
           pytest tests/ \

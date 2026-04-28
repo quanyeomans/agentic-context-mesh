@@ -1,7 +1,7 @@
 name: Benchmark gate
 
 # Automatic regression gate — runs on every PR that touches retrieval logic.
-# Uses the mock retrieval backend (no Azure API or QMD DB required).
+# Uses the mock retrieval backend (no Azure API required).
 # Compares against the committed baseline in benchmark-results/contract-baseline.json.
 #
 # FAIL conditions:

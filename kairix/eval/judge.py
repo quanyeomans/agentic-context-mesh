@@ -83,7 +83,7 @@ _CALIBRATION_ANCHORS: list[dict] = [
     {
         "query": "What database does this project use for full-text search?",
         "title": "architecture-overview",
-        "snippet": "Full-text search is implemented using SQLite FTS5 via the qmd index. BM25 ranking is handled natively by the FTS5 extension.",  # noqa: E501
+        "snippet": "Full-text search is implemented using SQLite FTS5 via the kairix index. BM25 ranking is handled natively by the FTS5 extension.",  # noqa: E501
         "expected": 2,
     },
     {

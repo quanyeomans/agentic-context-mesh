@@ -1,6 +1,6 @@
 """
 Integration tests: DB schema validation, vector insert/query roundtrip.
-Uses a real (temporary) SQLite DB with the QMD schema. No Azure calls.
+Uses a real (temporary) SQLite DB with the kairix schema. No Azure calls.
 """
 
 import sqlite3
@@ -20,8 +20,8 @@ pytestmark = pytest.mark.integration
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 
-def create_qmd_schema(db: sqlite3.Connection) -> None:
-    """Create the minimum QMD schema needed for our tests (mirrors qmd@1.1.2)."""
+def create_kairix_schema(db: sqlite3.Connection) -> None:
+    """Create the minimum kairix schema needed for our tests."""
     db.executescript("""
         CREATE TABLE IF NOT EXISTS content (
             hash TEXT PRIMARY KEY,
@@ -55,10 +55,10 @@ def create_qmd_schema(db: sqlite3.Connection) -> None:
 
 @pytest.fixture
 def tmp_db():
-    """Provide a fresh in-memory QMD-schema SQLite DB."""
+    """Provide a fresh in-memory kairix-schema SQLite DB."""
     db = sqlite3.connect(":memory:")
     db.execute("PRAGMA journal_mode=WAL")
-    create_qmd_schema(db)
+    create_kairix_schema(db)
     yield db
     db.close()
 

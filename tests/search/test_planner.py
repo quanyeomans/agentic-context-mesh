@@ -57,7 +57,7 @@ def _search_fn_factory(results_by_query: dict[str, list[_FakeResult]]):
 class TestDecompose:
     @pytest.mark.unit
     def test_fallback_when_import_fails(self) -> None:
-        """Should return [query] when mnemosyne._azure is not importable."""
+        """Should return [query] when kairix._azure is not importable."""
         planner = QueryPlanner()
         with patch("builtins.__import__", side_effect=ImportError("no module")):
             result = planner.decompose("what is the meaning of life?")

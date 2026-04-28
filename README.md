@@ -73,12 +73,12 @@ Kairix controls how much context each query returns. A quick fact check gets 1,5
 
 ## How it compares
 
-| | Kairix | Azure AI Search | QMD | Notion AI / Confluence AI | Stuffing the context window |
-|---|---|---|---|---|---|
-| **Your data stays private** | Yes — nothing leaves your servers | Azure cloud (your tenant) | Yes (local) | Vendor cloud | Sent to LLM provider |
-| **Finds the right document** | Keyword + meaning + knowledge graph, fused | Keyword OR meaning (not fused) | Keyword only (BM25) | Keyword only | No search — sends everything |
-| **Knows who people are** | Yes — entity graph links people, companies, decisions | No | No | No | No |
-| **Answers date questions** | Yes — "what happened last week" just works | Manual filters | No | No | No |
+| | Kairix | Azure AI Search | Notion AI / Confluence AI | Stuffing the context window |
+|---|---|---|---|---|
+| **Your data stays private** | Yes — nothing leaves your servers | Azure cloud (your tenant) | Vendor cloud | Sent to LLM provider |
+| **Finds the right document** | Keyword + meaning + knowledge graph, fused | Keyword OR meaning (not fused) | Keyword only | No search — sends everything |
+| **Knows who people are** | Yes — entity graph links people, companies, decisions | No | No | No |
+| **Answers date questions** | Yes — "what happened last week" just works | Manual filters | No | No |
 | **Controls what the LLM reads** | Yes — budget per query (saves money) | No budget control | No | Sends full pages | Sends everything |
 | **Proves it works** | Benchmarked: 0.80 NDCG@10 on real queries | Not published | Not published | Not published | N/A |
 | **Needs a GPU** | No | No | No | N/A (SaaS) | No |

@@ -38,12 +38,12 @@ def board_file(tmp_path: Path) -> Path:
 
         ## Done
 
-        - [ ] Phase 1 shipped [completed::2026-03-10] [project::Mnemosyne]
+        - [ ] Phase 1 shipped [completed::2026-03-10] [project::Kairix]
         - [ ] Fix BM25 bug [completed::2026-03-12] [started::2026-03-11]
 
         ## In Progress
 
-        - [ ] Phase 2 temporal [started::2026-03-23] [project::Mnemosyne]
+        - [ ] Phase 2 temporal [started::2026-03-23] [project::Kairix]
 
         ## Ready
 
@@ -54,7 +54,7 @@ def board_file(tmp_path: Path) -> Path:
         - [ ] Future task with no dates at all
 
     """)
-    p = tmp_path / "Boards" / "Mnemosyne.md"
+    p = tmp_path / "Boards" / "Kairix.md"
     p.parent.mkdir(parents=True)
     p.write_text(content, encoding="utf-8")
     return p

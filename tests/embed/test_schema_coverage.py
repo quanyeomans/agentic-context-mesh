@@ -70,7 +70,7 @@ def test_get_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_get_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Returns default kairix DB path when no DB exists (for fresh installs)."""
     monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
-    monkeypatch.delenv("QMD_CACHE_DIR", raising=False)
+    monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
     # Redirect home to tmp_path so default path resolves to a temp location
     monkeypatch.setenv("HOME", str(tmp_path))
     result = get_db_path()
@@ -134,7 +134,7 @@ def test_ensure_vec_table_skips_recreate_when_dims_match() -> None:
 
 
 def _make_minimal_db() -> sqlite3.Connection:
-    """Create minimal in-memory QMD schema for testing."""
+    """Create minimal in-memory kairix schema for testing."""
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
     db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT)")

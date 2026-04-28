@@ -8,7 +8,7 @@ Provides:
   - JudgeResult, judge_batch: per-document LLM relevance grading (gpt-4o-mini)
   - JudgeCalibrationError: raised when calibration anchor check fails
   - GeneratedQuery, GenerationResult, EnrichmentResult: GPL suite generation
-  - generate_suite: generate a benchmark suite from the QMD corpus
+  - generate_suite: generate a benchmark suite from the kairix corpus
   - enrich_suite: convert existing gold_path suite to graded gold_titles
   - MonitorResult, run_monitor: canary regression detection
 """

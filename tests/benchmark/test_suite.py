@@ -71,7 +71,7 @@ def minimal_suite_yaml(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def in_memory_db() -> sqlite3.Connection:
-    """Create an in-memory SQLite DB mimicking the QMD documents table."""
+    """Create an in-memory SQLite DB mimicking the kairix documents table."""
     db = sqlite3.connect(":memory:")
     db.execute(
         """
@@ -93,7 +93,7 @@ def in_memory_db() -> sqlite3.Connection:
         [
             ("vault", "01-projects/arize/report.md", "Arize Report"),
             ("vault", "04-agent-knowledge/builder/rules.md", "Builder Rules"),
-            ("vault", "01-projects/mnemosyne/architecture.md", "Mnemosyne Architecture"),
+            ("vault", "01-projects/kairix-platform/architecture.md", "Kairix Architecture"),
         ],
     )
     db.commit()
@@ -457,8 +457,8 @@ def test_run_benchmark_mocked_retrieval_correct_scores() -> None:
             BenchmarkCase(
                 id="R02",
                 category="recall",
-                query="Mnemosyne architecture",
-                gold_path="01-projects/mnemosyne/architecture.md",
+                query="Kairix architecture",
+                gold_path="01-projects/kairix-platform/architecture.md",
                 score_method="exact",
             ),
         ],

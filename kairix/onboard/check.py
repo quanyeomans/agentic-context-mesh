@@ -475,7 +475,7 @@ def check_chunk_date_populated() -> CheckResult:
             name="chunk_date_populated",
             ok=False,
             detail=f"chunk_date check failed: {exc}",
-            fix="Check QMD index at ~/.cache/kairix/index.sqlite",
+            fix="Check kairix index at ~/.cache/kairix/index.sqlite",
         )
 
 

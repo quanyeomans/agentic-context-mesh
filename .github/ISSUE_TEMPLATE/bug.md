@@ -26,7 +26,6 @@ labels: bug
 
 - Kairix version: `kairix --version`
 - Python version: `python3 --version`
-- QMD version: `qmd --version`
 - sqlite-vec loaded: yes / no
 - OS:
 
@@ -39,4 +38,4 @@ labels: bug
 
 ## Additional context
 
-<!-- Anything else that might help — recent config changes, QMD version upgrade, etc. -->
+<!-- Anything else that might help — recent config changes, etc. -->

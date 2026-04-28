@@ -396,8 +396,8 @@ def main(argv: list[str] | None = None) -> None:
     p_gen.add_argument("--categories", help="Comma-separated categories (default: all)")
     p_gen.add_argument(
         "--db",
-        default=str(__import__("pathlib").Path.home() / ".cache/qmd/index.sqlite"),
-        help="QMD SQLite path (default: ~/.cache/qmd/index.sqlite)",
+        default=str(__import__("pathlib").Path.home() / ".cache/kairix/index.sqlite"),
+        help="kairix SQLite path (default: ~/.cache/kairix/index.sqlite)",
     )
     p_gen.add_argument("--deployment", default="gpt-4o-mini", help="Azure deployment (default: gpt-4o-mini)")
     p_gen.add_argument("--no-calibrate", action="store_true", help="Skip calibration anchor check")
@@ -409,7 +409,7 @@ def main(argv: list[str] | None = None) -> None:
     p_enr.add_argument("--suite", required=True, help="Input suite YAML path")
     p_enr.add_argument("--output", required=True, help="Output suite YAML path")
     p_enr.add_argument(
-        "--db", default=str(__import__("pathlib").Path.home() / ".cache/qmd/index.sqlite"), help="QMD SQLite path"
+        "--db", default=str(__import__("pathlib").Path.home() / ".cache/kairix/index.sqlite"), help="kairix SQLite path"
     )
     p_enr.add_argument("--deployment", default="gpt-4o-mini", help="Azure deployment (default: gpt-4o-mini)")
     p_enr.add_argument("--agent", default="shape", help="Agent for retrieval scoping (default: shape)")
@@ -418,7 +418,7 @@ def main(argv: list[str] | None = None) -> None:
     p_mon = subparsers.add_parser("monitor", help="Run canary suite and check for regression")
     p_mon.add_argument("--suite", required=True, help="Canary suite YAML path")
     p_mon.add_argument(
-        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)"
+        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)"
     )
     p_mon.add_argument(
         "--alert-threshold",
@@ -434,7 +434,7 @@ def main(argv: list[str] | None = None) -> None:
     # --- report ---
     p_rep = subparsers.add_parser("report", help="Generate markdown report from monitor log")
     p_rep.add_argument(
-        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/qmd/monitor.jsonl)"
+        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)"
     )
     p_rep.add_argument("--days", type=int, default=30, help="Days of history to include (default: 30)")
     p_rep.add_argument("--output", default=None, help="Markdown output path (stdout if omitted)")
@@ -445,8 +445,8 @@ def main(argv: list[str] | None = None) -> None:
     p_gold.add_argument("--output", required=True, help="Output enriched suite YAML")
     p_gold.add_argument(
         "--systems",
-        default="bm25-equal,bm25-qmd,bm25-title,vector",
-        help="Retrieval systems to pool (default: bm25-equal,bm25-qmd,bm25-title,vector)",
+        default="bm25-equal,bm25-filepath,bm25-title,vector",
+        help="Retrieval systems to pool (default: bm25-equal,bm25-filepath,bm25-title,vector)",
     )
     p_gold.add_argument("--judge-runs", type=int, default=2, help="Judge runs per query (default: 2)")
     p_gold.add_argument("--no-calibrate", action="store_true", help="Skip judge calibration")

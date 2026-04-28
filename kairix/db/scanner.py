@@ -1,7 +1,7 @@
 """
 Document scanner — discovers, hashes, and ingests markdown files into the kairix database.
 
-Replaces what ``qmd update`` previously did: scanning document directories, computing
+Handles scanning document directories, computing
 content hashes, and upserting into the documents + content tables.
 
 Usage::

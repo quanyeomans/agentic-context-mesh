@@ -1,7 +1,7 @@
 meta:
   name: contract
   description: >
-    CI contract suite — runs against the mock retrieval backend (no Azure or QMD required).
+    CI contract suite — runs against the mock retrieval backend (no Azure required).
     Tests pipeline code correctness (RRF fusion, scoring, boost logic) not retrieval quality.
     Baseline committed to benchmark-results/contract-baseline.json.
     Gate: overall weighted_total must not regress more than 0.02 from the baseline.

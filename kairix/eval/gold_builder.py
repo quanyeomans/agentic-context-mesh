@@ -10,7 +10,7 @@ Usage::
     kairix eval build-gold \\
         --suite suites/v2-real-world.yaml \\
         --output suites/v2-independent-gold.yaml \\
-        --systems bm25-equal,bm25-qmd,bm25-title,vector
+        --systems bm25-equal,bm25-filepath,bm25-title,vector
 
 Methodology: TREC pooling (Voorhees & Harman, 2005) adapted for LLM judges.
 """
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # BM25 weight presets for pooling — column order: filepath, title, doc
 _WEIGHT_PRESETS: dict[str, tuple[float, float, float]] = {
     "bm25-equal": (1.0, 1.0, 1.0),
-    "bm25-qmd": (10.0, 1.0, 1.0),
+    "bm25-filepath": (10.0, 1.0, 1.0),
     "bm25-title": (1.0, 5.0, 1.0),
     "bm25-fp-title": (5.0, 3.0, 1.0),
 }
@@ -318,7 +318,7 @@ def build_independent_gold(
         GoldBuildReport with statistics.
     """
     if systems is None:
-        systems = ["bm25-equal", "bm25-qmd", "bm25-title", "vector"]
+        systems = ["bm25-equal", "bm25-filepath", "bm25-title", "vector"]
 
     # Load suite
     with open(suite_path) as f:

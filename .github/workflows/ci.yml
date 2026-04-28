@@ -223,12 +223,6 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
-      - name: Install QMD (provides sqlite-vec extension)
-        run: |
-          npm install -g qmd 2>/dev/null || true
-          npx --yes qmd --version || echo "QMD install attempted"
-        continue-on-error: true
-
       - name: Integration tests
         run: |
           pytest tests/ -m integration -v --tb=short --maxfail=3 \

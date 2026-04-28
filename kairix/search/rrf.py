@@ -80,7 +80,7 @@ def canonical_path(raw: str) -> str:
     """Normalise path to bare form for deduplication.
 
     Both BM25 and vector search return vault-relative paths directly.
-    This function strips any legacy qmd:// URIs that might remain in
+    This function strips any legacy scheme URIs that might remain in
     cached data or tests.
     """
     if raw.startswith("qmd://"):
@@ -384,7 +384,7 @@ def entity_boost_neo4j(
     # Build lookup: lowercased path → in_degree, and dir prefix → max in_degree
     path_in_degree: dict[str, int] = {}
     dir_in_degree: dict[str, int] = {}
-    # Secondary: slug-based lookup from entity name + label → QMD path
+    # Secondary: slug-based lookup from entity name + label → document path
     name_slug_in_degree: dict[str, int] = {}
     for row in rows:
         vp = str(row["vault_path"]).lower().replace("\\", "/")
@@ -403,9 +403,9 @@ def entity_boost_neo4j(
                 if dir_name:
                     slug = slugify(name)
                     if slug:
-                        qmd_path = f"{dir_name}/{slug}.md"
-                        existing = name_slug_in_degree.get(qmd_path, 0)
-                        name_slug_in_degree[qmd_path] = max(existing, in_deg)
+                        doc_path = f"{dir_name}/{slug}.md"
+                        existing = name_slug_in_degree.get(doc_path, 0)
+                        name_slug_in_degree[doc_path] = max(existing, in_deg)
 
     if not path_in_degree:
         for r in results:

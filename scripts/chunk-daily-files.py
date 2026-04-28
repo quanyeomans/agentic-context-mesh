@@ -3,7 +3,7 @@
 chunk-daily-files.py — TMP-4: Daily memory log section chunker.
 
 Pre-processes agent daily memory log files (YYYY-MM-DD.md) by splitting
-them into per-section chunk files suitable for QMD ingestion. Each ##
+them into per-section chunk files suitable for kairix ingestion. Each ##
 section becomes a separate document with injected frontmatter carrying:
   - source: original vault-relative path
   - section_heading: the ## heading text
@@ -14,7 +14,7 @@ Output files are written to --output-dir (default: /tmp/daily-chunks/).
 They are ephemeral — regenerate by re-running this script.
 
 After running, ingest with:
-  qmd embed <output-dir>
+  kairix embed <output-dir>
 
 Usage:
     python3 chunk-daily-files.py --vault-root /data/obsidian-vault
@@ -199,7 +199,7 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("Dry run: %d chunks from %d files (no files written)", total_chunks, total_files)
     else:
         logger.info("Done: %d chunks written from %d files to %s", total_chunks, total_files, output_dir)
-        print(f"\nTo ingest: qmd embed {output_dir}")
+        print(f"\nTo ingest: kairix embed {output_dir}")
 
 
 if __name__ == "__main__":

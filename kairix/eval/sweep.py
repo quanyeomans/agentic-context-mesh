@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 # Default parameter space
 DEFAULT_WEIGHT_CONFIGS: list[tuple[float, float, float]] = [
     (1.0, 1.0, 1.0),  # equal (current kairix)
-    (10.0, 1.0, 1.0),  # QMD's actual weights
-    (10.0, 5.0, 1.0),  # QMD + title boost
+    (10.0, 1.0, 1.0),  # filepath-heavy weights
+    (10.0, 5.0, 1.0),  # filepath + title boost
     (1.0, 5.0, 1.0),  # title-heavy
     (1.0, 3.0, 1.0),  # title-moderate
     (2.0, 5.0, 1.0),  # filepath slight + title heavy
@@ -47,7 +47,7 @@ DEFAULT_WEIGHT_CONFIGS: list[tuple[float, float, float]] = [
 
 DEFAULT_QUERY_STYLES: list[str] = [
     "bare",  # `term1 term2` (implicit AND)
-    "prefix",  # `"term1"* AND "term2"*` (QMD-style)
+    "prefix",  # `"term1"* AND "term2"*` (prefix-style)
     "quoted",  # `"term1" AND "term2"` (exact match)
 ]
 

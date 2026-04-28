@@ -249,7 +249,7 @@ def test_should_inject_agent_knowledge() -> None:
 
 @pytest.mark.unit
 def test_should_inject_projects() -> None:
-    assert should_inject("/tmp/test-vault/01-Projects/202603-Mnemosyne/README.md") is True
+    assert should_inject("/tmp/test-vault/01-Projects/202603-Kairix/README.md") is True
 
 
 @pytest.mark.unit

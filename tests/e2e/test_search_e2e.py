@@ -105,7 +105,7 @@ def _patch_search_deps(fts5_db, monkeypatch):
 
     _original_bm25_search = bm25_mod.bm25_search
 
-    def _fts5_bm25_search(query, collections=None, limit=10, qmd_binary=None, date_filter_paths=None):
+    def _fts5_bm25_search(query, collections=None, limit=10, date_filter_paths=None):
         """BM25-like search using our local FTS5 DB."""
         from kairix.search.bm25 import BM25Result, _normalise_fts_query
 

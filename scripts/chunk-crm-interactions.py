@@ -4,7 +4,7 @@ chunk-crm-interactions.py — TMP-3: CRM interaction chunker.
 
 Processes a CRM interaction export (JSON) and writes one chunk file per interaction,
 with injected frontmatter so each interaction inherits its date and contact
-metadata for QMD ingestion.
+metadata for kairix ingestion.
 
 Expected input format (JSON array):
     [
@@ -31,7 +31,7 @@ Output files are written to --output-dir (default: /tmp/crm-chunks/).
 They are ephemeral — regenerate by re-running this script.
 
 After running, ingest with:
-  qmd embed <output-dir>
+  kairix embed <output-dir>
 
 Usage:
     python3 chunk-crm-interactions.py --input /path/to/crm-export.json

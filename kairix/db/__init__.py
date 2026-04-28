@@ -1,7 +1,7 @@
 """
 Kairix storage layer — owns the SQLite database, FTS5 index, and sqlite-vec vectors.
 
-This module replaces the external QMD dependency. Kairix maintains its own
+Kairix maintains its own
 database at ``~/.cache/kairix/index.sqlite`` (configurable via ``KAIRIX_DB_PATH``).
 
 Public API:
@@ -20,9 +20,6 @@ logger = logging.getLogger(__name__)
 # Environment variable for explicit DB path override
 _DB_PATH_ENV = "KAIRIX_DB_PATH"
 
-# Legacy QMD DB path — used as fallback during migration period
-_LEGACY_QMD_CACHE_ENV = "QMD_CACHE_DIR"
-
 # sqlite-vec env override (preserved for deployments with custom vec0.so location)
 _SQLITE_VEC_ENV = "SQLITE_VEC_PATH"
 
@@ -37,10 +34,8 @@ def get_db_path() -> Path:
     Search order:
       1. ``KAIRIX_DB_PATH`` environment variable (explicit override)
       2. ``~/.cache/kairix/index.sqlite`` (default kairix location)
-      3. Legacy fallback: ``QMD_CACHE_DIR/index.sqlite`` or ``~/.cache/qmd/index.sqlite``
 
     Returns the path (which may not exist yet for fresh installs).
-    Raises FileNotFoundError only if no DB exists at any location.
     """
     # 1. Explicit override
     env_path = os.environ.get(_DB_PATH_ENV)
@@ -57,14 +52,7 @@ def get_db_path() -> Path:
     if kairix_db.exists():
         return kairix_db
 
-    # 3. Legacy QMD fallback (migration period)
-    qmd_cache = os.environ.get(_LEGACY_QMD_CACHE_ENV, str(Path.home() / ".cache" / "qmd"))
-    qmd_db = Path(qmd_cache) / "index.sqlite"
-    if qmd_db.exists():
-        logger.info("db: using legacy QMD index at %s — run 'kairix db migrate-from-qmd' to migrate", qmd_db)
-        return qmd_db
-
-    # No DB exists anywhere — return the default path for creation
+    # No DB exists — return the default path for creation
     return kairix_db
 
 
@@ -100,20 +88,6 @@ def _find_sqlite_vec() -> str | None:
     for path in system_paths:
         if Path(path).exists():
             return path
-
-    # 4. Legacy: QMD node_modules (migration period only)
-    for qmd_root_str in [
-        "/data/workspace/.tools/qmd/node_modules",
-        "/data/tools/qmd/node_modules",
-    ]:
-        qmd_root = Path(qmd_root_str)
-        if qmd_root.exists():
-            matches = sorted(qmd_root.glob("**/vec0.so"))
-            for m in matches:
-                if "x64" in str(m):
-                    return str(m)
-            if matches:
-                return str(matches[0])
 
     return None
 

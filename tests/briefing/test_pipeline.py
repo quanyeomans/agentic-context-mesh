@@ -1,5 +1,5 @@
 """
-Tests for the briefing pipeline (mnemosyne/briefing/pipeline.py).
+Tests for the briefing pipeline (kairix/briefing/pipeline.py).
 
 Uses mocked sources and synthesiser — no live API calls or file system dependencies.
 """
@@ -73,7 +73,7 @@ class TestGenerateBriefing:
         mock_briefing_body = (
             "## Pending & Blocked\nNone.\n\n"
             "## Recent Decisions\nADR-007 adopted.\n\n"
-            "## Active Projects\nMnemosyne Phase 3.\n\n"
+            "## Active Projects\nKairix Phase 3.\n\n"
             "## Relevant Context\nHybrid search working.\n\n"
             "## Key Constraints\nNever write credentials."
         )

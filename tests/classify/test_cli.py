@@ -1,5 +1,5 @@
 """
-Tests for the classify CLI (mnemosyne/classify/cli.py).
+Tests for the classify CLI (kairix/classify/cli.py).
 
 Tests CLI output format and argument parsing.
 """

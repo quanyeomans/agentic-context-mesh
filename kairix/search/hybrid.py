@@ -209,7 +209,7 @@ def _query_has_temporal_marker(query: str) -> bool:
 
 def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
     """
-    Populate FusedResult.chunk_date from the QMD SQLite DB for TMP-7B.
+    Populate FusedResult.chunk_date from the kairix SQLite DB for TMP-7B.
 
     Does a single SQL query joining content_vectors to documents on hash,
     then sets r.chunk_date for any results whose path has a non-null chunk_date.
@@ -227,7 +227,7 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
     try:
         db = sqlite3.connect(str(db_path))
         try:
-            # Use LIKE suffix match because QMD stores absolute paths while FusedResult
+            # Use LIKE suffix match because the DB stores absolute paths while FusedResult
             # paths may be collection-relative (e.g. "concept/builder.md" vs
             # "/data/vault/concept/builder.md"). An exact IN() match would miss all rows.
             # safe: LIKE clauses use ? binding for values

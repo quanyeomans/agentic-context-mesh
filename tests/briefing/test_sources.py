@@ -1,5 +1,5 @@
 """
-Tests for briefing source fetchers (mnemosyne/briefing/sources.py).
+Tests for briefing source fetchers (kairix/briefing/sources.py).
 
 All tests use fixtures or temporary directories — no live API calls.
 """

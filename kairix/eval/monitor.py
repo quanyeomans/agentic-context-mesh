@@ -5,7 +5,7 @@ Runs a canary benchmark suite after each embed cycle and logs results to
 a rolling JSONL file. Detects regression by comparing the current run's
 weighted NDCG to the rolling window average.
 
-Intended integration in qmd-reindex.sh, after `kairix embed`:
+Intended integration after `kairix embed`:
 
     kairix eval monitor \\
         --suite /path/to/canary.yaml \\
@@ -32,7 +32,7 @@ from kairix.eval.constants import CATEGORY_WEIGHTS
 logger = logging.getLogger(__name__)
 
 # Default log path (override with KAIRIX_MONITOR_LOG env var)
-_DEFAULT_LOG_PATH: str = str(Path.home() / ".cache/qmd/monitor.jsonl")
+_DEFAULT_LOG_PATH: str = str(Path.home() / ".cache/kairix/monitor.jsonl")
 
 # Maximum log entries to retain (rolling window)
 _MAX_LOG_ENTRIES: int = 90
@@ -146,7 +146,7 @@ def run_monitor(
     Args:
         suite_path:       Path to the canary suite YAML.
         log_path:         Path to the monitor JSONL log file.
-                          Defaults to KAIRIX_MONITOR_LOG env var or ~/.cache/qmd/monitor.jsonl.
+                          Defaults to KAIRIX_MONITOR_LOG env var or ~/.cache/kairix/monitor.jsonl.
         alert_threshold:  Relative NDCG drop that triggers regression flag (default: 0.05 = 5%).
         window_days:      Rolling window for baseline average in days (default: 7).
         agent:            Agent name for retrieval scoping.

@@ -65,7 +65,7 @@ def acquire_lock() -> IO[str]:
             lock_fh.flush()
             return lock_fh
         except BlockingIOError:
-            logging.info("Waiting for qmd lock...")
+            logging.info("Waiting for embed lock...")
             time.sleep(5)
     logging.error(f"Could not acquire lock after {LOCK_WAIT_SECS}s — another embed may be running")
     sys.exit(3)
@@ -207,7 +207,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Pending:   {len(pending)} documents need embedding")
 
         # Last run
-        log_path = Path.home() / ".cache" / "qmd" / "azure-embed-runs.json"
+        log_path = Path.home() / ".cache" / "kairix" / "azure-embed-runs.json"
         if log_path.exists():
             import json
 

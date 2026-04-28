@@ -37,10 +37,10 @@ class TestPoolCandidates:
         mock_bm25.return_value = [
             {"path": "/doc1.md", "title": "Doc 1", "snippet": "text", "collection": "eng"},
         ]
-        result = pool_candidates("test query", ["bm25-equal", "bm25-qmd"])
+        result = pool_candidates("test query", ["bm25-equal", "bm25-filepath"])
         assert len(result) == 1
         assert "bm25-equal" in result[0].sources
-        assert "bm25-qmd" in result[0].sources
+        assert "bm25-filepath" in result[0].sources
 
     @pytest.mark.unit
     @patch("kairix.eval.gold_builder._vector_search")
@@ -181,7 +181,7 @@ class TestBuildIndependentGold:
                 title="Irrelevant",
                 snippet="Bad content",
                 collection="eng",
-                sources=["bm25-qmd"],
+                sources=["bm25-filepath"],
             ),
         ]
 

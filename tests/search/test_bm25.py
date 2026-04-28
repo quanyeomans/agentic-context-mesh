@@ -103,13 +103,13 @@ def test_bm25_search_multiple_collections(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_bm25_search_returns_bare_paths(tmp_path: Path) -> None:
-    """Result file field is a bare document-store-relative path, not a qmd:// URI."""
+    """Result file field is a bare document-store-relative path, not a scheme URI."""
     db_path = _create_test_db(tmp_path)
     with patch("kairix.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("knowledge management")
 
     for r in results:
-        assert not r["file"].startswith("qmd://")
+        assert "://" not in r["file"]  # no scheme prefix
 
 
 @pytest.mark.unit

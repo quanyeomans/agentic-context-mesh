@@ -182,7 +182,7 @@ def _normalise_fts_query(query: str) -> str:
     """
     Build an FTS5 query from natural language using quoted prefix match.
 
-    Matches QMD's buildFTS5Query() behaviour: each meaningful token becomes
+    Matches the buildFTS5Query() behaviour: each meaningful token becomes
     ``"token"*`` (quoted with prefix wildcard), joined with AND. This gives
     exact token matches with prefix expansion, which is more precise than
     bare tokens for technical identifiers (ADR-012 → ``"adr"* AND "012"*``).
@@ -197,7 +197,7 @@ def _normalise_fts_query(query: str) -> str:
     tokens = [t for t in raw_tokens if t not in FTS_STOP_WORDS and len(t) >= 2]
     if not tokens:
         return ""
-    # Quoted prefix match per token, AND-joined (matches QMD's search behaviour)
+    # Quoted prefix match per token, AND-joined
     return " AND ".join(f'"{t}"*' for t in tokens)
 
 
@@ -287,7 +287,7 @@ def bm25_search(
     results: list[BM25Result] = []
     for row in rows:
         # bm25() returns negative values (lower = better match).
-        # Normalise to [0, 1) using QMD's formula: |x| / (1 + |x|)
+        # Normalise to [0, 1) using formula: |x| / (1 + |x|)
         # Maps: strong(-10)→0.91, medium(-2)→0.67, weak(-0.5)→0.33, none(0)→0
         raw_score = float(row["bm25_score"])
         score = abs(raw_score) / (1.0 + abs(raw_score))

@@ -1,5 +1,5 @@
 """
-Tests for the briefing synthesiser (mnemosyne/briefing/synthesiser.py).
+Tests for the briefing synthesiser (kairix/briefing/synthesiser.py).
 
 Uses mocked Azure client — no live API calls.
 """
@@ -20,7 +20,7 @@ class TestSynthesise:
         mock_body = (
             "## Pending & Blocked\n- Fix the RRF bug [pending]\n\n"
             "## Recent Decisions\n- ADR-007: Use RRF for fusion\n\n"
-            "## Active Projects\n- Mnemosyne Phase 3\n\n"
+            "## Active Projects\n- Kairix Phase 3\n\n"
             "## Relevant Context\nHybrid search working well.\n\n"
             "## Key Constraints\n- Never write credentials to disk"
         )

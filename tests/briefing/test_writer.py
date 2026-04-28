@@ -1,5 +1,5 @@
 """
-Tests for the briefing writer (mnemosyne/briefing/writer.py).
+Tests for the briefing writer (kairix/briefing/writer.py).
 """
 
 from __future__ import annotations

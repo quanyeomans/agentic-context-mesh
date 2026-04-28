@@ -3,7 +3,7 @@ GPL-inspired automated evaluation suite generation for kairix.
 
 Implements the Generative Pseudo Labeling pipeline (Wang et al. 2022):
 
-  1. sample_documents  — draw representative docs from the QMD SQLite index
+  1. sample_documents  — draw representative docs from the kairix SQLite index
   2. generate_queries  — prompt gpt-4o-mini to write queries the doc answers
   3. retrieve          — run hybrid_search for each generated query
   4. judge             — call judge.judge_batch() to grade retrieved docs
@@ -117,13 +117,13 @@ def sample_documents(
     seed: int | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Sample documents from the QMD SQLite index.
+    Sample documents from the kairix SQLite index.
 
     Proportionally samples across collections, skipping archived docs and
     very short documents (< _MIN_DOC_LENGTH chars).
 
     Args:
-        db_path:     Path to QMD SQLite database.
+        db_path:     Path to kairix SQLite database.
         n:           Target number of documents to sample.
         collections: Restrict to these collection names (None = all).
         seed:        Random seed for reproducibility.
@@ -394,7 +394,7 @@ def generate_suite(
     Pipeline: sample docs → generate queries → hybrid retrieve → LLM judge → YAML.
 
     Args:
-        db_path:        Path to QMD SQLite database.
+        db_path:        Path to kairix SQLite database.
         output_path:    Output YAML file path.
         n_cases:        Target number of accepted cases.
         categories:     Categories to include (None = all). Controls doc sampling
@@ -598,7 +598,7 @@ def enrich_suite(
     Args:
         suite_path:  Input suite YAML path.
         output_path: Output YAML path (may equal suite_path for in-place update).
-        db_path:     QMD SQLite path (not used directly; hybrid_search handles DB).
+        db_path:     kairix SQLite path (not used directly; hybrid_search handles DB).
         api_key:     Azure OpenAI API key (None = auto-fetch).
         endpoint:    Azure OpenAI endpoint URL (None = auto-fetch).
         deployment:  Model deployment name.

@@ -1,7 +1,7 @@
 """
 Kairix database schema creation, validation, and migration.
 
-The schema mirrors the structure previously owned by QMD, with the addition of
+The schema includes
 a ``kairix_meta`` table for schema versioning. Column names and types are
 identical to ensure all existing queries work without modification.
 

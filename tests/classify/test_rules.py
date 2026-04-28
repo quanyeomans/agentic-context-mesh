@@ -1,5 +1,5 @@
 """
-Tests for the rule-based classifier (mnemosyne/classify/rules.py).
+Tests for the rule-based classifier (kairix/classify/rules.py).
 
 Tests all rule patterns plus edge cases.
 """
@@ -19,7 +19,7 @@ from kairix.classify.rules import ClassificationResult, classify_by_rules, class
 class TestEpisodic:
     @pytest.mark.unit
     def test_basic_timestamp_header(self):
-        content = "## 09:15\nFixed the RRF path dedup bug in mnemosyne/search/rrf.py"
+        content = "## 09:15\nFixed the RRF path dedup bug in kairix/search/rrf.py"
         result_type, reason = classify_by_rules(content)
         assert result_type == "episodic"
         assert "09:15" in reason or "HH:MM" in reason or "header" in reason
@@ -224,7 +224,7 @@ class TestNoMatch:
 
     @pytest.mark.unit
     def test_plain_note(self):
-        content = "Reviewed the mnemosyne codebase today."
+        content = "Reviewed the kairix codebase today."
         result_type, _ = classify_by_rules(content)
         assert result_type is None
 
@@ -317,7 +317,7 @@ class TestBenchmarkCases:
 
     @pytest.mark.unit
     def test_cl02_episodic(self):
-        content = "## 09:15\nFixed the RRF path dedup bug in mnemosyne/search/rrf.py"
+        content = "## 09:15\nFixed the RRF path dedup bug in kairix/search/rrf.py"
         result_type, _ = classify_by_rules(content)
         assert result_type == "episodic", f"Expected episodic, got {result_type}"
 

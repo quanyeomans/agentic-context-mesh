@@ -3,7 +3,7 @@ meta:
   description: >
     CI contract suite for the reference library mock backend. Tests pipeline
     code correctness against the mock-reflib fixture corpus (30 documents
-    spanning 12 reference library collections). No Azure or QMD required.
+    spanning 12 reference library collections). No Azure required.
   version: "1.0"
   system: mock-reflib
   n_cases: 20

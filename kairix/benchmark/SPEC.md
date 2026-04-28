@@ -29,7 +29,7 @@ Each agent defines a test suite as a YAML file:
 # ~/.kairix/benchmark/<agent-name>/suite.yaml
 meta:
   agent: builder
-  collections:            # QMD collections this agent actually uses
+  collections:            # kairix collections this agent actually uses
     - vault
     - knowledge-builder
     - builder-memory
@@ -89,7 +89,7 @@ Weights sum to 1.0. Agents may omit categories with 0 cases (weight redistribute
 ### Recall case validity rules
 
 A `recall` case is valid if and only if:
-1. `gold_path` exists in the QMD index (verified at suite validation time)
+1. `gold_path` exists in the kairix index (verified at suite validation time)
 2. `gold_path` is unique across the suite (no two cases share the same gold doc)
 3. The query is specific enough to prefer the gold doc over near-neighbours (verified by running the retrieval system before committing)
 
@@ -171,7 +171,7 @@ The report includes a plain-language interpretation section:
 | ≥ 0.75 | Strong. Good enough for agent briefing and proactive synthesis. |
 | ≥ 0.68 | Solid. Temporal and entity queries reliable. |
 | ≥ 0.62 | Functional. Hybrid search working, basic entity retrieval reliable. |
-| ≥ 0.51 | BM25 baseline. If you're here, you're at default QMD quality. |
+| ≥ 0.51 | BM25 baseline. If you're here, you're at default kairix quality. |
 | < 0.51 | Below BM25 baseline. Something is wrong with the retrieval pipeline. |
 
 ### Per-category interpretation

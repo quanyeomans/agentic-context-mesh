@@ -211,14 +211,14 @@ class TestRewriteTemporalQuery:
     @pytest.mark.unit
     def test_appends_date_range_for_last_week(self) -> None:
         result = rewrite_temporal_query(
-            "what was completed last week on Mnemosyne",
+            "what was completed last week on Kairix",
             reference_date=REFERENCE,
         )
         expected_start = (REFERENCE - timedelta(days=7)).isoformat()
         expected_end = REFERENCE.isoformat()
         assert expected_start in result
         assert expected_end in result
-        assert "what was completed last week on Mnemosyne" in result
+        assert "what was completed last week on Kairix" in result
 
     @pytest.mark.unit
     def test_appends_single_date_for_exact_date(self) -> None:
@@ -246,7 +246,7 @@ class TestRewriteTemporalQuery:
 
     @pytest.mark.unit
     def test_original_query_preserved_in_output(self) -> None:
-        query = "Mnemosyne tasks recently"
+        query = "Kairix tasks recently"
         result = rewrite_temporal_query(query, reference_date=REFERENCE)
         assert result.startswith(query)
 

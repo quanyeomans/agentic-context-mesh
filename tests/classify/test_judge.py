@@ -1,5 +1,5 @@
 """
-Tests for the LLM judge (mnemosyne/classify/judge.py).
+Tests for the LLM judge (kairix/classify/judge.py).
 
 Uses mocked Azure client to test LLM classification without live API calls.
 """
