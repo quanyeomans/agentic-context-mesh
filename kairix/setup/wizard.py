@@ -11,37 +11,10 @@ from pathlib import Path
 
 import yaml
 
+from kairix.setup.prompts import SetupContext, prompt, prompt_choice, prompt_yn
 
-def _prompt(question: str, default: str = "") -> str:
-    """Prompt for input with optional default."""
-    if default:
-        answer = input(f"  {question} [{default}]: ").strip()
-        return answer or default
-    return input(f"  {question}: ").strip()
-
-
-def _prompt_choice(question: str, options: list[str]) -> int:
-    """Prompt for a numbered choice. Returns 0-based index."""
-    print(f"\n  {question}")
-    for i, opt in enumerate(options, 1):
-        print(f"  [{i}] {opt}")
-    while True:
-        try:
-            choice = int(input("  > ").strip())
-            if 1 <= choice <= len(options):
-                return choice - 1
-        except (ValueError, EOFError):
-            pass
-        print(f"  Please enter a number from 1 to {len(options)}")
-
-
-def _prompt_yn(question: str, default: bool = True) -> bool:
-    """Prompt for yes/no."""
-    hint = "Y/n" if default else "y/N"
-    answer = input(f"  {question} [{hint}]: ").strip().lower()
-    if not answer:
-        return default
-    return answer in ("y", "yes")
+# Old _prompt, _prompt_choice, _prompt_yn removed — replaced by
+# kairix.setup.prompts which supports interactive, non-interactive, and JSON modes.
 
 
 def _test_llm_connection(provider: str, endpoint: str, api_key: str, embed_model: str) -> bool:
@@ -95,16 +68,41 @@ def _load_template(name: str) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def run_setup(output_path: str = "kairix.config.yaml") -> bool:
-    """Run the interactive setup wizard.
+def run_setup(
+    output_path: str = "kairix.config.yaml",
+    ctx: SetupContext | None = None,
+    preset: str | None = None,
+    document_path: str | None = None,
+) -> bool:
+    """Run the setup wizard.
+
+    Supports interactive (terminal), non-interactive (flags/defaults),
+    and JSON output modes via SetupContext.
 
     Returns True if setup completed successfully.
     """
+    if ctx is None:
+        ctx = SetupContext.auto_detect()
+
     print("\nWelcome to kairix setup.\n")
     print("This will configure your knowledge base in a few steps.")
     print("You'll need: an LLM API key and a folder of documents.\n")
 
     config: dict = {}
+
+    # ── Step 0: Use-case survey (new — tailors defaults) ────────────────
+    if preset is None:
+        use_cases = [
+            "Personal knowledge base (notes, journals, research)",
+            "Technical documentation (code, runbooks, APIs)",
+            "Business / consulting (clients, projects, proposals)",
+            "Agent memory (OpenClaw, Claude Code, LangGraph)",
+            "Just exploring (use the reference library)",
+        ]
+        uc_idx = prompt_choice(ctx, "What are you setting up kairix for?", use_cases, default=0)
+        preset_key = ["general", "technical", "consulting", "general", "general"][uc_idx]
+    else:
+        preset_key = preset if preset != "daily-log" else "general"
 
     # ── Step 1: LLM Backend ──────────────────────────────────────────────
     print("Step 1 of 7: LLM Backend\n")
@@ -114,42 +112,45 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         "OpenAI",
         "Other OpenAI-compatible endpoint",
     ]
-    provider_idx = _prompt_choice("Which LLM provider are you using?", providers)
+    provider_idx = prompt_choice(ctx, "Which LLM provider are you using?", providers, default=0)
     provider_key = ["azure", "openai", "custom"][provider_idx]
 
     if provider_key == "azure":
-        endpoint = _prompt("Azure OpenAI endpoint")
-        api_key = _prompt("API key")
-        embed_model = _prompt("Embedding model deployment name", "text-embedding-3-large")
-        _prompt("Chat model deployment name", "gpt-4o-mini")  # consumed by future config expansion
+        endpoint = prompt(ctx, "Azure OpenAI endpoint")
+        api_key = prompt(ctx, "API key")
+        embed_model = prompt(ctx, "Embedding model deployment name", "text-embedding-3-large")
+        prompt(ctx, "Chat model deployment name", "gpt-4o-mini")  # consumed by future config expansion
     elif provider_key == "openai":
         endpoint = ""
-        api_key = _prompt("OpenAI API key")
-        embed_model = _prompt("Embedding model", "text-embedding-3-large")
-        _prompt("Chat model", "gpt-4o-mini")  # consumed by future config expansion
+        api_key = prompt(ctx, "OpenAI API key")
+        embed_model = prompt(ctx, "Embedding model", "text-embedding-3-large")
+        prompt(ctx, "Chat model", "gpt-4o-mini")  # consumed by future config expansion
     else:
-        endpoint = _prompt("Endpoint URL")
-        api_key = _prompt("API key")
-        embed_model = _prompt("Embedding model name")
-        _prompt("Chat model name")  # consumed by future config expansion
+        endpoint = prompt(ctx, "Endpoint URL")
+        api_key = prompt(ctx, "API key")
+        embed_model = prompt(ctx, "Embedding model name")
+        prompt(ctx, "Chat model name")  # consumed by future config expansion
 
     print("\n  Testing connection...")
     if _test_llm_connection(provider_key, endpoint, api_key, embed_model):
         print("  \u2713 Connected successfully\n")
     else:
         print("  \u2717 Connection failed — check your credentials and try again\n")
-        if not _prompt_yn("Continue anyway?", default=False):
+        if not prompt_yn(ctx, "Continue anyway?", default=False):
             return False
 
     # ── Step 2: Document Source ───────────────────────────────────────────
     print("Step 2 of 7: Document Source\n")
 
-    vault_path = _prompt("Where are your documents? (path to folder)")
-    vault_path = os.path.expanduser(vault_path)
+    if document_path:
+        vault_path = os.path.expanduser(document_path)
+    else:
+        vault_path = prompt(ctx, "Where are your documents? (path to folder)", default=str(Path.home() / "Documents"))
+        vault_path = os.path.expanduser(vault_path)
 
     if not os.path.isdir(vault_path):
         print(f"  Warning: '{vault_path}' does not exist or is not a directory")
-        if not _prompt_yn("Continue anyway?", default=False):
+        if not prompt_yn(ctx, "Continue anyway?", default=False):
             return False
         file_count, size_mb = 0, 0.0
     else:
@@ -165,12 +166,12 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         "Custom path — for shared or production deployments",
         "Docker paths (/data/kairix/) — for container deployments",
     ]
-    storage_idx = _prompt_choice("Where should kairix store its data?", storage_options)
+    storage_idx = prompt_choice(ctx, "Where should kairix store its data?", storage_options)
 
     if storage_idx == 0:
         db_dir = str(Path.home() / ".cache" / "kairix")
     elif storage_idx == 1:
-        db_dir = _prompt("Data directory path")
+        db_dir = prompt(ctx, "Data directory path")
         db_dir = os.path.expanduser(db_dir)
     else:
         db_dir = "/data/kairix"
@@ -185,10 +186,10 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
     print("  The knowledge graph tracks people, companies, and relationships")
     print("  for better search results. It requires Neo4j.")
 
-    use_neo4j = _prompt_yn("\n  Enable knowledge graph?", default=True)
+    use_neo4j = prompt_yn(ctx, "\n  Enable knowledge graph?", default=True)
     neo4j_uri = ""
     if use_neo4j:
-        neo4j_uri = _prompt("Neo4j URI", "bolt://localhost:7687")
+        neo4j_uri = prompt(ctx, "Neo4j URI", "bolt://localhost:7687")
         # Test Neo4j connection
         try:
             from kairix.graph.client import Neo4jClient
@@ -202,15 +203,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
 
     # ── Step 5: Search Configuration ─────────────────────────────────────
     print("Step 5 of 7: Search Configuration\n")
-
-    presets = [
-        "Consulting / professional services knowledge base",
-        "Technical documentation (guides, runbooks, procedures)",
-        "Daily logs and meeting notes",
-        "General / mixed content",
-    ]
-    preset_idx = _prompt_choice("What kind of documents do you have?", presets)
-    preset_key = ["consulting", "technical", "consulting", "general"][preset_idx]
+    print(f"  Using '{preset_key}' preset from your use-case selection.\n")
 
     template = _load_template(preset_key)
     template_name = template.get("name", preset_key)
@@ -227,7 +220,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         "Include agent workspace memories (for agent platforms)",
         "Skip — I'll configure collections later",
     ]
-    coll_idx = _prompt_choice("How do you want to organise your documents?", collection_options)
+    coll_idx = prompt_choice(ctx, "How do you want to organise your documents?", collection_options)
 
     collections_config: dict | None = None
     if coll_idx == 0:
@@ -280,7 +273,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         "Direct Python import (no MCP server needed)",
         "Skip — I'll configure this later",
     ]
-    agent_idx = _prompt_choice("Select your agent platform:", agent_options)
+    agent_idx = prompt_choice(ctx, "Select your agent platform:", agent_options)
 
     if agent_idx == 0:
         import platform as _platform
@@ -358,7 +351,7 @@ def run_setup(output_path: str = "kairix.config.yaml") -> bool:
         print(f"  Estimated time: ~{est_minutes} minute{'s' if est_minutes > 1 else ''}")
         print(f"  Estimated monthly LLM cost: ~${est_cost}\n")
 
-        if _prompt_yn("Start indexing now?"):
+        if prompt_yn(ctx, "Start indexing now?"):
             print("\n  Indexing...")
             try:
                 from kairix.embed.cli import main as embed_main
