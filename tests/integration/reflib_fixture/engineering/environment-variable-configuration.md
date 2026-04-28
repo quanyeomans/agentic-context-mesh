@@ -95,7 +95,7 @@ We selected the approach of a file .env because:
   * It is simple. Notably,  We are fine for now with the significant trade-offs that we see, such as a lack of audit capabilities as compared to an approach of a license server.
 
 
-### Implications 
+### Implications
 
 We need to figure out a way to separate environment variable configuration that is public from any secrets management.
 

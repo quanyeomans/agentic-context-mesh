@@ -14,6 +14,7 @@ Usage:
     python3 audit-date-formats.py --vault-root /data/obsidian-vault
     python3 audit-date-formats.py --vault-root /path/to/vault --output /tmp/audit.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -130,10 +131,12 @@ def run_audit(vault_root: Path) -> dict[str, Any]:
         if cls == "non_iso":
             non_iso_counts[raw] += 1
             if len(non_iso_examples) < 20:
-                non_iso_examples.append({
-                    "path": str(f.relative_to(vault_root)),
-                    "value": raw,
-                })
+                non_iso_examples.append(
+                    {
+                        "path": str(f.relative_to(vault_root)),
+                        "value": raw,
+                    }
+                )
 
     return {
         "total_files": total,

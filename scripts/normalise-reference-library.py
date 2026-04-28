@@ -32,27 +32,36 @@ def main(argv: list[str] | None = None) -> int:
         description="Normalise the kairix reference library corpus.",
     )
     parser.add_argument(
-        "--input", required=True, type=Path,
+        "--input",
+        required=True,
+        type=Path,
         help="Path to raw reference library (e.g. /tmp/reference-library)",
     )
     parser.add_argument(
-        "--output", required=True, type=Path,
+        "--output",
+        required=True,
+        type=Path,
         help="Path for normalised output (e.g. /tmp/reference-library-normalised)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would happen without writing files",
     )
     parser.add_argument(
-        "--max-tier", type=int, default=3,
+        "--max-tier",
+        type=int,
+        default=3,
         help="Maximum licence tier to include (default: 3 = CC0/MIT/Apache/CC-BY)",
     )
     parser.add_argument(
-        "--skip-dedup", action="store_true",
+        "--skip-dedup",
+        action="store_true",
         help="Skip cross-collection deduplication",
     )
     parser.add_argument(
-        "--verbose", action="store_true",
+        "--verbose",
+        action="store_true",
         help="Enable debug logging",
     )
 

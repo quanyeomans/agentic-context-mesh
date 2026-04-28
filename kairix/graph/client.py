@@ -184,7 +184,17 @@ class Neo4jClient:
             )
         try:
             with self._driver.session() as session:
-                session.run(cypher, from_id=edge.from_id, to_id=edge.to_id, props=edge.props)
+                result = session.run(cypher, from_id=edge.from_id, to_id=edge.to_id, props=edge.props)
+                summary = result.consume()
+                if summary.counters.relationships_created == 0 and summary.counters.properties_set == 0:
+                    logger.warning(
+                        "upsert_edge(%s→%s %s): no-op — target %s:%s may not exist",
+                        edge.from_id,
+                        edge.to_id,
+                        edge.kind,
+                        edge.to_label,
+                        edge.to_id,
+                    )
             return True
         except Exception as e:
             logger.warning("upsert_edge(%s→%s %s): %s", edge.from_id, edge.to_id, edge.kind, e)

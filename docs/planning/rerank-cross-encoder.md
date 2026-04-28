@@ -2,7 +2,7 @@
 
 > **Status: Superseded (2026-04-27).** Cross-encoder re-ranking is shipped as an optional feature (`kairix[rerank]`). Current baseline exceeds all targets in this plan.
 
-**Target version:** v1.0.0  
+**Target version:** v1.0.0
 **Primary motivation:** Semantic NDCG@10 is 0.501 (current baseline) — the weakest retrieval category. Cross-encoder re-ranking is the established intervention for lifting semantic precision without changing the retrieval pipeline.
 
 ---

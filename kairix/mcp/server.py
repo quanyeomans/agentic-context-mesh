@@ -231,19 +231,42 @@ def tool_prep(
 
     Choose 'l0' for 2-3 sentences or 'l1' for a structured overview.
     Uses less resources than a full search — good for quick context checks.
+    Retrieves relevant documents first, then summarises from them.
     """
     try:
         from kairix._azure import chat_completion
+        from kairix.search.hybrid import search as hybrid_search
+
+        # Retrieve context first — prep is grounded, not hallucinated
+        budget = 1500 if tier == "l0" else 3000
+        sr = hybrid_search(query, agent=agent, scope="shared+agent", budget=budget)
+        context_parts = []
+        for r in sr.results[:5]:
+            context_parts.append(f"[{r.result.title or r.result.path}]\n{r.content[:500]}")
+        context = "\n\n---\n\n".join(context_parts) if context_parts else ""
+
+        if not context:
+            return {
+                "query": query,
+                "tier": tier,
+                "summary": "No relevant documents found for this topic.",
+                "tokens": 0,
+                "error": "",
+            }
 
         max_tokens = 150 if tier == "l0" else 600
         system = (
-            "You are a concise knowledge assistant. Summarise what is known about the topic in 2-3 sentences."
+            "You are a concise knowledge assistant. Based ONLY on the provided documents, "
+            "summarise what is known about the topic in 2-3 sentences. "
+            "Do not add information that is not in the documents."
             if tier == "l0"
-            else "You are a knowledge assistant. Provide a structured overview of the topic."
+            else "You are a knowledge assistant. Based ONLY on the provided documents, "
+            "provide a structured overview of the topic. "
+            "Do not add information that is not in the documents."
         )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system},
-            {"role": "user", "content": f"Topic: {query}"},
+            {"role": "user", "content": f"Topic: {query}\n\nDocuments:\n{context}"},
         ]
         summary = chat_completion(messages, max_tokens=max_tokens)
         return {
@@ -251,15 +274,17 @@ def tool_prep(
             "tier": tier,
             "summary": summary,
             "tokens": estimate_tokens(summary),
+            "sources": [r.result.title or r.result.path for r in sr.results[:5]],
             "error": "",
         }
-    except (ImportError, requests.RequestException, OSError, RuntimeError, KeyError, ValueError) as exc:
+    except (ImportError, OSError, RuntimeError, KeyError, ValueError) as exc:
         logger.warning("mcp.prep failed: %s", exc, exc_info=True)
         return {
             "query": query,
             "tier": tier,
             "summary": "",
             "tokens": 0,
+            "sources": [],
             "error": "Prep failed — check server logs for details.",
         }
 

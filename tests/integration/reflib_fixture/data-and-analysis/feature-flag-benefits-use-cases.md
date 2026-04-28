@@ -33,7 +33,7 @@ In this post, we explore four benefits to using these feature flag types, such a
 
 Feature flags disconnect deployment from release, enabling developers to ship code faster. Instead of releasing code for use by everyone once deployed, it lives behind a feature flag and releases separately. This frees developers from worrying as much about releases.
 
-Using [feature flags services](/blog/best-open-source-feature-flag-tools) improves the deployment and integration process. Feature flags help developers merge and integrate their changes more often. Because developers aren’t waiting to deploy, metrics like deployment frequency and time improve. You avoid stale branches and code because it isn’t sitting dormant. All of these benefit DevOps teams especially. 
+Using [feature flags services](/blog/best-open-source-feature-flag-tools) improves the deployment and integration process. Feature flags help developers merge and integrate their changes more often. Because developers aren’t waiting to deploy, metrics like deployment frequency and time improve. You avoid stale branches and code because it isn’t sitting dormant. All of these benefit DevOps teams especially.
 
 Engineers can also use feature flags to hand off the release to other members of their team, such as product managers and marketers. This can be especially useful for features requiring slow rollouts, communication, and usage analysis. Instead of a developer babysitting the release, a non-technical team member can do the release, and any related work, themselves.
 
@@ -49,9 +49,9 @@ Feature flags also prevent the loss of momentum from issues with new features. I
 
 All changes and new releases have risks, and feature flags help mitigate those risks. Just because a team is shipping fast doesn’t mean they release recklessly. Feature flags are critical for ensuring releases go smoothly, and that they can roll back quickly if not. They enable slower rollouts and faster rollbacks, both of which help mitigate risk. To borrow a phrase from the U.S. Navy Seals, “slow is smooth, smooth is fast.”
 
-By doing percentage, conditional, or tiered deployments, the rollout slows down. Feature flags can limit a rollout to specific infrastructure, regions, users, or groups instead of everyone, everywhere, all at once. Teams can focus on monitoring the rollout and its impact on specific areas and analytics. As a rollout progresses, risk decreases and the team can be more confident the feature won’t cause issues for users. 
+By doing percentage, conditional, or tiered deployments, the rollout slows down. Feature flags can limit a rollout to specific infrastructure, regions, users, or groups instead of everyone, everywhere, all at once. Teams can focus on monitoring the rollout and its impact on specific areas and analytics. As a rollout progresses, risk decreases and the team can be more confident the feature won’t cause issues for users.
 
-Slower rollouts provide time for problems to arise before everyone accesses a feature. Using conditions (like specific users or groups) allows for discussion about changes and any issues they are seeing. This is also a way to get feedback about the feature (which can limit 
+Slower rollouts provide time for problems to arise before everyone accesses a feature. Using conditions (like specific users or groups) allows for discussion about changes and any issues they are seeing. This is also a way to get feedback about the feature (which can limit
 ”business risk”). This ensures confidence in a feature by the time it rolls out to everyone.
 
 If there are problems with a feature, feature flags can act as kill switches. There is no need to frantically make changes to remove the feature and then deploy those changes (which can lead to more problems). Just turn the feature flag off, preventing further issues, and you get time to analyze what went wrong.
@@ -63,7 +63,7 @@ If there are problems with a feature, feature flags can act as kill switches. Th
 - You’re in a situation where every change to your app needs a review to release (such as iOS App Store or Chrome Web Store). Instead of having to wait for a review to make a change, using a feature flag enables faster rollbacks. Fixes to issues aren’t delayed by review, mitigating their impact when they arise.
 
 > #### Rollout types explained:
-> 
+>
 > - **Percentage rollouts** release a feature to a percentage of users or groups, and then increase that percentage over time.
 >
 > - **Conditional rollouts** release a feature to specific users or groups based on a filter or condition. The filter or condition expands to more users or groups over time.
@@ -92,7 +92,7 @@ Feature flags can act as permissions, granting or denying certain users access t
 
 Replacing in-app toggles with feature flags eliminates the need for custom user fields, admin panel modifications, and additional checks, granting teams quick, easy and flexible permissions.
 
-Complex permission logic isn’t needed, engineering teams can just use a feature flag. This simplifies and distributes permission and access management. This means that a sales, support, or customer success team can then add permissions to their workflows and responsibilities. This takes work off the plate of developers. 
+Complex permission logic isn’t needed, engineering teams can just use a feature flag. This simplifies and distributes permission and access management. This means that a sales, support, or customer success team can then add permissions to their workflows and responsibilities. This takes work off the plate of developers.
 
 Feature flags also enable you to run alphas and betas of new features easily. Each feature doesn’t need a bespoke change to the code, other than the feature itself. The type of release or access pattern can change easily. For example, it can go from an alpha to a specific group release to a percentage rollout without needing to change any code.
 
@@ -194,7 +194,7 @@ Each has different features, here's a comparison of them:
             <td className="text-center">✖</td>
             <td className="text-center">✖</td>
             <td className="text-center">✖</td>
-        </tr>  
+        </tr>
         <tr>
             <td>Open source</td>
             <td className="text-center">✔</td>
@@ -202,7 +202,7 @@ Each has different features, here's a comparison of them:
             <td className="text-center">✔</td>
             <td className="text-center">✔</td>
             <td className="text-center">✖</td>
-        </tr>  
+        </tr>
         <tr>
             <td>Self-hostable</td>
             <td className="text-center">✔</td>
@@ -210,7 +210,7 @@ Each has different features, here's a comparison of them:
             <td className="text-center">✔</td>
             <td className="text-center">✔</td>
             <td className="text-center">✖</td>
-        </tr>  
+        </tr>
         <tr>
             <td>Unlimited flags for free</td>
             <td className="text-center">✔</td>
@@ -218,12 +218,12 @@ Each has different features, here's a comparison of them:
             <td className="text-center">✔</td>
             <td className="text-center">✔</td>
             <td className="text-center">✖</td>
-        </tr>   
+        </tr>
     </tbody>
 </table>
 </OverflowXSection>
 
-Except for PostHog, each of these tools focuses specifically on feature flags. In doing so, they miss out on the benefits of having all of your data in one place. For example, to get data on the usage of a feature flag, you would need to integrate a third-party analytics platform. 
+Except for PostHog, each of these tools focuses specifically on feature flags. In doing so, they miss out on the benefits of having all of your data in one place. For example, to get data on the usage of a feature flag, you would need to integrate a third-party analytics platform.
 
 PostHog has all the tools you need to build a great product, and they are integrated together. Feature flags are connected to analytics and visualizations which are connected to session recordings. [Our starter plan](/pricing) includes unlimited events, 1M events and 5k recordings for free
 

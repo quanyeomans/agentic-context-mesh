@@ -1,0 +1,38 @@
+# Publish kairix to PyPI on tagged releases.
+#
+# Trigger: push a tag matching v* (e.g., v2026.4.27)
+# Requires: PyPI trusted publisher configured for this repo.
+# Setup: https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
+
+name: Publish to PyPI
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC trusted publisher
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Verify package metadata
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

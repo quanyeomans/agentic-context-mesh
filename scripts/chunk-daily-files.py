@@ -20,6 +20,7 @@ Usage:
     python3 chunk-daily-files.py --vault-root /data/obsidian-vault
     python3 chunk-daily-files.py --vault-root /vault --output-dir /tmp/chunks --dry-run
 """
+
 from __future__ import annotations
 
 import argparse
@@ -101,7 +102,7 @@ def chunk_file(log_path: Path, vault_root: Path) -> list[dict[str, Any]]:
     if content.startswith("---"):
         end = content.find("\n---", 3)
         if end != -1:
-            content = content[end + 4:].lstrip("\n")
+            content = content[end + 4 :].lstrip("\n")
 
     sections = split_into_sections(content)
     chunks: list[dict[str, Any]] = []
@@ -109,13 +110,15 @@ def chunk_file(log_path: Path, vault_root: Path) -> list[dict[str, Any]]:
         slug = _slug(heading) if heading else "preamble"
         stem = log_path.stem  # YYYY-MM-DD
         filename = f"{stem}-{slug}-{idx:02d}.md"
-        chunks.append({
-            "heading": heading,
-            "body": body,
-            "date": file_date,
-            "source": vault_rel,
-            "filename": filename,
-        })
+        chunks.append(
+            {
+                "heading": heading,
+                "body": body,
+                "date": file_date,
+                "source": vault_rel,
+                "filename": filename,
+            }
+        )
 
     return chunks
 

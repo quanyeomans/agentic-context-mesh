@@ -1,6 +1,6 @@
 # Retrieval Boost Configuration
 
-**Status:** Partially Implemented — Layer 1 (RetrievalConfig) shipped in v2026.4.27  
+**Status:** Partially Implemented — Layer 1 (RetrievalConfig) shipped in v2026.4.27
 **Scope:** `kairix/search/config.py`, `rrf.py`, `hybrid.py`
 
 ---
@@ -201,7 +201,7 @@ retrieval:
   collection_profiles:
     runbooks-collection:    {boost_profile: runbook_heavy}
     entity-graph-collection: {boost_profile: entity_heavy}
-  
+
   boost_profiles:
     runbook_heavy:
       procedural: {enabled: true, factor: 1.6}

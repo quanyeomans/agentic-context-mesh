@@ -21,15 +21,15 @@ A healthy Internet helps people live and learn online. It includes everyone in i
 
 Some big ideas connected to [Internet health](https://internethealthreport.org/) include:
 
-- **Online Privacy & Security:** People understand and can meaningfully control how their data is collected and used online, and trust that it is safe. In parallel, companies and governments work to protect our data and enhance our ownership over our digital identities. 
+- **Online Privacy & Security:** People understand and can meaningfully control how their data is collected and used online, and trust that it is safe. In parallel, companies and governments work to protect our data and enhance our ownership over our digital identities.
 
-- **Open Innovation:** Open is the default: open source and open standards continue to be at the heart of the Internet, and influence organizations and industries products, policies and practices. As a result, entrepreneurs and everyday Internet users can create, innovate and compete online without asking permission. 
+- **Open Innovation:** Open is the default: open source and open standards continue to be at the heart of the Internet, and influence organizations and industries products, policies and practices. As a result, entrepreneurs and everyday Internet users can create, innovate and compete online without asking permission.
 
-- **Decentralization:** The technologies and platforms people use every day are interoperable and based on open standards. People expect and demand systems that allow seamless flow and transfer of information and content. 
+- **Decentralization:** The technologies and platforms people use every day are interoperable and based on open standards. People expect and demand systems that allow seamless flow and transfer of information and content.
 
-- **Digital Inclusion:** People everywhere can access and have the opportunity to participate in building the entire Internet. Subsequently, everyone on the Internet has the opportunity to access and shape our digital world. The Internet reflects the diversity of the people who use it. 
+- **Digital Inclusion:** People everywhere can access and have the opportunity to participate in building the entire Internet. Subsequently, everyone on the Internet has the opportunity to access and shape our digital world. The Internet reflects the diversity of the people who use it.
 
-- **Web Literacy:** People have the skills to read, write and participate in the digital world. Together, these informed digital citizens move beyond just consuming content, to creating, shaping and defending the web. 
+- **Web Literacy:** People have the skills to read, write and participate in the digital world. Together, these informed digital citizens move beyond just consuming content, to creating, shaping and defending the web.
 
 Think of Internet health and these big ideas as the “what” and “why” of what we do. Our commitment to these core values drives our work.
 
@@ -73,7 +73,7 @@ The framework is meant to be a foundation for later work, and, as such, it is no
 
 To put it another way: This framework is the first step of a larger, on-going project to develop curriculum, events, trainings and online resouces like an open leadership map that will help people locate themselves and then move ahead in their open leadership journeys.
 
-If you are curious about the kinds of use cases we envision and plan for the framework, you can review and test these prototypes: 
+If you are curious about the kinds of use cases we envision and plan for the framework, you can review and test these prototypes:
 
 - [Self assessment](https://docs.google.com/forms/d/e/1FAIpQLSds8B2aj6K0h7EwdKDBdqpIkGxReyOgrA4QRhrLim-Ags4rUw/viewform?usp=sf_link)
 - [Project design assessment](https://docs.google.com/forms/d/e/1FAIpQLSesg4Uk7Znn5VawGQd99eTIlAsNyPXv9TdLeJhfYj2mxtlv4w/viewform?usp=sf_link)
@@ -96,7 +96,7 @@ We believe that it is important to ensure the **sharing** of an open community o
 
 We believe that any efforts a community, leader, or project makes towards inclusion must include authentic, significant and valuable opportunities for participation, contribution and leadership. To make that belief an explicit part of the framework and its design we paired **participation & inclusion**.
 
-At its core, being “open” is about structuring any project or organization, technical or not, to invite the widest possible diversity of contributors from outside your organization's boundaries. Who are contributors? People who give time, expertise and labor to a project. A project that supports diverse contributors creates an inclusive community of people working together because of the interests and passions they share. That community includes new “insiders” who may have once felt like they were “outsiders” - people outside of a community, organization or project's notional boundaries who join a project because of shared expertise, interests and passions.  
+At its core, being “open” is about structuring any project or organization, technical or not, to invite the widest possible diversity of contributors from outside your organization's boundaries. Who are contributors? People who give time, expertise and labor to a project. A project that supports diverse contributors creates an inclusive community of people working together because of the interests and passions they share. That community includes new “insiders” who may have once felt like they were “outsiders” - people outside of a community, organization or project's notional boundaries who join a project because of shared expertise, interests and passions.
 
 Some projects need specific skill sets and define more narrow contribution pathways. There is a tension in such projects between aspirations of inclusivity and the details of the project. Open leaders strive to collaborate with their communities to imagine and make concrete as many authentic, valuable opportunities as possible for potential participants.
 
@@ -181,7 +181,7 @@ Contributing to an open community or project can be an altruistic act, but such 
 
 Open leaders empower others to become open leaders in their own right. By inviting others to collaborate, open leaders continue their own personal and professional leadership development and find trusted contributors to whom they can delegate work and offer mentorship for project sustainability and maintenance and for the overall health of the open movement.
 
-Contributors can benefit from the same kind of intrinsic personal and professional development as they assume more responsibility in a project and receive mentorship from other leaders in their project communities. They can also draw other kinds of extrinsic value from a project such as social capital within their professional networks, a forkable version of a project they can use in their own lives or within their networks, and any other specific benefits offered by a project or its community. 
+Contributors can benefit from the same kind of intrinsic personal and professional development as they assume more responsibility in a project and receive mentorship from other leaders in their project communities. They can also draw other kinds of extrinsic value from a project such as social capital within their professional networks, a forkable version of a project they can use in their own lives or within their networks, and any other specific benefits offered by a project or its community.
 
 Open leaders work to make the value exchanges between themselves, their projects and their contributors transparent and mutually and equitably beneficial.
 
@@ -443,7 +443,7 @@ Finally, if you would like to get a sense of how open leadership looks across th
 - [**Open Leadership Training Series (OLTS).**](https://mozilla.github.io/leadership-training/) Try this in-depth, self-paced curriculum designed to help you develop and document an open project.
 
 ### To join an open leadership event, visit...
-- [**Global Sprint.**](https://mozilla.github.io/global-sprint/) Check back often to submit a project for the next Global Sprint, a 2-day celebration of open projects and contributors from around the world. 
+- [**Global Sprint.**](https://mozilla.github.io/global-sprint/) Check back often to submit a project for the next Global Sprint, a 2-day celebration of open projects and contributors from around the world.
 - [**MozFest.**](https://mozillafestival.org/) Join us this October in London for our annual celebration of the Mozilla Network and the open projects its community members lead, support and inspire.
 
 Thank you for your leadership. We can’t wait to see what we might build together!
@@ -502,8 +502,8 @@ If you are curious about how we arrived at different terms, definitions and mode
 - [File issues](https://github.com/mozilla/open-leadership-framework/issues) on GitHub.
 - Follow this series of [weeknotes](https://medium.com/@chadsansing/open-leadership-framework-weeknote-1-4f0c4b1b7798), or weekly updates, about the project.
 - Email [Chad Sansing](mailto:chad@mozillafoundation.org).
-- Join us for [office hours](https://public.etherpad-mozilla.org/p/olm-whitepaper-office-hours) or a [community call](https://public.etherpad-mozilla.org/p/olm-whitepaper-call). 
-- Follow this weeknote series here or by subscribing to the [Work Open, Lead Open newsletter](https://tinyletter.com/MozOpenLeaders). 
+- Join us for [office hours](https://public.etherpad-mozilla.org/p/olm-whitepaper-office-hours) or a [community call](https://public.etherpad-mozilla.org/p/olm-whitepaper-call).
+- Follow this weeknote series here or by subscribing to the [Work Open, Lead Open newsletter](https://tinyletter.com/MozOpenLeaders).
 - Test a prototype use case.
   - [Self assessment](https://drive.google.com/open?id=1Kg2hR63ZG89pYu0SvhC_FXXLieiZHf65Wz7yRybByE0)
   - [Project design assessment](https://drive.google.com/open?id=1hd1yPyNCrkqUkq5aAH4uiaXVyhQv5bdlu5onIvbu3bE)
