@@ -30,7 +30,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from kairix.db import get_db_path, load_extensions
 from kairix.graph.client import get_client as _get_neo4j
@@ -48,7 +48,7 @@ from kairix.search.rrf import (
     rrf,
     temporal_date_boost,
 )
-from kairix.search.vector import VecResult, vector_search_bytes
+from kairix.search.vector import VECTOR_DEFAULT_K, VecResult
 
 logger = logging.getLogger(__name__)
 
@@ -637,7 +637,7 @@ def search(
         # Collect results
         for name, future in futures.items():
             try:
-                result = future.result(timeout=10)
+                result = future.result(timeout=30)
                 if name == "bm25":
                     bm25_results = result or []
                 elif name == "vec":
@@ -770,36 +770,72 @@ def _run_vector_search(
     date_filter_paths: frozenset[str] | None = None,
 ) -> list[VecResult]:
     """
-    Embed query and run vector search. Returns [] on any failure.
+    Embed query and run ANN vector search via usearch. Returns [] on any failure.
     Called from ThreadPoolExecutor — must not raise.
 
-    Retries embed once on empty result to handle cold Key Vault fetches
-    (first call may time out while KV secrets are being fetched; lru_cache
-    means the second call uses the warm cache and succeeds).
+    Retries embed once on empty result to handle cold Key Vault fetches.
     """
     import time as _time
 
+    import numpy as np
+
     try:
-        query_bytes = embed_text_as_bytes(query)
-        if not query_bytes:
-            # Retry once — cold KV start may have timed out on first call
-            logger.warning("hybrid: embed returned empty on first try — retrying once (query=%r)", query[:60])
+        from kairix._azure import embed_text
+
+        vec = embed_text(query)
+        if not vec:
+            logger.warning("hybrid: embed returned empty on first try — retrying once")
             _time.sleep(0.5)
-            query_bytes = embed_text_as_bytes(query)
-        if not query_bytes:
+            vec = embed_text(query)
+        if not vec:
             logger.warning("hybrid: embed returned empty after retry — skipping vector search")
             return []
 
-        db = _open_vec_db()
-        if db is None:
+        query_vec = np.array(vec, dtype=np.float32)
+        norm = np.linalg.norm(query_vec)
+        if norm > 0:
+            query_vec /= norm
+
+        index = _get_vector_index()
+        if index is None or len(index) == 0:
             return []
 
-        try:
-            return vector_search_bytes(
-                db, query_bytes, collections=collections or None, date_filter_paths=date_filter_paths
-            )
-        finally:
-            db.close()
-    except Exception as e:  # broad catch justified: embed + sqlite-vec; never-raises contract
+        results = index.search(query_vec, k=VECTOR_DEFAULT_K, collections=collections or None)
+
+        # Apply date filter if present (TMP-2 temporal filtering)
+        if date_filter_paths and results:
+            results = [r for r in results if r["path"] in date_filter_paths]
+
+        return results
+    except Exception as e:
         logger.warning("hybrid: _run_vector_search failed — %s", e)
         return []
+
+
+# Module-level usearch index singleton
+_VECTOR_INDEX: Any = None
+
+
+def _get_vector_index() -> Any:
+    """Lazily load the usearch vector index singleton."""
+    global _VECTOR_INDEX
+    if _VECTOR_INDEX is not None:
+        return _VECTOR_INDEX
+    try:
+        from kairix.paths import db_path as get_db_path
+        from kairix.search.vec_index import VectorIndex
+
+        db_p = get_db_path()
+        index_path = db_p.parent / "vectors.usearch"
+        meta_path = db_p.parent / "vectors.meta.json"
+        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p)
+        count = idx.load()
+        if count > 0:
+            logger.info("hybrid: loaded usearch index (%d vectors)", count)
+            _VECTOR_INDEX = idx
+            return idx
+        logger.warning("hybrid: usearch index empty or missing at %s", index_path)
+        return None
+    except Exception as e:
+        logger.warning("hybrid: failed to load usearch index — %s", e)
+        return None
