@@ -28,7 +28,7 @@ Conceptual content provides a clear, high-level overview of a feature or topic. 
 
 Conceptual content can be found in a standalone article or in a conceptual section within another article.
 Most major features or parts of the product will get their own conceptual article.
-For smaller or more specific conceptual sections that accompany one or more procedures, we instead place conceptual content within guides. 
+For smaller or more specific conceptual sections that accompany one or more procedures, we instead place conceptual content within guides.
 
 ### Contents of a conceptual article or header
 
@@ -57,7 +57,7 @@ Referential content provides detailed information that customers need to access 
 Referential content can be found in a standalone article or in a referential section within another article.
 
 * Some major subjects may require their own referential article, especially if there is a large amount of referential content, such as for search syntax or YAML syntax.
-* For smaller or more specific referential sections that accompany conceptual or procedural information, like a list of a feature’s supported languages or hardware requirements, we’ll add referential sections in context within procedural or conceptual content.  
+* For smaller or more specific referential sections that accompany conceptual or procedural information, like a list of a feature’s supported languages or hardware requirements, we’ll add referential sections in context within procedural or conceptual content.
 
 ### Contents of a referential article or header
 
@@ -85,7 +85,7 @@ Titles should avoid stacked nouns - use prepositions to break up long strings of
 * Referential articles
 TBD
 * Referential sections within other articles
-TBD 
+TBD
 * Placeholder: Referential REST content
 * Placeholder: Referential GraphQL content
 
@@ -99,7 +99,7 @@ When creating multiple related procedures, or when describing how to both do and
 * If disabling or undoing a procedure requires the same steps and has no detailed implications, then you do not need to write a separate procedure for undoing the setting.
 * If disabling or undoing a procedure requires different steps or has important or detailed implications, create a guide with an agnostic title (unless there are significant reasons to create separate individual procedural articles for both doing and undoing a task).
 
-Procedural content should include troubleshooting tips as frequently as possible. See the troubleshooting section below for more information. 
+Procedural content should include troubleshooting tips as frequently as possible. See the troubleshooting section below for more information.
 ### Title guidelines for procedural articles
 * Procedural articles or procedural sections within articles should be task-based and begin with a gerund
 * Use active and specific verbs (occasionally this takes some brainstorming or hitting a thesaurus)
@@ -115,10 +115,10 @@ Procedural content should include troubleshooting tips as frequently as possible
 
 Guides are highly-approachable articles that group information in context to help readers complete a complex task or set of related tasks. Guides eliminate duplication and ensure people find contextual content in the right place.  Guides may be a set of tasks within the reader’s larger workflow, such as including use cases.
 
-Guides combine the content types within a single article to illustrate an entire workflow within a single page, rather than splitting the workflow out into separate pieces. Guides containing multiple procedures help us scale as more options are added to the product. Users may need to complete different procedures within the guide at different times, or refer back to the guide for conceptual content or to complete a followup task. 
-Example usage: If there is a large number of the same type of setting, use a guide that gathers all of the tasks in context. 
+Guides combine the content types within a single article to illustrate an entire workflow within a single page, rather than splitting the workflow out into separate pieces. Guides containing multiple procedures help us scale as more options are added to the product. Users may need to complete different procedures within the guide at different times, or refer back to the guide for conceptual content or to complete a followup task.
+Example usage: If there is a large number of the same type of setting, use a guide that gathers all of the tasks in context.
 
-Guides must include a table of contents. 
+Guides must include a table of contents.
 You can replicate the guide’s title in a header if needed.
 
 ### Contents of guides
@@ -129,9 +129,9 @@ You can replicate the guide’s title in a header if needed.
 * Guides should include troubleshooting sections as frequently as possible. See the troubleshooting section below for more information.
 * Guides should include a section explaining who it's for, such as 'Who this is for' subsection or `persona` frontmatter field (coming soon).  "Who it's for" can even be a sentence using  the `` component to communicat  the guides' audience and helps set expectations. For example:
  ```text
- 
- As an analyst with `developer` permissions, you can xyz." 
- 
+
+ As an analyst with `developer` permissions, you can xyz."
+
  ```
 
 ### Title guidelines for guides
@@ -158,7 +158,7 @@ Quickstart guides are generally more conversational in tone than our other docum
   * States what the user will accomplish or build
   * Includes an example of a successful project
   * Does not include the expected amount of time that it may take users to complete the task, as this is highly dependent on the experience level of the user and can be demoralizing for beginners
-* Procedural sections  
+* Procedural sections
   * Based on the audience for the guide, the steps can be less explicit and formal than those used in procedural content. You do not have to use existing reusables to form these steps if the audience doesn’t require that level of detail.
     * Use: “From your profile, click **Settings, and then click **Developer settings**.”
     * Avoid: In the upper-right corner of any page, click your profile photo, then click **Settings**. In the left sidebar, click **Developer settings**.
@@ -172,7 +172,7 @@ Quickstart guides are generally more conversational in tone than our other docum
 * Next steps
   * Include 2-3 actionable next steps that the user take after completing the guide. Link off to other related information like:
     * Projects that illustrate the introduced concepts
-    * Relevant information 
+    * Relevant information
     * Relevant Learning courses
     * Relevant published talks, blog posts, or Community posts
 
@@ -184,7 +184,7 @@ Examples
 TBD
 
 ## Cookbook recipes
-The dbt Cookbook recipes are a collection of scenario-based, real-world examples for building with the dbt. Cookbook recipes offer practical, scenario-based examples for using specific features. 
+The dbt Cookbook recipes are a collection of scenario-based, real-world examples for building with the dbt. Cookbook recipes offer practical, scenario-based examples for using specific features.
 
 Code examples could be written in SQL or [Python](/docs/build/python-models), though most will be in SQL.
 

@@ -29,13 +29,15 @@ RECALL_LOG = Path.home() / ".cache" / "kairix" / "recall-check.json"
 
 # Recall queries with known gold path fragments (must appear in top-5 results)
 # Path fragments are vault-relative and lowercase-matched
-# Override with your own vault's known documents via RECALL_QUERIES env var (JSON)
+# Override with your own vault's known documents via RECALL_QUERIES env var (JSON).
+# Defaults use generic terms that match common document types in any corpus.
+# For corpus-specific recall, set RECALL_QUERIES as JSON array of [id, query, expected_title].
 DEFAULT_RECALL_QUERIES = [
-    ("R01", "Arize Phoenix observability recommendation", "arize-observability-research"),
-    ("R03", "kairix hybrid search architecture", "kairix"),
-    ("R04", "how to run benchmark evaluation", "benchmark"),
-    ("R05", "engineering standards and patterns", "facts"),
-    ("R12", "NemoClaw analysis OpenShell verdict", "nemoclaw-analysis"),
+    ("R01", "architecture decision record", "architecture"),
+    ("R02", "how to deploy", "deploy"),
+    ("R03", "testing strategy", "test"),
+    ("R04", "search query", "search"),
+    ("R05", "project documentation", "project"),
 ]
 
 DEGRADATION_THRESHOLD = 0.10  # alert if score drops more than 10%

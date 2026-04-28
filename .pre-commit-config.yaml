@@ -2,6 +2,9 @@
 # Install: pre-commit install
 # Run all: pre-commit run --all-files
 
+# Global exclude: reference library is external open-source content — not ours to lint
+exclude: ^reference-library/
+
 repos:
   # ── Ruff (lint + format) ───────────────────────────────────────────────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -16,9 +19,7 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^reference-library/
       - id: end-of-file-fixer
-        exclude: ^reference-library/
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files

@@ -20,9 +20,9 @@ Trunk-based development is one of many strategies for developing, merging, and s
 
 Specifically for trunk-based development, there are two types of branches:
 
-1. `main`: The trunk or main codebase. The base branch developers branch off of and merge into. 
+1. `main`: The trunk or main codebase. The base branch developers branch off of and merge into.
 
-2. `feature/fix`: Relatively small and short-lived branches where work and changes happen, and then get squashed and merged into `main` regularly. 
+2. `feature/fix`: Relatively small and short-lived branches where work and changes happen, and then get squashed and merged into `main` regularly.
 
 ![Trunk-based development diagram](https://res.cloudinary.com/dmukukwp6/image/upload/v1710055416/posthog.com/contents/images/blog/trunk-based-development/trunk.png)
 
@@ -42,7 +42,7 @@ The big difference between trunk-based development and other software developmen
 
 ### 1. Avoiding merge conflicts
 
-Merge conflicts happen when attempting to merge branches with different changes to the same areas. These are often unexpected and take time to solve. 
+Merge conflicts happen when attempting to merge branches with different changes to the same areas. These are often unexpected and take time to solve.
 
 Long-lived branches provide opportunities for merge conflicts to pile up. The short-lived branches of trunk-based development stay closer to `main` because they branch off and merge into it often. This helps avoid merge conflicts.
 
@@ -53,19 +53,19 @@ The `main` or trunk branch is the most important branch for two reasons:
 1. It gets deployed or shipped to users.
 2. It is the source of truth for the codebase.
 
-By merging to `main` regularly, everyone can be confident `main` is stable and the most up-to-date code. Developers do not need to search for healthy branches. 
+By merging to `main` regularly, everyone can be confident `main` is stable and the most up-to-date code. Developers do not need to search for healthy branches.
 
-It also enables engineers to be more confident in continuously deploying it. This helps them ship more and maintain momentum. 
+It also enables engineers to be more confident in continuously deploying it. This helps them ship more and maintain momentum.
 
 ### 3. Reviewable PRs
 
 Large feature branches can often have hundreds or thousands of lines of changes. Developers dread massive pull requests (PRs AKA merge requests) for a reason. Reviewing these requires a significant amount of overhead to get up to speed with the code.
 
-The smaller branches of trunk-based development create more reviewable pull requests. They require less overhead for someone to review. Merging regularly also creates opportunities for teams to collaborate. Every PR is a chance to interact with each other, get feedback earlier, and see what others are working on. 
+The smaller branches of trunk-based development create more reviewable pull requests. They require less overhead for someone to review. Merging regularly also creates opportunities for teams to collaborate. Every PR is a chance to interact with each other, get feedback earlier, and see what others are working on.
 
 ## The philosophy behind trunk-based development at PostHog
 
-Our main goal is to **minimize work-in-progress**. 
+Our main goal is to **minimize work-in-progress**.
 
 This is a [core philosophy of our development process](/handbook/engineering/development-process#sizing-tasks-and-reducing-wip) at PostHog and relates to all the key benefits of trunk-based development.
 
@@ -99,15 +99,15 @@ You can look at [a pull request on our repo](https://github.com/PostHog/posthog/
 
 ### 2. Feature flags
 
-[Feature flags](/feature-flags) enable us to include code in the "trunk" without immediately releasing it to users. This [decouples deployment from release](/product-engineers/decouple-deployment-from-release). 
+[Feature flags](/feature-flags) enable us to include code in the "trunk" without immediately releasing it to users. This [decouples deployment from release](/product-engineers/decouple-deployment-from-release).
 
-Once deployed, we can then [test in production](/product-engineers/testing-in-production), [dogfood](/product-engineers/dogfooding), beta test, get feedback, and progressively roll out the feature. 
+Once deployed, we can then [test in production](/product-engineers/testing-in-production), [dogfood](/product-engineers/dogfooding), beta test, get feedback, and progressively roll out the feature.
 
 We currently have [67 feature flags](https://github.com/PostHog/posthog/blob/249d82043bcd70bb3e95a0553551246998d0d160/frontend/src/lib/constants.tsx#L125C1-L198C3) in various stages of release in our main PostHog repo.
 
 ## How you can implement trunk-based development
 
-Implementing trunk-based development starts with a philosophy shift. Teams must encourage (or force) developers towards short-lived branches, rather than long-lived ones. This means breaking up PRs into smaller changes, prioritizing reviews, and pushing code out earlier. 
+Implementing trunk-based development starts with a philosophy shift. Teams must encourage (or force) developers towards short-lived branches, rather than long-lived ones. This means breaking up PRs into smaller changes, prioritizing reviews, and pushing code out earlier.
 
 Along with this shift, the right tools can help break a team's reliance on long-lived branches. These often happen for two reasons tools can help with:
 
@@ -116,7 +116,7 @@ Along with this shift, the right tools can help break a team's reliance on long-
 
 Testing and a continuous integration and deployment (CI/CD) system creates confidence in merged code. It helps avoid issues and increase code quality. Feature flags decouple deployment from release, meaning developers can merge code without needing to release it to users.
 
-The combination of a philosophy shift and the implementation of the right tools will help you transition to trunk-based development. We think making this transition is worth it. With it, we get more shipped, create momentum, and ultimately, build a more successful product. 
+The combination of a philosophy shift and the implementation of the right tools will help you transition to trunk-based development. We think making this transition is worth it. With it, we get more shipped, create momentum, and ultimately, build a more successful product.
 
 ## Further reading
 

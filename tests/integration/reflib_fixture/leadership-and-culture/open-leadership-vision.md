@@ -8,7 +8,7 @@ subdomain: mozilla-open-leadership
 date_added: 2026-04-25
 ---
 
-# A Vision for the Open Leadership Framework 
+# A Vision for the Open Leadership Framework
 
 We gather feedback and improve the Open Leadership Framework until it's strong enough to help us co-create world-class professional development opportunities with our partners.
 

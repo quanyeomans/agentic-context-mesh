@@ -10,7 +10,7 @@ date_added: 2026-04-25
 
 # mindful-programming
 
-This work is license under the [Creative Commons CC0 1.0 Universal license](https://creativecommons.org/publicdomain/zero/1.0/legalcode). 
+This work is license under the [Creative Commons CC0 1.0 Universal license](https://creativecommons.org/publicdomain/zero/1.0/legalcode).
 
 Initial version of document by [@rroblak](https://github.com/rroblak) and [@eduardohueso](https://github.com/eduardohueso). *Mindfulness of Task* based on conversations with [@palimpsestor](https://github.com/palimpsestor).
 

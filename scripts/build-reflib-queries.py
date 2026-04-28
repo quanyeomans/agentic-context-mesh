@@ -24,12 +24,10 @@ Usage:
 """
 
 import argparse
-import json
 import logging
 import random
 import sqlite3
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -80,12 +78,14 @@ def sample_documents(db_path: str, n_samples: int = 200, seed: int = 42) -> list
             (f"{collection}/%", target),
         ).fetchall()
         for row in rows:
-            all_docs.append({
-                "hash": row["hash"],
-                "path": row["path"],
-                "title": row["title"] or Path(row["path"]).stem,
-                "collection": collection,
-            })
+            all_docs.append(
+                {
+                    "hash": row["hash"],
+                    "path": row["path"],
+                    "title": row["title"] or Path(row["path"]).stem,
+                    "collection": collection,
+                }
+            )
 
     db.close()
     logger.info("Sampled %d documents from %d collections", len(all_docs), len(COLLECTION_WEIGHTS))
@@ -131,7 +131,7 @@ def generate_query_for_document(doc: dict, category: str) -> dict:
     }
 
     query_templates = templates.get(category, templates["recall"])
-    query_text = random.choice(query_templates)
+    query_text = random.choice(query_templates)  # noqa: S311
 
     # Normalise title for gold matching
     normalised_title = title.lower().replace(" ", "-").replace("_", "-")
@@ -171,7 +171,7 @@ def build_suite(
         if not available:
             available = list(TARGET_DISTRIBUTION.keys())
 
-        category = random.choice(available)
+        category = random.choice(available)  # noqa: S311
         case = generate_query_for_document(doc, category)
         case_counter[category] += 1
         cases.append(case)

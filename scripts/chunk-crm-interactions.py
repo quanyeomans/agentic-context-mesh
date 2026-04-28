@@ -38,6 +38,7 @@ Usage:
     python3 chunk-crm-interactions.py --input /path/to/crm-export.json --output-dir /tmp/chunks --dry-run
     python3 chunk-crm-interactions.py --input /path/to/crm-export.json --vault-root ~/vault
 """
+
 from __future__ import annotations
 
 import argparse
@@ -222,23 +223,32 @@ def process_export(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1].strip())
     parser.add_argument(
-        "--input", required=True, type=Path,
+        "--input",
+        required=True,
+        type=Path,
         help="Path to CRM export JSON file",
     )
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("/tmp/crm-chunks"),  # noqa: S108,
+        "--output-dir",
+        type=Path,
+        default=Path("/tmp/crm-chunks"),  # noqa: S108,
         help="Output directory for chunk files (default: /tmp/crm-chunks)",
     )
     parser.add_argument(
-        "--vault-root", type=Path, default=None,
+        "--vault-root",
+        type=Path,
+        default=None,
         help="Vault root (not used directly; reserved for future integration)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Show what would be written without writing files",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true",
+        "--verbose",
+        "-v",
+        action="store_true",
         help="Enable debug logging",
     )
     args = parser.parse_args(argv)

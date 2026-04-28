@@ -177,48 +177,74 @@ def test_tool_entity_neo4j_exception_returns_error() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _mock_search_result() -> MagicMock:
+    """Create a mock SearchResult with budgeted results for prep tests."""
+    sr = MagicMock()
+    mock_result = MagicMock()
+    mock_result.result.title = "test-doc"
+    mock_result.result.path = "projects/test-doc.md"
+    mock_result.content = "This is test document content about the topic."
+    sr.results = [mock_result]
+    return sr
+
+
 @pytest.mark.unit
 def test_tool_prep_l0() -> None:
     summary_text = "Brief context summary."
-    with patch("kairix._azure.chat_completion", return_value=summary_text):
+    with (
+        patch("kairix.search.hybrid.search", return_value=_mock_search_result()),
+        patch("kairix._azure.chat_completion", return_value=summary_text),
+    ):
         result = tool_prep(query="What did we discuss last quarter?", tier="l0")
 
     assert result["tier"] == "l0"
     assert result["summary"] == summary_text
-    from kairix.text import estimate_tokens
-
-    assert result["tokens"] == estimate_tokens(summary_text)
     assert result["error"] == ""
+    assert "sources" in result
 
 
 @pytest.mark.unit
 def test_tool_prep_l1() -> None:
-    from kairix.text import estimate_tokens
-
     summary_text = "Detailed context summary about the engagement."
-    with patch("kairix._azure.chat_completion", return_value=summary_text):
+    with (
+        patch("kairix.search.hybrid.search", return_value=_mock_search_result()),
+        patch("kairix._azure.chat_completion", return_value=summary_text),
+    ):
         result = tool_prep(query="Explain our test engagement", tier="l1")
 
     assert result["tier"] == "l1"
-    assert result["tokens"] == estimate_tokens(summary_text)
+    assert result["error"] == ""
+
+
+@pytest.mark.unit
+def test_tool_prep_no_results_returns_no_content() -> None:
+    """Prep returns 'no relevant documents' when search finds nothing."""
+    empty_sr = MagicMock()
+    empty_sr.results = []
+    with patch("kairix.search.hybrid.search", return_value=empty_sr):
+        result = tool_prep(query="something obscure", tier="l0")
+
+    assert "no relevant documents" in result["summary"].lower()
     assert result["error"] == ""
 
 
 @pytest.mark.unit
 def test_tool_prep_error_handled() -> None:
-    with patch("kairix._azure.chat_completion", side_effect=RuntimeError("llm unavailable")):
+    with patch("kairix.search.hybrid.search", side_effect=RuntimeError("search unavailable")):
         result = tool_prep(query="anything", tier="l0")
 
     assert result["summary"] == ""
-    assert "failed" in result["error"].lower()  # sanitised error, no internal details
+    assert "failed" in result["error"].lower()
 
 
 @pytest.mark.unit
 def test_tool_prep_default_tier_is_l0() -> None:
-    with patch("kairix._azure.chat_completion", return_value="ok") as mock_chat:
+    with (
+        patch("kairix.search.hybrid.search", return_value=_mock_search_result()),
+        patch("kairix._azure.chat_completion", return_value="ok") as mock_chat,
+    ):
         tool_prep(query="q")
         mock_chat.assert_called_once()
-        # l0 uses max_tokens=150
         _, kwargs = mock_chat.call_args
         assert kwargs.get("max_tokens") == 150
 
