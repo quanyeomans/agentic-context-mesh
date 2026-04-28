@@ -12,19 +12,20 @@ This implements S1-B: Resource entity cross-referencing.
 Usage:
     python scripts/seed-brief-entities.py [--dry-run] [--vault-root PATH]
 """
+
 from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
+
 import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from kairix.graph.client import get_client  # noqa: E402
+from kairix.graph.client import get_client
 
 VAULT_ROOT = Path(os.environ.get("KAIRIX_VAULT_ROOT", "/data/obsidian-vault"))
 BRIEF_DIRS = [
@@ -133,10 +134,7 @@ def seed_brief_entities(dry_run: bool = False, vault_root: Path = VAULT_ROOT) ->
     elif dry_run:
         print("\n[DRY RUN] No changes written.")
 
-    print(
-        f"Stats: no_related_entities={skipped_no_entities} | "
-        f"unresolved={skipped_unresolved}"
-    )
+    print(f"Stats: no_related_entities={skipped_no_entities} | unresolved={skipped_unresolved}")
 
 
 if __name__ == "__main__":

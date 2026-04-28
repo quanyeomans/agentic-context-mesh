@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Check definitions
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CheckResult:
     name: str
@@ -39,9 +40,7 @@ class CheckResult:
     note: str = ""
 
 
-def _run_search(
-    query: str, agent: str, kairix_bin: str, timeout: int = 60
-) -> dict:
+def _run_search(query: str, agent: str, kairix_bin: str, timeout: int = 60) -> dict:
     """Run kairix search --json and return parsed result dict."""
     result = subprocess.run(  # noqa: S603 — intentional: runs the kairix CLI binary
         [kairix_bin, "search", query, "--agent", agent, "--json"],
@@ -54,9 +53,7 @@ def _run_search(
     # Strip any warning lines before JSON
     stdout = result.stdout.strip()
     lines = stdout.splitlines()
-    json_start = next(
-        (i for i, line in enumerate(lines) if line.lstrip().startswith("{")), 0
-    )
+    json_start = next((i for i, line in enumerate(lines) if line.lstrip().startswith("{")), 0)
     return json.loads("\n".join(lines[json_start:]))
 
 
@@ -87,10 +84,7 @@ def check_search(
     intent = data.get("intent", "unknown")
     result_count = len(data.get("results", []))
 
-    passed = (
-        intent.lower() == expected_intent.lower()
-        and result_count >= min_results
-    )
+    passed = intent.lower() == expected_intent.lower() and result_count >= min_results
 
     return CheckResult(
         name=name,
@@ -160,12 +154,8 @@ def check_curator_health() -> CheckResult:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Acceptance verification for kairix search")
     parser.add_argument("--agent", default="shared", help="Agent name for collection scoping")
-    parser.add_argument(
-        "--entity-a", default="Acme Corp", help="Known entity name for ENTITY check"
-    )
-    parser.add_argument(
-        "--entity-b", default="TechCorp", help="Second known entity for MULTI_HOP check"
-    )
+    parser.add_argument("--entity-a", default="Acme Corp", help="Known entity name for ENTITY check")
+    parser.add_argument("--entity-b", default="TechCorp", help="Second known entity for MULTI_HOP check")
     parser.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
     parser.add_argument("--output", default=None, help="Write results to FILE")
     parser.add_argument(
@@ -181,11 +171,11 @@ def main() -> None:
         kairix_bin = "kairix"
 
     checks = [
-        ("keyword",   "FEAT-081 implementation status",        "keyword",   1),
-        ("temporal",  "what happened last week",              "temporal",  1),
-        ("entity",    f"tell me about {args.entity_a}",       "entity",    1),
-        ("procedural","how do I run the embedding pipeline",  "procedural",1),
-        ("semantic",  "infrastructure cost optimisation strategy", "semantic", 1),
+        ("keyword", "FEAT-081 implementation status", "keyword", 1),
+        ("temporal", "what happened last week", "temporal", 1),
+        ("entity", f"tell me about {args.entity_a}", "entity", 1),
+        ("procedural", "how do I run the embedding pipeline", "procedural", 1),
+        ("semantic", "infrastructure cost optimisation strategy", "semantic", 1),
         ("multi_hop", f"connection between {args.entity_a} and {args.entity_b}", "multi_hop", 2),
     ]
 
@@ -229,8 +219,7 @@ def main() -> None:
             else:
                 print(
                     f"  {icon} {r.name:<12} intent={r.intent or '?':<12} "
-                    f"results={r.result_count}  {round(r.latency_ms)}ms"
-                    + (f"  NOTE: {r.note}" if r.note else "")
+                    f"results={r.result_count}  {round(r.latency_ms)}ms" + (f"  NOTE: {r.note}" if r.note else "")
                 )
         print()
         if passed == total:

@@ -82,7 +82,7 @@ def extract_frontmatter(content: str) -> tuple[dict[str, str], str]:
         return {}, content
 
     fm_block = content[3:end_idx].strip()
-    body = content[end_idx + 4:].strip()
+    body = content[end_idx + 4 :].strip()
 
     frontmatter: dict[str, str] = {}
     for line in fm_block.splitlines():
