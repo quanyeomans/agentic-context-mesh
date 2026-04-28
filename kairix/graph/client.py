@@ -189,7 +189,11 @@ class Neo4jClient:
                 if summary.counters.relationships_created == 0 and summary.counters.properties_set == 0:
                     logger.warning(
                         "upsert_edge(%s→%s %s): no-op — target %s:%s may not exist",
-                        edge.from_id, edge.to_id, edge.kind, edge.to_label, edge.to_id,
+                        edge.from_id,
+                        edge.to_id,
+                        edge.kind,
+                        edge.to_label,
+                        edge.to_id,
                     )
             return True
         except Exception as e:

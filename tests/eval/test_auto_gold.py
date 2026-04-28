@@ -62,8 +62,11 @@ class TestGenerateQueries:
         from kairix.eval.auto_gold import CorpusProfile, generate_template_queries
 
         profile = CorpusProfile(
-            total_docs=100, collections={"default": 100},
-            procedural_count=10, date_filename_count=5, entity_doc_count=8,
+            total_docs=100,
+            collections={"default": 100},
+            procedural_count=10,
+            date_filename_count=5,
+            entity_doc_count=8,
             titles=["alpha", "beta", "microservices", "event-driven"],
         )
         queries = generate_template_queries(profile, n=20)
@@ -73,10 +76,21 @@ class TestGenerateQueries:
         from kairix.eval.auto_gold import CorpusProfile, generate_template_queries
 
         profile = CorpusProfile(
-            total_docs=100, collections={"default": 100},
-            procedural_count=10, date_filename_count=5, entity_doc_count=8,
-            titles=["alpha", "beta", "microservices", "event-driven",
-                    "kubernetes", "testing", "architecture", "deployment"],
+            total_docs=100,
+            collections={"default": 100},
+            procedural_count=10,
+            date_filename_count=5,
+            entity_doc_count=8,
+            titles=[
+                "alpha",
+                "beta",
+                "microservices",
+                "event-driven",
+                "kubernetes",
+                "testing",
+                "architecture",
+                "deployment",
+            ],
         )
         queries = generate_template_queries(profile, n=30)
         categories = {q["category"] for q in queries}
@@ -87,8 +101,11 @@ class TestGenerateQueries:
 
         titles = ["microservices", "kubernetes", "testing"]
         profile = CorpusProfile(
-            total_docs=50, collections={"default": 50},
-            procedural_count=5, date_filename_count=0, entity_doc_count=0,
+            total_docs=50,
+            collections={"default": 50},
+            procedural_count=5,
+            date_filename_count=0,
+            entity_doc_count=0,
             titles=titles,
         )
         queries = generate_template_queries(profile, n=10)
@@ -106,8 +123,11 @@ class TestBuildSuite:
         from kairix.eval.auto_gold import CorpusProfile, build_suite, generate_template_queries
 
         profile = CorpusProfile(
-            total_docs=50, collections={"default": 50},
-            procedural_count=5, date_filename_count=0, entity_doc_count=0,
+            total_docs=50,
+            collections={"default": 50},
+            procedural_count=5,
+            date_filename_count=0,
+            entity_doc_count=0,
             titles=["alpha", "beta", "gamma"],
         )
         queries = generate_template_queries(profile, n=10)

@@ -11,6 +11,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from typing import Any
 
 from kairix.utils import slugify
 
@@ -98,7 +99,7 @@ def _title_case(s: str) -> str:
     return " ".join(w if w.isupper() and len(w) > 1 else w.capitalize() for w in words)
 
 
-def seed_graph(client: object, candidates: list[EntityCandidate]) -> int:
+def seed_graph(client: Any, candidates: list[EntityCandidate]) -> int:
     """Upsert confirmed entity candidates into Neo4j.
 
     Returns the number of successfully upserted entities.
@@ -113,7 +114,7 @@ def seed_graph(client: object, candidates: list[EntityCandidate]) -> int:
         if c.source_docs:
             props["source_docs"] = c.source_docs[:5]  # cap for Neo4j property size
 
-        ok = client.upsert_node(c.entity_type, c.suggested_id, props)  # type: ignore[union-attr]
+        ok = client.upsert_node(c.entity_type, c.suggested_id, props)
         if ok:
             count += 1
         else:
