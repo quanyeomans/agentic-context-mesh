@@ -229,4 +229,5 @@ REFLIB_RETRIEVAL_CONFIG = RetrievalConfig(
     vec_limit=5,
     entity=EntityBoostConfig(enabled=True, factor=0.20, cap=2.0),
     procedural=ProceduralBoostConfig(enabled=True, factor=1.4),
+    rerank_intents=(),  # Reranking disabled — BM25-primary already ranks well for this corpus
 )
