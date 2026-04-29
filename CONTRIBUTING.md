@@ -5,7 +5,7 @@
 ```bash
 git clone https://github.com/quanyeomans/kairix
 cd kairix
-pip install -e ".[dev]"
+pip install -e ".[dev,neo4j,agents,rerank]"
 ```
 
 ## Running tests

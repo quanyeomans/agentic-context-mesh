@@ -83,7 +83,7 @@ Kairix controls how much context each query returns. A quick fact check gets 1,5
 | **Proves it works** | Benchmarked: 0.84 NDCG@10 on real queries | Not published | Not published | Not published | N/A |
 | **Needs a GPU** | No | No | No | N/A (SaaS) | No |
 | **Cost** | ~$25/month | $250+/month | Free | $8-10/user/month | LLM token costs |
-| **Works with agents (MCP)** | Built-in — 6 MCP tools | Custom integration needed | No | No | Manual prompt building |
+| **Works with agents (MCP)** | Built-in — 7 MCP tools | Custom integration needed | No | No | Manual prompt building |
 
 ---
 
@@ -94,7 +94,7 @@ Kairix controls how much context each query returns. A quick fact check gets 1,5
 ```bash
 pip install "kairix[agents,neo4j]"
 kairix setup                   # interactive wizard — picks your paths, ports, collections
-kairix embed                   # index your documents
+kairix embed                   # index your documents (summarisation runs automatically)
 kairix search "your question"  # find answers
 kairix mcp serve               # start MCP server for agent integration
 ```
@@ -157,7 +157,7 @@ The system handles automatically:
 - **Right-sized responses** — quick lookups get small answers; research questions get thorough ones
 - **People and company context** — if the question is about a known person or company, their knowledge graph summary appears at the top
 
-Other MCP tools available: `entity` (direct person/company lookup), `prep` (quick topic summary), `usage_guide` (self-documentation).
+Other MCP tools available: `entity` (direct person/company lookup), `prep` (quick topic summary), `timeline` (date-aware search), `research` (iterative multi-hop), `contradict` (check facts before writing), `usage_guide` (self-documentation).
 
 ---
 
@@ -211,12 +211,13 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 |---|---|---|
 | `kairix embed` | Shipped | Indexes your documents for search (keyword + meaning-based) |
 | `kairix search` | Shipped | Finds the best answers to any question |
-| `kairix mcp serve` | Shipped | MCP server with 6 tools — search, entity, prep, timeline, research, usage guide |
+| `kairix mcp serve` | Shipped | MCP server with 7 tools — search, entity, prep, timeline, research, contradict, usage guide |
 | `tool_research` (MCP) | Shipped | Iterative research — searches multiple times, refining until it finds a good answer |
 | `kairix store crawl` | Shipped | Builds a knowledge graph from your document structure |
 | `kairix prep` | Shipped | Quick topic summary (cheaper than full search) |
 | `kairix benchmark` | Shipped | Runs quality benchmarks against a test suite |
 | `kairix classify` | Shipped | Routes new knowledge to the right place in your document store |
+| `kairix summarise` | Shipped | Generates searchable summaries of your documents (runs automatically after embedding) |
 | `kairix contradict` | Shipped | Flags conflicting facts before they persist |
 | `kairix curator health` | Shipped | Monitors knowledge graph quality |
 
@@ -226,15 +227,12 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 
 ## Roadmap
 
-**Working now:** Hybrid search, knowledge graph, MCP server (6 tools), iterative research agent, evaluation tooling, configurable fusion strategies, budget auto-inference.
+**Working now:** Hybrid search, knowledge graph, MCP server (7 tools), iterative research agent, evaluation tooling, configurable fusion strategies, budget auto-inference, cross-encoder re-ranking, HyDE for semantic queries, post-embed summarisation, temporal search (absolute + relative dates), entity suggestion (spaCy NLP).
 
 **Coming next:**
-- Temporal search — date-aware query rewriting
 - Session briefings
-- Entity discovery (NLP-based)
 - Connector framework — ingest from SharePoint, CRM, email headers
 - Curator agent — proactive knowledge harvesting and gap detection
-- Cross-encoder re-ranking evaluation
 
 See [ROADMAP.md](docs/ROADMAP.md) for detail.
 
@@ -252,8 +250,11 @@ pip install "kairix[neo4j]"
 # With MCP server for agent integration
 pip install "kairix[agents]"
 
+# With cross-encoder re-ranking (best search quality)
+pip install "kairix[rerank]"
+
 # Everything
-pip install "kairix[neo4j,agents,nlp]"
+pip install "kairix[neo4j,agents,nlp,rerank]"
 ```
 
 **Prerequisites:**
@@ -274,8 +275,8 @@ See [OPERATIONS.md](docs/OPERATIONS.md) for full deployment guide.
 ```bash
 git clone https://github.com/quanyeomans/kairix
 cd kairix
-pip install -e ".[dev,neo4j,agents]"
-pytest tests/                    # 1,657 tests
+pip install -e ".[dev,neo4j,agents,rerank]"
+pytest tests/                    # 1,750 tests
 ruff check kairix/ tests/        # lint
 ```
 

@@ -483,6 +483,47 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 
 ---
 
+## Summarise Pipeline
+
+After embedding, kairix automatically generates L0 (abstract-level) summaries for each document and stores them in `summaries.db`. These summaries improve search quality by giving the ranking engine a concise representation of each document's content.
+
+- **Runs automatically** after `kairix embed` completes.
+- Summaries are stored in a separate SQLite database (`summaries.db` in the data directory).
+- To skip summarisation (e.g. for a quick test embed), pass `--skip-summarise`:
+  ```bash
+  kairix embed --skip-summarise
+  ```
+- To run summarisation independently:
+  ```bash
+  kairix summarise
+  ```
+
+---
+
+## Optional Extras
+
+### Cross-encoder re-ranking (`[rerank]`)
+
+For MULTI_HOP and SEMANTIC intent queries, kairix can apply a cross-encoder re-ranker after initial retrieval to improve result ordering. This requires the `rerank` extra:
+
+```bash
+pip install "kairix[rerank]"
+```
+
+Re-ranking is applied automatically when the extra is installed. Without it, kairix falls back to the standard fusion ranking (no degradation, just no cross-encoder pass).
+
+### Entity suggestion (`[nlp]`)
+
+Entity suggestion uses spaCy NLP models to detect named entities in your documents. This requires the `nlp` extra:
+
+```bash
+pip install "kairix[nlp]"
+```
+
+This is required for `kairix entity suggest` to work, including inside Docker containers. The Docker image includes the `nlp` extra by default.
+
+---
+
 ## Running the Benchmark
 
 ```bash

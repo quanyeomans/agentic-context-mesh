@@ -102,3 +102,10 @@ retrieval:
       chunk_date_boost:
         enabled: false        # Enable for indexed corpora with chunk_date populated
         decay_halflife_days: 30
+
+  # Cross-encoder re-ranking (requires `pip install "kairix[rerank]"`).
+  # When enabled, MULTI_HOP and SEMANTIC intent queries get a second-pass
+  # re-rank using a cross-encoder model for improved result ordering.
+  # rerank_intents:
+  #   - MULTI_HOP
+  #   - SEMANTIC

@@ -60,10 +60,10 @@ Kairix classifies your query before running search. The classification changes w
 |---|---|---|
 | **keyword** | Version strings, error codes, file names, proper nouns | BM25 + vector in parallel; exact terms weighted highly |
 | **entity** | "tell me about X", "what has Y been working on", person/org names | Entity graph lookup + ranked knowledge store docs |
-| **temporal** | "last week", "decisions in March", "what happened recently" | Date-filtered retrieval; only docs with `chunk_date` in the window |
+| **temporal** | "last week", "April 2026", "decisions in March", "what happened recently" | Date-filtered retrieval; handles both absolute dates ("April 2026") and relative phrases ("last week") |
 | **procedural** | "how do I", "what are the steps to", runbook queries | Path-weighted re-rank; step-relevant docs ranked above background |
-| **multi_hop** | "connection between X and Y", "how does A relate to B" | Query decomposed into sub-queries, results fused |
-| **semantic** | Abstract conceptual questions | Pure vector search; no exact-term requirement |
+| **multi_hop** | "connection between X and Y", "how does A relate to B" | Query decomposed into sub-queries, results fused; cross-encoder re-ranked if [rerank] extra installed |
+| **semantic** | Abstract conceptual questions | Pure vector search with HyDE (hypothetical document embedding); cross-encoder re-ranked if [rerank] extra installed |
 
 **You don't need to worry about this.** It's automatic. But if a query returns poor results, knowing the intent can help you rephrase it.
 
@@ -163,7 +163,13 @@ kairix classify "We decided to use PostgreSQL for the jobs table"
 ```bash
 kairix contradict check "We use PostgreSQL for all persistence" --top-k 5
 ```
-Returns contradicting knowledge store documents with conflict scores.
+Returns contradicting knowledge store documents with conflict scores. Also exposed as the `tool_contradict` MCP tool (see below).
+
+### contradict (MCP: tool_contradict) — check facts before writing
+```bash
+kairix contradict check "We use PostgreSQL for all persistence" --top-k 5
+```
+Also available as the `tool_contradict` MCP tool. Agents can call it before writing new content to verify it does not conflict with existing knowledge. Returns contradicting documents with conflict scores.
 
 ### onboard check — deployment diagnostics
 ```bash
@@ -228,6 +234,9 @@ kairix search "recent activity on the Azure connector" --agent builder
 kairix search "connection between Acme and TechCorp on the platform project" --agent builder
 ```
 
+### Research (MCP: tool_research)
+The `tool_research` MCP tool runs iterative multi-turn search, refining queries until it finds a good answer. It always returns a synthesis — if no relevant documents are found, it synthesises what it can from the best available results rather than returning a failure message.
+
 ---
 
 ## Token budget guidance
@@ -252,7 +261,7 @@ Set with `--budget N`. The budget caps total tokens returned, not the number of 
 | 0 results, no error | Document store not embedded | Run `kairix embed --limit 20` to test |
 | Results are all from one section | Scope issue | Check `--agent` flag is correct |
 | Entity lookup returns nothing | Entity not in Neo4j | Run `kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT` |
-| Temporal query returns non-temporal docs | Relative time phrase not detected | Use "last N days/weeks", "this month", "yesterday", "recently" |
+| Temporal query returns non-temporal docs | Time phrase not detected | Use relative ("last N days/weeks", "this month") or absolute ("April 2026", "March 15") date references |
 | BM25-only (vec_count=0) with valid creds | sqlite-vec extension not loaded | Set `SQLITE_VEC_PATH` or run `kairix onboard check` |
 
 ---
