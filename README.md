@@ -78,7 +78,7 @@ Kairix controls how much context each query returns. A quick fact check gets 1,5
 | **Your data stays private** | Yes — nothing leaves your servers | Azure cloud (your tenant) | Vendor cloud | Sent to LLM provider |
 | **Finds the right document** | Keyword + meaning + knowledge graph, fused | Keyword OR meaning (not fused) | Keyword only | No search — sends everything |
 | **Knows who people are** | Yes — entity graph links people, companies, decisions | No | No | No |
-| **Answers date questions** | Yes — "what happened last week" just works | Manual filters | No | No |
+| **Understands dates and time** | Yes — temporal query rewriting built in | Manual filters | No | No |
 | **Controls what the LLM reads** | Yes — budget per query (saves money) | No budget control | No | Sends full pages | Sends everything |
 | **Proves it works** | Benchmarked: 0.84 NDCG@10 on real queries | Not published | Not published | Not published | N/A |
 | **Needs a GPU** | No | No | No | N/A (SaaS) | No |
@@ -155,10 +155,9 @@ mcp-kairix__search("brief for quarterly client meeting")
 
 The system handles automatically:
 - **Right-sized responses** — quick lookups get small answers; research questions get thorough ones
-- **Date-based questions** — "what happened last week" is rewritten with specific dates before searching
 - **People and company context** — if the question is about a known person or company, their knowledge graph summary appears at the top
 
-Other MCP tools available: `entity` (direct person/company lookup), `prep` (quick topic summary), `timeline` (date query inspection).
+Other MCP tools available: `entity` (direct person/company lookup), `prep` (quick topic summary), `usage_guide` (self-documentation).
 
 ---
 
@@ -214,27 +213,28 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 | `kairix search` | Shipped | Finds the best answers to any question |
 | `kairix mcp serve` | Shipped | MCP server with 6 tools — search, entity, prep, timeline, research, usage guide |
 | `tool_research` (MCP) | Shipped | Iterative research — searches multiple times, refining until it finds a good answer |
-| `kairix eval` | Shipped | Measures and improves search quality on your data |
-| `kairix vault crawl` | Shipped | Builds a knowledge graph from your document structure |
-| `kairix brief` | Shipped | Generates a session briefing for an agent before it starts work |
+| `kairix store crawl` | Shipped | Builds a knowledge graph from your document structure |
 | `kairix prep` | Shipped | Quick topic summary (cheaper than full search) |
 | `kairix benchmark` | Shipped | Runs quality benchmarks against a test suite |
-| `kairix entity suggest` | Shipped | Discovers people, companies, and concepts in your documents |
-| `kairix classify` | Shipped | Routes new knowledge to the right place in your vault |
+| `kairix classify` | Shipped | Routes new knowledge to the right place in your document store |
 | `kairix contradict` | Shipped | Flags conflicting facts before they persist |
 | `kairix curator health` | Shipped | Monitors knowledge graph quality |
+
+**Coming soon:** session briefings, entity discovery, temporal timeline, connector framework. See [ROADMAP](docs/ROADMAP.md) for what's next.
 
 ---
 
 ## Roadmap
 
-**Working now:** Hybrid search, knowledge graph, temporal reasoning, session briefings, MCP server (6 tools), iterative Researcher Agent (LangGraph), evaluation tooling, configurable fusion strategies, budget auto-inference.
+**Working now:** Hybrid search, knowledge graph, MCP server (6 tools), iterative research agent, evaluation tooling, configurable fusion strategies, budget auto-inference.
 
 **Coming next:**
+- Temporal search — date-aware query rewriting
+- Session briefings
+- Entity discovery (NLP-based)
 - Connector framework — ingest from SharePoint, CRM, email headers
 - Curator agent — proactive knowledge harvesting and gap detection
 - Cross-encoder re-ranking evaluation
-- Multi-hop query improvement (weakest category at 0.721)
 
 See [ROADMAP.md](docs/ROADMAP.md) for detail.
 
@@ -275,7 +275,7 @@ See [OPERATIONS.md](docs/OPERATIONS.md) for full deployment guide.
 git clone https://github.com/quanyeomans/kairix
 cd kairix
 pip install -e ".[dev,neo4j,agents]"
-pytest tests/                    # 1,634 tests
+pytest tests/                    # 1,657 tests
 ruff check kairix/ tests/        # lint
 ```
 
