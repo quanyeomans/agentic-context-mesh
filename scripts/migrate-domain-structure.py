@@ -14,7 +14,6 @@ Usage:
   python3 scripts/migrate-domain-structure.py             # execute
 """
 
-import os
 import re
 import subprocess
 import sys
@@ -93,10 +92,12 @@ def rewrite_imports_in_file(filepath: Path, dry_run: bool = False) -> list[str]:
                 new_content,
             )
             if updated != new_content:
-                count = len(re.findall(
-                    rf'(?<![a-zA-Z0-9_.]){re.escape(old_import)}(?=[.\s"\',\)\]:;]|$)',
-                    new_content,
-                ))
+                count = len(
+                    re.findall(
+                        rf'(?<![a-zA-Z0-9_.]){re.escape(old_import)}(?=[.\s"\',\)\]:;]|$)',
+                        new_content,
+                    )
+                )
                 changes.append(f"  {old_import} → {new_import} ({count} occurrences)")
                 new_content = updated
 
