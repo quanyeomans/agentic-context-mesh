@@ -115,19 +115,30 @@ def _get_azure_config() -> tuple[str, str, str]:
 
 def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
     """
-    Verify Azure is reachable with a single-item embed call.
+    Verify the embedding API is reachable with a single-item embed call.
     Returns embedding dimensions on success, raises on failure.
     Does NOT touch the DB — safe to call before any writes.
     """
-    from openai import AzureOpenAI
+    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
+    if is_azure:
+        from openai import AzureOpenAI
 
-    client = AzureOpenAI(
-        api_key=api_key,
-        azure_endpoint=endpoint,
-        api_version=AZURE_API_VERSION,
-        max_retries=2,
-        timeout=30.0,
-    )
+        client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=AZURE_API_VERSION,
+            max_retries=2,
+            timeout=30.0,
+        )
+    else:
+        from openai import OpenAI
+
+        client = OpenAI(
+            api_key=api_key,
+            base_url=endpoint,
+            max_retries=2,
+            timeout=30.0,
+        )
     response = client.embeddings.create(
         model=deployment,
         input=["preflight check"],

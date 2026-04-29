@@ -126,7 +126,7 @@ def test_preflight_check_returns_dims_on_success() -> None:
     mock_response = MagicMock()
     mock_response.data = [mock_embedding]
 
-    with patch("openai.AzureOpenAI") as mock_cls:
+    with patch("openai.OpenAI") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.embeddings.create.return_value = mock_response
@@ -139,7 +139,7 @@ def test_preflight_check_returns_dims_on_success() -> None:
 def test_preflight_check_raises_on_api_error() -> None:
     import openai
 
-    with patch("openai.AzureOpenAI") as mock_cls:
+    with patch("openai.OpenAI") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         mock_client.embeddings.create.side_effect = openai.AuthenticationError(
