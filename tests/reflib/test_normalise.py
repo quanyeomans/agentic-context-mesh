@@ -1,4 +1,4 @@
-"""Tests for kairix.reflib.normalise — the main normalisation pipeline orchestrator.
+"""Tests for kairix.knowledge.reflib.normalise — the main normalisation pipeline orchestrator.
 
 Creates a temp directory structure mimicking a raw reference library and verifies
 the full normalise() pipeline: frontmatter injection, boilerplate filtering,
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.normalise import (
+from kairix.knowledge.reflib.normalise import (
     NormaliseConfig,
     NormaliseReport,
     _collect_markdown_files,
@@ -19,7 +19,7 @@ from kairix.reflib.normalise import (
     _is_gutenberg_text,
     normalise,
 )
-from kairix.reflib.sources import SourceDef
+from kairix.knowledge.reflib.sources import SourceDef
 
 pytestmark = pytest.mark.unit
 

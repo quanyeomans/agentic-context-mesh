@@ -6,9 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import kairix.search.rerank as rerank_mod
-from kairix.search.rerank import RERANK_CANDIDATE_LIMIT, RERANK_MODEL, _get_cross_encoder, rerank
-from kairix.search.rrf import FusedResult
+import kairix.core.search.rerank as rerank_mod
+from kairix.core.search.rerank import RERANK_CANDIDATE_LIMIT, RERANK_MODEL, _get_cross_encoder, rerank
+from kairix.core.search.rrf import FusedResult
 
 
 def _make_result(path: str, score: float, snippet: str = "") -> FusedResult:
@@ -27,7 +27,7 @@ class TestRerank:
     @pytest.mark.unit
     def test_returns_unchanged_when_sentence_transformers_not_installed(self):
         results = [_make_result("a.md", 0.9), _make_result("b.md", 0.5)]
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=None):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=None):
             out = rerank("test query", results)
         assert out == results  # same objects, same order
 
@@ -41,7 +41,7 @@ class TestRerank:
         # Return scores as list (simulates numpy array .tolist() result via our code)
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [0.1, 0.9])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("highly relevant query", results)
 
         assert out[0].path == "b.md"
@@ -53,7 +53,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [3.0, 7.0])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", results)
 
         # b.md should now be first with boosted_score = 7.0
@@ -67,7 +67,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [float(s) for s in scores])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", many, candidate_limit=RERANK_CANDIDATE_LIMIT)
 
         # All 25 results returned (top 20 re-ranked, remaining 5 appended)
@@ -83,14 +83,14 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.side_effect = RuntimeError("inference failed")
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", results)
 
         assert out == results
 
     @pytest.mark.unit
     def test_empty_results_returned_unchanged(self):
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=MagicMock()):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=MagicMock()):
             out = rerank("query", [])
         assert out == []
 
@@ -100,7 +100,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [4.2])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", results)
 
         assert out[0].rerank_score == pytest.approx(4.2)
@@ -113,7 +113,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [1.0])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             rerank("query", results)
 
         call_args = mock_encoder.predict.call_args[0][0]
@@ -134,7 +134,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [2.0])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             rerank("query", [result])
 
         call_args = mock_encoder.predict.call_args[0][0]
@@ -147,7 +147,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [5.5])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", results)
 
         assert len(out) == 1
@@ -161,7 +161,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [float(i) for i in range(3)])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", results, candidate_limit=3)
 
         assert len(out) == 10
@@ -179,7 +179,7 @@ class TestRerank:
         mock_encoder = MagicMock()
         mock_encoder.predict.return_value = MagicMock(tolist=lambda: [-2.0, -0.5])
 
-        with patch("kairix.search.rerank._get_cross_encoder", return_value=mock_encoder):
+        with patch("kairix.core.search.rerank._get_cross_encoder", return_value=mock_encoder):
             out = rerank("query", results)
 
         # b.md has higher score (-0.5 > -2.0)

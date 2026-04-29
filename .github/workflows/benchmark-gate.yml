@@ -1,7 +1,7 @@
 name: Benchmark gate
 
 # Automatic regression gate — runs on every PR that touches retrieval logic.
-# Uses the mock retrieval backend (no Azure API or QMD DB required).
+# Uses the mock retrieval backend (no Azure API required).
 # Compares against the committed baseline in benchmark-results/contract-baseline.json.
 #
 # FAIL conditions:
@@ -10,8 +10,8 @@ name: Benchmark gate
 #
 # To update the baseline after an intentional change:
 #   python3 -c "
-#     from kairix.benchmark.suite import load_suite
-#     from kairix.benchmark.runner import run_benchmark
+#     from kairix.quality.benchmark.suite import load_suite
+#     from kairix.quality.benchmark.runner import run_benchmark
 #     import json
 #     suite = load_suite('suites/contract-suite.yaml')
 #     result = run_benchmark(suite, system='mock', agent='shared')
@@ -23,11 +23,11 @@ name: Benchmark gate
 on:
   pull_request:
     paths:
-      - "kairix/search/**"
-      - "kairix/benchmark/**"
-      - "kairix/temporal/**"
-      - "kairix/embed/**"
-      - "kairix/graph/**"
+      - "kairix/core/search/**"
+      - "kairix/quality/benchmark/**"
+      - "kairix/core/temporal/**"
+      - "kairix/core/embed/**"
+      - "kairix/knowledge/graph/**"
       - "suites/contract-suite.yaml"
       - "benchmark-results/contract-baseline.json"
 
@@ -54,8 +54,8 @@ jobs:
       - name: Run contract suite (mock backend)
         run: |
           python3 -c "
-          from kairix.benchmark.suite import load_suite
-          from kairix.benchmark.runner import run_benchmark
+          from kairix.quality.benchmark.suite import load_suite
+          from kairix.quality.benchmark.runner import run_benchmark
           import json
 
           suite = load_suite('suites/contract-suite.yaml')
@@ -76,7 +76,7 @@ jobs:
       - name: Compare against baseline
         id: compare
         run: |
-          python3 -m kairix.benchmark.baseline \
+          python3 -m kairix.quality.benchmark.baseline \
             benchmark-results/contract-baseline.json \
             /tmp/contract-current.json
 

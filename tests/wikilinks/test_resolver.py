@@ -1,5 +1,5 @@
 """
-Tests for kairix.wikilinks.resolver
+Tests for kairix.knowledge.wikilinks.resolver
 
 Covers:
 - load_entities_from_bootstrap(): parses a synthetic index file (tmp_path fixture)
@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.wikilinks.resolver import (
+from kairix.knowledge.wikilinks.resolver import (
     WikiEntity,
     _neo4j_get_client,  # noqa: F401 — imported to confirm it exists for monkeypatching
     get_entities,
@@ -174,7 +174,7 @@ def test_neo4j_load_returns_entities(monkeypatch: pytest.MonkeyPatch) -> None:
     The loader calls cypher() twice (once per label — Organisation, Person),
     so we use side_effect to give each call distinct rows.
     """
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     org_rows = _NEO4J_ROWS[:4]  # organisations
     person_rows = _NEO4J_ROWS[4:]  # people/projects
@@ -193,7 +193,7 @@ def test_neo4j_load_returns_entities(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.unit
 def test_neo4j_load_returns_empty_when_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     """load_entities_from_neo4j() returns [] when Neo4j is unavailable."""
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     client = MagicMock()
     client.available = False
@@ -206,7 +206,7 @@ def test_neo4j_load_returns_empty_when_unavailable(monkeypatch: pytest.MonkeyPat
 @pytest.mark.unit
 def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Aliases list from Neo4j row is included in all_triggers()."""
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     row = {"id": "acme", "name": "Acme Corp", "aliases": ["Acme", "AH"], "vault_path": "02-Areas/Clients/Acme/"}
     # side_effect: first call (Organisation) returns the row, second (Person) returns []
@@ -225,7 +225,7 @@ def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.unit
 def test_neo4j_load_returns_empty_on_cypher_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """load_entities_from_neo4j() returns [] on any cypher exception."""
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     client = MagicMock()
     client.available = True
@@ -247,7 +247,7 @@ def test_get_entities_uses_neo4j_when_sufficient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_entities() uses Neo4j when it returns >= 5 entities with vault_path."""
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     monkeypatch.setattr(
         resolver_mod,
@@ -280,7 +280,7 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_sparse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_entities() falls back to bootstrap when Neo4j returns < 5 entities."""
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     # Only 2 entities from Neo4j — below _DB_THRESHOLD of 5
     sparse_rows = [
@@ -315,7 +315,7 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_entities() falls back to bootstrap when Neo4j is completely unavailable."""
-    import kairix.wikilinks.resolver as resolver_mod
+    import kairix.knowledge.wikilinks.resolver as resolver_mod
 
     monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: [])
     monkeypatch.setattr(

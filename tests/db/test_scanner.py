@@ -1,11 +1,11 @@
-"""Tests for kairix.db.scanner — document store file discovery, hashing, and ingestion."""
+"""Tests for kairix.core.db.scanner — document store file discovery, hashing, and ingestion."""
 
 import sqlite3
 
 import pytest
 
-from kairix.db.scanner import CollectionConfig, ScanReport, VaultScanner, _hash_content
-from kairix.reflib.frontmatter import extract_title as _extract_title
+from kairix.core.db.scanner import CollectionConfig, ScanReport, VaultScanner, _hash_content
+from kairix.knowledge.reflib.frontmatter import extract_title as _extract_title
 
 
 @pytest.mark.unit

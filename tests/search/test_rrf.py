@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.rrf — Reciprocal Rank Fusion + entity boosting.
+Tests for kairix.core.search.rrf — Reciprocal Rank Fusion + entity boosting.
 
 Tests cover:
   - RRF score formula correctness
@@ -16,9 +16,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.search.bm25 import BM25Result
-from kairix.search.config import EntityBoostConfig, ProceduralBoostConfig
-from kairix.search.rrf import (
+from kairix.core.search.bm25 import BM25Result
+from kairix.core.search.config import EntityBoostConfig, ProceduralBoostConfig
+from kairix.core.search.rrf import (
     RRF_K,
     FusedResult,
     bm25_primary_fuse,
@@ -30,7 +30,7 @@ from kairix.search.rrf import (
 # Constants kept for backward-compat test math (values from EntityBoostConfig / ProceduralBoostConfig defaults)
 ENTITY_BOOST_CAP = EntityBoostConfig().cap
 PROCEDURAL_BOOST_FACTOR = ProceduralBoostConfig().factor
-from kairix.search.vector import VecResult  # noqa: E402
+from kairix.core.search.vec_index import VecResult  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

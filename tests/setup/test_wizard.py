@@ -8,7 +8,7 @@ import yaml
 
 @pytest.mark.unit
 def test_load_template_consulting() -> None:
-    from kairix.setup.wizard import _load_template
+    from kairix.platform.setup.wizard import _load_template
 
     template = _load_template("consulting")
     assert template["name"] == "consulting"
@@ -17,7 +17,7 @@ def test_load_template_consulting() -> None:
 
 @pytest.mark.unit
 def test_load_template_missing_returns_empty() -> None:
-    from kairix.setup.wizard import _load_template
+    from kairix.platform.setup.wizard import _load_template
 
     template = _load_template("nonexistent")
     assert template == {}
@@ -25,7 +25,7 @@ def test_load_template_missing_returns_empty() -> None:
 
 @pytest.mark.unit
 def test_count_documents(tmp_path: Path) -> None:
-    from kairix.setup.wizard import _count_documents
+    from kairix.platform.setup.wizard import _count_documents
 
     # Create some test files
     (tmp_path / "doc1.md").write_text("hello")
@@ -41,7 +41,7 @@ def test_count_documents(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_count_documents_empty_dir(tmp_path: Path) -> None:
-    from kairix.setup.wizard import _count_documents
+    from kairix.platform.setup.wizard import _count_documents
 
     count, size = _count_documents(str(tmp_path))
     assert count == 0
@@ -50,7 +50,7 @@ def test_count_documents_empty_dir(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_count_documents_nonexistent_path() -> None:
-    from kairix.setup.wizard import _count_documents
+    from kairix.platform.setup.wizard import _count_documents
 
     count, size = _count_documents("/nonexistent/path")
     assert count == 0
@@ -72,7 +72,7 @@ def test_docker_compose_valid_yaml() -> None:
 @pytest.mark.unit
 def test_run_setup_generates_config(tmp_path: Path, monkeypatch) -> None:
     """run_setup writes a valid YAML config file."""
-    from kairix.setup.wizard import run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "test-config.yaml"
 
@@ -97,7 +97,7 @@ def test_run_setup_generates_config(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
     # Mock LLM connection test to fail (we don't have real credentials)
-    monkeypatch.setattr("kairix.setup.wizard._test_llm_connection", lambda *a, **k: False)
+    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: False)
 
     run_setup(output_path=str(output))
     # Setup may return False due to connection failure + "continue anyway"

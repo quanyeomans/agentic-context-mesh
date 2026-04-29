@@ -4,8 +4,8 @@ import datetime
 
 import pytest
 
-from kairix.search.config import TemporalBoostConfig
-from kairix.search.rrf import FusedResult, chunk_date_boost
+from kairix.core.search.config import TemporalBoostConfig
+from kairix.core.search.rrf import FusedResult, chunk_date_boost
 
 
 def _make(path: str, score: float, chunk_date: str = "") -> FusedResult:

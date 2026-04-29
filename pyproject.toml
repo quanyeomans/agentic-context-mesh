@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=61", "wheel", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "kairix"
-version = "2026.4.28"
+dynamic = ["version"]
 description = "Self-contained knowledge retrieval engine — hybrid search, entity graph, temporal reasoning, session briefing"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -13,7 +13,7 @@ dependencies = [
     "requests>=2.33.1,<3",
     "httpx>=0.27,<1",
     "pyyaml>=6.0,<7",
-    "sqlite-vec>=0.1.6,<0.2.0",
+    "usearch>=2.8,<3",
     "langgraph>=1.0.10,<2",
     "lxml>=6.1.0",
     "openai>=1.40,<2",
@@ -80,18 +80,17 @@ omit = [
     "tests/*",
     # CLI entry points are thin argparse wrappers — tested via integration, not unit coverage
     "kairix/cli.py",
-    "kairix/*/cli.py",
+    "kairix/**/cli.py",
     # External I/O adapters — Azure API; behaviour mocked in unit tests
     "kairix/_azure.py",
     # Eval orchestration — requires live DB + Azure for end-to-end sweep
-    "kairix/eval/hybrid_sweep.py",
-    "kairix/eval/sweep.py",
-    # One-time QMD migration — not applicable to new installs
+    "kairix/quality/eval/hybrid_sweep.py",
+    "kairix/quality/eval/sweep.py",
     # Neo4j graph layer — requires live Neo4j instance; not available in CI
-    "kairix/graph/*",
+    "kairix/knowledge/graph/*",
     # Pipeline orchestrators — thin wrappers over individually-tested modules
-    "kairix/temporal/index.py",
-    "kairix/wikilinks/audit.py",
+    "kairix/core/temporal/index.py",
+    "kairix/knowledge/wikilinks/audit.py",
 ]
 
 [tool.coverage.report]
@@ -121,13 +120,13 @@ strict_equality = true
 # Modules not yet fully annotated (will be removed as each phase ships)
 [[tool.mypy.overrides]]
 module = [
-    "kairix.search.*",
-    "kairix.temporal.*",
-    "kairix.summaries.*",
-    "kairix.classify.*",
-    "kairix.briefing.*",
-    "kairix.contradict.*",
-    "kairix.benchmark.*",
+    "kairix.core.search.*",
+    "kairix.core.temporal.*",
+    "kairix.core.classify.*",
+    "kairix.knowledge.summaries.*",
+    "kairix.knowledge.contradict.*",
+    "kairix.agents.briefing.*",
+    "kairix.quality.benchmark.*",
 ]
 # Modules not yet fully annotated — will be removed phase by phase
 ignore_errors = true
@@ -161,9 +160,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "T20"]           # Tests: allow assert + print
 "tests/e2e/*" = ["S", "T20", "I001"]  # E2E tests: inline imports required for lazy loading
-"kairix/*/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
+"kairix/**/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
 "kairix/cli.py" = ["T201"]
 "kairix/_azure.py" = ["S603", "S607"]  # Azure CLI subprocess (az keyvault) is intentional
+"scripts/*" = ["S", "T20", "B007"]    # Scripts: allow subprocess, print, unused loop vars
 
 [tool.ruff.format]
 quote-style = "double"
@@ -189,3 +189,12 @@ overall = 0.78
 temporal = 0.55
 entity = 0.80
 contextual_prep = 0.60
+
+# ── setuptools-scm — version derived from git tags ─────────────────────────
+# No manual version editing. Tagged commits = clean version (2026.4.28).
+# Untagged commits = dev version (2026.4.28.dev3 = 3 commits since tag).
+# pip install kairix never installs dev versions unless --pre is passed.
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+fallback_version = "0.0.0"

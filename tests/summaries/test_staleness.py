@@ -1,5 +1,5 @@
 """
-Tests for kairix.summaries.staleness
+Tests for kairix.knowledge.summaries.staleness
 """
 
 import sqlite3
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from kairix.summaries.generate import SummaryResult
-from kairix.summaries.staleness import (
+from kairix.knowledge.summaries.generate import SummaryResult
+from kairix.knowledge.summaries.staleness import (
     get_stale_paths,
     get_summary,
     init_summaries_db,

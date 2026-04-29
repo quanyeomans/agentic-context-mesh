@@ -1,5 +1,5 @@
 """
-Tests for kairix.curator.health — entity graph health check (CA-1).
+Tests for kairix.agents.curator.health — entity graph health check (CA-1).
 
 Neo4j is the canonical entity store. Tests use a mock Neo4j client that
 returns pre-configured Cypher results. No SQLite dependency, no external
@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from kairix.curator.health import (
+from kairix.agents.curator.health import (
     HealthReport,
     format_report_json,
     format_report_text,
@@ -26,7 +26,7 @@ from kairix.curator.health import (
 
 class _MockNeo4jClient:
     """
-    Minimal mock of kairix.graph.client.Neo4jClient for health check tests.
+    Minimal mock of kairix.knowledge.graph.client.Neo4jClient for health check tests.
 
     Routes Cypher calls by recognising distinguishable substrings in the query:
       - "COUNT(*)"      → entity count rows

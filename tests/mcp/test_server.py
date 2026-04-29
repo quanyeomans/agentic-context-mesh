@@ -1,5 +1,5 @@
 """
-Tests for kairix.mcp.server — MCP tool implementations.
+Tests for kairix.agents.mcp.server — MCP tool implementations.
 
 Tool functions are pure Python and importable without the ``mcp`` package.
 All underlying kairix module calls are mocked.
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline, tool_usage_guide
+from kairix.agents.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline, tool_usage_guide
 
 # ---------------------------------------------------------------------------
 # tool_search
@@ -36,7 +36,7 @@ def test_tool_search_returns_expected_shape() -> None:
         error="",
     )
 
-    with patch("kairix.search.hybrid.search", return_value=mock_result):
+    with patch("kairix.core.search.hybrid.search", return_value=mock_result):
         result = tool_search(query="test query", agent=None, scope="shared+agent", budget=3000)
 
     assert result["query"] == "test query"
@@ -50,7 +50,7 @@ def test_tool_search_returns_expected_shape() -> None:
 
 @pytest.mark.unit
 def test_tool_search_error_handled() -> None:
-    with patch("kairix.search.hybrid.search", side_effect=RuntimeError("db unavailable")):
+    with patch("kairix.core.search.hybrid.search", side_effect=RuntimeError("db unavailable")):
         result = tool_search(query="broken", agent=None, scope="shared", budget=3000)
 
     assert result["query"] == "broken"
@@ -60,7 +60,7 @@ def test_tool_search_error_handled() -> None:
 
 @pytest.mark.unit
 def test_tool_search_import_error_handled() -> None:
-    with patch.dict("sys.modules", {"kairix.search.hybrid": None}):
+    with patch.dict("sys.modules", {"kairix.core.search.hybrid": None}):
         result = tool_search(query="broken", agent=None, scope="shared", budget=3000)
 
     assert result["results"] == []
@@ -77,14 +77,14 @@ def test_tool_search_passes_agent_and_scope() -> None:
         latency_ms=1.0,
         error="",
     )
-    with patch("kairix.search.hybrid.search", return_value=mock_result) as mock_search:
+    with patch("kairix.core.search.hybrid.search", return_value=mock_result) as mock_search:
         tool_search(query="q", agent="builder", scope="agent", budget=1000)
         call_kwargs = mock_search.call_args.kwargs
         assert call_kwargs["query"] == "q"
         assert call_kwargs["agent"] == "builder"
         assert call_kwargs["scope"] == "agent"
         assert call_kwargs["budget"] == 1000
-        assert "config" in call_kwargs  # load_config() now passed through
+        # config is no longer passed explicitly — search() resolves per-collection config internally
 
 
 @pytest.mark.unit
@@ -103,7 +103,7 @@ def test_tool_search_result_snippet_truncated() -> None:
         latency_ms=5.0,
         error="",
     )
-    with patch("kairix.search.hybrid.search", return_value=mock_result):
+    with patch("kairix.core.search.hybrid.search", return_value=mock_result):
         result = tool_search(query="q")
 
     assert len(result["results"][0]["snippet"]) == 500
@@ -128,7 +128,7 @@ def test_tool_entity_neo4j_primary() -> None:
         }
     ]
 
-    with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
         result = tool_entity(name="Acme")
 
     assert result["id"] == "acme"
@@ -144,7 +144,7 @@ def test_tool_entity_neo4j_not_found_returns_error() -> None:
     mock_neo4j.available = True
     mock_neo4j.cypher.return_value = []  # not found in Neo4j
 
-    with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
         result = tool_entity(name="Unknown Entity")
 
     assert result["id"] == ""
@@ -157,7 +157,7 @@ def test_tool_entity_neo4j_unavailable_returns_error() -> None:
     mock_neo4j = MagicMock()
     mock_neo4j.available = False
 
-    with patch("kairix.graph.client.get_client", return_value=mock_neo4j):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
         result = tool_entity(name="Test")
 
     assert result["error"] != ""
@@ -166,7 +166,7 @@ def test_tool_entity_neo4j_unavailable_returns_error() -> None:
 @pytest.mark.unit
 def test_tool_entity_neo4j_exception_returns_error() -> None:
     """When Neo4j raises, entity not found is returned."""
-    with patch("kairix.graph.client.get_client", side_effect=RuntimeError("no neo4j")):
+    with patch("kairix.knowledge.graph.client.get_client", side_effect=RuntimeError("no neo4j")):
         result = tool_entity(name="Anything")
 
     assert result["error"] != ""
@@ -192,7 +192,7 @@ def _mock_search_result() -> MagicMock:
 def test_tool_prep_l0() -> None:
     summary_text = "Brief context summary."
     with (
-        patch("kairix.search.hybrid.search", return_value=_mock_search_result()),
+        patch("kairix.core.search.hybrid.search", return_value=_mock_search_result()),
         patch("kairix._azure.chat_completion", return_value=summary_text),
     ):
         result = tool_prep(query="What did we discuss last quarter?", tier="l0")
@@ -207,7 +207,7 @@ def test_tool_prep_l0() -> None:
 def test_tool_prep_l1() -> None:
     summary_text = "Detailed context summary about the engagement."
     with (
-        patch("kairix.search.hybrid.search", return_value=_mock_search_result()),
+        patch("kairix.core.search.hybrid.search", return_value=_mock_search_result()),
         patch("kairix._azure.chat_completion", return_value=summary_text),
     ):
         result = tool_prep(query="Explain our test engagement", tier="l1")
@@ -221,7 +221,7 @@ def test_tool_prep_no_results_returns_no_content() -> None:
     """Prep returns 'no relevant documents' when search finds nothing."""
     empty_sr = MagicMock()
     empty_sr.results = []
-    with patch("kairix.search.hybrid.search", return_value=empty_sr):
+    with patch("kairix.core.search.hybrid.search", return_value=empty_sr):
         result = tool_prep(query="something obscure", tier="l0")
 
     assert "no relevant documents" in result["summary"].lower()
@@ -230,7 +230,7 @@ def test_tool_prep_no_results_returns_no_content() -> None:
 
 @pytest.mark.unit
 def test_tool_prep_error_handled() -> None:
-    with patch("kairix.search.hybrid.search", side_effect=RuntimeError("search unavailable")):
+    with patch("kairix.core.search.hybrid.search", side_effect=RuntimeError("search unavailable")):
         result = tool_prep(query="anything", tier="l0")
 
     assert result["summary"] == ""
@@ -240,7 +240,7 @@ def test_tool_prep_error_handled() -> None:
 @pytest.mark.unit
 def test_tool_prep_default_tier_is_l0() -> None:
     with (
-        patch("kairix.search.hybrid.search", return_value=_mock_search_result()),
+        patch("kairix.core.search.hybrid.search", return_value=_mock_search_result()),
         patch("kairix._azure.chat_completion", return_value="ok") as mock_chat,
     ):
         tool_prep(query="q")
@@ -257,10 +257,10 @@ def test_tool_prep_default_tier_is_l0() -> None:
 @pytest.mark.unit
 def test_tool_timeline_temporal_query() -> None:
     rewritten = "what happened 2026-04-06..2026-04-13"
-    with patch("kairix.temporal.rewriter.is_relative_temporal", return_value=True):
-        with patch("kairix.temporal.rewriter.rewrite_temporal_query", return_value=rewritten):
+    with patch("kairix.core.temporal.rewriter.is_relative_temporal", return_value=True):
+        with patch("kairix.core.temporal.rewriter.rewrite_temporal_query", return_value=rewritten):
             with patch(
-                "kairix.temporal.rewriter.extract_time_window",
+                "kairix.core.temporal.rewriter.extract_time_window",
                 return_value=("2026-04-06", "2026-04-13"),
             ):
                 result = tool_timeline(query="what happened last week")
@@ -274,7 +274,7 @@ def test_tool_timeline_temporal_query() -> None:
 
 @pytest.mark.unit
 def test_tool_timeline_non_temporal_query() -> None:
-    with patch("kairix.temporal.rewriter.is_relative_temporal", return_value=False):
+    with patch("kairix.core.temporal.rewriter.is_relative_temporal", return_value=False):
         result = tool_timeline(query="tell me about Acme")
 
     assert result["is_temporal"] is False
@@ -285,7 +285,7 @@ def test_tool_timeline_non_temporal_query() -> None:
 
 @pytest.mark.unit
 def test_tool_timeline_preserves_original_query() -> None:
-    with patch("kairix.temporal.rewriter.is_relative_temporal", return_value=False):
+    with patch("kairix.core.temporal.rewriter.is_relative_temporal", return_value=False):
         result = tool_timeline(query="original question here")
 
     assert result["original_query"] == "original question here"
@@ -294,7 +294,7 @@ def test_tool_timeline_preserves_original_query() -> None:
 
 @pytest.mark.unit
 def test_tool_timeline_error_handled() -> None:
-    with patch("kairix.temporal.rewriter.is_relative_temporal", side_effect=RuntimeError("oops")):
+    with patch("kairix.core.temporal.rewriter.is_relative_temporal", side_effect=RuntimeError("oops")):
         result = tool_timeline(query="any query")
 
     assert result["is_temporal"] is False
@@ -304,9 +304,9 @@ def test_tool_timeline_error_handled() -> None:
 
 @pytest.mark.unit
 def test_tool_timeline_rewrite_none_returns_original() -> None:
-    with patch("kairix.temporal.rewriter.is_relative_temporal", return_value=True):
-        with patch("kairix.temporal.rewriter.rewrite_temporal_query", return_value=None):
-            with patch("kairix.temporal.rewriter.extract_time_window", return_value=None):
+    with patch("kairix.core.temporal.rewriter.is_relative_temporal", return_value=True):
+        with patch("kairix.core.temporal.rewriter.rewrite_temporal_query", return_value=None):
+            with patch("kairix.core.temporal.rewriter.extract_time_window", return_value=None):
                 result = tool_timeline(query="last month update")
 
     assert result["rewritten_query"] == "last month update"
@@ -322,7 +322,7 @@ def test_build_server_raises_when_mcp_not_installed() -> None:
     import sys
 
     with patch.dict(sys.modules, {"mcp": None, "mcp.server": None, "mcp.server.fastmcp": None}):
-        from kairix.mcp.server import build_server
+        from kairix.agents.mcp.server import build_server
 
         with pytest.raises(ImportError, match="mcp"):
             build_server()
@@ -350,7 +350,7 @@ def guide_file(tmp_path: Path) -> Path:
 @pytest.mark.unit
 def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
     """Empty topic returns full guide content."""
-    import kairix.mcp.server as _mod
+    import kairix.agents.mcp.server as _mod
 
     server_file = Path(_mod.__file__)
     expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
@@ -372,7 +372,7 @@ def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
 @pytest.mark.unit
 def test_tool_usage_guide_topic_filter(guide_file: Path) -> None:
     """Specific topic filters to relevant sections."""
-    import kairix.mcp.server as _mod
+    import kairix.agents.mcp.server as _mod
 
     server_file = Path(_mod.__file__)
     expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
@@ -395,7 +395,7 @@ def test_tool_usage_guide_topic_filter(guide_file: Path) -> None:
 def test_tool_usage_guide_missing_file(tmp_path: Path, monkeypatch) -> None:
     """Missing guide file returns error dict."""
     import kairix as _kairix_pkg
-    import kairix.mcp.server as _mod
+    import kairix.agents.mcp.server as _mod
 
     monkeypatch.setattr(_mod, "__file__", str(tmp_path / "kairix" / "mcp" / "server.py"))
     monkeypatch.setattr(_kairix_pkg, "__file__", str(tmp_path / "kairix" / "__init__.py"))

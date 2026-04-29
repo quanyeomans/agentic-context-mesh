@@ -1,5 +1,5 @@
 """
-Tests for the write router (mnemosyne/classify/router.py).
+Tests for the write router (kairix/classify/router.py).
 
 Tests path resolution for all classification types and agent scoping.
 """
@@ -10,7 +10,7 @@ from datetime import date
 
 import pytest
 
-from kairix.classify.router import VALID_AGENTS, resolve_target_path
+from kairix.core.classify.router import VALID_AGENTS, resolve_target_path
 
 
 @pytest.mark.unit

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.embed.embed import embed_batch
+from kairix.core.embed.embed import embed_batch
 
 API_KEY = "test-key"
 ENDPOINT = "https://test.openai.azure.com"

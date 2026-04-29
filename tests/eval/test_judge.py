@@ -1,5 +1,5 @@
 """
-Unit tests for kairix.eval.judge.
+Unit tests for kairix.quality.eval.judge.
 
 All Azure OpenAI API calls are mocked. No live calls in CI.
 """
@@ -7,11 +7,11 @@ All Azure OpenAI API calls are mocked. No live calls in CI.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from kairix.eval.judge import (
+from kairix.quality.eval.judge import (
     JudgeCalibrationError,
     JudgeResult,
     _parse_grade_response,
@@ -32,15 +32,9 @@ _CANDIDATES = [
 _QUERY = "What are the steps to deploy a Docker container?"
 
 
-def _mock_response(grades: dict[str, int]) -> MagicMock:
-    """Build a mock urllib.request.urlopen context manager returning grades JSON."""
-    content = json.dumps(grades)
-    body = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = body
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-    return mock_resp
+def _mock_chat_completion(grades: dict[str, int]) -> str:
+    """Return a JSON string of grades, mimicking chat_completion output."""
+    return json.dumps(grades)
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +46,7 @@ def _mock_response(grades: dict[str, int]) -> MagicMock:
 def test_judge_batch_returns_grade_dict() -> None:
     """judge_batch returns a JudgeResult with grades for each candidate."""
     # Shuffle is disabled to keep label order predictable in test
-    with patch("urllib.request.urlopen", return_value=_mock_response({"A": 2, "B": 0, "C": 1})):
+    with patch("kairix._azure.chat_completion", return_value=_mock_chat_completion({"A": 2, "B": 0, "C": 1})):
         result = judge_batch(
             query=_QUERY,
             candidates=_CANDIDATES,
@@ -70,7 +64,7 @@ def test_judge_batch_returns_grade_dict() -> None:
 @pytest.mark.unit
 def test_judge_batch_clamps_grades_to_0_2() -> None:
     """Grades outside [0, 2] are clamped."""
-    with patch("urllib.request.urlopen", return_value=_mock_response({"A": 5, "B": -1, "C": 1})):
+    with patch("kairix._azure.chat_completion", return_value=_mock_chat_completion({"A": 5, "B": -1, "C": 1})):
         result = judge_batch(
             query=_QUERY,
             candidates=_CANDIDATES,
@@ -91,7 +85,7 @@ def test_judge_batch_shuffles_candidates() -> None:
     shuffle_orders = set()
 
     for _ in range(10):
-        with patch("urllib.request.urlopen", return_value=_mock_response({"A": 2, "B": 1, "C": 0})):
+        with patch("kairix._azure.chat_completion", return_value=_mock_chat_completion({"A": 2, "B": 1, "C": 0})):
             result = judge_batch(
                 query=_QUERY,
                 candidates=_CANDIDATES,
@@ -110,7 +104,7 @@ def test_judge_batch_shuffles_candidates() -> None:
 @pytest.mark.unit
 def test_judge_batch_records_shuffle_order() -> None:
     """shuffle_order contains stems in the order they were presented to the LLM."""
-    with patch("urllib.request.urlopen", return_value=_mock_response({"A": 2, "B": 0, "C": 1})):
+    with patch("kairix._azure.chat_completion", return_value=_mock_chat_completion({"A": 2, "B": 0, "C": 1})):
         result = judge_batch(
             query=_QUERY,
             candidates=_CANDIDATES,
@@ -143,7 +137,7 @@ def test_judge_batch_empty_candidates() -> None:
 @pytest.mark.unit
 def test_judge_batch_returns_zeros_on_api_error() -> None:
     """Network error → all grades are 0, no exception raised."""
-    with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+    with patch("kairix._azure.chat_completion", side_effect=OSError("connection refused")):
         result = judge_batch(
             query=_QUERY,
             candidates=_CANDIDATES,
@@ -159,12 +153,7 @@ def test_judge_batch_returns_zeros_on_api_error() -> None:
 @pytest.mark.unit
 def test_judge_batch_returns_zeros_on_malformed_json() -> None:
     """Malformed JSON response → all grades are 0."""
-    mock_resp = MagicMock()
-    mock_resp.read.return_value = json.dumps({"choices": [{"message": {"content": "not json at all {"}}]}).encode()
-    mock_resp.__enter__ = lambda s: s
-    mock_resp.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_resp):
+    with patch("kairix._azure.chat_completion", return_value="not json at all {"):
         result = judge_batch(
             query=_QUERY,
             candidates=_CANDIDATES,
@@ -235,7 +224,7 @@ def test_parse_grade_response_ignores_extra_labels() -> None:
 def test_calibrate_passes_when_all_anchors_correct() -> None:
     """Calibration passes when all anchors get expected grades."""
     # Patch judge_batch to always return expected grades from anchors
-    from kairix.eval.judge import _CALIBRATION_ANCHORS
+    from kairix.quality.eval.judge import _CALIBRATION_ANCHORS
 
     def _perfect_judge(query, candidates, api_key, endpoint, deployment, shuffle):
         # Find the matching anchor and return its expected grade
@@ -250,7 +239,7 @@ def test_calibrate_passes_when_all_anchors_correct() -> None:
                 )
         return JudgeResult(query=query, grades={stem: 0}, shuffle_order=[stem], judge_model=deployment)
 
-    with patch("kairix.eval.judge.judge_batch", side_effect=_perfect_judge):
+    with patch("kairix.quality.eval.judge.judge_batch", side_effect=_perfect_judge):
         result = calibrate("test-key", "https://test.openai.azure.com")
 
     assert result is True
@@ -259,7 +248,7 @@ def test_calibrate_passes_when_all_anchors_correct() -> None:
 @pytest.mark.unit
 def test_calibrate_raises_when_too_many_anchors_wrong() -> None:
     """Calibration raises JudgeCalibrationError when >3 anchors are wrong."""
-    from kairix.eval.judge import CALIBRATION_MAX_ERRORS
+    from kairix.quality.eval.judge import CALIBRATION_MAX_ERRORS
 
     call_count = [0]
 
@@ -274,7 +263,7 @@ def test_calibrate_raises_when_too_many_anchors_wrong() -> None:
             judge_model=deployment,
         )
 
-    with patch("kairix.eval.judge.judge_batch", side_effect=_wrong_judge):
+    with patch("kairix.quality.eval.judge.judge_batch", side_effect=_wrong_judge):
         with pytest.raises(JudgeCalibrationError) as exc_info:
             calibrate("test-key", "https://test.openai.azure.com")
 

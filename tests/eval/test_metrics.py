@@ -1,8 +1,8 @@
-"""Unit tests for kairix.eval.metrics."""
+"""Unit tests for kairix.quality.eval.metrics."""
 
 import pytest
 
-from kairix.eval.metrics import hit_at_k, mean_reciprocal_rank, ndcg_score
+from kairix.quality.eval.metrics import hit_at_k, mean_reciprocal_rank, ndcg_score
 
 
 @pytest.mark.unit

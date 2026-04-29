@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.graph.models import EdgeKind, GraphEdge
+from kairix.knowledge.graph.models import EdgeKind, GraphEdge
 
 pytestmark = pytest.mark.unit
 
@@ -20,14 +20,14 @@ pytestmark = pytest.mark.unit
 @pytest.fixture()
 def mock_neo4j_client() -> MagicMock:
     """Create a Neo4jClient with a mocked driver."""
-    with patch("kairix.graph.client._try_import_neo4j") as mock_import:
+    with patch("kairix.knowledge.graph.client._try_import_neo4j") as mock_import:
         mock_driver_cls = MagicMock()
         mock_driver = MagicMock()
         mock_driver_cls.driver.return_value = mock_driver
         mock_driver.verify_connectivity.return_value = None
         mock_import.return_value = mock_driver_cls
 
-        from kairix.graph.client import Neo4jClient
+        from kairix.knowledge.graph.client import Neo4jClient
 
         client = Neo4jClient(uri="bolt://test:7687", user="test", password="test")
         assert client.available
@@ -103,8 +103,8 @@ class TestDocumentMentionsEdge:
 
     def test_upsert_edge_returns_false_when_driver_none(self) -> None:
         """upsert_edge returns False when no Neo4j driver is available."""
-        with patch("kairix.graph.client._try_import_neo4j", return_value=None):
-            from kairix.graph.client import Neo4jClient
+        with patch("kairix.knowledge.graph.client._try_import_neo4j", return_value=None):
+            from kairix.knowledge.graph.client import Neo4jClient
 
             client = Neo4jClient(uri="bolt://test:7687", user="test", password="test")
             assert not client.available

@@ -2,13 +2,13 @@
 
 import pytest
 
-from kairix.search.config import (
+from kairix.core.search.config import (
     EntityBoostConfig,
     ProceduralBoostConfig,
     RetrievalConfig,
     TemporalBoostConfig,
 )
-from kairix.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, temporal_date_boost
+from kairix.core.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, temporal_date_boost
 
 
 def _make_fused(path: str, rrf_score: float = 0.1) -> FusedResult:

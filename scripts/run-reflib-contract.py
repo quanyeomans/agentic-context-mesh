@@ -10,8 +10,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from kairix.benchmark.runner import run_benchmark
-from kairix.benchmark.suite import load_suite
+from kairix.quality.benchmark.runner import run_benchmark
+from kairix.quality.benchmark.suite import load_suite
 
 FLOOR = 0.50  # Minimum weighted_total to pass
 

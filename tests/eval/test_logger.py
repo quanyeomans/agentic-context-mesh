@@ -1,11 +1,11 @@
-"""Unit tests for kairix.eval.logger.QueryLogger."""
+"""Unit tests for kairix.quality.eval.logger.QueryLogger."""
 
 import json
 
 import pytest
 
-from kairix.eval.logger import QueryLogger
-from kairix.eval.schema import QueryLogEntry
+from kairix.quality.eval.logger import QueryLogger
+from kairix.quality.eval.schema import QueryLogEntry
 
 
 @pytest.mark.unit
@@ -226,7 +226,7 @@ def test_default_log_path_uses_env(monkeypatch, tmp_path):
     # Re-import to pick up env change
     import importlib
 
-    import kairix.eval.logger as logger_mod
+    import kairix.quality.eval.logger as logger_mod
 
     importlib.reload(logger_mod)
     ql = logger_mod.QueryLogger()

@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.hybrid + kairix.search.budget + kairix.search.cli.
+Tests for kairix.core.search.hybrid + kairix.core.search.budget + kairix.core.search.cli.
 
 Tests cover:
   - Successful hybrid search (BM25 + vector)
@@ -18,12 +18,12 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.search.bm25 import BM25Result
-from kairix.search.budget import DEFAULT_BUDGET, apply_budget
-from kairix.search.hybrid import SearchResult, _collections_for, search
-from kairix.search.intent import QueryIntent
-from kairix.search.rrf import rrf
-from kairix.search.vector import VecResult
+from kairix.core.search.bm25 import BM25Result
+from kairix.core.search.budget import DEFAULT_BUDGET, apply_budget
+from kairix.core.search.hybrid import SearchResult, _collections_for, search
+from kairix.core.search.intent import QueryIntent
+from kairix.core.search.rrf import rrf
+from kairix.core.search.vec_index import VecResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -115,7 +115,7 @@ def test_collections_for_with_agent_includes_agent_pattern() -> None:
     # Simulate having collections config with env var
     import os
 
-    import kairix.search.hybrid as _mod
+    import kairix.core.search.hybrid as _mod
 
     old = os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "")
     os.environ["KAIRIX_EXTRA_COLLECTIONS"] = "test-collection"
@@ -142,10 +142,10 @@ def test_collections_for_with_agent_includes_agent_pattern() -> None:
 def test_search_returns_search_result_type() -> None:
     """search() always returns SearchResult."""
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("test query")
     assert isinstance(result, SearchResult)
@@ -157,10 +157,10 @@ def test_search_returns_bm25_results_when_vec_fails() -> None:
     bm25_data = [_bm25_result("/vault/a.md"), _bm25_result("/vault/b.md")]
 
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("test semantic query about memory systems")
 
@@ -176,10 +176,10 @@ def test_search_fuses_both_lists() -> None:
     vec_data = [_vec_result("/vault/a.md"), _vec_result("/vault/c.md")]
 
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=vec_data),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("test semantic query about knowledge retrieval")
 
@@ -197,10 +197,10 @@ def test_search_keyword_intent_runs_hybrid() -> None:
     Now it runs the same BM25+vector RRF path as SEMANTIC and PROCEDURAL.
     """
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[_vec_result()]) as mock_vec,
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[_bm25_result()]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[_vec_result()]) as mock_vec,
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent
 
@@ -214,10 +214,10 @@ def test_search_logs_event(tmp_path: Path) -> None:
     log_file = tmp_path / "search.jsonl"
 
     with (
-        patch("kairix.search.hybrid.SEARCH_LOG_PATH", log_file),
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.SEARCH_LOG_PATH", log_file),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         search("test query about rules")
 
@@ -235,10 +235,10 @@ def test_search_log_directory_created(tmp_path: Path) -> None:
     log_file = tmp_path / "nested" / "dir" / "search.jsonl"
 
     with (
-        patch("kairix.search.hybrid.SEARCH_LOG_PATH", log_file),
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.SEARCH_LOG_PATH", log_file),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         search("another query")
 
@@ -249,10 +249,10 @@ def test_search_log_directory_created(tmp_path: Path) -> None:
 def test_search_records_latency() -> None:
     """latency_ms is recorded in the result."""
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("latency test")
 
@@ -263,10 +263,10 @@ def test_search_records_latency() -> None:
 def test_search_intent_is_classified() -> None:
     """Intent is classified and included in SearchResult."""
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("how to fetch a Key Vault secret")
 
@@ -281,7 +281,7 @@ def test_search_intent_is_classified() -> None:
 @pytest.mark.unit
 def test_cli_formats_output(capsys: pytest.CaptureFixture) -> None:
     """CLI prints formatted search results."""
-    from kairix.search.cli import main as search_cli
+    from kairix.core.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="test query",
@@ -292,7 +292,7 @@ def test_cli_formats_output(capsys: pytest.CaptureFixture) -> None:
         fused_count=0,
     )
 
-    with patch("kairix.search.cli.search", return_value=mock_sr):
+    with patch("kairix.core.search.cli.search", return_value=mock_sr):
         search_cli(["test query"])
 
     captured = capsys.readouterr()
@@ -303,7 +303,7 @@ def test_cli_formats_output(capsys: pytest.CaptureFixture) -> None:
 @pytest.mark.unit
 def test_cli_json_flag(capsys: pytest.CaptureFixture) -> None:
     """--json flag outputs valid JSON."""
-    from kairix.search.cli import main as search_cli
+    from kairix.core.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="test",
@@ -314,7 +314,7 @@ def test_cli_json_flag(capsys: pytest.CaptureFixture) -> None:
         fused_count=0,
     )
 
-    with patch("kairix.search.cli.search", return_value=mock_sr):
+    with patch("kairix.core.search.cli.search", return_value=mock_sr):
         search_cli(["test", "--json"])
 
     captured = capsys.readouterr()
@@ -326,7 +326,7 @@ def test_cli_json_flag(capsys: pytest.CaptureFixture) -> None:
 @pytest.mark.unit
 def test_cli_agent_flag_passed_to_search(capsys: pytest.CaptureFixture) -> None:
     """--agent flag is forwarded to search()."""
-    from kairix.search.cli import main as search_cli
+    from kairix.core.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="test",
@@ -337,7 +337,7 @@ def test_cli_agent_flag_passed_to_search(capsys: pytest.CaptureFixture) -> None:
         fused_count=0,
     )
 
-    with patch("kairix.search.cli.search", return_value=mock_sr) as mock_search:
+    with patch("kairix.core.search.cli.search", return_value=mock_sr) as mock_search:
         search_cli(["test", "--agent", "shape"])
 
     assert mock_search.call_count == 1
@@ -360,10 +360,10 @@ def test_search_keyword_uses_both_bm25_and_vector() -> None:
     vec_data = [_vec_result("/vault/schema-overview.md")]
 
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=bm25_data),
-        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=bm25_data),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=vec_data),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent
 
@@ -380,10 +380,10 @@ def test_search_keyword_vec_only_when_bm25_empty() -> None:
     vec_data = [_vec_result("/vault/keyword-vec.md")]
 
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=vec_data),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=vec_data),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("SchemaVersionError")  # KEYWORD intent — BM25 returns nothing
 
@@ -395,10 +395,10 @@ def test_search_keyword_vec_only_when_bm25_empty() -> None:
 def test_search_result_has_fallback_used_field() -> None:
     """SearchResult always has fallback_used field."""
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("anything")
 
@@ -415,7 +415,7 @@ def test_search_result_has_fallback_used_field() -> None:
 def test_rotate_query_log_moves_file(tmp_path: Path) -> None:
     """_rotate_query_log() moves path → path.1 and removes older rotated file."""
 
-    import kairix.search.hybrid as hybrid_mod
+    import kairix.core.search.hybrid as hybrid_mod
 
     log_file = tmp_path / "queries.jsonl"
     log_file.write_text('{"q": "test"}\n')
@@ -433,7 +433,7 @@ def test_rotate_query_log_moves_file(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_log_query_event_writes_when_enabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() appends to JSONL log when _LOG_QUERIES is True."""
-    import kairix.search.hybrid as hybrid_mod
+    import kairix.core.search.hybrid as hybrid_mod
 
     log_path = tmp_path / "queries.jsonl"
     monkeypatch.setattr(hybrid_mod, "_LOG_QUERIES", True)
@@ -451,7 +451,7 @@ def test_log_query_event_writes_when_enabled(tmp_path: Path, monkeypatch: pytest
 @pytest.mark.unit
 def test_log_query_event_noop_when_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() is a no-op when _LOG_QUERIES is False."""
-    import kairix.search.hybrid as hybrid_mod
+    import kairix.core.search.hybrid as hybrid_mod
 
     log_path = tmp_path / "queries.jsonl"
     monkeypatch.setattr(hybrid_mod, "_LOG_QUERIES", False)
@@ -464,7 +464,7 @@ def test_log_query_event_noop_when_disabled(tmp_path: Path, monkeypatch: pytest.
 @pytest.mark.unit
 def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """_log_query_event() rotates the file when it exceeds the size threshold."""
-    import kairix.search.hybrid as hybrid_mod
+    import kairix.core.search.hybrid as hybrid_mod
 
     log_path = tmp_path / "queries.jsonl"
     log_path.write_text("x" * 100)
@@ -477,16 +477,6 @@ def test_log_query_event_rotates_large_file(tmp_path: Path, monkeypatch: pytest.
 
     rotated = Path(str(log_path) + ".1")
     assert rotated.exists()
-
-
-@pytest.mark.unit
-def test_open_vec_db_returns_none_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_open_vec_db() returns None when kairix DB is unavailable."""
-    from kairix.search import hybrid as hybrid_mod
-
-    monkeypatch.setattr(hybrid_mod, "get_db_path", lambda: (_ for _ in ()).throw(FileNotFoundError("no db")))
-    result = hybrid_mod._open_vec_db()
-    assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -502,10 +492,10 @@ def test_search_entity_intent_errors_when_neo4j_unavailable() -> None:
     producing misleading results with no entity graph expansion.
     """
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[_bm25_result()]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
     ):
         result = search("tell me about Acme Corp")  # ENTITY intent
 
@@ -521,10 +511,10 @@ def test_search_entity_intent_proceeds_when_neo4j_available() -> None:
     mock_neo4j = type("C", (), {"available": True, "cypher": lambda self, q: []})()
 
     with (
-        patch("kairix.search.hybrid.bm25_search", return_value=[_bm25_result()]),
-        patch("kairix.search.hybrid._run_vector_search", return_value=[]),
-        patch("kairix.search.hybrid._log_search_event"),
-        patch("kairix.search.hybrid._get_neo4j", return_value=mock_neo4j),
+        patch("kairix.core.search.hybrid.bm25_search", return_value=[_bm25_result()]),
+        patch("kairix.core.search.hybrid._run_vector_search", return_value=[]),
+        patch("kairix.core.search.hybrid._log_search_event"),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=mock_neo4j),
     ):
         result = search("tell me about Acme Corp")  # ENTITY intent
 
@@ -536,7 +526,7 @@ def test_search_entity_intent_proceeds_when_neo4j_available() -> None:
 @pytest.mark.unit
 def test_cli_entity_error_exits_nonzero(capsys: pytest.CaptureFixture) -> None:
     """CLI exits with code 1 and prints error when entity query fails."""
-    from kairix.search.cli import main as search_cli
+    from kairix.core.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="tell me about Acme",
@@ -545,7 +535,7 @@ def test_cli_entity_error_exits_nonzero(capsys: pytest.CaptureFixture) -> None:
         error="Neo4j is required for entity queries but is unavailable.",
     )
 
-    with patch("kairix.search.cli.search", return_value=mock_sr):
+    with patch("kairix.core.search.cli.search", return_value=mock_sr):
         with pytest.raises(SystemExit) as exc_info:
             search_cli(["tell me about Acme"])
 
@@ -557,7 +547,7 @@ def test_cli_entity_error_exits_nonzero(capsys: pytest.CaptureFixture) -> None:
 @pytest.mark.unit
 def test_cli_entity_error_json_includes_error_field(capsys: pytest.CaptureFixture) -> None:
     """--json output includes 'error' field when entity query fails."""
-    from kairix.search.cli import main as search_cli
+    from kairix.core.search.cli import main as search_cli
 
     mock_sr = SearchResult(
         query="tell me about Acme",
@@ -566,7 +556,7 @@ def test_cli_entity_error_json_includes_error_field(capsys: pytest.CaptureFixtur
         error="Neo4j is required for entity queries but is unavailable.",
     )
 
-    with patch("kairix.search.cli.search", return_value=mock_sr):
+    with patch("kairix.core.search.cli.search", return_value=mock_sr):
         with pytest.raises(SystemExit) as exc_info:
             search_cli(["tell me about Acme", "--json"])
 
@@ -585,27 +575,26 @@ def test_cli_entity_error_json_includes_error_field(capsys: pytest.CaptureFixtur
 @pytest.mark.unit
 def test_search_temporal_intent_runs_rewriting(monkeypatch: pytest.MonkeyPatch) -> None:
     """search() with TEMPORAL intent calls temporal rewriting (mocked)."""
-    from kairix.search.bm25 import BM25Result
-    from kairix.search.hybrid import search
-    from kairix.search.intent import QueryIntent
+    from kairix.core.search.bm25 import BM25Result
+    from kairix.core.search.hybrid import search
+    from kairix.core.search.intent import QueryIntent
 
     bm25_items = [BM25Result(path="memory/2026-01-01.md", snippet="Session from last week", score=0.9)]
 
     with (
-        patch("kairix.search.intent.classify", return_value=QueryIntent.TEMPORAL),
-        patch("kairix.search.bm25.bm25_search", return_value=bm25_items),
-        patch("kairix.search.hybrid._open_vec_db", return_value=None),
-        patch("kairix.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
+        patch("kairix.core.search.intent.classify", return_value=QueryIntent.TEMPORAL),
+        patch("kairix.core.search.bm25.bm25_search", return_value=bm25_items),
+        patch("kairix.core.search.hybrid._get_neo4j", return_value=type("C", (), {"available": False})()),
         patch(
-            "kairix.temporal.rewriter.rewrite_temporal_query",
+            "kairix.core.temporal.rewriter.rewrite_temporal_query",
             return_value="recent session logs",
         ),
         patch(
-            "kairix.temporal.rewriter.extract_time_window",
+            "kairix.core.temporal.rewriter.extract_time_window",
             return_value=(None, None),
         ),
         patch(
-            "kairix.temporal.index.query_temporal_chunks",
+            "kairix.core.temporal.index.query_temporal_chunks",
             return_value=[],
         ),
     ):
@@ -638,8 +627,8 @@ def _make_chunk_date_db(tmp_path: Path, rows: list[tuple[str, str, str]]) -> Pat
 @pytest.mark.unit
 def test_enrich_chunk_dates_populates_matching_paths(tmp_path: Path) -> None:
     """_enrich_chunk_dates sets chunk_date on FusedResult for matching paths."""
-    from kairix.search.hybrid import _enrich_chunk_dates
-    from kairix.search.rrf import FusedResult
+    from kairix.core.search.hybrid import _enrich_chunk_dates
+    from kairix.core.search.rrf import FusedResult
 
     db_path = _make_chunk_date_db(
         tmp_path,
@@ -662,8 +651,8 @@ def test_enrich_chunk_dates_populates_matching_paths(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_enrich_chunk_dates_handles_missing_db(tmp_path: Path) -> None:
     """_enrich_chunk_dates returns silently when DB does not exist."""
-    from kairix.search.hybrid import _enrich_chunk_dates
-    from kairix.search.rrf import FusedResult
+    from kairix.core.search.hybrid import _enrich_chunk_dates
+    from kairix.core.search.rrf import FusedResult
 
     fused = [
         FusedResult(path="/vault/doc.md", collection="c", title="T", snippet="s", rrf_score=0.5, boosted_score=0.5)
@@ -675,7 +664,7 @@ def test_enrich_chunk_dates_handles_missing_db(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_enrich_chunk_dates_empty_list(tmp_path: Path) -> None:
     """_enrich_chunk_dates is a no-op for empty list."""
-    from kairix.search.hybrid import _enrich_chunk_dates
+    from kairix.core.search.hybrid import _enrich_chunk_dates
 
     db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/doc.md", "2026-04-20")])
     _enrich_chunk_dates([], db_path)
@@ -685,8 +674,8 @@ def test_enrich_chunk_dates_empty_list(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_enrich_chunk_dates_no_matching_paths(tmp_path: Path) -> None:
     """_enrich_chunk_dates leaves chunk_date empty when paths don't match."""
-    from kairix.search.hybrid import _enrich_chunk_dates
-    from kairix.search.rrf import FusedResult
+    from kairix.core.search.hybrid import _enrich_chunk_dates
+    from kairix.core.search.rrf import FusedResult
 
     db_path = _make_chunk_date_db(tmp_path, [("h1", "/vault/other.md", "2026-04-20")])
     fused = [

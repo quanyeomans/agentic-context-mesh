@@ -178,19 +178,16 @@ def get_secret(name: str, required: bool = True) -> str | None:
                 timeout=30,
             )
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+                return result.stdout.strip()  # nosec: returns secret value to caller (intended)
             else:
-                logger.warning("get_secret: KV fetch failed for %r (exit=%d)", name, result.returncode)
-        except (subprocess.SubprocessError, OSError, ValueError) as exc:
-            logger.warning("get_secret: error fetching KV secret %r — %s", name, type(exc).__name__)
+                logger.warning("get_secret: KV fetch failed for requested key")
+        except (subprocess.SubprocessError, OSError, ValueError):
+            logger.warning("get_secret: KV fetch error for requested key")
 
     # Not found
     if required:
-        logger.error(
-            "get_secret: %r not found in env, secrets file, or Key Vault",
-            name,
-        )
-        raise OSError(f"Secret {name!r} not available. Check environment, secrets file, or Key Vault configuration.")
+        logger.error("get_secret: required secret not found")
+        raise OSError("Required secret not available. Check environment, secrets file, or Key Vault configuration.")
     return None
 
 

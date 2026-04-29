@@ -1,5 +1,5 @@
 """
-Tests for kairix.embed.schema.get_date_filtered_paths.
+Tests for kairix.core.embed.schema.get_date_filtered_paths.
 
 Verifies:
   - Empty frozenset when both bounds are None
@@ -18,7 +18,7 @@ from datetime import date
 
 import pytest
 
-from kairix.embed.schema import get_date_filtered_paths
+from kairix.core.embed.schema import get_date_filtered_paths
 
 # ---------------------------------------------------------------------------
 # Helpers

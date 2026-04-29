@@ -1,4 +1,4 @@
-"""Tests for kairix.onboard.ports — port detection helpers."""
+"""Tests for kairix.platform.onboard.ports — port detection helpers."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import socket
 
 import pytest
 
-from kairix.onboard.ports import find_available_port, is_port_available
+from kairix.platform.onboard.ports import find_available_port, is_port_available
 
 pytestmark = pytest.mark.unit
 

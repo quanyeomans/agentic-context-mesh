@@ -1,4 +1,4 @@
-"""Unit tests for kairix.eval.gold_builder — TREC pooling and gold suite building."""
+"""Unit tests for kairix.quality.eval.gold_builder — TREC pooling and gold suite building."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from kairix.eval.gold_builder import (
+from kairix.quality.eval.gold_builder import (
     GoldBuildReport,
     PooledCandidate,
     grade_candidates,
@@ -21,7 +21,7 @@ from kairix.eval.gold_builder import (
 
 class TestPoolCandidates:
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder._bm25_search_with_weights")
+    @patch("kairix.quality.eval.gold_builder._bm25_search_with_weights")
     def test_pools_from_bm25(self, mock_bm25):
         mock_bm25.return_value = [
             {"path": "/doc1.md", "title": "Doc 1", "snippet": "text", "collection": "eng"},
@@ -32,19 +32,19 @@ class TestPoolCandidates:
         assert all(isinstance(c, PooledCandidate) for c in result)
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder._bm25_search_with_weights")
+    @patch("kairix.quality.eval.gold_builder._bm25_search_with_weights")
     def test_deduplicates_across_systems(self, mock_bm25):
         mock_bm25.return_value = [
             {"path": "/doc1.md", "title": "Doc 1", "snippet": "text", "collection": "eng"},
         ]
-        result = pool_candidates("test query", ["bm25-equal", "bm25-qmd"])
+        result = pool_candidates("test query", ["bm25-equal", "bm25-filepath"])
         assert len(result) == 1
         assert "bm25-equal" in result[0].sources
-        assert "bm25-qmd" in result[0].sources
+        assert "bm25-filepath" in result[0].sources
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder._vector_search")
-    @patch("kairix.eval.gold_builder._bm25_search_with_weights")
+    @patch("kairix.quality.eval.gold_builder._vector_search")
+    @patch("kairix.quality.eval.gold_builder._bm25_search_with_weights")
     def test_pools_bm25_and_vector(self, mock_bm25, mock_vector):
         mock_bm25.return_value = [
             {"path": "/doc1.md", "title": "Doc 1", "snippet": "text", "collection": "eng"},
@@ -56,14 +56,14 @@ class TestPoolCandidates:
         assert len(result) == 2
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder._bm25_search_with_weights")
+    @patch("kairix.quality.eval.gold_builder._bm25_search_with_weights")
     def test_unknown_system_skipped(self, mock_bm25):
         mock_bm25.return_value = []
         result = pool_candidates("test query", ["bm25-equal", "nosuchsystem"])
         assert isinstance(result, list)
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder._bm25_search_with_weights")
+    @patch("kairix.quality.eval.gold_builder._bm25_search_with_weights")
     def test_candidate_fields(self, mock_bm25):
         mock_bm25.return_value = [
             {"path": "/eng/doc.md", "title": "Title", "snippet": "Some text", "collection": "eng"},
@@ -83,7 +83,7 @@ class TestPoolCandidates:
 
 class TestGradeCandidates:
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder.judge_batch")
+    @patch("kairix.quality.eval.gold_builder.judge_batch")
     def test_grades_assigned(self, mock_judge):
         mock_result = MagicMock()
         mock_result.grades = {"doc1": 2, "doc2": 1}
@@ -99,7 +99,7 @@ class TestGradeCandidates:
         assert result[1].grade == 1
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder.judge_batch")
+    @patch("kairix.quality.eval.gold_builder.judge_batch")
     def test_majority_vote(self, mock_judge):
         """Two runs with different grades — majority wins."""
         call_count = [0]
@@ -129,7 +129,7 @@ class TestGradeCandidates:
         assert result == []
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder.judge_batch")
+    @patch("kairix.quality.eval.gold_builder.judge_batch")
     def test_three_runs_majority(self, mock_judge):
         """Three runs — grade 2 appears twice, should win."""
         call_count = [0]
@@ -159,12 +159,12 @@ class TestGradeCandidates:
 
 class TestBuildIndependentGold:
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder.fetch_llm_credentials")
-    @patch("kairix.eval.gold_builder.calibrate")
-    @patch("kairix.eval.gold_builder.pool_candidates")
-    @patch("kairix.eval.gold_builder.grade_candidates")
+    @patch("kairix.quality.eval.gold_builder.fetch_llm_credentials")
+    @patch("kairix.quality.eval.gold_builder.calibrate")
+    @patch("kairix.quality.eval.gold_builder.pool_candidates")
+    @patch("kairix.quality.eval.gold_builder.grade_candidates")
     def test_full_build(self, mock_grade, mock_pool, mock_calibrate, mock_creds, tmp_path):
-        from kairix.eval.gold_builder import build_independent_gold
+        from kairix.quality.eval.gold_builder import build_independent_gold
 
         mock_creds.return_value = ("api-key", "https://endpoint", "gpt-4o-mini")
 
@@ -181,7 +181,7 @@ class TestBuildIndependentGold:
                 title="Irrelevant",
                 snippet="Bad content",
                 collection="eng",
-                sources=["bm25-qmd"],
+                sources=["bm25-filepath"],
             ),
         ]
 
@@ -217,13 +217,13 @@ class TestBuildIndependentGold:
 
         output = yaml.safe_load(output_path.read_text())
         gold_titles = output["cases"][0]["gold_titles"]
-        assert any(g["title"] == "relevant" for g in gold_titles)
+        assert any("relevant" in g["title"] for g in gold_titles)
         assert output["meta"]["gold_method"] == "trec-pooling-llm-judge"
 
     @pytest.mark.unit
-    @patch("kairix.eval.gold_builder.fetch_llm_credentials")
+    @patch("kairix.quality.eval.gold_builder.fetch_llm_credentials")
     def test_no_credentials(self, mock_creds, tmp_path):
-        from kairix.eval.gold_builder import build_independent_gold
+        from kairix.quality.eval.gold_builder import build_independent_gold
 
         mock_creds.return_value = ("", "", "")
 

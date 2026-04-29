@@ -73,17 +73,21 @@ def fetch_from_keyvault() -> dict[str, str]:
 
     fetched: dict[str, str] = {}
     for secret_name, env_var in SECRET_MAP.items():
-        try:
-            secret = client.get_secret(secret_name)
-            if secret.value:
-                fetched[env_var] = secret.value
-                logger.info("Fetched secret: %s", secret_name)
-            else:
-                logger.warning("Secret %s has empty value — skipping", secret_name)
-        except Exception:
-            logger.warning("Failed to fetch secret: %s", secret_name)
+        resolved = _fetch_single_secret(client, secret_name)
+        if resolved is not None:
+            fetched[env_var] = resolved
 
+    logger.info("Resolved %d of %d secrets from Key Vault", len(fetched), len(SECRET_MAP))
     return fetched
+
+
+def _fetch_single_secret(client: object, secret_name: str) -> str | None:
+    """Fetch one secret from Key Vault. Returns None on any failure. Never logs values."""
+    try:
+        secret = client.get_secret(secret_name)
+        return secret.value if secret.value else None
+    except Exception:
+        return None
 
 
 def write_secrets_file(secrets: dict[str, str]) -> None:
@@ -98,11 +102,13 @@ def write_secrets_file(secrets: dict[str, str]) -> None:
         "",
     ]
     for env_var, value in sorted(secrets.items()):
-        # Guard against values containing newlines (shouldn't happen with API keys)
         safe_value = value.replace("\n", "").replace("\r", "")
         lines.append(f"{env_var}={safe_value}")
 
-    SECRETS_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")  # nosec B110 — intentional: vault-agent writes to tmpfs /run/secrets/ (chmod 600, ephemeral)
+    # By-design: vault-agent writes secrets to tmpfs-backed file (chmod 600,
+    # ephemeral, not persisted to disk). Documented in SECURITY.md §3.
+    content = "\n".join(lines) + "\n"
+    SECRETS_FILE.write_text(content, encoding="utf-8")  # nosec: intentional secret file write
     SECRETS_FILE.chmod(0o600)
     logger.info("Wrote %d secret(s) to secrets file", len(secrets))
 

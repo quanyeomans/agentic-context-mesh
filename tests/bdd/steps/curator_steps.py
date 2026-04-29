@@ -2,7 +2,7 @@
 
 from pytest_bdd import given, then, when
 
-from kairix.curator.health import run_health_check
+from kairix.agents.curator.health import run_health_check
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
 _state: dict = {}

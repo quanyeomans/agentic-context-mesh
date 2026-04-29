@@ -6,10 +6,10 @@ import textwrap
 
 import pytest
 
-from kairix.search.config import (
+from kairix.core.search.config import (
     RetrievalConfig,
 )
-from kairix.search.config_loader import (
+from kairix.core.search.config_loader import (
     ConfigValidationError,
     _load_cached,
     _parse_config,
@@ -141,7 +141,7 @@ class TestValidateConfig:
         """)
         )
         monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         with pytest.raises(ConfigValidationError):
@@ -155,7 +155,7 @@ class TestLoadConfig:
         monkeypatch.delenv("KAIRIX_CONFIG_PATH", raising=False)
         monkeypatch.chdir(tmp_path)
         # Clear lru_cache so path is re-resolved
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         cfg = load_config()
@@ -174,7 +174,7 @@ class TestLoadConfig:
         """)
         )
         monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         cfg = load_config()
@@ -186,7 +186,7 @@ class TestLoadConfig:
         config_file = tmp_path / "bad.yaml"
         config_file.write_text("{{{{invalid yaml content::::")
         monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         cfg = load_config()
@@ -197,7 +197,7 @@ class TestLoadConfig:
     def test_env_path_nonexistent_falls_back(self, tmp_path, monkeypatch):
         """KAIRIX_CONFIG_PATH pointing to nonexistent file falls back to defaults."""
         monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(tmp_path / "missing.yaml"))
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         cfg = load_config()
@@ -331,7 +331,7 @@ class TestLoadCachedEdgeCases:
     @pytest.mark.unit
     def test_none_path_returns_defaults(self):
         """_load_cached(None) returns defaults."""
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         cfg = _load_cached(None)
@@ -340,7 +340,7 @@ class TestLoadCachedEdgeCases:
     @pytest.mark.unit
     def test_yaml_not_installed_falls_back(self, tmp_path, monkeypatch):
         """When PyYAML is not installed, falls back to defaults."""
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         config_file = tmp_path / "test.yaml"
@@ -364,12 +364,12 @@ class TestLoadCachedEdgeCases:
         """Parse exception (not ConfigValidationError) falls back to defaults."""
         from unittest.mock import patch
 
-        from kairix.search import config_loader
+        from kairix.core.search import config_loader
 
         config_loader._load_cached.cache_clear()
         config_file = tmp_path / "test2.yaml"
         config_file.write_text("retrieval:\n  boosts:\n    entity:\n      enabled: true\n")
 
-        with patch("kairix.search.config_loader._parse_config", side_effect=TypeError("bad parse")):
+        with patch("kairix.core.search.config_loader._parse_config", side_effect=TypeError("bad parse")):
             cfg = _load_cached(config_file)
         assert isinstance(cfg, RetrievalConfig)

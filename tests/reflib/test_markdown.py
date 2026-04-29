@@ -2,7 +2,7 @@
 
 import pytest
 
-from kairix.reflib.markdown import (
+from kairix.knowledge.reflib.markdown import (
     clean_markdown,
     collapse_blank_lines,
     normalise_line_endings,

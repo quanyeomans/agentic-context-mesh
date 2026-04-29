@@ -1,4 +1,4 @@
-"""Tests for kairix.setup.agent — optional LLM onboarding assistant."""
+"""Tests for kairix.platform.setup.agent — optional LLM onboarding assistant."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.setup.agent import recommend_from_profile
+from kairix.platform.setup.agent import recommend_from_profile
 
 pytestmark = pytest.mark.unit
 
@@ -66,7 +66,7 @@ class TestRecommendFromProfile:
         assert result["fusion_strategy"] == "bm25_primary"
 
     def test_llm_failure_returns_rule_based(self) -> None:
-        with patch("kairix.setup.agent._call_llm", side_effect=RuntimeError("LLM unavailable")):
+        with patch("kairix.platform.setup.agent._call_llm", side_effect=RuntimeError("LLM unavailable")):
             result = recommend_from_profile(
                 total_docs=100,
                 format_counts={"md": 100},

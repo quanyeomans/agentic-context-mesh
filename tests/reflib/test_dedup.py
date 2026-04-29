@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.dedup import (
+from kairix.knowledge.reflib.dedup import (
     choose_canonical,
     find_exact_duplicates,
     hash_content,

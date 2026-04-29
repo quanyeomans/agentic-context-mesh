@@ -1,5 +1,5 @@
 """
-Tests for optional raw query logging in kairix.search.hybrid.
+Tests for optional raw query logging in kairix.core.search.hybrid.
 
 Coverage:
   - KAIRIX_LOG_QUERIES=0 (default): no queries.jsonl written
@@ -15,10 +15,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.search.budget import BudgetedResult
-from kairix.search.hybrid import _log_query_event, _rotate_query_log, search
-from kairix.search.intent import QueryIntent
-from kairix.search.rrf import FusedResult
+from kairix.core.search.budget import BudgetedResult
+from kairix.core.search.hybrid import _log_query_event, _rotate_query_log, search
+from kairix.core.search.intent import QueryIntent
+from kairix.core.search.rrf import FusedResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,13 +44,13 @@ def _budgeted(path: str, tokens: int = 50) -> BudgetedResult:
 def _make_search_mock(budgeted_results: list[BudgetedResult]) -> dict:
     """Return a dict of patches that simulate a successful search pipeline."""
     return {
-        "kairix.search.hybrid.classify": MagicMock(return_value=QueryIntent.SEMANTIC),
-        "kairix.search.hybrid.bm25_search": MagicMock(return_value=[]),
-        "kairix.search.hybrid._run_vector_search": MagicMock(return_value=[]),
-        "kairix.search.hybrid.bm25_primary_fuse": MagicMock(return_value=[]),
-        "kairix.search.hybrid._get_neo4j": MagicMock(return_value=type("C", (), {"available": False})()),
-        "kairix.search.hybrid.apply_budget": MagicMock(return_value=budgeted_results),
-        "kairix.search.hybrid._log_search_event": MagicMock(),  # don't touch search.jsonl
+        "kairix.core.search.hybrid.classify": MagicMock(return_value=QueryIntent.SEMANTIC),
+        "kairix.core.search.hybrid.bm25_search": MagicMock(return_value=[]),
+        "kairix.core.search.hybrid._run_vector_search": MagicMock(return_value=[]),
+        "kairix.core.search.hybrid.bm25_primary_fuse": MagicMock(return_value=[]),
+        "kairix.core.search.hybrid._get_neo4j": MagicMock(return_value=type("C", (), {"available": False})()),
+        "kairix.core.search.hybrid.apply_budget": MagicMock(return_value=budgeted_results),
+        "kairix.core.search.hybrid._log_search_event": MagicMock(),  # don't touch search.jsonl
     }
 
 
@@ -67,7 +67,7 @@ class TestQueryLoggingDisabled:
     def test_no_file_written_when_disabled(self, tmp_path: Path) -> None:
         log_path = tmp_path / "queries.jsonl"
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", False),
@@ -94,19 +94,21 @@ class TestQueryLoggingDisabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/a.md"), _budgeted("/vault/b.md")]
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", False),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
-            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
-            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
-            patch("kairix.search.hybrid.bm25_primary_fuse", mocks["kairix.search.hybrid.bm25_primary_fuse"]),
-            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
-            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
-            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
+            patch("kairix.core.search.hybrid.classify", mocks["kairix.core.search.hybrid.classify"]),
+            patch("kairix.core.search.hybrid.bm25_search", mocks["kairix.core.search.hybrid.bm25_search"]),
+            patch(
+                "kairix.core.search.hybrid._run_vector_search", mocks["kairix.core.search.hybrid._run_vector_search"]
+            ),
+            patch("kairix.core.search.hybrid.bm25_primary_fuse", mocks["kairix.core.search.hybrid.bm25_primary_fuse"]),
+            patch("kairix.core.search.hybrid._get_neo4j", mocks["kairix.core.search.hybrid._get_neo4j"]),
+            patch("kairix.core.search.hybrid.apply_budget", mocks["kairix.core.search.hybrid.apply_budget"]),
+            patch("kairix.core.search.hybrid._log_search_event", mocks["kairix.core.search.hybrid._log_search_event"]),
         ):
             search("what is the capital of France", agent="builder")
 
@@ -127,19 +129,21 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/doc1.md"), _budgeted("/vault/doc2.md")]
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
-            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
-            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
-            patch("kairix.search.hybrid.bm25_primary_fuse", mocks["kairix.search.hybrid.bm25_primary_fuse"]),
-            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
-            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
-            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
+            patch("kairix.core.search.hybrid.classify", mocks["kairix.core.search.hybrid.classify"]),
+            patch("kairix.core.search.hybrid.bm25_search", mocks["kairix.core.search.hybrid.bm25_search"]),
+            patch(
+                "kairix.core.search.hybrid._run_vector_search", mocks["kairix.core.search.hybrid._run_vector_search"]
+            ),
+            patch("kairix.core.search.hybrid.bm25_primary_fuse", mocks["kairix.core.search.hybrid.bm25_primary_fuse"]),
+            patch("kairix.core.search.hybrid._get_neo4j", mocks["kairix.core.search.hybrid._get_neo4j"]),
+            patch("kairix.core.search.hybrid.apply_budget", mocks["kairix.core.search.hybrid.apply_budget"]),
+            patch("kairix.core.search.hybrid._log_search_event", mocks["kairix.core.search.hybrid._log_search_event"]),
         ):
             search("what is Dan working on", agent="shape")
 
@@ -164,19 +168,21 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/a.md")]
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
-            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
-            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
-            patch("kairix.search.hybrid.bm25_primary_fuse", mocks["kairix.search.hybrid.bm25_primary_fuse"]),
-            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
-            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
-            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
+            patch("kairix.core.search.hybrid.classify", mocks["kairix.core.search.hybrid.classify"]),
+            patch("kairix.core.search.hybrid.bm25_search", mocks["kairix.core.search.hybrid.bm25_search"]),
+            patch(
+                "kairix.core.search.hybrid._run_vector_search", mocks["kairix.core.search.hybrid._run_vector_search"]
+            ),
+            patch("kairix.core.search.hybrid.bm25_primary_fuse", mocks["kairix.core.search.hybrid.bm25_primary_fuse"]),
+            patch("kairix.core.search.hybrid._get_neo4j", mocks["kairix.core.search.hybrid._get_neo4j"]),
+            patch("kairix.core.search.hybrid.apply_budget", mocks["kairix.core.search.hybrid.apply_budget"]),
+            patch("kairix.core.search.hybrid._log_search_event", mocks["kairix.core.search.hybrid._log_search_event"]),
         ):
             search("test query for hash", agent=None)
 
@@ -197,19 +203,21 @@ class TestQueryLoggingEnabled:
             _budgeted("/vault/e.md"),
         ]
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
-            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
-            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
-            patch("kairix.search.hybrid.bm25_primary_fuse", mocks["kairix.search.hybrid.bm25_primary_fuse"]),
-            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
-            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
-            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
+            patch("kairix.core.search.hybrid.classify", mocks["kairix.core.search.hybrid.classify"]),
+            patch("kairix.core.search.hybrid.bm25_search", mocks["kairix.core.search.hybrid.bm25_search"]),
+            patch(
+                "kairix.core.search.hybrid._run_vector_search", mocks["kairix.core.search.hybrid._run_vector_search"]
+            ),
+            patch("kairix.core.search.hybrid.bm25_primary_fuse", mocks["kairix.core.search.hybrid.bm25_primary_fuse"]),
+            patch("kairix.core.search.hybrid._get_neo4j", mocks["kairix.core.search.hybrid._get_neo4j"]),
+            patch("kairix.core.search.hybrid.apply_budget", mocks["kairix.core.search.hybrid.apply_budget"]),
+            patch("kairix.core.search.hybrid._log_search_event", mocks["kairix.core.search.hybrid._log_search_event"]),
         ):
             search("multi-result query", agent="builder")
 
@@ -222,19 +230,21 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/only.md")]
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
-            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
-            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
-            patch("kairix.search.hybrid.bm25_primary_fuse", mocks["kairix.search.hybrid.bm25_primary_fuse"]),
-            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
-            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
-            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
+            patch("kairix.core.search.hybrid.classify", mocks["kairix.core.search.hybrid.classify"]),
+            patch("kairix.core.search.hybrid.bm25_search", mocks["kairix.core.search.hybrid.bm25_search"]),
+            patch(
+                "kairix.core.search.hybrid._run_vector_search", mocks["kairix.core.search.hybrid._run_vector_search"]
+            ),
+            patch("kairix.core.search.hybrid.bm25_primary_fuse", mocks["kairix.core.search.hybrid.bm25_primary_fuse"]),
+            patch("kairix.core.search.hybrid._get_neo4j", mocks["kairix.core.search.hybrid._get_neo4j"]),
+            patch("kairix.core.search.hybrid.apply_budget", mocks["kairix.core.search.hybrid.apply_budget"]),
+            patch("kairix.core.search.hybrid._log_search_event", mocks["kairix.core.search.hybrid._log_search_event"]),
         ):
             search("single result query", agent="builder")
 
@@ -247,19 +257,21 @@ class TestQueryLoggingEnabled:
         log_path = tmp_path / "queries.jsonl"
         results = [_budgeted("/vault/x.md")]
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         mocks = _make_search_mock(results)
         patches = (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
             patch.object(hybrid_mod, "_QUERY_LOG_PATH", log_path),
-            patch("kairix.search.hybrid.classify", mocks["kairix.search.hybrid.classify"]),
-            patch("kairix.search.hybrid.bm25_search", mocks["kairix.search.hybrid.bm25_search"]),
-            patch("kairix.search.hybrid._run_vector_search", mocks["kairix.search.hybrid._run_vector_search"]),
-            patch("kairix.search.hybrid.bm25_primary_fuse", mocks["kairix.search.hybrid.bm25_primary_fuse"]),
-            patch("kairix.search.hybrid._get_neo4j", mocks["kairix.search.hybrid._get_neo4j"]),
-            patch("kairix.search.hybrid.apply_budget", mocks["kairix.search.hybrid.apply_budget"]),
-            patch("kairix.search.hybrid._log_search_event", mocks["kairix.search.hybrid._log_search_event"]),
+            patch("kairix.core.search.hybrid.classify", mocks["kairix.core.search.hybrid.classify"]),
+            patch("kairix.core.search.hybrid.bm25_search", mocks["kairix.core.search.hybrid.bm25_search"]),
+            patch(
+                "kairix.core.search.hybrid._run_vector_search", mocks["kairix.core.search.hybrid._run_vector_search"]
+            ),
+            patch("kairix.core.search.hybrid.bm25_primary_fuse", mocks["kairix.core.search.hybrid.bm25_primary_fuse"]),
+            patch("kairix.core.search.hybrid._get_neo4j", mocks["kairix.core.search.hybrid._get_neo4j"]),
+            patch("kairix.core.search.hybrid.apply_budget", mocks["kairix.core.search.hybrid.apply_budget"]),
+            patch("kairix.core.search.hybrid._log_search_event", mocks["kairix.core.search.hybrid._log_search_event"]),
         )
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], patches[7], patches[8]:
             search("first query", agent="builder")
@@ -290,7 +302,7 @@ class TestQueryLogRotation:
         log_path.write_bytes(b"x" * (10 * 1024 * 1024 + 1))
         original_size = log_path.stat().st_size
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
@@ -330,7 +342,7 @@ class TestQueryLogRotation:
         # Oversized active log
         log_path.write_bytes(b"y" * (10 * 1024 * 1024 + 1))
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),
@@ -365,7 +377,7 @@ class TestQueryLogRotation:
         # Small file — should not rotate
         log_path.write_text('{"ts": 1, "query": "existing"}\n')
 
-        import kairix.search.hybrid as hybrid_mod
+        import kairix.core.search.hybrid as hybrid_mod
 
         with (
             patch.object(hybrid_mod, "_LOG_QUERIES", True),

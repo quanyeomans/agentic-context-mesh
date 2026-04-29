@@ -14,7 +14,7 @@ pip install -e ".[dev]"
 # Unit tests (fast, no external deps required)
 pytest tests/ -m unit -x --timeout=30
 
-# Integration (requires sqlite-vec)
+# Integration (requires usearch)
 pytest tests/ -m integration -v
 
 # E2E (requires real kairix index + Azure credentials)
@@ -33,14 +33,14 @@ bash scripts/pre-commit-confidential-check.sh
 
 ### About skipped tests
 
-Integration tests that exercise the `vectors_vec` virtual table are marked `skip` unless sqlite-vec
-is installed. sqlite-vec is a pip dependency (`sqlite-vec>=0.1.6`) and is loaded automatically.
+Integration tests that exercise vector search are marked `skip` unless usearch
+is installed. usearch is a pip dependency (`usearch>=2.0`) and is loaded automatically.
 The skips are expected on systems where the native extension fails to compile and do not indicate broken tests.
 
-To install sqlite-vec:
+To install usearch:
 
 ```bash
-pip install "sqlite-vec>=0.1.6"
+pip install "usearch>=2.0"
 pytest tests/integration/
 ```
 
@@ -48,35 +48,33 @@ pytest tests/integration/
 
 ```
 kairix/
-  cli.py              — top-level dispatcher (kairix <subcommand>)
-  db/                 — Database schema, scanner, migrations
-    scanner.py        — Document discovery + ingestion
-    schema.py         — Single source of truth for DB schema
-  embed/              — Azure OpenAI embedding pipeline → sqlite-vec
-    schema.py         — Vec table management, pending chunk queries
-    embed.py          — Azure API client, chunking, vector encoding, DB writes
-    recall_check.py   — Post-embed quality gate
-    cli.py            — argparse entrypoint, lockfile, run logging
-  search/             — Hybrid BM25 + vector retrieval
-    hybrid.py         — Full pipeline: intent → BM25+vec → RRF → entity boost → budget
-    intent.py         — Query intent classification (6 intents)
-    bm25.py           — Kairix FTS wrapper
-    vector.py         — sqlite-vec wrapper
-    rrf.py            — Reciprocal Rank Fusion + entity/procedural boosts
-    budget.py         — Token budget management (L0/L1/L2 tiering)
-  graph/              — Neo4j client + graph models (OrganisationNode, PersonNode, etc.)
-  store/              — Document store operations
-  temporal/           — Date-aware query rewriting + chunking
-  summaries/          — L0/L1 tiered summary generation
-  wikilinks/          — Wikilink injection + entity resolver
-  briefing/           — Session briefing synthesis
-  classify/           — Memory write auto-classification
-  contradict/         — Contradiction detection on new knowledge writes
-  curator/            — Entity health monitoring (CA-1)
-  mcp/                — MCP server (search/entity/prep/timeline/research tools)
-  benchmark/          — YAML-driven benchmark runner (NDCG@10/Hit@5/MRR@10)
-  research/           — Multi-turn research agent (iterative search + synthesis)
-  secrets.py          — Secret resolution (env → sidecar → Key Vault)
+  core/           # Search engine
+    search/       # Hybrid BM25 + vector, RRF fusion, boosts
+    embed/        # Embedding pipeline (Azure OpenAI → usearch)
+    db/           # SQLite database, FTS5, schema
+    temporal/     # Temporal query rewriting
+    classify/     # Intent classification + content routing
+  knowledge/      # Knowledge management
+    entities/     # Entity discovery, seeding, validation
+    graph/        # Neo4j client
+    store/        # Document store operations
+    wikilinks/    # Wikilink injection + audit
+    reflib/       # Reference library management
+    summaries/    # Document summarisation
+    contradict/   # Contradiction detection
+  agents/         # Agent-facing capabilities
+    mcp/          # MCP server (tool_search, tool_entity, etc.)
+    briefing/     # Session briefing generation
+    curator/      # Entity graph health agent
+    research/     # Multi-hop research agent
+  quality/        # Evaluation and benchmarking
+    benchmark/    # Benchmark runner, suites, scoring
+    eval/         # Suite generation, monitoring, sweep
+    contracts/    # Protocol definitions
+  platform/       # Deployment and onboarding
+    setup/        # Onboarding wizard
+    onboard/      # Deployment diagnostics
+    llm/          # LLM backend abstraction
 ```
 
 **Key invariant:** `kairix/db/schema.py` is the single source of truth for the database schema.
@@ -90,7 +88,7 @@ Run `pytest tests/ -k "schema" -v` to verify compatibility after any schema chan
 
 ## Adding support for other OpenAI-compatible endpoints
 
-The embedding logic in `kairix/embed/embed.py` uses the Azure OpenAI REST API format
+The embedding logic in `kairix/core/embed/embed.py` uses the Azure OpenAI REST API format
 (`/openai/deployments/{deployment}/embeddings`). To support standard OpenAI or other
 compatible endpoints, the URL construction in `embed_batch()` and `preflight_check()`
 would need a flag to switch between Azure and OpenAI endpoint formats.

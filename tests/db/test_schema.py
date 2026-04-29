@@ -1,11 +1,11 @@
-"""Tests for kairix.db.schema — schema creation, validation, migration."""
+"""Tests for kairix.core.db.schema — schema creation, validation, migration."""
 
 import sqlite3
 from unittest.mock import patch
 
 import pytest
 
-from kairix.db.schema import SCHEMA_VERSION, _ensure_vec_table, create_schema, migrate, validate_schema
+from kairix.core.db.schema import SCHEMA_VERSION, _ensure_vec_table, create_schema, migrate, validate_schema
 
 
 @pytest.mark.unit
@@ -247,7 +247,7 @@ def test_migrate_creates_chunk_date_index() -> None:
 def test_create_schema_with_mocked_vec() -> None:
     """create_schema creates all tables when _ensure_vec_table is mocked."""
     db = sqlite3.connect(":memory:")
-    with patch("kairix.db.schema._ensure_vec_table"):
+    with patch("kairix.core.db.schema._ensure_vec_table"):
         create_schema(db)
 
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -270,7 +270,7 @@ def test_create_schema_with_mocked_vec() -> None:
 def test_create_schema_idempotent_with_mock() -> None:
     """create_schema can be called twice without error (mocked vec)."""
     db = sqlite3.connect(":memory:")
-    with patch("kairix.db.schema._ensure_vec_table"):
+    with patch("kairix.core.db.schema._ensure_vec_table"):
         create_schema(db)
         create_schema(db)  # second call should not raise
 
@@ -282,7 +282,7 @@ def test_create_schema_idempotent_with_mock() -> None:
 def test_create_schema_creates_indexes_with_mock() -> None:
     """create_schema creates expected indexes."""
     db = sqlite3.connect(":memory:")
-    with patch("kairix.db.schema._ensure_vec_table"):
+    with patch("kairix.core.db.schema._ensure_vec_table"):
         create_schema(db)
 
     indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
@@ -296,7 +296,7 @@ def test_create_schema_creates_indexes_with_mock() -> None:
 def test_create_schema_documents_table_columns_with_mock() -> None:
     """create_schema creates documents table with all expected columns."""
     db = sqlite3.connect(":memory:")
-    with patch("kairix.db.schema._ensure_vec_table"):
+    with patch("kairix.core.db.schema._ensure_vec_table"):
         create_schema(db)
 
     cols = {row[1] for row in db.execute("PRAGMA table_info(documents)")}
@@ -308,7 +308,7 @@ def test_create_schema_documents_table_columns_with_mock() -> None:
 def test_create_schema_content_vectors_has_chunk_date_with_mock() -> None:
     """create_schema creates content_vectors with chunk_date column."""
     db = sqlite3.connect(":memory:")
-    with patch("kairix.db.schema._ensure_vec_table"):
+    with patch("kairix.core.db.schema._ensure_vec_table"):
         create_schema(db)
 
     cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}

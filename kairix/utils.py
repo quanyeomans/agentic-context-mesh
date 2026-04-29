@@ -21,3 +21,18 @@ def slugify(name: str) -> str:
     ''
     """
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def display_name(slug: str) -> str:
+    """Convert a slug or filename to a human-readable display name.
+
+    Replaces hyphens and underscores with spaces and title-cases the result.
+
+    >>> display_name("marcus-aurelius")
+    'Marcus Aurelius'
+    >>> display_name("owasp_cheat_sheet")
+    'Owasp Cheat Sheet'
+    >>> display_name("")
+    ''
+    """
+    return slug.replace("-", " ").replace("_", " ").strip().title()

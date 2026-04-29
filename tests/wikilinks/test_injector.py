@@ -1,5 +1,5 @@
 """
-Tests for kairix.wikilinks.injector
+Tests for kairix.knowledge.wikilinks.injector
 
 Covers:
 - inject_wikilinks(): first mention, skip second, skip existing, skip code blocks,
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from kairix.wikilinks.injector import inject_wikilinks, should_inject
-from kairix.wikilinks.resolver import WikiEntity
+from kairix.knowledge.wikilinks.injector import inject_wikilinks, should_inject
+from kairix.knowledge.wikilinks.resolver import WikiEntity
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -40,8 +40,8 @@ def make_entity(
 
 
 ACME_CORP = make_entity("Acme Corp", "02-Areas/Clients/Acme-Corp/", link="[[Acme-Corp]]")
-THREE_CUBES = make_entity("Acme Corp", "02-Areas/Acme Corp/", link="[[AcmeCorp]]")
-BURGER_CHAIN = make_entity(
+ACME_CORP_ALT = make_entity("Acme Corp", "02-Areas/Acme Corp/", link="[[AcmeCorp]]")
+GAMMA_SYSTEMS = make_entity(
     "Gamma Systems",
     "02-Areas/Clients/Gamma-Systems/",
     link="[[Gamma-Systems|Gamma Systems]]",
@@ -199,7 +199,7 @@ def test_self_link_check_different_entity() -> None:
     content = "Acme Corp works with Gamma Systems on strategy."
     modified, injected = inject_wikilinks(
         content,
-        [ACME_CORP, BURGER_CHAIN],
+        [ACME_CORP, GAMMA_SYSTEMS],
         source_path="/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md",
     )
     # Acme Corp suppressed (self-link on own page); Gamma Systems still linked
@@ -218,7 +218,7 @@ def test_self_link_check_different_entity() -> None:
 def test_alias_triggers_link() -> None:
     """Alias 'Gamma Systems' should trigger the [[Gamma-Systems|Gamma Systems]] link."""
     content = "Gamma Systems is a fast food chain."
-    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
+    modified, injected = inject_wikilinks(content, [GAMMA_SYSTEMS])
     assert "[[Gamma-Systems|Gamma Systems]]" in modified
     assert injected == ["Gamma Systems"]
 
@@ -227,7 +227,7 @@ def test_alias_triggers_link() -> None:
 def test_primary_name_triggers_link() -> None:
     """Primary name 'Gamma Systems' should also trigger."""
     content = "Gamma Systems is a fast food chain."
-    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
+    modified, injected = inject_wikilinks(content, [GAMMA_SYSTEMS])
     assert "[[Gamma-Systems|Gamma Systems]]" in modified
     assert injected == ["Gamma Systems"]
 
@@ -249,7 +249,7 @@ def test_should_inject_agent_knowledge() -> None:
 
 @pytest.mark.unit
 def test_should_inject_projects() -> None:
-    assert should_inject("/tmp/test-vault/01-Projects/202603-Mnemosyne/README.md") is True
+    assert should_inject("/tmp/test-vault/01-Projects/202603-Kairix/README.md") is True
 
 
 @pytest.mark.unit
@@ -304,7 +304,7 @@ def test_should_not_inject_large_file(tmp_path: Path) -> None:
     # Since we can't easily place it in /tmp/test-vault, we test inject_file instead.
     # Here we just verify should_inject skips large files by placing one in a tmp dir
     # and calling it directly (the path won't match eligible prefixes, so test inject_file).
-    from kairix.wikilinks.injector import inject_file
+    from kairix.knowledge.wikilinks.injector import inject_file
 
     result = inject_file(str(large_file), [ACME_CORP])
     assert result == []
@@ -363,9 +363,9 @@ def test_only_first_alias_mention_linked() -> None:
 
 
 @pytest.mark.unit
-def test_burger_chain_alias_produces_canonical_link() -> None:
+def test_gamma_systems_alias_produces_canonical_link() -> None:
     """'Gamma Systems' → '[[Gamma-Systems|Gamma Systems]]' (alias → canonical display)."""
     content = "Gamma Systems is a major fast food chain."
-    modified, injected = inject_wikilinks(content, [BURGER_CHAIN])
+    modified, injected = inject_wikilinks(content, [GAMMA_SYSTEMS])
     assert "[[Gamma-Systems|Gamma Systems]]" in modified
     assert injected == ["Gamma Systems"]

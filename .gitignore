@@ -49,4 +49,5 @@ scripts/benchmark-path-audit.py
 !env.example
 PRD.md
 .claude/
+CLAUDE.md
 .confidential-patterns

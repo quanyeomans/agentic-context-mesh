@@ -1,5 +1,5 @@
 """
-Additional tests for kairix.embed.schema — covers previously-untested paths:
+Additional tests for kairix.core.embed.schema — covers previously-untested paths:
 - find_sqlite_vec(): env override, fallback, missing
 - load_sqlite_vec(): missing extension error
 - get_db_path(): env override, missing file
@@ -18,13 +18,12 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.embed.schema import (
+from kairix.core.embed.schema import (
     ensure_vec_table,
     find_sqlite_vec,
     get_all_chunks_needing_embedding,
     get_db_path,
     get_pending_chunks,
-    load_sqlite_vec,
     save_run_log,
 )
 
@@ -47,23 +46,9 @@ def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when no vec0.so can be located."""
     monkeypatch.delenv("SQLITE_VEC_PATH", raising=False)
-    with patch("kairix.db._find_sqlite_vec", return_value=None):
+    with patch("kairix.core.db._find_sqlite_vec", return_value=None):
         result = find_sqlite_vec()
     assert result is None
-
-
-# ---------------------------------------------------------------------------
-# load_sqlite_vec
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_load_sqlite_vec_raises_when_not_found() -> None:
-    """Raises RuntimeError with helpful message when extension is not found."""
-    db = sqlite3.connect(":memory:")
-    with patch("kairix.db._find_sqlite_vec", return_value=None):
-        with pytest.raises(RuntimeError, match="sqlite-vec extension"):
-            load_sqlite_vec(db)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +70,7 @@ def test_get_db_path_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_get_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Returns default kairix DB path when no DB exists (for fresh installs)."""
     monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
-    monkeypatch.delenv("QMD_CACHE_DIR", raising=False)
+    monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
     # Redirect home to tmp_path so default path resolves to a temp location
     monkeypatch.setenv("HOME", str(tmp_path))
     result = get_db_path()
@@ -149,7 +134,7 @@ def test_ensure_vec_table_skips_recreate_when_dims_match() -> None:
 
 
 def _make_minimal_db() -> sqlite3.Connection:
-    """Create minimal in-memory QMD schema for testing."""
+    """Create minimal in-memory kairix schema for testing."""
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
     db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT)")

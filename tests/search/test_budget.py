@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.budget — token budget enforcer.
+Tests for kairix.core.search.budget — token budget enforcer.
 
 Tests cover:
   - apply_budget() returns [] on empty results
@@ -27,7 +27,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.search.budget import (
+from kairix.core.search.budget import (
     L1_BUDGET_MIN,
     L1_SCORE_THRESHOLD,
     L2_BUDGET_MIN,
@@ -38,7 +38,7 @@ from kairix.search.budget import (
     _select_tier,
     apply_budget,
 )
-from kairix.search.rrf import FusedResult
+from kairix.core.search.rrf import FusedResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -121,7 +121,7 @@ class TestApplyBudget:
     def test_unexpected_exception_returns_empty(self) -> None:
         """apply_budget should never raise — returns [] on internal error."""
         results = [_fused()]
-        with patch("kairix.search.budget._apply_budget_impl", side_effect=RuntimeError("boom")):
+        with patch("kairix.core.search.budget._apply_budget_impl", side_effect=RuntimeError("boom")):
             result = apply_budget(results, budget=3000)
         assert result == []
 
@@ -135,7 +135,7 @@ class TestApplyBudget:
 class TestOpenSummariesDb:
     @pytest.mark.unit
     def test_returns_none_when_path_missing(self) -> None:
-        with patch("kairix.search.budget.Path") as mock_path:
+        with patch("kairix.core.search.budget.Path") as mock_path:
             mock_path.return_value.exists.return_value = False
             result = _open_summaries_db()
         assert result is None
@@ -147,7 +147,7 @@ class TestOpenSummariesDb:
         # Create a valid sqlite3 db
         sqlite3.connect(str(tmp_path)).close()
         try:
-            with patch("kairix.search.budget.Path", return_value=tmp_path):
+            with patch("kairix.core.search.budget.Path", return_value=tmp_path):
                 conn = _open_summaries_db()
             # Should return a connection (not None) since path exists
             if conn is not None:
@@ -160,9 +160,9 @@ class TestOpenSummariesDb:
 
     @pytest.mark.unit
     def test_returns_none_when_connect_raises(self) -> None:
-        with patch("kairix.search.budget.Path") as mock_path:
+        with patch("kairix.core.search.budget.Path") as mock_path:
             mock_path.return_value.exists.return_value = True
-            with patch("kairix.search.budget.sqlite3") as mock_sqlite:
+            with patch("kairix.core.search.budget.sqlite3") as mock_sqlite:
                 mock_sqlite.connect.side_effect = Exception("cannot open")
                 result = _open_summaries_db()
         assert result is None
@@ -260,7 +260,7 @@ class TestGetContentForTier:
         mock_loader.get_l0.return_value = "abstract text"
         mock_loader.get_l1.return_value = None
 
-        with patch.dict("sys.modules", {"kairix.summaries.loader": mock_loader}):
+        with patch.dict("sys.modules", {"kairix.knowledge.summaries.loader": mock_loader}):
             content = _get_content_for_tier(result, "L0", summaries_db=mock_db)
 
         assert content == "abstract text"
@@ -275,7 +275,7 @@ class TestGetContentForTier:
         mock_loader.get_l0.return_value = None
         mock_loader.get_l1.return_value = None
 
-        with patch.dict("sys.modules", {"kairix.summaries.loader": mock_loader}):
+        with patch.dict("sys.modules", {"kairix.knowledge.summaries.loader": mock_loader}):
             content = _get_content_for_tier(result, "L0", summaries_db=mock_db)
 
         assert content == "fallback snippet"
@@ -290,7 +290,7 @@ class TestGetContentForTier:
         mock_loader.get_l1.return_value = None
         mock_loader.get_l0.return_value = "l0 abstract"
 
-        with patch.dict("sys.modules", {"kairix.summaries.loader": mock_loader}):
+        with patch.dict("sys.modules", {"kairix.knowledge.summaries.loader": mock_loader}):
             content = _get_content_for_tier(result, "L1", summaries_db=mock_db)
 
         assert content == "l0 abstract"
@@ -305,7 +305,7 @@ class TestGetContentForTier:
         mock_loader.get_l1.return_value = "l1 overview"
         mock_loader.get_l0.return_value = "l0 abstract"
 
-        with patch.dict("sys.modules", {"kairix.summaries.loader": mock_loader}):
+        with patch.dict("sys.modules", {"kairix.knowledge.summaries.loader": mock_loader}):
             content = _get_content_for_tier(result, "L1", summaries_db=mock_db)
 
         assert content == "l1 overview"
@@ -320,7 +320,7 @@ class TestGetContentForTier:
         mock_loader.get_l0.side_effect = Exception("DB error")
         mock_loader.get_l1.side_effect = Exception("DB error")
 
-        with patch.dict("sys.modules", {"kairix.summaries.loader": mock_loader}):
+        with patch.dict("sys.modules", {"kairix.knowledge.summaries.loader": mock_loader}):
             content = _get_content_for_tier(result, "L0", summaries_db=mock_db)
 
         assert content == "safe fallback"

@@ -1,9 +1,8 @@
 """
-Tests for TMP-2: date-range path filtering in BM25 and vector search.
+Tests for TMP-2: date-range path filtering in BM25 search.
 
 Covers:
   - bm25_search date_filter_paths post-filter
-  - vector_search_bytes date_filter_paths post-filter
   - Graceful degradation when date_filter_paths is empty or None
 """
 
@@ -11,27 +10,15 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from kairix.search.bm25 import bm25_search
-from kairix.search.vector import VecResult, vector_search_bytes
+from kairix.core.search.bm25 import bm25_search
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_vec_result(path: str) -> VecResult:
-    return VecResult(
-        hash_seq="abc_0",
-        distance=0.1,
-        path=path,
-        collection="vault-areas",
-        title="Test",
-        snippet="Test snippet",
-    )
 
 
 def _create_test_db(tmp_path: Path) -> Path:
@@ -72,9 +59,9 @@ def _create_test_db(tmp_path: Path) -> Path:
 
 @pytest.mark.unit
 def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
-    """date_filter_paths=None → results not filtered."""
+    """date_filter_paths=None -> results not filtered."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("test document filtering", date_filter_paths=None)
 
     assert len(results) == 2
@@ -82,9 +69,9 @@ def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
-    """date_filter_paths=frozenset() → results not filtered (empty = no-filter)."""
+    """date_filter_paths=frozenset() -> results not filtered (empty = no-filter)."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search("test document filtering", date_filter_paths=frozenset())
 
     assert len(results) == 2
@@ -92,9 +79,9 @@ def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_bm25_date_filter_applied(tmp_path: Path) -> None:
-    """date_filter_paths with one path → only matching result returned."""
+    """date_filter_paths with one path -> only matching result returned."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.search.bm25.get_db_path", return_value=db_path):
+    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
         results = bm25_search(
             "test document filtering",
             date_filter_paths=frozenset({"02-Areas/good.md"}),
@@ -102,47 +89,3 @@ def test_bm25_date_filter_applied(tmp_path: Path) -> None:
 
     assert len(results) == 1
     assert results[0]["file"] == "02-Areas/good.md"
-
-
-# ---------------------------------------------------------------------------
-# vector_search_bytes date_filter_paths
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_vector_date_filter_none_passthrough() -> None:
-    """date_filter_paths=None → vector results not filtered."""
-    mock_db = MagicMock()
-    r1 = _make_vec_result("doc-a.md")
-    r2 = _make_vec_result("doc-b.md")
-
-    with patch("kairix.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
-        results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=None)
-
-    assert len(results) == 2
-
-
-@pytest.mark.unit
-def test_vector_date_filter_empty_passthrough() -> None:
-    """date_filter_paths=frozenset() → results not filtered."""
-    mock_db = MagicMock()
-    r1 = _make_vec_result("doc-a.md")
-
-    with patch("kairix.search.vector._vsearch_with_bytes", return_value=[r1]):
-        results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=frozenset())
-
-    assert len(results) == 1
-
-
-@pytest.mark.unit
-def test_vector_date_filter_applied() -> None:
-    """date_filter_paths with one path → only matching result returned."""
-    mock_db = MagicMock()
-    r1 = _make_vec_result("02-Areas/good.md")
-    r2 = _make_vec_result("02-Areas/bad.md")
-
-    with patch("kairix.search.vector._vsearch_with_bytes", return_value=[r1, r2]):
-        results = vector_search_bytes(mock_db, b"\x00" * 4, date_filter_paths=frozenset({"02-Areas/good.md"}))
-
-    assert len(results) == 1
-    assert results[0]["path"] == "02-Areas/good.md"

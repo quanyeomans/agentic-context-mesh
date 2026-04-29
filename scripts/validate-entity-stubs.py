@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from kairix.entities.stop_entities import is_stop_entity
+from kairix.knowledge.entities.stop_entities import is_stop_entity
 
 VALID_TYPES: frozenset[str] = frozenset({"person", "organisation", "concept", "project", "decision"})
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from pytest_bdd import given, then, when
 
-from kairix.onboard.check import (
+from kairix.platform.onboard.check import (
     CheckResult,
     check_kairix_on_path,
     check_secrets_loaded,

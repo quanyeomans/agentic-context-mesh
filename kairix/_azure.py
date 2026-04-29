@@ -52,6 +52,17 @@ _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"
 _EMBED_TIMEOUT_S = 30
 
 
+def _resolve_secret(secret_name: str) -> str | None:
+    """Resolve a single secret, returning None on any failure. Never raises or logs values."""
+    try:
+        from kairix.secrets import get_secret
+
+        return get_secret(secret_name, required=False) or None
+    except Exception:
+        logger.warning("_azure: failed to resolve a required credential")
+        return None
+
+
 @lru_cache(maxsize=1)
 def _get_secrets() -> dict[str, str]:
     """
@@ -64,8 +75,6 @@ def _get_secrets() -> dict[str, str]:
     Delegates to kairix.secrets.get_secret() for single-source secret
     resolution (env var -> sidecar file -> Key Vault CLI).
     """
-    from kairix.secrets import get_secret
-
     secrets: dict[str, str] = {}
 
     secret_map = {
@@ -75,12 +84,9 @@ def _get_secrets() -> dict[str, str]:
     }
 
     for key, secret_name in secret_map.items():
-        try:
-            value = get_secret(secret_name, required=False)
-            if value:
-                secrets[key] = value
-        except Exception:  # broad catch justified: Key Vault SDK can raise varied exceptions (network, auth, parse)
-            logger.warning("_azure: error resolving secret for key %r", key)
+        resolved = _resolve_secret(secret_name)
+        if resolved:
+            secrets[key] = resolved
 
     if "deployment" not in secrets:
         secrets["deployment"] = _DEFAULT_EMBED_DEPLOYMENT

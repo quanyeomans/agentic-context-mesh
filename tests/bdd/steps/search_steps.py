@@ -2,7 +2,7 @@
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.search.intent import QueryIntent, classify
+from kairix.core.search.intent import QueryIntent, classify
 
 # Module-level state (simple, test-scoped)
 _state: dict = {}

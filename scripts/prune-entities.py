@@ -161,9 +161,9 @@ def main() -> None:
 
     sys.path.insert(0, str(Path(__file__).parent.parent))
     try:
-        from kairix.graph.client import get_client
+        from kairix.knowledge.graph.client import get_client
     except ImportError as exc:
-        print(f"ERROR: could not import kairix.graph.client — {exc}", file=sys.stderr)
+        print(f"ERROR: could not import kairix.knowledge.graph.client — {exc}", file=sys.stderr)
         print("Ensure kairix[neo4j] is installed.", file=sys.stderr)
         sys.exit(1)
 

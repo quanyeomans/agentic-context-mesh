@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.planner — QueryPlanner decompose + retrieve_and_merge.
+Tests for kairix.core.search.planner — QueryPlanner decompose + retrieve_and_merge.
 
 Tests cover:
   - decompose() fallback when chat_completion import fails
@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.search.planner import QueryPlanner
+from kairix.core.search.planner import QueryPlanner
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,7 +57,7 @@ def _search_fn_factory(results_by_query: dict[str, list[_FakeResult]]):
 class TestDecompose:
     @pytest.mark.unit
     def test_fallback_when_import_fails(self) -> None:
-        """Should return [query] when mnemosyne._azure is not importable."""
+        """Should return [query] when kairix._azure is not importable."""
         planner = QueryPlanner()
         with patch("builtins.__import__", side_effect=ImportError("no module")):
             result = planner.decompose("what is the meaning of life?")
@@ -159,7 +159,7 @@ class TestDecompose:
         planner = QueryPlanner()
         neo4j_mock = MagicMock(available=False)
 
-        with patch("kairix.search.planner._neo4j_graph_context", return_value=None):
+        with patch("kairix.core.search.planner._neo4j_graph_context", return_value=None):
             result = planner.decompose("active projects techcorp", neo4j_client=neo4j_mock)
 
         # Should still return a list
@@ -177,8 +177,8 @@ class TestDecompose:
         mock_backend.chat.return_value = '["entity-aware sub-query"]'
 
         with (
-            patch("kairix.search.planner._neo4j_graph_context", return_value=context_str),
-            patch("kairix.llm.get_default_backend", return_value=mock_backend),
+            patch("kairix.core.search.planner._neo4j_graph_context", return_value=context_str),
+            patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
         ):
             result = planner.decompose("what is techcorp doing", neo4j_client=neo4j_mock)
 
@@ -336,7 +336,7 @@ class TestRetrieveAndMerge:
 class TestNeo4jGraphContext:
     def test_returns_none_when_no_entities_found(self) -> None:
         """Should return None when client finds no matching entities."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = []
@@ -345,7 +345,7 @@ class TestNeo4jGraphContext:
 
     def test_returns_context_string_with_entities(self) -> None:
         """Should return a context string when entities and relationships are found."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"id": "e1", "name": "TechCorp"}]
@@ -360,7 +360,7 @@ class TestNeo4jGraphContext:
 
     def test_skips_entities_without_id(self) -> None:
         """Entities missing 'id' should be skipped."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"name": "NoId"}]  # no "id" key
@@ -369,7 +369,7 @@ class TestNeo4jGraphContext:
 
     def test_handles_find_by_name_exception(self) -> None:
         """Should continue silently when find_by_name raises."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.side_effect = RuntimeError("neo4j down")
@@ -378,7 +378,7 @@ class TestNeo4jGraphContext:
 
     def test_handles_related_entities_exception(self) -> None:
         """Should skip entity gracefully when related_entities raises."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"id": "e1", "name": "Entity1"}]
@@ -389,7 +389,7 @@ class TestNeo4jGraphContext:
 
     def test_deduplicates_entities_by_id(self) -> None:
         """Same entity ID from multiple words should appear only once."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         entity = {"id": "e1", "name": "SameEntity"}
@@ -402,7 +402,7 @@ class TestNeo4jGraphContext:
 
     def test_filters_self_from_related(self) -> None:
         """Related entities with same name as source should be excluded."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"id": "e1", "name": "Alpha"}]
@@ -417,7 +417,7 @@ class TestNeo4jGraphContext:
 
     def test_short_words_filtered_out(self) -> None:
         """Words with 3 or fewer chars after stripping should be skipped."""
-        from kairix.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import _neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = []
@@ -440,7 +440,7 @@ class TestDecomposeEdgeCases:
         planner = QueryPlanner()
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["valid", 123, "also valid"]'
-        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = planner.decompose("mixed types query")
         assert result == ["valid", "also valid"]
 
@@ -450,7 +450,7 @@ class TestDecomposeEdgeCases:
         planner = QueryPlanner()
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["valid", "   ", "also valid"]'
-        with patch("kairix.llm.get_default_backend", return_value=mock_backend):
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = planner.decompose("whitespace items query")
         assert result == ["valid", "also valid"]
 
@@ -463,8 +463,8 @@ class TestDecomposeEdgeCases:
         mock_backend.chat.return_value = '["fallback query"]'
 
         with (
-            patch("kairix.search.planner._neo4j_graph_context", side_effect=RuntimeError("neo4j crash")),
-            patch("kairix.llm.get_default_backend", return_value=mock_backend),
+            patch("kairix.core.search.planner._neo4j_graph_context", side_effect=RuntimeError("neo4j crash")),
+            patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
         ):
             result = planner.decompose("query with broken neo4j", neo4j_client=neo4j_mock)
         assert isinstance(result, list)

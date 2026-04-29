@@ -7,7 +7,7 @@ route the canonical query patterns to their expected intents.
 
 import pytest
 
-from kairix.search.intent import QueryIntent, classify
+from kairix.core.search.intent import QueryIntent, classify
 
 _CANONICAL_CASES = [
     ("what happened last week", QueryIntent.TEMPORAL),

@@ -101,13 +101,13 @@ def _patch_search_deps(fts5_db, monkeypatch):
     """Patch BM25 to use our FTS5 DB and disable vector search."""
     import sqlite3 as _sqlite3
 
-    from kairix.search import bm25 as bm25_mod
+    from kairix.core.search import bm25 as bm25_mod
 
     _original_bm25_search = bm25_mod.bm25_search
 
-    def _fts5_bm25_search(query, collections=None, limit=10, qmd_binary=None, date_filter_paths=None):
+    def _fts5_bm25_search(query, collections=None, limit=10, date_filter_paths=None):
         """BM25-like search using our local FTS5 DB."""
-        from kairix.search.bm25 import BM25Result, _normalise_fts_query
+        from kairix.core.search.bm25 import BM25Result, _normalise_fts_query
 
         normalised = _normalise_fts_query(query)
         if not normalised.strip():
@@ -146,13 +146,13 @@ def _patch_search_deps(fts5_db, monkeypatch):
             )
         return results
 
-    monkeypatch.setattr("kairix.search.hybrid.bm25_search", _fts5_bm25_search)
-    monkeypatch.setattr("kairix.search.hybrid._run_vector_search", lambda *a, **kw: [])
+    monkeypatch.setattr("kairix.core.search.hybrid.bm25_search", _fts5_bm25_search)
+    monkeypatch.setattr("kairix.core.search.hybrid._run_vector_search", lambda *a, **kw: [])
     monkeypatch.setattr(
-        "kairix.search.hybrid._get_neo4j",
+        "kairix.core.search.hybrid._get_neo4j",
         lambda: type("C", (), {"available": False})(),
     )
-    monkeypatch.setattr("kairix.search.hybrid._log_search_event", lambda *a, **kw: None)
+    monkeypatch.setattr("kairix.core.search.hybrid._log_search_event", lambda *a, **kw: None)
 
 
 class TestSearchE2E:
@@ -160,15 +160,15 @@ class TestSearchE2E:
 
     def test_search_returns_results(self, _patch_search_deps):
         """Hybrid search returns results from FTS5 BM25 backend."""
-        from kairix.search.hybrid import search
+        from kairix.core.search.hybrid import search
 
         result = search("infrastructure Azure VM")
         assert len(result.results) > 0, "Expected at least one result"
 
     def test_search_intent_classified(self, _patch_search_deps):
         """Search result includes a classified intent."""
-        from kairix.search.hybrid import SearchResult, search
-        from kairix.search.intent import QueryIntent
+        from kairix.core.search.hybrid import SearchResult, search
+        from kairix.core.search.intent import QueryIntent
 
         result = search("how to deploy to staging")
         assert isinstance(result, SearchResult)
@@ -176,21 +176,21 @@ class TestSearchE2E:
 
     def test_search_bm25_results_present(self, _patch_search_deps):
         """BM25 results are present in the fused output."""
-        from kairix.search.hybrid import search
+        from kairix.core.search.hybrid import search
 
         result = search("observability tracing Arize")
         assert result.bm25_count > 0, "Expected BM25 to contribute results"
 
     def test_search_no_errors(self, _patch_search_deps):
         """Search completes without error."""
-        from kairix.search.hybrid import search
+        from kairix.core.search.hybrid import search
 
         result = search("project engagement Q2")
         assert result.error == ""
 
     def test_search_returns_search_result_type(self, _patch_search_deps):
         """search() always returns SearchResult dataclass."""
-        from kairix.search.hybrid import SearchResult, search
+        from kairix.core.search.hybrid import SearchResult, search
 
         result = search("deployment runbook steps")
         assert isinstance(result, SearchResult)

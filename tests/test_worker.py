@@ -30,7 +30,7 @@ def test_run_embed_catches_exceptions() -> None:
     """_run_embed should catch exceptions and not re-raise."""
     from kairix.worker import _run_embed
 
-    with patch("kairix.embed.cli.main", side_effect=RuntimeError("embed failed")):
+    with patch("kairix.core.embed.cli.main", side_effect=RuntimeError("embed failed")):
         _run_embed()  # should not raise
 
 
@@ -38,7 +38,7 @@ def test_run_embed_catches_import_error() -> None:
     """_run_embed should catch ImportError without crashing."""
     from kairix.worker import _run_embed
 
-    with patch("kairix.embed.cli.main", side_effect=ImportError("no module")):
+    with patch("kairix.core.embed.cli.main", side_effect=ImportError("no module")):
         _run_embed()
 
 
@@ -46,7 +46,7 @@ def test_run_embed_calls_embed_main() -> None:
     """_run_embed should call embed CLI main."""
     from kairix.worker import _run_embed
 
-    with patch("kairix.embed.cli.main") as mock:
+    with patch("kairix.core.embed.cli.main") as mock:
         _run_embed()
     mock.assert_called_once_with()
 
@@ -60,7 +60,7 @@ def test_run_entity_seed_catches_exceptions() -> None:
     """_run_entity_seed should catch exceptions and not re-raise."""
     from kairix.worker import _run_entity_seed
 
-    with patch("kairix.store.cli.main", side_effect=RuntimeError("store crawl failed")):
+    with patch("kairix.knowledge.store.cli.main", side_effect=RuntimeError("store crawl failed")):
         _run_entity_seed()  # should not raise
 
 
@@ -68,7 +68,7 @@ def test_run_entity_seed_catches_import_error() -> None:
     """_run_entity_seed should catch ImportError without crashing."""
     from kairix.worker import _run_entity_seed
 
-    with patch("kairix.store.cli.main", side_effect=ImportError("no module")):
+    with patch("kairix.knowledge.store.cli.main", side_effect=ImportError("no module")):
         _run_entity_seed()
 
 
@@ -76,7 +76,7 @@ def test_run_entity_seed_calls_store_main() -> None:
     """_run_entity_seed should call store CLI main with crawl args."""
     from kairix.worker import _run_entity_seed
 
-    with patch("kairix.store.cli.main") as mock:
+    with patch("kairix.knowledge.store.cli.main") as mock:
         _run_entity_seed()
     mock.assert_called_once()
     args = mock.call_args[0][0]
@@ -92,7 +92,7 @@ def test_run_health_check_catches_exceptions() -> None:
     """_run_health_check should catch exceptions and not re-raise."""
     from kairix.worker import _run_health_check
 
-    with patch("kairix.onboard.check.run_all_checks", side_effect=RuntimeError("check failed")):
+    with patch("kairix.platform.onboard.check.run_all_checks", side_effect=RuntimeError("check failed")):
         _run_health_check()  # should not raise
 
 
@@ -100,7 +100,7 @@ def test_run_health_check_catches_import_error() -> None:
     """_run_health_check should catch ImportError without crashing."""
     from kairix.worker import _run_health_check
 
-    with patch("kairix.onboard.check.run_all_checks", side_effect=ImportError("no module")):
+    with patch("kairix.platform.onboard.check.run_all_checks", side_effect=ImportError("no module")):
         _run_health_check()
 
 
@@ -110,7 +110,7 @@ def test_run_health_check_counts_results() -> None:
 
     ok_result = MagicMock(ok=True)
     fail_result = MagicMock(ok=False)
-    with patch("kairix.onboard.check.run_all_checks", return_value=[ok_result, fail_result, ok_result]):
+    with patch("kairix.platform.onboard.check.run_all_checks", return_value=[ok_result, fail_result, ok_result]):
         _run_health_check()  # should not raise
 
 

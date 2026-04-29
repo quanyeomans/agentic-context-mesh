@@ -2,7 +2,7 @@
 
 Checks that:
   - BriefingSourceProtocol defines the expected interface
-  - kairix.briefing.pipeline.generate_briefing exists and is callable
+  - kairix.agents.briefing.pipeline.generate_briefing exists and is callable
   - A minimal stub implementing BriefingSourceProtocol satisfies the protocol
 """
 
@@ -10,7 +10,7 @@ import inspect
 
 import pytest
 
-from kairix.contracts.briefing import BriefingSourceProtocol
+from kairix.quality.contracts.briefing import BriefingSourceProtocol
 
 
 @pytest.mark.contract
@@ -59,8 +59,8 @@ def test_non_conforming_class_fails_protocol():
 
 @pytest.mark.contract
 def test_generate_briefing_is_callable():
-    """kairix.briefing.pipeline.generate_briefing exists and is callable."""
-    from kairix.briefing.pipeline import generate_briefing
+    """kairix.agents.briefing.pipeline.generate_briefing exists and is callable."""
+    from kairix.agents.briefing.pipeline import generate_briefing
 
     assert callable(generate_briefing)
 
@@ -68,7 +68,7 @@ def test_generate_briefing_is_callable():
 @pytest.mark.contract
 def test_generate_briefing_accepts_agent_param():
     """generate_briefing accepts an 'agent' parameter."""
-    from kairix.briefing.pipeline import generate_briefing
+    from kairix.agents.briefing.pipeline import generate_briefing
 
     sig = inspect.signature(generate_briefing)
     assert "agent" in sig.parameters

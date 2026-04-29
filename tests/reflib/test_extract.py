@@ -1,4 +1,4 @@
-"""Tests for kairix.reflib.extract — rule-based entity extraction."""
+"""Tests for kairix.knowledge.reflib.extract — rule-based entity extraction."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.extract import (
+from kairix.knowledge.reflib.extract import (
     RawEntity,
     RawRelationship,
     _domain_from_path,

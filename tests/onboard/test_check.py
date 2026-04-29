@@ -1,5 +1,5 @@
 """
-Tests for kairix.onboard.check deployment health checks.
+Tests for kairix.platform.onboard.check deployment health checks.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.onboard.check import (
+from kairix.platform.onboard.check import (
     CheckResult,
     check_document_root_configured,
     check_neo4j_reachable,
@@ -43,7 +43,7 @@ def test_neo4j_fix_hint_contains_install_script() -> None:
     mock_client = MagicMock()
     mock_client.available = False
 
-    with patch("kairix.graph.client.get_client", return_value=mock_client):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_client):
         result = check_neo4j_reachable()
 
     assert not result.ok
@@ -59,7 +59,7 @@ def test_neo4j_fix_hint_contains_docker_run() -> None:
     mock_client = MagicMock()
     mock_client.available = False
 
-    with patch("kairix.graph.client.get_client", return_value=mock_client):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_client):
         result = check_neo4j_reachable()
 
     assert result.fix is not None
@@ -73,7 +73,7 @@ def test_neo4j_reachable_ok_when_has_nodes() -> None:
     mock_client.available = True
     mock_client.cypher.return_value = [{"total": 42}]
 
-    with patch("kairix.graph.client.get_client", return_value=mock_client):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_client):
         result = check_neo4j_reachable()
 
     assert result.ok
@@ -87,7 +87,7 @@ def test_neo4j_reachable_fail_when_empty() -> None:
     mock_client.available = True
     mock_client.cypher.return_value = [{"total": 0}]
 
-    with patch("kairix.graph.client.get_client", return_value=mock_client):
+    with patch("kairix.knowledge.graph.client.get_client", return_value=mock_client):
         result = check_neo4j_reachable()
 
     assert not result.ok
@@ -97,7 +97,7 @@ def test_neo4j_reachable_fail_when_empty() -> None:
 @pytest.mark.unit
 def test_neo4j_check_exception_surfaces_as_failed_result() -> None:
     """Exceptions from Neo4j client are caught and returned as a failed CheckResult."""
-    with patch("kairix.graph.client.get_client", side_effect=ImportError("neo4j not installed")):
+    with patch("kairix.knowledge.graph.client.get_client", side_effect=ImportError("neo4j not installed")):
         result = check_neo4j_reachable()
 
     assert not result.ok

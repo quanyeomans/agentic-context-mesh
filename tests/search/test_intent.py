@@ -1,5 +1,5 @@
 """
-Tests for kairix.search.intent — query intent classifier.
+Tests for kairix.core.search.intent — query intent classifier.
 
 20 labelled examples covering all five intent classes.
 Priority order tested: TEMPORAL > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
@@ -7,7 +7,7 @@ Priority order tested: TEMPORAL > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
 
 import pytest
 
-from kairix.search.intent import QueryIntent, classify
+from kairix.core.search.intent import QueryIntent, classify
 
 # ---------------------------------------------------------------------------
 # Labelled test cases
@@ -17,7 +17,7 @@ CASES: list[tuple[str, QueryIntent]] = [
     # --- TEMPORAL (6 cases) ---
     ("what was completed last week", QueryIntent.TEMPORAL),
     ("what changed in March", QueryIntent.TEMPORAL),
-    ("when did we fix the QMD lock crash", QueryIntent.TEMPORAL),
+    ("when did we fix the embed lock crash", QueryIntent.TEMPORAL),
     ("what has been done recently", QueryIntent.TEMPORAL),
     ("show me items completed on 2026-03-22", QueryIntent.TEMPORAL),
     ("what happened over the last 30 days", QueryIntent.TEMPORAL),
@@ -37,7 +37,7 @@ CASES: list[tuple[str, QueryIntent]] = [
     ("/data/workspaces/builder/MEMORY.md", QueryIntent.KEYWORD),
     # --- SEMANTIC (3 cases) ---
     ("why does hybrid search outperform pure vector", QueryIntent.SEMANTIC),
-    ("explain the architecture of the Mnemosyne memory system", QueryIntent.SEMANTIC),
+    ("explain the architecture of the kairix memory system", QueryIntent.SEMANTIC),
     ("what are the trade-offs between BM25 and vector search", QueryIntent.SEMANTIC),
 ]
 
@@ -116,7 +116,7 @@ def test_procedural_beats_keyword() -> None:
 @pytest.mark.unit
 def test_version_string_is_keyword() -> None:
     """Queries containing version strings are KEYWORD."""
-    assert classify("qmd v1.1.2 changelog") == QueryIntent.KEYWORD
+    assert classify("kairix v1.1.2 changelog") == QueryIntent.KEYWORD
 
 
 @pytest.mark.unit

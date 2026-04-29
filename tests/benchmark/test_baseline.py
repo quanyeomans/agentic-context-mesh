@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.benchmark.baseline import (
+from kairix.quality.benchmark.baseline import (
     CATEGORY_FLOOR,
     compare,
     load_result,
@@ -223,8 +223,8 @@ class TestMockContractSuite:
     @pytest.mark.unit
     def test_contract_suite_scores_above_floor(self):
         """The contract suite with mock backend should score > 0.85 overall."""
-        from kairix.benchmark.runner import run_benchmark
-        from kairix.benchmark.suite import load_suite
+        from kairix.quality.benchmark.runner import run_benchmark
+        from kairix.quality.benchmark.suite import load_suite
 
         suite_path = Path(__file__).parent.parent.parent / "suites" / "contract-suite.yaml"
         if not suite_path.exists():
@@ -240,8 +240,8 @@ class TestMockContractSuite:
     @pytest.mark.unit
     def test_contract_suite_no_category_below_floor(self):
         """All non-classification categories must be above CATEGORY_FLOOR."""
-        from kairix.benchmark.runner import run_benchmark
-        from kairix.benchmark.suite import load_suite
+        from kairix.quality.benchmark.runner import run_benchmark
+        from kairix.quality.benchmark.suite import load_suite
 
         suite_path = Path(__file__).parent.parent.parent / "suites" / "contract-suite.yaml"
         if not suite_path.exists():

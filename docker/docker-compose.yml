@@ -31,7 +31,6 @@ services:
       - KAIRIX_KV_NAME=${KAIRIX_KV_NAME}
       - KAIRIX_VAULT_ROOT=${KAIRIX_VAULT_ROOT:-/data/vault}
       - KAIRIX_NEO4J_URI=bolt://neo4j:7687
-      - QMD_BINARY_PATH=${QMD_BINARY_PATH:-/data/tools/qmd/node_modules/.bin/qmd}
     depends_on:
       vault-agent:
         condition: service_healthy

@@ -117,7 +117,8 @@ Vault content is sent to **Azure OpenAI** for:
 No vault content is stored by Azure beyond the API call. Azure OpenAI does not use customer data for model training by default (see Microsoft's Data Privacy terms).
 
 All vectors, entity data, and search indexes live in SQLite and Neo4j on your own infrastructure:
-- `~/.cache/kairix/index.sqlite` — Kairix FTS + sqlite-vec vectors (1536-dim)
+- `~/.cache/kairix/index.sqlite` — Kairix FTS index
+- `~/.cache/kairix/vectors.usearch` — usearch HNSW vectors (1536-dim)
 - Neo4j — entity graph (if installed)
 
 ---

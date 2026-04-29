@@ -1,4 +1,4 @@
-"""Unit tests for kairix.reflib.emit — entity stub JSON emission."""
+"""Unit tests for kairix.knowledge.reflib.emit — entity stub JSON emission."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from kairix.reflib.emit import emit_entity_stubs
-from kairix.reflib.extract import RawRelationship
-from kairix.reflib.resolve import ResolvedEntity
+from kairix.knowledge.reflib.emit import emit_entity_stubs
+from kairix.knowledge.reflib.extract import RawRelationship
+from kairix.knowledge.reflib.resolve import ResolvedEntity
 
 
 def _make_entities() -> list[ResolvedEntity]:

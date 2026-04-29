@@ -1,4 +1,4 @@
-"""Unit tests for kairix.eval.sweep — metric calculation functions."""
+"""Unit tests for kairix.quality.eval.sweep — metric calculation functions."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Helpers: import pure functions under test
 # ---------------------------------------------------------------------------
-from kairix.eval.sweep import (
+from kairix.quality.eval.sweep import (
     _build_rel_map,
     _compute_hit_at_k,
     _compute_mrr,
@@ -232,19 +232,19 @@ class TestComputeMRR:
 class TestCategoryAliases:
     @pytest.mark.unit
     def test_semantic_alias(self):
-        from kairix.eval.constants import CATEGORY_ALIASES
+        from kairix.quality.eval.constants import CATEGORY_ALIASES
 
         assert CATEGORY_ALIASES["semantic"] == "recall"
 
     @pytest.mark.unit
     def test_keyword_alias(self):
-        from kairix.eval.constants import CATEGORY_ALIASES
+        from kairix.quality.eval.constants import CATEGORY_ALIASES
 
         assert CATEGORY_ALIASES["keyword"] == "conceptual"
 
     @pytest.mark.unit
     def test_weights_sum(self):
-        from kairix.eval.constants import CATEGORY_WEIGHTS
+        from kairix.quality.eval.constants import CATEGORY_WEIGHTS
 
         total = sum(CATEGORY_WEIGHTS.values())
         assert total == pytest.approx(1.0)

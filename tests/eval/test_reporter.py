@@ -1,4 +1,4 @@
-"""Unit tests for kairix.eval.reporter — performance report generation."""
+"""Unit tests for kairix.quality.eval.reporter — performance report generation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from kairix.eval.reporter import PerformanceReporter
+from kairix.quality.eval.reporter import PerformanceReporter
 
 
 @pytest.fixture()

@@ -268,7 +268,7 @@ def test_get_secret_required_raises_oserror(monkeypatch) -> None:
     monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
-    with pytest.raises(OSError, match="azure-openai-api-key"):
+    with pytest.raises(OSError, match="not available"):
         get_secret("azure-openai-api-key")
 
 
@@ -301,8 +301,8 @@ def test_get_secret_oserror_message_is_informative(monkeypatch) -> None:
     with pytest.raises(OSError) as exc_info:
         get_secret("azure-openai-api-key")
     msg = str(exc_info.value)
-    assert "azure-openai-api-key" in msg
-    # Error message should be generic — no internal paths or env var names leaked
+    # Error message must NOT contain the secret name (security: no key names in output)
+    assert "azure-openai-api-key" not in msg
     assert "not available" in msg
 
 

@@ -4,7 +4,7 @@ verify-search.py — Acceptance verification for all 6 search intents + curator 
 
 Runs 7 checks against live kairix search on the current deployment.
 Uses subprocess to call `kairix search --json` and checks intent + result count.
-Check 7 calls kairix.curator.health directly.
+Check 7 calls kairix.agents.curator.health directly.
 
 Usage:
     .venv/bin/python3 scripts/verify-search.py [--agent AGENT] [--json] [--output FILE]
@@ -42,7 +42,7 @@ class CheckResult:
 
 def _run_search(query: str, agent: str, kairix_bin: str, timeout: int = 60) -> dict:
     """Run kairix search --json and return parsed result dict."""
-    result = subprocess.run(  # noqa: S603 — intentional: runs the kairix CLI binary
+    result = subprocess.run(
         [kairix_bin, "search", query, "--agent", agent, "--json"],
         capture_output=True,
         text=True,
@@ -101,8 +101,8 @@ def check_curator_health() -> CheckResult:
     """Check 7: call run_health_check via Neo4j and verify ok=True."""
     t0 = time.time()
     try:
-        from kairix.curator.health import run_health_check
-        from kairix.graph.client import get_client
+        from kairix.agents.curator.health import run_health_check
+        from kairix.knowledge.graph.client import get_client
 
         neo4j_client = get_client()
         report = run_health_check(neo4j_client, staleness_days=180)

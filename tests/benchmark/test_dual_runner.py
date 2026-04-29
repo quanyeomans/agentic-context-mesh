@@ -1,5 +1,5 @@
 """
-Tests for kairix.benchmark.dual_runner — verify the dual runner produces
+Tests for kairix.quality.benchmark.dual_runner — verify the dual runner produces
 baseline + comparison + deltas and detects regressions.
 """
 
@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from kairix.benchmark.dual_runner import DualBenchmarkResult, run_dual_benchmark
+from kairix.quality.benchmark.dual_runner import DualBenchmarkResult, run_dual_benchmark
 
 # Path to the reflib contract suite (relative to repo root)
 _SUITE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "suites", "reflib-contract-suite.yaml")

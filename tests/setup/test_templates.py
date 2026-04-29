@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-TEMPLATE_DIR = Path(__file__).parent.parent.parent / "kairix" / "setup" / "templates"
+TEMPLATE_DIR = Path(__file__).parent.parent.parent / "kairix" / "platform" / "setup" / "templates"
 
 
 @pytest.mark.unit

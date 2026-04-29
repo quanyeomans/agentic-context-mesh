@@ -1,5 +1,5 @@
 """
-Tests for the classify CLI (mnemosyne/classify/cli.py).
+Tests for the classify CLI (kairix/classify/cli.py).
 
 Tests CLI output format and argument parsing.
 """
@@ -16,7 +16,7 @@ def run_classify_cli(args: list[str]) -> tuple[str, str, int]:
     """Run classify CLI and return (stdout, stderr, exit_code)."""
     import io
 
-    from kairix.classify.cli import main
+    from kairix.core.classify.cli import main
 
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()

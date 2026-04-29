@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from kairix.reflib.frontmatter import (
+from kairix.knowledge.reflib.frontmatter import (
     Frontmatter,
     build_frontmatter,
     extract_existing_frontmatter,
     extract_title,
     inject_frontmatter,
 )
-from kairix.reflib.sources import SourceDef
+from kairix.knowledge.reflib.sources import SourceDef
 
 _TEST_SOURCE = SourceDef(
     name="Test Source",

@@ -12,6 +12,6 @@ def _set_test_roots(monkeypatch):
     # Force reimport so module-level variables pick up the new env vars
     import importlib
 
-    import kairix.wikilinks.injector
+    import kairix.knowledge.wikilinks.injector
 
-    importlib.reload(kairix.wikilinks.injector)
+    importlib.reload(kairix.knowledge.wikilinks.injector)

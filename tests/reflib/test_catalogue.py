@@ -1,4 +1,4 @@
-"""Unit tests for kairix.reflib.catalogue — CATALOGUE.md and LICENSE-NOTICES.md generation."""
+"""Unit tests for kairix.knowledge.reflib.catalogue — CATALOGUE.md and LICENSE-NOTICES.md generation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from kairix.reflib.catalogue import CatalogueEntry, generate_catalogue, generate_licence_notices
+from kairix.knowledge.reflib.catalogue import CatalogueEntry, generate_catalogue, generate_licence_notices
 
 
 def _make_entries() -> list[CatalogueEntry]:
