@@ -36,13 +36,15 @@ RERANK_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 RERANK_CANDIDATE_LIMIT: int = 20
 
 _cross_encoder = None  # lazy singleton
+_cross_encoder_checked = False  # True once we've tried to load (even if it failed)
 
 
 def _get_cross_encoder(model: str):
     """Load and cache the cross-encoder model. Returns None on any import/load failure."""
-    global _cross_encoder
-    if _cross_encoder is not None:
+    global _cross_encoder, _cross_encoder_checked
+    if _cross_encoder_checked:
         return _cross_encoder
+    _cross_encoder_checked = True
     try:
         from sentence_transformers import CrossEncoder  # type: ignore[import-untyped]
 
