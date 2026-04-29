@@ -13,7 +13,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.agents.mcp.server import tool_entity, tool_prep, tool_search, tool_timeline, tool_usage_guide
+from kairix.agents.mcp.server import (
+    tool_contradict,
+    tool_entity,
+    tool_prep,
+    tool_search,
+    tool_timeline,
+    tool_usage_guide,
+)
 
 # ---------------------------------------------------------------------------
 # tool_search
@@ -404,3 +411,72 @@ def test_tool_usage_guide_missing_file(tmp_path: Path, monkeypatch) -> None:
     result = tool_usage_guide(topic="anything")
     assert result["error"] != ""
     assert result["content"] == ""
+
+
+# ---------------------------------------------------------------------------
+# tool_contradict (WP7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_tool_contradict_returns_structure() -> None:
+    """Empty contradiction list when check_contradiction returns []."""
+    with (
+        patch("kairix.knowledge.contradict.detector.check_contradiction", return_value=[]),
+        patch("kairix.platform.llm.get_default_backend", return_value=MagicMock()),
+    ):
+        result = tool_contradict(content="test claim")
+
+    assert result["has_contradictions"] is False
+    assert result["error"] == ""
+    assert isinstance(result["contradictions"], list)
+    assert result["content"] == "test claim"
+
+
+@pytest.mark.unit
+def test_tool_contradict_with_results() -> None:
+    """Contradictions are serialised into the response dict."""
+    from kairix.knowledge.contradict.detector import ContradictionResult
+
+    mock_results = [
+        ContradictionResult(
+            doc_path="notes/arch.md",
+            score=0.85,
+            reason="Architecture mismatch",
+            snippet="Uses microservices",
+        ),
+    ]
+    with (
+        patch("kairix.knowledge.contradict.detector.check_contradiction", return_value=mock_results),
+        patch("kairix.platform.llm.get_default_backend", return_value=MagicMock()),
+    ):
+        result = tool_contradict(content="architecture uses monolith pattern")
+
+    assert result["has_contradictions"] is True
+    assert len(result["contradictions"]) == 1
+    assert result["contradictions"][0]["path"] == "notes/arch.md"
+    assert result["contradictions"][0]["score"] == 0.85
+    assert result["error"] == ""
+
+
+@pytest.mark.unit
+def test_tool_contradict_error_handled() -> None:
+    """On exception, returns error dict without raising."""
+    with patch("kairix.platform.llm.get_default_backend", side_effect=RuntimeError("no LLM")):
+        result = tool_contradict(content="anything")
+
+    assert result["has_contradictions"] is False
+    assert result["contradictions"] == []
+    assert "failed" in result["error"].lower()
+
+
+@pytest.mark.unit
+def test_tool_contradict_default_agent() -> None:
+    """When agent is None, 'shared' is passed to check_contradiction."""
+    with (
+        patch("kairix.knowledge.contradict.detector.check_contradiction", return_value=[]) as mock_check,
+        patch("kairix.platform.llm.get_default_backend", return_value=MagicMock()),
+    ):
+        tool_contradict(content="claim", agent=None)
+        call_kwargs = mock_check.call_args.kwargs
+        assert call_kwargs["agent"] == "shared"

@@ -147,6 +147,11 @@ class RetrievalConfig:
     temporal: TemporalBoostConfig = field(default_factory=TemporalBoostConfig)
     rerank: RerankConfig = field(default_factory=RerankConfig)
 
+    # Intent types that always receive cross-encoder re-ranking, even when
+    # rerank.enabled is False.  Users can force rerank for *all* intents by
+    # setting rerank.enabled = true in their config.
+    rerank_intents: tuple[str, ...] = ("multi_hop", "semantic")
+
     @classmethod
     def defaults(cls) -> RetrievalConfig:
         """Consulting knowledge base defaults: bm25_primary, entity + procedural boost."""

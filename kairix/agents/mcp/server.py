@@ -1,11 +1,12 @@
 """
 kairix.agents.mcp.server — MCP server exposing kairix tools to MCP-compatible agents.
 
-Provides five tools:
+Provides six tools:
   search       Hybrid BM25 + vector search over the vault
   entity       Entity lookup from Neo4j
   prep         Context preparation: tiered L0/L1 summary generation
   timeline     Temporal query rewriting + date-aware retrieval
+  contradict   Check new content against existing knowledge for contradictions
   usage_guide  Return the kairix agent usage guide (self-documentation)
 
 The server uses FastMCP (from the ``mcp`` package). Install via:
@@ -465,6 +466,48 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
         return {"topic": topic, "content": "", "error": "Usage guide lookup failed — check server logs for details."}
 
 
+def tool_contradict(
+    content: str,
+    agent: str | None = None,
+    top_k: int = 5,
+    threshold: float = 0.6,
+) -> dict[str, Any]:
+    """Check new content against existing knowledge for contradictions.
+
+    Use before writing new facts — catches conflicts with what's already
+    in the knowledge base. Returns a list of contradicting documents with
+    scores and explanations.
+    """
+    try:
+        from kairix.knowledge.contradict.detector import check_contradiction
+        from kairix.platform.llm import get_default_backend
+
+        llm = get_default_backend()
+        results = check_contradiction(
+            content=content,
+            llm=llm,
+            agent=agent or "shared",
+            top_k=top_k,
+            threshold=threshold,
+        )
+        return {
+            "content": content,
+            "contradictions": [
+                {"path": r.doc_path, "score": r.score, "reason": r.reason, "snippet": r.snippet} for r in results
+            ],
+            "has_contradictions": len(results) > 0,
+            "error": "",
+        }
+    except Exception as exc:
+        logger.warning("mcp.contradict failed: %s", exc, exc_info=True)
+        return {
+            "content": content,
+            "contradictions": [],
+            "has_contradictions": False,
+            "error": "Contradiction check failed — check server logs for details.",
+        }
+
+
 # ---------------------------------------------------------------------------
 # FastMCP server — only constructed when mcp package is available
 # ---------------------------------------------------------------------------
@@ -519,6 +562,16 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
     def research(query: str, agent: str | None = None, max_turns: int = 4) -> dict[str, Any]:
         """Research a complex question. Searches iteratively until it finds a good answer."""
         return tool_research(query=query, agent=agent, max_turns=max_turns)
+
+    @server.tool()
+    def contradict(
+        content: str,
+        agent: str | None = None,
+        top_k: int = 5,
+        threshold: float = 0.6,
+    ) -> dict[str, Any]:
+        """Check new content against existing knowledge for contradictions."""
+        return tool_contradict(content=content, agent=agent, top_k=top_k, threshold=threshold)
 
     @server.tool()
     def usage_guide(topic: str = "") -> dict[str, Any]:

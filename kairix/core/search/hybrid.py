@@ -313,18 +313,18 @@ def _run_multi_hop(
 
     seen_paths: set[str] = set()
     fused_for_budget: list[FusedResult] = []
-    for i, r in enumerate(fused_results):
+    for r in fused_results:
         if not hasattr(r, "result") or not r.result.path:
             continue
         if r.result.path in seen_paths:
             continue
         seen_paths.add(r.result.path)
         snippet = r.result.snippet or ""
+        # Preserve original RRF/boosted scores from the planner's merge
+        # instead of overwriting with positional scores.
         merged_fr = _replace(
             r.result,
             snippet=snippet[:600] if len(snippet) > 600 else snippet,
-            rrf_score=1.0 / (60 + i + 1),
-            boosted_score=1.0 / (60 + i + 1),
         )
         fused_for_budget.append(merged_fr)
 
@@ -643,7 +643,7 @@ def search(
         )
         if not cfg.skip_vector:
             futures["vec"] = executor.submit(
-                _run_vector_search, active_query, collections, date_filter_paths, cfg.vec_limit
+                _run_vector_search, active_query, collections, date_filter_paths, cfg.vec_limit, intent.value
             )
 
         # Collect results
@@ -744,8 +744,10 @@ def search(
             fused = temporal_fused + fused
             logger.debug("hybrid: merged %d temporal chunks into results", len(temporal_fused))
 
-    # Cross-encoder re-ranking (optional — enabled via config.rerank.enabled)
-    if cfg.rerank.enabled and fused:
+    # Cross-encoder re-ranking — always on for MULTI_HOP and SEMANTIC intents,
+    # optional for others via config.rerank.enabled.
+    should_rerank = (cfg.rerank.enabled or intent.value in cfg.rerank_intents) and fused
+    if should_rerank:
         try:
             from kairix.core.search.rerank import rerank as _rerank
 
@@ -783,12 +785,17 @@ def _run_vector_search(
     collections: list[str],
     date_filter_paths: frozenset[str] | None = None,
     k: int = VECTOR_DEFAULT_K,
+    intent: str | None = None,
 ) -> list[VecResult]:
     """
     Embed query and run ANN vector search via usearch. Returns [] on any failure.
     Called from ThreadPoolExecutor — must not raise.
 
     Retries embed once on empty result to handle cold Key Vault fetches.
+
+    When intent is "semantic" or "multi_hop", applies HyDE (Hypothetical Document
+    Embeddings): generates a short hypothetical answer via LLM, embeds it, and
+    blends with the query embedding for better recall on conceptual queries.
     """
     import time as _time
 
@@ -810,6 +817,31 @@ def _run_vector_search(
         norm = np.linalg.norm(query_vec)
         if norm > 0:
             query_vec /= norm
+
+        # HyDE: for semantic/multi-hop queries, generate a hypothetical answer
+        # and blend its embedding with the query embedding for better recall
+        if intent in ("semantic", "multi_hop"):
+            try:
+                from kairix._azure import chat_completion
+
+                hyde_answer = chat_completion(
+                    [{"role": "user", "content": f"Write a short paragraph that answers: {query}"}],
+                    max_tokens=150,
+                )
+                if hyde_answer:
+                    hyde_vec = embed_text(hyde_answer)
+                    if hyde_vec:
+                        hyde_arr = np.array(hyde_vec, dtype=np.float32)
+                        hyde_norm = np.linalg.norm(hyde_arr)
+                        if hyde_norm > 0:
+                            hyde_arr /= hyde_norm
+                            # Blend: 50% query + 50% hypothetical answer
+                            query_vec = (query_vec + hyde_arr) / 2.0
+                            norm = np.linalg.norm(query_vec)
+                            if norm > 0:
+                                query_vec /= norm
+            except Exception as _hyde_e:
+                logger.debug("hybrid: HyDE generation failed — %s — using raw query embedding", _hyde_e)
 
         index = get_vector_index()
         if index is None or len(index) == 0:

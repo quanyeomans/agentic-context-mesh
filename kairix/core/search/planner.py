@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re as _re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -73,7 +74,17 @@ _DECOMPOSE_PROMPT = (
     "- Each sub-query should retrieve a distinct aspect needed to answer the original.\n"
     "- Maximum 3 sub-queries.\n"
     '- If the query is simple (single topic), return just ["original_query"].\n'
-    "- Keep sub-queries concise (under 15 words each)."
+    "- Keep sub-queries concise (under 15 words each).\n\n"
+    "Examples:\n"
+    'Query: "how does OpenTelemetry tracing support twelve-factor app logging"\n'
+    '["OpenTelemetry distributed tracing instrumentation", '
+    '"twelve-factor app logging practices"]\n\n'
+    'Query: "compare dbt testing strategy with code review best practices"\n'
+    '["dbt testing strategy and methodology", '
+    '"code review best practices and standards"]\n\n'
+    'Query: "what is the relationship between entity graphs and retrieval quality"\n'
+    '["entity graph construction and knowledge representation", '
+    '"how entity awareness improves search retrieval"]'
 )
 
 _DECOMPOSE_PROMPT_WITH_CONTEXT = (
@@ -86,7 +97,17 @@ _DECOMPOSE_PROMPT_WITH_CONTEXT = (
     "- Use entity relationships above to expand abbreviations or implied connections.\n"
     "- Maximum 3 sub-queries.\n"
     '- If the query is simple (single topic), return just ["original_query"].\n'
-    "- Keep sub-queries concise (under 15 words each)."
+    "- Keep sub-queries concise (under 15 words each).\n\n"
+    "Examples:\n"
+    'Query: "how does OpenTelemetry tracing support twelve-factor app logging"\n'
+    '["OpenTelemetry distributed tracing instrumentation", '
+    '"twelve-factor app logging practices"]\n\n'
+    'Query: "compare dbt testing strategy with code review best practices"\n'
+    '["dbt testing strategy and methodology", '
+    '"code review best practices and standards"]\n\n'
+    'Query: "what is the relationship between entity graphs and retrieval quality"\n'
+    '["entity graph construction and knowledge representation", '
+    '"how entity awareness improves search retrieval"]'
 )
 
 
@@ -135,7 +156,13 @@ class QueryPlanner:
                     logger.debug("planner: decomposed into %d sub-queries", len(subs))
                     return subs
         except json.JSONDecodeError as _e:
-            logger.warning("planner: JSON parse failed (%s) — falling back to original query", _e)
+            logger.warning("planner: JSON parse failed (%s) — trying regex fallback", _e)
+            # Regex fallback: extract quoted strings (min 5 chars) from LLM output
+            if response:
+                matches = _re.findall(r'"([^"]{5,})"', response)
+                if matches:
+                    logger.debug("planner: regex fallback extracted %d sub-queries", len(matches))
+                    return matches[:3]
         except Exception as _e:
             logger.warning("planner: decompose failed (%s) — falling back to original query", _e)
         return [query]

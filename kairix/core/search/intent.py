@@ -73,7 +73,7 @@ _PROCEDURAL_PATTERNS: list[re.Pattern[str]] = [
 # Multi-hop signals — queries spanning multiple documents/topics
 # ---------------------------------------------------------------------------
 _MULTI_HOP_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"and\s+how", re.IGNORECASE),
+    re.compile(r"\band\s+how\s+does\b", re.IGNORECASE),
     re.compile(r"relates?\s+to", re.IGNORECASE),
     re.compile(r"compared?\s+to", re.IGNORECASE),
     re.compile(r"impact\s+on", re.IGNORECASE),
@@ -84,11 +84,8 @@ _MULTI_HOP_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(positioning|methodology)\s+and\s+(how|why|what)", re.IGNORECASE),
     re.compile(r"link\s+between", re.IGNORECASE),
     re.compile(r"interaction\s+between", re.IGNORECASE),
-    re.compile(r"in\s+the\s+context\s+of", re.IGNORECASE),
     # P6-A additions: natural-language multi-hop signals
-    re.compile(r"\bwhy\s+(?:was|were|is|has)\b", re.IGNORECASE),  # "why was X", "why were Y"
     re.compile(r"\band\s+why\b", re.IGNORECASE),  # "and why does", "and why do"
-    re.compile(r"\bwhat\s+must\b", re.IGNORECASE),  # "what must X do"
     re.compile(r"\btradeoffs?\b", re.IGNORECASE),  # "explain the tradeoffs"
 ]
 
