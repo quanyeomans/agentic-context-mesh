@@ -27,6 +27,6 @@ class ResearcherState(TypedDict, total=False):
 
 
 DEFAULT_MAX_TURNS: int = 4
-SUFFICIENCY_THRESHOLD: float = 0.7
+SUFFICIENCY_THRESHOLD: float = 0.5
 INITIAL_BUDGET: int = 3000
 REFINEMENT_BUDGET: int = 5000

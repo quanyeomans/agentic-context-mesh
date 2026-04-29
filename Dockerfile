@@ -13,7 +13,8 @@ RUN mkdir -p /data/vault /data/kairix /data/kairix/workspaces /opt/kairix/bin /o
 # Install kairix from local source with all production extras
 COPY pyproject.toml setup.cfg* setup.py* README.md /opt/kairix/src/
 COPY kairix/ /opt/kairix/src/kairix/
-RUN pip install --no-cache-dir "/opt/kairix/src[neo4j,agents]"
+RUN pip install --no-cache-dir "/opt/kairix/src[neo4j,agents,nlp]"
+RUN python -m spacy download en_core_web_sm || true
 
 # Copy entrypoint and default config
 COPY docker/entrypoint.sh /entrypoint.sh

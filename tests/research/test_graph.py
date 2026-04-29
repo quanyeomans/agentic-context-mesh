@@ -85,33 +85,40 @@ def test_run_research_refines_then_succeeds() -> None:
 
 
 @pytest.mark.unit
-def test_run_research_gives_up_after_max_turns() -> None:
-    """Graph gives up when max turns reached without sufficient results."""
+def test_run_research_synthesises_best_effort_after_max_turns() -> None:
+    """Graph synthesises a best-effort answer when max turns exhausted at low confidence."""
     from kairix.agents.research.graph import run_research
 
     mock_backend = MagicMock()
-    # Always insufficient
-    mock_backend.chat.return_value = json.dumps(
-        {
-            "confidence": 0.2,
-            "sufficient": False,
-            "refined_query": "still trying",
-            "reasoning": "not enough",
-        }
-    )
+    # Evaluation always returns low confidence; final call is synthesis
+    eval_low = {"confidence": 0.2, "sufficient": False, "refined_query": "still trying", "reasoning": "not enough"}
+    eval_low2 = {"confidence": 0.3, "sufficient": False, "refined_query": "still trying", "reasoning": "not enough"}
+    mock_backend.chat.side_effect = [
+        # Turn 0 eval: insufficient
+        json.dumps(eval_low),
+        # Turn 1 eval: still insufficient, turns exhausted -> synthesise
+        json.dumps(eval_low2),
+        # Synthesis (best effort)
+        "Best-effort answer from limited results.",
+    ]
+
+    call_count = 0
+
+    def mock_search(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _mock_search_result([(f"a{call_count}.md", "x")])
 
     with (
-        patch(
-            "kairix.core.search.hybrid.search",
-            return_value=_mock_search_result([("a.md", "x")]),
-        ),
+        patch("kairix.core.search.hybrid.search", side_effect=mock_search),
         patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
         patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
     ):
-        result = run_research("impossible question", max_turns=2)
+        result = run_research("hard question", max_turns=2)
 
-    assert len(result["gaps"]) >= 1
+    assert result["synthesis"] != ""
     assert result["turns"] >= 1
+    assert result["confidence"] < 0.5  # below threshold but still got synthesis
 
 
 @pytest.mark.unit

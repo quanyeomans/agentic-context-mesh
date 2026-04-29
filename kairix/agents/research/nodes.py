@@ -162,29 +162,13 @@ def synthesise(state: ResearcherState) -> dict[str, Any]:
         }
 
 
-def give_up(state: ResearcherState) -> dict[str, Any]:
-    """Stop searching — return what we found and flag what's missing."""
-    chunks = state.get("retrieved_chunks", [])
-    query = state["query"]
-    turns = state.get("turns", 0)
-
-    gaps = [f"Could not find a confident answer to '{query}' after {turns + 1} search rounds."]
-    if not chunks:
-        gaps.append("No relevant documents found in the knowledge base.")
-
-    partial = (
-        f"Found {len(chunks)} documents across {turns + 1} search rounds, but confidence remained below threshold."
-    )
-    if chunks:
-        partial += " Best results:\n" + "\n".join(f"- {r.get('path', '?')}" for r in chunks[:5])
-
-    return {"gaps": gaps, "synthesis": partial}
-
-
 def route_after_evaluation(state: ResearcherState) -> str:
     """Decide what to do after evaluating search results.
 
-    Returns the name of the next node: 'synthesise', 'refine_query', or 'give_up'.
+    Returns the name of the next node: 'synthesise' or 'refine_query'.
+    Synthesis always runs eventually — even at low confidence we produce
+    a best-effort answer so callers get usable output with a confidence
+    score they can inspect.
     """
     confidence = state.get("confidence", 0.0)
     turns = state.get("turns", 0)
@@ -195,4 +179,5 @@ def route_after_evaluation(state: ResearcherState) -> str:
     elif turns < max_turns - 1:
         return "refine_query"
     else:
-        return "give_up"
+        # Turns exhausted but confidence still low — synthesise anyway (best effort)
+        return "synthesise"

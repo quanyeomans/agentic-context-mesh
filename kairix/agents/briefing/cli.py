@@ -35,9 +35,20 @@ def main(args: list[str] | None = None) -> None:
         default=False,
         help="Print the full briefing to stdout.",
     )
+    parser.add_argument(
+        "--memory-path",
+        dest="memory_path",
+        default=None,
+        help="Override the agent memory root directory (sets KAIRIX_AGENT_MEMORY_ROOT).",
+    )
 
     parsed = parser.parse_args(args)
     agent = parsed.agent.lower().strip()
+
+    if parsed.memory_path:
+        import os
+
+        os.environ["KAIRIX_AGENT_MEMORY_ROOT"] = parsed.memory_path
 
     valid_agents = {"builder", "shape", "growth", "consultant"}
     if agent not in valid_agents:

@@ -8,11 +8,9 @@ All functions return strings (may be empty on failure) and never raise.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import date, timedelta
-from pathlib import Path
 
-from kairix.paths import document_root, workspace_root
+from kairix.paths import agent_memory_path, document_root, workspace_root
 from kairix.text import truncate_to_tokens
 
 logger = logging.getLogger(__name__)
@@ -23,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 _DOCUMENT_ROOT = document_root()
 _WORKSPACE_ROOT = workspace_root()
-_MEMORY_LOG_ROOT = Path(os.environ.get("KAIRIX_MEMORY_LOG", str(workspace_root())))
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +36,7 @@ def fetch_memory_logs(agent: str, max_tokens: int = 500) -> str:
     Returns empty string on failure.
     """
     try:
-        memory_dir = _WORKSPACE_ROOT / agent / "memory"
+        memory_dir = agent_memory_path(agent)
         if not memory_dir.exists():
             logger.warning("sources: memory dir not found for agent %r: %s", agent, memory_dir)
             return ""
@@ -84,7 +81,7 @@ def fetch_recent_memory(agent: str, max_tokens: int = 300) -> str:
     Returns empty string on failure.
     """
     try:
-        memory_dir = _WORKSPACE_ROOT / agent / "memory"
+        memory_dir = agent_memory_path(agent)
         if not memory_dir.exists():
             return ""
 

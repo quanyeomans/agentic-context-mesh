@@ -200,3 +200,15 @@ def log_dir() -> Path:
 def workspace_root() -> Path:
     """Get the workspace root path."""
     return KairixPaths.resolve().workspace_root
+
+
+def agent_memory_path(agent: str) -> Path:
+    """Get the memory directory for an agent.
+
+    Override with KAIRIX_AGENT_MEMORY_ROOT env var for custom layouts.
+    Default: {workspace_root}/{agent}/memory
+    """
+    override = os.environ.get("KAIRIX_AGENT_MEMORY_ROOT")
+    if override:
+        return Path(override) / agent / "memory"
+    return workspace_root() / agent / "memory"

@@ -25,7 +25,7 @@ def cmd_suggest(args: argparse.Namespace) -> int:
         neo4j = get_client()
         suggestions = suggest_entities(text, neo4j)
     except ImportError:
-        print("ERROR: Entity suggestion requires Neo4j driver. Run: pip install 'kairix[neo4j]'", file=sys.stderr)
+        print("ERROR: Entity suggestion requires spaCy NLP. Run: pip install 'kairix[nlp]'", file=sys.stderr)
         return 1
 
     print(format_suggestions(suggestions, fmt=args.format))

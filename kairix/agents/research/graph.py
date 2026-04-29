@@ -12,7 +12,6 @@ from typing import Any
 from kairix.agents.research.nodes import (
     classify_intent,
     evaluate_sufficiency,
-    give_up,
     refine_query,
     retrieve,
     route_after_evaluation,
@@ -38,7 +37,6 @@ def build_researcher_graph() -> Any:
     graph.add_node("evaluate_sufficiency", evaluate_sufficiency)
     graph.add_node("refine_query", refine_query)
     graph.add_node("synthesise", synthesise)
-    graph.add_node("give_up", give_up)
 
     # Wire edges
     graph.set_entry_point("classify_intent")
@@ -50,12 +48,10 @@ def build_researcher_graph() -> Any:
         {
             "synthesise": "synthesise",
             "refine_query": "refine_query",
-            "give_up": "give_up",
         },
     )
     graph.add_edge("refine_query", "retrieve")
     graph.add_edge("synthesise", END)
-    graph.add_edge("give_up", END)
 
     return graph.compile()
 

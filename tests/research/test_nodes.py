@@ -10,7 +10,6 @@ import pytest
 from kairix.agents.research.nodes import (
     classify_intent,
     evaluate_sufficiency,
-    give_up,
     refine_query,
     retrieve,
     route_after_evaluation,
@@ -144,18 +143,6 @@ class TestSynthesise:
 
 
 @pytest.mark.unit
-class TestGiveUp:
-    def test_populates_gaps(self) -> None:
-        result = give_up(_state(turns=3))
-        assert len(result["gaps"]) >= 1
-        assert "4 search rounds" in result["gaps"][0]
-
-    def test_notes_no_documents(self) -> None:
-        result = give_up(_state(retrieved_chunks=[]))
-        assert any("No relevant documents" in g for g in result["gaps"])
-
-
-@pytest.mark.unit
 class TestRouteAfterEvaluation:
     def test_sufficient_routes_to_synthesise(self) -> None:
         assert route_after_evaluation(_state(confidence=0.8)) == "synthesise"
@@ -163,9 +150,10 @@ class TestRouteAfterEvaluation:
     def test_insufficient_with_turns_left_routes_to_refine(self) -> None:
         assert route_after_evaluation(_state(confidence=0.3, turns=1, max_turns=4)) == "refine_query"
 
-    def test_insufficient_at_max_turns_routes_to_give_up(self) -> None:
-        assert route_after_evaluation(_state(confidence=0.3, turns=3, max_turns=4)) == "give_up"
+    def test_insufficient_at_max_turns_routes_to_synthesise(self) -> None:
+        """When turns are exhausted, synthesise anyway (best effort) instead of giving up."""
+        assert route_after_evaluation(_state(confidence=0.3, turns=3, max_turns=4)) == "synthesise"
 
     def test_threshold_boundary(self) -> None:
-        assert route_after_evaluation(_state(confidence=0.7)) == "synthesise"
-        assert route_after_evaluation(_state(confidence=0.69)) == "refine_query"
+        assert route_after_evaluation(_state(confidence=0.5)) == "synthesise"
+        assert route_after_evaluation(_state(confidence=0.49)) == "refine_query"

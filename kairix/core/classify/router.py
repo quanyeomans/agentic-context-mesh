@@ -15,9 +15,9 @@ Path mappings:
 
 from __future__ import annotations
 
-import os
 from datetime import date as _date
-from pathlib import Path
+
+from kairix.paths import document_root, workspace_root
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -25,15 +25,6 @@ from pathlib import Path
 
 VALID_AGENTS = frozenset({"builder", "shape", "growth", "consultant", "shared"})
 SHARED_AGENT = "shared"
-
-_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(
-    "KAIRIX_DOCUMENT_ROOT", str(Path.home() / "Documents")
-)
-_WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
-_KNOWLEDGE_ROOT = f"{_DOCUMENT_ROOT}/04-Agent-Knowledge"
-
-# Agents where "shared" maps to the shared knowledge area
-_SHARED_AGENT_ROOT = f"{_KNOWLEDGE_ROOT}/shared"
 
 
 # ---------------------------------------------------------------------------
@@ -73,37 +64,43 @@ def resolve_target_path(
     else:
         raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)} or 'shared'.")
 
+    # Lazy resolution — env vars may be set after import time
+    doc_root = str(document_root())
+    ws_root = str(workspace_root())
+    knowledge_root = f"{doc_root}/04-Agent-Knowledge"
+    shared_agent_root = f"{knowledge_root}/shared"
+
     if classification_type == "episodic":
         date_str = date or _date.today().isoformat()
         if scoped_agent == "shared":
             # shared doesn't have episodic workspace — use builder as fallback
-            return f"{_WORKSPACE_ROOT}/builder/memory/{date_str}.md"
-        return f"{_WORKSPACE_ROOT}/{scoped_agent}/memory/{date_str}.md"
+            return f"{ws_root}/builder/memory/{date_str}.md"
+        return f"{ws_root}/{scoped_agent}/memory/{date_str}.md"
 
     if classification_type == "procedural-rule":
         if scoped_agent == "shared":
-            return f"{_SHARED_AGENT_ROOT}/rules.md"
-        return f"{_KNOWLEDGE_ROOT}/{scoped_agent}/rules.md"
+            return f"{shared_agent_root}/rules.md"
+        return f"{knowledge_root}/{scoped_agent}/rules.md"
 
     if classification_type == "procedural-pattern":
         if scoped_agent == "shared":
-            return f"{_SHARED_AGENT_ROOT}/patterns.md"
-        return f"{_KNOWLEDGE_ROOT}/{scoped_agent}/patterns.md"
+            return f"{shared_agent_root}/patterns.md"
+        return f"{knowledge_root}/{scoped_agent}/patterns.md"
 
     if classification_type == "semantic-decision":
         if scoped_agent == "shared":
-            return f"{_SHARED_AGENT_ROOT}/decisions.md"
-        return f"{_KNOWLEDGE_ROOT}/{scoped_agent}/decisions.md"
+            return f"{shared_agent_root}/decisions.md"
+        return f"{knowledge_root}/{scoped_agent}/decisions.md"
 
     if classification_type == "semantic-fact":
         if scoped_agent == "shared":
-            return f"{_SHARED_AGENT_ROOT}/facts.md"
-        return f"{_KNOWLEDGE_ROOT}/{scoped_agent}/facts.md"
+            return f"{shared_agent_root}/facts.md"
+        return f"{knowledge_root}/{scoped_agent}/facts.md"
 
     if classification_type == "entity":
         etype = entity_type or "unknown"
         slug = entity_slug or "unknown"
-        return f"{_KNOWLEDGE_ROOT}/entities/{etype}/{slug}.md"
+        return f"{knowledge_root}/entities/{etype}/{slug}.md"
 
     raise ValueError(
         f"Unknown classification type {classification_type!r}. "

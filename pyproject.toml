@@ -28,6 +28,9 @@ neo4j = [
     # Neo4j Python driver — required for entity graph, multi-hop queries, and curator health
     "neo4j>=5.0,<7.0",
 ]
+nlp = [
+    "spacy>=3.7,<4",
+]
 rerank = [
     # Cross-encoder re-ranking (post-RRF semantic pass). CPU-only, ~22 MB model.
     "sentence-transformers>=3.0,<4",

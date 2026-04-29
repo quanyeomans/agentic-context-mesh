@@ -79,7 +79,7 @@ class TestFetchMemoryLogs:
         )
         (memory_dir / f"{today.isoformat()}.md").write_text(content)
 
-        with patch("kairix.agents.briefing.sources._WORKSPACE_ROOT", tmp_path):
+        with patch("kairix.agents.briefing.sources.agent_memory_path", return_value=memory_dir):
             result = fetch_memory_logs("builder")
 
         assert "[pending]" in result or "pending" in result.lower()
@@ -93,7 +93,7 @@ class TestFetchMemoryLogs:
         bad_file = memory_dir / f"{today.isoformat()}.md"
         bad_file.write_bytes(b"\xff\xfe invalid utf-8")
 
-        with patch("kairix.agents.briefing.sources._WORKSPACE_ROOT", tmp_path):
+        with patch("kairix.agents.briefing.sources.agent_memory_path", return_value=memory_dir):
             result = fetch_memory_logs("builder")
         # Should not raise — may return empty or partial content
         assert isinstance(result, str)
@@ -108,7 +108,7 @@ class TestFetchMemoryLogs:
         content = "\n".join([f"[pending] item {i}" for i in range(1000)])
         (memory_dir / f"{today.isoformat()}.md").write_text(content)
 
-        with patch("kairix.agents.briefing.sources._WORKSPACE_ROOT", tmp_path):
+        with patch("kairix.agents.briefing.sources.agent_memory_path", return_value=memory_dir):
             result = fetch_memory_logs("builder", max_tokens=50)
 
         assert estimate_tokens(result) <= 100  # some buffer
@@ -136,7 +136,7 @@ class TestFetchRecentMemory:
         (memory_dir / f"{today.isoformat()}.md").write_text("Today's content here")
         (memory_dir / f"{yesterday.isoformat()}.md").write_text("Yesterday content here")
 
-        with patch("kairix.agents.briefing.sources._WORKSPACE_ROOT", tmp_path):
+        with patch("kairix.agents.briefing.sources.agent_memory_path", return_value=memory_dir):
             result = fetch_recent_memory("builder")
 
         assert today.isoformat() in result
