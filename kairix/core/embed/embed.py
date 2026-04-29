@@ -273,11 +273,11 @@ def batched(items: list, size: int) -> Generator[list, None, None]:
 # ── usearch index update ─────────────────────────────────────────────────────
 
 
-def _update_usearch_index(hash_seqs: list[str], vectors: list[list[float]]) -> None:
-    """Write batch of vectors to the usearch ANN index.
+def _open_usearch_index():  # type: ignore[no-untyped-def]
+    """Open (or create) the usearch ANN index for the embed run.
 
-    If the existing index has different dimensions (e.g. after changing
-    KAIRIX_EMBED_DIMS), it is automatically deleted and rebuilt.
+    Returns a mutable VectorIndex that can be reused across all batches.
+    Auto-deletes old index if dimensions have changed.
     """
     try:
         from kairix.core.search.vec_index import VectorIndex
@@ -288,11 +288,10 @@ def _update_usearch_index(hash_seqs: list[str], vectors: list[list[float]]) -> N
         meta_path = db_p.parent / "vectors.meta.json"
         idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p)
         idx.load()  # auto-deletes if dims mismatch
-        count = idx.add_vectors(hash_seqs, vectors)
-        if count > 0:
-            logger.debug("usearch: added %d vectors", count)
+        return idx
     except Exception as e:
-        logger.error("usearch index update failed: %s", e)
+        logger.error("usearch index open failed: %s", e)
+        return None
 
 
 # ── Main embed runner ─────────────────────────────────────────────────────────
@@ -396,6 +395,10 @@ def run_embed(
     start_time = time.time()
     now = int(start_time)
 
+    # Open usearch index once — reuse across all batches (avoids O(n²) rebuild)
+    vec_index = _open_usearch_index()
+    save_interval = 10  # save index to disk every N batches
+
     for batch_idx, batch in enumerate(batched(all_chunks, batch_size)):
         texts = [c["text"] for c in batch]
 
@@ -420,9 +423,15 @@ def run_embed(
                         now,
                         chunk_date=chunk.get("chunk_date"),
                     )
-            # Write to usearch ANN index (outside transaction — file-based)
-            batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
-            _update_usearch_index(batch_hash_seqs, vectors)
+            # Write to usearch ANN index (reuse mutable index across batches)
+            if vec_index is not None:
+                try:
+                    batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
+                    vec_index.add_vectors(batch_hash_seqs, vectors)
+                    if (batch_idx + 1) % save_interval == 0:
+                        vec_index.save()
+                except Exception as e:
+                    logger.error("usearch batch %d failed: %s", batch_idx, e)
             embedded += len(batch)
             logger.info(
                 "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
@@ -438,6 +447,14 @@ def run_embed(
 
         # No unconditional sleep — rate limiting is handled reactively via
         # Retry-After headers in embed_batch() when Azure actually pushes back.
+
+    # Final save of usearch index
+    if vec_index is not None:
+        try:
+            vec_index.save()
+            logger.info("usearch: saved index with %d vectors", len(vec_index))
+        except Exception as e:
+            logger.error("usearch final save failed: %s", e)
 
     duration_s = time.time() - start_time
 

@@ -79,7 +79,7 @@ def test_embed_progress_logging_emitted(embed_db, caplog):
         patch("kairix.core.embed.embed.migrate_content_vectors"),
         patch("kairix.core.embed.embed.embed_batch", return_value=[_fake_vec(dims)]),
         patch("kairix.core.embed.embed.stage_embedding"),
-        patch("kairix.core.embed.embed._update_usearch_index"),
+        patch("kairix.core.embed.embed._open_usearch_index", return_value=None),
     ):
         with caplog.at_level(logging.INFO, logger="kairix.core.embed.embed"):
             result = run_embed(embed_db, batch_size=50, limit=2)

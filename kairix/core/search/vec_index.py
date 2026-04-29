@@ -58,6 +58,7 @@ class VectorIndex:
         self._index: Any = None
         self._key_to_hash_seq: dict[int, str] = {}
         self._next_key: int = 0
+        self._mutable: bool = False
 
     def __len__(self) -> int:
         if self._index is None:
@@ -184,21 +185,26 @@ class VectorIndex:
 
         usearch Index.restore(view=True) creates an immutable memory-mapped
         index. To add vectors we need a mutable copy. This rebuilds the
-        index from the existing vectors when needed.
+        index from the existing vectors when needed. Subsequent calls are
+        a no-op once the index has been converted.
         """
         from usearch.index import Index
 
+        if self._mutable:
+            return
+
         if self._index is None:
             self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")
+            self._mutable = True
             return
 
         # Check if the index is immutable by attempting a dummy operation
         try:
-            # If this succeeds, the index is already mutable
             test_key = np.array([self._next_key], dtype=np.int64)
             test_vec = np.zeros((1, self._ndim), dtype=np.float32)
             self._index.add(test_key, test_vec)
             self._index.remove(test_key)
+            self._mutable = True
         except Exception:
             # Index is immutable — rebuild as mutable
             logger.info("vec_index: converting immutable index to mutable (%d vectors)", len(self._index))
@@ -207,9 +213,10 @@ class VectorIndex:
             self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")
             if len(old_keys) > 0:
                 self._index.add(old_keys, old_vecs)
+            self._mutable = True
 
     def add_vectors(self, hash_seqs: list[str], vectors: list[list[float]]) -> int:
-        """Add new vectors incrementally. Saves index after adding."""
+        """Add new vectors incrementally. Does NOT auto-save — caller controls save timing."""
         if not hash_seqs:
             return 0
         self._ensure_mutable()
@@ -220,8 +227,11 @@ class VectorIndex:
         for k, hs in zip(keys, hash_seqs, strict=True):
             self._key_to_hash_seq[int(k)] = hs
         self._next_key += len(hash_seqs)
-        self._save()
         return len(hash_seqs)
+
+    def save(self) -> None:
+        """Save index and metadata to disk. Public wrapper for callers."""
+        self._save()
 
     def _save(self) -> None:
         """Save index and metadata to disk."""
