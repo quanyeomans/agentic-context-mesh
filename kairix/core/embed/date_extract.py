@@ -1,22 +1,24 @@
 """
-Extract a document date from frontmatter fields or filename patterns.
+Extract a document date from frontmatter fields, filename patterns, or file mtime.
 
 Priority order:
   1. YAML frontmatter (date / created / updated / created_at / date_added fields)
   2. ISO date pattern YYYY-MM-DD in the file path
+  3. File modification time (mtime) from the filesystem — last resort fallback
 
 Returns an ISO 8601 date string (e.g. "2026-04-09") or None if no reliable
 date signal is found.
-
-documents.modified_at is intentionally excluded -- that is the index time,
-not the document date, and including it would pollute temporal queries with
-false signal.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Scan only the first 2 000 characters for frontmatter to keep extraction fast.
 _FRONTMATTER_HEAD = 2000
@@ -60,13 +62,16 @@ def _is_valid_date(value: str) -> bool:
     return _MIN_DATE <= parsed <= max_date
 
 
-def extract_chunk_date(doc: str, path: str) -> str | None:
+def extract_chunk_date(doc: str, path: str, document_root: str | Path | None = None) -> str | None:
     """
     Extract the best available document date.
 
     Args:
-        doc:  Full document text (only the first 2 000 chars are scanned).
-        path: File path from the ``documents`` table.
+        doc:            Full document text (only the first 2 000 chars are scanned).
+        path:           File path from the ``documents`` table (vault-relative).
+        document_root:  Absolute path to the document store root. When provided,
+                        enables file mtime fallback for documents without dates
+                        in frontmatter or path.
 
     Returns:
         ISO 8601 date string (``"YYYY-MM-DD"``) or ``None``.
@@ -92,4 +97,20 @@ def extract_chunk_date(doc: str, path: str) -> str | None:
         if _is_valid_date(candidate):
             return candidate
 
+    # 4. File modification time (last resort)
+    if document_root is not None:
+        return _mtime_date(Path(document_root) / path)
+
+    return None
+
+
+def _mtime_date(full_path: Path) -> str | None:
+    """Extract the file modification date from the filesystem. Returns None on any error."""
+    try:
+        mtime = os.path.getmtime(full_path)
+        dt = datetime.fromtimestamp(mtime, tz=timezone.utc).date()
+        if dt >= _MIN_DATE:
+            return dt.isoformat()
+    except (OSError, ValueError):
+        pass
     return None

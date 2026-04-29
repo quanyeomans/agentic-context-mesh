@@ -265,6 +265,14 @@ def run_embed(
 
     Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
     """
+    # Resolve document root for file mtime fallback in chunk date extraction
+    try:
+        from kairix.paths import document_root
+
+        doc_root = str(document_root())
+    except Exception:
+        doc_root = None
+
     api_key, endpoint, deployment = _get_azure_config()
 
     # Preflight — verify Azure before touching DB
@@ -310,7 +318,7 @@ def run_embed(
     # Expand into chunks, extracting chunk_date once per document
     all_chunks = []
     for content_hash, body, path in rows:
-        doc_date = extract_chunk_date(body, path)  # document-level date, same for all chunks
+        doc_date = extract_chunk_date(body, path, document_root=doc_root)  # document-level date
         for chunk in chunk_text(body):
             all_chunks.append(
                 {

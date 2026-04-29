@@ -301,7 +301,7 @@ def tool_timeline(
     try:
         from datetime import date as _date
 
-        from kairix.core.temporal.rewriter import is_relative_temporal, rewrite_temporal_query
+        from kairix.core.temporal.rewriter import extract_time_window, rewrite_temporal_query
 
         anchor: _date | None = None
         if anchor_date:
@@ -310,23 +310,21 @@ def tool_timeline(
             except ValueError:
                 pass
 
-        is_temporal = is_relative_temporal(query)
-        rewritten = rewrite_temporal_query(query=query, reference_date=anchor) if is_temporal else query
-
-        # Extract time window if temporal
+        # Detect temporal intent from BOTH relative ("last week") and absolute ("April 2026") expressions
         time_window: dict[str, str] = {}
-        if is_temporal:
-            try:
-                from kairix.core.temporal.rewriter import extract_time_window
+        try:
+            start, end = extract_time_window(query=query, reference_date=anchor)
+            if start or end:
+                time_window = {
+                    "start": str(start) if start else "",
+                    "end": str(end) if end else "",
+                }
+        except Exception:
+            start, end = None, None
+            logger.debug("extract_time_window failed", exc_info=True)
 
-                start, end = extract_time_window(query=query, reference_date=anchor)
-                if start or end:
-                    time_window = {
-                        "start": str(start) if start else "",
-                        "end": str(end) if end else "",
-                    }
-            except Exception:
-                logger.debug("extract_time_window failed", exc_info=True)
+        is_temporal = bool(time_window)
+        rewritten = rewrite_temporal_query(query=query, reference_date=anchor) if is_temporal else query
 
         return {
             "original_query": query,

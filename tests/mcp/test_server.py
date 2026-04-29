@@ -294,20 +294,22 @@ def test_tool_timeline_preserves_original_query() -> None:
 
 @pytest.mark.unit
 def test_tool_timeline_error_handled() -> None:
-    with patch("kairix.core.temporal.rewriter.is_relative_temporal", side_effect=RuntimeError("oops")):
+    """When extract_time_window fails, timeline gracefully returns non-temporal result."""
+    with patch("kairix.core.temporal.rewriter.extract_time_window", side_effect=RuntimeError("oops")):
         result = tool_timeline(query="any query")
 
     assert result["is_temporal"] is False
     assert result["rewritten_query"] == "any query"
-    assert "failed" in result["error"].lower()  # sanitised error, no internal details
+    assert result["error"] == ""  # graceful degradation, not an error
 
 
 @pytest.mark.unit
 def test_tool_timeline_rewrite_none_returns_original() -> None:
-    with patch("kairix.core.temporal.rewriter.is_relative_temporal", return_value=True):
-        with patch("kairix.core.temporal.rewriter.rewrite_temporal_query", return_value=None):
-            with patch("kairix.core.temporal.rewriter.extract_time_window", return_value=None):
-                result = tool_timeline(query="last month update")
+    with (
+        patch("kairix.core.temporal.rewriter.extract_time_window", return_value=(None, None)),
+        patch("kairix.core.temporal.rewriter.rewrite_temporal_query", return_value=None),
+    ):
+        result = tool_timeline(query="last month update")
 
     assert result["rewritten_query"] == "last month update"
 
