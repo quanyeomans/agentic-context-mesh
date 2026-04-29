@@ -131,7 +131,7 @@ def generate_query_for_document(doc: dict, category: str) -> dict:
     }
 
     query_templates = templates.get(category, templates["recall"])
-    query_text = random.choice(query_templates)  # noqa: S311
+    query_text = random.choice(query_templates)
 
     # Normalise title for gold matching
     normalised_title = title.lower().replace(" ", "-").replace("_", "-")
@@ -171,7 +171,7 @@ def build_suite(
         if not available:
             available = list(TARGET_DISTRIBUTION.keys())
 
-        category = random.choice(available)  # noqa: S311
+        category = random.choice(available)
         case = generate_query_for_document(doc, category)
         case_counter[category] += 1
         cases.append(case)

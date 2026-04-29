@@ -42,7 +42,7 @@ class CheckResult:
 
 def _run_search(query: str, agent: str, kairix_bin: str, timeout: int = 60) -> dict:
     """Run kairix search --json and return parsed result dict."""
-    result = subprocess.run(  # noqa: S603 — intentional: runs the kairix CLI binary
+    result = subprocess.run(
         [kairix_bin, "search", query, "--agent", agent, "--json"],
         capture_output=True,
         text=True,

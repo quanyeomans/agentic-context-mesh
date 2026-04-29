@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("/tmp/crm-chunks"),  # noqa: S108,
+        default=Path("/tmp/crm-chunks"),
         help="Output directory for chunk files (default: /tmp/crm-chunks)",
     )
     parser.add_argument(

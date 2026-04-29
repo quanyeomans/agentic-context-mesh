@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--vault-root", required=True, help="Path to vault root")
     parser.add_argument(
         "--output-dir",
-        default="/tmp/daily-chunks",  # noqa: S108
+        default="/tmp/daily-chunks",
         help="Output directory for chunk files (default: /tmp/daily-chunks)",
     )
     parser.add_argument(

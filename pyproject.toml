@@ -163,6 +163,7 @@ ignore = [
 "kairix/**/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
 "kairix/cli.py" = ["T201"]
 "kairix/_azure.py" = ["S603", "S607"]  # Azure CLI subprocess (az keyvault) is intentional
+"scripts/*" = ["S", "T20", "B007"]    # Scripts: allow subprocess, print, unused loop vars
 
 [tool.ruff.format]
 quote-style = "double"
