@@ -1,22 +1,48 @@
+# Version control and CI
 .git
+.github
+.pre-commit-config.yaml
+.secrets.baseline
+
+# Python build artifacts
 .venv
 __pycache__
 *.pyc
 *.pyo
+*.egg-info
+dist
+build
 .pytest_cache
 .coverage
 htmlcov
-dist
-build
-*.egg-info
+coverage.xml
+
+# Test and documentation (not needed in runtime image)
 tests/
 docs/
+scripts/
+suites/
+benchmark-results/
+
+# Docker build files (prevent recursive context)
 docker/vault-agent/
+
+# Data files (mounted as volumes, not baked into image)
 reference-library/
 vault
+*.sqlite
+*.db
+*.log
+
+# Secrets (never in the image)
 .env
 .env.*
 !.env.example
-*.log
-*.sqlite
-*.db
+secrets/
+
+# Editor and OS
+.DS_Store
+*.swp
+*.swo
+CLAUDE.md
+.claude/

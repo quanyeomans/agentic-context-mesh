@@ -340,6 +340,16 @@ jobs:
         run: |
           docker run --rm --entrypoint python kairix:ci -c "import kairix; print('OK')"
 
+      - name: Image size gate (max 3GB)
+        run: |
+          SIZE_BYTES=$(docker image inspect kairix:ci --format '{{.Size}}')
+          SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+          echo "Image size: ${SIZE_MB}MB"
+          if [ "$SIZE_MB" -gt 3072 ]; then
+            echo "::error::Docker image is ${SIZE_MB}MB — exceeds 3GB gate. Check for CUDA libs or unnecessary dependencies."
+            exit 1
+          fi
+
   # ── Fan-in gate (branch protection target) ─────────────────────────────────
   check:
     name: "CI gate"
