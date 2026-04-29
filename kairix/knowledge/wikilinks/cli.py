@@ -45,7 +45,10 @@ def main(argv: list[str] | None = None) -> None:
 
     subcmd = argv[0]
 
-    if subcmd == "inject":
+    if subcmd in ("--help", "-h", "help"):
+        print(__doc__)
+        sys.exit(0)
+    elif subcmd == "inject":
         _inject_cmd(argv[1:])
     elif subcmd == "audit":
         _audit_cmd(argv[1:])

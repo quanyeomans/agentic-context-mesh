@@ -38,7 +38,7 @@ def main(argv: list[str] | None = None) -> None:
         "--transport",
         choices=["stdio", "sse"],
         default="stdio",
-        help="Transport: stdio (default, for Claude Desktop) or sse (HTTP + SSE)",
+        help="Transport: stdio (default, for Claude Desktop) or sse (for Docker/server deployments)",
     )
 
     args = parser.parse_args(argv)
