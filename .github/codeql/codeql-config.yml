@@ -1,0 +1,11 @@
+# CodeQL configuration for kairix
+# Excludes deployment utilities and third-party content from analysis.
+
+paths-ignore:
+  # Vault-agent sidecar writes secrets to tmpfs by design (chmod 600, ephemeral).
+  # Documented in SECURITY.md §3. Not application code.
+  - docker/vault-agent/
+  # Reference library is third-party open-source content
+  - reference-library/
+  # Migration and build scripts
+  - scripts/
