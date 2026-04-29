@@ -22,7 +22,7 @@ Semantics for load_secrets():
 The secrets file path can be overridden via KAIRIX_SECRETS_FILE for testing.
 
 Resolution order for get_secret():
-  1. Direct env vars (AZURE_OPENAI_API_KEY etc.) — fastest, for tests and local dev
+  1. Direct env vars (KAIRIX_LLM_API_KEY etc.) — fastest, for tests and local dev
   2. KAIRIX_SECRETS_DIR/kairix.env — Docker sidecar pattern
   3. KAIRIX_KV_NAME env var → az keyvault secret show — VM fallback
 
@@ -40,13 +40,16 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SECRETS_FILE = "/run/secrets/kairix.env"
+_DEFAULT_SECRETS_DIR = "/run/secrets"
 
-# Map of logical KV secret name → env var name
+# Map of logical secret name → env var name (provider-agnostic)
 _SECRET_ENV_MAP = {
-    "azure-openai-api-key": "AZURE_OPENAI_API_KEY",
-    "azure-openai-endpoint": "AZURE_OPENAI_ENDPOINT",
-    "azure-openai-embedding-deployment": "AZURE_OPENAI_EMBED_DEPLOYMENT",
-    "azure-openai-gpt4o-mini-deployment": "AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT",
+    "kairix-llm-api-key": "KAIRIX_LLM_API_KEY",
+    "kairix-llm-endpoint": "KAIRIX_LLM_ENDPOINT",
+    "kairix-llm-model": "KAIRIX_LLM_MODEL",
+    "kairix-embed-api-key": "KAIRIX_EMBED_API_KEY",
+    "kairix-embed-endpoint": "KAIRIX_EMBED_ENDPOINT",
+    "kairix-embed-model": "KAIRIX_EMBED_MODEL",
     "kairix-neo4j-password": "KAIRIX_NEO4J_PASSWORD",
 }
 
@@ -117,17 +120,52 @@ def _load_secrets_file(path: Path) -> dict[str, str]:
     return result
 
 
+def _read_secret_file(name: str) -> str | None:
+    """Read a single secret from a per-file secret (Docker secrets pattern).
+
+    Looks for a file named ``name`` in the secrets directory
+    (``/run/secrets/`` for Docker, ``~/.config/kairix/secrets/`` for pip).
+    Returns the file content stripped of whitespace, or None.
+    """
+    for secrets_dir in _secret_file_dirs():
+        secret_path = Path(secrets_dir) / name
+        if secret_path.is_file():
+            try:
+                value = secret_path.read_text(encoding="utf-8").strip()
+                if value:
+                    return value
+            except OSError:
+                pass
+    return None
+
+
+def _secret_file_dirs() -> list[str]:
+    """Return directories to scan for per-file secrets, in priority order."""
+    dirs = []
+    # Explicit override
+    override = os.environ.get("KAIRIX_SECRETS_DIR")
+    if override:
+        dirs.append(override)
+    # Docker secrets (tmpfs)
+    dirs.append(_DEFAULT_SECRETS_DIR)
+    # pip install path (XDG)
+    xdg = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
+    dirs.append(str(Path(xdg) / "kairix" / "secrets"))
+    return dirs
+
+
 def get_secret(name: str, required: bool = True) -> str | None:
     """
-    Resolve a secret by KV name. Returns value or None (raises if required).
+    Resolve a secret by name. Returns value or None (raises if required).
 
     Resolution order:
-      1. Direct env vars (fastest, for tests and local dev)
-      2. KAIRIX_SECRETS_DIR/kairix.env — Docker sidecar pattern
-      3. KAIRIX_KV_NAME env var → az keyvault secret show — VM fallback
+      1. Direct env vars (fastest, for tests and CI)
+      2. Per-file secret (/run/secrets/<name> or ~/.config/kairix/secrets/<name>)
+      3. Bundle file (kairix.env — vault-agent sidecar pattern)
+      4. Azure Key Vault CLI fallback (if KAIRIX_KV_NAME set)
 
     Args:
-        name:     KV secret name (e.g. "azure-openai-api-key").
+        name:     Secret name (e.g. "kairix-llm-api-key").
         required: If True and no value found, raises OSError. Default True.
 
     Returns:
@@ -144,8 +182,13 @@ def get_secret(name: str, required: bool = True) -> str | None:
         if value:
             return value
 
-    # Step 2: sidecar secrets file
-    secrets_dir = os.environ.get("KAIRIX_SECRETS_DIR", "/run/secrets")
+    # Step 2: per-file secret (Docker secrets / XDG config)
+    value = _read_secret_file(name)
+    if value:
+        return value
+
+    # Step 3: legacy bundle file (vault-agent sidecar)
+    secrets_dir = os.environ.get("KAIRIX_SECRETS_DIR", _DEFAULT_SECRETS_DIR)
     secrets_file = Path(secrets_dir) / "kairix.env"
     if secrets_file.exists():
         file_secrets = _load_secrets_file(secrets_file)
@@ -154,7 +197,7 @@ def get_secret(name: str, required: bool = True) -> str | None:
             if value:
                 return value
 
-    # Step 3: Azure Key Vault CLI fallback
+    # Step 4: Azure Key Vault CLI fallback
     kv_name = os.environ.get("KAIRIX_KV_NAME", "")
     if kv_name:
         try:

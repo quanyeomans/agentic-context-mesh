@@ -82,33 +82,37 @@ class OpenAIEmbedProvider:
 
 
 def get_embed_provider() -> EmbedProvider:
-    """Get the configured embed provider based on environment variables.
+    """Get the configured embed provider via ``get_credentials("embed")``.
 
-    Checks for Azure config first (AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY),
-    then falls back to standard OpenAI (OPENAI_API_KEY).
+    Uses ``kairix.credentials.get_credentials()`` for credential resolution,
+    which checks: env vars (KAIRIX_EMBED_* / KAIRIX_LLM_*) -> secrets file
+    -> Azure Key Vault.
 
-    Uses kairix.secrets.get_secret() for credential resolution, which checks:
-    env vars → secrets file → Azure Key Vault.
+    Selects AzureEmbedProvider when the endpoint is an Azure URL, otherwise
+    falls back to OpenAIEmbedProvider.
 
     Raises OSError if no credentials are available.
     """
-    from kairix.secrets import get_secret
+    from kairix.credentials import get_credentials
 
-    # Try Azure first
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT") or get_secret("azure-openai-endpoint", required=False)
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY") or get_secret("azure-openai-api-key", required=False)
+    creds = get_credentials("embed")
 
-    if endpoint and api_key:
-        logger.debug("embed_provider: using AzureEmbedProvider")
-        return AzureEmbedProvider(endpoint=endpoint, api_key=api_key)
+    if creds and creds.api_key and creds.endpoint:
+        if creds.is_azure:
+            logger.debug("embed_provider: using AzureEmbedProvider")
+            return AzureEmbedProvider(endpoint=creds.endpoint, api_key=creds.api_key)
+        else:
+            logger.debug("embed_provider: using OpenAIEmbedProvider")
+            return OpenAIEmbedProvider(api_key=creds.api_key)
 
-    # Fall back to OpenAI
-    openai_key = os.environ.get("OPENAI_API_KEY") or get_secret("openai-api-key", required=False)
+    # Fall back to OPENAI_API_KEY for backwards compatibility
+    openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
-        logger.debug("embed_provider: using OpenAIEmbedProvider")
+        logger.debug("embed_provider: using OpenAIEmbedProvider (OPENAI_API_KEY fallback)")
         return OpenAIEmbedProvider(api_key=openai_key)
 
     raise OSError(
-        "No embedding provider configured. Set AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY "
-        "for Azure, or OPENAI_API_KEY for OpenAI."
+        "No embedding provider configured. Set KAIRIX_LLM_API_KEY + KAIRIX_LLM_ENDPOINT "
+        "(or KAIRIX_EMBED_API_KEY + KAIRIX_EMBED_ENDPOINT for a separate embed provider), "
+        "or OPENAI_API_KEY for OpenAI."
     )

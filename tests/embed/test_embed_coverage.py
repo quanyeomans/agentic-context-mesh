@@ -81,9 +81,9 @@ def test_chunk_text_empty_string() -> None:
 
 @pytest.mark.unit
 def test_get_azure_config_returns_tuple(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
-    monkeypatch.setenv("AZURE_OPENAI_EMBED_DEPLOYMENT", "my-deploy")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://fake.example.com/")
+    monkeypatch.setenv("KAIRIX_EMBED_MODEL", "my-deploy")
 
     key, endpoint, deployment = _get_azure_config()
     assert key == "test-key"
@@ -93,17 +93,23 @@ def test_get_azure_config_returns_tuple(monkeypatch: pytest.MonkeyPatch) -> None
 
 @pytest.mark.unit
 def test_get_azure_config_raises_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
-    with pytest.raises(OSError, match="AZURE_OPENAI_API_KEY"):
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
+    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://fake.example.com/")
+    monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
+    with pytest.raises(OSError):
         _get_azure_config()
 
 
 @pytest.mark.unit
 def test_get_azure_config_raises_without_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key")
-    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
-    with pytest.raises(OSError, match="AZURE_OPENAI_ENDPOINT"):
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")
+    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
+    monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
+    with pytest.raises(OSError):
         _get_azure_config()
 
 

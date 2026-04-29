@@ -94,14 +94,21 @@ def _build_adaptive_queries(db: sqlite3.Connection) -> list[tuple]:
 
 
 def _embed_query(query: str) -> np.ndarray | None:
-    """Embed a single query string via Azure OpenAI. Returns float32 numpy array or None."""
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
-    deployment = os.environ.get("AZURE_OPENAI_EMBED_DEPLOYMENT", "text-embedding-3-large")
+    """Embed a single query string via the configured embed provider. Returns float32 numpy array or None."""
+    try:
+        from kairix.credentials import get_credentials
 
-    if not api_key or not endpoint:
-        logger.warning("Azure credentials not set — skipping recall check")
+        creds = get_credentials("embed")
+    except Exception:
+        creds = None
+
+    if creds is None or not creds.api_key or not creds.endpoint:
+        logger.warning("Embed credentials not set — skipping recall check")
         return None
+
+    api_key = creds.api_key
+    endpoint = creds.endpoint.rstrip("/")
+    deployment = creds.model or "text-embedding-3-large"
 
     try:
         import requests

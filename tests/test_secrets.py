@@ -200,23 +200,23 @@ def test_idempotent_multiple_calls(tmp_path, monkeypatch) -> None:
 @pytest.mark.unit
 def test_get_secret_from_env_var(monkeypatch) -> None:
     """get_secret returns value when the mapped env var is set."""
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key-from-env")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key-from-env")
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     # Point secrets dir at a nonexistent path so file step is skipped
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
-    value = get_secret("azure-openai-api-key")
+    value = get_secret("kairix-llm-api-key")
     assert value == "test-key-from-env"
 
 
 @pytest.mark.unit
 def test_get_secret_env_var_takes_priority_over_file(tmp_path, monkeypatch) -> None:
     """Env var wins over sidecar file — highest priority."""
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "env-wins")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "env-wins")
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     p = tmp_path / "kairix.env"
-    p.write_text("AZURE_OPENAI_API_KEY=file-value\n", encoding="utf-8")
+    p.write_text("KAIRIX_LLM_API_KEY=file-value\n", encoding="utf-8")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path))
-    value = get_secret("azure-openai-api-key")
+    value = get_secret("kairix-llm-api-key")
     assert value == "env-wins"
 
 
@@ -228,16 +228,16 @@ def test_get_secret_env_var_takes_priority_over_file(tmp_path, monkeypatch) -> N
 @pytest.mark.unit
 def test_get_secret_from_file(tmp_path, monkeypatch) -> None:
     """get_secret reads from the sidecar secrets file when env var is absent."""
-    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     p = tmp_path / "kairix.env"
-    p.write_text("AZURE_OPENAI_ENDPOINT=https://example.openai.azure.com\n", encoding="utf-8")
+    p.write_text("KAIRIX_LLM_ENDPOINT=https://example.openai.azure.com\n", encoding="utf-8")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path))
     # Clear lru_cache so this path is freshly read
     from kairix.secrets import _load_secrets_file
 
     _load_secrets_file.cache_clear()
-    value = get_secret("azure-openai-endpoint")
+    value = get_secret("kairix-llm-endpoint")
     assert value == "https://example.openai.azure.com"
 
 
@@ -265,11 +265,11 @@ def test_get_secret_file_ignores_comments_and_blank_lines(tmp_path, monkeypatch)
 @pytest.mark.unit
 def test_get_secret_required_raises_oserror(monkeypatch) -> None:
     """Missing required secret raises OSError with an informative message."""
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
     with pytest.raises(OSError, match="not available"):
-        get_secret("azure-openai-api-key")
+        get_secret("kairix-llm-api-key")
 
 
 @pytest.mark.unit
@@ -285,24 +285,24 @@ def test_get_secret_required_true_is_default(monkeypatch) -> None:
 @pytest.mark.unit
 def test_get_secret_not_required_returns_none(monkeypatch) -> None:
     """required=False returns None instead of raising when secret is absent."""
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
-    result = get_secret("azure-openai-api-key", required=False)
+    result = get_secret("kairix-llm-api-key", required=False)
     assert result is None
 
 
 @pytest.mark.unit
 def test_get_secret_oserror_message_is_informative(monkeypatch) -> None:
     """OSError message names the secret and hints at resolution steps."""
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
     with pytest.raises(OSError) as exc_info:
-        get_secret("azure-openai-api-key")
+        get_secret("kairix-llm-api-key")
     msg = str(exc_info.value)
     # Error message must NOT contain the secret name (security: no key names in output)
-    assert "azure-openai-api-key" not in msg
+    assert "kairix-llm-api-key" not in msg
     assert "not available" in msg
 
 

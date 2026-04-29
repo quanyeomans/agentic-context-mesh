@@ -30,8 +30,8 @@ Open `.env` in your editor and add your LLM API key:
 
 ```bash
 # For Azure OpenAI:
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
-AZURE_OPENAI_API_KEY=your-key-here
+KAIRIX_LLM_ENDPOINT=https://your-resource.openai.azure.com
+KAIRIX_LLM_API_KEY=your-key-here
 
 # Or for standard OpenAI:
 # OPENAI_API_KEY=sk-your-key-here

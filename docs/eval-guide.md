@@ -12,7 +12,7 @@ For the methodology and research basis, see [evaluation-methodology.md](evaluati
 
 - `kairix` installed and configured
 - `KAIRIX_KV_NAME` env var set (for Azure Key Vault credential resolution), **or**
-  `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` set directly
+  `KAIRIX_LLM_API_KEY` + `KAIRIX_LLM_ENDPOINT` set directly
 - Kairix index populated (`kairix embed` completed)
 - `kairix benchmark` working (`kairix benchmark validate --suite <suite>`)
 
@@ -260,7 +260,7 @@ To increase acceptance rate: use `--count` larger than your target (the pipeline
 The LLM judge is returning unexpected grades on anchor cases. Possible causes:
 
 - API endpoint misconfigured (returns errors or empty responses)
-- Model deployment renamed (update `AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT` or use `--deployment`)
+- Model deployment renamed (update `KAIRIX_LLM_MODEL` or use `--deployment`)
 - Temporary API degradation — retry in a few minutes
 
 Use `--no-calibrate` to bypass for development/testing. Do not bypass calibration in production generation runs.

@@ -3,7 +3,6 @@ Core embedding logic — fetches vectors from Azure OpenAI and writes to kairix'
 """
 
 import logging
-import os
 import sqlite3
 import time
 from collections.abc import Generator
@@ -84,28 +83,27 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHU
 
 def _get_azure_config() -> tuple[str, str, str]:
     """
-    Read embed API config from env vars. Supports Azure, OpenRouter, or any
-    OpenAI-compatible endpoint.
+    Read embed API config via ``get_credentials("embed")``. Supports Azure,
+    OpenRouter, or any OpenAI-compatible endpoint.
 
-    Override with KAIRIX_EMBED_API_KEY and KAIRIX_EMBED_ENDPOINT to use a
-    different provider for embedding (e.g. OpenRouter) while keeping Azure
-    for chat completions.
+    Raises OSError when credentials cannot be resolved.
     """
-    api_key = os.environ.get("KAIRIX_EMBED_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
-    endpoint = os.environ.get("KAIRIX_EMBED_ENDPOINT") or os.environ.get("AZURE_OPENAI_ENDPOINT")
-    deployment = os.environ.get("AZURE_OPENAI_EMBED_DEPLOYMENT", DEFAULT_DEPLOYMENT)
+    from kairix.credentials import get_credentials
+
+    creds = get_credentials("embed")
+    api_key = creds.api_key
+    endpoint = creds.endpoint
+    deployment = creds.model or DEFAULT_DEPLOYMENT
 
     if not api_key:
         raise OSError(
-            "AZURE_OPENAI_API_KEY not set. "
-            "Fetch from Key Vault: az keyvault secret show --vault-name ${KV_NAME} "
-            "--name azure-openai-api-key --query value -o tsv"
+            "KAIRIX_LLM_API_KEY / KAIRIX_EMBED_API_KEY not set. "
+            "Set the env var, add to secrets file, or configure Key Vault."
         )
     if not endpoint:
         raise OSError(
-            "AZURE_OPENAI_ENDPOINT not set. "
-            "Fetch from Key Vault: az keyvault secret show --vault-name ${KV_NAME} "
-            "--name azure-openai-endpoint --query value -o tsv"
+            "KAIRIX_LLM_ENDPOINT / KAIRIX_EMBED_ENDPOINT not set. "
+            "Set the env var, add to secrets file, or configure Key Vault."
         )
 
     # Normalise endpoint — strip trailing slash, we'll add the path
@@ -315,7 +313,7 @@ def run_embed(
     if actual_dims != DEFAULT_DIMS:
         raise SchemaVersionError(
             f"Azure returned {actual_dims} dims but expected {DEFAULT_DIMS}. "
-            f"Check AZURE_OPENAI_EMBED_DEPLOYMENT and dimensions setting."
+            f"Check KAIRIX_EMBED_MODEL and dimensions setting."
         )
 
     # Ensure chunk_date column exists (idempotent — no-op when already present)

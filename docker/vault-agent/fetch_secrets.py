@@ -19,11 +19,13 @@ Optional:
   REFRESH_INTERVAL_SECONDS How often to re-fetch from KV (default: 3600)
 
 Secrets fetched (KV secret name → env var written to file):
-  azure-openai-api-key               → AZURE_OPENAI_API_KEY
-  azure-openai-endpoint              → AZURE_OPENAI_ENDPOINT
-  azure-openai-embedding-deployment  → AZURE_OPENAI_EMBED_DEPLOYMENT
-  azure-openai-gpt4o-mini-deployment → AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT
-  kairix-neo4j-password              → KAIRIX_NEO4J_PASSWORD
+  kairix-llm-api-key      → KAIRIX_LLM_API_KEY
+  kairix-llm-endpoint     → KAIRIX_LLM_ENDPOINT
+  kairix-llm-model        → KAIRIX_LLM_MODEL
+  kairix-embed-api-key    → KAIRIX_EMBED_API_KEY
+  kairix-embed-endpoint   → KAIRIX_EMBED_ENDPOINT
+  kairix-embed-model      → KAIRIX_EMBED_MODEL
+  kairix-neo4j-password   → KAIRIX_NEO4J_PASSWORD
 """
 
 import logging
@@ -47,10 +49,12 @@ REFRESH_INTERVAL = int(os.environ.get("REFRESH_INTERVAL_SECONDS", "3600"))
 
 # Azure Key Vault secret name → env var name
 SECRET_MAP: dict[str, str] = {
-    "azure-openai-api-key": "AZURE_OPENAI_API_KEY",
-    "azure-openai-endpoint": "AZURE_OPENAI_ENDPOINT",
-    "azure-openai-embedding-deployment": "AZURE_OPENAI_EMBED_DEPLOYMENT",
-    "azure-openai-gpt4o-mini-deployment": "AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT",
+    "kairix-llm-api-key": "KAIRIX_LLM_API_KEY",
+    "kairix-llm-endpoint": "KAIRIX_LLM_ENDPOINT",
+    "kairix-llm-model": "KAIRIX_LLM_MODEL",
+    "kairix-embed-api-key": "KAIRIX_EMBED_API_KEY",
+    "kairix-embed-endpoint": "KAIRIX_EMBED_ENDPOINT",
+    "kairix-embed-model": "KAIRIX_EMBED_MODEL",
     "kairix-neo4j-password": "KAIRIX_NEO4J_PASSWORD",
 }
 

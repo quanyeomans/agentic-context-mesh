@@ -119,7 +119,7 @@ def check_wrapper_installed() -> CheckResult:
         )
 
 
-_REQUIRED_SECRETS = ("AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT")
+_REQUIRED_SECRETS = ("KAIRIX_LLM_API_KEY", "KAIRIX_LLM_ENDPOINT")
 _SECRETS_FILE_PROBE_PATHS = (
     "/run/secrets/kairix.env",
     "/opt/kairix/secrets.env",
@@ -143,9 +143,9 @@ def _secrets_file_keys_present(path: Path, keys: tuple[str, ...]) -> set[str]:
 
 
 def check_secrets_loaded() -> CheckResult:
-    """Azure OpenAI credentials are available in the environment or a secrets file."""
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+    """LLM credentials are available in the environment or a secrets file."""
+    api_key = os.environ.get("KAIRIX_LLM_API_KEY", "")
+    endpoint = os.environ.get("KAIRIX_LLM_ENDPOINT", "")
 
     # Tier 1 — credentials in process environment (wrapper loaded them)
     if api_key and endpoint:
@@ -153,7 +153,7 @@ def check_secrets_loaded() -> CheckResult:
         return CheckResult(
             name="secrets_loaded",
             ok=True,
-            detail=f"Azure credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
+            detail=f"LLM credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
         )
 
     # Tier 2 — probe secrets file directly (credentials present but not yet in env;
@@ -185,8 +185,7 @@ def check_secrets_loaded() -> CheckResult:
             fix=(
                 f"Add the missing keys to {probe}:\n"
                 + "".join(f"  {k}=<value>\n" for k in missing_in_file)
-                + "Fetch from Azure Key Vault:\n"
-                "  az keyvault secret show --vault-name <kv> --name azure-openai-api-key --query value -o tsv"
+                + "Set KAIRIX_LLM_API_KEY and KAIRIX_LLM_ENDPOINT in your env or secrets file."
             ),
         )
 
@@ -196,11 +195,11 @@ def check_secrets_loaded() -> CheckResult:
     return CheckResult(
         name="secrets_loaded",
         ok=False,
-        detail=f"Azure credentials not found in environment or secrets file: {', '.join(missing_env)}",
+        detail=f"LLM credentials not found in environment or secrets file: {', '.join(missing_env)}",
         fix=(
             f"Create {default_path} with:\n"
-            "  AZURE_OPENAI_API_KEY=<value>\n"
-            "  AZURE_OPENAI_ENDPOINT=<value>\n"
+            "  KAIRIX_LLM_API_KEY=<value>\n"
+            "  KAIRIX_LLM_ENDPOINT=<value>\n"
             "Or ensure the kairix wrapper (not the raw Python binary) is on PATH.\n"
             "Verify: head -1 $(which kairix)  — should show #!/usr/bin/env bash"
         ),
@@ -298,7 +297,7 @@ def check_vector_search_working() -> CheckResult:
             ok=False,
             detail=f"Search raised an exception: {exc}",
             fix=(
-                "Check AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT are set.\n"
+                "Check KAIRIX_LLM_API_KEY and KAIRIX_LLM_ENDPOINT are set.\n"
                 "Run: kairix onboard check  to see secrets_loaded status."
             ),
         )

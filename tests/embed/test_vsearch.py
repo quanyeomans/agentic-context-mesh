@@ -3,7 +3,7 @@ E2E test: embed 50 real chunks via Azure, verify vector search returns correct d
 
 Skipped unless KAIRIX_E2E=1 is set. Requires:
   - Real kairix index at ~/.cache/kairix/index.sqlite
-  - AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT set
+  - KAIRIX_LLM_API_KEY + KAIRIX_LLM_ENDPOINT set
 
 Run manually pre-deploy:
   KAIRIX_E2E=1 python3 -m pytest tests/e2e/ -v -s

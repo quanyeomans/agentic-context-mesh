@@ -81,22 +81,26 @@ class TestOpenAIEmbedProvider:
 @pytest.mark.unit
 class TestGetEmbedProvider:
     def test_returns_azure_when_env_vars_set(self, monkeypatch) -> None:
-        monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com")
-        monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key")
+        monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://test.openai.azure.com")
+        monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")
         provider = get_embed_provider()
         assert isinstance(provider, AzureEmbedProvider)
 
     def test_falls_back_to_openai(self, monkeypatch) -> None:
-        monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
-        monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
+        monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         with patch("kairix.secrets.get_secret", return_value=None):
             provider = get_embed_provider()
         assert isinstance(provider, OpenAIEmbedProvider)
 
     def test_raises_when_no_credentials(self, monkeypatch) -> None:
-        monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
-        monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
+        monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         with patch("kairix.secrets.get_secret", return_value=None):
             with pytest.raises(OSError, match="No embedding provider"):

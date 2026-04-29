@@ -31,7 +31,7 @@ services:
     environment:
       - KAIRIX_NEO4J_URI=bolt://neo4j:7687
       - KAIRIX_NEO4J_USER=neo4j
-      - KAIRIX_NEO4J_PASSWORD=${NEO4J_PASSWORD:-changeme}
+      - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
     depends_on:
       neo4j:
         condition: service_healthy
@@ -58,7 +58,7 @@ services:
     environment:
       - KAIRIX_NEO4J_URI=bolt://neo4j:7687
       - KAIRIX_NEO4J_USER=neo4j
-      - KAIRIX_NEO4J_PASSWORD=${NEO4J_PASSWORD:-changeme}
+      - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
     depends_on:
       neo4j:
         condition: service_healthy
@@ -68,12 +68,12 @@ services:
     image: neo4j:5-community
     # Pin for production: neo4j:5.24.0-community
     environment:
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-changeme}
+      NEO4J_AUTH: neo4j/${KAIRIX_NEO4J_PASSWORD}
       NEO4J_PLUGINS: '[]'
     volumes:
       - neo4j-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-changeme} 'RETURN 1' || exit 1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${KAIRIX_NEO4J_PASSWORD} 'RETURN 1' || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 5

@@ -22,10 +22,10 @@ Kairix requires these secrets to operate:
 
 | Secret | Environment variable | Sensitivity |
 |---|---|---|
-| Azure OpenAI API key | `AZURE_OPENAI_API_KEY` | HIGH — rotate on any suspected exposure |
-| Azure OpenAI endpoint URL | `AZURE_OPENAI_ENDPOINT` | MEDIUM |
-| Embedding deployment name | `AZURE_OPENAI_EMBED_DEPLOYMENT` | LOW |
-| GPT-4o-mini deployment name | `AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT` | LOW |
+| LLM API key | `KAIRIX_LLM_API_KEY` | HIGH — rotate on any suspected exposure |
+| LLM endpoint URL | `KAIRIX_LLM_ENDPOINT` | MEDIUM |
+| Embedding model name | `KAIRIX_EMBED_MODEL` | LOW |
+| Chat model name | `KAIRIX_LLM_MODEL` | LOW |
 | Neo4j password | `KAIRIX_NEO4J_PASSWORD` | HIGH (if Neo4j installed) |
 
 ### Production: tmpfs via systemd oneshot unit (recommended)
@@ -49,7 +49,7 @@ source "${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 kairix embed
 
 # Wrong — secrets fetched inline, appear in cron log, require az CLI auth per-run
-export AZURE_OPENAI_API_KEY=$(az keyvault secret show ...)
+export KAIRIX_LLM_API_KEY=$(az keyvault secret show ...)
 ```
 
 ### Local development
@@ -94,14 +94,14 @@ Neo4j is an **optional** dependency (`pip install "kairix[neo4j]"`). If Neo4j is
 
 ## API Key Rotation
 
-Rotate `AZURE_OPENAI_API_KEY` when:
+Rotate `KAIRIX_LLM_API_KEY` when:
 - Any team member with access leaves
 - Suspected exposure (logs, debug output, screenshots)
 - Quarterly as standard hygiene
 
 Rotation steps:
 1. Generate new key in Azure Portal → Azure OpenAI resource → Keys and Endpoint
-2. Update the Key Vault secret: `az keyvault secret set --vault-name <vault> --name azure-openai-api-key --value "<new-key>"`
+2. Update the Key Vault secret: `az keyvault secret set --vault-name <vault> --name kairix-llm-api-key --value "<new-key>"`
 3. Restart `kairix-fetch-secrets.service` to refresh `/run/secrets/kairix.env`: `sudo systemctl restart kairix-fetch-secrets.service`
 4. Verify the next scheduled embed cron picks up the new key (check log output within 1 hour)
 5. Disable the old key in Azure Portal

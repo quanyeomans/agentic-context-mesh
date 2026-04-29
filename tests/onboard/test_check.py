@@ -111,8 +111,8 @@ def test_neo4j_check_exception_surfaces_as_failed_result() -> None:
 
 @pytest.mark.unit
 def test_secrets_loaded_ok_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "key-abc12345")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.openai.azure.com/")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "key-abc12345")
+    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://example.openai.azure.com/")
     result = check_secrets_loaded()
     assert result.ok
     assert "key-abc1" in result.detail  # masked key present
@@ -120,8 +120,8 @@ def test_secrets_loaded_ok_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.unit
 def test_secrets_loaded_fail_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
     monkeypatch.delenv("KAIRIX_SECRETS_FILE", raising=False)
     result = check_secrets_loaded()
     assert not result.ok
@@ -131,11 +131,11 @@ def test_secrets_loaded_fail_when_missing(monkeypatch: pytest.MonkeyPatch) -> No
 @pytest.mark.unit
 def test_secrets_loaded_ok_from_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Tier 2: secrets file with both keys present returns ok=True."""
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
 
     secrets_file = tmp_path / "kairix.env"
-    secrets_file.write_text("AZURE_OPENAI_API_KEY=test-key\nAZURE_OPENAI_ENDPOINT=https://example.openai.azure.com/\n")
+    secrets_file.write_text("KAIRIX_LLM_API_KEY=test-key\nKAIRIX_LLM_ENDPOINT=https://example.openai.azure.com/\n")
     monkeypatch.setenv("KAIRIX_SECRETS_FILE", str(secrets_file))
 
     result = check_secrets_loaded()

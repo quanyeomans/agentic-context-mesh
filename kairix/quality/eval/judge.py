@@ -187,11 +187,11 @@ class JudgeResult:
 
 def fetch_llm_credentials() -> tuple[str, str, str]:
     """
-    Fetch Azure OpenAI credentials for the LLM judge.
+    Fetch LLM credentials for the judge.
 
-    Delegates to ``kairix.secrets.get_secret()`` which resolves via:
-    1. Direct env vars (AZURE_OPENAI_API_KEY etc.)
-    2. Sidecar secrets file (/run/secrets/kairix.env)
+    Delegates to ``kairix.credentials.get_credentials("llm")`` which resolves via:
+    1. Direct env vars (KAIRIX_LLM_API_KEY etc.)
+    2. Per-file secrets / sidecar secrets file
     3. Azure Key Vault CLI fallback (KAIRIX_KV_NAME)
 
     Returns:
@@ -199,13 +199,15 @@ def fetch_llm_credentials() -> tuple[str, str, str]:
 
     Never raises -- returns empty strings on failure (judge returns all-zero grades).
     """
-    from kairix.secrets import get_secret
+    try:
+        from kairix.credentials import get_credentials
 
-    api_key = get_secret("azure-openai-api-key", required=False) or ""
-    endpoint = get_secret("azure-openai-endpoint", required=False) or ""
-    deployment = get_secret("azure-openai-gpt4o-mini-deployment", required=False) or JUDGE_DEPLOYMENT
-
-    return api_key, endpoint, deployment
+        creds = get_credentials("llm")
+        if creds is None:
+            return "", "", JUDGE_DEPLOYMENT
+        return creds.api_key or "", creds.endpoint or "", creds.model or JUDGE_DEPLOYMENT
+    except Exception:
+        return "", "", JUDGE_DEPLOYMENT
 
 
 # ---------------------------------------------------------------------------

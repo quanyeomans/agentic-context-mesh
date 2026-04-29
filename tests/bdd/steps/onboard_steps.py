@@ -24,8 +24,8 @@ _state: dict = {}
 
 @given("kairix is installed with valid credentials")
 def kairix_with_credentials(monkeypatch):
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "test-key-12345678")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com/")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key-12345678")
+    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://test.openai.azure.com/")
     _state["has_credentials"] = True
 
 
@@ -110,8 +110,8 @@ def document_root_configured_passes():
 
 @given("kairix is installed without API credentials")
 def kairix_without_credentials(monkeypatch):
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
     monkeypatch.delenv("KAIRIX_SECRETS_FILE", raising=False)
     _state["has_credentials"] = False
 

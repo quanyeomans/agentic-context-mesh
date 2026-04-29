@@ -51,7 +51,7 @@ def no_azure_calls(monkeypatch, request):
     if "e2e" not in request.keywords:
         monkeypatch.setenv("KAIRIX_EMBED_BACKEND", "fake")
         monkeypatch.delenv("KAIRIX_AZURE_API_KEY", raising=False)
-        monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
 
 
 @pytest.fixture

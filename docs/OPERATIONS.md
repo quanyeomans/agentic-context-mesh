@@ -31,7 +31,7 @@ cp env.example .env    # .env is gitignored
 source .env && kairix search "test query" --agent builder
 ```
 
-**For GitHub Actions:** add each variable as a repository secret (Settings → Secrets and variables → Actions). The CI workflows that need Azure credentials read them as `${{ secrets.AZURE_OPENAI_API_KEY }}` etc.
+**For GitHub Actions:** add each variable as a repository secret (Settings → Secrets and variables → Actions). The CI workflows that need Azure credentials read them as `${{ secrets.KAIRIX_LLM_API_KEY }}` etc.
 
 **Key variables to set first:**
 
@@ -64,21 +64,21 @@ Create the following secrets in Key Vault:
 
 | Secret name | Value |
 |---|---|
-| `azure-openai-endpoint` | `https://<your-resource>.cognitiveservices.azure.com/` |
-| `azure-openai-api-key` | Your Azure OpenAI API key |
-| `azure-openai-embedding-deployment` | `text-embedding-3-large` (or your deployment name) |
-| `azure-openai-gpt4o-mini-deployment` | `gpt-4o-mini` (or your deployment name) |
+| `kairix-llm-endpoint` | `https://<your-resource>.cognitiveservices.azure.com/` |
+| `kairix-llm-api-key` | Your Azure OpenAI API key |
+| `kairix-embed-model` | `text-embedding-3-large` (or your deployment name) |
+| `kairix-llm-model` | `gpt-4o-mini` (or your deployment name) |
 | `kairix-neo4j-password` | Your Neo4j password |
 
 ```bash
 # Create secrets (run once, from a machine with Key Vault access)
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-endpoint \
   --value "https://your-resource.cognitiveservices.azure.com/"
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-api-key \
   --value "your-api-key"
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-embedding-deployment \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-embed-model \
   --value "text-embedding-3-large"
-az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name azure-openai-gpt4o-mini-deployment \
+az keyvault secret set --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-model \
   --value "gpt-4o-mini"
 ```
 
@@ -93,7 +93,7 @@ The VM running Kairix must be able to authenticate to Azure Key Vault. Two optio
 
 ```bash
 # Verify managed identity auth is working
-az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-endpoint --query value -o tsv
+az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-endpoint --query value -o tsv
 ```
 
 **Option B: Service Principal**
@@ -315,9 +315,9 @@ nano /opt/kairix/service.env
 source /opt/kairix/service.env
 
 ENDPOINT=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
-  --name azure-openai-endpoint --query value -o tsv)
+  --name kairix-llm-endpoint --query value -o tsv)
 APIKEY=$(az keyvault secret show --vault-name ${KAIRIX_KV_NAME} \
-  --name azure-openai-api-key --query value -o tsv)
+  --name kairix-llm-api-key --query value -o tsv)
 
 echo "Endpoint: ${ENDPOINT:0:40}..."
 echo "Key: ${APIKEY:0:8}..."
@@ -328,8 +328,8 @@ Both must return values. If either is empty, check Azure CLI auth and Key Vault 
 ### Step 4: Run a test embed (first 20 chunks)
 
 ```bash
-AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
-AZURE_OPENAI_API_KEY="$APIKEY" \
+KAIRIX_LLM_ENDPOINT="$ENDPOINT" \
+KAIRIX_LLM_API_KEY="$APIKEY" \
 kairix embed --limit 20
 ```
 
@@ -347,8 +347,8 @@ If you see `SchemaVersionError` or `usearch index load failed`, see [Troubleshoo
 ### Step 5: Full vault embed
 
 ```bash
-AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
-AZURE_OPENAI_API_KEY="$APIKEY" \
+KAIRIX_LLM_ENDPOINT="$ENDPOINT" \
+KAIRIX_LLM_API_KEY="$APIKEY" \
 nohup kairix embed >> ${KAIRIX_DATA_DIR:-/var/lib/kairix}/logs/embed.log 2>&1 &
 echo "PID: $!"
 ```
@@ -380,8 +380,8 @@ Expected: entity count ≥ 50 for a typical vault.
 ### Step 8: Test briefing
 
 ```bash
-AZURE_OPENAI_ENDPOINT="$ENDPOINT" \
-AZURE_OPENAI_API_KEY="$APIKEY" \
+KAIRIX_LLM_ENDPOINT="$ENDPOINT" \
+KAIRIX_LLM_API_KEY="$APIKEY" \
 kairix brief builder
 ```
 
@@ -416,7 +416,7 @@ source "${KAIRIX_SECRETS_FILE:-/run/secrets/kairix.env}"
 kairix embed
 
 # Wrong — fetches secrets inline, requires az CLI auth per-run, leaks into cron logs
-export AZURE_OPENAI_API_KEY=$(az keyvault secret show ...)
+export KAIRIX_LLM_API_KEY=$(az keyvault secret show ...)
 ```
 
 For production VM deployments, `kairix-fetch-secrets.service` writes Azure credentials to `/run/secrets/kairix.env` (tmpfs) at boot using the VM's managed identity. See [SECURITY.md](../SECURITY.md) for setup detail.
@@ -470,9 +470,9 @@ All credentials are fetched from Azure Key Vault at runtime. You can override an
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `AZURE_OPENAI_API_KEY` | Azure OpenAI API key | From Key Vault `azure-openai-api-key` |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `azure-openai-endpoint` |
-| `AZURE_OPENAI_EMBED_DEPLOYMENT` | Embedding deployment name | From Key Vault `azure-openai-embedding-deployment` |
+| `KAIRIX_LLM_API_KEY` | Azure OpenAI API key | From Key Vault `kairix-llm-api-key` |
+| `KAIRIX_LLM_ENDPOINT` | Azure OpenAI endpoint URL | From Key Vault `kairix-llm-endpoint` |
+| `KAIRIX_EMBED_MODEL` | Embedding deployment name | From Key Vault `kairix-embed-model` |
 | `KAIRIX_VAULT_ROOT` | Path to Obsidian vault | `/path/to/vault` |
 | `KAIRIX_DATA_DIR` | Data directory for logs | `/var/lib/kairix` |
 | `KAIRIX_WORKSPACE_ROOT` | Agent memory log root | `/data/workspaces` |
@@ -613,14 +613,14 @@ head -1 $(which kairix)
 # Should show: #!/usr/bin/env bash  (not #!/path/to/python)
 ```
 
-### `AZURE_OPENAI_API_KEY not set`
+### `KAIRIX_LLM_API_KEY not set`
 
 The embed or briefing command can't find Azure credentials.
 
 ```bash
 # Check Key Vault auth
 az account show
-az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name azure-openai-api-key --query value -o tsv
+az keyvault secret show --vault-name ${KAIRIX_KV_NAME} --name kairix-llm-api-key --query value -o tsv
 ```
 
 If `az account show` fails, run `az login` or check the VM's managed identity assignment.
@@ -670,7 +670,7 @@ sqlite3 ~/.cache/kairix/index.sqlite \
 # Should be 1536
 
 # If 0 vectors: run full re-embed
-AZURE_OPENAI_ENDPOINT="$ENDPOINT" AZURE_OPENAI_API_KEY="$APIKEY" \
+KAIRIX_LLM_ENDPOINT="$ENDPOINT" KAIRIX_LLM_API_KEY="$APIKEY" \
 kairix embed --force
 ```
 

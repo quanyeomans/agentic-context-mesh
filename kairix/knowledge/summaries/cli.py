@@ -149,8 +149,11 @@ def main(argv: list[str] | None = None) -> None:
 
     # Fetch credentials (only needed for generation)
     try:
-        api_key = _get_cred("azure-openai-api-key")
-        endpoint = _get_cred("azure-openai-endpoint")
+        from kairix.credentials import get_credentials
+
+        llm_creds = get_credentials("llm")
+        api_key = llm_creds.api_key
+        endpoint = llm_creds.endpoint
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)

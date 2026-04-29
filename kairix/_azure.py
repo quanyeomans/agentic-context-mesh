@@ -3,28 +3,19 @@ Shared Azure OpenAI client for the kairix pipeline.
 
 Provides:
   - embed_text(text: str) -> list[float]
-        Embeds text via Azure OpenAI text-embedding-3-large.
+        Embeds text via the configured LLM provider (Azure OpenAI, OpenAI, etc.).
         Returns [] on any failure — callers treat [] as "no embedding available".
 
-Secrets are fetched at runtime from Azure Key Vault using the Azure CLI.
-The Key Vault name is read from the KAIRIX_KV_NAME environment variable.
-They are cached in-process for the process lifetime (never written to disk or logs).
-
-Key Vault secret names:
-  azure-openai-api-key
-  azure-openai-endpoint
-  azure-openai-embedding-deployment  (default: text-embedding-3-large)
-
-Override secrets via environment variables for testing (or when not using Key Vault):
-  AZURE_OPENAI_API_KEY
-  AZURE_OPENAI_ENDPOINT
-  AZURE_OPENAI_EMBED_DEPLOYMENT
-  KAIRIX_KV_NAME  — Key Vault name (required when using Key Vault auth)
+Credentials are resolved by ``kairix.credentials.get_credentials()`` which checks:
+  1. Direct env vars (KAIRIX_LLM_API_KEY / KAIRIX_EMBED_API_KEY etc.)
+  2. Per-file secret (/run/secrets/<name> or ~/.config/kairix/secrets/<name>)
+  3. Bundle file (kairix.env — vault-agent sidecar pattern)
+  4. Azure Key Vault CLI fallback (KAIRIX_KV_NAME)
 
 Failure modes:
-  - Key Vault unavailable: returns []
+  - Credentials unavailable: returns []
   - Network error: returns []
-  - Azure API error (rate limit, auth failure, etc.): returns []
+  - API error (rate limit, auth failure, etc.): returns []
   - Malformed response: returns []
   Never raises.
 """
@@ -52,49 +43,30 @@ _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"
 _EMBED_TIMEOUT_S = 30
 
 
-def _resolve_secret(secret_name: str) -> str | None:
-    """Resolve a single secret, returning None on any failure. Never raises or logs values."""
-    try:
-        from kairix.secrets import get_secret
-
-        return get_secret(secret_name, required=False) or None
-    except Exception:
-        logger.warning("_azure: failed to resolve a required credential")
-        return None
-
-
 @lru_cache(maxsize=1)
 def _get_secrets() -> dict[str, str]:
     """
-    Fetch Azure OpenAI secrets from Key Vault or environment.
+    Fetch embed credentials via ``get_credentials("embed")``.
 
     Cached for the process lifetime (lru_cache with maxsize=1).
     Returns {} on any failure — callers check for missing keys.
     Never raises.
-
-    Delegates to kairix.secrets.get_secret() for single-source secret
-    resolution (env var -> sidecar file -> Key Vault CLI).
     """
-    secrets: dict[str, str] = {}
+    try:
+        from kairix.credentials import get_credentials
 
-    secret_map = {
-        "api_key": "azure-openai-api-key",
-        "endpoint": "azure-openai-endpoint",
-        "deployment": "azure-openai-embedding-deployment",
-    }
-
-    for key, secret_name in secret_map.items():
-        resolved = _resolve_secret(secret_name)
-        if resolved:
-            secrets[key] = resolved
-
-    if "deployment" not in secrets:
-        secrets["deployment"] = _DEFAULT_EMBED_DEPLOYMENT
-
-    if secrets.get("endpoint"):
-        secrets["endpoint"] = secrets["endpoint"].rstrip("/")
-
-    return secrets
+        creds = get_credentials("embed")
+        if creds is None:
+            return {}
+        secrets: dict[str, str] = {
+            "api_key": creds.api_key,
+            "endpoint": creds.endpoint.rstrip("/"),
+            "deployment": creds.model or _DEFAULT_EMBED_DEPLOYMENT,
+        }
+        return secrets
+    except Exception:
+        logger.warning("_azure: failed to resolve embed credentials")
+        return {}
 
 
 def _get_client() -> Any:
@@ -160,7 +132,7 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
     """
     Call GPT-4o-mini for synthesis via Azure OpenAI chat completions.
 
-    Uses the azure-openai-gpt4o-mini-deployment KV secret for the deployment name.
+    Uses the kairix-llm-model secret for the model/deployment name.
     Same endpoint and API key as embeddings.
 
     Returns empty string on any failure. Never raises.
@@ -172,13 +144,14 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
         logger.warning("chat_completion: failed to get client — %s", e)
         return ""
 
-    # Fetch GPT-4o-mini deployment name separately (different KV secret)
+    # Fetch LLM model name via credentials
     try:
-        from kairix.secrets import get_secret
+        from kairix.credentials import get_credentials
 
-        deployment = get_secret("azure-openai-gpt4o-mini-deployment", required=False) or ""
+        llm_creds = get_credentials("llm")
+        deployment = llm_creds.model if llm_creds else ""
     except Exception as e:
-        logger.warning("chat_completion: error resolving GPT-4o-mini deployment secret — %s", e)
+        logger.warning("chat_completion: error resolving LLM model — %s", e)
         deployment = ""
 
     if not deployment:

@@ -125,9 +125,13 @@ def test_adaptive_queries_used_when_db_available() -> None:
 
 @pytest.mark.unit
 def test_embed_query_returns_none_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Returns None when Azure credentials are not set."""
-    monkeypatch.delenv("AZURE_OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+    """Returns None when embed credentials are not set."""
+    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
+    monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
     result = _embed_query("test query")
     assert result is None
 
@@ -135,8 +139,9 @@ def test_embed_query_returns_none_without_credentials(monkeypatch: pytest.Monkey
 @pytest.mark.unit
 def test_embed_query_returns_array_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns normalised numpy array when API call succeeds."""
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "fake-key")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "fake-key")
+    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://fake.example.com/")
+    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
 
     fake_vec = [0.1] * 1536
     mock_resp = MagicMock()
@@ -156,8 +161,9 @@ def test_embed_query_returns_array_on_success(monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.unit
 def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Returns None when the API call raises an exception."""
-    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "fake-key")
-    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake.example.com/")
+    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "fake-key")
+    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://fake.example.com/")
+    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
 
     with patch("requests.post", side_effect=OSError("timeout")):
         result = _embed_query("test query")

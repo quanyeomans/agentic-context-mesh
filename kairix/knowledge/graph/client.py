@@ -41,9 +41,24 @@ logging.getLogger("neo4j").setLevel(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
-_NEO4J_URI = os.environ.get("KAIRIX_NEO4J_URI", "bolt://localhost:7687")
-_NEO4J_USER = os.environ.get("KAIRIX_NEO4J_USER", "neo4j")
-_NEO4J_PASSWORD = os.environ.get("KAIRIX_NEO4J_PASSWORD", "")
+
+def _get_neo4j_defaults() -> tuple[str, str, str]:
+    """Resolve Neo4j credentials lazily via get_credentials("graph")."""
+    try:
+        from kairix.credentials import get_credentials
+
+        creds = get_credentials("graph")
+        if creds is not None:
+            return creds.uri, creds.user, creds.password
+    except Exception:  # noqa: S110 — fallback to env vars below
+        pass
+    # Fallback to env vars for backwards compatibility
+    return (
+        os.environ.get("KAIRIX_NEO4J_URI", "bolt://localhost:7687"),
+        os.environ.get("KAIRIX_NEO4J_USER", "neo4j"),
+        os.environ.get("KAIRIX_NEO4J_PASSWORD", ""),
+    )
+
 
 # Constraints ensure idempotent upserts via MERGE on id property
 _CONSTRAINT_QUERIES = [
@@ -77,10 +92,15 @@ class Neo4jClient:
 
     def __init__(
         self,
-        uri: str = _NEO4J_URI,
-        user: str = _NEO4J_USER,
-        password: str = _NEO4J_PASSWORD,
+        uri: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
     ) -> None:
+        if uri is None or user is None or password is None:
+            _uri, _user, _password = _get_neo4j_defaults()
+            uri = uri or _uri
+            user = user or _user
+            password = password or _password
         self._uri = uri
         self._user = user
         self._password = password

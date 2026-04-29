@@ -35,10 +35,10 @@ and neo4j database via a shared in-memory volume.
 
 | KV Secret Name                        | Env Var Written                    |
 |---------------------------------------|------------------------------------|
-| `azure-openai-api-key`                | `AZURE_OPENAI_API_KEY`             |
-| `azure-openai-endpoint`               | `AZURE_OPENAI_ENDPOINT`            |
-| `azure-openai-embedding-deployment`   | `AZURE_OPENAI_EMBED_DEPLOYMENT`    |
-| `azure-openai-gpt4o-mini-deployment`  | `AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT` |
+| `kairix-llm-api-key`                | `KAIRIX_LLM_API_KEY`             |
+| `kairix-llm-endpoint`               | `KAIRIX_LLM_ENDPOINT`            |
+| `kairix-embed-model`   | `KAIRIX_EMBED_MODEL`    |
+| `kairix-llm-model`  | `KAIRIX_LLM_MODEL` |
 | `kairix-neo4j-password`               | `KAIRIX_NEO4J_PASSWORD`            |
 
 ## Usage

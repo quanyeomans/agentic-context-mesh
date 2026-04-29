@@ -24,10 +24,10 @@ def _test_llm_connection(provider: str, endpoint: str, api_key: str, embed_model
     """Test LLM connectivity with a single embed + chat call."""
     try:
         if provider == "azure":
-            os.environ["AZURE_OPENAI_ENDPOINT"] = endpoint
-            os.environ["AZURE_OPENAI_API_KEY"] = api_key
+            os.environ["KAIRIX_LLM_ENDPOINT"] = endpoint
+            os.environ["KAIRIX_LLM_API_KEY"] = api_key
         elif provider == "openai":
-            os.environ["OPENAI_API_KEY"] = api_key
+            os.environ["KAIRIX_LLM_API_KEY"] = api_key
 
         from kairix.platform.llm import get_default_backend
 
