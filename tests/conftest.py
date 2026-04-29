@@ -30,6 +30,10 @@ pytest_plugins = [
     "tests.bdd.steps.benchmark_steps",
     "tests.bdd.steps.mcp_search_steps",
     "tests.bdd.steps.mcp_prep_steps",
+    "tests.bdd.steps.timeline_absolute_steps",
+    "tests.bdd.steps.mcp_contradict_steps",
+    "tests.bdd.steps.chunk_date_steps",
+    "tests.bdd.steps.research_synthesis_steps",
 ]
 
 from tests.fixtures.embeddings import fake_embedding  # noqa: E402
