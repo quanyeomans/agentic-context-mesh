@@ -170,7 +170,61 @@ def cmd_embed(args: argparse.Namespace) -> int:
         logging.error("Recall gate FAILED — search quality degraded. Check logs.")
         return 1
 
+    # Post-embed summarise — generate L0 summaries for stale/new docs
+    if not args.skip_summarise:
+        _run_post_embed_summarise()
+
     return 0 if result["failed"] == 0 else 1
+
+
+def _run_post_embed_summarise() -> None:
+    """Generate L0 summaries for documents that don't have them yet.
+
+    Non-critical: failures are logged but don't block the embed return code.
+    """
+    try:
+        import os
+
+        from kairix.paths import document_root
+
+        droot = document_root()
+        all_docs = [str(p) for p in droot.rglob("*.md") if p.is_file()]
+        if not all_docs:
+            return
+
+        # Open summaries DB and find stale/missing docs
+        from kairix.knowledge.summaries.staleness import get_stale_paths, init_summaries_db
+
+        db_path = os.environ.get(
+            "KAIRIX_SUMMARIES_DB", str(__import__("pathlib").Path.home() / ".cache" / "kairix" / "summaries.db")
+        )
+        import sqlite3
+
+        db = sqlite3.connect(db_path)
+        init_summaries_db(db)
+
+        stale = get_stale_paths(all_docs, db)
+        if not stale:
+            logging.info("Summarise: all %d docs have current summaries", len(all_docs))
+            db.close()
+            return
+
+        # Cap at 100 docs per embed run to limit API cost
+        batch = stale[:100]
+        logging.info("Summarise: generating L0 for %d of %d stale docs (capped at 100)", len(batch), len(stale))
+
+        from kairix.knowledge.summaries.generate import generate_summaries
+        from kairix.knowledge.summaries.staleness import write_summary
+
+        results = generate_summaries(paths=batch, api_key="", endpoint="", deployment="gpt-4o-mini")
+        for r in results:
+            write_summary(r, db)
+
+        logging.info("Summarise: %d L0 summaries generated", len(results))
+        db.close()
+
+    except Exception:
+        logging.warning("Post-embed summarise failed (non-critical)", exc_info=True)
 
 
 def cmd_recall(args: argparse.Namespace) -> int:
@@ -236,6 +290,7 @@ def main() -> None:
     embed_p.add_argument("--limit", type=int, default=None, help="Cap total chunks (for validation)")
     embed_p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Chunks per Azure API call")
     embed_p.add_argument("--skip-recall-check", action="store_true", help="Skip post-embed quality gate")
+    embed_p.add_argument("--skip-summarise", action="store_true", help="Skip post-embed L0 summary generation")
 
     # recall-check
     sub.add_parser("recall-check", help="Run recall quality check standalone")
@@ -253,6 +308,7 @@ def main() -> None:
             args.limit = None
             args.batch_size = DEFAULT_BATCH_SIZE
             args.skip_recall_check = False
+            args.skip_summarise = False
         sys.exit(cmd_embed(args))
     elif args.command == "recall-check":
         sys.exit(cmd_recall(args))
