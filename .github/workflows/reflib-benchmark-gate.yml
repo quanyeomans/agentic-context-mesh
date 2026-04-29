@@ -3,10 +3,10 @@ name: Reference Library Benchmark Gate
 on:
   pull_request:
     paths:
-      - "kairix/search/**"
-      - "kairix/benchmark/**"
-      - "kairix/eval/**"
-      - "kairix/reflib/**"
+      - "kairix/core/search/**"
+      - "kairix/quality/benchmark/**"
+      - "kairix/quality/eval/**"
+      - "kairix/knowledge/reflib/**"
       - "suites/reflib-contract-suite.yaml"
       - "benchmark-results/reflib-contract-baseline.json"
       - "reference-library/**"

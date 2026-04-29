@@ -135,7 +135,9 @@ def sample_documents(
         random.seed(seed)
 
     try:
-        db = sqlite3.connect(db_path, timeout=10.0)
+        from kairix.core.db import open_db
+
+        db = open_db(Path(db_path), extensions=False)
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("sample_documents: failed to open %r — %s", db_path, e)

@@ -20,22 +20,20 @@ Never raises — logs failures and continues. Returns a CrawlReport on completio
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from kairix.utils import slugify
+from kairix.knowledge.wikilinks import WIKILINK_RE
+from kairix.utils import display_name, slugify
 
 if TYPE_CHECKING:
     from kairix.knowledge.graph.models import OrganisationNode
 
 logger = logging.getLogger(__name__)
 
-# Regex: extract YAML frontmatter block between --- delimiters
-_FM_PATTERN = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 # Regex: extract all [[wikilinks]] from text (ignores [[Link|Alias]] alias part)
-_WIKILINK_PATTERN = re.compile(r"\[\[([^\]|#]+?)(?:\|[^\]]+?)?\]\]")
+_WIKILINK_PATTERN = WIKILINK_RE
 
 # Directory names under 02-Areas to search for People-Notes
 _PEOPLE_DIRS = {"People-Notes", "people-notes"}
@@ -245,20 +243,41 @@ def crawl(
 
 
 def _parse_frontmatter(path: Path) -> dict[str, Any]:
-    """Parse YAML frontmatter from a markdown file. Returns {} on any failure."""
+    """Parse YAML frontmatter from a markdown file. Returns {} on any failure.
+
+    Delegates text extraction to ``extract_existing_frontmatter``, then
+    re-parses with ``yaml.safe_load`` for full YAML support (lists, nested values)
+    that the crawler's entity model requires.
+    """
+    from kairix.knowledge.reflib.frontmatter import extract_existing_frontmatter
+
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return {}
 
-    match = _FM_PATTERN.match(text)
-    if not match:
-        return {}
+    simple_parsed, _ = extract_existing_frontmatter(text)
+    if simple_parsed is None:
+        # No frontmatter found at all — also try lenient match (no trailing newline)
+        import re
+
+        lenient = re.match(r"\A---\s*\n(.*?)\n---", text, re.DOTALL)
+        if not lenient:
+            return {}
+        block = lenient.group(1)
+    else:
+        # Re-extract the raw YAML block for full yaml.safe_load parsing
+        import re
+
+        match = re.match(r"\A---\s*\n(.*?)\n---", text, re.DOTALL)
+        if not match:
+            return dict(simple_parsed)  # fallback to simple parsing
+        block = match.group(1)
 
     try:
         import yaml
 
-        result = yaml.safe_load(match.group(1))
+        result = yaml.safe_load(block)
         return result if isinstance(result, dict) else {}
     except Exception:
         return {}
@@ -284,7 +303,7 @@ def _to_slug(name: str) -> str:
 
 def _to_display_name(name: str) -> str:
     """Convert slug/filename to a display name (title case, hyphens → spaces)."""
-    return name.replace("-", " ").replace("_", " ").title()
+    return display_name(name)
 
 
 def _as_list(value: Any) -> list[str]:

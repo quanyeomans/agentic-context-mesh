@@ -64,7 +64,7 @@ def split_at_headings(
 
         if section_text:
             heading_text = match.group(2).strip()
-            section_slug = _to_slug(heading_text)
+            section_slug = _heading_slug(heading_text)
             sections.append((section_slug, section_text))
 
     # Include any preamble before the first heading
@@ -92,8 +92,20 @@ def split_at_headings(
     return result
 
 
-def _to_slug(text: str) -> str:
-    """Convert heading text to a URL-safe slug."""
+def _heading_slug(text: str) -> str:
+    """Convert a markdown heading to a URL-safe slug (max 60 chars).
+
+    This differs from ``kairix.utils.slugify`` in two ways:
+    1. Caps output at 60 characters (headings can be very long).
+    2. Uses a simpler regex that only keeps ``[a-z0-9]``, spaces, and
+       hyphens — ``slugify`` also strips Unicode and applies different
+       whitespace rules suited to document *titles* rather than section
+       headings.
+
+    Kept separate because section-heading slugs feed into chunk stem
+    names (e.g. ``doc-part-03-design-decisions``) where a shorter,
+    ASCII-only slug avoids filesystem issues.
+    """
     slug = text.lower()
     slug = re.sub(r"[^a-z0-9\s-]", "", slug)
     slug = re.sub(r"[\s_]+", "-", slug)

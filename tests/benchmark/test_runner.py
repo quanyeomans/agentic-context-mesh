@@ -4,7 +4,7 @@ Tests for kairix.quality.benchmark.runner — covers previously-untested paths:
 - _fuzzy_match(): partial path matching
 - _classification_score(): rule classifier integration
 - _llm_judge(): API call mocked + error paths
-- _score_tier(): tier labels
+- score_tier(): tier labels
 - _category_diagnosis(): diagnostic strings
 - format_interpretation(): output structure
 """
@@ -31,10 +31,10 @@ from kairix.quality.benchmark.runner import (
     _normalise_title,
     _reciprocal_rank,
     _reciprocal_rank_by_title,
-    _score_tier,
     _stem_from_path,
     _title_in_retrieved,
     format_interpretation,
+    score_tier,
 )
 
 # ---------------------------------------------------------------------------
@@ -175,21 +175,11 @@ def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyP
 @pytest.mark.unit
 def test_llm_judge_returns_score_from_api() -> None:
     """Returns float score from API response."""
-    mock_resp_body = b'{"choices":[{"message":{"content":"0.8"}}]}'
-
-    mock_response = MagicMock()
-    mock_response.read.return_value = mock_resp_body
-    mock_response.__enter__ = lambda s: s
-    mock_response.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_response):
+    with patch("kairix._azure.chat_completion", return_value="0.8"):
         score = _llm_judge(
             query="what are our engineering patterns?",
             paths=["04-Agent-Knowledge/builder/patterns.md"],
             snippets=["Engineering patterns for Builder"],
-            api_key="fake-key",
-            endpoint="https://fake.example.com",
-            deployment="gpt-4o-mini",
         )
 
     assert score == pytest.approx(0.8)
@@ -198,14 +188,8 @@ def test_llm_judge_returns_score_from_api() -> None:
 @pytest.mark.unit
 def test_llm_judge_clamps_to_range() -> None:
     """Clamps score to [0.0, 1.0]."""
-    mock_resp_body = b'{"choices":[{"message":{"content":"1.5"}}]}'
-    mock_response = MagicMock()
-    mock_response.read.return_value = mock_resp_body
-    mock_response.__enter__ = lambda s: s
-    mock_response.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_response):
-        score = _llm_judge("q", ["p.md"], ["s"], "k", "https://e.com")
+    with patch("kairix._azure.chat_completion", return_value="1.5"):
+        score = _llm_judge("q", ["p.md"], ["s"])
 
     assert score == 1.0
 
@@ -213,8 +197,8 @@ def test_llm_judge_clamps_to_range() -> None:
 @pytest.mark.unit
 def test_llm_judge_returns_0_on_api_error() -> None:
     """Returns 0.0 when API call fails."""
-    with patch("urllib.request.urlopen", side_effect=OSError("timeout")):
-        score = _llm_judge("q", ["p.md"], ["s"], "k", "https://e.com")
+    with patch("kairix._azure.chat_completion", side_effect=OSError("timeout")):
+        score = _llm_judge("q", ["p.md"], ["s"])
 
     assert score == 0.0
 
@@ -222,47 +206,42 @@ def test_llm_judge_returns_0_on_api_error() -> None:
 @pytest.mark.unit
 def test_llm_judge_returns_0_for_empty_paths() -> None:
     """Returns 0.0 immediately when no paths are provided."""
-    score = _llm_judge("q", [], [], "k", "https://e.com")
+    score = _llm_judge("q", [], [])
     assert score == 0.0
 
 
 @pytest.mark.unit
 def test_llm_judge_returns_0_on_bad_json() -> None:
-    """Returns 0.0 when response body is not valid JSON."""
-    mock_response = MagicMock()
-    mock_response.read.return_value = b"not json"
-    mock_response.__enter__ = lambda s: s
-    mock_response.__exit__ = MagicMock(return_value=False)
-
-    with patch("urllib.request.urlopen", return_value=mock_response):
-        score = _llm_judge("q", ["p.md"], ["s"], "k", "https://e.com")
+    """Returns 0.0 when chat_completion returns non-numeric text."""
+    with patch("kairix._azure.chat_completion", return_value="not a number"):
+        score = _llm_judge("q", ["p.md"], ["s"])
 
     assert score == 0.0
 
 
 # ---------------------------------------------------------------------------
-# _score_tier
+# score_tier
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_score_tier_production() -> None:
-    assert "Production" in _score_tier(0.762)
+def testscore_tier_production() -> None:
+    assert "Production" in score_tier(0.762)
 
 
 @pytest.mark.unit
-def test_score_tier_stable() -> None:
-    assert "Phase 2" in _score_tier(0.69)
+def testscore_tier_stable() -> None:
+    assert "Phase 2" in score_tier(0.69)
 
 
 @pytest.mark.unit
-def test_score_tier_developing() -> None:
-    assert "BM25" in _score_tier(0.61)
+def testscore_tier_developing() -> None:
+    assert "BM25" in score_tier(0.61)
 
 
 @pytest.mark.unit
-def test_score_tier_needs_work() -> None:
-    assert "BM25" in _score_tier(0.45)
+def testscore_tier_needs_work() -> None:
+    assert "BM25" in score_tier(0.45)
 
 
 # ---------------------------------------------------------------------------

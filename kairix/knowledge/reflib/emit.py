@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 
 from kairix.knowledge.reflib.extract import RawRelationship
-from kairix.knowledge.reflib.resolve import ResolvedEntity, _to_slug
+from kairix.knowledge.reflib.resolve import ResolvedEntity
+from kairix.utils import slugify
 
 
 def emit_entity_stubs(
@@ -60,8 +61,8 @@ def emit_entity_stubs(
     seen_edges: set[tuple[str, str, str]] = set()
     edges = []
     for r in relationships:
-        from_id = name_to_id.get(r.from_name, _to_slug(r.from_name))
-        to_id = name_to_id.get(r.to_name, _to_slug(r.to_name))
+        from_id = name_to_id.get(r.from_name, slugify(r.from_name))
+        to_id = name_to_id.get(r.to_name, slugify(r.to_name))
         if not from_id or not to_id:
             continue
         edge_key = (from_id, to_id, r.kind)

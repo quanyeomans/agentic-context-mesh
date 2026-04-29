@@ -20,7 +20,8 @@ shift the baseline score and require a new baseline run.
 
 from __future__ import annotations
 
-import re
+from kairix.quality.benchmark._mock_engine import build_keyword_index
+from kairix.quality.benchmark._mock_engine import mock_retrieve as _engine_retrieve
 
 # ---------------------------------------------------------------------------
 # Fixture corpus
@@ -155,20 +156,12 @@ FIXTURE_DOCUMENTS: list[dict] = [
 ]
 
 # Build keyword → document index for O(k) lookup per query
-_KEYWORD_INDEX: dict[str, list[int]] = {}
-for _i, _doc in enumerate(FIXTURE_DOCUMENTS):
-    for _kw in _doc["keywords"]:
-        _KEYWORD_INDEX.setdefault(_kw.lower(), []).append(_i)
+_KEYWORD_INDEX: dict[str, list[int]] = build_keyword_index(FIXTURE_DOCUMENTS)
 
 
 # ---------------------------------------------------------------------------
 # Mock retriever
 # ---------------------------------------------------------------------------
-
-
-def _tokenise(text: str) -> set[str]:
-    """Extract lowercase word tokens from text."""
-    return set(re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)*", text.lower()))
 
 
 def mock_retrieve(query: str, limit: int = 10) -> tuple[list[str], list[str], dict]:
@@ -178,21 +171,11 @@ def mock_retrieve(query: str, limit: int = 10) -> tuple[list[str], list[str], di
     Scoring: count of matching keywords. Ties broken by fixture index order.
     Returns (paths, snippets, metadata) matching the _retrieve() contract in runner.py.
     """
-    query_tokens = _tokenise(query)
-    scores: dict[int, int] = {}
-
-    for token in query_tokens:
-        for doc_idx in _KEYWORD_INDEX.get(token, []):
-            scores[doc_idx] = scores.get(doc_idx, 0) + 1
-
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    top = ranked[:limit]
-
-    paths = [FIXTURE_DOCUMENTS[i]["path"] for i, _ in top]
-    snippets = [FIXTURE_DOCUMENTS[i]["snippet"] for i, _ in top]
-    meta = {
-        "system": "mock",
-        "n_matched": len(top),
-        "query_tokens": sorted(query_tokens),
-    }
-    return paths, snippets, meta
+    return _engine_retrieve(
+        fixture_docs=FIXTURE_DOCUMENTS,
+        keyword_index=_KEYWORD_INDEX,
+        query=query,
+        limit=limit,
+        system_name="mock",
+        snippet_field="snippet",
+    )

@@ -13,9 +13,10 @@ BM25Result is a TypedDict for lightweight, serialisable results.
 import logging
 import re
 import sqlite3
+from pathlib import Path
 from typing import TypedDict
 
-from kairix.core.db import get_db_path
+from kairix.core.db import get_db_path, open_db
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ def bm25_search(
 
     try:
         db_path = get_db_path()
-        db = sqlite3.connect(str(db_path), timeout=5.0)
+        db = open_db(Path(db_path), extensions=False)
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("bm25_search: cannot open database — %s", e)

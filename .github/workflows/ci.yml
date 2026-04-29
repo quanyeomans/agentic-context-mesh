@@ -50,7 +50,7 @@ jobs:
               - '*.md'
               - '!CLAUDE.md'
             reflib:
-              - 'kairix/reflib/**'
+              - 'kairix/knowledge/reflib/**'
               - 'reference-library/**'
 
   # ── Pre-commit (linting, formatting, secrets, file hygiene) ────────────────
@@ -230,9 +230,9 @@ jobs:
 
       - name: Verify core imports
         run: |
-          python -c "from kairix.embed.embed import encode_vector, build_hash_seq; print('Embed OK')"
-          python -c "from kairix.store.crawler import crawl; print('Store OK')"
-          python -c "from kairix.reflib.sources import SOURCES; print(f'Reflib OK: {len(SOURCES)} sources')"
+          python -c "from kairix.core.embed.embed import build_hash_seq; print('Embed OK')"
+          python -c "from kairix.knowledge.store.crawler import crawl; print('Store OK')"
+          python -c "from kairix.knowledge.reflib.sources import SOURCES; print(f'Reflib OK: {len(SOURCES)} sources')"
 
       - name: Upload test results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

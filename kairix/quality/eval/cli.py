@@ -242,10 +242,9 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
 
 
 def _cmd_auto_gold(args: argparse.Namespace) -> int:
-    import sqlite3
     from pathlib import Path
 
-    from kairix.core.db import get_db_path
+    from kairix.core.db import get_db_path, open_db
     from kairix.quality.eval.auto_gold import analyse_corpus, build_suite, generate_template_queries
 
     try:
@@ -254,7 +253,7 @@ def _cmd_auto_gold(args: argparse.Namespace) -> int:
         print("ERROR: kairix index not found. Run 'kairix embed' first.", file=sys.stderr)
         return 1
 
-    db = sqlite3.connect(str(db_path))
+    db = open_db(Path(db_path), extensions=False)
     profile = analyse_corpus(db)
     db.close()
 
@@ -283,7 +282,7 @@ def _cmd_auto_gold(args: argparse.Namespace) -> int:
 
 def _cmd_tune(args: argparse.Namespace) -> int:
     import json
-    import sqlite3
+    from pathlib import Path
 
     from kairix.quality.eval.tune import CorpusHints, analyse_results, recommend
 
@@ -316,11 +315,11 @@ def _cmd_tune(args: argparse.Namespace) -> int:
     # Build corpus hints from the index if available
     hints = CorpusHints()
     try:
-        from kairix.core.db import get_db_path
+        from kairix.core.db import get_db_path, open_db
         from kairix.quality.eval.auto_gold import analyse_corpus
 
         db_path = get_db_path()
-        db = sqlite3.connect(str(db_path))
+        db = open_db(Path(db_path), extensions=False)
         profile = analyse_corpus(db)
         db.close()
         hints = CorpusHints(

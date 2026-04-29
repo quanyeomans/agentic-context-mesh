@@ -12,13 +12,13 @@ from pathlib import Path
 
 import yaml
 
+from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
+
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
 
-VALID_CATEGORIES = frozenset(
-    {"recall", "temporal", "entity", "conceptual", "multi_hop", "procedural", "classification", "semantic", "keyword"}
-)
+VALID_CATEGORIES = frozenset(CATEGORY_WEIGHTS.keys()) | frozenset(CATEGORY_ALIASES.keys())
 VALID_SCORE_METHODS = frozenset({"exact", "fuzzy", "llm", "classification", "ndcg"})
 
 

@@ -14,8 +14,6 @@ Score methods:
 from __future__ import annotations
 
 import json
-import math
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -24,21 +22,29 @@ from pathlib import Path
 from typing import Any
 
 from kairix.quality.benchmark.suite import BenchmarkSuite
-from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
-from kairix.secrets import get_secret
+from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS, PHASE_GATES
+from kairix.quality.eval.metrics import (
+    dcg as _dcg,
+)
+from kairix.quality.eval.metrics import (
+    hit_at_k_graded as _hit_at_k,
+)
+from kairix.quality.eval.metrics import (
+    ideal_dcg_graded as _ideal_dcg,
+)
+from kairix.quality.eval.metrics import (
+    ndcg_graded as _ndcg_score,
+)
+from kairix.quality.eval.metrics import (
+    reciprocal_rank_graded as _reciprocal_rank,
+)
 
 # Re-export so existing `from kairix.quality.benchmark.runner import CATEGORY_WEIGHTS` keeps working
-__all__ = ["CATEGORY_ALIASES", "CATEGORY_WEIGHTS"]
+__all__ = ["CATEGORY_ALIASES", "CATEGORY_WEIGHTS", "PHASE_GATES"]
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-PHASE_GATES: dict[str, float] = {
-    "phase1": 0.62,
-    "phase2": 0.68,
-    "phase3": 0.75,
-}
 
 SCORE_TIERS = [
     (0.80, "Phase 4 target — fully-tuned with synthesis"),
@@ -55,79 +61,6 @@ CATEGORY_FLOOR = 0.50  # per-category minimum for gate pass
 # How many top results to inspect for exact/fuzzy matching
 EXACT_MATCH_TOPK = 5
 FUZZY_MATCH_TOPK = 10
-
-# ---------------------------------------------------------------------------
-# NDCG@10 helpers — graded-relevance path-based variants
-#
-# These use the gold_paths list[dict] format ({"path": ..., "relevance": 0/1/2})
-# which supports graded relevance and suffix-based path matching. The simpler
-# binary-relevance functions live in kairix.quality.eval.metrics (ndcg_score, hit_at_k,
-# mean_reciprocal_rank).
-# ---------------------------------------------------------------------------
-
-
-def _dcg(relevances: list[float], k: int) -> float:
-    """Discounted Cumulative Gain at k."""
-    return sum(rel / math.log2(i + 2) for i, rel in enumerate(relevances[:k]))
-
-
-def _ideal_dcg(gold_paths: list[dict], k: int) -> float:
-    """IDCG: ideal ordering (sort by relevance desc, take top k)."""
-    sorted_rels = sorted([g["relevance"] for g in gold_paths], reverse=True)
-    return _dcg(sorted_rels, k)
-
-
-def _path_relevance(path: str, gold_map: dict[str, float]) -> float:
-    """Return relevance of a retrieved path via exact then suffix match against gold_map."""
-    p = path.lower().replace("\\", "/")
-    if p in gold_map:
-        return gold_map[p]
-    parts = p.split("/")
-    for n in range(1, len(parts)):
-        suffix = "/".join(parts[n:])
-        if suffix in gold_map:
-            return gold_map[suffix]
-    return 0.0
-
-
-def _path_in_set(path: str, gold_set: set[str]) -> bool:
-    """True if path matches any gold entry via exact or suffix match."""
-    p = path.lower().replace("\\", "/")
-    if p in gold_set:
-        return True
-    parts = p.split("/")
-    for n in range(1, len(parts)):
-        if "/".join(parts[n:]) in gold_set:
-            return True
-    return False
-
-
-def _ndcg_score(retrieved: list[str], gold_paths: list[dict], k: int = 10) -> float:
-    """Compute NDCG@k given retrieved path list and graded gold list."""
-    if not gold_paths:
-        return 0.0
-    idcg = _ideal_dcg(gold_paths, k)
-    if idcg == 0.0:
-        return 0.0
-    gold_map = {g["path"].lower(): g["relevance"] for g in gold_paths}
-    rels = [_path_relevance(p, gold_map) for p in retrieved[:k]]
-    return _dcg(rels, k) / idcg
-
-
-def _hit_at_k(retrieved: list[str], gold_paths: list[dict], k: int) -> bool:
-    """True if any gold path (any relevance >= 1) appears in top-k retrieved."""
-    gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
-    return any(_path_in_set(p, gold_set) for p in retrieved[:k])
-
-
-def _reciprocal_rank(retrieved: list[str], gold_paths: list[dict], k: int) -> float:
-    """Reciprocal rank of first relevant gold path in top-k (0 if none)."""
-    gold_set = {g["path"].lower() for g in gold_paths if g.get("relevance", 0) >= 1}
-    for i, p in enumerate(retrieved[:k]):
-        if _path_in_set(p, gold_set):
-            return 1.0 / (i + 1)
-    return 0.0
-
 
 # ---------------------------------------------------------------------------
 # Title-based NDCG helpers (TREC qrels pattern — path-agnostic document identity)
@@ -154,7 +87,7 @@ def _path_suffix_from_path(path: str) -> str:
     return _normalise_title(path.replace(".md", ""))
 
 
-def _match_gold_to_path(gold_title: str, result_path: str) -> bool:
+def match_gold_to_path(gold_title: str, result_path: str) -> bool:
     """Check if a gold title matches a retrieved path.
 
     Path-based (contains '/'): match as suffix of the result path.
@@ -173,13 +106,13 @@ def _match_gold_to_path(gold_title: str, result_path: str) -> bool:
 
 def _title_in_retrieved(gold_title: str, retrieved_paths: list[str], top_k: int) -> bool:
     """True if any of the top-k retrieved paths resolves to the gold title."""
-    return any(_match_gold_to_path(gold_title, p) for p in retrieved_paths[:top_k])
+    return any(match_gold_to_path(gold_title, p) for p in retrieved_paths[:top_k])
 
 
 def _relevance_for_path(path: str, gold_titles: list[dict]) -> int:
     """Return the relevance grade for a retrieved path against gold titles."""
     for g in gold_titles:
-        if _match_gold_to_path(g["title"], path):
+        if match_gold_to_path(g["title"], path):
             return g.get("relevance", 0)
     return 0
 
@@ -291,9 +224,6 @@ def _llm_judge(
     query: str,
     paths: list[str],
     snippets: list[str],
-    api_key: str,
-    endpoint: str,
-    deployment: str = "gpt-4o-mini",
 ) -> float:
     """
     Score 0.0-1.0 using gpt-4o-mini as relevance judge.
@@ -301,7 +231,7 @@ def _llm_judge(
     Returns 0.0 on any failure (API error, parse error, timeout).
     """
     try:
-        import urllib.request
+        from kairix._azure import chat_completion
 
         if not paths:
             return 0.0
@@ -323,29 +253,8 @@ def _llm_judge(
             "Reply with ONLY a number between 0.0 and 1.0."
         )
 
-        payload = json.dumps(
-            {
-                "model": deployment,
-                "messages": [
-                    {"role": "user", "content": prompt},
-                ],
-                "max_tokens": 10,
-                "temperature": 0.0,
-            }
-        ).encode()
-
-        # Build URL: Azure OpenAI chat completions
-        url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions?api-version=2024-02-01"
-
-        req = urllib.request.Request(  # noqa: S310
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json", "api-key": api_key},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310  # nosec B310
-            body = json.loads(resp.read())
-        content = body["choices"][0]["message"]["content"].strip()
+        messages = [{"role": "user", "content": prompt}]
+        content = chat_completion(messages, max_tokens=10)
         score = float(content)
         return max(0.0, min(1.0, score))
 
@@ -432,7 +341,7 @@ def _retrieve(
 # ---------------------------------------------------------------------------
 
 
-def _score_tier(score: float) -> str:
+def score_tier(score: float) -> str:
     for threshold, label in SCORE_TIERS:
         if score >= threshold:
             return label
@@ -459,7 +368,7 @@ def format_interpretation(result: BenchmarkResult) -> str:
     """Return a human-readable interpretation section."""
     lines: list[str] = []
     wt = result.summary["weighted_total"]
-    tier = _score_tier(wt)
+    tier = score_tier(wt)
 
     lines.append("=" * 60)
     lines.append("BENCHMARK RESULTS")
@@ -527,15 +436,6 @@ def run_benchmark(
     Returns:
         BenchmarkResult with summary, category scores, and per-case results.
     """
-    # Fetch Azure credentials for LLM judge via kairix.secrets (env → sidecar → KV)
-    api_key = get_secret("azure-openai-api-key", required=False) or os.environ.get("AZURE_OPENAI_API_KEY", "")
-    endpoint = get_secret("azure-openai-endpoint", required=False) or os.environ.get("AZURE_OPENAI_ENDPOINT", "")
-    deployment = (
-        get_secret("azure-openai-gpt4o-mini-deployment", required=False)
-        or os.environ.get("AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT", "")
-        or "gpt-4o-mini"
-    )
-
     case_results: list[dict[str, Any]] = []
     # Include all valid categories including classification
     all_categories = set(CATEGORY_WEIGHTS.keys()) | {"classification"}
@@ -599,9 +499,6 @@ def run_benchmark(
                 query=case.query,
                 paths=paths,
                 snippets=snippets,
-                api_key=api_key,
-                endpoint=endpoint,
-                deployment=deployment,
             )
 
         elapsed_ms = (time.time() - t0) * 1000

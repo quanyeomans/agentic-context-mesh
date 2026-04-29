@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+from kairix.text import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -73,28 +73,19 @@ def _call_chat(
     max_tokens: int,
 ) -> tuple[str, int]:
     """
-    POST to Azure OpenAI chat completions endpoint.
+    Call Azure OpenAI chat completions via the shared SDK client.
 
-    Returns (content, total_tokens_used). Raises httpx.HTTPStatusError on non-2xx.
+    Returns (content, estimated_tokens_used). Raises on failure.
+
+    The api_key, endpoint, and deployment parameters are accepted for backwards
+    compatibility but ignored — credentials are resolved by ``kairix._azure``.
     """
-    url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions?api-version=2024-02-01"
-    headers = {
-        "api-key": api_key,
-        "Content-Type": "application/json",
-    }
-    body = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": 0.0,
-    }
-    with httpx.Client(timeout=60) as client:
-        resp = client.post(url, headers=headers, json=body)
-        resp.raise_for_status()
+    from kairix._azure import chat_completion
 
-    data = resp.json()
-    content: str = data["choices"][0]["message"]["content"].strip()
-    tokens_used: int = data.get("usage", {}).get("total_tokens", 0)
-    return content, tokens_used
+    content = chat_completion(messages, max_tokens=max_tokens)
+    # Token usage is not available from the shared client; estimate from output length.
+    tokens_est = estimate_tokens(content)
+    return content, tokens_est
 
 
 # ---------------------------------------------------------------------------
@@ -182,12 +173,12 @@ def generate_summaries(
 
             l0 = generate_l0(path, content, api_key, endpoint, deployment)
             # Rough token estimate for L0 if usage not tracked here
-            tokens_total += len(l0.split()) * 4 // 3
+            tokens_total += estimate_tokens(l0)
 
             l1: str | None = None
             if include_l1:
                 l1 = generate_l1(path, content, api_key, endpoint, deployment)
-                tokens_total += len(l1.split()) * 4 // 3
+                tokens_total += estimate_tokens(l1)
 
             results.append(
                 SummaryResult(

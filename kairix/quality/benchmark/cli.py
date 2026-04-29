@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
-from kairix.core.db import get_db_path
+from kairix.core.db import get_db_path, open_db
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -91,7 +90,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         _db_path = None
     if _db_path is not None:
-        db = sqlite3.connect(str(_db_path))
+        db = open_db(Path(_db_path), extensions=False)
         errors = validate_suite(suite, db, strict=False)
         db.close()
         if errors:
@@ -137,7 +136,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print("✅ Schema validation passed")
         return 0
 
-    db = sqlite3.connect(str(_db_path))
+    db = open_db(Path(_db_path), extensions=False)
     errors = validate_suite(suite, db, strict=True)
     db.close()
 
@@ -175,17 +174,13 @@ def cmd_compare(args: argparse.Namespace) -> int:
     a_label = f"{a_meta.get('system', 'A')} ({a_meta.get('date', '?')})"
     b_label = f"{b_meta.get('system', 'B')} ({b_meta.get('date', '?')})"
 
-    from kairix.quality.benchmark.runner import CATEGORY_WEIGHTS, _score_tier
+    from kairix.quality.benchmark.runner import CATEGORY_WEIGHTS, score_tier
 
     print("=" * 60)
     print("BENCHMARK COMPARISON")
     print("=" * 60)
-    print(
-        f"  A: {a_label}  total={a_sum.get('weighted_total', 0):.3f}  [{_score_tier(a_sum.get('weighted_total', 0))}]"
-    )
-    print(
-        f"  B: {b_label}  total={b_sum.get('weighted_total', 0):.3f}  [{_score_tier(b_sum.get('weighted_total', 0))}]"
-    )
+    print(f"  A: {a_label}  total={a_sum.get('weighted_total', 0):.3f}  [{score_tier(a_sum.get('weighted_total', 0))}]")
+    print(f"  B: {b_label}  total={b_sum.get('weighted_total', 0):.3f}  [{score_tier(b_sum.get('weighted_total', 0))}]")
 
     delta = b_sum.get("weighted_total", 0) - a_sum.get("weighted_total", 0)
     direction = "▲" if delta > 0 else ("▼" if delta < 0 else "=")

@@ -130,9 +130,9 @@ def _vsearch_usearch(query_vec: np.ndarray, limit: int = RECALL_LIMIT) -> list[s
     Returns list of document paths in similarity order.
     """
     try:
-        from kairix.core.search.hybrid import _get_vector_index
+        from kairix.core.search.hybrid import get_vector_index
 
-        index = _get_vector_index()
+        index = get_vector_index()
         if index is None:
             logger.warning("usearch index not available for recall check")
             return []
@@ -155,9 +155,9 @@ def check_recall(db: sqlite3.Connection | None = None) -> dict:
     close_db = False
     if db is None:
         try:
-            from kairix.core.db import get_db_path
+            from kairix.core.db import get_db_path, open_db
 
-            db = sqlite3.connect(str(get_db_path()))
+            db = open_db(Path(get_db_path()), extensions=False)
             close_db = True
         except FileNotFoundError:
             db = None

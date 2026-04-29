@@ -51,32 +51,47 @@ class TestClassifyIntent:
         assert result["intent"] == "semantic"
 
 
+def _mock_search_result(paths_snippets: list[tuple[str, str]]):
+    """Build a mock SearchResult with BudgetedResult-like objects."""
+    results = []
+    for path, snippet in paths_snippets:
+        fused = MagicMock()
+        fused.path = path
+        budgeted = MagicMock()
+        budgeted.result = fused
+        budgeted.content = snippet
+        results.append(budgeted)
+    sr = MagicMock()
+    sr.results = results
+    return sr
+
+
 @pytest.mark.unit
 class TestRetrieve:
-    def test_calls_tool_search(self) -> None:
-        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
-            mock_search.return_value = {"results": [{"path": "a.md", "snippet": "hello"}]}
+    def test_calls_search(self) -> None:
+        with patch("kairix.core.search.hybrid.search") as mock_search:
+            mock_search.return_value = _mock_search_result([("a.md", "hello")])
             result = retrieve(_state())
         assert len(result["retrieved_chunks"]) == 1
         assert result["retrieved_chunks"][0]["path"] == "a.md"
 
     def test_accumulates_across_turns(self) -> None:
         existing = [{"path": "old.md", "snippet": "existing"}]
-        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
-            mock_search.return_value = {"results": [{"path": "new.md", "snippet": "new"}]}
+        with patch("kairix.core.search.hybrid.search") as mock_search:
+            mock_search.return_value = _mock_search_result([("new.md", "new")])
             result = retrieve(_state(retrieved_chunks=existing, turns=1))
         assert len(result["retrieved_chunks"]) == 2
 
     def test_deduplicates_by_path(self) -> None:
         existing = [{"path": "same.md", "snippet": "v1"}]
-        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
-            mock_search.return_value = {"results": [{"path": "same.md", "snippet": "v2"}]}
+        with patch("kairix.core.search.hybrid.search") as mock_search:
+            mock_search.return_value = _mock_search_result([("same.md", "v2")])
             result = retrieve(_state(retrieved_chunks=existing))
         assert len(result["retrieved_chunks"]) == 1
 
     def test_higher_budget_on_refinement(self) -> None:
-        with patch("kairix.agents.mcp.server.tool_search") as mock_search:
-            mock_search.return_value = {"results": []}
+        with patch("kairix.core.search.hybrid.search") as mock_search:
+            mock_search.return_value = _mock_search_result([])
             retrieve(_state(turns=2))
         mock_search.assert_called_once()
         assert mock_search.call_args.kwargs["budget"] == 5000

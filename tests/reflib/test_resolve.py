@@ -8,9 +8,9 @@ from kairix.knowledge.reflib.extract import RawEntity
 from kairix.knowledge.reflib.resolve import (
     _levenshtein,
     _similarity,
-    _to_slug,
     resolve_entities,
 )
+from kairix.utils import slugify
 
 pytestmark = pytest.mark.unit
 
@@ -21,19 +21,19 @@ pytestmark = pytest.mark.unit
 
 class TestToSlug:
     def test_simple_name(self):
-        assert _to_slug("Marcus Aurelius") == "marcus-aurelius"
+        assert slugify("Marcus Aurelius") == "marcus-aurelius"
 
     def test_acronym(self):
-        assert _to_slug("OWASP") == "owasp"
+        assert slugify("OWASP") == "owasp"
 
     def test_special_chars(self):
-        assert _to_slug("dbt Labs (Analytics)") == "dbt-labs-analytics"
+        assert slugify("dbt Labs (Analytics)") == "dbt-labs-analytics"
 
     def test_hyphenated(self):
-        assert _to_slug("Twelve-Factor App") == "twelve-factor-app"
+        assert slugify("Twelve-Factor App") == "twelve-factor-app"
 
     def test_empty(self):
-        assert _to_slug("") == ""
+        assert slugify("") == ""
 
 
 # ---------------------------------------------------------------------------

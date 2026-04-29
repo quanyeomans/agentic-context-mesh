@@ -23,14 +23,13 @@ import time
 from pathlib import Path
 
 from kairix.knowledge.wikilinks.resolver import WikiEntity
+from kairix.paths import document_root, workspace_root
 
 # Injection log path
 _LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
-_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(
-    "KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault")
-)
-_WORKSPACE_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
+_DOCUMENT_ROOT = str(document_root())
+_WORKSPACE_ROOT = str(workspace_root())
 
 # Eligible base paths for injection
 _ELIGIBLE_PREFIXES = (
@@ -47,7 +46,7 @@ _INELIGIBLE_SUBSTRINGS = (
     "/home/<service-user>/.cache/shape/",
 )
 
-_MAX_FILE_SIZE = 500 * 1024  # 500 KB
+MAX_FILE_SIZE = 500 * 1024  # 500 KB
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +80,7 @@ def should_inject(path: str) -> bool:
 
     # Check file size if it exists
     try:
-        if os.path.getsize(path) > _MAX_FILE_SIZE:
+        if os.path.getsize(path) > MAX_FILE_SIZE:
             return False
     except OSError:
         pass  # file may not exist yet; defer to caller
@@ -356,7 +355,7 @@ def inject_file(path: str, entities: list[WikiEntity], dry_run: bool = False) ->
     except OSError:
         return []
 
-    if size > _MAX_FILE_SIZE:
+    if size > MAX_FILE_SIZE:
         return []
 
     try:

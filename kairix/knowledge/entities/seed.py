@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
-from kairix.utils import slugify
+from kairix.utils import display_name, slugify
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +77,7 @@ def _check_path_patterns(path: str, title: str, candidates: dict[str, EntityCand
     ]:
         m = pattern.search(path)
         if m:
-            raw_name = m.group(1).replace("-", " ").replace("_", " ").strip()
-            name = _title_case(raw_name)
+            name = _title_case(m.group(1))
             key = name.lower()
             if key in candidates:
                 candidates[key].source_docs.append(path)
@@ -92,9 +91,24 @@ def _check_path_patterns(path: str, title: str, candidates: dict[str, EntityCand
 
 
 def _title_case(s: str) -> str:
-    """Title-case a name, preserving acronyms (all-caps words stay caps)."""
-    words = s.split()
-    return " ".join(w if w.isupper() and len(w) > 1 else w.capitalize() for w in words)
+    """Title-case a name, preserving acronyms (all-caps words stay caps).
+
+    Uses ``display_name`` as the base transformation and then restores any
+    ALL-CAPS words from the original input.
+    """
+    base = display_name(s)
+    # Restore acronyms: if the original word was ALL-CAPS (len>1), keep it
+    original_words = s.replace("-", " ").replace("_", " ").split()
+    base_words = base.split()
+    result: list[str] = []
+    for orig, titled in zip(original_words, base_words, strict=False):
+        if orig.isupper() and len(orig) > 1:
+            result.append(orig)
+        else:
+            result.append(titled)
+    # If base has more/fewer words (shouldn't happen), append remainder
+    result.extend(base_words[len(original_words) :])
+    return " ".join(result)
 
 
 def seed_graph(client: Any, candidates: list[EntityCandidate]) -> int:

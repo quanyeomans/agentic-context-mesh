@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from kairix.core.db import get_db_path
+from kairix.core.db import get_db_path, open_db
 from kairix.core.search.bm25 import BM25Result, bm25_search
 from kairix.core.search.budget import BudgetedResult, apply_budget
 from kairix.core.search.config import RetrievalConfig
@@ -47,10 +47,22 @@ from kairix.core.search.rrf import (
     temporal_date_boost,
 )
 from kairix.core.search.vec_index import VECTOR_DEFAULT_K, VecResult
-from kairix.knowledge.graph.client import get_client as _get_neo4j
-from kairix.platform.llm import get_default_backend as _get_llm
 
 logger = logging.getLogger(__name__)
+
+
+def _get_neo4j():  # type: ignore[return]
+    """Lazy import for Neo4j client to avoid hard dependency at module load."""
+    from kairix.knowledge.graph.client import get_client
+
+    return get_client()
+
+
+def _get_llm():  # type: ignore[return]
+    """Lazy import for LLM backend to avoid hard dependency at module load."""
+    from kairix.platform.llm import get_default_backend
+
+    return get_default_backend()
 
 
 def embed_text_as_bytes(text: str) -> bytes | None:
@@ -225,7 +237,7 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
         return
 
     try:
-        db = sqlite3.connect(str(db_path))
+        db = open_db(Path(db_path), extensions=False)
         try:
             # Use LIKE suffix match because the DB stores absolute paths while FusedResult
             # paths may be collection-relative (e.g. "concept/builder.md" vs
@@ -415,7 +427,7 @@ def _preprocess_temporal(
             from kairix.core.temporal.rewriter import is_relative_temporal
 
             if is_relative_temporal(query):
-                _tmp2_db = sqlite3.connect(str(get_db_path()))
+                _tmp2_db = open_db(Path(get_db_path()), extensions=False)
                 try:
                     _paths = get_date_filtered_paths(_tmp2_db, start, end)
                     if _paths:  # empty = no dated chunks yet; do not filter
@@ -799,7 +811,7 @@ def _run_vector_search(
         if norm > 0:
             query_vec /= norm
 
-        index = _get_vector_index()
+        index = get_vector_index()
         if index is None or len(index) == 0:
             return []
 
@@ -819,7 +831,7 @@ def _run_vector_search(
 _VECTOR_INDEX: Any = None
 
 
-def _get_vector_index() -> Any:
+def get_vector_index() -> Any:
     """Lazily load the usearch vector index singleton."""
     global _VECTOR_INDEX
     if _VECTOR_INDEX is not None:

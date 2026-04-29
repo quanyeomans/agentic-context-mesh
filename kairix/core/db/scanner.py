@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kairix.knowledge.reflib.frontmatter import extract_title
+from kairix.text import extract_title
 
 logger = logging.getLogger(__name__)
 

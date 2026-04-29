@@ -173,7 +173,7 @@ def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.unit
 def test_vsearch_usearch_returns_empty_when_index_unavailable() -> None:
     """Returns [] when usearch index is not available."""
-    with patch("kairix.core.search.hybrid._get_vector_index", return_value=None):
+    with patch("kairix.core.search.hybrid.get_vector_index", return_value=None):
         result = _vsearch_usearch(np.zeros(1536, dtype=np.float32))
     assert result == []
 

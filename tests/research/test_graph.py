@@ -8,6 +8,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+def _mock_search_result(paths_snippets: list[tuple[str, str]]):
+    """Build a mock SearchResult with BudgetedResult-like objects."""
+    results = []
+    for path, snippet in paths_snippets:
+        fused = MagicMock()
+        fused.path = path
+        budgeted = MagicMock()
+        budgeted.result = fused
+        budgeted.content = snippet
+        results.append(budgeted)
+    sr = MagicMock()
+    sr.results = results
+    return sr
+
+
 @pytest.mark.unit
 def test_run_research_sufficient_first_pass() -> None:
     """Graph completes in one pass when results are sufficient."""
@@ -22,7 +37,8 @@ def test_run_research_sufficient_first_pass() -> None:
 
     with (
         patch(
-            "kairix.agents.mcp.server.tool_search", return_value={"results": [{"path": "doc.md", "snippet": "content"}]}
+            "kairix.core.search.hybrid.search",
+            return_value=_mock_search_result([("doc.md", "content")]),
         ),
         patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
         patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
@@ -54,10 +70,10 @@ def test_run_research_refines_then_succeeds() -> None:
     def mock_search(**kwargs):
         nonlocal call_count
         call_count += 1
-        return {"results": [{"path": f"doc{call_count}.md", "snippet": f"content {call_count}"}]}
+        return _mock_search_result([(f"doc{call_count}.md", f"content {call_count}")])
 
     with (
-        patch("kairix.agents.mcp.server.tool_search", side_effect=mock_search),
+        patch("kairix.core.search.hybrid.search", side_effect=mock_search),
         patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
         patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
     ):
@@ -85,7 +101,10 @@ def test_run_research_gives_up_after_max_turns() -> None:
     )
 
     with (
-        patch("kairix.agents.mcp.server.tool_search", return_value={"results": [{"path": "a.md", "snippet": "x"}]}),
+        patch(
+            "kairix.core.search.hybrid.search",
+            return_value=_mock_search_result([("a.md", "x")]),
+        ),
         patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
         patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
     ):

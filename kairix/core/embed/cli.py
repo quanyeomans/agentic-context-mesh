@@ -11,13 +11,12 @@ import argparse
 import fcntl
 import logging
 import os
-import sqlite3
 import sys
 import time
 from pathlib import Path
 from typing import IO
 
-from kairix.core.db import get_db_path, load_extensions
+from kairix.core.db import get_db_path, open_db
 
 from .embed import DEFAULT_BATCH_SIZE, run_embed
 from .recall_check import run_recall_gate
@@ -90,14 +89,8 @@ def cmd_embed(args: argparse.Namespace) -> int:
     result = None
 
     try:
-        db = sqlite3.connect(str(db_path))
+        db = open_db(Path(db_path))
         try:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.execute("PRAGMA busy_timeout=10000")
-
-            # Load sqlite-vec extension and ensure schema exists.
-            # create_schema is idempotent — safe on every run.
-            load_extensions(db)
             from kairix.core.db.schema import create_schema
 
             create_schema(db)
@@ -195,7 +188,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     from .schema import get_pending_chunks
 
     db_path = get_db_path()
-    db = sqlite3.connect(str(db_path))
+    db = open_db(Path(db_path), extensions=False)
     try:
         pending = get_pending_chunks(db)
         total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]

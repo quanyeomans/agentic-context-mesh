@@ -19,6 +19,8 @@ from typing import Any, TypedDict
 
 import numpy as np
 
+from kairix.core.db import open_db
+
 logger = logging.getLogger(__name__)
 
 # Default dimensions for text-embedding-3-large
@@ -110,7 +112,7 @@ class VectorIndex:
         # Resolve metadata from SQLite
         results = []
         try:
-            db = sqlite3.connect(str(self._db_path), timeout=5.0)
+            db = open_db(Path(self._db_path), extensions=False)
             db.row_factory = sqlite3.Row
             for key, distance in zip(matches.keys, matches.distances, strict=True):
                 hash_seq = self._key_to_hash_seq.get(int(key))

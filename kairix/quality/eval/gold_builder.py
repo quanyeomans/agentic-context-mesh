@@ -88,7 +88,7 @@ def _bm25_search_with_weights(
     """
     import re
 
-    from kairix.core.db import get_db_path
+    from kairix.core.db import get_db_path, open_db
 
     # Stop words (same as bm25.py)
     from kairix.core.search.bm25 import FTS_STOP_WORDS
@@ -103,7 +103,7 @@ def _bm25_search_with_weights(
 
     try:
         db_path = get_db_path()
-        db = sqlite3.connect(str(db_path), timeout=5.0)
+        db = open_db(Path(db_path), extensions=False)
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("gold_builder: cannot open DB — %s", e)
@@ -179,7 +179,7 @@ def _vector_search(
         import numpy as np
 
         from kairix._azure import embed_text
-        from kairix.core.search.hybrid import _get_vector_index
+        from kairix.core.search.hybrid import get_vector_index
 
         vec = embed_text(query)
         if not vec:
@@ -190,7 +190,7 @@ def _vector_search(
         if norm > 0:
             query_vec /= norm
 
-        index = _get_vector_index()
+        index = get_vector_index()
         if index is None:
             return []
 

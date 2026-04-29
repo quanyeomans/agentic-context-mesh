@@ -30,10 +30,10 @@ jobs:
             const title = pr.title || '';
 
             const retrieval_files = [
-              'kairix/search/',
-              'kairix/temporal/',
-              'kairix/embed/',
-              'kairix/entities/'
+              'kairix/core/search/',
+              'kairix/core/temporal/',
+              'kairix/core/embed/',
+              'kairix/knowledge/entities/'
             ];
 
             // Check if PR touches retrieval logic
@@ -97,12 +97,12 @@ jobs:
       - name: Verify public API imports
         run: |
           python -c "
-          from kairix.embed.embed import encode_vector, build_hash_seq, run_embed
-          from kairix.embed.schema import validate_schema, ensure_vec_table
-          from kairix.embed.recall_check import run_recall_gate
-          from kairix.setup.prompts import SetupContext
-          from kairix.entities.seed import scan_for_entities
-          from kairix.eval.auto_gold import analyse_corpus
-          from kairix.eval.tune import recommend
+          from kairix.core.embed.embed import build_hash_seq, run_embed
+          from kairix.core.embed.schema import validate_schema
+          from kairix.core.embed.recall_check import run_recall_gate
+          from kairix.platform.setup.prompts import SetupContext
+          from kairix.knowledge.entities.seed import scan_for_entities
+          from kairix.quality.eval.auto_gold import analyse_corpus
+          from kairix.quality.eval.tune import recommend
           print('All public API imports passed.')
           "

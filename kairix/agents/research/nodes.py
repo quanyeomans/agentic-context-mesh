@@ -35,7 +35,7 @@ def classify_intent(state: ResearcherState) -> dict[str, Any]:
 
 def retrieve(state: ResearcherState) -> dict[str, Any]:
     """Search the knowledge base for answers to the current query."""
-    from kairix.agents.mcp.server import tool_search
+    from kairix.core.search.hybrid import search
 
     query = state.get("refined_query") or state["query"]
     turns = state.get("turns", 0)
@@ -43,11 +43,13 @@ def retrieve(state: ResearcherState) -> dict[str, Any]:
     # Use a bigger budget on refinement turns — we need more context
     budget = INITIAL_BUDGET if turns == 0 else REFINEMENT_BUDGET
 
-    result = tool_search(query=query, budget=budget)
+    sr = search(query=query, budget=budget)
+
+    # Convert SearchResult to list-of-dicts for accumulation
+    new_results = [{"path": b.result.path, "snippet": b.content[:500]} for b in sr.results]
 
     # Accumulate results across turns (don't replace previous finds)
     existing = list(state.get("retrieved_chunks") or [])
-    new_results = result.get("results", [])
 
     # Deduplicate by path
     seen_paths = {r.get("path", "") for r in existing}

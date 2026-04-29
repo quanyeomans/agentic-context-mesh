@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from kairix.knowledge.reflib.frontmatter import strip_frontmatter
+from kairix.text import strip_frontmatter
 
 logger = logging.getLogger(__name__)
 

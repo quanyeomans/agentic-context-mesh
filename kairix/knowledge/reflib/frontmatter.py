@@ -11,15 +11,21 @@ from datetime import date
 from pathlib import Path
 
 from kairix.knowledge.reflib.sources import SourceDef
+from kairix.text import extract_title, strip_frontmatter
 
 # YAML frontmatter block — \A anchor ensures match only at string start
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
-# Same pattern without capture group, for strip_frontmatter
-_FRONTMATTER_STRIP_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n", re.DOTALL)
-
-# First markdown heading
-_FIRST_HEADING_RE = re.compile(r"^#{1,3}\s+(.+)$", re.MULTILINE)
+# Re-export for backwards compatibility
+__all__ = [
+    "Frontmatter",
+    "build_frontmatter",
+    "extract_existing_frontmatter",
+    "extract_title",
+    "inject_frontmatter",
+    "render_frontmatter",
+    "strip_frontmatter",
+]
 
 
 @dataclass
@@ -60,42 +66,6 @@ def extract_existing_frontmatter(text: str) -> tuple[dict[str, str] | None, str]
                 parsed[key] = value
 
     return parsed, body
-
-
-def strip_frontmatter(text: str) -> str:
-    """Remove YAML frontmatter block from the start of text.
-
-    Uses \\A anchor to match only at string start (not mid-string with DOTALL).
-    """
-    return _FRONTMATTER_STRIP_RE.sub("", text, count=1)
-
-
-def extract_title(text: str, path: Path) -> str:
-    """Extract a document title using priority: frontmatter > heading > filename.
-
-    Args:
-        text: Full document text (may include frontmatter).
-        path: File path for filename-based fallback.
-    """
-    # Priority 1: existing frontmatter title
-    existing, body = extract_existing_frontmatter(text)
-    if existing and existing.get("title"):
-        return existing["title"]
-
-    # Priority 2: first heading in body
-    heading_match = _FIRST_HEADING_RE.search(body if existing else text)
-    if heading_match:
-        title = heading_match.group(1).strip()
-        # Strip markdown links from heading
-        title = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", title)
-        if title and len(title) < 200:
-            return title
-
-    # Priority 3: filename stem → title case
-    stem = path.stem
-    # Convert kebab-case/snake_case to title
-    title = stem.replace("-", " ").replace("_", " ").strip()
-    return title.title() if title else "Untitled"
 
 
 def build_frontmatter(path: Path, source: SourceDef, text: str) -> Frontmatter:

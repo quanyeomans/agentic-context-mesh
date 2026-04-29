@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.quality.benchmark.runner import _match_gold_to_path, _relevance_for_path
+from kairix.quality.benchmark.runner import _relevance_for_path, match_gold_to_path
 from kairix.quality.eval.gold_builder import _path_title
 
 pytestmark = pytest.mark.unit
@@ -26,31 +26,31 @@ class TestPathTitle:
 
 class TestMatchGoldToPath:
     def test_path_based_matches_correct_file(self) -> None:
-        assert _match_gold_to_path(
+        assert match_gold_to_path(
             "engineering/adr-examples/readme",
             "reference-library/engineering/adr-examples/readme.md",
         )
 
     def test_path_based_rejects_different_file_same_stem(self) -> None:
-        assert not _match_gold_to_path(
+        assert not match_gold_to_path(
             "engineering/adr-examples/readme",
             "data-and-analysis/dbt-docs/readme.md",
         )
 
     def test_stem_only_matches(self) -> None:
-        assert _match_gold_to_path("patterns", "vault/knowledge/patterns.md")
+        assert match_gold_to_path("patterns", "vault/knowledge/patterns.md")
 
     def test_stem_only_rejects_different_stem(self) -> None:
-        assert not _match_gold_to_path("patterns", "vault/knowledge/anti-patterns.md")
+        assert not match_gold_to_path("patterns", "vault/knowledge/anti-patterns.md")
 
     def test_case_insensitive(self) -> None:
-        assert _match_gold_to_path(
+        assert match_gold_to_path(
             "Engineering/ADR-Examples/README",
             "reference-library/engineering/adr-examples/readme.md",
         )
 
     def test_hyphen_underscore_normalisation(self) -> None:
-        assert _match_gold_to_path(
+        assert match_gold_to_path(
             "engineering/adr_examples/read_me",
             "reference-library/engineering/adr-examples/read-me.md",
         )

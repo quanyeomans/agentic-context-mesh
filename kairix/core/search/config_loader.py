@@ -340,11 +340,7 @@ def _get_collection_overrides() -> dict[str, dict]:
     collections_cfg = load_collections()
     if not collections_cfg:
         return {}
-    return {
-        c.name: c.retrieval_overrides
-        for c in collections_cfg.shared
-        if c.retrieval_overrides
-    }
+    return {c.name: c.retrieval_overrides for c in collections_cfg.shared if c.retrieval_overrides}
 
 
 def resolve_retrieval_config(
@@ -376,7 +372,7 @@ def resolve_retrieval_config(
 
     # Hardcoded reference library baseline
     if target == "reference-library":
-        from kairix.knowledge.reflib.retrieval_config import REFLIB_RETRIEVAL_CONFIG
+        from kairix.core.search.config import REFLIB_RETRIEVAL_CONFIG
 
         return REFLIB_RETRIEVAL_CONFIG
 

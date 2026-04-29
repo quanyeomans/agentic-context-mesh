@@ -21,3 +21,18 @@ CATEGORY_ALIASES: dict[str, str] = {
     "semantic": "recall",
     "keyword": "conceptual",
 }
+
+# Phase gate thresholds — used by benchmark runner and performance reporter
+PHASE_GATES: dict[str, float] = {
+    "phase1": 0.62,
+    "phase2": 0.68,
+    "phase3": 0.75,
+}
+
+# Reporter gate thresholds — per-category minimum scores
+REPORTER_GATES: dict[str, float] = {
+    "overall": 0.78,
+    "temporal": 0.55,
+    "entity": 0.80,
+    "contextual_prep": 0.60,
+}

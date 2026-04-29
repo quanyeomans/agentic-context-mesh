@@ -19,7 +19,7 @@ from pathlib import Path
 
 from kairix.knowledge.wikilinks.injector import (
     _LOG_PATH,
-    _MAX_FILE_SIZE,
+    MAX_FILE_SIZE,
     inject_file,
     should_inject,
 )
@@ -178,7 +178,7 @@ def _gather_eligible_files() -> list[str]:
             path_str = str(md_file)
             if should_inject(path_str):
                 try:
-                    if md_file.stat().st_size <= _MAX_FILE_SIZE:
+                    if md_file.stat().st_size <= MAX_FILE_SIZE:
                         result.append(path_str)
                 except OSError:
                     continue

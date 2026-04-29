@@ -38,22 +38,6 @@ class ResolvedEntity:
 # ---------------------------------------------------------------------------
 
 
-def _to_slug(name: str) -> str:
-    """Convert a name to a lowercase, hyphenated slug.
-
-    Delegates to ``kairix.utils.slugify`` — kept as a local alias for
-    backwards compatibility (tests and ``kairix.knowledge.reflib.emit`` import this name).
-
-    >>> _to_slug("Marcus Aurelius")
-    'marcus-aurelius'
-    >>> _to_slug("OWASP Cheat Sheet Series")
-    'owasp-cheat-sheet-series'
-    >>> _to_slug("dbt Labs")
-    'dbt-labs'
-    """
-    return slugify(name)
-
-
 # ---------------------------------------------------------------------------
 # Levenshtein distance (pure Python, no external deps)
 # ---------------------------------------------------------------------------
@@ -147,7 +131,7 @@ def resolve_entities(raw: list[RawEntity]) -> list[ResolvedEntity]:
     # Step 1: group by (slug, type)
     groups: dict[tuple[str, str], list[RawEntity]] = defaultdict(list)
     for entity in raw:
-        slug = _to_slug(entity.name)
+        slug = slugify(entity.name)
         if not slug:
             continue
         groups[(slug, entity.entity_type)].append(entity)

@@ -264,9 +264,9 @@ def sweep_bm25_params(
     )
 
     # Open DB once for all configs
-    from kairix.core.db import get_db_path
+    from kairix.core.db import get_db_path, open_db
 
-    db = sqlite3.connect(str(get_db_path()), timeout=10.0)
+    db = open_db(Path(get_db_path()), extensions=False)
     db.row_factory = sqlite3.Row
 
     report = SweepReport()

@@ -17,13 +17,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kairix.knowledge.wikilinks.injector import _MAX_FILE_SIZE, should_inject
+from kairix.knowledge.wikilinks import WIKILINK_RE
+from kairix.knowledge.wikilinks.injector import MAX_FILE_SIZE, should_inject
 from kairix.knowledge.wikilinks.resolver import WikiEntity
 
 _LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
-# Regex to find all [[wikilinks]] in content
-_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+# Canonical wikilink regex (excludes anchor links)
+_WIKILINK_RE = WIKILINK_RE
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +129,7 @@ def find_unlinked_mentions(
     for md_file in sampled:
         try:
             size = md_file.stat().st_size
-            if size > _MAX_FILE_SIZE:
+            if size > MAX_FILE_SIZE:
                 continue
             content = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):

@@ -243,14 +243,14 @@ def _match_relevance(retrieved_path: str, gold: list[dict]) -> int:
     gold titles containing '/' match as suffix of the retrieved path,
     titles without '/' match against the filename stem only.
     """
-    from kairix.quality.benchmark.runner import _match_gold_to_path
+    from kairix.quality.benchmark.runner import match_gold_to_path
 
     for g in gold:
         title = g.get("title") or g.get("path", "")
         # Strip .md extension from path-format gold entries to match runner convention
         if title.endswith(".md"):
             title = title[:-3]
-        if _match_gold_to_path(title, retrieved_path):
+        if match_gold_to_path(title, retrieved_path):
             return int(g.get("relevance", 0))
     return 0
 

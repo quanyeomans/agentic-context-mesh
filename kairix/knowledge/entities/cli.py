@@ -77,9 +77,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_seed(args: argparse.Namespace) -> int:
     """kairix entity seed — discover entities from indexed documents and seed Neo4j."""
-    import sqlite3
+    from pathlib import Path
 
-    from kairix.core.db import get_db_path
+    from kairix.core.db import get_db_path, open_db
     from kairix.knowledge.entities.seed import scan_for_entities, seed_graph
 
     try:
@@ -88,7 +88,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
         print("ERROR: kairix index not found. Run 'kairix embed' first.", file=sys.stderr)
         return 1
 
-    db = sqlite3.connect(str(db_path))
+    db = open_db(Path(db_path), extensions=False)
     candidates = scan_for_entities(db, limit=args.limit)
     db.close()
 

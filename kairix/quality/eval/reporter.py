@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
+from kairix.quality.eval.constants import REPORTER_GATES
+
 
 class PerformanceReporter:
     """
@@ -18,12 +20,7 @@ class PerformanceReporter:
     """
 
     # Gate thresholds — can be overridden at construction time
-    GATES: ClassVar[dict[str, float]] = {
-        "overall": 0.78,
-        "temporal": 0.55,
-        "entity": 0.80,
-        "contextual_prep": 0.60,
-    }
+    GATES: ClassVar[dict[str, float]] = REPORTER_GATES
 
     def __init__(
         self,
@@ -32,8 +29,7 @@ class PerformanceReporter:
     ) -> None:
         self._path = Path(results_path)
         self._results = self._load(self._path)
-        if gates:
-            type(self).GATES = {**type(self).GATES, **gates}
+        self._gates = {**type(self).GATES, **(gates or {})}
 
     @staticmethod
     def _load(path: Path) -> dict[str, Any]:
@@ -58,7 +54,7 @@ class PerformanceReporter:
 
     def passes_gates(self) -> bool:
         scores = self._category_scores(self._results)
-        for category, threshold in self.GATES.items():
+        for category, threshold in self._gates.items():
             if scores.get(category, 0.0) < threshold:
                 return False
         return True
@@ -67,7 +63,7 @@ class PerformanceReporter:
         """Return list of (category, actual_score, gate_threshold) for failures."""
         scores = self._category_scores(self._results)
         failures = []
-        for category, threshold in self.GATES.items():
+        for category, threshold in self._gates.items():
             actual = scores.get(category, 0.0)
             if actual < threshold:
                 failures.append((category, actual, threshold))
@@ -93,10 +89,10 @@ class PerformanceReporter:
             "|----------|-------|------|--------|-------|",
         ]
 
-        all_cats = sorted(set(list(scores.keys()) + list(self.GATES.keys())))
+        all_cats = sorted(set(list(scores.keys()) + list(self._gates.keys())))
         for cat in all_cats:
             score = scores.get(cat, None)
-            gate = self.GATES.get(cat)
+            gate = self._gates.get(cat)
             score_str = f"{score:.3f}" if score is not None else "—"
             gate_str = f"{gate:.2f}" if gate is not None else "—"
 

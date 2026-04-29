@@ -35,7 +35,6 @@ import json
 import logging
 import random
 import re
-import urllib.request
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -225,26 +224,10 @@ def _call_llm(
     Call Azure OpenAI chat completions. Returns the response content string.
     Raises on any network or API error.
     """
-    url = f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions?api-version={JUDGE_API_VERSION}"
-    payload = json.dumps(
-        {
-            "model": deployment,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens,
-            "temperature": 0.0,
-        }
-    ).encode()
+    from kairix._azure import chat_completion
 
-    req = urllib.request.Request(  # noqa: S310
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json", "api-key": api_key},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=JUDGE_TIMEOUT_S) as resp:  # noqa: S310  # nosec B310
-        body = json.loads(resp.read())
-    content: str = body["choices"][0]["message"]["content"].strip()
-    return content
+    messages = [{"role": "user", "content": prompt}]
+    return chat_completion(messages, max_tokens=max_tokens)
 
 
 # ---------------------------------------------------------------------------
