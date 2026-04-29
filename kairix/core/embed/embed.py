@@ -84,11 +84,15 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHU
 
 def _get_azure_config() -> tuple[str, str, str]:
     """
-    Read Azure config from env vars. Fails fast with clear message if missing.
-    Callers (scripts/deploy.sh) set these after fetching from Key Vault.
+    Read embed API config from env vars. Supports Azure, OpenRouter, or any
+    OpenAI-compatible endpoint.
+
+    Override with KAIRIX_EMBED_API_KEY and KAIRIX_EMBED_ENDPOINT to use a
+    different provider for embedding (e.g. OpenRouter) while keeping Azure
+    for chat completions.
     """
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
-    endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+    api_key = os.environ.get("KAIRIX_EMBED_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    endpoint = os.environ.get("KAIRIX_EMBED_ENDPOINT") or os.environ.get("AZURE_OPENAI_ENDPOINT")
     deployment = os.environ.get("AZURE_OPENAI_EMBED_DEPLOYMENT", DEFAULT_DEPLOYMENT)
 
     if not api_key:
