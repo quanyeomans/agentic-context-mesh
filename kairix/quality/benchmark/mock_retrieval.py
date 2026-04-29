@@ -142,9 +142,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
     {
         "path": "concept/vector-embeddings.md",
         "title": "Vector Embeddings",
-        "snippet": (
-            "Vector embeddings encode text as dense float32 arrays. kairix uses 1536-dim Azure OpenAI embeddings."
-        ),
+        "snippet": ("Vector embeddings encode text as dense float32 arrays for semantic similarity search."),
         "keywords": {"vector", "embeddings", "dense", "float", "azure", "dimensions", "encode"},
     },
     {

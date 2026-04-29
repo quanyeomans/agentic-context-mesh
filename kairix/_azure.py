@@ -25,6 +25,8 @@ import struct
 from functools import lru_cache
 from typing import Any
 
+from kairix.core.db import EMBED_VECTOR_DIMS as EMBED_DIMS
+from kairix.credentials import AZURE_API_VERSION
 from kairix.secrets import load_secrets as _load_secrets
 
 # Load vault-agent sidecar secrets before any env-var reads.
@@ -32,9 +34,6 @@ from kairix.secrets import load_secrets as _load_secrets
 _load_secrets()
 
 logger = logging.getLogger(__name__)
-
-# Azure OpenAI embedding dimensions
-EMBED_DIMS = 1536
 
 # Default deployment
 _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"
@@ -88,7 +87,7 @@ def _get_client() -> Any:
         return AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,
-            api_version="2024-02-01",
+            api_version=AZURE_API_VERSION,
             max_retries=5,
             timeout=float(_EMBED_TIMEOUT_S),
         )
@@ -107,7 +106,7 @@ def embed_text(text: str) -> list[float]:
     """
     Embed a text string via Azure OpenAI text-embedding-3-large.
 
-    Returns a list of 1536 floats. Returns [] on any failure.
+    Returns a list of floats (dimension set by KAIRIX_EMBED_DIMS). Returns [] on any failure.
     Never raises. Uses the OpenAI SDK with built-in retry and backoff.
     """
     if not text or not text.strip():

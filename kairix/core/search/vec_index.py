@@ -19,12 +19,12 @@ from typing import Any, TypedDict
 
 import numpy as np
 
-from kairix.core.db import open_db
+from kairix.core.db import EMBED_VECTOR_DIMS, open_db
 
 logger = logging.getLogger(__name__)
 
-# Default dimensions for text-embedding-3-large
-DIMS = 1536
+# Default dimensions — reads KAIRIX_EMBED_DIMS env var (default 1536)
+DIMS = EMBED_VECTOR_DIMS
 
 # Default number of vector results to retrieve before fusion
 VECTOR_DEFAULT_K: int = 20

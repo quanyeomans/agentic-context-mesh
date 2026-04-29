@@ -1,6 +1,6 @@
 """Unit tests for embed_batch using OpenAI SDK."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -128,7 +128,7 @@ class TestEmbedBatch:
         mock_cls.assert_called_once_with(
             api_key=API_KEY,
             azure_endpoint=ENDPOINT,
-            api_version="2024-02-01",
+            api_version=ANY,
             max_retries=6,
             timeout=60.0,
         )

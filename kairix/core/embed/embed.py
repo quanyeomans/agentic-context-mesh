@@ -7,6 +7,8 @@ import sqlite3
 import time
 from collections.abc import Generator
 
+from kairix.credentials import AZURE_API_VERSION
+
 from .date_extract import extract_chunk_date
 from .schema import (
     EMBED_VECTOR_DIMS,
@@ -122,7 +124,7 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
     client = AzureOpenAI(
         api_key=api_key,
         azure_endpoint=endpoint,
-        api_version="2024-02-01",
+        api_version=AZURE_API_VERSION,
         max_retries=2,
         timeout=30.0,
     )
@@ -157,7 +159,7 @@ def _get_embed_client(api_key: str, endpoint: str):  # type: ignore[no-untyped-d
         _embed_client = AzureOpenAI(
             api_key=api_key,
             azure_endpoint=endpoint,
-            api_version="2024-02-01",
+            api_version=AZURE_API_VERSION,
             max_retries=MAX_RETRIES,
             timeout=60.0,
         )

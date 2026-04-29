@@ -132,7 +132,8 @@ _CALIBRATION_ANCHORS: list[dict] = [
     {
         "query": "How do we handle customer refund requests?",
         "title": "vector-search-implementation",
-        "snippet": "Vector search uses cosine similarity over 1536-dimensional embeddings from text-embedding-3-large. Results are fused with BM25 via Reciprocal Rank Fusion.",  # noqa: E501
+        "snippet": "Vector search uses cosine similarity over dense embeddings. "
+        "Results are fused with BM25 via Reciprocal Rank Fusion.",
         "expected": 0,
     },
     {

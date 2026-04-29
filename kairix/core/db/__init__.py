@@ -23,8 +23,8 @@ _DB_PATH_ENV = "KAIRIX_DB_PATH"
 # sqlite-vec env override (preserved for deployments with custom vec0.so location)
 _SQLITE_VEC_ENV = "SQLITE_VEC_PATH"
 
-# Embedding dimensions — Azure text-embedding-3-large
-EMBED_VECTOR_DIMS = 1536
+# Embedding dimensions — configurable via KAIRIX_EMBED_DIMS
+EMBED_VECTOR_DIMS = int(os.environ.get("KAIRIX_EMBED_DIMS", "1536"))
 
 
 def get_db_path() -> Path:

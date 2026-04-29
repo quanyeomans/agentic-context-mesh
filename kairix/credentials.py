@@ -20,6 +20,9 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+AZURE_API_VERSION = os.environ.get("KAIRIX_AZURE_API_VERSION", "2024-12-01-preview")
+
+
 @dataclass(frozen=True)
 class Credentials:
     """Resolved provider credentials."""
@@ -27,7 +30,7 @@ class Credentials:
     api_key: str
     endpoint: str
     model: str
-    dims: int = 1536  # only relevant for embed
+    dims: int = 0  # set from KAIRIX_EMBED_DIMS at resolve time
 
     @property
     def is_azure(self) -> bool:
@@ -78,6 +81,7 @@ def _resolve_llm() -> Credentials:
 
 
 def _resolve_embed() -> Credentials:
+    from kairix.core.db import EMBED_VECTOR_DIMS
     from kairix.secrets import get_secret
 
     api_key = get_secret("kairix-embed-api-key", required=False)
@@ -91,7 +95,7 @@ def _resolve_embed() -> Credentials:
     if not model:
         model = "text-embedding-3-large"
 
-    return Credentials(api_key=api_key, endpoint=endpoint, model=model)
+    return Credentials(api_key=api_key, endpoint=endpoint, model=model, dims=EMBED_VECTOR_DIMS)
 
 
 def _resolve_graph() -> GraphCredentials | None:
