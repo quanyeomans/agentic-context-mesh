@@ -98,21 +98,37 @@ def _get_secrets() -> dict[str, str]:
 
 
 def _get_client() -> Any:
-    """Return an AzureOpenAI client configured from secrets. Cached per-process."""
-    from openai import AzureOpenAI
+    """Return an OpenAI-compatible client configured from secrets. Cached per-process.
 
+    Detects Azure endpoints automatically. For OpenRouter or standard OpenAI,
+    set the endpoint to the base URL (e.g. https://openrouter.ai/api/v1).
+    """
     secrets = _get_secrets()
     api_key = secrets.get("api_key")
     endpoint = secrets.get("endpoint")
     if not api_key or not endpoint:
-        raise ValueError("Missing Azure OpenAI API key or endpoint")
-    return AzureOpenAI(
-        api_key=api_key,
-        azure_endpoint=endpoint,
-        api_version="2024-02-01",
-        max_retries=5,
-        timeout=float(_EMBED_TIMEOUT_S),
-    )
+        raise ValueError("Missing API key or endpoint")
+
+    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
+    if is_azure:
+        from openai import AzureOpenAI
+
+        return AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version="2024-02-01",
+            max_retries=5,
+            timeout=float(_EMBED_TIMEOUT_S),
+        )
+    else:
+        from openai import OpenAI
+
+        return OpenAI(
+            api_key=api_key,
+            base_url=endpoint,
+            max_retries=5,
+            timeout=float(_EMBED_TIMEOUT_S),
+        )
 
 
 def embed_text(text: str) -> list[float]:

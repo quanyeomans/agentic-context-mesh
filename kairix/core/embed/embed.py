@@ -147,15 +147,28 @@ def _get_embed_client(api_key: str, endpoint: str):  # type: ignore[no-untyped-d
     key = (api_key, endpoint)
     if _embed_client is not None and _embed_client_key == key:
         return _embed_client
-    from openai import AzureOpenAI
 
-    _embed_client = AzureOpenAI(
-        api_key=api_key,
-        azure_endpoint=endpoint,
-        api_version="2024-02-01",
-        max_retries=MAX_RETRIES,
-        timeout=60.0,
-    )
+    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
+    if is_azure:
+        from openai import AzureOpenAI
+
+        _embed_client = AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version="2024-02-01",
+            max_retries=MAX_RETRIES,
+            timeout=60.0,
+        )
+    else:
+        from openai import OpenAI
+
+        _embed_client = OpenAI(
+            api_key=api_key,
+            base_url=endpoint,
+            max_retries=MAX_RETRIES,
+            timeout=60.0,
+        )
+
     _embed_client_key = key
     return _embed_client
 
