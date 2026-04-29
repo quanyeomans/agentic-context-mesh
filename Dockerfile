@@ -8,15 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml setup.cfg* setup.py* README.md /opt/kairix/src/
 COPY kairix/ /opt/kairix/src/kairix/
 
-RUN pip install --no-cache-dir --prefix=/install "/opt/kairix/src[neo4j,agents,nlp,rerank]"
-RUN PYTHONPATH=/install/lib/python3.12/site-packages python -m spacy download en_core_web_sm || true
+RUN pip install --no-cache-dir "/opt/kairix/src[neo4j,agents,nlp,rerank]"
+RUN python -m spacy download en_core_web_sm || true
 
 # ── Runtime stage: slim image with only installed packages ───────────────────
 FROM python:3.12-slim AS runtime
 
-# Copy installed packages from builder (no build-essential, no pip cache, no source)
-COPY --from=builder /install /usr/local
-COPY --from=builder /root/.local /root/.local
+# Copy installed Python packages from builder (no build-essential, no source)
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Create runtime directories
 RUN mkdir -p /data/vault /data/kairix /data/kairix/workspaces /opt/kairix/bin /opt/kairix/cron
