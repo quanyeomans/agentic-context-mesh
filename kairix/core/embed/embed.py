@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Azure OpenAI
 DEFAULT_DEPLOYMENT = "text-embedding-3-large"
 DEFAULT_DIMS = EMBED_VECTOR_DIMS
-DEFAULT_BATCH_SIZE = 100  # Smaller batches reduce 429 rate-limit hits with Azure Global Standard deployments
+DEFAULT_BATCH_SIZE = 250  # Balanced: large enough for throughput, small enough to avoid Azure 429s
 MAX_RETRIES = 6  # used by OpenAI SDK max_retries
 
 # Chunking — mirrors kairix's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
