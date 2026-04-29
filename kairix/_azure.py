@@ -21,7 +21,6 @@ Failure modes:
 """
 
 import logging
-import struct
 from functools import lru_cache
 from typing import Any
 
@@ -169,15 +168,3 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
     except Exception as e:
         logger.warning("chat_completion: %s", e)
         return ""
-
-
-def embed_text_as_bytes(text: str) -> bytes | None:
-    """
-    Embed text and return as packed float32 bytes (for sqlite-vec).
-
-    Returns None on any failure (when embed_text returns []).
-    """
-    vec = embed_text(text)
-    if not vec:
-        return None
-    return struct.pack(f"<{len(vec)}f", *vec)

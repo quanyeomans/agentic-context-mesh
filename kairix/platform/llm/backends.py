@@ -33,9 +33,3 @@ class AzureOpenAIBackend:
         from kairix._azure import embed_text
 
         return embed_text(text)
-
-    def embed_as_bytes(self, text: str) -> bytes | None:
-        """Embed text and return as packed float32 bytes for sqlite-vec."""
-        from kairix._azure import embed_text_as_bytes
-
-        return embed_text_as_bytes(text)

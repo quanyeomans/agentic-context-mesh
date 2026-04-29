@@ -18,8 +18,8 @@ def test_azure_backend_satisfies_llm_protocol():
 
 @pytest.mark.contract
 def test_llm_backend_protocol_has_required_methods():
-    """LLMBackend Protocol must declare chat, embed, embed_as_bytes."""
-    required = {"chat", "embed", "embed_as_bytes"}
+    """LLMBackend Protocol must declare chat and embed."""
+    required = {"chat", "embed"}
     protocol_members = (
         set(LLMBackend.__protocol_attrs__) if hasattr(LLMBackend, "__protocol_attrs__") else set(dir(LLMBackend))
     )

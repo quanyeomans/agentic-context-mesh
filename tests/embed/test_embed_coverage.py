@@ -242,7 +242,7 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
         "CREATE TABLE content_vectors"
         " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)"
     )
-    db.execute("CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY, embedding BLOB)")
+    # No vectors_vec table — sqlite-vec legacy removed
 
     with (
         patch("kairix.core.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),

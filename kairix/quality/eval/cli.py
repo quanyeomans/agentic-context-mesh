@@ -253,7 +253,7 @@ def _cmd_auto_gold(args: argparse.Namespace) -> int:
         print("ERROR: kairix index not found. Run 'kairix embed' first.", file=sys.stderr)
         return 1
 
-    db = open_db(Path(db_path), extensions=False)
+    db = open_db(Path(db_path))
     profile = analyse_corpus(db)
     db.close()
 
@@ -319,7 +319,7 @@ def _cmd_tune(args: argparse.Namespace) -> int:
         from kairix.quality.eval.auto_gold import analyse_corpus
 
         db_path = get_db_path()
-        db = open_db(Path(db_path), extensions=False)
+        db = open_db(Path(db_path))
         profile = analyse_corpus(db)
         db.close()
         hints = CorpusHints(

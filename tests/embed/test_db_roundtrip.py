@@ -11,7 +11,6 @@ import pytest
 from kairix.core.embed.embed import stage_embedding
 from kairix.core.embed.schema import (
     SchemaVersionError,
-    ensure_vec_table,
     validate_schema,
 )
 
@@ -87,36 +86,6 @@ class TestSchemaValidation:
         tmp_db.commit()
         with pytest.raises(SchemaVersionError, match="missing columns"):
             validate_schema(tmp_db)
-
-
-# ── Vec table tests ───────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-class TestEnsureVecTable:
-    @pytest.mark.unit
-    def test_creates_table(self, tmp_db):
-        # Requires sqlite-vec extension — skip if not available
-        try:
-            ensure_vec_table(tmp_db, 4)
-        except sqlite3.OperationalError as e:
-            if "no such module: vec0" in str(e):
-                pytest.skip("sqlite-vec not available in test environment")
-            raise
-
-        tables = {r[0] for r in tmp_db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert "vectors_vec" in tables
-
-    @pytest.mark.unit
-    def test_idempotent_same_dims(self, tmp_db):
-        try:
-            ensure_vec_table(tmp_db, 4)
-            ensure_vec_table(tmp_db, 4)  # Second call should be no-op
-        except sqlite3.OperationalError as e:
-            if "no such module: vec0" in str(e):
-                pytest.skip("sqlite-vec not available")
-            raise
-        assert True, "smoke: idempotent call did not raise"
 
 
 # ── Insert embedding tests ────────────────────────────────────────────────────

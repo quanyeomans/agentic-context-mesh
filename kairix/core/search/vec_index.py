@@ -1,6 +1,6 @@
 """usearch-backed ANN vector index for kairix.
 
-Replaces sqlite-vec brute-force KNN with usearch HNSW for
+usearch HNSW ANN index for
 sub-10ms vector search at 50K+ vectors. Memory-mapped persistence
 means near-zero RAM for read workloads.
 
@@ -112,7 +112,7 @@ class VectorIndex:
         # Resolve metadata from SQLite
         results = []
         try:
-            db = open_db(Path(self._db_path), extensions=False)
+            db = open_db(Path(self._db_path))
             db.row_factory = sqlite3.Row
             for key, distance in zip(matches.keys, matches.distances, strict=True):
                 hash_seq = self._key_to_hash_seq.get(int(key))

@@ -402,9 +402,7 @@ def run_embed(
             failed_chunks.extend(batch)
             continue
 
-        # Write batch atomically via staging table
-        # Stage all vectors first (normal SQLite, supports OR REPLACE),
-        # then flush staging → vectors_vec in one transaction.
+        # Write chunk metadata to content_vectors, then update usearch index.
         try:
             with db:  # transaction: write metadata atomically
                 for chunk, vector in zip(batch, vectors, strict=False):

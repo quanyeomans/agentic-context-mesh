@@ -103,7 +103,7 @@ def _bm25_search_with_weights(
 
     try:
         db_path = get_db_path()
-        db = open_db(Path(db_path), extensions=False)
+        db = open_db(Path(db_path))
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("gold_builder: cannot open DB — %s", e)

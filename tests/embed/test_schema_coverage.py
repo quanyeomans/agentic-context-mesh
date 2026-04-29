@@ -1,9 +1,6 @@
 """
 Additional tests for kairix.core.embed.schema — covers previously-untested paths:
-- find_sqlite_vec(): env override, fallback, missing
-- load_sqlite_vec(): missing extension error
 - get_db_path(): env override, missing file
-- ensure_vec_table(): create, dimension mismatch re-create
 - get_pending_chunks(): synthetic DB
 - get_all_chunks_needing_embedding(): synthetic DB
 - save_run_log(): creates and rotates
@@ -14,42 +11,15 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from kairix.core.embed.schema import (
-    ensure_vec_table,
-    find_sqlite_vec,
     get_all_chunks_needing_embedding,
     get_db_path,
     get_pending_chunks,
     save_run_log,
 )
-
-# ---------------------------------------------------------------------------
-# find_sqlite_vec
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_find_sqlite_vec_uses_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Returns the path from SQLITE_VEC_PATH env var when it exists."""
-    so = tmp_path / "vec0.so"
-    so.touch()
-    monkeypatch.setenv("SQLITE_VEC_PATH", str(so))
-    result = find_sqlite_vec()
-    assert result == str(so)
-
-
-@pytest.mark.unit
-def test_find_sqlite_vec_returns_none_when_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Returns None when no vec0.so can be located."""
-    monkeypatch.delenv("SQLITE_VEC_PATH", raising=False)
-    with patch("kairix.core.db._find_sqlite_vec", return_value=None):
-        result = find_sqlite_vec()
-    assert result is None
-
 
 # ---------------------------------------------------------------------------
 # get_db_path
@@ -75,57 +45,6 @@ def test_get_db_path_returns_default_when_missing(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("HOME", str(tmp_path))
     result = get_db_path()
     assert str(result).endswith("kairix/index.sqlite")
-
-
-# ---------------------------------------------------------------------------
-# ensure_vec_table
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_ensure_vec_table_creates_table_via_fake_db() -> None:
-    """ensure_vec_table() issues CREATE VIRTUAL TABLE with the correct dimensions."""
-    executed: list[str] = []
-
-    class FakeDB:
-        def execute(self, sql: str, *args, **kwargs):
-            executed.append(sql)
-
-            class FakeCursor:
-                def fetchone(self) -> None:
-                    return None  # no existing table
-
-            return FakeCursor()
-
-        def commit(self) -> None:
-            pass
-
-    ensure_vec_table(FakeDB(), dims=1536)  # type: ignore[arg-type]
-    create_sqls = [s for s in executed if "CREATE" in s and "vec0" in s]
-    assert any("float[1536]" in s for s in create_sqls)
-
-
-@pytest.mark.unit
-def test_ensure_vec_table_skips_recreate_when_dims_match() -> None:
-    """ensure_vec_table() returns early when table already has correct dims."""
-    executed: list[str] = []
-
-    class FakeDB:
-        def execute(self, sql: str, *args, **kwargs):
-            executed.append(sql)
-
-            class FakeCursor:
-                def fetchone(self):
-                    return ("CREATE VIRTUAL TABLE vectors_vec USING vec0(hash_seq TEXT, embedding float[1536])",)
-
-            return FakeCursor()
-
-        def commit(self) -> None:
-            pass
-
-    ensure_vec_table(FakeDB(), dims=1536)  # type: ignore[arg-type]
-    # Only the SELECT should have been called; no DROP or CREATE
-    assert not any("DROP" in s or ("CREATE" in s and "vec0" in s) for s in executed)
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +103,6 @@ def test_get_pending_chunks_skips_empty_content() -> None:
 def test_get_all_chunks_needing_embedding_returns_empty_without_content_vectors() -> None:
     """Returns [] when content_vectors table is empty."""
     db = _make_minimal_db()
-    # Need vectors_vec table too (no vec0 extension — just a regular table)
-    db.execute("CREATE TABLE vectors_vec (hash_seq TEXT PRIMARY KEY)")
 
     result = get_all_chunks_needing_embedding(db)
     assert result == []

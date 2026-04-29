@@ -262,8 +262,8 @@ def check_vector_search_working() -> CheckResult:
                     "Vector search failure usually means Azure credentials aren't loaded.\n"
                     "Check: kairix onboard check  — look at secrets_loaded result.\n"
                     "If secrets are loaded, check the embed ran:\n"
-                    "  sqlite3 ~/.cache/kairix/index.sqlite 'SELECT COUNT(*) FROM vectors_vec;'\n"
-                    "  Should be > 0. If 0: run kairix embed --limit 20 to test."
+                    "  kairix search 'test query'\n"
+                    "  If vec=0: run kairix embed --limit 20 to test."
                 ),
             )
 
@@ -406,7 +406,7 @@ def check_chunk_date_populated() -> CheckResult:
         db_path = get_db_path()
         from pathlib import Path
 
-        db = open_db(Path(db_path), extensions=False)
+        db = open_db(Path(db_path))
         try:
             # Check if the column exists first
             cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}

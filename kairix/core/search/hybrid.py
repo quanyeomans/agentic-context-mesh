@@ -65,11 +65,6 @@ def _get_llm():  # type: ignore[return]
     return get_default_backend()
 
 
-def embed_text_as_bytes(text: str) -> bytes | None:
-    """Embed text via the default LLM backend and return packed float32 bytes."""
-    return _get_llm().embed_as_bytes(text)
-
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -237,7 +232,7 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
         return
 
     try:
-        db = open_db(Path(db_path), extensions=False)
+        db = open_db(Path(db_path))
         try:
             # Use LIKE suffix match because the DB stores absolute paths while FusedResult
             # paths may be collection-relative (e.g. "concept/builder.md" vs
@@ -427,7 +422,7 @@ def _preprocess_temporal(
             from kairix.core.temporal.rewriter import is_relative_temporal
 
             if is_relative_temporal(query):
-                _tmp2_db = open_db(Path(get_db_path()), extensions=False)
+                _tmp2_db = open_db(Path(get_db_path()))
                 try:
                     _paths = get_date_filtered_paths(_tmp2_db, start, end)
                     if _paths:  # empty = no dated chunks yet; do not filter

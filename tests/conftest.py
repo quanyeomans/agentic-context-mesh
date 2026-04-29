@@ -5,7 +5,7 @@ Fixture hierarchy:
   no_azure_calls (autouse, all non-e2e tests) — blocks accidental Azure API calls
   fake_llm_backend — FakeLLM satisfying LLMBackend Protocol
   neo4j_client — FakeNeo4jClient satisfying Neo4jClient interface
-  search_db / seeded_search_db — sqlite-vec search index fixtures
+  search_db / seeded_search_db — BM25 search index fixtures
 
 BDD step modules must be declared as pytest_plugins at the root conftest level
 (pytest restriction: pytest_plugins in sub-conftest files is not supported).

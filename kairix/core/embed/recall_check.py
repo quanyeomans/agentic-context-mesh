@@ -164,7 +164,7 @@ def check_recall(db: sqlite3.Connection | None = None) -> dict:
         try:
             from kairix.core.db import get_db_path, open_db
 
-            db = open_db(Path(get_db_path()), extensions=False)
+            db = open_db(Path(get_db_path()))
             close_db = True
         except FileNotFoundError:
             db = None

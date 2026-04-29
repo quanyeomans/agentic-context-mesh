@@ -2,7 +2,7 @@
 kairix — private knowledge retrieval for AI agents and teams.
 
 Subcommands:
-  embed       Embed documents into kairix sqlite-vec index (text-embedding-3-large)
+  embed       Embed documents into the kairix vector index
   search      Hybrid search: BM25 + vector via RRF
   entity      Entity management: suggest (NER), validate (Wikidata)
   curator     Curator agent: entity health monitoring and enrichment (CA-1)

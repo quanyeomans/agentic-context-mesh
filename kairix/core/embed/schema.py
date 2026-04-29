@@ -1,16 +1,16 @@
 """
-Kairix SQLite schema utilities — embedding, vector storage, and chunk metadata.
+Kairix SQLite schema utilities — embedding and chunk metadata.
 
-Delegates database path resolution and sqlite-vec extension loading to
-``kairix.db``. This module retains embedding-specific schema functions
-(ensure_vec_table, get_pending_chunks, etc.) and is the primary import
-for the embed pipeline.
+Delegates database path resolution to ``kairix.core.db``.
+This module retains embedding-specific schema functions
+(get_pending_chunks, etc.) and is the primary import for the embed pipeline.
+
+Vector storage is handled by usearch (HNSW ANN index).
 
 Key schema facts:
   - content.doc   — document text (NOT 'body')
   - content.hash  — SHA of document content, FK to documents.hash
   - documents.active — 1 = indexed, 0 = removed
-  - vectors_vec   — sqlite-vec virtual table; embedding stored as packed float32 binary.
   - hash_seq PK   — "{hash}_{seq}" e.g. "abc123_0", "abc123_1"
 """
 
@@ -21,20 +21,17 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from kairix.core.db import EMBED_VECTOR_DIMS, get_db_path, load_extensions
+from kairix.core.db import EMBED_VECTOR_DIMS, get_db_path
 
-# Re-export EMBED_VECTOR_DIMS for backward compatibility
+# Re-export for callers
 __all__ = [
     "EMBED_VECTOR_DIMS",
     "DBLockedError",
     "SchemaVersionError",
-    "ensure_vec_table",
-    "find_sqlite_vec",
     "get_all_chunks_needing_embedding",
     "get_date_filtered_paths",
     "get_db_path",
     "get_pending_chunks",
-    "load_sqlite_vec",
     "migrate_content_vectors",
     "save_run_log",
     "validate_schema",
@@ -53,18 +50,6 @@ class DBLockedError(Exception):
     pass
 
 
-def find_sqlite_vec() -> str | None:
-    """Locate the sqlite-vec extension. Delegates to ``kairix.core.db._find_sqlite_vec()``."""
-    from kairix.core.db import _find_sqlite_vec
-
-    return _find_sqlite_vec()
-
-
-def load_sqlite_vec(db: sqlite3.Connection) -> None:
-    """Load sqlite-vec extension. Delegates to ``kairix.core.db.load_extensions()``."""
-    load_extensions(db)
-
-
 # get_db_path is re-exported from kairix.core.db for backwards compatibility.
 # Callers should import from kairix.core.db directly.
 
@@ -81,13 +66,6 @@ def validate_schema(db: sqlite3.Connection) -> None:
     errors = _validate(db)
     if errors:
         raise SchemaVersionError("Database schema validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
-
-
-def ensure_vec_table(db: sqlite3.Connection, dims: int = EMBED_VECTOR_DIMS) -> None:
-    """Ensure vec0 virtual table exists. Delegates to kairix.core.db.schema."""
-    from kairix.core.db.schema import _ensure_vec_table
-
-    return _ensure_vec_table(db, dims)
 
 
 def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -125,16 +103,14 @@ def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
 def get_all_chunks_needing_embedding(db: sqlite3.Connection) -> list[dict[str, Any]]:
     """
     Return all (hash, seq, pos, text) tuples from content_vectors
-    that exist in content_vectors but have no entry in vectors_vec.
+    that have been staged but not yet written to the usearch index.
     Used for incremental catch-up after partial failures.
     """
     rows = db.execute("""
         SELECT cv.hash, cv.seq, cv.pos, c.doc
         FROM content_vectors cv
         JOIN content c ON c.hash = cv.hash
-        LEFT JOIN vectors_vec vv ON vv.hash_seq = (cv.hash || '_' || cv.seq)
-        WHERE vv.hash_seq IS NULL
-          AND c.doc IS NOT NULL
+        WHERE c.doc IS NOT NULL
     """).fetchall()
 
     return [{"hash": r[0], "seq": r[1], "pos": r[2], "body": r[3]} for r in rows]
@@ -195,7 +171,7 @@ def get_date_filtered_paths(
     Falls back to empty frozenset on any DB error rather than raising.
 
     Args:
-        db:    Open sqlite3.Connection (kairix index — no sqlite-vec extension needed).
+        db:    Open sqlite3.Connection (kairix index).
         start: Lower bound (inclusive). None means no lower bound.
         end:   Upper bound (inclusive). None means no upper bound.
 

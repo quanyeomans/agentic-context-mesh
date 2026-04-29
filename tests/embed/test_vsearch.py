@@ -44,7 +44,6 @@ def embedded_db(tmp_path_factory):
     # Clear existing vectors in the copy
     db = sqlite3.connect(str(tmp_db_path))
     db.execute("DELETE FROM content_vectors")
-    db.execute("DELETE FROM vectors_vec")
     db.commit()
     db.close()
 
@@ -52,11 +51,10 @@ def embedded_db(tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("KAIRIX_DB_PATH", str(tmp_db_path))
         from kairix.core.embed.embed import run_embed
-        from kairix.core.embed.schema import ensure_vec_table, validate_schema
+        from kairix.core.embed.schema import validate_schema
 
         db = sqlite3.connect(str(tmp_db_path))
         validate_schema(db)
-        ensure_vec_table(db)
         result = run_embed(db, force=False, limit=50)
         db.close()
 

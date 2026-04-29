@@ -90,7 +90,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     except FileNotFoundError:
         _db_path = None
     if _db_path is not None:
-        db = open_db(Path(_db_path), extensions=False)
+        db = open_db(Path(_db_path))
         errors = validate_suite(suite, db, strict=False)
         db.close()
         if errors:
@@ -136,7 +136,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print("✅ Schema validation passed")
         return 0
 
-    db = open_db(Path(_db_path), extensions=False)
+    db = open_db(Path(_db_path))
     errors = validate_suite(suite, db, strict=True)
     db.close()
 

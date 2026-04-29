@@ -88,7 +88,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
         print("ERROR: kairix index not found. Run 'kairix embed' first.", file=sys.stderr)
         return 1
 
-    db = open_db(Path(db_path), extensions=False)
+    db = open_db(Path(db_path))
     candidates = scan_for_entities(db, limit=args.limit)
     db.close()
 

@@ -137,7 +137,7 @@ def sample_documents(
     try:
         from kairix.core.db import open_db
 
-        db = open_db(Path(db_path), extensions=False)
+        db = open_db(Path(db_path))
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("sample_documents: failed to open %r — %s", db_path, e)

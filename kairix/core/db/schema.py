@@ -10,8 +10,9 @@ Tables:
   - content         — document text keyed by content hash
   - content_vectors — chunk metadata (hash, seq, pos, model, embedded_at, chunk_date)
   - documents_fts   — FTS5 full-text search index
-  - vectors_vec     — sqlite-vec virtual table for vector similarity search
   - kairix_meta     — schema version tracking
+
+Vector storage is handled by usearch (HNSW ANN index), not SQLite.
 """
 
 import logging
@@ -32,9 +33,8 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
     DDL statements.
 
     Args:
-        db:   Open sqlite3.Connection (sqlite-vec must already be loaded
-              if ``vectors_vec`` is to be created).
-        dims: Vector embedding dimensions (default: 1536).
+        db:   Open sqlite3.Connection.
+        dims: Vector embedding dimensions (for metadata only — vectors stored in usearch).
     """
     db.executescript("""
         CREATE TABLE IF NOT EXISTS documents (
@@ -82,9 +82,6 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
     if not fts_exists:
         db.execute("CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61')")
 
-    # sqlite-vec virtual table
-    _ensure_vec_table(db, dims)
-
     # Schema version
     db.execute(
         "INSERT OR IGNORE INTO kairix_meta (key, value) VALUES ('schema_version', ?)",
@@ -96,31 +93,6 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
 
     db.commit()
     logger.info("db.schema: kairix schema initialised (version=%s, dims=%d)", SCHEMA_VERSION, dims)
-
-
-def _ensure_vec_table(db: sqlite3.Connection, dims: int = EMBED_VECTOR_DIMS) -> None:
-    """
-    Ensure ``vectors_vec`` virtual table exists with the correct dimensions.
-
-    If it exists with different dimensions, drops and recreates it.
-    """
-    cur = db.execute("SELECT sql FROM sqlite_master WHERE name='vectors_vec'").fetchone()
-
-    if cur:
-        existing_sql = cur[0] or ""
-        expected_fragment = f"float[{dims}]"
-        if expected_fragment in existing_sql:
-            return  # Already correct
-        # Dimension mismatch — drop and recreate
-        logger.warning("db.schema: vectors_vec dimension mismatch — recreating with dims=%d", dims)
-        db.execute("DROP TABLE IF EXISTS vectors_vec")
-
-    db.execute(
-        f"CREATE VIRTUAL TABLE vectors_vec USING vec0("
-        f"hash_seq TEXT PRIMARY KEY, "
-        f"embedding float[{dims}] distance_metric=cosine)"
-    )
-    db.commit()
 
 
 def validate_schema(db: sqlite3.Connection) -> list[str]:

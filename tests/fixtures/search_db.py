@@ -1,6 +1,6 @@
-"""sqlite-vec search index fixtures for tests.
+"""BM25 search index fixtures for tests.
 
-This is the SEARCH INDEX only (BM25 + vectors). Not the entity store.
+This is the SEARCH INDEX only (BM25). Not the entity store.
 Entity tests use FakeNeo4jClient from neo4j_mock.py.
 """
 

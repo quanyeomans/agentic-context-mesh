@@ -10,7 +10,7 @@ except Exception:
 __all__ = ["QueryIntent", "RetrievalConfig", "SearchResult", "__version__", "hybrid_search"]
 
 # Public API surface — guarded so the package loads even when optional deps
-# (e.g. sqlite-vec, neo4j) are missing.
+# (e.g. neo4j) are missing.
 # Note: search() is aliased to hybrid_search to avoid shadowing the
 # kairix.core.search subpackage in sys.modules.
 try:

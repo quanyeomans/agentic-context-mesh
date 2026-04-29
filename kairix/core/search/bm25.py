@@ -233,7 +233,7 @@ def bm25_search(
 
     try:
         db_path = get_db_path()
-        db = open_db(Path(db_path), extensions=False)
+        db = open_db(Path(db_path))
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("bm25_search: cannot open database — %s", e)

@@ -242,7 +242,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     from .schema import get_pending_chunks
 
     db_path = get_db_path()
-    db = open_db(Path(db_path), extensions=False)
+    db = open_db(Path(db_path))
     try:
         pending = get_pending_chunks(db)
         total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
