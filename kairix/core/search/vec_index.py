@@ -65,17 +65,49 @@ class VectorIndex:
         return len(self._index)
 
     def load(self) -> int:
-        """Load existing usearch index + metadata from disk."""
+        """Load existing usearch index + metadata from disk.
+
+        If the index was built with different dimensions, deletes it and
+        returns 0 so a fresh index is created on the next add_vectors() call.
+        """
         from usearch.index import Index
 
         if not self._index_path.exists():
             return 0
+
+        # Check metadata for dimension mismatch before loading
+        if self._meta_path.exists():
+            try:
+                meta = json.loads(self._meta_path.read_text(encoding="utf-8"))
+                stored_ndim = meta.get("ndim", 0)
+                if stored_ndim and stored_ndim != self._ndim:
+                    logger.warning(
+                        "vec_index: dimension mismatch (index=%d, expected=%d) — deleting old index",
+                        stored_ndim,
+                        self._ndim,
+                    )
+                    self._delete_index_files()
+                    return 0
+            except (json.JSONDecodeError, OSError):
+                pass
+
         self._index = Index.restore(str(self._index_path), view=True)
         if self._meta_path.exists():
             meta = json.loads(self._meta_path.read_text(encoding="utf-8"))
             self._key_to_hash_seq = {int(k): v for k, v in meta["keys"].items()}
             self._next_key = meta.get("next_key", max(self._key_to_hash_seq.keys(), default=-1) + 1)
         return len(self._index)
+
+    def _delete_index_files(self) -> None:
+        """Remove index and metadata files from disk."""
+        for path in (self._index_path, self._meta_path):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning("vec_index: failed to delete %s — %s", path, e)
+        self._index = None
+        self._key_to_hash_seq = {}
+        self._next_key = 0
 
     def build_from_vectors(self, hash_seqs: list[str], vectors: np.ndarray) -> int:
         """Build a new index from provided vectors. Saves to disk."""

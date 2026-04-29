@@ -274,7 +274,11 @@ def batched(items: list, size: int) -> Generator[list, None, None]:
 
 
 def _update_usearch_index(hash_seqs: list[str], vectors: list[list[float]]) -> None:
-    """Write batch of vectors to the usearch ANN index (non-critical)."""
+    """Write batch of vectors to the usearch ANN index.
+
+    If the existing index has different dimensions (e.g. after changing
+    KAIRIX_EMBED_DIMS), it is automatically deleted and rebuilt.
+    """
     try:
         from kairix.core.search.vec_index import VectorIndex
         from kairix.paths import db_path as get_db_path
@@ -283,12 +287,12 @@ def _update_usearch_index(hash_seqs: list[str], vectors: list[list[float]]) -> N
         index_path = db_p.parent / "vectors.usearch"
         meta_path = db_p.parent / "vectors.meta.json"
         idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p)
-        idx.load()
+        idx.load()  # auto-deletes if dims mismatch
         count = idx.add_vectors(hash_seqs, vectors)
         if count > 0:
             logger.debug("usearch: added %d vectors", count)
     except Exception as e:
-        logger.warning("usearch index update failed (non-critical): %s", e)
+        logger.error("usearch index update failed: %s", e)
 
 
 # ── Main embed runner ─────────────────────────────────────────────────────────
