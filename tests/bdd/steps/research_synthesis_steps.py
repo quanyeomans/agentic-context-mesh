@@ -41,12 +41,14 @@ def given_low_confidence_results():
     ]
 
     # LLM returns low confidence during evaluation
-    eval_response = json.dumps({
-        "confidence": 0.25,
-        "sufficient": False,
-        "refined_query": "test question detailed",
-        "reasoning": "Results are tangentially related but do not directly answer.",
-    })
+    eval_response = json.dumps(
+        {
+            "confidence": 0.25,
+            "sufficient": False,
+            "refined_query": "test question detailed",
+            "reasoning": "Results are tangentially related but do not directly answer.",
+        }
+    )
 
     mock_llm = MagicMock()
     mock_llm.chat.return_value = eval_response

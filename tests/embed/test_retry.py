@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import kairix.core.embed.embed as _embed_mod
 from kairix.core.embed.embed import embed_batch
 
 API_KEY = "test-key"
@@ -12,6 +13,16 @@ DEPLOYMENT = "text-embedding-3-large"
 DIMS = 1536
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _reset_embed_client():
+    """Reset the cached embed client before each test so mocks take effect."""
+    _embed_mod._embed_client = None
+    _embed_mod._embed_client_key = ("", "")
+    yield
+    _embed_mod._embed_client = None
+    _embed_mod._embed_client_key = ("", "")
 
 
 def _mock_embedding(index: int, value: float = 0.1) -> MagicMock:

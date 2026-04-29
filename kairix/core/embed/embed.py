@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Azure OpenAI
 DEFAULT_DEPLOYMENT = "text-embedding-3-large"
 DEFAULT_DIMS = EMBED_VECTOR_DIMS
-DEFAULT_BATCH_SIZE = 500
+DEFAULT_BATCH_SIZE = 100  # Smaller batches reduce 429 rate-limit hits with Azure Global Standard deployments
 MAX_RETRIES = 6  # used by OpenAI SDK max_retries
 
 # Chunking — mirrors kairix's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
@@ -134,6 +134,32 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
     return dims
 
 
+# Reuse a single SDK client across all batches. Connection pooling and the
+# SDK's internal rate-limiter state carry over between calls, which prevents
+# redundant Retry-After waits when the server quota is actually available.
+_embed_client = None
+_embed_client_key: tuple = ("", "")
+
+
+def _get_embed_client(api_key: str, endpoint: str):  # type: ignore[no-untyped-def]
+    """Return a cached AzureOpenAI client. Creates a new one if credentials change."""
+    global _embed_client, _embed_client_key
+    key = (api_key, endpoint)
+    if _embed_client is not None and _embed_client_key == key:
+        return _embed_client
+    from openai import AzureOpenAI
+
+    _embed_client = AzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=endpoint,
+        api_version="2024-02-01",
+        max_retries=MAX_RETRIES,
+        timeout=60.0,
+    )
+    _embed_client_key = key
+    return _embed_client
+
+
 def embed_batch(
     texts: list[str],
     api_key: str,
@@ -144,26 +170,20 @@ def embed_batch(
     """
     Embed a batch of texts via Azure OpenAI using the OpenAI SDK.
 
-    The SDK handles retry with exponential backoff, rate-limit headers
-    (Retry-After), and proper error classification automatically.
+    Client is reused across batches for connection pooling and rate-limiter
+    state persistence. The SDK handles retry with exponential backoff and
+    Retry-After headers automatically.
 
     Returns list of float vectors in same order as input texts.
     Raises on persistent failures after SDK retries are exhausted.
     On BadRequestError (batch too large), splits and recurses.
     """
     import openai
-    from openai import AzureOpenAI
 
     if not texts:
         return []
 
-    client = AzureOpenAI(
-        api_key=api_key,
-        azure_endpoint=endpoint,
-        api_version="2024-02-01",
-        max_retries=MAX_RETRIES,
-        timeout=60.0,
-    )
+    client = _get_embed_client(api_key, endpoint)
 
     try:
         response = client.embeddings.create(
@@ -171,11 +191,9 @@ def embed_batch(
             input=texts,
             dimensions=dims,
         )
-        # Sort by index to preserve order (API may return out of order)
         results = sorted(response.data, key=lambda x: x.index)
         return [list(r.embedding) for r in results]
     except openai.BadRequestError:
-        # Batch too large for model — split and recurse
         if len(texts) == 1:
             raise
         mid = len(texts) // 2
