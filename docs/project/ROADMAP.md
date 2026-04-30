@@ -77,7 +77,8 @@ The benchmark uses strict NDCG@10 scoring with graded relevance (0/1/2), generat
 
 ## Near-term
 
-- **File watcher** — `watchfiles`-based daemon replacing the 60-second embed cron. Vault changes embedded within seconds of write, reducing lag for session-prep queries against recently-added content.
+- **Pre-release container registry** — CI builds and pushes alpha Docker images to GHCR on green `develop` builds (`ghcr.io/quanyeomans/kairix:2026.5.1a1`). VM deploys via `docker compose pull` instead of building from source. Tests the exact same image end users will get. Stable tags pushed on merge to `main`.
+- **File watcher** — `watchfiles`-based daemon replacing the 60-second embed cron. Document store changes embedded within seconds of write, reducing lag for session-prep queries against recently-added content.
 - **Observability dashboard** — structured JSON log output (`LOG_LEVEL=json`) parsed by a lightweight dashboard. Per-query latency, intent distribution, entity hit rate, RRF score distributions surfaced without third-party tooling.
 - **Local/offline embedding** — `EmbedProvider` abstraction; Ollama and sentence-transformers adapters (removes Azure OpenAI as hard dependency for non-Azure deployments).
 - **REST API** — FastAPI server mode exposing search, entity, and briefing as local HTTP endpoints.
