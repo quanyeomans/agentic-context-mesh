@@ -40,7 +40,6 @@ def main(argv: list[str] | None = None) -> None:
     results = check_contradiction(
         content=args.content,
         llm=llm,
-        agent=args.agent,
         top_k=args.top_k,
         threshold=args.threshold,
     )

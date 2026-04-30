@@ -472,11 +472,11 @@ def test_tool_contradict_error_handled() -> None:
 
 @pytest.mark.unit
 def test_tool_contradict_default_agent() -> None:
-    """When agent is None, 'shared' is passed to check_contradiction."""
+    """Agent param is no longer passed to check_contradiction (searches all collections)."""
     with (
         patch("kairix.knowledge.contradict.detector.check_contradiction", return_value=[]) as mock_check,
         patch("kairix.platform.llm.get_default_backend", return_value=MagicMock()),
     ):
         tool_contradict(content="claim", agent=None)
         call_kwargs = mock_check.call_args.kwargs
-        assert call_kwargs["agent"] == "shared"
+        assert "agent" not in call_kwargs

@@ -486,7 +486,6 @@ def tool_contradict(
         results = check_contradiction(
             content=content,
             llm=llm,
-            agent=agent or "shared",
             top_k=top_k,
             threshold=threshold,
         )

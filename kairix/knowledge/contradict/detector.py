@@ -45,17 +45,15 @@ class ContradictionResult:
 def check_contradiction(
     content: str,
     llm: Any,
-    agent: str = "shared",
     top_k: int = 5,
-    threshold: float = 0.6,
+    threshold: float = 0.5,
 ) -> list[ContradictionResult]:
     """
-    Check whether *content* contradicts existing knowledge in the vault.
+    Check whether *content* contradicts existing knowledge in the document store.
 
     Args:
         content:   The new content to check (raw text; may be a claim, note, or decision).
         llm:       An LLMBackend instance (must implement `chat(messages)`).
-        agent:     Agent scope for collection selection (default "shared").
         top_k:     How many similar documents to compare against.
         threshold: Minimum contradiction score (0.0-1.0) to include in results.
 
@@ -67,9 +65,19 @@ def check_contradiction(
 
     results: list[ContradictionResult] = []
 
+    # Truncate content to first 500 chars for the search query — the claim
+    # is typically at the start, and full-text queries dilute BM25/vector signal
+    search_query = content[:500]
+
     try:
-        sr = hybrid_search(query=content, agent=agent, scope="shared+agent", budget=5000)
+        sr = hybrid_search(query=search_query, budget=5000)
         candidates = sr.results[:top_k]
+        logger.info(
+            "contradict: retrieved %d candidates (query length=%d, threshold=%.2f)",
+            len(candidates),
+            len(search_query),
+            threshold,
+        )
     except Exception as exc:
         logger.warning("contradict: hybrid search failed — %s", exc)
         return []
@@ -91,7 +99,10 @@ def check_contradiction(
 
         score, reason = _parse_llm_response(raw)
         if score is None:
+            logger.debug("contradict: unparseable LLM response for %s", doc_path)
             continue
+
+        logger.debug("contradict: %s → score=%.2f reason=%s", doc_path, score, reason[:80])
 
         if score >= threshold:
             results.append(
@@ -104,6 +115,7 @@ def check_contradiction(
             )
 
     results.sort(key=lambda r: r.score, reverse=True)
+    logger.info("contradict: %d contradictions found (threshold=%.2f)", len(results), threshold)
     return results
 
 
