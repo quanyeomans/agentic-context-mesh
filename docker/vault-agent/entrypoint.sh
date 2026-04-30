@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # kairix-vault-agent — fetches Azure KV secrets to shared tmpfs, refreshes every 8h
+set +x  # NEVER enable tracing — secret values will leak to stderr
 set -euo pipefail
 
 KV_NAME="${KAIRIX_KV_NAME:?KAIRIX_KV_NAME must be set}"
@@ -12,11 +13,13 @@ fetch_and_write() {
     chmod 600 "$tmpfile"
     _fetch() { az keyvault secret show --vault-name "$KV_NAME" --name "$1" --query value -o tsv 2>/dev/null || echo ""; }
     {
-        printf 'AZURE_OPENAI_API_KEY=%s\n'             "$(_fetch azure-openai-api-key)"
-        printf 'AZURE_OPENAI_ENDPOINT=%s\n'            "$(_fetch azure-openai-endpoint)"
-        printf 'AZURE_OPENAI_EMBED_DEPLOYMENT=%s\n'    "$(_fetch azure-openai-embedding-deployment)"
-        printf 'AZURE_OPENAI_GPT4O_MINI_DEPLOYMENT=%s\n' "$(_fetch azure-openai-gpt4o-mini-deployment)"
-        printf 'KAIRIX_NEO4J_PASSWORD=%s\n'            "$(_fetch kairix-neo4j-password)"
+        echo "KAIRIX_LLM_API_KEY=$(_fetch kairix-llm-api-key)"
+        echo "KAIRIX_LLM_ENDPOINT=$(_fetch kairix-llm-endpoint)"
+        echo "KAIRIX_LLM_MODEL=$(_fetch kairix-llm-model)"
+        echo "KAIRIX_EMBED_API_KEY=$(_fetch kairix-embed-api-key)"
+        echo "KAIRIX_EMBED_ENDPOINT=$(_fetch kairix-embed-endpoint)"
+        echo "KAIRIX_EMBED_MODEL=$(_fetch kairix-embed-model)"
+        echo "KAIRIX_NEO4J_PASSWORD=$(_fetch kairix-neo4j-password)"
     } >> "$tmpfile"
     mv -f "$tmpfile" "${SECRETS_DIR}/kairix.env"
     chmod 600 "${SECRETS_DIR}/kairix.env"

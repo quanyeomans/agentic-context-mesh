@@ -14,7 +14,7 @@
 
 - [ ] Unit tests pass: `pytest tests/ -m unit`
 - [ ] Contract tests pass: `pytest tests/ -m contract`
-- [ ] Integration tests pass (if sqlite-vec available): `pytest tests/ -m integration`
+- [ ] Integration tests pass: `pytest tests/ -m integration`
 - [ ] New tests added for changed behaviour (if applicable)
 
 ## Retrieval quality

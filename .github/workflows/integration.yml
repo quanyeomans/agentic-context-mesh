@@ -67,7 +67,7 @@ jobs:
             console.log(`Retrieval logic touched: ${touches_retrieval}`);
             console.log('PR gates passed.');
 
-  # Full integration test suite against live sqlite-vec
+  # Full integration test suite
   full-integration:
     name: Full integration suite
     runs-on: ubuntu-latest

@@ -18,7 +18,7 @@
 set -euo pipefail
 
 MODE="${1:---docker}"
-NEO4J_PASSWORD="${NEO4J_PASSWORD:-changeme-please}"
+NEO4J_PASSWORD="${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set — generate one with: openssl rand -hex 16}"
 INSTALL_DIR="${NEO4J_INSTALL_DIR:-/opt/neo4j}"
 
 # ---------------------------------------------------------------------------

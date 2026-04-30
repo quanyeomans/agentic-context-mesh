@@ -69,7 +69,7 @@ addopts = "--tb=short -q"
 markers = [
     "contract: interface agreement tests (fast, <30s total, zero tolerance for failure)",
     "unit: individual component logic (mock externals, fast)",
-    "integration: multi-component with real sqlite-vec (skip if extension unavailable)",
+    "integration: multi-component with real database and usearch index",
     "e2e: full pipeline against live Azure API (requires KAIRIX_E2E=1)",
     "bdd: behaviour-driven acceptance tests (pytest-bdd feature files)",
     "slow: tests taking >5s",

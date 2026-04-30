@@ -108,7 +108,7 @@ _TEST_DOCUMENTS = [
     {
         "path": "notes/embedding.md",
         "title": "Embedding Notes",
-        "body": "Azure text-embedding-3-large produces 1536-dim float vectors stored in sqlite-vec.",
+        "body": "Embedding models produce dense float vectors stored in the usearch HNSW index.",
     },
     {
         "path": "notes/curator.md",
@@ -128,7 +128,7 @@ def tmp_db_path(tmp_path):
 
 @pytest.fixture
 def search_db(tmp_db_path):
-    """Minimal in-memory SQLite DB with BM25 search table. No sqlite-vec extension required."""
+    """Minimal in-memory SQLite DB with BM25 search table."""
     conn = sqlite3.connect(str(tmp_db_path))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS documents (

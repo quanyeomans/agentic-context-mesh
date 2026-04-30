@@ -318,7 +318,7 @@ def check_neo4j_reachable() -> CheckResult:
                     "Install Neo4j:\n"
                     "  bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scripts/install-neo4j.sh)\n"
                     "Or run with Docker:\n"
-                    "  docker run -d --name neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/changeme neo4j:5-community\n"
+                    "  docker run -d --name neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/YOUR_PASSWORD neo4j:5-community\n"
                     "Then set KAIRIX_NEO4J_URI in /opt/kairix/service.env:\n"
                     "  KAIRIX_NEO4J_URI=bolt://localhost:7687\n"
                     "Neo4j is optional — entity boost and multi-hop queries are degraded without it."

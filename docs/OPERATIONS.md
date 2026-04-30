@@ -132,7 +132,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/quanyeomans/kairix/main/scri
 
 # Or quick Docker start (no install script):
 docker run -d --name neo4j -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/changeme \
+  -e NEO4J_AUTH=neo4j/$(openssl rand -hex 16) \
   neo4j:5-community
 ```
 

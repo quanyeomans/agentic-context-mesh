@@ -26,7 +26,7 @@ labels: bug
 
 - Kairix version: `kairix --version`
 - Python version: `python3 --version`
-- sqlite-vec loaded: yes / no
+- `kairix onboard check` output:
 - OS:
 
 ## Logs
