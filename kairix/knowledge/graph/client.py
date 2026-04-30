@@ -333,6 +333,29 @@ class Neo4jClient:
             logger.warning("cypher query failed: %s", e)
             return []
 
+    def rotate_password(self, new_password: str) -> bool:
+        """Change the Neo4j password for the current user.
+
+        Connects with the existing password and executes ALTER CURRENT USER
+        SET PASSWORD. Returns True on success, False on failure.
+        """
+        if not self._driver:
+            logger.error("rotate_password: no active connection")
+            return False
+        try:
+            with self._driver.session(database="system") as session:
+                session.run(
+                    "ALTER CURRENT USER SET PASSWORD FROM $old TO $new",
+                    old=self._password,
+                    new=new_password,
+                )
+            logger.info("Neo4j password rotated successfully")
+            self._password = new_password
+            return True
+        except Exception as e:
+            logger.error("rotate_password failed: %s", e)
+            return False
+
 
 # Module-level singleton — lazy-initialised on first call
 _client: Neo4jClient | None = None

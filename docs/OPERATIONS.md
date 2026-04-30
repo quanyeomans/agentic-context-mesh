@@ -6,6 +6,38 @@ For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 
 ---
 
+## Configuration vs Secrets
+
+Not all environment variables are secrets. Configuration values belong in `service.env` or `docker-compose.override.yml`. Secrets belong in Key Vault or `/run/secrets/` (tmpfs).
+
+**Configuration (service.env / compose environment):**
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `KAIRIX_EMBED_DIMS` | Embedding vector dimensions | `1536` |
+| `KAIRIX_AZURE_API_VERSION` | Azure API version override | `2024-12-01-preview` |
+| `KAIRIX_NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
+| `KAIRIX_NEO4J_USER` | Neo4j username | `neo4j` |
+| `KAIRIX_DOCUMENT_ROOT` | Path to document store | `~/kairix-vault` |
+| `KAIRIX_DB_PATH` | SQLite database path | `~/.cache/kairix/index.sqlite` |
+| `KAIRIX_KV_NAME` | Azure Key Vault name (for secret resolution) | — |
+
+**Secrets (Key Vault / /run/secrets/ / env var override):**
+
+| KV name | Env var | Purpose |
+|---------|---------|---------|
+| `kairix-llm-api-key` | `KAIRIX_LLM_API_KEY` | LLM API key |
+| `kairix-llm-endpoint` | `KAIRIX_LLM_ENDPOINT` | LLM API endpoint |
+| `kairix-llm-model` | `KAIRIX_LLM_MODEL` | Chat model name |
+| `kairix-embed-api-key` | `KAIRIX_EMBED_API_KEY` | Embed API key (falls back to LLM) |
+| `kairix-embed-endpoint` | `KAIRIX_EMBED_ENDPOINT` | Embed API endpoint (falls back to LLM) |
+| `kairix-embed-model` | `KAIRIX_EMBED_MODEL` | Embed model name |
+| `kairix-neo4j-password` | `KAIRIX_NEO4J_PASSWORD` | Neo4j password |
+
+Resolution order: env var > per-file secret (`/run/secrets/<name>`) > bundle file (`/run/secrets/kairix.env`) > Azure Key Vault CLI (`KAIRIX_KV_NAME`).
+
+---
+
 ## Environment Configuration
 
 All infrastructure-specific values (vault name, paths, credentials) are passed via environment variables — nothing is hardcoded in the source. The repo ships [`env.example`](../env.example) with every variable documented.

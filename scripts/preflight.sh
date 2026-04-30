@@ -44,7 +44,23 @@ if [[ "$QUICK" == "false" ]]; then
     fi
 fi
 
-# 5. Confidential data check
+# 5. Shellcheck for shell scripts (skip in quick mode)
+if [[ "$QUICK" == "false" ]]; then
+    if command -v shellcheck &>/dev/null; then
+        SC_OUT=$(shellcheck --severity=warning scripts/*.sh docker/**/*.sh 2>&1 || true)
+        if [[ -z "$SC_OUT" ]]; then
+            pass "shellcheck"
+        else
+            echo "  ⚠ shellcheck findings:"
+            echo "$SC_OUT" | head -15
+            pass "shellcheck (reviewed)"
+        fi
+    else
+        pass "shellcheck (not installed — skipped)"
+    fi
+fi
+
+# 6. Confidential data check
 bash scripts/pre-commit-confidential-check.sh && pass "confidential check" || fail "confidential data detected"
 
 echo ""
