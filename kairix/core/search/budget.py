@@ -86,13 +86,31 @@ def _get_summaries_db_path() -> Path:
     return summaries_db_path()
 
 
+_summaries_warned = False
+
+
 def _open_summaries_db() -> sqlite3.Connection | None:
-    """Open the summaries DB if it exists, else return None."""
+    """Open the summaries DB if it exists, else return None.
+
+    Logs a warning once if the DB is missing or has fewer than 100 entries.
+    """
+    global _summaries_warned
     db_path = _get_summaries_db_path()
     if not db_path.exists():
+        if not _summaries_warned:
+            logger.info("budget: summaries DB not found — run 'kairix summarise --all' to generate L0 summaries")
+            _summaries_warned = True
         return None
     try:
         conn = sqlite3.connect(str(db_path))
+        if not _summaries_warned:
+            count = conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]
+            if count < 100:
+                logger.info(
+                    "budget: only %d summaries in DB — run 'kairix summarise --all' for better token budgeting",
+                    count,
+                )
+            _summaries_warned = True
         return conn
     except Exception:
         return None

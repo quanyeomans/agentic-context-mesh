@@ -326,6 +326,39 @@ def format_interpretation(result: BenchmarkResult) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _validate_suite_prerequisites(suite: BenchmarkSuite) -> None:
+    """Validate suite has usable gold references before scoring.
+
+    Logs warnings for cases that will produce zero scores due to missing
+    gold data. Raises ValueError if no cases have scorable gold references.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    empty_recall = 0
+    total_recall = 0
+
+    for case in suite.cases:
+        if case.category == "recall" and case.score_method == "ndcg":
+            total_recall += 1
+            if not case.gold_titles and not case.gold_paths and not case.gold_path:
+                empty_recall += 1
+
+    if empty_recall > 0:
+        logger.warning(
+            "benchmark: %d/%d recall cases have no gold references — these will score 0.0",
+            empty_recall,
+            total_recall,
+        )
+
+    if total_recall > 0 and empty_recall == total_recall:
+        raise ValueError(
+            f"All {total_recall} recall cases have no gold references. "
+            "Cannot produce meaningful benchmark results. "
+            "Regenerate the suite: kairix eval generate --output <suite.yaml>"
+        )
+
+
 def run_benchmark(
     suite: BenchmarkSuite,
     system: str = "hybrid",
@@ -349,6 +382,9 @@ def run_benchmark(
     Returns:
         BenchmarkResult with summary, category scores, and per-case results.
     """
+    # Validate suite prerequisites
+    _validate_suite_prerequisites(suite)
+
     case_results: list[dict[str, Any]] = []
     # Include all valid categories including classification
     all_categories = set(CATEGORY_WEIGHTS.keys()) | {"classification"}
