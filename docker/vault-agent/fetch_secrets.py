@@ -55,7 +55,7 @@ SECRET_MAP: dict[str, str] = {
     "kairix-embed-api-key": "KAIRIX_EMBED_API_KEY",
     "kairix-embed-endpoint": "KAIRIX_EMBED_ENDPOINT",
     "kairix-embed-model": "KAIRIX_EMBED_MODEL",
-    "kairix-neo4j-password": "KAIRIX_NEO4J_PASSWORD",
+    "kairix-neo4j-password": "KAIRIX_NEO4J_PASSWORD",  # pragma: allowlist secret
 }
 
 

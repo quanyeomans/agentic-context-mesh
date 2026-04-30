@@ -22,7 +22,7 @@ services:
     ports:
       - "8080:8080"  # Change to "9090:8080" if port 8080 is already in use
     volumes:
-      - ./documents:/data/vault:ro  # Your documents folder → container's document store
+      - ./documents:/data/vault  # Your documents folder → container's document store
       - kairix-data:/data/kairix
       # Optional: mount a custom config file (created by kairix setup)
       # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
@@ -49,7 +49,7 @@ services:
     # build: .
     command: ["worker"]
     volumes:
-      - ./documents:/data/vault:ro  # Your documents folder → container's document store
+      - ./documents:/data/vault  # Your documents folder → container's document store
       - kairix-data:/data/kairix
       # Optional: mount a custom config file
       # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
