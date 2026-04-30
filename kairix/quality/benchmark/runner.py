@@ -176,7 +176,7 @@ def _llm_judge(
 
 
 # ---------------------------------------------------------------------------
-# Retrieval backends
+# Retrieval — delegates to shared retrieval module
 # ---------------------------------------------------------------------------
 
 
@@ -192,64 +192,18 @@ def _retrieve(
     """
     Run retrieval and return (paths, snippets, metadata).
     """
-    if system == "hybrid":
-        from dataclasses import replace
+    from kairix.quality.eval.retrieval import retrieve
 
-        from kairix.core.search.hybrid import search
-
-        config = None
-        if fusion_override:
-            from kairix.core.search.config_loader import load_config
-
-            config = replace(load_config(), fusion_strategy=fusion_override)
-
-        # Build explicit collections list when --collection is set
-        collections = [collection] if collection else None
-
-        search_kwargs: dict[str, Any] = {
-            "query": query,
-            "budget": 500_000,
-            "config": config,
-            "collections": collections,
-        }
-        if agent:
-            search_kwargs["agent"] = agent
-            search_kwargs["scope"] = "shared+agent"
-
-        sr = search(**search_kwargs)
-        paths = [b.result.path for b in sr.results]
-        snippets = [b.content[:500] for b in sr.results]
-        meta = {
-            "intent": sr.intent.value,
-            "bm25_count": sr.bm25_count,
-            "vec_count": sr.vec_count,
-            "fused_count": sr.fused_count,
-            "vec_failed": sr.vec_failed,
-            "latency_ms": round(sr.latency_ms, 1),
-        }
-        return paths, snippets, meta
-
-    elif system == "bm25":
-        from kairix.core.search.bm25 import bm25_search
-
-        results = bm25_search(query=query, agent=agent, limit=limit)
-        # BM25Result.file is now a bare vault-relative path
-        paths = [r["file"] for r in results]
-        snippets = [r.get("snippet") or "" for r in results]
-        return paths, snippets, {"system": "bm25"}
-
-    elif system == "mock":
-        from kairix.quality.benchmark.mock_retrieval import mock_retrieve
-
-        return mock_retrieve(query=query, limit=limit)
-
-    elif system == "mock-reflib":
-        from kairix.quality.benchmark.mock_reflib_retrieval import mock_reflib_retrieve
-
-        return mock_reflib_retrieve(query=query, limit=limit)
-
-    else:
-        raise ValueError(f"Unknown system: {system!r}. Use 'hybrid', 'bm25', 'vector', 'mock', or 'mock-reflib'.")
+    result = retrieve(
+        query=query,
+        system=system,
+        agent=agent,
+        limit=limit,
+        db_path=db_path,
+        collection=collection,
+        fusion_override=fusion_override,
+    )
+    return result.paths, result.snippets, result.meta
 
 
 # ---------------------------------------------------------------------------

@@ -299,7 +299,7 @@ def generate_queries(
 
 
 # ---------------------------------------------------------------------------
-# Retrieval
+# Retrieval — delegates to shared retrieval module
 # ---------------------------------------------------------------------------
 
 
@@ -309,12 +309,12 @@ def _retrieve(query: str, intent: str, agent: str = "shape") -> tuple[list[str],
     Returns ([], []) on any failure.
     """
     try:
-        from kairix.core.search.hybrid import search
+        from kairix.quality.eval.retrieval import retrieve
 
-        sr = search(query=query, agent=agent, scope="shared+agent", budget=500_000)
-        paths = [b.result.path for b in sr.results]
-        snippets = [b.content[:300] for b in sr.results]
-        return paths, snippets
+        result = retrieve(query=query, system="hybrid", agent=agent)
+        # Truncate snippets to 300 chars for judge input
+        snippets = [s[:300] for s in result.snippets]
+        return result.paths, snippets
     except Exception as e:
         logger.warning("_retrieve: error for query %r — %s", query[:60], e)
         return [], []

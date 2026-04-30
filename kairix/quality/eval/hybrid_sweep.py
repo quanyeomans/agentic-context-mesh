@@ -313,23 +313,21 @@ def _retrieve(
     collections: list[str] | None,
     cfg: HybridSweepConfig,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Run retrieval via the main search pipeline."""
-    from kairix.core.search.hybrid import search
+    """Run retrieval via the shared retrieval module."""
+    from kairix.quality.eval.retrieval import retrieve
 
     config = _sweep_config_to_retrieval_config(cfg)
-    sr = search(
+    result = retrieve(
         query=query,
-        scope="shared+agent",
-        budget=500_000,
+        system="hybrid",
         config=config,
         collections=collections,
     )
-    paths = [b.result.path for b in sr.results]
-    return paths, {
-        "bm25_count": sr.bm25_count,
-        "vec_count": sr.vec_count,
-        "fused_count": sr.fused_count,
-        "vec_failed": sr.vec_failed,
+    return result.paths, {
+        "bm25_count": result.meta.get("bm25_count", 0),
+        "vec_count": result.meta.get("vec_count", 0),
+        "fused_count": result.meta.get("fused_count", 0),
+        "vec_failed": result.meta.get("vec_failed", False),
     }
 
 
