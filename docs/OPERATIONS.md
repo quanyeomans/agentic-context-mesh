@@ -657,31 +657,25 @@ kairix --version
 
 ### Vector search returns 0 results
 
-The embed pipeline hasn't run, or the vectors_vec table is empty or wrong-dimension.
+The embed pipeline hasn't run, or the usearch vector index is empty or missing.
 
 ```bash
-# Check vector count
-sqlite3 ~/.cache/kairix/index.sqlite "SELECT COUNT(*) FROM vectors_vec;"
-# Should be > 0
+# Check if the usearch index file exists
+ls -la ~/.cache/kairix/vectors.usearch
+# Should exist and be > 0 bytes
 
-# Check dimensions
-sqlite3 ~/.cache/kairix/index.sqlite \
-  "SELECT length(embedding)/4 FROM vectors_vec LIMIT 1;"
-# Should be 1536
+# Check dimensions from metadata
+cat ~/.cache/kairix/vectors.meta.json
+# Look for "ndim": 1536
 
-# If 0 vectors: run full re-embed
+# If index is missing: run full re-embed
 KAIRIX_LLM_ENDPOINT="$ENDPOINT" KAIRIX_LLM_API_KEY="$APIKEY" \
 kairix embed --force
 ```
 
 ### `Dimension mismatch` errors in embed log
 
-Another process wrote to the kairix database during an embed run and recreated `vectors_vec` with different dimensions. This is handled automatically by the retry logic in embed.py (ADR-M08), but if it's happening frequently, check for concurrent writers:
-
-```bash
-# Check for other processes accessing the database
-fuser ~/.cache/kairix/index.sqlite
-```
+A dimension mismatch is now auto-detected: the old index is deleted and rebuilt with the correct dimensions on the next embed run. No manual intervention required.
 
 ### Embedding model mismatch
 

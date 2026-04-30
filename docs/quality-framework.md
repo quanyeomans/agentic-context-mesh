@@ -144,7 +144,7 @@ Each section has a maturity scale:
 ### 5.2 Scalability
 - [ ] SQLite handles up to ~50,000 documents without degradation
 - [ ] FTS5 index size scales linearly with document count
-- [ ] Vector search scales with sqlite-vec constraints documented
+- [ ] Vector search scales with usearch HNSW constraints documented
 - [ ] Neo4j graph size limits documented (community edition: no clustering)
 
 ### 5.3 Reliability

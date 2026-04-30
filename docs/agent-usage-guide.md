@@ -262,7 +262,7 @@ Set with `--budget N`. The budget caps total tokens returned, not the number of 
 | Results are all from one section | Scope issue | Check `--agent` flag is correct |
 | Entity lookup returns nothing | Entity not in Neo4j | Run `kairix vault crawl --vault-root $KAIRIX_VAULT_ROOT` |
 | Temporal query returns non-temporal docs | Time phrase not detected | Use relative ("last N days/weeks", "this month") or absolute ("April 2026", "March 15") date references |
-| BM25-only (vec_count=0) with valid creds | sqlite-vec extension not loaded | Set `SQLITE_VEC_PATH` or run `kairix onboard check` |
+| BM25-only (vec_count=0) with valid creds | usearch vector index not built | Run `kairix embed` to build the index |
 
 ---
 

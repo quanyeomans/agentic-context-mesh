@@ -357,7 +357,7 @@ All Dependabot PRs require CI to pass before merge. No manual merge without CI g
 
 usearch is installed as a pip dependency (`usearch>=0.1.6`). No manual extension path configuration needed.
 
-The `SQLITE_VEC_PATH` env var can be used to specify the location explicitly if auto-discovery fails.
+Vector storage uses usearch natively via pip — no SQLite extension or manual path configuration required.
 
 ### 6.3 Adding a new dependency
 
