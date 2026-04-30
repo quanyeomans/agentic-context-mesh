@@ -10,12 +10,12 @@ from kairix.quality.eval.hybrid_sweep import (
     HybridSweepConfig,
     HybridSweepReport,
     HybridSweepResult,
-    _match_relevance,
     build_default_configs,
     compute_hit_at_k,
     compute_mrr,
     compute_ndcg,
 )
+from kairix.quality.eval.metrics import relevance_for_path as _match_relevance
 
 # ---------------------------------------------------------------------------
 # HybridSweepConfig

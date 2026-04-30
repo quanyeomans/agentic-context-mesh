@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.quality.benchmark.runner import _relevance_for_path, match_gold_to_path
 from kairix.quality.eval.gold_builder import _path_title
+from kairix.quality.eval.metrics import match_gold_to_path
+from kairix.quality.eval.metrics import relevance_for_path as _relevance_for_path
 
 pytestmark = pytest.mark.unit
 

@@ -28,6 +28,15 @@ import yaml
 
 from kairix.quality.eval.constants import CATEGORY_ALIASES as _CATEGORY_ALIASES
 from kairix.quality.eval.constants import CATEGORY_WEIGHTS as _CATEGORY_WEIGHTS
+from kairix.quality.eval.metrics import (
+    hit_at_k_graded as _compute_hit_at_k,
+)
+from kairix.quality.eval.metrics import (
+    ndcg_graded as _compute_ndcg,
+)
+from kairix.quality.eval.metrics import (
+    reciprocal_rank_graded as _compute_mrr,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,84 +144,6 @@ def _bm25_search_config(
     except Exception as e:
         logger.debug("sweep: FTS query failed — %s (query=%r)", e, query[:40])
         return []
-
-
-def _build_rel_map(gold: list[dict]) -> tuple[dict[str, int], str]:
-    """Build relevance map from gold_titles or gold_paths format.
-
-    Returns (rel_map, match_mode) where match_mode is 'stem' or 'path'.
-    """
-    if not gold:
-        return {}, "stem"
-
-    # Detect format: gold_titles use 'title', gold_paths use 'path'
-    if "title" in gold[0]:
-        rel_map = {str(g["title"]).lower().strip(): int(g.get("relevance", 0)) for g in gold}
-        return rel_map, "stem"
-    elif "path" in gold[0]:
-        rel_map = {str(g["path"]).lower().strip(): int(g.get("relevance", 0)) for g in gold}
-        return rel_map, "path"
-    return {}, "stem"
-
-
-def _match_path(retrieved: str, rel_map: dict[str, int], mode: str) -> int:
-    """Look up relevance grade for a retrieved path."""
-    if mode == "stem":
-        return rel_map.get(Path(retrieved).stem.lower(), 0)
-    elif mode == "path":
-        retrieved_lower = retrieved.lower()
-        # Try exact match first
-        if retrieved_lower in rel_map:
-            return rel_map[retrieved_lower]
-        # Try suffix match (gold may be collection-relative, retrieved may be different prefix)
-        for gold_path, rel in rel_map.items():
-            if retrieved_lower.endswith(gold_path) or gold_path.endswith(retrieved_lower):
-                return rel
-        return 0
-    return 0
-
-
-def _compute_ndcg(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
-    """Compute NDCG@k for a single query."""
-    import math
-
-    if not gold:
-        return 0.0
-
-    rel_map, mode = _build_rel_map(gold)
-
-    # DCG@k
-    dcg = 0.0
-    for i, path in enumerate(retrieved_paths[:k]):
-        rel = _match_path(path, rel_map, mode)
-        dcg += rel / math.log2(i + 2)
-
-    # IDCG@k (ideal ranking)
-    ideal_rels = sorted(rel_map.values(), reverse=True)[:k]
-    idcg = sum(r / math.log2(i + 2) for i, r in enumerate(ideal_rels))
-
-    return dcg / idcg if idcg > 0 else 0.0
-
-
-def _compute_hit_at_k(retrieved_paths: list[str], gold: list[dict], k: int = 5) -> bool:
-    """Check if any gold doc appears in top-k."""
-    rel_map, mode = _build_rel_map(gold)
-    for path in retrieved_paths[:k]:
-        if _match_path(path, rel_map, mode) >= 1:
-            return True
-    return False
-
-
-def _compute_mrr(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
-    """Compute MRR@k (reciprocal rank of first relevant doc)."""
-    rel_map, mode = _build_rel_map(gold)
-    for i, path in enumerate(retrieved_paths[:k]):
-        if _match_path(path, rel_map, mode) >= 1:
-            return 1.0 / (i + 1)
-    return 0.0
-
-
-# Category weights (same as benchmark runner)
 
 
 def sweep_bm25_params(

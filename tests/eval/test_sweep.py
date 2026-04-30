@@ -1,4 +1,4 @@
-"""Unit tests for kairix.quality.eval.sweep — metric calculation functions."""
+"""Unit tests for scoring metrics used by sweep — delegates to kairix.quality.eval.metrics."""
 
 from __future__ import annotations
 
@@ -6,100 +6,18 @@ import math
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Helpers: import pure functions under test
-# ---------------------------------------------------------------------------
-from kairix.quality.eval.sweep import (
-    _build_rel_map,
-    _compute_hit_at_k,
-    _compute_mrr,
-    _compute_ndcg,
-    _match_path,
+from kairix.quality.eval.metrics import (
+    hit_at_k_graded as _compute_hit_at_k,
+)
+from kairix.quality.eval.metrics import (
+    ndcg_graded as _compute_ndcg,
+)
+from kairix.quality.eval.metrics import (
+    reciprocal_rank_graded as _compute_mrr,
 )
 
 # ---------------------------------------------------------------------------
-# _build_rel_map
-# ---------------------------------------------------------------------------
-
-
-class TestBuildRelMap:
-    @pytest.mark.unit
-    def test_empty_gold(self):
-        rel_map, mode = _build_rel_map([])
-        assert rel_map == {}
-        assert mode == "stem"
-
-    @pytest.mark.unit
-    def test_title_format(self):
-        gold = [
-            {"title": "My-Doc", "relevance": 2},
-            {"title": "Other", "relevance": 1},
-        ]
-        rel_map, mode = _build_rel_map(gold)
-        assert mode == "stem"
-        assert rel_map["my-doc"] == 2
-        assert rel_map["other"] == 1
-
-    @pytest.mark.unit
-    def test_path_format(self):
-        gold = [
-            {"path": "engineering/adr-001.md", "relevance": 2},
-        ]
-        rel_map, mode = _build_rel_map(gold)
-        assert mode == "path"
-        assert rel_map["engineering/adr-001.md"] == 2
-
-    @pytest.mark.unit
-    def test_no_title_no_path(self):
-        gold = [{"something": "else"}]
-        rel_map, mode = _build_rel_map(gold)  # noqa: RUF059
-        assert rel_map == {}
-
-    @pytest.mark.unit
-    def test_default_relevance(self):
-        gold = [{"title": "Doc"}]
-        rel_map, _ = _build_rel_map(gold)
-        assert rel_map["doc"] == 0
-
-
-# ---------------------------------------------------------------------------
-# _match_path
-# ---------------------------------------------------------------------------
-
-
-class TestMatchPath:
-    @pytest.mark.unit
-    def test_stem_mode_exact(self):
-        rel_map = {"my-doc": 2}
-        assert _match_path("/some/path/My-Doc.md", rel_map, "stem") == 2
-
-    @pytest.mark.unit
-    def test_stem_mode_miss(self):
-        rel_map = {"my-doc": 2}
-        assert _match_path("/some/path/other.md", rel_map, "stem") == 0
-
-    @pytest.mark.unit
-    def test_path_mode_exact(self):
-        rel_map = {"engineering/adr-001.md": 2}
-        assert _match_path("engineering/adr-001.md", rel_map, "path") == 2
-
-    @pytest.mark.unit
-    def test_path_mode_suffix_match(self):
-        rel_map = {"adr-001.md": 2}
-        assert _match_path("/full/path/adr-001.md", rel_map, "path") == 2
-
-    @pytest.mark.unit
-    def test_path_mode_miss(self):
-        rel_map = {"adr-001.md": 2}
-        assert _match_path("/full/path/other.md", rel_map, "path") == 0
-
-    @pytest.mark.unit
-    def test_unknown_mode(self):
-        assert _match_path("foo.md", {"foo": 1}, "unknown") == 0
-
-
-# ---------------------------------------------------------------------------
-# _compute_ndcg
+# ndcg_graded (was _compute_ndcg)
 # ---------------------------------------------------------------------------
 
 
@@ -130,8 +48,6 @@ class TestComputeNDCG:
         ]
         retrieved = ["/path/a.md", "/path/irrelevant.md", "/path/b.md"]
 
-        # DCG: 2/log2(2) + 0/log2(3) + 1/log2(4) = 2.0 + 0.0 + 0.5 = 2.5
-        # IDCG: 2/log2(2) + 1/log2(3) = 2.0 + 0.6309... = 2.6309...
         expected_dcg = 2.0 / math.log2(2) + 0.0 + 1.0 / math.log2(4)
         expected_idcg = 2.0 / math.log2(2) + 1.0 / math.log2(3)
         expected = expected_dcg / expected_idcg
@@ -143,7 +59,6 @@ class TestComputeNDCG:
         """Only top-k results count."""
         gold = [{"title": "late", "relevance": 2}]
         retrieved = ["/a.md", "/b.md", "/late.md"]
-        # k=2 means /late.md is excluded
         assert _compute_ndcg(retrieved, gold, k=2) == 0.0
 
     @pytest.mark.unit
@@ -153,7 +68,7 @@ class TestComputeNDCG:
 
 
 # ---------------------------------------------------------------------------
-# _compute_hit_at_k
+# hit_at_k_graded (was _compute_hit_at_k)
 # ---------------------------------------------------------------------------
 
 
@@ -187,7 +102,7 @@ class TestComputeHitAtK:
 
 
 # ---------------------------------------------------------------------------
-# _compute_mrr
+# reciprocal_rank_graded (was _compute_mrr)
 # ---------------------------------------------------------------------------
 
 

@@ -19,23 +19,37 @@ from kairix.quality.benchmark.runner import (
     BenchmarkResult,
     _category_diagnosis,
     _classification_score,
-    _dcg,
     _exact_match,
     _fuzzy_match,
-    _hit_at_k,
-    _hit_at_k_by_title,
-    _ideal_dcg,
     _llm_judge,
-    _ndcg_score,
-    _ndcg_score_by_title,
-    _normalise_title,
-    _reciprocal_rank,
-    _reciprocal_rank_by_title,
-    _stem_from_path,
     _title_in_retrieved,
     format_interpretation,
     score_tier,
 )
+from kairix.quality.eval.metrics import (
+    _normalise_title,
+    _stem_from_path,
+)
+from kairix.quality.eval.metrics import (
+    dcg as _dcg,
+)
+from kairix.quality.eval.metrics import (
+    hit_at_k_graded as _hit_at_k,
+)
+from kairix.quality.eval.metrics import (
+    ideal_dcg_graded as _ideal_dcg,
+)
+from kairix.quality.eval.metrics import (
+    ndcg_graded as _ndcg_score,
+)
+from kairix.quality.eval.metrics import (
+    reciprocal_rank_graded as _reciprocal_rank,
+)
+
+# Aliases for title-based tests — these are the same functions now (unified matching)
+_ndcg_score_by_title = _ndcg_score
+_hit_at_k_by_title = _hit_at_k
+_reciprocal_rank_by_title = _reciprocal_rank
 
 # ---------------------------------------------------------------------------
 # _exact_match

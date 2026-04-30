@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +31,15 @@ from typing import Any
 import yaml
 
 from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
+from kairix.quality.eval.metrics import (
+    hit_at_k_graded as compute_hit_at_k,
+)
+from kairix.quality.eval.metrics import (
+    ndcg_graded as compute_ndcg,
+)
+from kairix.quality.eval.metrics import (
+    reciprocal_rank_graded as compute_mrr,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -229,59 +237,6 @@ def build_default_configs() -> list[HybridSweepConfig]:
     )
 
     return configs
-
-
-# ---------------------------------------------------------------------------
-# Metrics (reused from sweep.py with minor adaptations)
-# ---------------------------------------------------------------------------
-
-
-def _match_relevance(retrieved_path: str, gold: list[dict]) -> int:
-    """Look up relevance grade for a retrieved path against gold list.
-
-    Uses the same path-based matching as the benchmark runner:
-    gold titles containing '/' match as suffix of the retrieved path,
-    titles without '/' match against the filename stem only.
-    """
-    from kairix.quality.benchmark.runner import match_gold_to_path
-
-    for g in gold:
-        title = g.get("title") or g.get("path", "")
-        # Strip .md extension from path-format gold entries to match runner convention
-        if title.endswith(".md"):
-            title = title[:-3]
-        if match_gold_to_path(title, retrieved_path):
-            return int(g.get("relevance", 0))
-    return 0
-
-
-def compute_ndcg(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
-    """Compute NDCG@k for a single query."""
-    if not gold:
-        return 0.0
-    dcg = 0.0
-    for i, path in enumerate(retrieved_paths[:k]):
-        rel = _match_relevance(path, gold)
-        dcg += rel / math.log2(i + 2)
-    ideal_rels = sorted([int(g.get("relevance", 0)) for g in gold], reverse=True)[:k]
-    idcg = sum(r / math.log2(i + 2) for i, r in enumerate(ideal_rels))
-    return dcg / idcg if idcg > 0 else 0.0
-
-
-def compute_hit_at_k(retrieved_paths: list[str], gold: list[dict], k: int = 5) -> bool:
-    """Check if any relevant gold doc appears in top-k."""
-    for path in retrieved_paths[:k]:
-        if _match_relevance(path, gold) >= 1:
-            return True
-    return False
-
-
-def compute_mrr(retrieved_paths: list[str], gold: list[dict], k: int = 10) -> float:
-    """Compute MRR@k (reciprocal rank of first relevant doc)."""
-    for i, path in enumerate(retrieved_paths[:k]):
-        if _match_relevance(path, gold) >= 1:
-            return 1.0 / (i + 1)
-    return 0.0
 
 
 # ---------------------------------------------------------------------------

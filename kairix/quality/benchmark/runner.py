@@ -14,7 +14,6 @@ Score methods:
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,23 +23,13 @@ from typing import Any
 from kairix.quality.benchmark.suite import BenchmarkSuite
 from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS, PHASE_GATES
 from kairix.quality.eval.metrics import (
-    dcg as _dcg,
-)
-from kairix.quality.eval.metrics import (
-    hit_at_k_graded as _hit_at_k,
-)
-from kairix.quality.eval.metrics import (
-    ideal_dcg_graded as _ideal_dcg,
-)
-from kairix.quality.eval.metrics import (
-    ndcg_graded as _ndcg_score,
-)
-from kairix.quality.eval.metrics import (
-    reciprocal_rank_graded as _reciprocal_rank,
+    hit_at_k_graded,
+    match_gold_to_path,
+    ndcg_graded,
+    reciprocal_rank_graded,
 )
 
 # Re-export so existing `from kairix.quality.benchmark.runner import CATEGORY_WEIGHTS` keeps working
-__all__ = ["CATEGORY_ALIASES", "CATEGORY_WEIGHTS", "PHASE_GATES"]
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -62,89 +51,13 @@ CATEGORY_FLOOR = 0.50  # per-category minimum for gate pass
 EXACT_MATCH_TOPK = 5
 FUZZY_MATCH_TOPK = 10
 
-# ---------------------------------------------------------------------------
-# Title-based NDCG helpers (TREC qrels pattern — path-agnostic document identity)
-#
-# Obsidian uses the filename stem as the stable document ID (wikilinks reference
-# titles, not paths). Normalising both gold titles and retrieved path stems to the
-# same form makes scoring robust to vault reorganisation: a file moved from
-# 02-Areas/Foo/foo.md to Archive/foo.md still matches a gold_title of "foo".
-# ---------------------------------------------------------------------------
-
-
-def _normalise_title(t: str) -> str:
-    """Stable document identity key: lowercase, consolidate separators to hyphens."""
-    return re.sub(r"[-_\s]+", "-", t.lower()).strip("-")
-
-
-def _stem_from_path(path: str) -> str:
-    """Extract the normalised note-title key from a retrieved filesystem path."""
-    return _normalise_title(Path(path).stem)
-
-
-def _path_suffix_from_path(path: str) -> str:
-    """Normalise a full path for suffix matching (remove .md, lowercase, hyphens)."""
-    return _normalise_title(path.replace(".md", ""))
-
-
-def match_gold_to_path(gold_title: str, result_path: str) -> bool:
-    """Check if a gold title matches a retrieved path.
-
-    Path-based (contains '/'): match as suffix of the result path.
-      gold="engineering/adr-examples/readme" matches
-      "reference-library/engineering/adr-examples/readme.md"
-
-    Stem-only (no '/'): match against filename stem only.
-      gold="patterns" matches "vault/patterns.md"
-    """
-    norm_gold = _normalise_title(gold_title)
-    if "/" in gold_title:
-        norm_path = _path_suffix_from_path(result_path)
-        return norm_path.endswith(norm_gold)
-    return _stem_from_path(result_path) == norm_gold
+# match_gold_to_path re-exported from metrics for external callers
+__all__ = ["CATEGORY_ALIASES", "CATEGORY_WEIGHTS", "PHASE_GATES", "match_gold_to_path"]
 
 
 def _title_in_retrieved(gold_title: str, retrieved_paths: list[str], top_k: int) -> bool:
     """True if any of the top-k retrieved paths resolves to the gold title."""
     return any(match_gold_to_path(gold_title, p) for p in retrieved_paths[:top_k])
-
-
-def _relevance_for_path(path: str, gold_titles: list[dict]) -> int:
-    """Return the relevance grade for a retrieved path against gold titles."""
-    for g in gold_titles:
-        if match_gold_to_path(g["title"], path):
-            return g.get("relevance", 0)
-    return 0
-
-
-def _ndcg_score_by_title(retrieved_paths: list[str], gold_titles: list[dict], k: int = 10) -> float:
-    """NDCG@k using title-based document identity.
-
-    Supports both stem-only ("patterns") and path-based
-    ("engineering/adr-examples/readme") gold titles.
-    """
-    if not gold_titles:
-        return 0.0
-    idcg = _ideal_dcg(gold_titles, k)
-    if idcg == 0.0:
-        return 0.0
-    rels = [_relevance_for_path(p, gold_titles) for p in retrieved_paths[:k]]
-    return _dcg(rels, k) / idcg
-
-
-def _hit_at_k_by_title(retrieved_paths: list[str], gold_titles: list[dict], k: int) -> bool:
-    """True if any gold title (relevance >= 1) appears in top-k retrieved paths."""
-    gold_set = {_normalise_title(g["title"]) for g in gold_titles if g.get("relevance", 0) >= 1}
-    return any(_stem_from_path(p) in gold_set for p in retrieved_paths[:k])
-
-
-def _reciprocal_rank_by_title(retrieved_paths: list[str], gold_titles: list[dict], k: int) -> float:
-    """Reciprocal rank of the first relevant gold title in top-k (0.0 if none)."""
-    gold_set = {_normalise_title(g["title"]) for g in gold_titles if g.get("relevance", 0) >= 1}
-    for i, p in enumerate(retrieved_paths[:k]):
-        if _stem_from_path(p) in gold_set:
-            return 1.0 / (i + 1)
-    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -477,23 +390,17 @@ def run_benchmark(
             else:
                 score = _fuzzy_match(paths, case.gold_path or "")
         elif case.score_method == "ndcg":
-            if case.gold_titles:
-                # Title-based NDCG: TREC qrels pattern — stable identity, path-agnostic
-                score = _ndcg_score_by_title(paths, case.gold_titles, k=10)
-                ndcg_detail = {
-                    "hit_at_5": _hit_at_k_by_title(paths, case.gold_titles, k=5),
-                    "rr": _reciprocal_rank_by_title(paths, case.gold_titles, k=10),
-                }
-            else:
-                # Path-based fallback: backwards compat for suites without gold_titles
-                effective_gold = case.gold_paths or (
-                    [{"path": case.gold_path, "relevance": 2}] if case.gold_path else []
-                )
-                score = _ndcg_score(paths, effective_gold, k=10)
-                ndcg_detail = {
-                    "hit_at_5": _hit_at_k(paths, effective_gold, k=5),
-                    "rr": _reciprocal_rank(paths, effective_gold, k=10),
-                }
+            # Unified scoring: works with both gold_titles and gold_paths
+            effective_gold = (
+                case.gold_titles
+                or case.gold_paths
+                or ([{"path": case.gold_path, "relevance": 2}] if case.gold_path else [])
+            )
+            score = ndcg_graded(paths, effective_gold, k=10)
+            ndcg_detail = {
+                "hit_at_5": hit_at_k_graded(paths, effective_gold, k=5),
+                "rr": reciprocal_rank_graded(paths, effective_gold, k=10),
+            }
         else:  # llm
             score = _llm_judge(
                 query=case.query,
