@@ -110,7 +110,7 @@ ln -s ~/my-notes ./documents # point to your documents
 docker compose up -d         # pulls pre-built image + starts kairix + worker + Neo4j
 ```
 
-See the [full quick-start guide](docs/quick-start.md) for detailed setup, configuration, and troubleshooting.
+See the [full quick-start guide](docs/getting-started/quick-start.md) for detailed setup, configuration, and troubleshooting.
 
 **What you need:**
 - Python 3.10+ (Option A) or Docker (Option B)
@@ -221,7 +221,7 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 | `kairix contradict` | Shipped | Flags conflicting facts before they persist |
 | `kairix curator health` | Shipped | Monitors knowledge graph quality |
 
-**Coming soon:** session briefings, entity discovery, temporal timeline, connector framework. See [ROADMAP](docs/ROADMAP.md) for what's next.
+**Coming soon:** session briefings, entity discovery, temporal timeline, connector framework. See [ROADMAP](docs/project/ROADMAP.md) for what's next.
 
 ---
 
@@ -234,7 +234,7 @@ You have documents. Kairix indexes them. When you or your agents ask a question,
 - Connector framework — ingest from SharePoint, CRM, email headers
 - Curator agent — proactive knowledge harvesting and gap detection
 
-See [ROADMAP.md](docs/ROADMAP.md) for detail.
+See [ROADMAP.md](docs/project/ROADMAP.md) for detail.
 
 ---
 
@@ -266,7 +266,7 @@ pip install "kairix[neo4j,agents,nlp,rerank]"
 - Neo4j Community Edition — for knowledge graph features
 - Azure Key Vault — for production secret management
 
-See [OPERATIONS.md](docs/OPERATIONS.md) for full deployment guide.
+See [OPERATIONS.md](docs/operations/OPERATIONS.md) for full deployment guide.
 
 ---
 
