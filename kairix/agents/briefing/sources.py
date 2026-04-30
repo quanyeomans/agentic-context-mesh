@@ -38,7 +38,12 @@ def fetch_memory_logs(agent: str, max_tokens: int = 500) -> str:
     try:
         memory_dir = agent_memory_path(agent)
         if not memory_dir.exists():
-            logger.warning("sources: memory dir not found for agent %r: %s", agent, memory_dir)
+            logger.warning(
+                "sources: memory dir not found for agent %r at %s — create it with: mkdir -p %s",
+                agent,
+                memory_dir,
+                memory_dir,
+            )
             return ""
 
         today = date.today()

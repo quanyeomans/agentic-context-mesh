@@ -154,6 +154,23 @@ def generate_briefing(agent: str) -> str:
     sources_count = len(context)
     logger.info("pipeline: collected %d sources for %r", sources_count, agent)
 
+    # Surface missing memory — helps users diagnose stale briefings
+    memory_keys = {"memory_logs", "recent_memory"}
+    if not (memory_keys & context.keys()):
+        from kairix.paths import agent_memory_path
+
+        mem_path = agent_memory_path(agent)
+        context["_missing_memory_note"] = (
+            f"No agent memory logs found at {mem_path}. "
+            f"Briefing is based on knowledge store and entity data only. "
+            f"To enable memory-based briefing, create daily log files at "
+            f"{mem_path}/YYYY-MM-DD.md"
+        )
+        logger.warning(
+            "pipeline: no memory sources for agent %r — briefing may be stale",
+            agent,
+        )
+
     # Trim context if over budget
     context = _trim_context(context)
 
