@@ -25,7 +25,6 @@ from functools import lru_cache
 from typing import Any
 
 from kairix.core.db import EMBED_VECTOR_DIMS as EMBED_DIMS
-from kairix.credentials import AZURE_API_VERSION
 from kairix.secrets import load_secrets as _load_secrets
 
 # Load vault-agent sidecar secrets before any env-var reads.
@@ -73,32 +72,15 @@ def _get_client() -> Any:
     Detects Azure endpoints automatically. For OpenRouter or standard OpenAI,
     set the endpoint to the base URL (e.g. https://openrouter.ai/api/v1).
     """
+    from kairix.credentials import make_openai_client
+
     secrets = _get_secrets()
     api_key = secrets.get("api_key")
     endpoint = secrets.get("endpoint")
     if not api_key or not endpoint:
         raise ValueError("Missing API key or endpoint")
 
-    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
-    if is_azure:
-        from openai import AzureOpenAI
-
-        return AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=AZURE_API_VERSION,
-            max_retries=5,
-            timeout=float(_EMBED_TIMEOUT_S),
-        )
-    else:
-        from openai import OpenAI
-
-        return OpenAI(
-            api_key=api_key,
-            base_url=endpoint,
-            max_retries=5,
-            timeout=float(_EMBED_TIMEOUT_S),
-        )
+    return make_openai_client(api_key, endpoint, timeout=float(_EMBED_TIMEOUT_S))
 
 
 def embed_text(text: str) -> list[float]:

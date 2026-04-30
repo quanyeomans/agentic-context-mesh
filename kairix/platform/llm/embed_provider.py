@@ -6,7 +6,7 @@ rate-limit handling, and backoff — no manual retry logic needed.
 
 Two providers available:
   AzureEmbedProvider — for Azure OpenAI endpoints
-  OpenAIEmbedProvider — for standard OpenAI endpoints
+  OpenAIEmbedProvider — for standard OpenAI endpoints (including OpenRouter)
 """
 
 from __future__ import annotations
@@ -41,27 +41,12 @@ class EmbedProvider(Protocol):
 
 
 class AzureEmbedProvider:
-    """Azure OpenAI embeddings via the openai SDK.
+    """Azure OpenAI embeddings via the openai SDK."""
 
-    Uses the SDK's built-in retry with exponential backoff and
-    rate-limit header respect. No manual retry needed.
-    """
+    def __init__(self, endpoint: str, api_key: str, max_retries: int = 5) -> None:
+        from kairix.credentials import make_openai_client
 
-    def __init__(
-        self,
-        endpoint: str,
-        api_key: str,
-        api_version: str = "2024-10-21",
-        max_retries: int = 5,
-    ) -> None:
-        from openai import AzureOpenAI
-
-        self.client = AzureOpenAI(
-            azure_endpoint=endpoint,
-            api_key=api_key,
-            api_version=api_version,
-            max_retries=max_retries,
-        )
+        self.client = make_openai_client(api_key, endpoint, max_retries=max_retries)
 
     def embed_batch(self, texts: list[str], *, model: str, dims: int) -> list[list[float]]:
         response = self.client.embeddings.create(input=texts, model=model, dimensions=dims)
@@ -69,12 +54,12 @@ class AzureEmbedProvider:
 
 
 class OpenAIEmbedProvider:
-    """Standard OpenAI embeddings via the openai SDK."""
+    """Standard OpenAI / OpenRouter embeddings via the openai SDK."""
 
-    def __init__(self, api_key: str, max_retries: int = 5) -> None:
-        from openai import OpenAI
+    def __init__(self, api_key: str, endpoint: str = "https://api.openai.com/v1", max_retries: int = 5) -> None:
+        from kairix.credentials import make_openai_client
 
-        self.client = OpenAI(api_key=api_key, max_retries=max_retries)
+        self.client = make_openai_client(api_key, endpoint, max_retries=max_retries)
 
     def embed_batch(self, texts: list[str], *, model: str, dims: int) -> list[list[float]]:
         response = self.client.embeddings.create(input=texts, model=model, dimensions=dims)
@@ -103,7 +88,7 @@ def get_embed_provider() -> EmbedProvider:
             return AzureEmbedProvider(endpoint=creds.endpoint, api_key=creds.api_key)
         else:
             logger.debug("embed_provider: using OpenAIEmbedProvider")
-            return OpenAIEmbedProvider(api_key=creds.api_key)
+            return OpenAIEmbedProvider(api_key=creds.api_key, endpoint=creds.endpoint)
 
     # Fall back to OPENAI_API_KEY for backwards compatibility
     openai_key = os.environ.get("OPENAI_API_KEY")

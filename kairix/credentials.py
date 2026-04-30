@@ -48,6 +48,39 @@ class GraphCredentials:
     password: str
 
 
+def make_openai_client(
+    api_key: str,
+    endpoint: str,
+    *,
+    max_retries: int = 5,
+    timeout: float = 30.0,
+):  # type: ignore[no-untyped-def]
+    """Create an OpenAI-compatible client. Auto-detects Azure from the endpoint URL.
+
+    Single factory — all client creation in kairix goes through this function.
+    """
+    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
+    if is_azure:
+        from openai import AzureOpenAI
+
+        return AzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=endpoint,
+            api_version=AZURE_API_VERSION,
+            max_retries=max_retries,
+            timeout=timeout,
+        )
+    else:
+        from openai import OpenAI
+
+        return OpenAI(
+            api_key=api_key,
+            base_url=endpoint,
+            max_retries=max_retries,
+            timeout=timeout,
+        )
+
+
 def get_credentials(purpose: str) -> Credentials | GraphCredentials | None:
     """Resolve credentials for the given purpose.
 

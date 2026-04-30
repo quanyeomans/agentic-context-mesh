@@ -7,8 +7,6 @@ import sqlite3
 import time
 from collections.abc import Generator
 
-from kairix.credentials import AZURE_API_VERSION
-
 from .date_extract import extract_chunk_date
 from .schema import (
     EMBED_VECTOR_DIMS,
@@ -119,26 +117,9 @@ def preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
     Returns embedding dimensions on success, raises on failure.
     Does NOT touch the DB — safe to call before any writes.
     """
-    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
-    if is_azure:
-        from openai import AzureOpenAI
+    from kairix.credentials import make_openai_client
 
-        client = AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=AZURE_API_VERSION,
-            max_retries=2,
-            timeout=30.0,
-        )
-    else:
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=api_key,
-            base_url=endpoint,
-            max_retries=2,
-            timeout=30.0,
-        )
+    client = make_openai_client(api_key, endpoint, max_retries=2, timeout=30.0)
     response = client.embeddings.create(
         model=deployment,
         input=["preflight check"],
@@ -157,33 +138,15 @@ _embed_client_key: tuple = ("", "")
 
 
 def _get_embed_client(api_key: str, endpoint: str):  # type: ignore[no-untyped-def]
-    """Return a cached AzureOpenAI client. Creates a new one if credentials change."""
+    """Return a cached OpenAI client. Creates a new one if credentials change."""
+    from kairix.credentials import make_openai_client
+
     global _embed_client, _embed_client_key
     key = (api_key, endpoint)
     if _embed_client is not None and _embed_client_key == key:
         return _embed_client
 
-    is_azure = "azure" in endpoint.lower() or "cognitiveservices" in endpoint.lower()
-    if is_azure:
-        from openai import AzureOpenAI
-
-        _embed_client = AzureOpenAI(
-            api_key=api_key,
-            azure_endpoint=endpoint,
-            api_version=AZURE_API_VERSION,
-            max_retries=MAX_RETRIES,
-            timeout=60.0,
-        )
-    else:
-        from openai import OpenAI
-
-        _embed_client = OpenAI(
-            api_key=api_key,
-            base_url=endpoint,
-            max_retries=MAX_RETRIES,
-            timeout=60.0,
-        )
-
+    _embed_client = make_openai_client(api_key, endpoint, max_retries=MAX_RETRIES, timeout=60.0)
     _embed_client_key = key
     return _embed_client
 
