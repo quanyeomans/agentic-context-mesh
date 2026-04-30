@@ -25,12 +25,14 @@ def _make_fused(path: str, rrf_score: float = 0.1) -> FusedResult:
 @pytest.mark.unit
 class TestRetrievalConfigFactories:
     @pytest.mark.unit
-    def test_defaults_returns_entity_and_procedural_enabled(self):
+    def test_defaults_returns_sweep_optimised_config(self):
+        """defaults() returns sweep-optimised config: RRF, boosts off, vec_limit=10."""
         cfg = RetrievalConfig.defaults()
-        assert cfg.entity.enabled is True
-        assert cfg.procedural.enabled is True
-        assert cfg.temporal.date_path_boost_enabled is False
-        # TMP-7B: chunk_date_boost is enabled by default when chunk_date is populated
+        assert cfg.fusion_strategy == "rrf"
+        assert cfg.rrf_k == 60
+        assert cfg.vec_limit == 10
+        assert cfg.entity.enabled is False
+        assert cfg.procedural.enabled is False
         assert cfg.temporal.chunk_date_boost_enabled is True
 
     @pytest.mark.unit
@@ -61,9 +63,9 @@ class TestRetrievalConfigFactories:
         assert cfg.entity.enabled is False
 
     @pytest.mark.unit
-    def test_defaults_use_bm25_primary(self):
+    def test_defaults_use_rrf(self):
         cfg = RetrievalConfig.defaults()
-        assert cfg.fusion_strategy == "bm25_primary"
+        assert cfg.fusion_strategy == "rrf"
 
     @pytest.mark.unit
     def test_minimal_uses_bm25_primary(self):

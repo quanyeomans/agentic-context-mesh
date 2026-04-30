@@ -144,22 +144,29 @@ def _parse_config(data: dict) -> RetrievalConfig:
     retrieval = data.get("retrieval", {}) or {}
     boosts = retrieval.get("boosts", {}) or {}
 
-    entity_cfg = _parse_entity(boosts.get("entity", {}) or {})
-    procedural_cfg = _parse_procedural(boosts.get("procedural", {}) or {})
-    temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {})
-    rerank_cfg = _parse_rerank(retrieval.get("rerank", {}) or {})
+    defaults = RetrievalConfig.defaults()
+
+    entity_cfg = _parse_entity(boosts.get("entity", {}) or {}) if boosts.get("entity") else defaults.entity
+    procedural_cfg = (
+        _parse_procedural(boosts.get("procedural", {}) or {}) if boosts.get("procedural") else defaults.procedural
+    )
+    temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {}) if boosts.get("temporal") else defaults.temporal
+    rerank_cfg = _parse_rerank(retrieval.get("rerank", {}) or {}) if retrieval.get("rerank") else defaults.rerank
 
     # Fusion strategy + RRF k
-    defaults = RetrievalConfig.defaults()
     fusion = str(retrieval.get("fusion_strategy", defaults.fusion_strategy))
     if fusion not in ("bm25_primary", "rrf"):
-        logger.warning("config_loader: unknown fusion_strategy %r — using bm25_primary", fusion)
-        fusion = "bm25_primary"
+        logger.warning("config_loader: unknown fusion_strategy %r — using default", fusion)
+        fusion = defaults.fusion_strategy
     rrf_k = int(retrieval.get("rrf_k", defaults.rrf_k))
+    vec_limit = int(retrieval.get("vec_limit", defaults.vec_limit))
+    bm25_limit = int(retrieval.get("bm25_limit", defaults.bm25_limit))
 
     return RetrievalConfig(
         fusion_strategy=fusion,
         rrf_k=rrf_k,
+        bm25_limit=bm25_limit,
+        vec_limit=vec_limit,
         entity=entity_cfg,
         procedural=procedural_cfg,
         temporal=temporal_cfg,

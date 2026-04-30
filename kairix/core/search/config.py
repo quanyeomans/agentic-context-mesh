@@ -7,17 +7,15 @@ with defaults tuned via parameter sweep against an independent gold suite
 
 **Fusion strategies** (``fusion_strategy`` field):
 
-  ``"bm25_primary"`` (default)
-    BM25 results ranked first, vector-only results appended at the bottom.
-    Best when BM25 is the stronger ranking signal — structured filenames,
-    keyword-rich content, consulting/enterprise knowledge bases.
-    Sweep result: 0.803 NDCG@10, 91% Hit@5.
-
-  ``"rrf"``
+  ``"rrf"`` (default)
     Standard Reciprocal Rank Fusion (Cormack et al., 2009). Merges BM25 and
-    vector rankings with equal weight. Better for corpora where semantic
-    similarity is the primary signal — research papers, unstructured prose,
-    multilingual content.
+    vector rankings with equal weight. Sweep-optimised: weighted=0.545,
+    NDCG@10=0.564, Hit@5=73.7% on user vault (2026-04-30).
+
+  ``"bm25_primary"``
+    BM25 results ranked first, vector-only results appended at the bottom.
+    Use when BM25 is the stronger ranking signal — structured filenames,
+    keyword-rich content. Generally 15-20% lower than RRF on mixed corpora.
 
 **Choosing a strategy**: Run ``kairix eval hybrid-sweep --suite <your-gold.yaml>``
 to evaluate both strategies on your data. If you don't have a gold suite yet,
@@ -154,8 +152,18 @@ class RetrievalConfig:
 
     @classmethod
     def defaults(cls) -> RetrievalConfig:
-        """Consulting knowledge base defaults: bm25_primary, entity + procedural boost."""
+        """Sweep-optimised defaults: RRF fusion, boosts disabled, vec_limit=10.
+
+        Derived from hybrid-sweep on user vault (v2-real-world-enriched, 350 cases,
+        2026-04-30). RRF k=60 with minimal boosts scored weighted=0.545, NDCG=0.564,
+        Hit@5=73.7% — outperforming bm25_primary and boost-enabled configs.
+        """
         return cls(
+            fusion_strategy="rrf",
+            rrf_k=60,
+            vec_limit=10,
+            entity=EntityBoostConfig(enabled=False),
+            procedural=ProceduralBoostConfig(enabled=False),
             temporal=TemporalBoostConfig(chunk_date_boost_enabled=True),
         )
 

@@ -17,12 +17,12 @@ class TestFusionOverride:
 
     def test_replace_frozen_dataclass(self) -> None:
         cfg = RetrievalConfig.defaults()
-        assert cfg.fusion_strategy == "bm25_primary"
+        assert cfg.fusion_strategy == "rrf"
 
-        overridden = replace(cfg, fusion_strategy="rrf")
-        assert overridden.fusion_strategy == "rrf"
+        overridden = replace(cfg, fusion_strategy="bm25_primary")
+        assert overridden.fusion_strategy == "bm25_primary"
         # Original unchanged
-        assert cfg.fusion_strategy == "bm25_primary"
+        assert cfg.fusion_strategy == "rrf"
 
     def test_replace_preserves_other_fields(self) -> None:
         cfg = RetrievalConfig.defaults()

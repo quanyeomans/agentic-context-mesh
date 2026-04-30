@@ -313,7 +313,7 @@ class TestFusionStrategy:
     @pytest.mark.unit
     def test_unknown_fusion_strategy_falls_back(self):
         cfg = _parse_config({"retrieval": {"fusion_strategy": "unknown_strategy"}})
-        assert cfg.fusion_strategy == "bm25_primary"
+        assert cfg.fusion_strategy == RetrievalConfig.defaults().fusion_strategy
 
     @pytest.mark.unit
     def test_rrf_fusion_strategy_accepted(self):
