@@ -36,7 +36,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["hybrid", "bm25", "vector"],
         help="Retrieval system (default: hybrid)",
     )
-    run_p.add_argument("--agent", default="shape", help="Agent name for collection scoping")
+    run_p.add_argument("--agent", default=None, help="Agent name for collection scoping (omit for no scoping)")
     run_p.add_argument("--collection", default=None, help="Restrict search to this collection only")
     run_p.add_argument(
         "--fusion",

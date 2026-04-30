@@ -206,14 +206,17 @@ def _retrieve(
         # Build explicit collections list when --collection is set
         collections = [collection] if collection else None
 
-        sr = search(
-            query=query,
-            agent=agent,
-            scope="shared+agent",
-            budget=500_000,
-            config=config,
-            collections=collections,
-        )
+        search_kwargs: dict[str, Any] = {
+            "query": query,
+            "budget": 500_000,
+            "config": config,
+            "collections": collections,
+        }
+        if agent:
+            search_kwargs["agent"] = agent
+            search_kwargs["scope"] = "shared+agent"
+
+        sr = search(**search_kwargs)
         paths = [b.result.path for b in sr.results]
         snippets = [b.content[:500] for b in sr.results]
         meta = {
@@ -362,7 +365,7 @@ def _validate_suite_prerequisites(suite: BenchmarkSuite) -> None:
 def run_benchmark(
     suite: BenchmarkSuite,
     system: str = "hybrid",
-    agent: str = "shape",
+    agent: str | None = None,
     output_dir: str | None = None,
     db_path: str | None = None,
     collection: str | None = None,
