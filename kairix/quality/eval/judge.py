@@ -201,10 +201,10 @@ def fetch_llm_credentials() -> tuple[str, str, str]:
     Never raises -- returns empty strings on failure (judge returns all-zero grades).
     """
     try:
-        from kairix.credentials import get_credentials
+        from kairix.credentials import Credentials, get_credentials
 
         creds = get_credentials("llm")
-        if creds is None:
+        if not isinstance(creds, Credentials):
             return "", "", JUDGE_DEPLOYMENT
         return creds.api_key or "", creds.endpoint or "", creds.model or JUDGE_DEPLOYMENT
     except Exception:

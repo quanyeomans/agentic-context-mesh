@@ -92,7 +92,7 @@ class TestGetEmbedProvider:
         monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
         monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        with patch("kairix.secrets.get_secret", return_value=None):
+        with patch("kairix.credentials.get_credentials", return_value=None):
             provider = get_embed_provider()
         assert isinstance(provider, OpenAIEmbedProvider)
 
@@ -102,6 +102,6 @@ class TestGetEmbedProvider:
         monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
         monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        with patch("kairix.secrets.get_secret", return_value=None):
+        with patch("kairix.credentials.get_credentials", return_value=None):
             with pytest.raises(OSError, match="No embedding provider"):
                 get_embed_provider()

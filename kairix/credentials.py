@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def make_openai_client(
     *,
     max_retries: int = 5,
     timeout: float = 30.0,
-):  # type: ignore[no-untyped-def]
+) -> Any:
     """Create an OpenAI-compatible client. Auto-detects Azure from the endpoint URL.
 
     Single factory — all client creation in kairix goes through this function.
@@ -109,6 +110,8 @@ def _resolve_llm() -> Credentials:
 
     api_key = get_secret("kairix-llm-api-key", required=True)
     endpoint = get_secret("kairix-llm-endpoint", required=True)
+    assert api_key is not None  # get_secret raises if required and missing
+    assert endpoint is not None
     model = get_secret("kairix-llm-model", required=False) or "gpt-4o-mini"
     return Credentials(api_key=api_key, endpoint=endpoint, model=model)
 
@@ -123,8 +126,10 @@ def _resolve_embed() -> Credentials:
 
     if not api_key:
         api_key = get_secret("kairix-llm-api-key", required=True)
+        assert api_key is not None
     if not endpoint:
         endpoint = get_secret("kairix-llm-endpoint", required=True)
+        assert endpoint is not None
     if not model:
         model = "text-embedding-3-large"
 

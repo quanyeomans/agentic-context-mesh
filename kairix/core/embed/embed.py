@@ -88,9 +88,11 @@ def _get_azure_config() -> tuple[str, str, str]:
 
     Raises OSError when credentials cannot be resolved.
     """
-    from kairix.credentials import get_credentials
+    from kairix.credentials import Credentials, get_credentials
 
     creds = get_credentials("embed")
+    if not isinstance(creds, Credentials):
+        raise OSError("Embed credentials not available.")
     api_key = creds.api_key
     endpoint = creds.endpoint
     deployment = creds.model or DEFAULT_DEPLOYMENT

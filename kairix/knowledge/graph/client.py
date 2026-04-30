@@ -45,10 +45,10 @@ logger = logging.getLogger(__name__)
 def _get_neo4j_defaults() -> tuple[str, str, str]:
     """Resolve Neo4j credentials lazily via get_credentials("graph")."""
     try:
-        from kairix.credentials import get_credentials
+        from kairix.credentials import GraphCredentials, get_credentials
 
         creds = get_credentials("graph")
-        if creds is not None:
+        if isinstance(creds, GraphCredentials):
             return creds.uri, creds.user, creds.password
     except Exception:  # noqa: S110 — fallback to env vars below
         pass

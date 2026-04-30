@@ -50,10 +50,10 @@ def _get_secrets() -> dict[str, str]:
     Never raises.
     """
     try:
-        from kairix.credentials import get_credentials
+        from kairix.credentials import Credentials, get_credentials
 
         creds = get_credentials("embed")
-        if creds is None:
+        if creds is None or not isinstance(creds, Credentials):
             return {}
         secrets: dict[str, str] = {
             "api_key": creds.api_key,
@@ -126,10 +126,11 @@ def chat_completion(messages: list[dict[str, str]], max_tokens: int = 800) -> st
 
     # Fetch LLM model name via credentials
     try:
+        from kairix.credentials import Credentials as _Creds
         from kairix.credentials import get_credentials
 
         llm_creds = get_credentials("llm")
-        deployment = llm_creds.model if llm_creds else ""
+        deployment = llm_creds.model if isinstance(llm_creds, _Creds) else ""
     except Exception as e:
         logger.warning("chat_completion: error resolving LLM model — %s", e)
         deployment = ""

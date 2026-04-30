@@ -102,7 +102,9 @@ def _embed_query(query: str) -> np.ndarray | None:
     except Exception:
         creds = None
 
-    if creds is None or not creds.api_key or not creds.endpoint:
+    from kairix.credentials import Credentials
+
+    if not isinstance(creds, Credentials) or not creds.api_key or not creds.endpoint:
         logger.warning("Embed credentials not set — skipping recall check")
         return None
 

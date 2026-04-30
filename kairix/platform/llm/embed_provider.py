@@ -78,11 +78,11 @@ def get_embed_provider() -> EmbedProvider:
 
     Raises OSError if no credentials are available.
     """
-    from kairix.credentials import get_credentials
+    from kairix.credentials import Credentials, get_credentials
 
     creds = get_credentials("embed")
 
-    if creds and creds.api_key and creds.endpoint:
+    if isinstance(creds, Credentials) and creds.api_key and creds.endpoint:
         if creds.is_azure:
             logger.debug("embed_provider: using AzureEmbedProvider")
             return AzureEmbedProvider(endpoint=creds.endpoint, api_key=creds.api_key)
