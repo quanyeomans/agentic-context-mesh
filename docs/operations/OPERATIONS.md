@@ -426,7 +426,7 @@ kairix onboard guide --vault-root /path/to/vault
 kairix embed --changed   # make the guide searchable
 ```
 
-This installs `docs/agent-usage-guide.md` into the vault's shared knowledge base so agents can search for kairix usage instructions.
+This installs `docs/user-guide/agent-usage-guide.md` into the document store's shared knowledge base so agents can search for kairix usage instructions.
 
 ### Step 10: Register cron jobs
 
@@ -770,7 +770,7 @@ KAIRIX_LOG_QUERIES=1 kairix brief <agent> --budget 5000
 
 ### More detailed runbooks
 
-For deeper diagnostic procedures and less common failure modes, see [`docs/runbooks/INDEX.md`](runbooks/INDEX.md).
+For deeper diagnostic procedures and less common failure modes, see [`docs/operations/runbooks/INDEX.md`](runbooks/INDEX.md).
 
 ---
 

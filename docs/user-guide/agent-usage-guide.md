@@ -6,7 +6,7 @@ tags: [kairix, agent-knowledge, search, retrieval]
 
 # Kairix Agent Usage Guide
 
-> **First-time users:** Run `kairix setup` to configure your environment before proceeding. See [docs/quick-start.md](quick-start.md) for full installation instructions.
+> **First-time users:** Run `kairix setup` to configure your environment before proceeding. See [docs/getting-started/quick-start.md](../getting-started/quick-start.md) for full installation instructions.
 
 This guide is for AI agents using kairix to search and retrieve knowledge from the shared knowledge store. Read it before your first session, and use it as a reference when queries return unexpected results.
 
