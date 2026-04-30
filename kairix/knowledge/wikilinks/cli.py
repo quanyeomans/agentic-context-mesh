@@ -24,11 +24,11 @@ from kairix.knowledge.wikilinks.injector import (
     should_inject,
 )
 from kairix.knowledge.wikilinks.resolver import get_entities
+from kairix.paths import document_root as _doc_root_fn
+from kairix.paths import workspace_root as _workspace_root_fn
 
-_DOCUMENT_ROOT = os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get(
-    "KAIRIX_DOCUMENT_ROOT", str(Path.home() / "kairix-vault")
-)
-_WORKSPACES_ROOT = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
+_DOCUMENT_ROOT = str(_doc_root_fn())
+_WORKSPACES_ROOT = str(_workspace_root_fn())
 
 # Timestamp file to track last run
 _LAST_RUN_PATH = os.environ.get("KAIRIX_DATA_DIR", str(Path.home() / ".cache" / "kairix")) + "/wikilinks-last-run"

@@ -183,8 +183,6 @@ def _run_post_embed_summarise() -> None:
     Non-critical: failures are logged but don't block the embed return code.
     """
     try:
-        import os
-
         from kairix.paths import document_root
 
         droot = document_root()
@@ -193,14 +191,12 @@ def _run_post_embed_summarise() -> None:
             return
 
         # Open summaries DB and find stale/missing docs
-        from kairix.knowledge.summaries.staleness import get_stale_paths, init_summaries_db
-
-        db_path = os.environ.get(
-            "KAIRIX_SUMMARIES_DB", str(__import__("pathlib").Path.home() / ".cache" / "kairix" / "summaries.db")
-        )
         import sqlite3
 
-        db = sqlite3.connect(db_path)
+        from kairix.knowledge.summaries.staleness import get_stale_paths, init_summaries_db
+        from kairix.paths import summaries_db_path
+
+        db = sqlite3.connect(str(summaries_db_path()))
         init_summaries_db(db)
 
         stale = get_stale_paths(all_docs, db)

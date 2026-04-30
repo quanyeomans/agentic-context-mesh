@@ -202,6 +202,15 @@ def workspace_root() -> Path:
     return KairixPaths.resolve().workspace_root
 
 
+def summaries_db_path() -> Path:
+    """Get the summaries database path.
+
+    Configurable via KAIRIX_SUMMARIES_DB env var.
+    Default: ~/.cache/kairix/summaries.db
+    """
+    return Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
+
+
 def agent_memory_path(agent: str) -> Path:
     """Get the memory directory for an agent.
 

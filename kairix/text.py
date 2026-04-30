@@ -14,6 +14,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+# Approximate characters per token (for byte-budget calculations)
+APPROX_CHARS_PER_TOKEN = 4
+
 
 def estimate_tokens(text: str) -> int:
     """Estimate token count. Uses word count * 1.3 (matches OpenAI tokeniser within 10%)."""

@@ -18,13 +18,13 @@ Usage::
     print(report)
 """
 
-import hashlib
 import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from kairix.knowledge.reflib.dedup import hash_content as _hash_content
 from kairix.text import extract_title
 
 logger = logging.getLogger(__name__)
@@ -61,11 +61,6 @@ class ScanReport:
             f"{self.removed} removed, {self.unchanged} unchanged, "
             f"{self.errors} errors ({self.collections_scanned} collections)"
         )
-
-
-def _hash_content(text: str) -> str:
-    """SHA-256 hex digest of document content."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class DocumentScanner:

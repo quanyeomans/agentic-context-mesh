@@ -6,13 +6,13 @@ alongside the source file mtime at generation time. A summary is stale
 when the source file mtime is newer than when the summary was generated.
 """
 
-import os
 import sqlite3
 from pathlib import Path
 
 from kairix.knowledge.summaries.generate import SummaryResult
+from kairix.paths import summaries_db_path
 
-SUMMARIES_DB = Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
+SUMMARIES_DB = summaries_db_path()
 
 # ---------------------------------------------------------------------------
 # Schema

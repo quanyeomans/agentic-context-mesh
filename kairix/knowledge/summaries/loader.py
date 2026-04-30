@@ -17,17 +17,13 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from kairix.text import APPROX_CHARS_PER_TOKEN
+
 logger = logging.getLogger(__name__)
-
-_APPROX_CHARS_PER_TOKEN = 4
-
-
-def _chars_for_tokens(tokens: int) -> int:
-    return tokens * _APPROX_CHARS_PER_TOKEN
 
 
 def _truncate_to_tokens(text: str, budget_tokens: int) -> str:
-    max_chars = _chars_for_tokens(budget_tokens)
+    max_chars = budget_tokens * APPROX_CHARS_PER_TOKEN
     return text[:max_chars]
 
 
@@ -94,7 +90,7 @@ def load_tiered_content(
 
     # budget > 600: full content truncated to budget
     raw = _read_file(path)
-    if len(raw) <= _chars_for_tokens(budget_tokens):
+    if len(raw) <= budget_tokens * APPROX_CHARS_PER_TOKEN:
         return raw, "full"
     return _truncate_to_tokens(raw, budget_tokens), "truncated"
 

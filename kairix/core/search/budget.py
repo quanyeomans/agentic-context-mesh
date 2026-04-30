@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Literal
 
 from kairix.core.search.rrf import FusedResult
+from kairix.text import APPROX_CHARS_PER_TOKEN
 from kairix.text import estimate_tokens as _estimate_tokens_word
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 DEFAULT_BUDGET: int = 3_000
-APPROX_CHARS_PER_TOKEN: int = 4
 
 # Tier thresholds (Phase 2+ — unused until L0/L1 summaries exist)
 L1_SCORE_THRESHOLD: float = 0.15
@@ -80,10 +80,10 @@ def _estimate_tokens(text: str) -> int:
 
 
 def _get_summaries_db_path() -> Path:
-    """Return the summaries DB path, configurable via KAIRIX_SUMMARIES_DB env var."""
-    import os
+    """Return the summaries DB path — delegates to kairix.paths."""
+    from kairix.paths import summaries_db_path
 
-    return Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
+    return summaries_db_path()
 
 
 def _open_summaries_db() -> sqlite3.Connection | None:

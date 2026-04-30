@@ -21,7 +21,10 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
+from kairix.core.search.bm25 import FTS_STOP_WORDS as _STOP_WORDS
 from kairix.core.temporal.chunker import TemporalChunk, chunk_board, chunk_memory_log
+from kairix.paths import document_root as _doc_root_fn
+from kairix.paths import workspace_root as _workspace_root_fn
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +32,8 @@ logger = logging.getLogger(__name__)
 # Paths
 # ---------------------------------------------------------------------------
 
-_DOCUMENT_ROOT = _os.environ.get("KAIRIX_DOCUMENT_ROOT") or _os.environ.get(
-    "KAIRIX_DOCUMENT_ROOT", str(Path.home() / "Documents")
-)
-_WORKSPACE_ROOT = _os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
+_DOCUMENT_ROOT = str(_doc_root_fn())
+_WORKSPACE_ROOT = str(_workspace_root_fn())
 # override with KAIRIX_BOARDS_DIR env var
 _BOARDS_DIR = _os.environ.get("KAIRIX_BOARDS_DIR", f"{_DOCUMENT_ROOT}/01-Projects/Boards")
 
@@ -99,77 +100,6 @@ def get_memory_log_paths(
 # ---------------------------------------------------------------------------
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
-_STOP_WORDS = frozenset(
-    {
-        "a",
-        "an",
-        "the",
-        "is",
-        "are",
-        "was",
-        "were",
-        "be",
-        "been",
-        "being",
-        "have",
-        "has",
-        "had",
-        "do",
-        "does",
-        "did",
-        "will",
-        "would",
-        "could",
-        "should",
-        "to",
-        "of",
-        "in",
-        "on",
-        "at",
-        "by",
-        "for",
-        "with",
-        "about",
-        "and",
-        "or",
-        "but",
-        "not",
-        "so",
-        "if",
-        "as",
-        "it",
-        "its",
-        "this",
-        "that",
-        "from",
-        "what",
-        "when",
-        "where",
-        "who",
-        "which",
-        "how",
-        "me",
-        "my",
-        "we",
-        "our",
-        "you",
-        "he",
-        "she",
-        "they",
-        "them",
-        "their",
-        "i",
-        "get",
-        "use",
-        "all",
-        "any",
-        "no",
-        "up",
-        "out",
-        "then",
-        "than",
-    }
-)
 
 # BM25 tuning constants
 _K1 = 1.5

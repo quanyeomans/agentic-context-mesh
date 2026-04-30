@@ -10,10 +10,11 @@ Usage:
 """
 
 import argparse
-import os
 import sqlite3
 import sys
 from pathlib import Path
+
+from kairix.paths import document_root as _get_document_root
 
 # ---------------------------------------------------------------------------
 # Credential helper
@@ -32,9 +33,7 @@ def _get_cred(secret_name: str) -> str:
 # Vault doc discovery
 # ---------------------------------------------------------------------------
 
-_DOCUMENT_ROOT = Path(
-    os.environ.get("KAIRIX_DOCUMENT_ROOT") or os.environ.get("KAIRIX_VAULT_ROOT", str(Path.home() / "kairix-vault"))
-)
+_DOCUMENT_ROOT = _get_document_root()
 
 
 def _discover_vault_docs() -> list[str]:
@@ -48,7 +47,9 @@ def _discover_vault_docs() -> list[str]:
 
 
 def _open_db() -> sqlite3.Connection:
-    db_path = Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
+    from kairix.paths import summaries_db_path
+
+    db_path = summaries_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     from kairix.knowledge.summaries.staleness import init_summaries_db
