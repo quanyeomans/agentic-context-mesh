@@ -13,7 +13,7 @@ pytestmark = pytest.mark.integration
 
 
 def _create_scanner_schema(db: sqlite3.Connection) -> None:
-    """Create minimal schema for DocumentScanner (no sqlite-vec needed)."""
+    """Create minimal schema for DocumentScanner."""
     db.executescript("""
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
