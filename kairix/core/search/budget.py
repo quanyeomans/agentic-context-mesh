@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Literal
 
 from kairix.core.search.rrf import FusedResult
-from kairix.text import APPROX_CHARS_PER_TOKEN
+from kairix.text import APPROX_CHARS_PER_TOKEN, strip_frontmatter
 from kairix.text import estimate_tokens as _estimate_tokens_word
 
 logger = logging.getLogger(__name__)
@@ -258,4 +258,6 @@ def _get_content_for_tier(
             logger.debug("_get_content_for_tier: summary lookup failed — %s", exc)
 
     # Default: return snippet (Phase 1 behaviour and fallback)
-    return result.snippet or ""
+    # Strip YAML frontmatter — raw frontmatter wastes context budget and is
+    # noise for agents consuming search results.
+    return strip_frontmatter(result.snippet) if result.snippet else ""

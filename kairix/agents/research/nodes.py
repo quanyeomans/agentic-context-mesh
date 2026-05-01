@@ -83,9 +83,12 @@ def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
                 "You are evaluating whether search results answer a question. "
                 "Rate your confidence from 0.0 (results are irrelevant) to 1.0 "
                 "(results fully answer the question). If confidence is below 0.7, "
-                "suggest a better search query that might find what's missing.\n\n"
+                "suggest a better search query that might find what's missing. "
+                "List any gaps — specific pieces of information that are missing "
+                "or incomplete in the results.\n\n"
                 "Respond as JSON: "
                 '{"confidence": 0.8, "sufficient": true, "refined_query": null, '
+                '"gaps": ["missing detail 1", "missing detail 2"], '
                 '"reasoning": "The results cover..."}'
             ),
         },
@@ -97,27 +100,32 @@ def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
 
     try:
         llm = get_default_backend()
-        response = llm.chat(messages, max_tokens=200)
+        response = llm.chat(messages, max_tokens=300)
 
         # Parse JSON from response
         parsed = json.loads(response)
         confidence = float(parsed.get("confidence", 0.0))
         refined = parsed.get("refined_query")
+        gaps = parsed.get("gaps") or []
+        if not isinstance(gaps, list):
+            gaps = [str(gaps)]
 
         logger.info(
-            "research: evaluate turn=%d confidence=%.2f sufficient=%s",
+            "research: evaluate turn=%d confidence=%.2f sufficient=%s gaps=%d",
             turns,
             confidence,
             confidence >= SUFFICIENCY_THRESHOLD,
+            len(gaps),
         )
         return {
             "confidence": confidence,
+            "gaps": gaps,
             "refined_query": refined or state.get("refined_query") or query,
         }
     except Exception as exc:
         logger.warning("research: evaluate_sufficiency LLM call failed — %s", exc)
         # If LLM fails, treat as insufficient so we try again (up to max_turns)
-        return {"confidence": 0.0, "refined_query": query}
+        return {"confidence": 0.0, "gaps": [], "refined_query": query}
 
 
 def refine_query(state: ResearcherState) -> dict[str, Any]:
@@ -153,11 +161,12 @@ def synthesise(state: ResearcherState) -> dict[str, Any]:
     try:
         llm = get_default_backend()
         synthesis = llm.chat(messages, max_tokens=500)
-        return {"synthesis": synthesis}
+        return {"synthesis": synthesis, "confidence": state.get("confidence", 0.0)}
     except Exception as exc:
         logger.warning("research: synthesise LLM call failed — %s", exc)
         return {
             "synthesis": f"Found {len(chunks)} relevant documents but synthesis failed.",
+            "confidence": state.get("confidence", 0.0),
             "error": "Synthesis failed — check server logs for details.",
         }
 

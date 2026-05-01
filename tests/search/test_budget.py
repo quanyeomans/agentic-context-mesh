@@ -39,6 +39,7 @@ from kairix.core.search.budget import (
     apply_budget,
 )
 from kairix.core.search.rrf import FusedResult
+from kairix.text import strip_frontmatter
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -324,3 +325,53 @@ class TestGetContentForTier:
             content = _get_content_for_tier(result, "L0", summaries_db=mock_db)
 
         assert content == "safe fallback"
+
+    @pytest.mark.unit
+    def test_phase1_strips_yaml_frontmatter_from_snippet(self) -> None:
+        """S18-16: snippets with YAML frontmatter should have it stripped."""
+        snippet = "---\ntitle: Test Doc\ntype: note\n---\n\nActual content here."
+        result = _fused(snippet=snippet)
+        content = _get_content_for_tier(result, "L2", summaries_db=None)
+        assert "---" not in content
+        assert "title:" not in content
+        assert "Actual content" in content
+
+    @pytest.mark.unit
+    def test_phase1_preserves_snippet_without_frontmatter(self) -> None:
+        """S18-16: snippets without frontmatter are returned unchanged."""
+        snippet = "Just normal content here."
+        result = _fused(snippet=snippet)
+        content = _get_content_for_tier(result, "L2", summaries_db=None)
+        assert content == snippet
+
+
+# ---------------------------------------------------------------------------
+# strip_frontmatter() tests (kairix.text utility)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestStripFrontmatter:
+    @pytest.mark.unit
+    def test_snippet_excludes_yaml_frontmatter(self) -> None:
+        """S18-16: YAML frontmatter block is stripped from text."""
+        text = "---\ntitle: Test Doc\ntype: note\n---\n\nActual content here."
+        stripped = strip_frontmatter(text)
+        assert "---" not in stripped
+        assert "title:" not in stripped
+        assert "Actual content" in stripped
+
+    @pytest.mark.unit
+    def test_no_frontmatter_unchanged(self) -> None:
+        text = "No frontmatter here, just content."
+        assert strip_frontmatter(text) == text
+
+    @pytest.mark.unit
+    def test_empty_string(self) -> None:
+        assert strip_frontmatter("") == ""
+
+    @pytest.mark.unit
+    def test_mid_text_dashes_not_stripped(self) -> None:
+        """Dashes in the middle of text are not treated as frontmatter."""
+        text = "Some text\n---\nnot frontmatter\n---\nmore text"
+        assert strip_frontmatter(text) == text

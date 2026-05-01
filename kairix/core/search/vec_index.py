@@ -20,6 +20,7 @@ from typing import Any, TypedDict
 import numpy as np
 
 from kairix.core.db import EMBED_VECTOR_DIMS, open_db
+from kairix.text import strip_frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +170,7 @@ class VectorIndex:
                         "path": row["path"],
                         "collection": row["collection"],
                         "title": row["title"],
-                        "snippet": row["snippet"][:300] if row["snippet"] else "",
+                        "snippet": strip_frontmatter(row["snippet"])[:300] if row["snippet"] else "",
                     }
                 )
                 if len(results) >= k:

@@ -117,6 +117,31 @@ class TestEvaluateSufficiency:
             result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "x"}]))
         assert result["confidence"] == 0.0
 
+    def test_returns_gaps_from_llm(self) -> None:
+        """S18-5: evaluate_sufficiency parses and returns gaps from LLM response."""
+        llm_response = json.dumps(
+            {
+                "confidence": 0.6,
+                "sufficient": False,
+                "refined_query": "better query",
+                "gaps": ["missing deployment details", "no cost information"],
+                "reasoning": "partial coverage",
+            }
+        )
+        mock_backend = MagicMock()
+        mock_backend.chat.return_value = llm_response
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
+            result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "content"}]))
+        assert result["gaps"] == ["missing deployment details", "no cost information"]
+
+    def test_returns_empty_gaps_on_failure(self) -> None:
+        """S18-5: gaps defaults to empty list on LLM failure."""
+        mock_backend = MagicMock()
+        mock_backend.chat.side_effect = RuntimeError("llm down")
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
+            result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "x"}]))
+        assert result["gaps"] == []
+
 
 @pytest.mark.unit
 class TestRefineQuery:
@@ -140,6 +165,23 @@ class TestSynthesise:
         with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = synthesise(_state(retrieved_chunks=[{"path": "a.md"}]))
         assert "failed" in result["synthesis"].lower()
+
+    def test_synthesise_carries_confidence_from_state(self) -> None:
+        """S18-5: synthesise must re-emit confidence from state so it reaches the final result."""
+        mock_backend = MagicMock()
+        mock_backend.chat.return_value = "Synthesised answer."
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
+            result = synthesise(_state(confidence=0.85, retrieved_chunks=[{"path": "a.md", "snippet": "x"}]))
+        assert "confidence" in result
+        assert result["confidence"] == 0.85
+
+    def test_synthesise_carries_confidence_on_failure(self) -> None:
+        """S18-5: even on LLM failure, confidence from state is preserved."""
+        mock_backend = MagicMock()
+        mock_backend.chat.side_effect = RuntimeError("down")
+        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
+            result = synthesise(_state(confidence=0.42, retrieved_chunks=[{"path": "a.md"}]))
+        assert result["confidence"] == 0.42
 
 
 @pytest.mark.unit
