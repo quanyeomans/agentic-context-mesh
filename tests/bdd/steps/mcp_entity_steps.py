@@ -32,8 +32,14 @@ class _EntityAwareFakeNeo4j(FakeNeo4jClient):
                             "type": e.get("label", ""),
                             "id": e.get("id", ""),
                             "name": e.get("name", ""),
-                            "summary": e.get("summary", ""),
                             "vault_path": e.get("vault_path", ""),
+                            "role": e.get("role", ""),
+                            "org": e.get("org", ""),
+                            "tier": e.get("tier", ""),
+                            "engagement_status": e.get("engagement_status", ""),
+                            "domain": e.get("domain", ""),
+                            "industry": e.get("industry", ""),
+                            "category": e.get("category", ""),
                         }
                     ]
             return []
@@ -54,7 +60,7 @@ def neo4j_has_entity(name, etype, summary):
         "name": name,
         "label": etype,
         "vault_path": f"entities/{slugify(name)}.md",
-        "summary": summary,
+        "role": summary,
     }
     _patch_neo4j(_EntityAwareFakeNeo4j(entities=[entity]))
 
