@@ -325,7 +325,7 @@ def _run_multi_hop(
 
     budgeted = apply_budget(fused_for_budget, budget=budget)
     total_tokens = sum(r.token_estimate for r in budgeted)
-    tiers_used = sorted(set(r.tier for r in budgeted))
+    tiers_used = sorted({r.tier for r in budgeted})
     t_end = time.monotonic()
     latency_ms = (t_end - t_start) * 1000.0
     query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
@@ -388,7 +388,6 @@ class _SearchPipelineState:
 def _preprocess_temporal(
     query: str,
     intent: QueryIntent,
-    collections: list[str],
 ) -> tuple[str, list, frozenset[str] | None]:
     """Rewrite a TEMPORAL query and extract temporal chunks and date-filter paths.
 
@@ -446,7 +445,6 @@ def _preprocess_temporal(
 
 def _apply_entity_boost(
     fused: list[FusedResult],
-    query: str,
     neo4j_client: object,
     cfg: RetrievalConfig,
 ) -> list[FusedResult]:
@@ -471,7 +469,7 @@ def _build_search_result(state: _SearchPipelineState) -> SearchResult:
     budgeted = apply_budget(state.fused, budget=state.budget)
 
     total_tokens = sum(r.token_estimate for r in budgeted)
-    tiers_used = sorted(set(r.tier for r in budgeted))
+    tiers_used = sorted({r.tier for r in budgeted})
 
     t_end = time.monotonic()
     latency_ms = (t_end - state.t_start) * 1000.0
@@ -594,7 +592,7 @@ def search(
     fallback_used = False
 
     # Temporal query rewriting — expand query with explicit date tokens before retrieval
-    active_query, temporal_chunks, date_filter_paths = _preprocess_temporal(query, intent, collections)
+    active_query, temporal_chunks, date_filter_paths = _preprocess_temporal(query, intent)
 
     # Neo4j client — used by planner (entity context) and entity_boost
     # lgtm — false positive: _get_neo4j() returns a client object, no credentials logged
@@ -677,7 +675,7 @@ def search(
         logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
 
     # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
-    fused = _apply_entity_boost(fused, active_query, neo4j_client, cfg)
+    fused = _apply_entity_boost(fused, neo4j_client, cfg)
 
     # Procedural boosting for PROCEDURAL intent
     if intent == QueryIntent.PROCEDURAL:

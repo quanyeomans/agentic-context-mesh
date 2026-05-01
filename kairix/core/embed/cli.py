@@ -244,7 +244,7 @@ def _run_post_embed_summarise() -> None:
         logging.warning("Post-embed summarise failed (non-critical)", exc_info=True)
 
 
-def cmd_recall(args: argparse.Namespace) -> int:
+def cmd_recall(_args: argparse.Namespace) -> int:
     """Run the recall check standalone."""
     passed, result = run_recall_gate()
     print(f"Recall: {result['passed']}/{result['total']} ({result['score']:.0%})")
@@ -254,7 +254,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-def cmd_status(args: argparse.Namespace) -> int:
+def cmd_status(_args: argparse.Namespace) -> int:
     """Show current embedding status."""
     from .schema import get_pending_chunks
 

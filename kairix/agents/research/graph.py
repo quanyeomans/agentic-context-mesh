@@ -58,7 +58,6 @@ def build_researcher_graph() -> Any:
 
 def run_research(
     query: str,
-    agent: str | None = None,
     max_turns: int = DEFAULT_MAX_TURNS,
 ) -> dict[str, Any]:
     """Run a research query through the full iterative search pipeline.
@@ -68,7 +67,6 @@ def run_research(
 
     Args:
         query:      The question to research.
-        agent:      Agent name for collection scoping.
         max_turns:  Maximum search rounds before giving up (default 4).
 
     Returns:

@@ -391,7 +391,7 @@ def tool_research(
     try:
         from kairix.agents.research.graph import run_research
 
-        result = run_research(query=query, agent=agent, max_turns=max_turns)
+        result = run_research(query=query, max_turns=max_turns)
         return {
             "query": result.get("query", query),
             "synthesis": result.get("synthesis", ""),

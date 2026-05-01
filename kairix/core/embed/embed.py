@@ -216,6 +216,10 @@ def stage_embedding(
     Vectors are written to the usearch ANN index separately via
     _update_usearch_index() at batch commit time.
 
+    _vector is accepted for call-site compatibility (callers pass it
+    positionally) but is not used here — vectors are written to the
+    usearch ANN index by the caller.
+
     chunk_date is the ISO date extracted from the document (frontmatter or path).
     It is the same for all chunks of a given document (document-level property).
     """
@@ -430,7 +434,8 @@ def run_embed(
 
     if failed_chunks:
         failed_paths = list({c["path"] for c in failed_chunks})[:10]
-        logger.warning("%d chunks failed. Affected paths (sample): %s", len(failed_chunks), [str(p)[:200] for p in failed_paths])
+        sample = [str(p)[:200] for p in failed_paths]
+        logger.warning("%d chunks failed. Affected paths (sample): %s", len(failed_chunks), sample)
 
     # Count how many chunks have chunk_date populated (for diagnostics / ERR-001 guard)
     chunk_date_count = sum(1 for c in all_chunks if c.get("chunk_date"))
