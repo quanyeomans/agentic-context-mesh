@@ -328,6 +328,100 @@ def _bm25_primary_impl(
 # ---------------------------------------------------------------------------
 
 
+def _build_entity_index(
+    neo4j_client: object,
+) -> tuple[dict[str, int], dict[str, int], dict[str, int], int]:
+    """Run Cypher query and build entity lookup dicts.
+
+    Returns:
+        (path_in_degree, dir_in_degree, name_slug_in_degree, max_in_degree).
+        All dicts are empty and max_in_degree is 0 on failure.
+    """
+    empty: tuple[dict[str, int], dict[str, int], dict[str, int], int] = ({}, {}, {}, 0)
+    try:
+        rows = neo4j_client.cypher(  # type: ignore[union-attr]
+            "MATCH (n) WHERE n.vault_path IS NOT NULL AND n.vault_path <> '' "
+            "OPTIONAL MATCH ()-[:MENTIONS]->(n) "
+            "RETURN n.vault_path AS vault_path, n.name AS name, labels(n) AS labels, count(*) AS in_degree"
+        )
+    except Exception as e:
+        logger.warning("entity_boost_neo4j: cypher failed — %s", e)
+        return empty
+
+    if not rows:
+        return empty
+
+    path_in_degree: dict[str, int] = {}
+    dir_in_degree: dict[str, int] = {}
+    name_slug_in_degree: dict[str, int] = {}
+
+    for row in rows:
+        vp = str(row["vault_path"]).lower().replace("\\", "/")
+        in_deg = int(row.get("in_degree") or 0)
+        path_in_degree[vp] = in_deg
+        parent = str(Path(vp).parent).lower().replace("\\", "/")
+        if parent not in (".", ""):
+            dir_in_degree[parent] = max(dir_in_degree.get(parent, 0), in_deg)
+
+        # Slug-based secondary lookup from entity name + label
+        name = str(row.get("name") or "").strip()
+        labels = row.get("labels") or []
+        if name:
+            for lbl in labels:
+                dir_name = _LABEL_TO_DIR.get(str(lbl).lower())
+                if dir_name:
+                    slug = slugify(name)
+                    if slug:
+                        doc_path = f"{dir_name}/{slug}.md"
+                        existing = name_slug_in_degree.get(doc_path, 0)
+                        name_slug_in_degree[doc_path] = max(existing, in_deg)
+
+    if not path_in_degree:
+        return empty
+
+    max_in_degree = max(path_in_degree.values()) or 1
+    return path_in_degree, dir_in_degree, name_slug_in_degree, max_in_degree
+
+
+def _lookup_mention_count(
+    result_path: str,
+    path_index: dict[str, int],
+    dir_index: dict[str, int],
+    slug_index: dict[str, int],
+) -> tuple[int, int]:
+    """Three-tier entity lookup for a single result path.
+
+    Tries exact path match, then name-slug match, then directory match
+    (half boost). Returns (mention_count, in_degree).
+    """
+    path_lower = result_path.lower().replace("\\", "/")
+    in_deg = path_index.get(path_lower, 0)
+
+    # Secondary: slug-based lookup from entity name
+    if in_deg == 0:
+        in_deg = slug_index.get(path_lower, 0)
+
+    if in_deg == 0:
+        # Half-boost for files under an entity directory
+        for dir_prefix, dir_deg in dir_index.items():
+            if path_lower.startswith(dir_prefix + "/"):
+                in_deg = max(in_deg, dir_deg // 2)
+                break
+
+    return in_deg, in_deg
+
+
+def _compute_entity_boost_factor(
+    in_degree: int,
+    max_in_degree: int,
+    config: EntityBoostConfig,
+) -> float:
+    """Normalise in-degree and apply log boost formula. Returns multiplier."""
+    normalised = in_degree / max_in_degree
+    boost_amount = min(config.factor * math.log1p(normalised * 10), config.cap - 1.0)
+    return 1.0 + boost_amount
+
+
 def entity_boost_neo4j(
     results: list[FusedResult],
     neo4j_client: object,
@@ -349,86 +443,22 @@ def entity_boost_neo4j(
         return results
 
     cfg = config if config is not None else EntityBoostConfig()
-    if not cfg.enabled:
+    if not cfg.enabled or neo4j_client is None or not getattr(neo4j_client, "available", False):
         for r in results:
             r.boosted_score = r.rrf_score
         return results
 
-    client = neo4j_client
-    if client is None or not getattr(client, "available", False):
+    path_idx, dir_idx, slug_idx, max_in_deg = _build_entity_index(neo4j_client)
+    if not path_idx and not dir_idx:
         for r in results:
             r.boosted_score = r.rrf_score
         return results
-
-    try:
-        rows = client.cypher(
-            "MATCH (n) WHERE n.vault_path IS NOT NULL AND n.vault_path <> '' "
-            "OPTIONAL MATCH ()-[:MENTIONS]->(n) "
-            "RETURN n.vault_path AS vault_path, n.name AS name, labels(n) AS labels, count(*) AS in_degree"
-        )
-    except Exception as e:
-        logger.warning("entity_boost_neo4j: cypher failed — %s", e)
-        for r in results:
-            r.boosted_score = r.rrf_score
-        return results
-
-    if not rows:
-        for r in results:
-            r.boosted_score = r.rrf_score
-        return results
-
-    # Build lookup: lowercased path → in_degree, and dir prefix → max in_degree
-    path_in_degree: dict[str, int] = {}
-    dir_in_degree: dict[str, int] = {}
-    # Secondary: slug-based lookup from entity name + label → document path
-    name_slug_in_degree: dict[str, int] = {}
-    for row in rows:
-        vp = str(row["vault_path"]).lower().replace("\\", "/")
-        in_deg = int(row.get("in_degree") or 0)
-        path_in_degree[vp] = in_deg
-        parent = str(Path(vp).parent).lower().replace("\\", "/")
-        if parent not in (".", ""):
-            dir_in_degree[parent] = max(dir_in_degree.get(parent, 0), in_deg)
-
-        # Build slug-based secondary lookup from entity name + label
-        name = str(row.get("name") or "").strip()
-        labels = row.get("labels") or []
-        if name:
-            for lbl in labels:
-                dir_name = _LABEL_TO_DIR.get(str(lbl).lower())
-                if dir_name:
-                    slug = slugify(name)
-                    if slug:
-                        doc_path = f"{dir_name}/{slug}.md"
-                        existing = name_slug_in_degree.get(doc_path, 0)
-                        name_slug_in_degree[doc_path] = max(existing, in_deg)
-
-    if not path_in_degree:
-        for r in results:
-            r.boosted_score = r.rrf_score
-        return results
-
-    max_in_degree = max(path_in_degree.values()) or 1
 
     for r in results:
-        path_lower = r.path.lower().replace("\\", "/")
-        in_deg = path_in_degree.get(path_lower, 0)
-
-        # Secondary: slug-based lookup from entity name
-        if in_deg == 0:
-            in_deg = name_slug_in_degree.get(path_lower, 0)
-
-        if in_deg == 0:
-            # Half-boost for files under an entity directory
-            for dir_prefix, dir_deg in dir_in_degree.items():
-                if path_lower.startswith(dir_prefix + "/"):
-                    in_deg = max(in_deg, dir_deg // 2)
-                    break
-        r.entity_mention_count = in_deg
+        mention_count, in_deg = _lookup_mention_count(r.path, path_idx, dir_idx, slug_idx)
+        r.entity_mention_count = mention_count
         if in_deg > 0:
-            normalised = in_deg / max_in_degree
-            boost_amount = min(cfg.factor * math.log1p(normalised * 10), cfg.cap - 1.0)
-            r.boosted_score = r.rrf_score * (1.0 + boost_amount)
+            r.boosted_score = r.rrf_score * _compute_entity_boost_factor(in_deg, max_in_deg, cfg)
         else:
             r.boosted_score = r.rrf_score
 
