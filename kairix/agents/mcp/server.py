@@ -98,16 +98,38 @@ def _fetch_entity_card(name: str) -> dict | None:
         rows = neo4j.cypher(
             "MATCH (n) WHERE n.id = $id OR toLower(n.name) = toLower($name) "
             "RETURN labels(n)[0] AS type, n.id AS id, n.name AS name, "
-            "n.summary AS summary, n.vault_path AS vault_path LIMIT 1",
+            "n.vault_path AS vault_path, "
+            "n.role AS role, n.org AS org, "
+            "n.tier AS tier, n.engagement_status AS engagement_status, "
+            "n.domain AS domain, n.industry AS industry, "
+            "n.category AS category "
+            "LIMIT 1",
             {"id": slug, "name": name},
         )
         if rows:
             r = rows[0]
+            # Build summary from type-specific fields
+            summary_parts: list[str] = []
+            if r.get("role"):
+                summary_parts.append(r["role"])
+            if r.get("org"):
+                summary_parts.append(f"at {r['org']}")
+            if r.get("tier"):
+                summary_parts.append(f"Tier {r['tier']}")
+            if r.get("engagement_status"):
+                summary_parts.append(f"({r['engagement_status']})")
+            if r.get("industry"):
+                val = r["industry"]
+                summary_parts.append(", ".join(val) if isinstance(val, list) else val)
+            if r.get("domain"):
+                summary_parts.append(r["domain"])
+            if r.get("category"):
+                summary_parts.append(r["category"])
             return {
                 "id": r.get("id", ""),
                 "name": r.get("name", ""),
                 "type": r.get("type", ""),
-                "summary": r.get("summary") or "",
+                "summary": " — ".join(summary_parts) if summary_parts else "",
                 "vault_path": r.get("vault_path") or "",
             }
     except (ImportError, RuntimeError, OSError, KeyError) as exc:
