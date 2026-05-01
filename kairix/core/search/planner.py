@@ -23,16 +23,13 @@ from kairix.core.search.rrf import RRF_K
 logger = logging.getLogger(__name__)
 
 
-def _neo4j_graph_context(query: str, client: object) -> str | None:
-    """
-    Build an entity relationship context string from Neo4j for use in the
-    decompose LLM prompt. Finds entities mentioned in the query and returns
-    their direct relationships as a short text block.
+def _find_query_entities(query: str, client: object) -> list[dict]:
+    """Find entities mentioned in query words via Neo4j name search.
 
-    Returns None if no relevant entities are found.
+    Returns up to 6 unique entity dicts. Never raises.
     """
     words = [w.strip(".,;:?!\"'") for w in query.split() if len(w.strip(".,;:?!\"'")) > 3]
-    found_entities: list[dict] = []
+    found: list[dict] = []
     seen_ids: set[str] = set()
     for word in words[:6]:
         try:
@@ -40,16 +37,19 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
             for m in matches[:2]:
                 if m.get("id") and m["id"] not in seen_ids:
                     seen_ids.add(m["id"])
-                    found_entities.append(m)
+                    found.append(m)
         except Exception:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
             logger.debug("planner: Neo4j find_by_name failed for word %r", word)
-            continue
+    return found
 
-    if not found_entities:
-        return None
 
-    context_parts = ["Known entities related to this query:"]
-    for entity in found_entities[:3]:
+def _build_entity_relationships(entities: list[dict], client: object) -> list[str]:
+    """Build relationship lines for found entities.
+
+    Returns list of formatted relationship strings. Never raises.
+    """
+    lines: list[str] = []
+    for entity in entities[:3]:
         eid = entity.get("id")
         ename = entity.get("name", eid)
         if not eid:
@@ -58,12 +58,29 @@ def _neo4j_graph_context(query: str, client: object) -> str | None:
             related = client.related_entities(eid, max_hops=1)
             rel_names = [r.get("name") for r in related[:4] if r.get("name") and r.get("name") != ename]
             if rel_names:
-                context_parts.append(f"- {ename} → {', '.join(rel_names)}")
+                lines.append(f"- {ename} → {', '.join(rel_names)}")
         except Exception:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
             logger.debug("planner: Neo4j related_entities failed for entity %r", eid)
-            continue
+    return lines
 
-    return "\n".join(context_parts) if len(context_parts) > 1 else None
+
+def _neo4j_graph_context(query: str, client: object) -> str | None:
+    """
+    Build an entity relationship context string from Neo4j for use in the
+    decompose LLM prompt. Finds entities mentioned in the query and returns
+    their direct relationships as a short text block.
+
+    Returns None if no relevant entities are found.
+    """
+    found_entities = _find_query_entities(query, client)
+    if not found_entities:
+        return None
+
+    rel_lines = _build_entity_relationships(found_entities, client)
+    if not rel_lines:
+        return None
+
+    return "Known entities related to this query:\n" + "\n".join(rel_lines)
 
 
 _DECOMPOSE_PROMPT = (
@@ -167,6 +184,15 @@ class QueryPlanner:
             logger.warning("planner: decompose failed (%s) — falling back to original query", _e)
         return [query]
 
+    @staticmethod
+    def _result_key(r: Any) -> str:
+        """Extract a deduplication key (path) from a heterogeneous result object."""
+        if isinstance(r, dict):
+            return r.get("file") or r.get("path") or str(r)
+        if hasattr(r, "result") and hasattr(r.result, "path"):
+            return r.result.path or str(r)
+        return getattr(r, "path", None) or str(r)
+
     def retrieve_and_merge(
         self,
         sub_queries: list[str],
@@ -185,7 +211,7 @@ class QueryPlanner:
             top_k_per_sub: Number of results to retrieve per sub-query.
             final_top_k:   Number of final merged results to return.
         """
-        all_results: dict[str, Any] = {}  # path -> best result
+        all_results: dict[str, Any] = {}
         rank_lists: list[list[str]] = []
 
         with ThreadPoolExecutor(max_workers=min(len(sub_queries), 3)) as pool:
@@ -199,14 +225,7 @@ class QueryPlanner:
 
                 rank_list: list[str] = []
                 for r in results[:top_k_per_sub]:
-                    # BudgetedResult (from search()) has .result.path
-                    # FusedResult has .path; dict BM25 results have "file" key
-                    if isinstance(r, dict):
-                        key = r.get("file") or r.get("path") or str(r)
-                    elif hasattr(r, "result") and hasattr(r.result, "path"):
-                        key = r.result.path or str(r)
-                    else:
-                        key = getattr(r, "path", None) or str(r)
+                    key = self._result_key(r)
                     if key not in all_results:
                         all_results[key] = r
                     rank_list.append(key)

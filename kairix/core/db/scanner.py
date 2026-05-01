@@ -100,6 +100,62 @@ class DocumentScanner:
         logger.info("db.scanner: %s", report)
         return report
 
+    def _process_file(
+        self,
+        file_path: Path,
+        rel_path: str,
+        config: CollectionConfig,
+        existing: dict[str, str],
+        all_indexed_hashes: set[str],
+        now: str,
+        report: ScanReport,
+    ) -> None:
+        """Process a single file: hash, dedup, and upsert into the database."""
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("db.scanner: cannot read %s — %s", file_path, e)
+            report.errors += 1
+            return
+
+        content_hash = _hash_content(text)
+        title = extract_title(text, file_path)
+        old_hash = existing.get(rel_path)
+
+        if old_hash == content_hash:
+            report.unchanged += 1
+            return
+
+        if content_hash in all_indexed_hashes and old_hash is None:
+            logger.debug(
+                "db.scanner: skipping duplicate content at %s (hash %s already indexed)",
+                rel_path,
+                content_hash[:12],
+            )
+            return
+
+        self._db.execute(
+            """
+            INSERT INTO documents (collection, path, title, hash, created_at, modified_at, active)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+            ON CONFLICT(collection, path) DO UPDATE SET
+                title = excluded.title,
+                hash = excluded.hash,
+                modified_at = excluded.modified_at,
+                active = 1
+            """,
+            (config.name, rel_path, title, content_hash, now, now),
+        )
+        self._db.execute(
+            "INSERT OR REPLACE INTO content (hash, doc, created_at) VALUES (?, ?, ?)",
+            (content_hash, text, now),
+        )
+
+        if old_hash is None:
+            report.new += 1
+        else:
+            report.updated += 1
+
     def _scan_collection(self, config: CollectionConfig) -> ScanReport:
         """Scan a single collection."""
         report = ScanReport()
@@ -109,10 +165,8 @@ class DocumentScanner:
             logger.warning("db.scanner: collection path does not exist: %s", collection_path)
             return report
 
-        # Build exclude set
         exclude_patterns = set(config.exclude)
 
-        # Get existing documents for this collection
         existing = {}
         for row in self._db.execute(
             "SELECT path, hash FROM documents WHERE collection = ? AND active = 1",
@@ -120,10 +174,6 @@ class DocumentScanner:
         ):
             existing[row[0]] = row[1]
 
-        # Build set of content hashes already indexed (any collection) for dedup.
-        # Prevents the same content from being indexed twice under different paths
-        # or in different collections — saves embedding cost and avoids duplicate
-        # search results.
         all_indexed_hashes: set[str] = set()
         for row in self._db.execute("SELECT DISTINCT hash FROM documents WHERE active = 1"):
             all_indexed_hashes.add(row[0])
@@ -131,71 +181,17 @@ class DocumentScanner:
         seen_paths: set[str] = set()
         now = datetime.now(tz=timezone.utc).isoformat()
 
-        # Scan files
         for file_path in sorted(collection_path.glob(config.glob)):
             if not file_path.is_file():
                 continue
 
-            # Check excludes
             rel_path = str(file_path.relative_to(self._document_root))
             if any(pattern in rel_path for pattern in exclude_patterns):
                 continue
 
             seen_paths.add(rel_path)
+            self._process_file(file_path, rel_path, config, existing, all_indexed_hashes, now, report)
 
-            try:
-                text = file_path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError) as e:
-                logger.warning("db.scanner: cannot read %s — %s", file_path, e)
-                report.errors += 1
-                continue
-
-            content_hash = _hash_content(text)
-            title = extract_title(text, file_path)
-
-            old_hash = existing.get(rel_path)
-
-            if old_hash == content_hash:
-                report.unchanged += 1
-                continue
-
-            # Dedup: skip if this exact content is already indexed under a
-            # different path. Prevents double-embedding when the same file
-            # exists at multiple paths (e.g. symlinks, vault reorganisation).
-            if content_hash in all_indexed_hashes and old_hash is None:
-                logger.debug(
-                    "db.scanner: skipping duplicate content at %s (hash %s already indexed)",
-                    rel_path,
-                    content_hash[:12],
-                )
-                continue
-
-            # Upsert document
-            self._db.execute(
-                """
-                INSERT INTO documents (collection, path, title, hash, created_at, modified_at, active)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-                ON CONFLICT(collection, path) DO UPDATE SET
-                    title = excluded.title,
-                    hash = excluded.hash,
-                    modified_at = excluded.modified_at,
-                    active = 1
-                """,
-                (config.name, rel_path, title, content_hash, now, now),
-            )
-
-            # Upsert content
-            self._db.execute(
-                "INSERT OR REPLACE INTO content (hash, doc, created_at) VALUES (?, ?, ?)",
-                (content_hash, text, now),
-            )
-
-            if old_hash is None:
-                report.new += 1
-            else:
-                report.updated += 1
-
-        # Mark removed documents as inactive
         for path in existing:
             if path not in seen_paths:
                 self._db.execute(

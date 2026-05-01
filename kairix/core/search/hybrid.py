@@ -859,6 +859,46 @@ def search(
     )
 
 
+def _apply_hyde(query: str, query_vec: Any) -> Any:
+    """Apply HyDE (Hypothetical Document Embeddings) to a query vector.
+
+    Generates a short hypothetical answer via LLM, embeds it, and blends
+    with the query embedding (50/50) for better recall on conceptual queries.
+
+    Returns the (possibly blended) query vector. Never raises.
+    """
+    import numpy as np
+
+    try:
+        from kairix._azure import chat_completion, embed_text
+
+        hyde_answer = chat_completion(
+            [{"role": "user", "content": f"Write a short paragraph that answers: {query}"}],
+            max_tokens=150,
+        )
+        if not hyde_answer:
+            return query_vec
+
+        hyde_vec = embed_text(hyde_answer)
+        if not hyde_vec:
+            return query_vec
+
+        hyde_arr = np.array(hyde_vec, dtype=np.float32)
+        hyde_norm = np.linalg.norm(hyde_arr)
+        if hyde_norm <= 0:
+            return query_vec
+
+        hyde_arr /= hyde_norm
+        blended = (query_vec + hyde_arr) / 2.0
+        norm = np.linalg.norm(blended)
+        if norm > 0:
+            blended /= norm
+        return blended
+    except Exception as _hyde_e:
+        logger.debug("hybrid: HyDE generation failed — %s — using raw query embedding", _hyde_e)
+        return query_vec
+
+
 def _run_vector_search(
     query: str,
     collections: list[str],
@@ -897,30 +937,8 @@ def _run_vector_search(
         if norm > 0:
             query_vec /= norm
 
-        # HyDE: for semantic/multi-hop queries, generate a hypothetical answer
-        # and blend its embedding with the query embedding for better recall
         if intent in ("semantic", "multi_hop"):
-            try:
-                from kairix._azure import chat_completion
-
-                hyde_answer = chat_completion(
-                    [{"role": "user", "content": f"Write a short paragraph that answers: {query}"}],
-                    max_tokens=150,
-                )
-                if hyde_answer:
-                    hyde_vec = embed_text(hyde_answer)
-                    if hyde_vec:
-                        hyde_arr = np.array(hyde_vec, dtype=np.float32)
-                        hyde_norm = np.linalg.norm(hyde_arr)
-                        if hyde_norm > 0:
-                            hyde_arr /= hyde_norm
-                            # Blend: 50% query + 50% hypothetical answer
-                            query_vec = (query_vec + hyde_arr) / 2.0
-                            norm = np.linalg.norm(query_vec)
-                            if norm > 0:
-                                query_vec /= norm
-            except Exception as _hyde_e:
-                logger.debug("hybrid: HyDE generation failed — %s — using raw query embedding", _hyde_e)
+            query_vec = _apply_hyde(query, query_vec)
 
         index = get_vector_index()
         if index is None or len(index) == 0:
@@ -928,7 +946,6 @@ def _run_vector_search(
 
         results = index.search(query_vec, k=k, collections=collections or None)
 
-        # Apply date filter if present (TMP-2 temporal filtering)
         if date_filter_paths and results:
             results = [r for r in results if r["path"] in date_filter_paths]
 

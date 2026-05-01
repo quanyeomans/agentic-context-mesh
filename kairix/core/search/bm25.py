@@ -202,6 +202,54 @@ def _normalise_fts_query(query: str) -> str:
     return " AND ".join(f'"{t}"*' for t in tokens)
 
 
+def _build_bm25_query(
+    fts_query: str,
+    collections: list[str] | None,
+    limit: int,
+) -> tuple[str, list]:
+    """Build the FTS5 SQL query and parameter list.
+
+    Returns (sql, params) tuple. Collection filtering is applied when
+    collections is non-empty; otherwise searches all active documents.
+    """
+    if collections:
+        placeholders = ",".join("?" * len(collections))
+        sql = f"""
+            SELECT d.collection,
+                   d.path,
+                   d.title,
+                   c.doc,
+                   bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
+            FROM documents_fts
+            JOIN documents d ON d.id = documents_fts.rowid
+            JOIN content   c ON c.hash = d.hash
+            WHERE documents_fts MATCH ?
+              AND d.collection IN ({placeholders})
+              AND d.active = 1
+            ORDER BY bm25_score ASC
+            LIMIT ?
+        """
+        params: list = [fts_query, *collections, limit]
+    else:
+        sql = """
+            SELECT d.collection,
+                   d.path,
+                   d.title,
+                   c.doc,
+                   bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
+            FROM documents_fts
+            JOIN documents d ON d.id = documents_fts.rowid
+            JOIN content   c ON c.hash = d.hash
+            WHERE documents_fts MATCH ?
+              AND d.active = 1
+            ORDER BY bm25_score ASC
+            LIMIT ?
+        """
+        params = [fts_query, limit]
+
+    return sql, params
+
+
 def bm25_search(
     query: str,
     collections: list[str] | None = None,
@@ -239,46 +287,9 @@ def bm25_search(
         logger.warning("bm25_search: cannot open database — %s", e)
         return []
 
-    try:
-        # Use bm25() auxiliary function with column weights (filepath, title, doc).
-        # Default weights from sweep: equal weights work well; prefix query style
-        # has more impact than weight tuning.
-        if collections:
-            # safe: placeholders are "?" strings, values bound via params
-            placeholders = ",".join("?" * len(collections))
-            sql = f"""
-                SELECT d.collection,
-                       d.path,
-                       d.title,
-                       c.doc,
-                       bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
-                FROM documents_fts
-                JOIN documents d ON d.id = documents_fts.rowid
-                JOIN content   c ON c.hash = d.hash
-                WHERE documents_fts MATCH ?
-                  AND d.collection IN ({placeholders})
-                  AND d.active = 1
-                ORDER BY bm25_score ASC
-                LIMIT ?
-            """
-            params: list = [fts_query, *collections, limit]
-        else:
-            sql = """
-                SELECT d.collection,
-                       d.path,
-                       d.title,
-                       c.doc,
-                       bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
-                FROM documents_fts
-                JOIN documents d ON d.id = documents_fts.rowid
-                JOIN content   c ON c.hash = d.hash
-                WHERE documents_fts MATCH ?
-                  AND d.active = 1
-                ORDER BY bm25_score ASC
-                LIMIT ?
-            """
-            params = [fts_query, limit]
+    sql, params = _build_bm25_query(fts_query, collections, limit)
 
+    try:
         rows = db.execute(sql, params).fetchall()
     except Exception as e:
         logger.warning("bm25_search: FTS query failed — %s (query=%r)", e, query[:60])
@@ -287,13 +298,9 @@ def bm25_search(
 
     results: list[BM25Result] = []
     for row in rows:
-        # bm25() returns negative values (lower = better match).
-        # Normalise to [0, 1) using formula: |x| / (1 + |x|)
-        # Maps: strong(-10)→0.91, medium(-2)→0.67, weak(-0.5)→0.33, none(0)→0
         raw_score = float(row["bm25_score"])
         score = abs(raw_score) / (1.0 + abs(raw_score))
 
-        # Build a short snippet from doc (first 300 chars of body)
         doc_text = row["doc"] or ""
         if doc_text.startswith("---"):
             parts = doc_text.split("---", 2)
@@ -313,7 +320,6 @@ def bm25_search(
 
     db.close()
 
-    # TMP-2: apply date-range path filter for TEMPORAL queries
     if date_filter_paths:
         results = [r for r in results if r["file"] in date_filter_paths]
 

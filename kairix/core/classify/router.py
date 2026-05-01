@@ -32,6 +32,15 @@ SHARED_AGENT = "shared"
 # ---------------------------------------------------------------------------
 
 
+# Mapping from classification type → filename within the agent knowledge directory
+_TYPE_TO_FILENAME: dict[str, str] = {
+    "procedural-rule": "rules.md",
+    "procedural-pattern": "patterns.md",
+    "semantic-decision": "decisions.md",
+    "semantic-fact": "facts.md",
+}
+
+
 def resolve_target_path(
     agent: str,
     classification_type: str,
@@ -56,51 +65,28 @@ def resolve_target_path(
     Raises:
         ValueError: If agent is invalid or classification_type is unknown.
     """
-    # Resolve agent name
-    if agent == SHARED_AGENT:
-        scoped_agent = "shared"
-    elif agent in VALID_AGENTS:
-        scoped_agent = agent
-    else:
+    if agent != SHARED_AGENT and agent not in VALID_AGENTS:
         raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)} or 'shared'.")
 
-    # Lazy resolution — env vars may be set after import time
+    scoped_agent = "shared" if agent == SHARED_AGENT else agent
+
     doc_root = str(document_root())
     ws_root = str(workspace_root())
     knowledge_root = f"{doc_root}/04-Agent-Knowledge"
-    shared_agent_root = f"{knowledge_root}/shared"
 
     if classification_type == "episodic":
         date_str = date or _date.today().isoformat()
-        if scoped_agent == "shared":
-            # shared doesn't have episodic workspace — use builder as fallback
-            return f"{ws_root}/builder/memory/{date_str}.md"
-        return f"{ws_root}/{scoped_agent}/memory/{date_str}.md"
-
-    if classification_type == "procedural-rule":
-        if scoped_agent == "shared":
-            return f"{shared_agent_root}/rules.md"
-        return f"{knowledge_root}/{scoped_agent}/rules.md"
-
-    if classification_type == "procedural-pattern":
-        if scoped_agent == "shared":
-            return f"{shared_agent_root}/patterns.md"
-        return f"{knowledge_root}/{scoped_agent}/patterns.md"
-
-    if classification_type == "semantic-decision":
-        if scoped_agent == "shared":
-            return f"{shared_agent_root}/decisions.md"
-        return f"{knowledge_root}/{scoped_agent}/decisions.md"
-
-    if classification_type == "semantic-fact":
-        if scoped_agent == "shared":
-            return f"{shared_agent_root}/facts.md"
-        return f"{knowledge_root}/{scoped_agent}/facts.md"
+        effective_agent = "builder" if scoped_agent == "shared" else scoped_agent
+        return f"{ws_root}/{effective_agent}/memory/{date_str}.md"
 
     if classification_type == "entity":
         etype = entity_type or "unknown"
         slug = entity_slug or "unknown"
         return f"{knowledge_root}/entities/{etype}/{slug}.md"
+
+    filename = _TYPE_TO_FILENAME.get(classification_type)
+    if filename is not None:
+        return f"{knowledge_root}/{scoped_agent}/{filename}"
 
     raise ValueError(
         f"Unknown classification type {classification_type!r}. "

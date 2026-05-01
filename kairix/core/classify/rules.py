@@ -96,6 +96,21 @@ def _matches_any(content: str, patterns: list[re.Pattern]) -> bool:
     return any(p.search(content) for p in patterns)
 
 
+def _match_pattern_group(
+    content: str,
+    patterns: list[re.Pattern],
+    classification_type: str,
+    reason_prefix: str,
+) -> tuple[str | None, str]:
+    """Try each pattern against content; return (type, reason) on first match, or (None, "")."""
+    for pat in patterns:
+        m = pat.search(content)
+        if m:
+            matched = m.group(0).strip()
+            return classification_type, f"{reason_prefix}: {matched!r}"
+    return None, ""
+
+
 def classify_by_rules(content: str) -> tuple[str | None, str]:
     """
     Apply rule-based classification.
@@ -106,46 +121,23 @@ def classify_by_rules(content: str) -> tuple[str | None, str]:
     if not content or not content.strip():
         return None, ""
 
-    # Rule 1: episodic — starts with ## HH:MM (must be at start of a line, MULTILINE)
+    # Rule 1: episodic — starts with ## HH:MM
     if _RE_EPISODIC.search(content):
         return "episodic", "starts with ## HH:MM session-log header"
 
-    # Rule 3a (elevated): procedural-pattern — check explicit structural markers first
-    # before normative-language rules, because pattern docs often contain "always/never"
-    # as part of their instructions (e.g. "Pattern: X must always be Y. Step 1: ...")
-    for pat in _RE_PROCEDURAL_PATTERN_STRONG:
-        m = pat.search(content)
-        if m:
-            matched = m.group(0).strip()
-            return "procedural-pattern", f"contains procedural pattern marker: {matched!r}"
+    # Rules in priority order: each group is (patterns, type, reason_prefix)
+    _rule_groups: list[tuple[list[re.Pattern], str, str]] = [
+        (_RE_PROCEDURAL_PATTERN_STRONG, "procedural-pattern", "contains procedural pattern marker"),
+        (_RE_PROCEDURAL_RULE_PATTERNS, "procedural-rule", "contains normative language"),
+        (_RE_PROCEDURAL_PATTERN_WEAK, "procedural-pattern", "contains procedural pattern marker"),
+        (_RE_SEMANTIC_DECISION_PATTERNS, "semantic-decision", "contains decision marker"),
+        (_RE_SEMANTIC_FACT_PATTERNS, "semantic-fact", "contains infrastructure/config fact"),
+    ]
 
-    # Rule 2: procedural-rule — normative language
-    for pat in _RE_PROCEDURAL_RULE_PATTERNS:
-        m = pat.search(content)
-        if m:
-            matched = m.group(0).strip()
-            return "procedural-rule", f"contains normative language: {matched!r}"
-
-    # Rule 3b: remaining procedural-pattern patterns (how-to, ## Steps, step 1)
-    for pat in _RE_PROCEDURAL_PATTERN_WEAK:
-        m = pat.search(content)
-        if m:
-            matched = m.group(0).strip()
-            return "procedural-pattern", f"contains procedural pattern marker: {matched!r}"
-
-    # Rule 4: semantic-decision — decision records
-    for pat in _RE_SEMANTIC_DECISION_PATTERNS:
-        m = pat.search(content)
-        if m:
-            matched = m.group(0).strip()
-            return "semantic-decision", f"contains decision marker: {matched!r}"
-
-    # Rule 5: semantic-fact — infra/config facts
-    for pat in _RE_SEMANTIC_FACT_PATTERNS:
-        m = pat.search(content)
-        if m:
-            matched = m.group(0).strip()
-            return "semantic-fact", f"contains infrastructure/config fact: {matched!r}"
+    for patterns, cls_type, reason_prefix in _rule_groups:
+        result, reason = _match_pattern_group(content, patterns, cls_type, reason_prefix)
+        if result is not None:
+            return result, reason
 
     return None, ""
 

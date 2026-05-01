@@ -38,6 +38,26 @@ def build_hash_seq(content_hash: str, seq: int) -> str:
 # ── Chunking ──────────────────────────────────────────────────────────────────
 
 
+def _find_break_point(text: str, pos: int, end: int, chunk_size: int) -> int:
+    """Find the best break point within a chunk boundary.
+
+    Prefers paragraph breaks, then sentence breaks, then falls back to the raw end.
+    """
+    if end >= len(text):
+        return end
+
+    half = pos + chunk_size // 2
+    para_break = text.rfind("\n\n", pos, end)
+    if para_break > half:
+        return para_break + 2
+
+    sent_break = max(text.rfind(". ", pos, end), text.rfind(".\n", pos, end))
+    if sent_break > half:
+        return sent_break + 1
+
+    return end
+
+
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHUNK_OVERLAP_CHARS) -> list[dict]:
     """
     Split text into overlapping chunks. Returns list of {seq, pos, text}.
@@ -53,20 +73,7 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE_CHARS, overlap: int = CHU
 
     while pos < len(text):
         end = min(pos + chunk_size, len(text))
-
-        # Try to split on paragraph boundary
-        if end < len(text):
-            para_break = text.rfind("\n\n", pos, end)
-            if para_break > pos + chunk_size // 2:
-                end = para_break + 2
-            else:
-                # Fall back to sentence boundary
-                sent_break = max(
-                    text.rfind(". ", pos, end),
-                    text.rfind(".\n", pos, end),
-                )
-                if sent_break > pos + chunk_size // 2:
-                    end = sent_break + 1
+        end = _find_break_point(text, pos, end, chunk_size)
 
         chunk_text_val = text[pos:end].strip()
         if chunk_text_val:

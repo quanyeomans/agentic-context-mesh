@@ -126,25 +126,17 @@ class VectorIndex:
         self._save()
         return n
 
-    def search(
+    def _resolve_match_metadata(
         self,
-        query_vec: np.ndarray,
-        k: int = 10,
-        collections: list[str] | None = None,
+        matches: Any,
+        k: int,
+        collections: list[str] | None,
     ) -> list[dict]:
-        """ANN search with optional collection filtering.
+        """Resolve ANN match keys to document metadata via SQLite.
 
-        Returns list of VecResult-compatible dicts sorted by distance.
+        Returns list of VecResult-compatible dicts. Returns [] on DB failure.
         """
-        if self._index is None or len(self._index) == 0:
-            return []
-
-        # Over-fetch when filtering by collection
-        fetch_k = min(k * 4 if collections else k, len(self._index))
-        matches = self._index.search(query_vec.astype(np.float32), fetch_k)
-
-        # Resolve metadata from SQLite
-        results = []
+        results: list[dict] = []
         try:
             db = open_db(Path(self._db_path))
             db.row_factory = sqlite3.Row
@@ -180,6 +172,24 @@ class VectorIndex:
             logger.warning("vec_index: metadata lookup failed — %s", e)
 
         return results
+
+    def search(
+        self,
+        query_vec: np.ndarray,
+        k: int = 10,
+        collections: list[str] | None = None,
+    ) -> list[dict]:
+        """ANN search with optional collection filtering.
+
+        Returns list of VecResult-compatible dicts sorted by distance.
+        """
+        if self._index is None or len(self._index) == 0:
+            return []
+
+        fetch_k = min(k * 4 if collections else k, len(self._index))
+        matches = self._index.search(query_vec.astype(np.float32), fetch_k)
+
+        return self._resolve_match_metadata(matches, k, collections)
 
     def _ensure_mutable(self) -> None:
         """Ensure the index is mutable (not a read-only mmap view).

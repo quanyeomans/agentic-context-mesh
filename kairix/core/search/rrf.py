@@ -576,27 +576,72 @@ def temporal_date_boost(
         return results
 
 
+def _extract_query_date_strings(query: str) -> list[str]:
+    """Extract explicit date strings from a query for path matching.
+
+    Returns date strings (YYYY-MM-DD and/or YYYY-MM) found in the query,
+    or an empty list if none are found.
+    """
+    iso_match = _QUERY_ISO_DATE_RE.search(query)
+    if iso_match:
+        return [iso_match.group(1), iso_match.group(1)[:7]]
+
+    ym_match = _QUERY_YEAR_MONTH_RE.search(query)
+    if ym_match:
+        return [ym_match.group(1)]
+
+    return []
+
+
+def _boost_by_recency_window(
+    results: list[FusedResult],
+    query: str,
+    boost_factor: float,
+) -> bool:
+    """Boost results whose path contains a date within the relative temporal window.
+
+    Returns True if any result was boosted.
+    """
+    import datetime
+
+    rel_match = _RELATIVE_TEMPORAL_RE.search(query)
+    if not rel_match:
+        return False
+
+    term = rel_match.group(1).lower()
+    today = datetime.date.today()
+    if "last week" in term or "yesterday" in term or "today" in term:
+        cutoff = today - datetime.timedelta(days=30)
+    else:
+        cutoff = today - datetime.timedelta(days=90)
+
+    _path_date_re = re.compile(r"(\d{4}-\d{2}-\d{2})")
+    boosted_any = False
+    for r in results:
+        path_date_match = _path_date_re.search(r.path)
+        if not path_date_match:
+            continue
+        try:
+            path_date = datetime.date.fromisoformat(path_date_match.group(1))
+            if path_date >= cutoff:
+                r.boosted_score *= boost_factor
+                boosted_any = True
+        except ValueError:
+            pass
+
+    return boosted_any
+
+
 def _temporal_date_boost_impl(
     results: list[FusedResult],
     query: str,
     boost_factor: float,
 ) -> list[FusedResult]:
     """Implementation of temporal date boosting — called from temporal_date_boost() with error boundary."""
-    import datetime
-
     boosted_any = False
 
-    # --- Strategy 1: explicit date in query (YYYY-MM-DD or YYYY-MM) ---
-    iso_match = _QUERY_ISO_DATE_RE.search(query)
-    ym_match = _QUERY_YEAR_MONTH_RE.search(query)
-
-    date_strings: list[str] = []
-    if iso_match:
-        date_strings.append(iso_match.group(1))  # YYYY-MM-DD
-        date_strings.append(iso_match.group(1)[:7])  # YYYY-MM prefix
-    elif ym_match:
-        date_strings.append(ym_match.group(1))  # YYYY-MM
-
+    # Strategy 1: explicit date in query (YYYY-MM-DD or YYYY-MM)
+    date_strings = _extract_query_date_strings(query)
     if date_strings:
         for r in results:
             if any(ds in r.path for ds in date_strings):
@@ -605,29 +650,8 @@ def _temporal_date_boost_impl(
         if boosted_any:
             return sorted(results, key=lambda r: r.boosted_score, reverse=True)
 
-    # --- Strategy 2: relative temporal terms → recency window ---
-    rel_match = _RELATIVE_TEMPORAL_RE.search(query)
-    if rel_match:
-        term = rel_match.group(1).lower().replace(" ", " ")
-        today = datetime.date.today()
-        if "last week" in term or "yesterday" in term or "today" in term:
-            cutoff = today - datetime.timedelta(days=30)
-        else:
-            # "recently", "last month", "this week", "this month"
-            cutoff = today - datetime.timedelta(days=90)
-
-        # Path dates: look for YYYY-MM-DD in the path and compare to cutoff
-        _path_date_re = re.compile(r"(\d{4}-\d{2}-\d{2})")
-        for r in results:
-            path_date_match = _path_date_re.search(r.path)
-            if path_date_match:
-                try:
-                    path_date = datetime.date.fromisoformat(path_date_match.group(1))
-                    if path_date >= cutoff:
-                        r.boosted_score *= boost_factor
-                        boosted_any = True
-                except ValueError:
-                    pass
+    # Strategy 2: relative temporal terms -> recency window
+    boosted_any = _boost_by_recency_window(results, query, boost_factor)
 
     if boosted_any:
         return sorted(results, key=lambda r: r.boosted_score, reverse=True)

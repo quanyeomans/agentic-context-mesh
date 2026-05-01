@@ -23,11 +23,35 @@ See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 
 import sys
 
+# Dispatch table: command name → (module_path, function_name, accepts_args)
+# Lazy imports keep startup fast — only the selected command is imported.
+_COMMANDS: dict[str, tuple[str, str, bool]] = {
+    "embed": ("kairix.core.embed.cli", "main", False),
+    "entity": ("kairix.knowledge.entities.cli", "main", True),
+    "curator": ("kairix.agents.curator.cli", "main", True),
+    "search": ("kairix.core.search.cli", "main", True),
+    "benchmark": ("kairix.quality.benchmark.cli", "main", True),
+    "summarise": ("kairix.knowledge.summaries.cli", "main", True),
+    "timeline": ("kairix.core.temporal.cli", "main", True),
+    "wikilinks": ("kairix.knowledge.wikilinks.cli", "main", True),
+    "classify": ("kairix.core.classify.cli", "main", True),
+    "brief": ("kairix.agents.briefing.cli", "main", True),
+    "contradict": ("kairix.knowledge.contradict.cli", "main", True),
+    "store": ("kairix.knowledge.store.cli", "main", True),
+    "vault": ("kairix.knowledge.store.cli", "main", True),  # backwards-compat alias
+    "mcp": ("kairix.agents.mcp.cli", "main", True),
+    "onboard": ("kairix.platform.onboard.cli", "main", True),
+    "eval": ("kairix.quality.eval.cli", "main", True),
+    "reference-library": ("kairix.knowledge.reflib.cli", "main", True),
+    "setup": ("kairix.platform.setup.cli", "main", True),
+    "worker": ("kairix.worker", "main", False),
+}
+
 
 def main() -> None:
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
-        sys.exit(1)
+        sys.exit(0 if len(sys.argv) >= 2 else 1)
 
     cmd = sys.argv[1]
 
@@ -37,103 +61,23 @@ def main() -> None:
         print(f"kairix {__version__}")
         sys.exit(0)
 
-    elif cmd in ("--help", "-h"):
-        print(__doc__)
-        sys.exit(0)
-
-    elif cmd == "embed":
-        from kairix.core.embed.cli import main as embed_main
-
-        embed_main()
-
-    elif cmd == "entity":
-        from kairix.knowledge.entities.cli import main as entity_main
-
-        sys.exit(entity_main(sys.argv[2:]))
-
-    elif cmd == "curator":
-        from kairix.agents.curator.cli import main as curator_main
-
-        curator_main(sys.argv[2:])
-
-    elif cmd == "search":
-        from kairix.core.search.cli import main as search_main
-
-        search_main(sys.argv[2:])
-
-    elif cmd == "benchmark":
-        from kairix.quality.benchmark.cli import main as benchmark_main
-
-        benchmark_main(sys.argv[2:])
-
-    elif cmd == "summarise":
-        from kairix.knowledge.summaries.cli import main as summarise_main
-
-        summarise_main(sys.argv[2:])
-
-    elif cmd == "timeline":
-        from kairix.core.temporal.cli import main as timeline_main
-
-        timeline_main(sys.argv[2:])
-
-    elif cmd == "wikilinks":
-        from kairix.knowledge.wikilinks.cli import main as wikilinks_main
-
-        wikilinks_main(sys.argv[2:])
-
-    elif cmd == "classify":
-        from kairix.core.classify.cli import main as classify_main
-
-        classify_main(sys.argv[2:])
-
-    elif cmd == "brief":
-        from kairix.agents.briefing.cli import main as brief_main
-
-        brief_main(sys.argv[2:])
-
-    elif cmd == "contradict":
-        from kairix.knowledge.contradict.cli import main as contradict_main
-
-        contradict_main(sys.argv[2:])
-
-    elif cmd in ("store", "vault"):
-        from kairix.knowledge.store.cli import main as store_main
-
-        store_main(sys.argv[2:])
-
-    elif cmd == "mcp":
-        from kairix.agents.mcp.cli import main as mcp_main
-
-        mcp_main(sys.argv[2:])
-
-    elif cmd == "onboard":
-        from kairix.platform.onboard.cli import main as onboard_main
-
-        onboard_main(sys.argv[2:])
-
-    elif cmd == "eval":
-        from kairix.quality.eval.cli import main as eval_main
-
-        eval_main(sys.argv[2:])
-
-    elif cmd == "reference-library":
-        from kairix.knowledge.reflib.cli import main as reflib_main
-
-        reflib_main(sys.argv[2:])
-
-    elif cmd == "setup":
-        from kairix.platform.setup.cli import main as setup_main
-
-        setup_main(sys.argv[2:])
-
-    elif cmd == "worker":
-        from kairix.worker import main as worker_main
-
-        worker_main()
-
-    else:
+    entry = _COMMANDS.get(cmd)
+    if entry is None:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)
         sys.exit(1)
+
+    module_path, func_name, accepts_args = entry
+    import importlib
+
+    mod = importlib.import_module(module_path)
+    fn = getattr(mod, func_name)
+
+    if accepts_args:
+        result = fn(sys.argv[2:])
+        if result is not None:
+            sys.exit(result)
+    else:
+        fn()
 
 
 if __name__ == "__main__":
