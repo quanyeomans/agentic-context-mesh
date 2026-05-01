@@ -263,55 +263,27 @@ def _open_usearch_index():  # type: ignore[no-untyped-def]
         return None
 
 
-# ── Main embed runner ─────────────────────────────────────────────────────────
+# ── Extracted helpers (run_embed decomposition) ─────────────────────────────
 
 
-def run_embed(
+def _gather_pending_chunks(
     db: sqlite3.Connection,
-    force: bool = False,
-    batch_size: int = DEFAULT_BATCH_SIZE,
-    limit: int | None = None,
-) -> dict:
+    force: bool,
+    doc_root: str | None,
+) -> tuple[list[dict], int]:
+    """Gather chunks that need embedding.
+
+    In force mode, clears existing vectors and selects all documents.
+    In incremental mode, selects only documents not yet embedded.
+
+    Returns (all_chunks, document_count) where each chunk is a dict with
+    keys: hash, seq, pos, text, path, chunk_date.
     """
-    Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
-
-    Args:
-        db:         Open SQLite connection (caller holds the lock)
-        force:      Re-embed everything, not just pending
-        batch_size: Chunks per Azure API call (Azure supports up to 2048; default 500)
-        limit:      Cap total chunks (for validation/testing)
-
-    Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
-    """
-    # Resolve document root for file mtime fallback in chunk date extraction
-    try:
-        from kairix.paths import document_root
-
-        doc_root = str(document_root())
-    except Exception:
-        doc_root = None
-
-    api_key, endpoint, deployment = _get_azure_config()
-
-    # Preflight — verify Azure before touching DB
-    actual_dims = preflight_check(api_key, endpoint, deployment)
-    if actual_dims != DEFAULT_DIMS:
-        raise SchemaVersionError(
-            f"Azure returned {actual_dims} dims but expected {DEFAULT_DIMS}. "
-            f"Check KAIRIX_EMBED_MODEL and dimensions setting."
-        )
-
-    # Ensure chunk_date column exists (idempotent — no-op when already present)
-    migrate_content_vectors(db)
-
-    # Gather chunks to embed
     if force:
-        # Clear existing vectors first (after successful preflight)
         logger.info("--force: clearing all existing vectors")
         db.execute("DELETE FROM content_vectors")
         db.commit()
 
-    # Get all document bodies that need chunking + embedding
     if force:
         rows = db.execute("""
             SELECT c.hash, c.doc, d.path
@@ -333,10 +305,9 @@ def run_embed(
               AND length(c.doc) > 0
         """).fetchall()
 
-    # Expand into chunks, extracting chunk_date once per document
-    all_chunks = []
+    all_chunks: list[dict] = []
     for content_hash, body, path in rows:
-        doc_date = extract_chunk_date(body, path, document_root=doc_root)  # document-level date
+        doc_date = extract_chunk_date(body, path, document_root=doc_root)
         for chunk in chunk_text(body):
             all_chunks.append(
                 {
@@ -349,6 +320,111 @@ def run_embed(
                 }
             )
 
+    return all_chunks, len(rows)
+
+
+def _embed_and_store_batch(
+    batch: list[dict],
+    batch_idx: int,
+    db: sqlite3.Connection,
+    vec_index: object | None,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    dims: int,
+    now: int,
+    save_interval: int,
+) -> tuple[int, list[dict]]:
+    """Embed a single batch and write results to DB + usearch index.
+
+    Returns (embedded_count, failed_chunks) for this batch.
+    """
+    texts = [c["text"] for c in batch]
+
+    try:
+        vectors = embed_batch(texts, api_key, endpoint, deployment, dims)
+    except (RuntimeError, KeyError, ValueError, OSError) as e:
+        logger.error("Batch %d failed: %s — logging %d chunks as failed", batch_idx, e, len(batch))
+        return 0, list(batch)
+
+    try:
+        with db:
+            for chunk, vector in zip(batch, vectors, strict=False):
+                stage_embedding(
+                    db,
+                    chunk["hash"],
+                    chunk["seq"],
+                    chunk["pos"],
+                    vector,
+                    deployment,
+                    now,
+                    chunk_date=chunk.get("chunk_date"),
+                )
+        if vec_index is not None:
+            try:
+                batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
+                vec_index.add_vectors(batch_hash_seqs, vectors)
+                if (batch_idx + 1) % save_interval == 0:
+                    vec_index.save()
+            except Exception as e:
+                logger.error("usearch batch %d failed: %s", batch_idx, e)
+        return len(batch), []
+    except sqlite3.Error as e:
+        logger.error("DB write for batch %d failed: %s", batch_idx, e)
+        return 0, list(batch)
+
+
+def _save_index_checkpoint(vec_index: object | None) -> None:
+    """Final save of the usearch ANN index to disk."""
+    if vec_index is None:
+        return
+    try:
+        vec_index.save()
+        logger.info("usearch: saved index with %d vectors", len(vec_index))
+    except Exception as e:
+        logger.error("usearch final save failed: %s", e)
+
+
+# ── Main embed runner ─────────────────────────────────────────────────────────
+
+
+def run_embed(
+    db: sqlite3.Connection,
+    force: bool = False,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    limit: int | None = None,
+) -> dict:
+    """
+    Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
+
+    Args:
+        db:         Open SQLite connection (caller holds the lock)
+        force:      Re-embed everything, not just pending
+        batch_size: Chunks per Azure API call (Azure supports up to 2048; default 500)
+        limit:      Cap total chunks (for validation/testing)
+
+    Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
+    """
+    try:
+        from kairix.paths import document_root
+
+        doc_root = str(document_root())
+    except Exception:
+        doc_root = None
+
+    api_key, endpoint, deployment = _get_azure_config()
+
+    actual_dims = preflight_check(api_key, endpoint, deployment)
+    if actual_dims != DEFAULT_DIMS:
+        raise SchemaVersionError(
+            f"Azure returned {actual_dims} dims but expected {DEFAULT_DIMS}. "
+            f"Check KAIRIX_EMBED_MODEL and dimensions setting."
+        )
+
+    migrate_content_vectors(db)
+
+    all_chunks, doc_count = _gather_pending_chunks(db, force, doc_root)
+
     if limit:
         all_chunks = all_chunks[:limit]
 
@@ -357,51 +433,32 @@ def run_embed(
         logger.info("Nothing to embed — index is up to date.")
         return {"embedded": 0, "skipped": 0, "failed": 0, "duration_s": 0, "estimated_cost_usd": 0.0}
 
-    logger.info("Embedding %d chunks across %d documents (batch_size=%d)", total, len(rows), batch_size)
+    logger.info("Embedding %d chunks across %d documents (batch_size=%d)", total, doc_count, batch_size)
 
     embedded = 0
-    failed_chunks = []
+    failed_chunks: list[dict] = []
     start_time = time.time()
     now = int(start_time)
 
-    # Open usearch index once — reuse across all batches (avoids O(n²) rebuild)
     vec_index = _open_usearch_index()
-    save_interval = 10  # save index to disk every N batches
+    save_interval = 10
 
     for batch_idx, batch in enumerate(batched(all_chunks, batch_size)):
-        texts = [c["text"] for c in batch]
-
-        try:
-            vectors = embed_batch(texts, api_key, endpoint, deployment, actual_dims)
-        except (RuntimeError, KeyError, ValueError, OSError) as e:
-            logger.error(f"Batch {batch_idx} failed: {e} — logging {len(batch)} chunks as failed")
-            failed_chunks.extend(batch)
-            continue
-
-        # Write chunk metadata to content_vectors, then update usearch index.
-        try:
-            with db:  # transaction: write metadata atomically
-                for chunk, vector in zip(batch, vectors, strict=False):
-                    stage_embedding(
-                        db,
-                        chunk["hash"],
-                        chunk["seq"],
-                        chunk["pos"],
-                        vector,
-                        deployment,
-                        now,
-                        chunk_date=chunk.get("chunk_date"),
-                    )
-            # Write to usearch ANN index (reuse mutable index across batches)
-            if vec_index is not None:
-                try:
-                    batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in batch]
-                    vec_index.add_vectors(batch_hash_seqs, vectors)
-                    if (batch_idx + 1) % save_interval == 0:
-                        vec_index.save()
-                except Exception as e:
-                    logger.error("usearch batch %d failed: %s", batch_idx, e)
-            embedded += len(batch)
+        batch_ok, batch_failed = _embed_and_store_batch(
+            batch,
+            batch_idx,
+            db,
+            vec_index,
+            api_key,
+            endpoint,
+            deployment,
+            actual_dims,
+            now,
+            save_interval,
+        )
+        embedded += batch_ok
+        failed_chunks.extend(batch_failed)
+        if batch_ok:
             logger.info(
                 "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
                 embedded,
@@ -409,26 +466,10 @@ def run_embed(
                 100.0 * embedded / total if total > 0 else 0,
                 batch_idx + 1,
             )
-        except sqlite3.Error as e:
-            logger.error("DB write for batch %d failed: %s", batch_idx, e)
-            failed_chunks.extend(batch)
-            continue
 
-        # No unconditional sleep — rate limiting is handled reactively via
-        # Retry-After headers in embed_batch() when Azure actually pushes back.
-
-    # Final save of usearch index
-    if vec_index is not None:
-        try:
-            vec_index.save()
-            logger.info("usearch: saved index with %d vectors", len(vec_index))
-        except Exception as e:
-            logger.error("usearch final save failed: %s", e)
+    _save_index_checkpoint(vec_index)
 
     duration_s = time.time() - start_time
-
-    # Cost estimate: text-embedding-3-large at $0.00013/1K tokens
-    # Assume avg 200 tokens/chunk
     estimated_tokens = embedded * 200
     estimated_cost = (estimated_tokens / 1000) * 0.00013
 
@@ -437,7 +478,6 @@ def run_embed(
         sample = [str(p)[:200] for p in failed_paths]
         logger.warning("%d chunks failed. Affected paths (sample): %s", len(failed_chunks), sample)
 
-    # Count how many chunks have chunk_date populated (for diagnostics / ERR-001 guard)
     chunk_date_count = sum(1 for c in all_chunks if c.get("chunk_date"))
     if chunk_date_count == 0 and total > 0:
         logger.warning(
