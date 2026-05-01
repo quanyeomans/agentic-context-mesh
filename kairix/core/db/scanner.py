@@ -71,11 +71,9 @@ class DocumentScanner:
     and only updates modified documents.
     """
 
-    def __init__(
-        self, db: sqlite3.Connection, document_root: Path | None = None, vault_root: Path | None = None
-    ) -> None:
+    def __init__(self, db: sqlite3.Connection, document_root: Path | None = None) -> None:
         self._db = db
-        self._document_root = document_root or vault_root or Path.home() / "kairix-vault"
+        self._document_root = document_root or Path.home() / "Documents"
 
     def scan(self, collections: list[CollectionConfig]) -> ScanReport:
         """
@@ -139,11 +137,11 @@ class DocumentScanner:
                 continue
 
             # Check excludes
-            rel_to_vault = str(file_path.relative_to(self._document_root))
-            if any(pattern in rel_to_vault for pattern in exclude_patterns):
+            rel_path = str(file_path.relative_to(self._document_root))
+            if any(pattern in rel_path for pattern in exclude_patterns):
                 continue
 
-            seen_paths.add(rel_to_vault)
+            seen_paths.add(rel_path)
 
             try:
                 text = file_path.read_text(encoding="utf-8")
@@ -155,7 +153,7 @@ class DocumentScanner:
             content_hash = _hash_content(text)
             title = extract_title(text, file_path)
 
-            old_hash = existing.get(rel_to_vault)
+            old_hash = existing.get(rel_path)
 
             if old_hash == content_hash:
                 report.unchanged += 1
@@ -167,7 +165,7 @@ class DocumentScanner:
             if content_hash in all_indexed_hashes and old_hash is None:
                 logger.debug(
                     "db.scanner: skipping duplicate content at %s (hash %s already indexed)",
-                    rel_to_vault,
+                    rel_path,
                     content_hash[:12],
                 )
                 continue
@@ -183,7 +181,7 @@ class DocumentScanner:
                     modified_at = excluded.modified_at,
                     active = 1
                 """,
-                (config.name, rel_to_vault, title, content_hash, now, now),
+                (config.name, rel_path, title, content_hash, now, now),
             )
 
             # Upsert content
@@ -210,4 +208,3 @@ class DocumentScanner:
 
 
 # Backwards-compat alias
-VaultScanner = DocumentScanner

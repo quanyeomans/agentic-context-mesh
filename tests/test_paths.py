@@ -63,7 +63,7 @@ class TestKairixPaths:
         monkeypatch.delenv("KAIRIX_DOCUMENT_ROOT", raising=False)
         monkeypatch.delenv("KAIRIX_DB_PATH", raising=False)
         paths = KairixPaths.resolve()
-        assert str(paths.document_root) == "/data/vault"
+        assert str(paths.document_root) == "/data/documents"
 
     def test_clear_cache_allows_re_resolution(self, monkeypatch) -> None:
         monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", "/first")

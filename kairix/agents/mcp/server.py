@@ -2,7 +2,7 @@
 kairix.agents.mcp.server — MCP server exposing kairix tools to MCP-compatible agents.
 
 Provides six tools:
-  search       Hybrid BM25 + vector search over the vault
+  search       Search your knowledge store — finds the best answers to any question
   entity       Entity lookup from Neo4j
   prep         Context preparation: tiered L0/L1 summary generation
   timeline     Temporal query rewriting + date-aware retrieval
@@ -420,7 +420,7 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
             return {
                 "topic": topic,
                 "content": "",
-                "error": "Usage guide not found. Run: kairix onboard guide --vault-root <path>",
+                "error": "Usage guide not found. Run: kairix onboard guide --document-root <path>",
             }
 
         full_text = guide_path.read_text(encoding="utf-8")
@@ -539,7 +539,7 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
         budget: int = 3000,
     ) -> dict[str, Any]:
-        """Hybrid BM25 + vector search over the vault."""
+        """Search your knowledge store — finds the best answers to any question."""
         return tool_search(query=query, agent=agent, scope=scope, budget=budget)
 
     @server.tool()

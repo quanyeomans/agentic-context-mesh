@@ -84,7 +84,7 @@ def canonical_path(raw: str) -> str:
     """
     for prefix in ("obsidian-vault/",):
         if raw.startswith(prefix):
-            return raw[len(prefix):]
+            return raw[len(prefix) :]
     return raw
 
 

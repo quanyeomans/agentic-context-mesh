@@ -10,18 +10,18 @@
 
 # ── Paths ───────────────────────────────────────────────────────────────────
 # Where your documents and data live. Defaults work for most setups.
-# Environment variables (KAIRIX_VAULT_ROOT, KAIRIX_DB_PATH, etc.) take
+# Environment variables (KAIRIX_DOCUMENT_ROOT, KAIRIX_DB_PATH, etc.) take
 # precedence over these values.
 #
 # paths:
-#   vault_root: ~/Documents/my-vault     # your documents folder
+#   document_root: ~/Documents/my-notes  # your documents folder
 #   db_path: ~/.cache/kairix/index.sqlite # search index
 #   log_dir: ~/.cache/kairix/logs         # search and embed logs
 #   workspace_root: ~/.kairix/workspaces  # agent memory logs
 
 # ── Collections ─────────────────────────────────────────────────────────────
 # Organise your documents into named collections for search scoping.
-# Each collection maps a name to a folder inside your vault.
+# Each collection maps a name to a folder inside your document store.
 # If not configured, all documents in your vault are searched as one collection.
 #
 # collections:

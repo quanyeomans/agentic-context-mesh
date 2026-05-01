@@ -10,7 +10,7 @@ Usage:
   kairix onboard check
   kairix onboard check --json
   kairix onboard check --env-file /opt/kairix/service.env
-  kairix onboard guide --vault-root /data/obsidian-vault
+  kairix onboard guide --document-root /data/documents
   kairix onboard verify --agent builder
 """
 
@@ -165,18 +165,13 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 def cmd_guide(args: argparse.Namespace) -> int:
     """Install the agent usage guide into the document store's shared knowledge base."""
-    doc_root = (
-        args.vault_root
-        or os.environ.get("KAIRIX_DOCUMENT_ROOT")
-        or os.environ.get("KAIRIX_VAULT_ROOT")
-        or os.environ.get("VAULT_ROOT", "")
-    )
+    doc_root = args.document_root or os.environ.get("KAIRIX_DOCUMENT_ROOT", "")
     if not doc_root:
-        print("Error: --vault-root is required (or set KAIRIX_DOCUMENT_ROOT)", file=sys.stderr)
+        print("Error: --document-root is required (or set KAIRIX_DOCUMENT_ROOT)", file=sys.stderr)
         return 1
 
-    vault_path = Path(doc_root)
-    if not vault_path.exists():
+    doc_path = Path(doc_root)
+    if not doc_path.exists():
         print(f"Error: document root does not exist: {doc_root}", file=sys.stderr)
         return 1
 
@@ -201,16 +196,16 @@ def cmd_guide(args: argparse.Namespace) -> int:
     else:
         # Try to find the shared knowledge directory
         candidates = [
-            vault_path / "04-Agent-Knowledge" / "shared" / "kairix-usage.md",
-            vault_path / "shared" / "kairix-usage.md",
-            vault_path / "agent-knowledge" / "shared" / "kairix-usage.md",
+            doc_path / "04-Agent-Knowledge" / "shared" / "kairix-usage.md",
+            doc_path / "shared" / "kairix-usage.md",
+            doc_path / "agent-knowledge" / "shared" / "kairix-usage.md",
         ]
         dest_or_none: Path | None = None
         for c in candidates:
             if c.parent.exists():
                 dest_or_none = c
                 break
-        dest = dest_or_none if dest_or_none is not None else vault_path / "kairix-usage.md"
+        dest = dest_or_none if dest_or_none is not None else doc_path / "kairix-usage.md"
 
     if args.dry_run:
         print("Would install agent usage guide:")
@@ -279,7 +274,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # guide
     p_guide = sub.add_parser("guide", help="Install the agent usage guide into the document store")
-    p_guide.add_argument("--vault-root", help="Path to document root (default: KAIRIX_DOCUMENT_ROOT)")
+    p_guide.add_argument("--document-root", help="Path to document root (default: KAIRIX_DOCUMENT_ROOT)")
     p_guide.add_argument("--output", help="Override destination file path")
     p_guide.add_argument("--dry-run", action="store_true", help="Show what would be installed without writing")
 

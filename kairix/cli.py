@@ -6,8 +6,8 @@ Subcommands:
   search      Hybrid search: BM25 + vector via RRF
   entity      Entity management: suggest (NER), validate (Wikidata)
   curator     Curator agent: entity health monitoring and enrichment (CA-1)
-  contradict  Contradiction detection: check new content against vault knowledge
-  store       Document store operations: crawl entities into Neo4j, health check (alias: vault)
+  contradict  Contradiction detection: check new content against existing knowledge
+  store       Document store operations: crawl entities into Neo4j, health check
   mcp         MCP server: expose search/entity/prep/timeline as MCP tools
   onboard     Deployment diagnostics and agent onboarding (check, guide, verify)
   timeline    Temporal query rewriting + date-aware retrieval
@@ -15,7 +15,7 @@ Subcommands:
   classify    Auto-classify memory writes
   brief       Session briefing synthesis
   benchmark   Run retrieval quality benchmark
-  wikilinks   Inject [[wikilinks]] on first mention in agent-written vault files
+  wikilinks   Inject [[wikilinks]] on first mention in agent-written document store files
   reference-library  Reference library: install entities, check status, run extraction
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.

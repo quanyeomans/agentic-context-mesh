@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from kairix.core.db.scanner import CollectionConfig, ScanReport, VaultScanner, _hash_content
+from kairix.core.db.scanner import CollectionConfig, DocumentScanner, ScanReport, _hash_content
 from kairix.knowledge.reflib.frontmatter import extract_title as _extract_title
 
 
@@ -67,7 +67,7 @@ def test_scan_discovers_new_files(tmp_path: __import__("pathlib").Path) -> None:
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
     """)
 
-    scanner = VaultScanner(db, vault)
+    scanner = DocumentScanner(db, vault)
     report = scanner.scan([CollectionConfig(name="vault-areas", path="02-Areas")])
 
     assert report.new == 2
@@ -99,7 +99,7 @@ def test_scan_detects_unchanged_files(tmp_path: __import__("pathlib").Path) -> N
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
     """)
 
-    scanner = VaultScanner(db, vault)
+    scanner = DocumentScanner(db, vault)
     r1 = scanner.scan([CollectionConfig(name="test", path="02-Areas")])
     assert r1.new == 1
 
@@ -128,7 +128,7 @@ def test_scan_detects_updated_files(tmp_path: __import__("pathlib").Path) -> Non
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
     """)
 
-    scanner = VaultScanner(db, vault)
+    scanner = DocumentScanner(db, vault)
     scanner.scan([CollectionConfig(name="test", path="02-Areas")])
 
     doc.write_text("# Version 2\n\nUpdated.")
@@ -157,7 +157,7 @@ def test_scan_marks_removed_files_inactive(tmp_path: __import__("pathlib").Path)
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
     """)
 
-    scanner = VaultScanner(db, vault)
+    scanner = DocumentScanner(db, vault)
     scanner.scan([CollectionConfig(name="test", path="02-Areas")])
     assert db.execute("SELECT active FROM documents").fetchone()[0] == 1
 
@@ -187,7 +187,7 @@ def test_scan_excludes_patterns(tmp_path: __import__("pathlib").Path) -> None:
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
     """)
 
-    scanner = VaultScanner(db, vault)
+    scanner = DocumentScanner(db, vault)
     report = scanner.scan(
         [
             CollectionConfig(name="test", path="02-Areas", exclude=["templates"]),
@@ -237,11 +237,13 @@ def test_scan_skips_duplicate_content_across_collections(tmp_path: __import__("p
     db = sqlite3.connect(":memory:")
     db.executescript(_SCANNER_SCHEMA)
 
-    scanner = VaultScanner(db, vault)
-    report = scanner.scan([
-        CollectionConfig(name="first", path="col-a"),
-        CollectionConfig(name="second", path="col-b"),
-    ])
+    scanner = DocumentScanner(db, vault)
+    report = scanner.scan(
+        [
+            CollectionConfig(name="first", path="col-a"),
+            CollectionConfig(name="second", path="col-b"),
+        ]
+    )
 
     # First collection indexes the doc; second collection skips the duplicate
     assert report.new == 1
@@ -261,7 +263,7 @@ def test_scan_allows_update_to_existing_path(tmp_path: __import__("pathlib").Pat
     db = sqlite3.connect(":memory:")
     db.executescript(_SCANNER_SCHEMA)
 
-    scanner = VaultScanner(db, vault)
+    scanner = DocumentScanner(db, vault)
     r1 = scanner.scan([CollectionConfig(name="test", path="docs")])
     assert r1.new == 1
 

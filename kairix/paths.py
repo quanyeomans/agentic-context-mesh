@@ -36,12 +36,12 @@ def _is_service_install() -> bool:
 def _default_document_root() -> Path:
     """Platform-appropriate default document store location.
 
-    Docker: /data/vault (bind mount from host)
+    Docker: /data/documents (bind mount from host)
     Server: /var/lib/kairix/documents (admin configures)
     User (all platforms): ~/Documents (most common document location)
     """
     if _is_docker():
-        return Path("/data/vault")
+        return Path("/data/documents")
     if _is_service_install():
         return Path("/var/lib/kairix/documents")
     return Path.home() / "Documents"

@@ -247,9 +247,7 @@ def _gold_path_in_index(db: sqlite3.Connection, gold_path: str) -> bool:
     """
     Check whether a gold path exists in the kairix index (case-insensitive substring match).
 
-    kairix stores paths as full filesystem paths like:
-      /data/obsidian-vault/01-projects/...
-    or relative paths like:
+    kairix stores paths as document-root-relative paths like:
       01-projects/...
 
     We match using a LIKE query on the path column.
