@@ -122,6 +122,14 @@ class DocumentScanner:
         ):
             existing[row[0]] = row[1]
 
+        # Build set of content hashes already indexed (any collection) for dedup.
+        # Prevents the same content from being indexed twice under different paths
+        # or in different collections — saves embedding cost and avoids duplicate
+        # search results.
+        all_indexed_hashes: set[str] = set()
+        for row in self._db.execute("SELECT DISTINCT hash FROM documents WHERE active = 1"):
+            all_indexed_hashes.add(row[0])
+
         seen_paths: set[str] = set()
         now = datetime.now(tz=timezone.utc).isoformat()
 
@@ -151,6 +159,17 @@ class DocumentScanner:
 
             if old_hash == content_hash:
                 report.unchanged += 1
+                continue
+
+            # Dedup: skip if this exact content is already indexed under a
+            # different path. Prevents double-embedding when the same file
+            # exists at multiple paths (e.g. symlinks, vault reorganisation).
+            if content_hash in all_indexed_hashes and old_hash is None:
+                logger.debug(
+                    "db.scanner: skipping duplicate content at %s (hash %s already indexed)",
+                    rel_to_vault,
+                    content_hash[:12],
+                )
                 continue
 
             # Upsert document

@@ -22,6 +22,7 @@ from kairix.core.search.rrf import (
     RRF_K,
     FusedResult,
     bm25_primary_fuse,
+    canonical_path,
     entity_boost_neo4j,
     procedural_boost,
     rrf,
@@ -460,3 +461,54 @@ def test_bm25_primary_scores_descending() -> None:
     )
     scores = [r.rrf_score for r in results]
     assert scores == sorted(scores, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# canonical_path — path normalisation for dedup
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_canonical_path_strips_obsidian_vault_prefix() -> None:
+    """obsidian-vault/ prefix is stripped so docs deduplicate across collections."""
+    assert canonical_path("obsidian-vault/04-Agent-Knowledge/foo.md") == "04-Agent-Knowledge/foo.md"
+
+
+@pytest.mark.unit
+def test_canonical_path_passes_bare_path_unchanged() -> None:
+    """Bare paths without a known prefix pass through unchanged."""
+    assert canonical_path("04-Agent-Knowledge/foo.md") == "04-Agent-Knowledge/foo.md"
+
+
+@pytest.mark.unit
+def test_canonical_path_no_longer_handles_qmd_scheme() -> None:
+    """qmd:// is deprecated — inputs with that prefix pass through unchanged."""
+    raw = "qmd://collection/some/doc.md"
+    assert canonical_path(raw) == raw
+
+
+# ---------------------------------------------------------------------------
+# Dedup across collection prefixes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_rrf_deduplicates_same_doc_different_prefix() -> None:
+    """Same doc at bare path and obsidian-vault/ prefix fuses into one result."""
+    results = rrf(
+        [_bm25("04-Agent-Knowledge/foo.md"), _bm25("obsidian-vault/04-Agent-Knowledge/foo.md")],
+        [],
+    )
+    assert len(results) == 1
+    assert results[0].path == "04-Agent-Knowledge/foo.md"
+
+
+@pytest.mark.unit
+def test_bm25_primary_deduplicates_same_doc_different_prefix() -> None:
+    """Same doc at bare path and obsidian-vault/ prefix appears once in bm25_primary."""
+    results = bm25_primary_fuse(
+        [_bm25("04-Agent-Knowledge/foo.md"), _bm25("obsidian-vault/04-Agent-Knowledge/foo.md")],
+        [_vec("obsidian-vault/04-Agent-Knowledge/foo.md")],
+    )
+    assert len(results) == 1
+    assert results[0].path == "04-Agent-Knowledge/foo.md"

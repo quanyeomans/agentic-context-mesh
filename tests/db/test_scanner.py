@@ -203,3 +203,74 @@ def test_scan_report_str() -> None:
     assert "3 new" in str(r)
     assert "1 updated" in str(r)
     assert "2 removed" in str(r)
+
+
+# ---------------------------------------------------------------------------
+# Content-hash dedup across collections
+# ---------------------------------------------------------------------------
+
+_SCANNER_SCHEMA = """
+    CREATE TABLE documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        collection TEXT NOT NULL, path TEXT NOT NULL, title TEXT,
+        hash TEXT NOT NULL, created_at TEXT, modified_at TEXT,
+        active INTEGER DEFAULT 1, UNIQUE(collection, path)
+    );
+    CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
+"""
+
+
+@pytest.mark.unit
+def test_scan_skips_duplicate_content_across_collections(tmp_path: __import__("pathlib").Path) -> None:
+    """Same content at different paths is only indexed once."""
+    vault = tmp_path / "vault"
+    # Create identical content in two collection paths
+    area_a = vault / "col-a"
+    area_b = vault / "col-b"
+    area_a.mkdir(parents=True)
+    area_b.mkdir(parents=True)
+
+    content = "# Shared Document\n\nThis content is identical in both collections."
+    (area_a / "shared.md").write_text(content)
+    (area_b / "shared.md").write_text(content)
+
+    db = sqlite3.connect(":memory:")
+    db.executescript(_SCANNER_SCHEMA)
+
+    scanner = VaultScanner(db, vault)
+    report = scanner.scan([
+        CollectionConfig(name="first", path="col-a"),
+        CollectionConfig(name="second", path="col-b"),
+    ])
+
+    # First collection indexes the doc; second collection skips the duplicate
+    assert report.new == 1
+    docs = db.execute("SELECT collection, path FROM documents WHERE active = 1").fetchall()
+    assert len(docs) == 1
+    assert docs[0][0] == "first"
+
+
+@pytest.mark.unit
+def test_scan_allows_update_to_existing_path(tmp_path: __import__("pathlib").Path) -> None:
+    """Changed content at the same path is updated, not blocked by dedup."""
+    vault = tmp_path / "vault"
+    area = vault / "docs"
+    area.mkdir(parents=True)
+    (area / "doc.md").write_text("# Version 1\n\nOriginal content.")
+
+    db = sqlite3.connect(":memory:")
+    db.executescript(_SCANNER_SCHEMA)
+
+    scanner = VaultScanner(db, vault)
+    r1 = scanner.scan([CollectionConfig(name="test", path="docs")])
+    assert r1.new == 1
+
+    # Modify the file
+    (area / "doc.md").write_text("# Version 2\n\nUpdated content.")
+    r2 = scanner.scan([CollectionConfig(name="test", path="docs")])
+    assert r2.updated == 1
+    assert r2.new == 0
+
+    # Content should be the new version
+    row = db.execute("SELECT doc FROM content ORDER BY created_at DESC LIMIT 1").fetchone()
+    assert "Version 2" in row[0]

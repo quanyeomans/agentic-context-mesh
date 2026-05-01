@@ -77,18 +77,14 @@ RRF_K: int = 60
 
 
 def canonical_path(raw: str) -> str:
-    """Normalise path to bare form for deduplication.
+    """Normalise path for deduplication.
 
-    Both BM25 and vector search return vault-relative paths directly.
-    This function strips any legacy scheme URIs that might remain in
-    cached data or tests.
+    Strips known collection-root prefixes so the same document indexed
+    under different paths deduplicates during fusion.
     """
-    if raw.startswith("qmd://"):
-        without_scheme = raw[len("qmd://") :]
-        slash = without_scheme.find("/")
-        if slash != -1:
-            return without_scheme[slash + 1 :]
-        return without_scheme
+    for prefix in ("obsidian-vault/",):
+        if raw.startswith(prefix):
+            return raw[len(prefix):]
     return raw
 
 
