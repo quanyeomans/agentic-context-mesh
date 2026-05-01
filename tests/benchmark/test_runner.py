@@ -59,35 +59,35 @@ _reciprocal_rank_by_title = _reciprocal_rank
 @pytest.mark.unit
 def test_exact_match_returns_1_for_direct_match() -> None:
     paths = ["04-Agent-Knowledge/builder/patterns.md", "some/other/doc.md"]
-    assert _exact_match(paths, "04-Agent-Knowledge/builder/patterns.md") == 1.0
+    assert _exact_match(paths, "04-Agent-Knowledge/builder/patterns.md") == pytest.approx(1.0)
 
 
 @pytest.mark.unit
 def test_exact_match_returns_1_for_substring_match() -> None:
     paths = ["04-Agent-Knowledge/builder/patterns.md"]
-    assert _exact_match(paths, "builder/patterns") == 1.0
+    assert _exact_match(paths, "builder/patterns") == pytest.approx(1.0)
 
 
 @pytest.mark.unit
 def test_exact_match_returns_0_when_no_match() -> None:
     paths = ["some/unrelated/doc.md"]
-    assert _exact_match(paths, "builder/patterns.md") == 0.0
+    assert _exact_match(paths, "builder/patterns.md") == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_exact_match_returns_0_for_empty_gold() -> None:
-    assert _exact_match(["any/path.md"], "") == 0.0
+    assert _exact_match(["any/path.md"], "") == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_exact_match_returns_0_for_empty_paths() -> None:
-    assert _exact_match([], "builder/patterns.md") == 0.0
+    assert _exact_match([], "builder/patterns.md") == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_exact_match_is_case_insensitive() -> None:
     paths = ["04-Agent-Knowledge/Builder/Patterns.md"]
-    assert _exact_match(paths, "builder/patterns.md") == 1.0
+    assert _exact_match(paths, "builder/patterns.md") == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -98,25 +98,25 @@ def test_exact_match_is_case_insensitive() -> None:
 @pytest.mark.unit
 def test_fuzzy_match_returns_1_for_suffix_match() -> None:
     paths = ["04-Agent-Knowledge/entities/jordan-blake.md"]
-    assert _fuzzy_match(paths, "entities/jordan-blake.md") == 1.0
+    assert _fuzzy_match(paths, "entities/jordan-blake.md") == pytest.approx(1.0)
 
 
 @pytest.mark.unit
 def test_fuzzy_match_returns_0_for_no_match() -> None:
     paths = ["totally/unrelated/file.md"]
-    assert _fuzzy_match(paths, "entities/jordan-blake.md") == 0.0
+    assert _fuzzy_match(paths, "entities/jordan-blake.md") == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_fuzzy_match_returns_0_for_empty_gold() -> None:
-    assert _fuzzy_match(["any/path.md"], "") == 0.0
+    assert _fuzzy_match(["any/path.md"], "") == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_fuzzy_match_respects_topk_limit() -> None:
     # gold is in position 11 (0-indexed), beyond top-10
     paths = [f"unrelated/{i}.md" for i in range(10)] + ["04-Agent-Knowledge/entities/target.md"]
-    assert _fuzzy_match(paths, "entities/target.md") == 0.0
+    assert _fuzzy_match(paths, "entities/target.md") == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ def test_classification_score_returns_1_for_correct_type() -> None:
     ):
         score = _classification_score("We decided to use PostgreSQL.", "decision")
 
-    assert score == 1.0
+    assert score == pytest.approx(1.0)
 
 
 @pytest.mark.unit
@@ -151,7 +151,7 @@ def test_classification_score_returns_0_for_wrong_type() -> None:
     ):
         score = _classification_score("We decided to use PostgreSQL.", "decision")
 
-    assert score == 0.0
+    assert score == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -160,7 +160,7 @@ def test_classification_score_returns_0_on_exception() -> None:
     with patch("kairix.core.classify.rules.classify_content", side_effect=RuntimeError("oops")):
         score = _classification_score("anything", "decision")
 
-    assert score == 0.0
+    assert score == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -178,7 +178,7 @@ def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyP
     ):
         score = _classification_score("We decided to use PostgreSQL.", "decision")
 
-    assert score == 1.0
+    assert score == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def test_llm_judge_clamps_to_range() -> None:
     with patch("kairix._azure.chat_completion", return_value="1.5"):
         score = _llm_judge("q", ["p.md"], ["s"])
 
-    assert score == 1.0
+    assert score == pytest.approx(1.0)
 
 
 @pytest.mark.unit
@@ -214,14 +214,14 @@ def test_llm_judge_returns_0_on_api_error() -> None:
     with patch("kairix._azure.chat_completion", side_effect=OSError("timeout")):
         score = _llm_judge("q", ["p.md"], ["s"])
 
-    assert score == 0.0
+    assert score == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_llm_judge_returns_0_for_empty_paths() -> None:
     """Returns 0.0 immediately when no paths are provided."""
     score = _llm_judge("q", [], [])
-    assert score == 0.0
+    assert score == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -230,7 +230,7 @@ def test_llm_judge_returns_0_on_bad_json() -> None:
     with patch("kairix._azure.chat_completion", return_value="not a number"):
         score = _llm_judge("q", ["p.md"], ["s"])
 
-    assert score == 0.0
+    assert score == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +323,7 @@ def test_dcg_perfect_relevance() -> None:
 
 @pytest.mark.unit
 def test_dcg_empty_relevances() -> None:
-    assert _dcg([], k=10) == 0.0
+    assert _dcg([], k=10) == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -358,7 +358,7 @@ def test_ndcg_score_no_relevant_retrieved() -> None:
 
 @pytest.mark.unit
 def test_ndcg_score_empty_gold() -> None:
-    assert _ndcg_score(["a.md", "b.md"], [], k=10) == 0.0
+    assert _ndcg_score(["a.md", "b.md"], [], k=10) == pytest.approx(0.0)
 
 
 @pytest.mark.unit

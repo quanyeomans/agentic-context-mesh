@@ -48,7 +48,7 @@ class TestPerformanceReporter:
     @pytest.mark.unit
     def test_load_results(self, results_file):
         reporter = PerformanceReporter(results_file)
-        assert reporter._results["overall_ndcg"] == 0.85
+        assert reporter._results["overall_ndcg"] == pytest.approx(0.85)
 
     @pytest.mark.unit
     def test_load_missing_file(self, tmp_path):

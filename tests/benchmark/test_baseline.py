@@ -109,7 +109,7 @@ class TestLoadResult:
         p = tmp_path / "result.json"
         p.write_text(json.dumps(data))
         loaded = load_result(p)
-        assert loaded["summary"]["weighted_total"] == 0.85
+        assert loaded["summary"]["weighted_total"] == pytest.approx(0.85)
 
     @pytest.mark.unit
     def test_load_result_file_not_found(self, tmp_path):

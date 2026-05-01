@@ -76,7 +76,7 @@ class TestDualRunnerWithComparison:
         assert "weighted_total" in result.deltas
 
         # Same system, same suite => deltas should be 0
-        assert result.deltas["weighted_total"] == 0.0
+        assert result.deltas["weighted_total"] == pytest.approx(0.0)
         assert result.regression_detected is False
 
     def test_deltas_contain_all_categories(self) -> None:

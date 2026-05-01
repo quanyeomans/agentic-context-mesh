@@ -30,7 +30,7 @@ class TestClassifyWithLLM:
             result = classify_with_llm("some ambiguous content", agent="builder")
         assert isinstance(result, ClassificationResult)
         assert result.type == "semantic-decision"
-        assert result.confidence == 0.85
+        assert result.confidence == pytest.approx(0.85)
         assert not result.needs_confirmation
 
     @pytest.mark.unit
@@ -45,14 +45,14 @@ class TestClassifyWithLLM:
         with patch("kairix._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("ambiguous content", agent="builder")
         assert result.needs_confirmation is True
-        assert result.confidence == 0.55
+        assert result.confidence == pytest.approx(0.55)
 
     @pytest.mark.unit
     def test_api_failure_returns_unknown(self):
         with patch("kairix._azure.chat_completion", return_value=""):
             result = classify_with_llm("some content", agent="builder")
         assert result.type == "unknown"
-        assert result.confidence == 0.0
+        assert result.confidence == pytest.approx(0.0)
         assert result.needs_confirmation is True
 
     @pytest.mark.unit
@@ -75,7 +75,7 @@ class TestClassifyWithLLM:
         with patch("kairix._azure.chat_completion", return_value=mock_response):
             result = classify_with_llm("## 09:15 did stuff", agent="builder")
         assert result.type == "episodic"
-        assert result.confidence == 0.9
+        assert result.confidence == pytest.approx(0.9)
 
     @pytest.mark.unit
     def test_path_resolved_for_valid_type(self):

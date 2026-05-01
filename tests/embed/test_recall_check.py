@@ -197,7 +197,7 @@ def test_check_recall_skips_when_embed_returns_none() -> None:
     with patch("kairix.core.embed.recall_check._embed_query", return_value=None):
         result = check_recall(db=db)
 
-    assert result["score"] == 0.0
+    assert result["score"] == pytest.approx(0.0)
     assert result["passed"] == 0
     assert all(d.get("skipped") for d in result["detail"])
 
@@ -236,5 +236,5 @@ def test_check_recall_counts_hit_when_gold_in_results() -> None:
         result = check_recall(db=db)
 
     assert result["passed"] == 1
-    assert result["score"] == 1.0
+    assert result["score"] == pytest.approx(1.0)
     assert result["detail"][0]["hit"] is True

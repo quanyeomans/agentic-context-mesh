@@ -172,16 +172,16 @@ class TestComputeNdcg:
         gold = [{"path": "a.md", "relevance": 2}]
         paths = ["x.md", "y.md"]
         ndcg = compute_ndcg(paths, gold, k=10)
-        assert ndcg == 0.0
+        assert ndcg == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_empty_gold(self) -> None:
-        assert compute_ndcg(["a.md"], [], k=10) == 0.0
+        assert compute_ndcg(["a.md"], [], k=10) == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_empty_retrieved(self) -> None:
         gold = [{"path": "a.md", "relevance": 2}]
-        assert compute_ndcg([], gold, k=10) == 0.0
+        assert compute_ndcg([], gold, k=10) == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -224,7 +224,7 @@ class TestComputeMrr:
     @pytest.mark.unit
     def test_no_relevant(self) -> None:
         gold = [{"path": "a.md", "relevance": 1}]
-        assert compute_mrr(["x.md", "y.md"], gold) == 0.0
+        assert compute_mrr(["x.md", "y.md"], gold) == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +261,7 @@ def test_category_aliases_covers_suite_names() -> None:
 def test_sweep_result_defaults() -> None:
     cfg = HybridSweepConfig(name="test", mode="hybrid")
     r = HybridSweepResult(config=cfg)
-    assert r.weighted_total == 0.0
+    assert r.weighted_total == pytest.approx(0.0)
     assert r.n_vec_failed == 0
     assert r.category_scores == {}
 

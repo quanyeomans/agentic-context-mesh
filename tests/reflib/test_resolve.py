@@ -52,7 +52,7 @@ class TestLevenshtein:
         assert _levenshtein("", "abc") == 3
 
     def test_similarity_identical(self):
-        assert _similarity("hello", "hello") == 1.0
+        assert _similarity("hello", "hello") == pytest.approx(1.0)
 
     def test_similarity_close(self):
         # "hello" vs "helo" — distance 1, max_len 5 → similarity 0.8
@@ -139,7 +139,7 @@ class TestResolveEntities:
         ]
         resolved = resolve_entities(raw)
         google = [e for e in resolved if e.id == "google"]
-        assert google[0].confidence == 0.95
+        assert google[0].confidence == pytest.approx(0.95)
 
     def test_empty_names_skipped(self):
         """Entities with empty names are dropped."""

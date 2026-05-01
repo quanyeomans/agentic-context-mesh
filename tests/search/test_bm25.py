@@ -188,7 +188,7 @@ def test_bm25_result_typeddict_fields() -> None:
         collection="c",
     )
     assert r["file"] == "/f.md"
-    assert r["score"] == 1.0
+    assert r["score"] == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------

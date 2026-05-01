@@ -50,7 +50,7 @@ def test_tool_search_returns_expected_shape() -> None:
     assert result["intent"] == "semantic"
     assert len(result["results"]) == 1
     assert result["results"][0]["path"] == "notes/foo.md"
-    assert result["results"][0]["score"] == 0.9
+    assert result["results"][0]["score"] == pytest.approx(0.9)
     assert result["total_tokens"] == 10
     assert result["error"] == ""
 
@@ -455,7 +455,7 @@ def test_tool_contradict_with_results() -> None:
     assert result["has_contradictions"] is True
     assert len(result["contradictions"]) == 1
     assert result["contradictions"][0]["path"] == "notes/arch.md"
-    assert result["contradictions"][0]["score"] == 0.85
+    assert result["contradictions"][0]["score"] == pytest.approx(0.85)
     assert result["error"] == ""
 
 

@@ -129,7 +129,7 @@ def ndcg_score(retrieved_paths: list[str], gold_paths: list[str], k: int = 10) -
     relevances = [1.0 if p.lower().replace("\\", "/") in gold_set else 0.0 for p in retrieved_paths[:k]]
     ideal_rel = [1.0] * min(len(gold_paths), k)
     idcg = _ideal_dcg(ideal_rel, k)
-    if idcg == 0.0:
+    if idcg < 1e-9:
         return 0.0
     return _dcg(relevances) / idcg
 
@@ -167,7 +167,7 @@ def ndcg_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
         return 0.0
     retrieved = list(dict.fromkeys(retrieved))  # dedup, preserve order
     idcg = ideal_dcg_graded(gold, k)
-    if idcg == 0.0:
+    if idcg < 1e-9:
         return 0.0
     rels = [float(relevance_for_path(p, gold)) for p in retrieved[:k]]
     return dcg(rels, k) / idcg

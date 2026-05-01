@@ -26,7 +26,7 @@ class TestOntologyTemplates:
             data = yaml.safe_load(f)
         assert data["name"] == "technical"
         assert data["retrieval"]["boosts"]["entity"]["enabled"] is False
-        assert data["retrieval"]["boosts"]["procedural"]["factor"] == 1.5
+        assert data["retrieval"]["boosts"]["procedural"]["factor"] == pytest.approx(1.5)
 
     def test_general_template_loads(self) -> None:
         path = TEMPLATE_DIR / "general.yaml"
@@ -34,7 +34,7 @@ class TestOntologyTemplates:
         with open(path) as f:
             data = yaml.safe_load(f)
         assert data["name"] == "general"
-        assert data["retrieval"]["boosts"]["entity"]["factor"] == 0.15
+        assert data["retrieval"]["boosts"]["entity"]["factor"] == pytest.approx(0.15)
 
     def test_all_templates_have_fusion_strategy(self) -> None:
         for template_file in TEMPLATE_DIR.glob("*.yaml"):

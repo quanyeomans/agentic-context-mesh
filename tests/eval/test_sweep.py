@@ -31,13 +31,13 @@ class TestComputeNDCG:
 
     @pytest.mark.unit
     def test_empty_gold(self):
-        assert _compute_ndcg(["/a.md"], [], k=10) == 0.0
+        assert _compute_ndcg(["/a.md"], [], k=10) == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_no_relevant_retrieved(self):
         gold = [{"title": "target", "relevance": 2}]
         retrieved = ["/path/wrong.md", "/path/also-wrong.md"]
-        assert _compute_ndcg(retrieved, gold, k=10) == 0.0
+        assert _compute_ndcg(retrieved, gold, k=10) == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_known_ndcg_value(self):
@@ -59,12 +59,12 @@ class TestComputeNDCG:
         """Only top-k results count."""
         gold = [{"title": "late", "relevance": 2}]
         retrieved = ["/a.md", "/b.md", "/late.md"]
-        assert _compute_ndcg(retrieved, gold, k=2) == 0.0
+        assert _compute_ndcg(retrieved, gold, k=2) == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_empty_retrieved(self):
         gold = [{"title": "a", "relevance": 1}]
-        assert _compute_ndcg([], gold, k=10) == 0.0
+        assert _compute_ndcg([], gold, k=10) == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -126,17 +126,17 @@ class TestComputeMRR:
     @pytest.mark.unit
     def test_no_relevant(self):
         gold = [{"title": "target", "relevance": 1}]
-        assert _compute_mrr(["/a.md", "/b.md"], gold, k=10) == 0.0
+        assert _compute_mrr(["/a.md", "/b.md"], gold, k=10) == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_beyond_k(self):
         gold = [{"title": "target", "relevance": 1}]
         retrieved = ["/a.md", "/b.md", "/target.md"]
-        assert _compute_mrr(retrieved, gold, k=2) == 0.0
+        assert _compute_mrr(retrieved, gold, k=2) == pytest.approx(0.0)
 
     @pytest.mark.unit
     def test_empty_gold(self):
-        assert _compute_mrr(["/a.md"], [], k=10) == 0.0
+        assert _compute_mrr(["/a.md"], [], k=10) == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------

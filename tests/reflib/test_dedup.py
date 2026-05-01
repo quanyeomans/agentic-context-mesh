@@ -24,7 +24,7 @@ class TestHashContent:
 @pytest.mark.unit
 class TestJaccardSimilarity:
     def test_identical_texts(self):
-        assert jaccard_similarity("the quick brown fox", "the quick brown fox") == 1.0
+        assert jaccard_similarity("the quick brown fox", "the quick brown fox") == pytest.approx(1.0)
 
     def test_similar_texts(self):
         sim = jaccard_similarity("the quick brown fox", "the quick brown dog")
@@ -36,7 +36,7 @@ class TestJaccardSimilarity:
 
     def test_empty_text(self):
         # Empty strings produce empty shingle sets
-        assert jaccard_similarity("", "abc def ghi") == 0.0
+        assert jaccard_similarity("", "abc def ghi") == pytest.approx(0.0)
 
 
 @pytest.mark.unit

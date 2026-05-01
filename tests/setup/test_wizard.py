@@ -45,7 +45,7 @@ def test_count_documents_empty_dir(tmp_path: Path) -> None:
 
     count, size = _count_documents(str(tmp_path))
     assert count == 0
-    assert size == 0.0
+    assert size == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -54,7 +54,7 @@ def test_count_documents_nonexistent_path() -> None:
 
     count, size = _count_documents("/nonexistent/path")
     assert count == 0
-    assert size == 0.0
+    assert size == pytest.approx(0.0)
 
 
 @pytest.mark.unit

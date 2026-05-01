@@ -28,14 +28,14 @@ class TestMergeRetrievalConfig:
     def test_nested_entity_override(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(base, {"boosts": {"entity": {"factor": 0.50}}})
-        assert merged.entity.factor == 0.50
+        assert merged.entity.factor == pytest.approx(0.50)
         assert merged.entity.cap == base.entity.cap  # unchanged
         assert merged.entity.enabled == base.entity.enabled  # unchanged
 
     def test_nested_procedural_override(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(base, {"boosts": {"procedural": {"factor": 2.0}}})
-        assert merged.procedural.factor == 2.0
+        assert merged.procedural.factor == pytest.approx(2.0)
         assert merged.procedural.enabled == base.procedural.enabled
 
     def test_empty_override_returns_base(self) -> None:

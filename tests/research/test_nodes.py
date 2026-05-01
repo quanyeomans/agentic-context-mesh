@@ -104,18 +104,18 @@ class TestEvaluateSufficiency:
         mock_backend.chat.return_value = llm_response
         with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "content"}]))
-        assert result["confidence"] == 0.85
+        assert result["confidence"] == pytest.approx(0.85)
 
     def test_returns_zero_on_empty_chunks(self) -> None:
         result = evaluate_sufficiency(_state(retrieved_chunks=[]))
-        assert result["confidence"] == 0.0
+        assert result["confidence"] == pytest.approx(0.0)
 
     def test_returns_zero_on_llm_failure(self) -> None:
         mock_backend = MagicMock()
         mock_backend.chat.side_effect = RuntimeError("llm down")
         with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = evaluate_sufficiency(_state(retrieved_chunks=[{"path": "a.md", "snippet": "x"}]))
-        assert result["confidence"] == 0.0
+        assert result["confidence"] == pytest.approx(0.0)
 
     def test_returns_gaps_from_llm(self) -> None:
         """S18-5: evaluate_sufficiency parses and returns gaps from LLM response."""
@@ -173,7 +173,7 @@ class TestSynthesise:
         with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = synthesise(_state(confidence=0.85, retrieved_chunks=[{"path": "a.md", "snippet": "x"}]))
         assert "confidence" in result
-        assert result["confidence"] == 0.85
+        assert result["confidence"] == pytest.approx(0.85)
 
     def test_synthesise_carries_confidence_on_failure(self) -> None:
         """S18-5: even on LLM failure, confidence from state is preserved."""
@@ -181,7 +181,7 @@ class TestSynthesise:
         mock_backend.chat.side_effect = RuntimeError("down")
         with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
             result = synthesise(_state(confidence=0.42, retrieved_chunks=[{"path": "a.md"}]))
-        assert result["confidence"] == 0.42
+        assert result["confidence"] == pytest.approx(0.42)
 
 
 @pytest.mark.unit

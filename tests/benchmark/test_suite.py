@@ -367,7 +367,7 @@ def test_exact_match_returns_1_when_gold_in_top5() -> None:
         "vault/04-knowledge/rules.md",
     ]
     gold = "01-Projects/Arize/Research-Report.md"
-    assert _exact_match(paths, gold) == 1.0
+    assert _exact_match(paths, gold) == pytest.approx(1.0)
 
 
 @pytest.mark.unit
@@ -375,7 +375,7 @@ def test_exact_match_case_insensitive() -> None:
     """Match is case-insensitive."""
     paths = ["vault/PATH/TO/DOC.MD"]
     gold = "path/to/doc.md"
-    assert _exact_match(paths, gold) == 1.0
+    assert _exact_match(paths, gold) == pytest.approx(1.0)
 
 
 @pytest.mark.unit
@@ -386,7 +386,7 @@ def test_exact_match_returns_0_when_gold_not_in_paths() -> None:
         "vault/02-areas/foo/bar.md",
     ]
     gold = "01-projects/totally-different/report.md"
-    assert _exact_match(paths, gold) == 0.0
+    assert _exact_match(paths, gold) == pytest.approx(0.0)
 
 
 @pytest.mark.unit
@@ -401,19 +401,19 @@ def test_exact_match_only_checks_top5() -> None:
         "vault/unique-report-xyz-9999.md",  # position 6 — should NOT match
     ]
     gold = "unique-report-xyz-9999.md"
-    assert _exact_match(paths, gold) == 0.0
+    assert _exact_match(paths, gold) == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_exact_match_empty_paths_returns_0() -> None:
     """Empty paths list returns 0.0."""
-    assert _exact_match([], "some/path.md") == 0.0
+    assert _exact_match([], "some/path.md") == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_exact_match_empty_gold_returns_0() -> None:
     """Empty gold path returns 0.0."""
-    assert _exact_match(["some/path.md"], "") == 0.0
+    assert _exact_match(["some/path.md"], "") == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -481,8 +481,8 @@ def test_run_benchmark_mocked_retrieval_correct_scores() -> None:
     r01_case = next(c for c in result.cases if c["id"] == "R01")
     r02_case = next(c for c in result.cases if c["id"] == "R02")
 
-    assert r01_case["score"] == 1.0
-    assert r02_case["score"] == 0.0
+    assert r01_case["score"] == pytest.approx(1.0)
+    assert r02_case["score"] == pytest.approx(0.0)
 
     # Recall category score: (1.0 + 0.0) / 2 = 0.5
     assert result.summary["category_scores"]["recall"] == pytest.approx(0.5)
