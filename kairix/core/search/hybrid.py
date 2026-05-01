@@ -460,6 +460,213 @@ def _apply_entity_boost(
     return fused
 
 
+def _check_entity_prerequisites(
+    intent: QueryIntent,
+    neo4j_client: object,
+    query: str,
+) -> SearchResult | None:
+    """Return a SearchResult error if ENTITY intent lacks Neo4j, else None.
+
+    ENTITY intent requires Neo4j. Do not silently degrade to BM25+vector
+    for entity queries — the results would be misleading (no entity graph
+    expansion, no alias resolution, no mention-based boosting).
+    """
+    if intent != QueryIntent.ENTITY or neo4j_client.available:  # type: ignore[union-attr]
+        return None
+    err = (
+        "Entity queries require Neo4j but the graph is unavailable. "
+        "Check KAIRIX_NEO4J_URI, KAIRIX_NEO4J_USER, KAIRIX_NEO4J_PASSWORD "
+        "and run `kairix onboard check` for diagnostics. "
+        "Install Neo4j with `bash scripts/install-neo4j.sh` if not yet set up."
+    )
+    logger.error("hybrid: ENTITY query rejected — Neo4j unavailable (query=%r)", query[:60])
+    return SearchResult(query=query, intent=intent, error=err)
+
+
+def _dispatch_parallel_search(
+    active_query: str,
+    collections: list[str],
+    cfg: RetrievalConfig,
+    date_filter_paths: frozenset[str] | None,
+    intent: QueryIntent,
+    query: str,
+) -> tuple[list[BM25Result], list[VecResult], bool]:
+    """Dispatch BM25 and vector search in parallel via ThreadPoolExecutor.
+
+    Returns (bm25_results, vec_results, vec_failed).
+    """
+    bm25_results: list[BM25Result] = []
+    vec_results: list[VecResult] = []
+    vec_failed = False
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures: dict[str, Future] = {}
+
+        futures["bm25"] = executor.submit(
+            bm25_search, active_query, collections, cfg.bm25_limit, None, date_filter_paths
+        )
+        if not cfg.skip_vector:
+            futures["vec"] = executor.submit(
+                _run_vector_search, active_query, collections, date_filter_paths, cfg.vec_limit, intent.value
+            )
+
+        for name, future in futures.items():
+            try:
+                result = future.result(timeout=30)
+                if name == "bm25":
+                    bm25_results = result or []
+                elif name == "vec":
+                    vec_results = result or []
+            except Exception as e:
+                logger.warning("hybrid: %s search future failed — %s", name, e)
+                if name == "vec":
+                    vec_failed = True
+
+    if cfg.skip_vector:
+        vec_failed = False  # not a failure — intentionally skipped
+    elif not vec_results:
+        vec_failed = True
+        logger.info("hybrid: vector search returned no results, using BM25 only (query=%r)", query[:60])
+
+    return bm25_results, vec_results, vec_failed
+
+
+def _apply_intent_boosts(
+    fused: list[FusedResult],
+    intent: QueryIntent,
+    active_query: str,
+    neo4j_client: object,
+    cfg: RetrievalConfig,
+) -> list[FusedResult]:
+    """Apply all post-fusion intent-specific boosts.
+
+    Applies entity boost, procedural boost, temporal date-path boost,
+    and chunk-date proximity boost as appropriate for the query intent.
+    Returns the boosted fused list.
+    """
+    # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
+    fused = _apply_entity_boost(fused, neo4j_client, cfg)
+
+    # Procedural boosting for PROCEDURAL intent
+    if intent == QueryIntent.PROCEDURAL:
+        fused = procedural_boost(fused, config=cfg.procedural)
+
+    # Temporal date-path boost for TEMPORAL intent (disabled by default via config —
+    # enable for date-named file corpora via RetrievalConfig.for_daily_log_corpus())
+    if intent == QueryIntent.TEMPORAL:
+        fused = temporal_date_boost(fused, active_query, config=cfg.temporal)
+
+    # Chunk-date proximity boost for TEMPORAL intent (TMP-7B)
+    # Guard: skip when config requires explicit temporal marker and query lacks one.
+    # Prevents recency bias on generic TEMPORAL queries ("what changed and why").
+    _chunk_date_guard_ok = not cfg.temporal.chunk_date_boost_guard_explicit_only or _query_has_temporal_marker(
+        active_query
+    )
+    if intent == QueryIntent.TEMPORAL and cfg.temporal.chunk_date_boost_enabled and _chunk_date_guard_ok:
+        fused = _apply_chunk_date_boost(fused, active_query, cfg)
+
+    return fused
+
+
+def _apply_chunk_date_boost(
+    fused: list[FusedResult],
+    active_query: str,
+    cfg: RetrievalConfig,
+) -> list[FusedResult]:
+    """Apply chunk-date proximity boost for TEMPORAL intent.
+
+    Extracts the time window from the query and boosts results whose
+    chunk_date is close to the window midpoint. Returns the fused list
+    unchanged on any failure.
+    """
+    import datetime as _dt
+
+    from kairix.core.temporal.rewriter import extract_time_window
+
+    try:
+        _start, _end = extract_time_window(active_query, reference_date=_dt.date.today())
+        # Use window midpoint rather than start — avoids systematic bias toward
+        # documents dated at the beginning of a multi-day query window.
+        if _start and _end:
+            _query_date = _start + _dt.timedelta(days=(_end - _start).days // 2)
+        else:
+            _query_date = _start or _dt.date.today()
+        fused = chunk_date_boost(fused, _query_date, config=cfg.temporal)
+    except Exception as _cbd_e:
+        logger.warning("hybrid: chunk_date_boost failed — %s", _cbd_e)
+    return fused
+
+
+def _inject_temporal_chunks(
+    fused: list[FusedResult],
+    temporal_chunks: list,
+    intent: QueryIntent,
+    active_query: str,
+) -> list[FusedResult]:
+    """Merge temporal chunks into fused results for TEMPORAL intent.
+
+    Only injects when query has an explicit temporal reference (specific date or
+    relative term like "last week"). Queries like "what changed and why" trigger
+    TEMPORAL intent but target architecture/decisions docs — not memory files.
+    Injecting memory files at rrf_score=0.82 for those queries displaces gold docs.
+
+    Returns updated fused list.
+    """
+    if not temporal_chunks or intent != QueryIntent.TEMPORAL or not _query_has_temporal_marker(active_query):
+        return fused
+
+    seen_paths = {fr.path for fr in fused}
+    temporal_fused = []
+    for tc in temporal_chunks[:6]:
+        if tc.source_path not in seen_paths:
+            heading = tc.metadata.get("section_heading") or tc.metadata.get("status") or ""
+            title = (heading + " — " + tc.source_path.split("/")[-1]) if heading else tc.source_path.split("/")[-1]
+            temporal_fused.append(
+                FusedResult(
+                    path=tc.source_path,
+                    collection="temporal",
+                    title=title,
+                    snippet=tc.text[:500].strip(),
+                    rrf_score=0.82,
+                    boosted_score=0.82,
+                )
+            )
+            seen_paths.add(tc.source_path)
+    if temporal_fused:
+        fused = temporal_fused + fused
+        logger.debug("hybrid: merged %d temporal chunks into results", len(temporal_fused))
+
+    return fused
+
+
+def _apply_reranking(
+    fused: list[FusedResult],
+    active_query: str,
+    intent: QueryIntent,
+    cfg: RetrievalConfig,
+) -> list[FusedResult]:
+    """Apply cross-encoder re-ranking when eligible.
+
+    Always on for MULTI_HOP and SEMANTIC intents, optional for others
+    via config.rerank.enabled. Returns the fused list unchanged on failure.
+    """
+    should_rerank = (cfg.rerank.enabled or intent.value in cfg.rerank_intents) and fused
+    if not should_rerank:
+        return fused
+    try:
+        from kairix.core.search.rerank import rerank as _rerank
+
+        fused = _rerank(
+            query=active_query,
+            results=fused,
+            model=cfg.rerank.model,
+            candidate_limit=cfg.rerank.candidate_limit,
+        )
+    except Exception as _rr_e:
+        logger.warning("hybrid: rerank failed — %s — using unmodified order", _rr_e)
+    return fused
+
+
 def _build_search_result(state: _SearchPipelineState) -> SearchResult:
     """Apply token budget, compute diagnostics, build SearchResult, and log.
 
@@ -586,11 +793,6 @@ def search(
         explicit_config=config,
     )
 
-    bm25_results: list[BM25Result] = []
-    vec_results: list[VecResult] = []
-    vec_failed = False
-    fallback_used = False
-
     # Temporal query rewriting — expand query with explicit date tokens before retrieval
     active_query, temporal_chunks, date_filter_paths = _preprocess_temporal(query, intent)
 
@@ -598,18 +800,10 @@ def search(
     # lgtm — false positive: _get_neo4j() returns a client object, no credentials logged
     neo4j_client = _get_neo4j()
 
-    # ENTITY intent requires Neo4j. Do not silently degrade to BM25+vector
-    # for entity queries — the results would be misleading (no entity graph
-    # expansion, no alias resolution, no mention-based boosting).
-    if intent == QueryIntent.ENTITY and not neo4j_client.available:
-        err = (
-            "Entity queries require Neo4j but the graph is unavailable. "
-            "Check KAIRIX_NEO4J_URI, KAIRIX_NEO4J_USER, KAIRIX_NEO4J_PASSWORD "
-            "and run `kairix onboard check` for diagnostics. "
-            "Install Neo4j with `bash scripts/install-neo4j.sh` if not yet set up."
-        )
-        logger.error("hybrid: ENTITY query rejected — Neo4j unavailable (query=%r)", query[:60])
-        return SearchResult(query=query, intent=intent, error=err)
+    # Entity intent requires Neo4j — reject early if unavailable
+    error = _check_entity_prerequisites(intent, neo4j_client, query)
+    if error:
+        return error
 
     # Multi-hop: decompose and run sub-queries in parallel, then merge.
     if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
@@ -619,50 +813,12 @@ def search(
             logger.warning("hybrid: MULTI_HOP planner failed (%s) — falling back to SEMANTIC", _mh_e)
             intent = QueryIntent.SEMANTIC
 
-    # All intents run BM25 + vector in parallel via RRF.
-    # Previously KEYWORD ran BM25-only, which degraded NDCG@10 (0.439) because:
-    # (a) BM25-only misses semantically-relevant docs for proper nouns/codes
-    # (b) the vector-only fallback when BM25 returned 0 results halved RRF scores
-    # Running hybrid gives KEYWORD queries both BM25 exact-match strength and
-    # vector semantic coverage — the same approach that lifted PROCEDURAL from 0.389→0.564.
-
     # Dispatch BM25 and vector search in parallel for all intents
-    # For TEMPORAL intent, active_query is the rewritten (date-expanded) query
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures: dict[str, Future] = {}
+    bm25_results, vec_results, vec_failed = _dispatch_parallel_search(
+        active_query, collections, cfg, date_filter_paths, intent, query
+    )
 
-        futures["bm25"] = executor.submit(
-            bm25_search, active_query, collections, cfg.bm25_limit, None, date_filter_paths
-        )
-        if not cfg.skip_vector:
-            futures["vec"] = executor.submit(
-                _run_vector_search, active_query, collections, date_filter_paths, cfg.vec_limit, intent.value
-            )
-
-        # Collect results
-        for name, future in futures.items():
-            try:
-                result = future.result(timeout=30)
-                if name == "bm25":
-                    bm25_results = result or []
-                elif name == "vec":
-                    vec_results = result or []
-            except Exception as e:
-                logger.warning("hybrid: %s search future failed — %s", name, e)
-                if name == "vec":
-                    vec_failed = True
-
-    if cfg.skip_vector:
-        vec_failed = False  # not a failure — intentionally skipped
-    elif not vec_results:
-        vec_failed = True
-        logger.info("hybrid: vector search returned no results, using BM25 only (query=%r)", query[:60])
-
-    # Fuse results using the configured strategy.
-    # bm25_primary: BM25 results first, vector-only appended (best for structured KBs).
-    # rrf: Standard Reciprocal Rank Fusion (better for semantic/unstructured corpora).
-    # Run `kairix eval hybrid-sweep` against your gold suite to determine which is
-    # optimal for your data.
+    # Fuse results using the configured strategy
     if cfg.fusion_strategy == "rrf":
         fused: list[FusedResult] = rrf(bm25_results, vec_results, k=cfg.rrf_k)
     else:
@@ -674,84 +830,14 @@ def search(
     except (sqlite3.Error, OSError) as _cde:
         logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
 
-    # Entity boost via Neo4j — boosts entity canonical notes by graph in-degree
-    fused = _apply_entity_boost(fused, neo4j_client, cfg)
+    # Apply all intent-specific boosts
+    fused = _apply_intent_boosts(fused, intent, active_query, neo4j_client, cfg)
 
-    # Procedural boosting for PROCEDURAL intent
-    if intent == QueryIntent.PROCEDURAL:
-        fused = procedural_boost(fused, config=cfg.procedural)
+    # Merge temporal chunks
+    fused = _inject_temporal_chunks(fused, temporal_chunks, intent, active_query)
 
-    # Temporal date-path boost for TEMPORAL intent (disabled by default via config —
-    # enable for date-named file corpora via RetrievalConfig.for_daily_log_corpus())
-    if intent == QueryIntent.TEMPORAL:
-        fused = temporal_date_boost(fused, active_query, config=cfg.temporal)
-
-    # Chunk-date proximity boost for TEMPORAL intent (TMP-7B)
-    # Guard: skip when config requires explicit temporal marker and query lacks one.
-    # Prevents recency bias on generic TEMPORAL queries ("what changed and why").
-    _chunk_date_guard_ok = not cfg.temporal.chunk_date_boost_guard_explicit_only or _query_has_temporal_marker(
-        active_query
-    )
-    if intent == QueryIntent.TEMPORAL and cfg.temporal.chunk_date_boost_enabled and _chunk_date_guard_ok:
-        import datetime as _dt
-
-        from kairix.core.temporal.rewriter import extract_time_window
-
-        try:
-            _start, _end = extract_time_window(active_query, reference_date=_dt.date.today())
-            # Use window midpoint rather than start — avoids systematic bias toward
-            # documents dated at the beginning of a multi-day query window.
-            if _start and _end:
-                _query_date = _start + _dt.timedelta(days=(_end - _start).days // 2)
-            else:
-                _query_date = _start or _dt.date.today()
-            fused = chunk_date_boost(fused, _query_date, config=cfg.temporal)
-        except Exception as _cbd_e:
-            logger.warning("hybrid: chunk_date_boost failed — %s", _cbd_e)
-
-    # Merge temporal chunks into fused results for TEMPORAL intent.
-    # Guard: only inject when query has explicit temporal reference (specific date or
-    # relative term like "last week"). Queries like "what changed and why" trigger
-    # TEMPORAL intent but target architecture/decisions docs — not memory files.
-    # Injecting memory files at rrf_score=0.82 for those queries displaces gold docs.
-    # MHQ-1 finding: M07 gold moved from ranks 2,3 to 4,5 due to unconditional injection.
-    if temporal_chunks and intent == QueryIntent.TEMPORAL and _query_has_temporal_marker(active_query):
-        seen_paths = {fr.path for fr in fused}
-        temporal_fused = []
-        for tc in temporal_chunks[:6]:
-            if tc.source_path not in seen_paths:
-                heading = tc.metadata.get("section_heading") or tc.metadata.get("status") or ""
-                title = (heading + " — " + tc.source_path.split("/")[-1]) if heading else tc.source_path.split("/")[-1]
-                temporal_fused.append(
-                    FusedResult(
-                        path=tc.source_path,
-                        collection="temporal",
-                        title=title,
-                        snippet=tc.text[:500].strip(),
-                        rrf_score=0.82,
-                        boosted_score=0.82,
-                    )
-                )
-                seen_paths.add(tc.source_path)
-        if temporal_fused:
-            fused = temporal_fused + fused
-            logger.debug("hybrid: merged %d temporal chunks into results", len(temporal_fused))
-
-    # Cross-encoder re-ranking — always on for MULTI_HOP and SEMANTIC intents,
-    # optional for others via config.rerank.enabled.
-    should_rerank = (cfg.rerank.enabled or intent.value in cfg.rerank_intents) and fused
-    if should_rerank:
-        try:
-            from kairix.core.search.rerank import rerank as _rerank
-
-            fused = _rerank(
-                query=active_query,
-                results=fused,
-                model=cfg.rerank.model,
-                candidate_limit=cfg.rerank.candidate_limit,
-            )
-        except Exception as _rr_e:
-            logger.warning("hybrid: rerank failed — %s — using unmodified order", _rr_e)
+    # Cross-encoder re-ranking
+    fused = _apply_reranking(fused, active_query, intent, cfg)
 
     # Build final result: apply budget, compute diagnostics, log events
     return _build_search_result(
@@ -765,7 +851,7 @@ def search(
             vec_count=len(vec_results),
             collections=collections,
             vec_failed=vec_failed,
-            fallback_used=fallback_used,
+            fallback_used=False,
             temporal_chunks=temporal_chunks or None,
             agent=agent,
             scope=scope,
