@@ -10,7 +10,6 @@ Provides:
 from __future__ import annotations
 
 import json
-import os
 import random
 import re
 import time
@@ -113,7 +112,9 @@ def find_unlinked_mentions(
             eligible.append(md_file)
 
     # Also check workspace memory files
-    workspaces_root = Path(os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces")))
+    from kairix.paths import workspace_root as _ws_root
+
+    workspaces_root = _ws_root()
     if workspaces_root.exists():
         for md_file in workspaces_root.rglob("*.md"):
             if should_inject(str(md_file)):

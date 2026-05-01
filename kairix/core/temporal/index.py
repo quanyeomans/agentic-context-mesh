@@ -24,21 +24,8 @@ from pathlib import Path
 from kairix.core.search.bm25 import FTS_STOP_WORDS as _STOP_WORDS
 from kairix.core.temporal.chunker import TemporalChunk, chunk_board, chunk_memory_log
 from kairix.paths import document_root as _doc_root_fn
-from kairix.paths import workspace_root as _workspace_root_fn
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-
-_DOCUMENT_ROOT = str(_doc_root_fn())
-_WORKSPACE_ROOT = str(_workspace_root_fn())
-# override with KAIRIX_BOARDS_DIR env var
-_BOARDS_DIR = _os.environ.get("KAIRIX_BOARDS_DIR", f"{_DOCUMENT_ROOT}/01-Projects/Boards")
-
-_BOARDS_GLOB = f"{_BOARDS_DIR}/*.md"
-_WORKSPACE_MEMORY_GLOB = f"{_WORKSPACE_ROOT}/*/memory"
 
 # Filename pattern for memory logs
 _MEMORY_LOG_FILENAME_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md$")
@@ -49,14 +36,22 @@ _MEMORY_LOG_FILENAME_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})\.md$")
 # ---------------------------------------------------------------------------
 
 
+def _boards_dir() -> Path:
+    """Return the boards directory, respecting KAIRIX_BOARDS_DIR override."""
+    override = _os.environ.get("KAIRIX_BOARDS_DIR")
+    if override:
+        return Path(override)
+    return _doc_root_fn() / "01-Projects" / "Boards"
+
+
 def get_memory_log_paths(
     start: date | None,
     end: date | None,
 ) -> list[str]:
     """
-    Return all memory log paths across agent workspaces, filtered by date range.
+    Return all memory log paths across agent knowledge dirs, filtered by date range.
 
-    Scans /data/workspaces/*/memory/ for YYYY-MM-DD.md files.
+    Scans {document_root}/04-Agent-Knowledge/*/memory/ for YYYY-MM-DD.md files.
     If start is None, returns all logs up to end.
     If end is None, returns all logs from start.
     If both are None, returns all logs found.
@@ -70,8 +65,14 @@ def get_memory_log_paths(
     """
     paths: list[str] = []
 
-    for workspace_dir in Path(_WORKSPACE_ROOT).iterdir():
-        memory_dir = workspace_dir / "memory"
+    agent_knowledge_dir = _doc_root_fn() / "04-Agent-Knowledge"
+    if not agent_knowledge_dir.is_dir():
+        return paths
+
+    for agent_dir in agent_knowledge_dir.iterdir():
+        if not agent_dir.is_dir():
+            continue
+        memory_dir = agent_dir / "memory"
         if not memory_dir.is_dir():
             continue
 
@@ -192,7 +193,8 @@ def query_temporal_chunks(
         all_chunks: list[TemporalChunk] = []
 
         # 1. Board files
-        for board_path in sorted(Path(_BOARDS_DIR).glob("*.md")):
+        boards = _boards_dir()
+        for board_path in sorted(boards.glob("*.md")) if boards.is_dir() else []:
             try:
                 all_chunks.extend(chunk_board(str(board_path)))
             except Exception as e:

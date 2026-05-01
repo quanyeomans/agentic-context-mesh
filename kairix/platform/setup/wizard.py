@@ -257,7 +257,9 @@ def run_setup(
             }
         print(f"  \u2713 {len(collections_config['shared'])} collections configured.\n")
     elif coll_idx == 2:
-        workspace_root = os.environ.get("KAIRIX_WORKSPACE_ROOT", "~/.kairix/workspaces")
+        from kairix.paths import workspace_root as _ws_root_fn
+
+        workspace_root = str(_ws_root_fn())
         collections_config = {
             "shared": [
                 {"name": "all", "path": ".", "glob": "**/*.md"},

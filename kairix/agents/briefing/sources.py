@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import date, timedelta
 
-from kairix.paths import agent_memory_path, document_root, workspace_root
+from kairix.paths import agent_memory_path, document_root
 from kairix.text import truncate_to_tokens
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _DOCUMENT_ROOT = document_root()
-_WORKSPACE_ROOT = workspace_root()
 
 
 # ---------------------------------------------------------------------------

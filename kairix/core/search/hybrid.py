@@ -236,7 +236,7 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
         try:
             # Use LIKE suffix match because the DB stores absolute paths while FusedResult
             # paths may be collection-relative (e.g. "concept/builder.md" vs
-            # "/data/vault/concept/builder.md"). An exact IN() match would miss all rows.
+            # "/data/documents/concept/builder.md"). An exact IN() match would miss all rows.
             # safe: LIKE clauses use ? binding for values
             like_clauses = " OR ".join("d.path LIKE ?" for _ in paths)
             rows = db.execute(
