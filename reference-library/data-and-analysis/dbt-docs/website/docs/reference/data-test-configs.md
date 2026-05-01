@@ -1,0 +1,379 @@
+---
+title: "Data test configurations"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+import ConfigResource from '/snippets/_config-description-resource.md';
+import ConfigGeneral from '/snippets/_config-description-general.md';
+
+
+## Related documentation
+
+* [Data tests](/docs/build/data-tests)
+
+Data tests can be configured in a few different ways:
+1. Properties within `.yml` definition (generic tests only, see [test properties](/reference/resource-properties/data-tests) for full syntax)
+2. A `config()` block within the test's SQL definition
+3. In `dbt_project.yml`
+
+Data test configs are applied hierarchically, in the order of specificity outlined above. In the case of a singular test, the `config()` block within the SQL definition takes precedence over configs in the project YAML file. In the case of a specific instance of a generic test, the test's `.yml` properties would take precedence over any values set in its generic SQL definition's `config()`, which in turn would take precedence over values set in the project YAML file (`dbt_project.yml`).
+
+## Available configurations
+
+Click the link on each configuration option to read more about what it can do.
+
+### Data test-specific configurations
+
+<ConfigResource meta={frontMatter.meta} />
+
+<Tabs
+  groupId="config-languages"
+  defaultValue="project-yaml"
+  values={[
+    { label: 'Project file', value: 'project-yaml', },
+    { label: 'SQL file config', value: 'config', },
+    { label: 'Property file', value: 'property-yaml', },
+  ]
+}>
+<TabItem value="project-yaml">
+
+<File name='dbt_project.yml'>
+
+```yaml
+data_tests:
+  [<resource-path>](/reference/resource-configs/resource-path):
+    [+](/reference/resource-configs/plus-prefix)[fail_calc](/reference/resource-configs/fail_calc): <string>
+    [+](/reference/resource-configs/plus-prefix)[limit](/reference/resource-configs/limit): 
+    [+](/reference/resource-configs/plus-prefix)[severity](/reference/resource-configs/severity): error | warn
+    [+](/reference/resource-configs/plus-prefix)[error_if](/reference/resource-configs/severity): <string>
+    [+](/reference/resource-configs/plus-prefix)[warn_if](/reference/resource-configs/severity): <string>
+    [+](/reference/resource-configs/plus-prefix)[store_failures](/reference/resource-configs/store_failures): true | false
+    [+](/reference/resource-configs/plus-prefix)[where](/reference/resource-configs/where): <string>
+
+```
+
+</File>
+
+</TabItem>
+
+
+<TabItem value="config">
+
+```jinja
+
+{{ config(
+    [fail_calc](/reference/resource-configs/fail_calc) = "<string>",
+    [limit](/reference/resource-configs/limit) = ,
+    [severity](/reference/resource-configs/severity) = "error | warn",
+    [error_if](/reference/resource-configs/severity) = "<string>",
+    [warn_if](/reference/resource-configs/severity) = "<string>",
+    [store_failures](/reference/resource-configs/store_failures) = true | false,
+    [where](/reference/resource-configs/where) = "<string>"
+) }}
+
+```
+
+
+</TabItem>
+
+<TabItem value="property-yaml">
+
+```yaml
+<resource_type>:
+  - name: <resource_name>
+    data_tests:
+      - <test_name>: # # Actual name of the test. For example, dbt_utils.equality
+          name: # Human friendly name for the test. For example, equality_fct_test_coverage
+          [description](/reference/resource-properties/description): "markdown formatting"
+          arguments: # Available in v1.10.5 and higher. Older versions can set the <argument_name> as the top-level property.
+            <argument_name>: <argument_value>
+          [config](/reference/resource-properties/config):
+            [fail_calc](/reference/resource-configs/fail_calc): <string>
+            [limit](/reference/resource-configs/limit): 
+            [severity](/reference/resource-configs/severity): error | warn
+            [error_if](/reference/resource-configs/severity): <string>
+            [warn_if](/reference/resource-configs/severity): <string>
+            [store_failures](/reference/resource-configs/store_failures): true | false
+            [where](/reference/resource-configs/where): <string>
+            # Available in v1.12 and higher. Requires enabling the `require_sql_header_in_test_configs` flag.
+            [sql_header](/reference/resource-configs/sql_header): <string> 
+
+    [columns](/reference/resource-properties/columns):
+      - name: <column_name>
+        data_tests:
+          - <test_name>:
+              name:
+              [description](/reference/resource-properties/description): "markdown formatting"
+              arguments: # Available in v1.10.5 and higher. Older versions can set the <argument_name> as the top-level property.
+                <argument_name>: <argument_value>
+              [config](/reference/resource-properties/config):
+                [fail_calc](/reference/resource-configs/fail_calc): <string>
+                [limit](/reference/resource-configs/limit): 
+                [severity](/reference/resource-configs/severity): error | warn
+                [error_if](/reference/resource-configs/severity): <string>
+                [warn_if](/reference/resource-configs/severity): <string>
+                [store_failures](/reference/resource-configs/store_failures): true | false
+                [where](/reference/resource-configs/where): <string>
+                # Available in v1.12 and higher. Requires enabling the `require_sql_header_in_test_configs` flag.
+                [sql_header](/reference/resource-configs/sql_header): <string> 
+```
+
+This configuration mechanism is supported for specific instances of generic tests only. To configure a specific singular test, you should use the `config()` macro in its SQL definition.
+
+Starting in <Constant name="core" /> v1.12, you can set [`sql_header`](/reference/resource-configs/sql_header) in the `config` of a generic data test at the model or column level of your `properties.yml`. Enable the [`require_sql_header_in_test_configs`](/reference/global-configs/behavior-changes#sql_header-in-test-configs) flag to use `config.sql_header` in your data tests.
+
+
+</TabItem>
+
+</Tabs>
+
+
+### General configurations
+
+<ConfigGeneral />
+
+<Tabs
+  groupId="config-languages"
+  defaultValue="project-yaml"
+  values={[
+    { label: 'Project file', value: 'project-yaml', },
+    { label: 'SQL file config', value: 'config', },
+    { label: 'Property file', value: 'property-yaml', },
+  ]
+}>
+<TabItem value="project-yaml">
+
+
+<File name='dbt_project.yml'>
+
+```yaml
+data_tests:
+  [<resource-path>](/reference/resource-configs/resource-path):
+    [+](/reference/resource-configs/plus-prefix)[enabled](/reference/resource-configs/enabled): true | false
+    [+](/reference/resource-configs/plus-prefix)[tags](/reference/resource-configs/tags): <string> | [<string>]
+    [+](/reference/resource-configs/plus-prefix)[meta](/reference/resource-configs/meta): {dictionary}
+    # relevant for [store_failures](/reference/resource-configs/store_failures) only
+    [+](/reference/resource-configs/plus-prefix)[database](/reference/resource-configs/database): <string>
+    [+](/reference/resource-configs/plus-prefix)[schema](/reference/resource-properties/schema): <string>
+    [+](/reference/resource-configs/plus-prefix)[alias](/reference/resource-configs/alias): <string>
+```
+</File>
+
+</TabItem>
+
+<TabItem value="config">
+
+
+```jinja
+
+{{ config(
+    [enabled](/reference/resource-configs/enabled)=true | false,
+    [tags](/reference/resource-configs/tags)="<string>" | ["<string>"]
+    [meta](/reference/resource-configs/meta)={dictionary},
+    [database](/reference/resource-configs/database)="<string>",
+    [schema](/reference/resource-properties/schema)="<string>",
+    [alias](/reference/resource-configs/alias)="<string>",
+) }}
+
+```
+
+</TabItem>
+
+<TabItem value="property-yaml">
+
+```yaml
+
+<resource_type>:
+  - name: <resource_name>
+    data_tests:
+      - <test_name>: # Actual name of the test. For example, dbt_utils.equality
+          name: # Human friendly name for the test. For example, equality_fct_test_coverage
+          [description](/reference/resource-properties/description): "markdown formatting"
+          arguments: # available in v1.10.5 and higher. Older versions can set the <argument_name> as the top-level property.
+            <argument_name>: <argument_value>
+          [config](/reference/resource-properties/config):
+            [enabled](/reference/resource-configs/enabled): true | false
+            [tags](/reference/resource-configs/tags): <string> | [<string>]
+            [meta](/reference/resource-configs/meta): {dictionary}
+            # relevant for [store_failures](/reference/resource-configs/store_failures) only
+            [database](/reference/resource-configs/database): <string>
+            [schema](/reference/resource-properties/schema): <string>
+            [alias](/reference/resource-configs/alias): <string>
+
+    [columns](/reference/resource-properties/columns):
+      - name: <column_name>
+        data_tests:
+          - <test_name>:
+              name: 
+              [description](/reference/resource-properties/description): "markdown formatting"
+              arguments: # available in v1.10.5 and higher. Older versions can set the <argument_name> as the top-level property.
+                <argument_name>: <argument_value>
+              [config](/reference/resource-properties/config):
+                [enabled](/reference/resource-configs/enabled): true | false
+                [tags](/reference/resource-configs/tags): <string> | [<string>]
+                [meta](/reference/resource-configs/meta): {dictionary}
+                # relevant for [store_failures](/reference/resource-configs/store_failures) only
+                [database](/reference/resource-configs/database): <string>
+                [schema](/reference/resource-properties/schema): <string>
+                [alias](/reference/resource-configs/alias): <string>
+```
+
+This configuration mechanism is supported for specific instances of generic data tests only. To configure a specific singular test, you should use the `config()` macro in its SQL definition.
+
+
+</TabItem>
+
+
+</Tabs>
+
+### Examples
+
+#### Add a tag to one test
+
+If a specific instance of a generic data test:
+
+<File name='models/<filename>.yml'>
+
+```yml
+models:
+  - name: my_model
+    columns:
+      - name: id
+        data_tests:
+          - unique:
+              config:
+                tags: ['my_tag'] # changed to config in v1.10
+```
+
+</File>
+
+If a singular data test:
+
+<File name='tests/<filename>.sql'>
+
+```sql
+{{ config(tags = ['my_tag']) }}
+
+select ...
+```
+
+</File>
+
+#### Set the default severity for all instances of a generic data test
+
+<File name='macros/<filename>.sql'>
+
+```sql
+{% test my_test() %}
+
+    {{ config(severity = 'warn') }}
+
+    select ...
+
+{% endtest %}
+```
+
+</File>
+
+#### Disable all data tests from a package
+
+<File name='dbt_project.yml'>
+
+```yml
+data_tests:
+  package_name:
+    +enabled: false
+```
+
+</File>
+
+#### Specify custom configurations for generic data tests
+
+Beginning in dbt v1.9, you can use any custom config key to specify custom configurations for data tests. For example, the following specifies the `snowflake_warehouse` custom config that dbt should use when executing the `accepted_values` data test:
+
+```yml
+
+models:
+  - name: my_model
+    columns:
+      - name: color
+        data_tests:
+          - accepted_values:
+              arguments: # available in v1.10.5 and higher. Older versions can set the <argument_name> as the top-level property.
+                values: ['blue', 'red']
+              config:
+                severity: warn
+                snowflake_warehouse: my_warehouse
+
+```
+
+Given the config, the data test runs on a different Snowflake virtual warehouse than the one in your default connection to enable better price-performance with a different warehouse size or more granular cost allocation and visibility.
+
+#### Add a description to generic and singular tests
+
+Starting from dbt v1.9 (also available to <Constant name="dbt" /> [release tracks](/docs/dbt-versions/cloud-release-tracks)), you can add [descriptions](/reference/resource-properties/data-tests#description) to both generic and singular tests.
+
+For a generic test, add the description in line with the existing YAML:
+
+<File name='models/staging/<filename>.yml'>
+
+```yml
+
+models:
+  - name: my_model
+    columns:
+      - name: delivery_status
+        data_tests:
+          - accepted_values:
+              arguments: # available in v1.10.5 and higher. Older versions can set the <argument_name> as the top-level property.
+                values: ['delivered', 'pending', 'failed']
+              description: "This test checks whether there are unexpected delivery statuses. If it fails, check with logistics team"
+
+```
+</File>
+
+You can also add descriptions to the Jinja macro that provides the core logic of a generic data test. Refer to the [Add description to generic data test logic](/best-practices/writing-custom-generic-tests#add-description-to-generic-data-test-logic) for more information.
+
+For a singular test, define it in the test's directory:
+
+<File name='tests/my_custom_test.yml'>
+
+```yml
+
+data_tests: 
+  - name: my_custom_test
+    description: "This test checks whether the rolling average of returns is inside of expected bounds. If it isn't, flag to customer success team"
+
+```
+</File>
+
+For more information refer to [Add a description to a data test](/reference/resource-properties/description#add-a-description-to-a-data-test).
+
+<VersionBlock firstVersion="1.12">
+
+#### Set `sql_header` in a generic data test
+
+When the [`require_sql_header_in_test_configs`](/reference/global-configs/behavior-changes#sql_header-in-data-tests) flag is enabled, you can set [`sql_header`](/reference/resource-configs/sql_header) in the `config` of a generic data test so that the specified SQL runs before the test executes (for example, to set session parameters or add a comment):
+
+<File name="models/properties.yml">
+
+```yaml
+models:
+  - name: orders
+    columns:
+      - name: order_id
+        data_tests:
+          - not_null:
+              name: not_null_orders_order_id
+              config:
+                sql_header: "-- SQL_HEADER_TEST_MARKER"
+```
+
+</File>
+
+</VersionBlock>

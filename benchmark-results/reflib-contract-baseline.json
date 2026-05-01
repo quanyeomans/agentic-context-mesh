@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "name": "reflib-contract",
+    "system": "mock-reflib",
+    "generated": "2026-04-26",
+    "suite": "suites/reflib-contract-suite.yaml"
+  },
+  "summary": {
+    "weighted_total": 0.6803,
+    "category_scores": {
+      "temporal": 0.0,
+      "multi_hop": 0.0,
+      "entity": 1.0,
+      "conceptual": 1.0,
+      "classification": 0.0,
+      "procedural": 1.0,
+      "recall": 0.921
+    }
+  }
+}

@@ -1,0 +1,17 @@
+---
+title: "How can we move our project from a managed repository, to a self-hosted repository?"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+dbt Labs can send your managed repository through a ZIP file in its current state for you to push up to a git provider. After that, you'd just need to switch over to the [repo in your project](/docs/cloud/git/import-a-project-by-git-url) to point to the new repository.
+
+When you're ready to do this, [contact the dbt Labs Support team](mailto:support@getdbt.com) with your request and your managed repo URL, which you can find by navigating to your project setting. To find project settings:
+
+1. From <Constant name="dbt" />, click on your account name in the left side menu and select **Account settings**.
+2. Click **Projects**, and then select your project. 
+3. Under **Repository** in the project details page, you can find your managed repo URL.

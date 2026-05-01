@@ -1,0 +1,25 @@
+---
+title: "Stakeholder influence mapping"
+source: 18F Guides
+source_url: https://github.com/18F/guides
+licence: CC0-1.0
+domain: engineering
+subdomain: 18f-guides
+date_added: 2026-04-25
+---
+
+## How to do it{#how-stake-i}
+
+1. Gather the team and at least one crucial stakeholder familiar with their organization and how it works from both a technical and an interpersonal point of view.
+1. Using a whiteboard (or virtual collaboration tool), divide the board into a grid with 4 sections. Label the x-axis *influence* and the y-axis *interest*.
+1. List out stakeholders together. Write down names of people, groups, communities, or organizations that your work may impact, and organize them into the four quadrants based on your understanding of their relative influence and interest.
+1. Look at each quadrant to sort who to engage with and how. For stakeholders that are both __interested and influential__, collaborate closely with them. For stakeholders that are __either influential *or* interested__, keep them informed. For stakeholders that are __neither influential nor interested__, allow them to drive their own involvement.
+1. If your map reveals power dynamics that route around policy, consider whether the information poses personal or professional risk to any stakeholders. Avoid possible harm by sharing this map with only the people who need to understand it, and consider the consequences of those you do share with — or share an edited version. Be sure to review and update the map as you understand the situation better.
+
+<section class="method--section method--section--18f-example" markdown="1" >
+
+## Government considerations{#con-stake-i}
+
+No PRA implications. No information is collected from members of the public.
+
+</section>

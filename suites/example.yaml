@@ -1,0 +1,164 @@
+# Example benchmark suite for kairix
+#
+# This file shows the format for a benchmark suite. Your actual suite contains
+# vault-specific cases and lives outside the repo (.gitignore'd).
+#
+# Generate a suite from your vault:
+#   python scripts/build-eval-gold.py \
+#     --queries queries.jsonl \
+#     --output suites/my-suite.yaml \
+#     --agent builder
+#
+# Or write cases manually as shown below.
+#
+# Score methods:
+#   exact — gold_title must resolve to a document in top-5 results
+#   ndcg  — NDCG@10 with graded relevance (0 = irrelevant, 1 = partial, 2 = directly answers)
+#
+# Document identity:
+#   gold_titles uses stable note titles (filename stems), not filesystem paths.
+#   This follows the TREC qrels convention: relevance judgments are decoupled
+#   from document location so scores are not affected by vault reorganisation.
+#   A result matches if its filename stem normalises to the gold title.
+#   Example: gold_title "patterns" matches both "04-Agent-Knowledge/patterns.md"
+#            and "Archive/patterns.md" — the title is the stable identity.
+
+meta:
+  name: example
+  version: '1.0'
+  instrument: kairix-hybrid
+  description: Example suite — replace with your vault-specific cases
+
+cases:
+
+  # --- Recall: exact document retrieval ---
+  - id: R01
+    query: "engineering patterns and conventions"
+    category: recall
+    score_method: exact
+    gold_titles:
+      - title: patterns
+        relevance: 2
+
+  # --- Entity: named entity lookup ---
+  - id: E01
+    query: "who is responsible for the platform infrastructure"
+    category: entity
+    score_method: exact
+    gold_titles:
+      - title: alice-chen
+        relevance: 2
+
+  # --- Temporal: date-sensitive query ---
+  - id: T01
+    query: "decisions made last week"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: decisions
+        relevance: 2
+
+  # --- Conceptual: semantic retrieval ---
+  - id: C01
+    query: "how does the authentication system work"
+    category: conceptual
+    score_method: ndcg
+    gold_titles:
+      - title: auth-design
+        relevance: 2
+
+  # --- Multi-hop: requires connecting multiple documents ---
+  - id: M01
+    query: "what projects does the platform team own and what are their current statuses"
+    category: multi_hop
+    score_method: ndcg
+    gold_titles:
+      - title: projects
+        relevance: 2
+      - title: status
+        relevance: 1
+
+  # --- Procedural: how-to retrieval ---
+  - id: P01
+    query: "how do I add a new agent to the system"
+    category: procedural
+    score_method: ndcg
+    gold_titles:
+      - title: how-to-add-new-agent
+        relevance: 2
+
+  # --- Temporal: absolute date queries ---
+  # These should NOT apply date-range filtering (the query is ABOUT a specific date,
+  # not scoped to a window). The system should retrieve the log for that date.
+
+  - id: T02
+    query: "platform incident 2026-04-07 root cause"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-07
+        relevance: 2
+    notes: "Absolute date — retrieves the daily log for that date"
+
+  - id: T03
+    query: "architecture decisions March 2026"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-03-architecture-review
+        relevance: 2
+    notes: "Month-scoped query — documents about that month's decisions"
+
+  - id: T04
+    query: "2026-04-08 agent sandbox configuration"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-08
+        relevance: 2
+      - title: sandbox-config
+        relevance: 1
+    notes: "Absolute date + topic — combine date anchor with subject matter"
+
+  - id: T05
+    query: "what was changed in the search pipeline on 2026-04-10"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-10
+        relevance: 2
+    notes: "Explicit date query — looks for log from that exact date"
+
+  # --- Temporal: relative expressions ---
+  # These SHOULD apply date-range filtering (documents written in the window).
+
+  - id: T06
+    query: "recent shape agent work this week"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-09
+        relevance: 2
+      - title: 2026-04-08
+        relevance: 2
+    notes: "Relative temporal — 'this week' gates results to recent memory files"
+
+  - id: T07
+    query: "what did the builder agent work on last week"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-06
+        relevance: 2
+      - title: 2026-04-03
+        relevance: 1
+    notes: "Relative temporal — 'last week' date filter applied"
+
+  - id: T08
+    query: "recently completed platform work last few days"
+    category: temporal
+    score_method: ndcg
+    gold_titles:
+      - title: 2026-04-08
+        relevance: 2
+    notes: "Relative temporal — 'last few days' with agent memory scope"

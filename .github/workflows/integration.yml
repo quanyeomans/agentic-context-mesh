@@ -1,0 +1,108 @@
+name: Integration (PR to main)
+
+# Runs full integration suite on PRs targeting main.
+# Separated from ci.yml so it can use larger runners when needed.
+# Engineering hub: "Integration tests: medium (30s–2min). Stop on >3 failures."
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, ready_for_review]
+
+jobs:
+  # Require PR description to include benchmark comparison if retrieval logic changed
+  pr-gates:
+    name: PR compliance check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check PR description completeness
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            const title = pr.title || '';
+
+            const retrieval_files = [
+              'kairix/core/search/',
+              'kairix/core/temporal/',
+              'kairix/core/embed/',
+              'kairix/knowledge/entities/'
+            ];
+
+            // Check if PR touches retrieval logic
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number
+            });
+
+            const touches_retrieval = files.data.some(f =>
+              retrieval_files.some(path => f.filename.startsWith(path))
+            );
+
+            if (touches_retrieval && !body.includes('benchmark')) {
+              core.warning(
+                'This PR modifies retrieval logic but the description does not mention benchmark results. ' +
+                'Engineering hub requires: "PRs that change retrieval logic must include benchmark result comparison." ' +
+                'Please add before/after benchmark scores to the PR description.'
+              );
+              // Warning only — not a hard failure. Builder to verify.
+            }
+
+            // Check no secrets in title or description (basic)
+            const secret_patterns = [/sk-[a-zA-Z0-9]{20,}/, /[a-f0-9]{32,}/];
+            for (const pattern of secret_patterns) {
+              if (pattern.test(title) || pattern.test(body)) {
+                core.setFailed('Potential secret detected in PR title or description.');
+              }
+            }
+
+            console.log(`Retrieval logic touched: ${touches_retrieval}`);
+            console.log('PR gates passed.');
+
+  # Full integration test suite
+  full-integration:
+    name: Full integration suite
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: pr-gates
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package + dev deps
+        run: pip install -e ".[dev]" pytest-timeout
+
+      - name: Run integration tests
+        run: |
+          pytest tests/ \
+            -m "integration or contract" \
+            -v --tb=short \
+            --maxfail=3 \
+            --timeout=60
+
+      - name: Verify public API imports
+        run: |
+          python -c "
+          from kairix.core.embed.embed import build_hash_seq, run_embed
+          from kairix.core.embed.schema import validate_schema
+          from kairix.core.embed.recall_check import run_recall_gate
+          from kairix.platform.setup.prompts import SetupContext
+          from kairix.knowledge.entities.seed import scan_for_entities
+          from kairix.quality.eval.auto_gold import analyse_corpus
+          from kairix.quality.eval.tune import recommend
+          print('All public API imports passed.')
+          "

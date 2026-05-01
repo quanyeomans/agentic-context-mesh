@@ -1,0 +1,1 @@
+# Default Skyscanner metrics view config

@@ -1,0 +1,38 @@
+name: Reference Library Benchmark Gate
+
+on:
+  pull_request:
+    paths:
+      - "kairix/core/search/**"
+      - "kairix/quality/benchmark/**"
+      - "kairix/quality/eval/**"
+      - "kairix/knowledge/reflib/**"
+      - "suites/reflib-contract-suite.yaml"
+      - "benchmark-results/reflib-contract-baseline.json"
+      - "reference-library/**"
+
+permissions:
+  contents: read
+
+jobs:
+  reflib-benchmark-gate:
+    name: Reference library contract suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install kairix
+        run: pip install -e ".[dev]"
+
+      - name: Run reflib contract suite (mock backend)
+        run: python3 scripts/run-reflib-contract.py
+
+      - name: Compare against baseline
+        run: python3 scripts/compare-reflib-baseline.py

@@ -1,0 +1,184 @@
+meta:
+  name: reflib-contract
+  description: >
+    CI contract suite for the reference library mock backend. Tests pipeline
+    code correctness against the mock-reflib fixture corpus (30 documents
+    spanning 12 reference library collections). No Azure required.
+  version: "1.0"
+  system: mock-reflib
+  n_cases: 20
+
+cases:
+  # --- recall (8) ---
+  - id: RL-R001
+    category: recall
+    query: agent loop pattern observe orient decide act react
+    score_method: ndcg
+    gold_titles:
+      - title: agent-loop-patterns
+        relevance: 2
+      - title: tool-use-protocols
+        relevance: 1
+
+  - id: RL-R002
+    category: recall
+    query: tool use protocol function calling sandbox parallel
+    score_method: ndcg
+    gold_titles:
+      - title: tool-use-protocols
+        relevance: 2
+      - title: agent-loop-patterns
+        relevance: 1
+
+  - id: RL-R003
+    category: recall
+    query: memory architecture working episodic semantic rag retrieval
+    score_method: ndcg
+    gold_titles:
+      - title: memory-architectures
+        relevance: 2
+      - title: agent-loop-patterns
+        relevance: 1
+
+  - id: RL-R004
+    category: recall
+    query: distributed systems cap theorem consistency availability partition
+    score_method: ndcg
+    gold_titles:
+      - title: distributed-systems-fundamentals
+        relevance: 2
+
+  - id: RL-R005
+    category: recall
+    query: observability logs metrics traces prometheus opentelemetry
+    score_method: ndcg
+    gold_titles:
+      - title: observability-practice
+        relevance: 2
+
+  - id: RL-R006
+    category: recall
+    query: data modelling schema star graph document normalisation
+    score_method: ndcg
+    gold_titles:
+      - title: data-modelling-patterns
+        relevance: 2
+
+  - id: RL-R007
+    category: recall
+    query: zero trust architecture security authentication identity
+    score_method: ndcg
+    gold_titles:
+      - title: zero-trust-architecture
+        relevance: 2
+      - title: secrets-management
+        relevance: 1
+
+  - id: RL-R008
+    category: recall
+    query: secrets management vault key credential rotation api
+    score_method: ndcg
+    gold_titles:
+      - title: secrets-management
+        relevance: 2
+      - title: zero-trust-architecture
+        relevance: 1
+
+  # --- conceptual (4) ---
+  - id: RL-C001
+    category: conceptual
+    query: epistemology knowledge belief justification gettier reliabilism
+    score_method: ndcg
+    gold_titles:
+      - title: epistemology-and-knowledge
+        relevance: 2
+
+  - id: RL-C002
+    category: conceptual
+    query: systems thinking feedback loop leverage emergence interconnected
+    score_method: ndcg
+    gold_titles:
+      - title: systems-thinking
+        relevance: 2
+
+  - id: RL-C003
+    category: conceptual
+    query: first principles reasoning fundamental analogy assumptions
+    score_method: ndcg
+    gold_titles:
+      - title: first-principles-reasoning
+        relevance: 2
+
+  - id: RL-C004
+    category: conceptual
+    query: statistical thinking bayesian inference hypothesis probability
+    score_method: ndcg
+    gold_titles:
+      - title: statistical-thinking
+        relevance: 2
+
+  # --- procedural (4) ---
+  - id: RL-P001
+    category: procedural
+    query: ci cd pipeline continuous integration delivery deploy canary
+    score_method: ndcg
+    gold_titles:
+      - title: ci-cd-pipelines
+        relevance: 2
+
+  - id: RL-P002
+    category: procedural
+    query: testing strategy unit integration end-to-end pyramid contract
+    score_method: ndcg
+    gold_titles:
+      - title: testing-strategies
+        relevance: 2
+
+  - id: RL-P003
+    category: procedural
+    query: api design rest graphql versioning rate limiting http
+    score_method: ndcg
+    gold_titles:
+      - title: api-design-principles
+        relevance: 2
+
+  - id: RL-P004
+    category: procedural
+    query: deep work focus time-blocking distraction attention productivity
+    score_method: ndcg
+    gold_titles:
+      - title: deep-work-practices
+        relevance: 2
+
+  # --- entity (4) ---
+  - id: RL-E001
+    category: entity
+    query: team topologies stream-aligned platform enabling conway organisation
+    score_method: ndcg
+    gold_titles:
+      - title: team-topologies
+        relevance: 2
+
+  - id: RL-E002
+    category: entity
+    query: okr objectives key results goals alignment quarterly measurable
+    score_method: ndcg
+    gold_titles:
+      - title: okr-framework
+        relevance: 2
+
+  - id: RL-E003
+    category: entity
+    query: psychological safety team trust vulnerability aristotle leadership
+    score_method: ndcg
+    gold_titles:
+      - title: psychological-safety
+        relevance: 2
+
+  - id: RL-E004
+    category: entity
+    query: incentive design economics principal agent moral hazard mechanism
+    score_method: ndcg
+    gold_titles:
+      - title: incentive-design
+        relevance: 2

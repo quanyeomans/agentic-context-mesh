@@ -1,0 +1,1 @@
+# Import the standard functional fixtures as a plugin

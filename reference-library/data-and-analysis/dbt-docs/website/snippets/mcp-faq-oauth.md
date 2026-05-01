@@ -1,0 +1,24 @@
+---
+title: "Mcp Faq Oauth"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+<Expandable alt_header="OAuth login not initiating">
+
+**Symptoms:** The OAuth browser window never opens, or authentication appears to hang.
+
+**Cause:** dbt MCP uses a lock file to avoid repeated authentication. If a previous session left the lock file in place, it can block new authentication attempts.
+
+**Solution:**
+
+1. Close your MCP client (Claude Desktop, Cursor, VS Code, etc.).
+2. Delete the local dbt MCP config files:
+   - macOS/Linux: `rm -f ~/.dbt/mcp.yml ~/.dbt/mcp.lock`
+   - Windows: `Remove-Item -Force $env:USERPROFILE\.dbt\mcp.yml, $env:USERPROFILE\.dbt\mcp.lock`
+3. Restart your client and try connecting again.
+</Expandable>

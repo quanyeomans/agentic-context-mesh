@@ -1,0 +1,62 @@
+---
+title: "Definition"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+<File name='dbt_project.yml'>
+
+```yml
+docs-paths: [directorypath]
+```
+
+</File>
+
+## Definition
+Optionally specify a custom list of directories where [docs blocks](/docs/build/documentation#docs-blocks) are located.
+
+
+## Default
+
+<VersionBlock firstVersion="1.9">
+
+By default, dbt will search in all resource paths for docs blocks (for example, the combined list of [model-paths](/reference/project-configs/model-paths), [seed-paths](/reference/project-configs/seed-paths), [analysis-paths](/reference/project-configs/analysis-paths), [test-paths](/reference/project-configs/test-paths), [macro-paths](/reference/project-configs/macro-paths), and [snapshot-paths](/reference/project-configs/snapshot-paths)). If this option is configured, dbt will _only_ look in the specified directory for docs blocks.
+
+</VersionBlock>
+
+import RelativePath from '/snippets/_relative-path.md';
+
+<RelativePath 
+path="docs-paths"
+absolute="/Users/username/project/docs"
+/>
+
+- ✅ **Do**
+  - Use relative path:
+    ```yml
+    docs-paths: ["docs"]
+    ```
+
+- ❌ **Don't**
+  - Avoid absolute paths:
+    ```yml
+    docs-paths: ["/Users/username/project/docs"]
+    ```
+
+## Example
+
+Use a subdirectory named `docs` for docs blocks:
+
+<File name='dbt_project.yml'>
+
+```yml
+docs-paths: ["docs"]
+```
+
+</File>
+
+**Note:** We typically omit this configuration as we prefer dbt's default behavior.

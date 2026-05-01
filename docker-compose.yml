@@ -1,0 +1,89 @@
+# Kairix — Docker Compose stack
+#
+# Quick start (no clone needed):
+#   1. Download this file: curl -O https://raw.githubusercontent.com/quanyeomans/kairix/main/docker-compose.yml
+#   2. Download .env example: curl -O https://raw.githubusercontent.com/quanyeomans/kairix/main/.env.example
+#   3. cp .env.example .env && edit .env (add your LLM API key)
+#   4. ln -s /path/to/your/documents ./documents
+#   5. docker compose up -d
+#   6. docker compose exec kairix kairix setup
+#   7. docker compose exec kairix kairix search "your question"
+#
+# Services:
+#   kairix        — MCP server (port 8080) for agent integration + CLI
+#   kairix-worker — background tasks (hourly embed, nightly entity seed)
+#   neo4j         — knowledge graph for people/company/relationship queries
+
+services:
+  kairix:
+    image: ghcr.io/quanyeomans/kairix:latest
+    # To build from source instead: comment out 'image' above and uncomment:
+    # build: .
+    ports:
+      - "8080:8080"  # Change to "9090:8080" if port 8080 is already in use
+    volumes:
+      - ./documents:/data/documents  # Your documents folder → container's document store
+      - kairix-data:/data/kairix
+      # Optional: mount a custom config file (created by kairix setup)
+      # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
+    env_file:
+      - .env
+    environment:
+      - KAIRIX_NEO4J_URI=bolt://neo4j:7687
+      - KAIRIX_NEO4J_USER=neo4j
+      - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kairix", "onboard", "check"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+
+  kairix-worker:
+    image: ghcr.io/quanyeomans/kairix:latest
+    # To build from source instead: comment out 'image' above and uncomment:
+    # build: .
+    command: ["worker"]
+    volumes:
+      - ./documents:/data/documents  # Your documents folder → container's document store
+      - kairix-data:/data/kairix
+      # Optional: mount a custom config file
+      # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
+    env_file:
+      - .env
+    environment:
+      - KAIRIX_NEO4J_URI=bolt://neo4j:7687
+      - KAIRIX_NEO4J_USER=neo4j
+      - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5-community
+    # Pin for production: neo4j:5.24.0-community
+    environment:
+      NEO4J_AUTH: neo4j/${KAIRIX_NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '[]'
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${KAIRIX_NEO4J_PASSWORD} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    # Uncomment to expose Neo4j browser (http://localhost:7474):
+    # ports:
+    #   - "7474:7474"
+    #   - "7687:7687"
+
+volumes:
+  kairix-data:
+  neo4j-data:

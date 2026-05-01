@@ -1,0 +1,32 @@
+## Architecture and Execution Patterns
+
+The architectures of workflows versus agents differ in how the control flow is structured:
+
+* **Workflows architecture:** A workflow is essentially a *directed graph or sequence of LLM calls and tool calls* orchestrated by traditional code. The developer explicitly sequences calls: the output of one step may feed into the next. Common **execution patterns** for workflows include:
+
+  * *Prompt chaining*: breaking a task into a linear series of sub-tasks (calls) with possible checks in between.
+  * *Routing*: using an initial classification to route the input to different specialized prompts or models.
+  * *Parallelization*: splitting a task into independent parts processed in parallel (e.g. multiple LLM instances handling different pieces, or multiple attempts/votes on the same task).
+  * *Orchestrator-worker*: a central coordinator LLM spawns sub-tasks to worker LLMs and then integrates results.
+  * *Evaluator-optimizer loops*: one LLM generates a solution, another evaluates and provides feedback, potentially looping for refinement.
+
+  In all these patterns, the *execution path is predetermined* by the pattern – e.g. the number of iterations or branches is set by code, not decided by the LLM (even if an orchestrator LLM dynamically creates subtask content, the existence of an orchestrator step is fixed by design). Each step usually has a well-defined role or prompt. Importantly, developers can insert error-handling logic or validation steps in the workflow. For example, after a step, the code might check if the LLM’s output meets certain criteria (the “gate” in prompt chaining) and either proceed, retry that step, or exit if the check fails. This explicit control flow makes the architecture **transparent** – you can visualize it as a flowchart, and every path is known.
+
+* **Agents architecture:** An agent’s architecture is more **fluid**. Typically, an agent is implemented as a loop where in each iteration:
+
+  1. The agent (LLM) observes the current state (which includes the user request, any intermediate results or memory of past steps, etc.).
+  2. The agent **decides on an action** – which could be calling a tool (e.g. search, calculator, code executor), or outputting a final answer, or asking a clarifying question, etc.
+  3. If an action is taken (like a tool call), the environment returns a result, which is fed back into the agent’s context for the next step.
+  4. The loop repeats until the agent signals completion or a stop condition triggers.
+
+  The key to this architecture is that the sequence of actions is **not pre-scripted** in code; it’s *decided by the LLM’s logic*. The Anthropic article summarizes that agents are often just “LLMs using tools based on environmental feedback in a loop”. This means the code for an agent might be quite simple (e.g. a `while` loop calling the LLM with the conversation state and tool outputs), but the *emergent behavior* can be complex. The agent’s prompt (sometimes called the policy or system prompt) is crucial – it needs to instruct the LLM to plan, reason, and use tools step-by-step. A common architectural pattern is to include a format where the LLM can output a structured plan or a tool invocation command (e.g. in a special format) which the agent loop interprets. There is often a distinction between the agent’s **planning output** and the **action output**. For example, the agent might internally generate a thought like “I should search for X” and then actually output a JSON or special token to invoke the search tool for X. The architecture must capture these outputs and execute the tools, then append the results into the LLM’s context for the next cycle.
+
+  In terms of **architectural patterns**, agents may employ various strategies internally:
+
+  * **Tool-augmented reasoning:** The agent chooses from a set of tools (search, calculator, code runner, etc.) to gather information or take actions as needed. Designing this tool interface is part of the architecture – each tool is defined with instructions and input/output schema for the agent.
+  * **Self-decomposition:** Instead of a fixed prompt chain given by the developer, an agent can on-the-fly break a problem into subproblems. This is analogous to the orchestrator-worker pattern, but the orchestrator is not a separate hard-coded module – it’s the agent itself deciding to spawn subtasks. For example, facing a complex request, the agent might decide “let’s break this into these 3 questions” and address each, planning this decomposition dynamically.
+  * **Iterative refinement:** An agent can incorporate an inner evaluation loop by itself – e.g. generate a draft solution, then critique it and improve it if not satisfied. Again, unlike a fixed evaluator-optimizer workflow, the agent *chooses* to do this if it deems necessary, based on its prompting.
+
+  Because the agent’s execution pattern is dynamic, its architecture must also include mechanisms for **safety and error handling** that aren’t simply “go to a fixed error branch.” The agent is expected to handle errors as part of its reasoning. For instance, if a tool call fails or returns no useful info, a well-designed agent prompt can encourage the LLM to try an alternative approach or ask the user for guidance. Anthropic points out that today’s more advanced models are capable of **recovering from errors** during autonomous operation – an essential capability for reliable agents. Developers often impose a **limit on agent iterations** (e.g. max number of steps) or specific fail-safes (stop if irrelevant actions repeat, etc.) to avoid infinite loops or degenerate behavior.
+
+In summary, workflow architectures are akin to **orchestrated pipelines** with fixed stages, whereas agent architectures resemble an **event-driven loop** where the next event is decided by the AI. Workflows use clear architectural patterns that can be composed and nested, while agents rely on the LLM’s emergent planning abilities within a simple loop framework. The choice often boils down to whether you can encapsulate the task in a known sequence (favor a workflow) or whether you need an *open loop* that lets the AI figure out the sequence (necessitating an agent).

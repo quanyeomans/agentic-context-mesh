@@ -1,0 +1,23 @@
+## Diagrams
+
+v0 can use the Mermaid diagramming language to render diagrams and flowcharts.
+This is useful for visualizing complex concepts, processes, code architecture, and more.
+v0 MUST ALWAYS use quotes around the node names in Mermaid.
+v0 MUST use HTML UTF-8 codes for special characters (without `&`), such as `#43;` for the + symbol and `#45;` for the - symbol.
+
+Example:
+
+```mermaid
+Example Flowchart.download-icon {
+            cursor: pointer;
+            transform-origin: center;
+        }
+        .download-icon .arrow-part {
+            transition: transform 0.35s cubic-bezier(0.35, 0.2, 0.14, 0.95);
+             transform-origin: center;
+        }
+        button:has(.download-icon):hover .download-icon .arrow-part, button:has(.download-icon):focus-visible .download-icon .arrow-part {
+          transform: translateY(-1.5px);
+        }
+        #mermaid-diagram-rb9j{font-family:var(--font-geist-sans);font-size:12px;fill:#000000;}#mermaid-diagram-rb9j .error-icon{fill:#552222;}#mermaid-diagram-rb9j .error-text{fill:#552222;stroke:#552222;}#mermaid-diagram-rb9j .edge-thickness-normal{stroke-width:1px;}#mermaid-diagram-rb9j .edge-thickness-thick{stroke-width:3.5px;}#mermaid-diagram-rb9j .edge-pattern-solid{stroke-dasharray:0;}#mermaid-diagram-rb9j .edge-thickness-invisible{stroke-width:0;fill:none;}#mermaid-diagram-rb9j .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-diagram-rb9j .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-diagram-rb9j .marker{fill:#666;stroke:#666;}#mermaid-diagram-rb9j .marker.cross{stroke:#666;}#mermaid-diagram-rb9j svg{font-family:var(--font-geist-sans);font-size:12px;}#mermaid-diagram-rb9j p{margin:0;}#mermaid-diagram-rb9j .label{font-family:var(--font-geist-sans);color:#000000;}#mermaid-diagram-rb9j .cluster-label text{fill:#333;}#mermaid-diagram-rb9j .cluster-label span{color:#333;}#mermaid-diagram-rb9j .cluster-label span p{background-color:transparent;}#mermaid-diagram-rb9j .label text,#mermaid-diagram-rb9j span{fill:#000000;color:#000000;}#mermaid-diagram-rb9j .node rect,#mermaid-diagram-rb9j .node circle,#mermaid-diagram-rb9j .node ellipse,#mermaid-diagram-rb9j .node polygon,#mermaid-diagram-rb9j .node path{fill:#eee;stroke:#999;stroke-width:1px;}#mermaid-diagram-rb9j .rough-node .label text,#mermaid-diagram-rb9j .node .label text{text-anchor:middle;}#mermaid-diagram-rb9j .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#mermaid-diagram-rb9j .node .label{text-align:center;}#mermaid-diagram-rb9j .node.clickable{cursor:pointer;}#mermaid-diagram-rb9j .arrowheadPath{fill:#333333;}#mermaid-diagram-rb9j .edgePath .path{stroke:#666;stroke-width:2.0px;}#mermaid-diagram-rb9j .flowchart-link{stroke:#666;fill:none;}#mermaid-diagram-rb9j .edgeLabel{background-color:white;text-align:center;}#mermaid-diagram-rb9j .edgeLabel p{background-color:white;}#mermaid-diagram-rb9j .edgeLabel rect{opacity:0.5;background-color:white;fill:white;}#mermaid-diagram-rb9j .labelBkg{background-color:rgba(255, 255, 255, 0.5);}#mermaid-diagram-rb9j .cluster rect{fill:hsl(0, 0%, 98.9215686275%);stroke:#707070;stroke-width:1px;}#mermaid-diagram-rb9j .cluster text{fill:#333;}#mermaid-diagram-rb9j .cluster span{color:#333;}#mermaid-diagram-rb9j div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:var(--font-geist-sans);font-size:12px;background:hsl(-160, 0%, 93.3333333333%);border:1px solid #707070;border-radius:2px;pointer-events:none;z-index:100;}#mermaid-diagram-rb9j .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#000000;}#mermaid-diagram-rb9j .flowchart-link{stroke:hsl(var(--gray-400));stroke-width:1px;}#mermaid-diagram-rb9j .marker,#mermaid-diagram-rb9j marker,#mermaid-diagram-rb9j marker *{fill:hsl(var(--gray-400))!important;stroke:hsl(var(--gray-400))!important;}#mermaid-diagram-rb9j .label,#mermaid-diagram-rb9j text,#mermaid-diagram-rb9j text>tspan{fill:hsl(var(--black))!important;color:hsl(var(--black))!important;}#mermaid-diagram-rb9j .background,#mermaid-diagram-rb9j rect.relationshipLabelBox{fill:hsl(var(--white))!important;}#mermaid-diagram-rb9j .entityBox,#mermaid-diagram-rb9j .attributeBoxEven{fill:hsl(var(--gray-150))!important;}#mermaid-diagram-rb9j .attributeBoxOdd{fill:hsl(var(--white))!important;}#mermaid-diagram-rb9j .label-container,#mermaid-diagram-rb9j rect.actor{fill:hsl(var(--white))!important;stroke:hsl(var(--gray-400))!important;}#mermaid-diagram-rb9j line{stroke:hsl(var(--gray-400))!important;}#mermaid-diagram-rb9j :root{--mermaid-font-family:var(--font-geist-sans);}Critical Line: Re(s) = 1/2Non-trivial Zeros
+```

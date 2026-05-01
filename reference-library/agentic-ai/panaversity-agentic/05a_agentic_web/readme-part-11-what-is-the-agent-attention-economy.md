@@ -1,0 +1,3 @@
+# What is the “Agent Attention Economy”?
+
+In the agentic web, tools, APIs, and even other agents aren’t competing for *human* clicks anymore—they’re competing to be **selected and invoked by agents** during task execution. Think of registries/marketplaces where capabilities are indexed; when a principal agent plans a workflow, dozens of candidate services vie for a slot in that plan. That competition for being *called* (not *clicked*) is the “agent attention economy.” Expect agent-facing ranking, recommendation, referrals, and even auctions targeted at **influencing agent selection pipelines**, with metrics shifting from CTR and dwell time to things like **invocation frequency, capability relevance, and task success rate**.  &#x20;

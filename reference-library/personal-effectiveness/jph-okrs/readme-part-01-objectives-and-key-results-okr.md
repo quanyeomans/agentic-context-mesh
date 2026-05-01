@@ -1,0 +1,40 @@
+# Objectives and Key Results (OKR)
+
+
+Contents:
+- [What is OKR?](#what-is-okr)
+- [What is an objective?](#what-is-an-objective)
+  - [Example objectives](#example-objectives)
+- [What is a key result?](#what-is-a-key-result)
+  - [Example key results](#example-key-results)
+- [OKR purpose](#okr-purpose)
+- [OKR systems](#okr-systems)
+- [OKR quotations](#okr-quotations)
+  - [OKR quotations by Andy Grove](#okr-quotations-by-andy-grove)
+  - [OKR quotations by John Doerr](#okr-quotations-by-john-doerr)
+- [FAQ](#faq)
+  - [Are OKRs heavyweight or lightweight?](#are-okrs-heavyweight-or-lightweight)
+  - [How long should I spend writing OKRs?](#how-long-should-i-spend-writing-okrs)
+  - [How does OKR compare to other communication approaches?](#how-does-okr-compare-to-other-communication-approaches)
+  - [How does OKR compare to email or chat?](#how-does-okr-compare-to-email-or-chat)
+  - [How does OKR compare to task lists or work boards?](#how-does-okr-compare-to-task-lists-or-work-boards)
+  - [Can you do OKRs for capabilities that are all-or-nothing?](#can-you-do-okrs-for-capabilities-that-are-all-or-nothing)
+  - [Should measurements and times be explicit or implicit?](#should-measurements-and-times-be-explicit-or-implicit)
+  - [Are OKRs transparent?](#are-okrs-transparent)
+- [Comments](#comments)
+  - [Strategy vs. objectives](#strategy-vs-objectives)
+  - [Pros](#pros)
+  - [Mixed](#mixed)
+  - [Cons](#cons)
+  - [Alternatives](#alternatives)
+- [For more information](#for-more-information)
+
+Examples:
+* [OKR examples by SixArm](examples/okrs-by-sixarm/index.md)
+* [OKR examples by Google](examples/okrs-by-google/index.md)
+* [OKR examples by Attim](examples/okrs-by-atiim/index.md)
+* [OKR examples by Clickup](examples/okrs-by-clickup/index.md)
+
+Articles:
+* [Pre-work for setting OKRs by Eleganthack](articles/pre-work-for-setting-okrs-by-eleganthack/)
+* [OKRs are not equal to strategy by Ant Murphy](articles/okrs-are-not-equal-to-strategy-by-ant-murphy/)

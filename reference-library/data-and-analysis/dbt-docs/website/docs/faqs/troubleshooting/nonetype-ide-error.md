@@ -1,0 +1,24 @@
+---
+title: "I'm receiving a NoneType object has no attribute error in the IDE?"
+source: dbt Core Documentation
+source_url: https://github.com/dbt-labs/docs.getdbt.com
+licence: Apache-2.0
+domain: data-and-analysis
+subdomain: dbt-docs
+date_added: 2026-04-25
+---
+
+If you're unable to access the <Constant name="studio_ide" /> due to the below error message, we'll do our best to get you unstuck with the below steps!
+
+```shell
+NoneType object has no attribute 
+enumerate_fields'
+```
+
+Usually this error indicates that you tried connecting your database via [SSH tunnel](/docs/cloud/connect-data-platform/connect-redshift#connecting-using-an-ssh-tunnel). If you're seeing this error, double-check you have supplied the following items:
+
+- the hostname
+- username
+- port of bastion server
+
+If you've tried the step above and are still experiencing this behavior - reach out to the Support team at support@getdbt.com and we'll be happy to help!

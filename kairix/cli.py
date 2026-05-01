@@ -1,0 +1,140 @@
+"""
+kairix — private knowledge retrieval for AI agents and teams.
+
+Subcommands:
+  embed       Embed documents into the kairix vector index
+  search      Hybrid search: BM25 + vector via RRF
+  entity      Entity management: suggest (NER), validate (Wikidata)
+  curator     Curator agent: entity health monitoring and enrichment (CA-1)
+  contradict  Contradiction detection: check new content against existing knowledge
+  store       Document store operations: crawl entities into Neo4j, health check
+  mcp         MCP server: expose search/entity/prep/timeline as MCP tools
+  onboard     Deployment diagnostics and agent onboarding (check, guide, verify)
+  timeline    Temporal query rewriting + date-aware retrieval
+  summarise   L0/L1 tiered context generation
+  classify    Auto-classify memory writes
+  brief       Session briefing synthesis
+  benchmark   Run retrieval quality benchmark
+  wikilinks   Inject [[wikilinks]] on first mention in agent-written document store files
+  reference-library  Reference library: install entities, check status, run extraction
+
+See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
+"""
+
+import sys
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
+    if cmd in ("--version", "-V", "version"):
+        from kairix import __version__
+
+        print(f"kairix {__version__}")
+        sys.exit(0)
+
+    elif cmd in ("--help", "-h"):
+        print(__doc__)
+        sys.exit(0)
+
+    elif cmd == "embed":
+        from kairix.core.embed.cli import main as embed_main
+
+        embed_main()
+
+    elif cmd == "entity":
+        from kairix.knowledge.entities.cli import main as entity_main
+
+        sys.exit(entity_main(sys.argv[2:]))
+
+    elif cmd == "curator":
+        from kairix.agents.curator.cli import main as curator_main
+
+        curator_main(sys.argv[2:])
+
+    elif cmd == "search":
+        from kairix.core.search.cli import main as search_main
+
+        search_main(sys.argv[2:])
+
+    elif cmd == "benchmark":
+        from kairix.quality.benchmark.cli import main as benchmark_main
+
+        benchmark_main(sys.argv[2:])
+
+    elif cmd == "summarise":
+        from kairix.knowledge.summaries.cli import main as summarise_main
+
+        summarise_main(sys.argv[2:])
+
+    elif cmd == "timeline":
+        from kairix.core.temporal.cli import main as timeline_main
+
+        timeline_main(sys.argv[2:])
+
+    elif cmd == "wikilinks":
+        from kairix.knowledge.wikilinks.cli import main as wikilinks_main
+
+        wikilinks_main(sys.argv[2:])
+
+    elif cmd == "classify":
+        from kairix.core.classify.cli import main as classify_main
+
+        classify_main(sys.argv[2:])
+
+    elif cmd == "brief":
+        from kairix.agents.briefing.cli import main as brief_main
+
+        brief_main(sys.argv[2:])
+
+    elif cmd == "contradict":
+        from kairix.knowledge.contradict.cli import main as contradict_main
+
+        contradict_main(sys.argv[2:])
+
+    elif cmd in ("store", "vault"):
+        from kairix.knowledge.store.cli import main as store_main
+
+        store_main(sys.argv[2:])
+
+    elif cmd == "mcp":
+        from kairix.agents.mcp.cli import main as mcp_main
+
+        mcp_main(sys.argv[2:])
+
+    elif cmd == "onboard":
+        from kairix.platform.onboard.cli import main as onboard_main
+
+        onboard_main(sys.argv[2:])
+
+    elif cmd == "eval":
+        from kairix.quality.eval.cli import main as eval_main
+
+        eval_main(sys.argv[2:])
+
+    elif cmd == "reference-library":
+        from kairix.knowledge.reflib.cli import main as reflib_main
+
+        reflib_main(sys.argv[2:])
+
+    elif cmd == "setup":
+        from kairix.platform.setup.cli import main as setup_main
+
+        setup_main(sys.argv[2:])
+
+    elif cmd == "worker":
+        from kairix.worker import main as worker_main
+
+        worker_main()
+
+    else:
+        print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

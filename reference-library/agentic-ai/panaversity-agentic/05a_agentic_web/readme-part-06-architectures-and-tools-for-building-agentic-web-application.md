@@ -1,0 +1,21 @@
+## Architectures and Tools for Building Agentic Web Applications
+
+With the concepts in place, let’s discuss how you can **implement** agentic web solutions as a developer. This involves choosing the right architecture for multi-agent systems, leveraging existing frameworks, and understanding the tooling available.
+
+**Multi-Agent Architectures:** A common design pattern in Agentic Web systems is to have a hierarchy or team of specialized agents orchestrated to handle complex tasks. A concrete example is the *AgentMaster* framework (Liao et al., 2025), which implemented a conversational multi-agent system using A2A and MCP. In AgentMaster’s architecture:
+
+* There is an **Orchestrator Agent** that receives the user’s request and decomposes it into subtasks, assigning each to the appropriate specialist agent.
+* **Domain Agents** are specialized (e.g., one for information retrieval, one for database queries, one for image analysis, etc.). They focus on a part of the task and may use tools via MCP. For instance, a “Math Tutor” agent could be a domain agent that knows how to use a math engine tool.
+* **General Agents** cover tasks that don’t fit a specialty – they are paired with general LLMs to handle open-ended reasoning or glue tasks.
+* All agents communicate through A2A messages in natural language (under the hood JSON), coordinated by the orchestrator. The orchestrator ensures they share context and work towards the common goal. A state management layer (like a shared memory or vector database) often supports longer context and tool results storage.
+
+The takeaway for developers: **consider structuring your agentic application as multiple cooperating agents rather than one monolithic agent**. This aligns with the microservices philosophy, but for AI behaviors. For an educational scenario, you might have:
+
+* A “Lesson Planner” agent,
+* A “Quiz Generator” agent,
+* A “Student Interaction” agent (chatbot interface),
+* All overseen by a coordinator that breaks a high-level request (e.g., “Teach me calculus basics”) into tasks like “plan syllabus”, “deliver lesson 1”, “ask quiz”, etc., and assigns those to the appropriate agent. Such modular design can make the system more robust and extensible (you can upgrade one agent’s model without affecting others, or add a new agent for a new feature).
+
+**Tool Integrations and Context:** For educational applications, integrating domain-specific tools will be very valuable. Think of an agent that can: query a **library database** for research papers, use a **calculator or algebra system** for solving equations, fetch **interactive simulations** for science experiments, etc. Using MCP, you can plug these in fairly easily if MCP connectors exist or you build one. For instance, Anthropic’s MCP repository might already have something like a Wikipedia or ArXiv plugin that an academic agent could leverage. If not, you can write an MCP server wrapper around an API (e.g., an open education resource) so any agent can utilize it. This modular approach means your tutoring agent can gain new abilities just by adding tools, without retraining its core AI. It also means if a tool updates (say a new version of a math solver), as long as the MCP interface remains consistent, your agent doesn’t need internal changes.
+
+**Safety and Control:** In building agentic systems, especially for education, you should design for safety from the start. Agents acting autonomously can raise concerns: giving wrong answers, accessing inappropriate content, or performing actions that users didn’t intend. Make use of **guardrails** – for example, define constraints in the agent’s prompting or use a framework like OpenAI Agents SDK Guardrails (which can set policy rules for LLM agent behavior). Ensure there are **checkpoints for human oversight** if needed. For instance, an agent generating a curriculum might submit it for teacher approval before distributing to students. The Agentic Web doesn’t remove humans from the loop entirely; rather it optimizes our involvement. Especially in education, alignment with human values (no bias, age-appropriate responses, etc.) is paramount.

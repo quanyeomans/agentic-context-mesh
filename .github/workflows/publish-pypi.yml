@@ -1,0 +1,62 @@
+# Publish kairix to PyPI when a GitHub Release is created.
+#
+# Trigger: GitHub Release creation (not tag push — gives you control over release notes)
+# Requires: PyPI trusted publisher configured for this repo + "release" environment.
+# Setup: https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/
+#
+# Version is derived from the git tag via setuptools-scm — no manual version editing.
+
+name: Publish to PyPI
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    name: Build package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # setuptools-scm needs full history
+
+      - uses: hynek/build-and-inspect-python-package@v2
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Packages
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  verify:
+    name: Verify install
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Wait for PyPI propagation
+        run: sleep 60
+
+      - name: Install and smoke test
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          pip install "kairix==${VERSION}"
+          python -c "import kairix; print(f'kairix {kairix.__version__} installed successfully')"
+          kairix --version

@@ -1,0 +1,5 @@
+# Why micropayments matter
+
+Once agents select each other’s services on the fly, you need **fine-grained, usage-based billing** (per tool call, per token, per minute of GPU, etc.). Traditional subscriptions don’t map well to multi-agent, long-running workflows where costs sprawl across sub-agents and third-party APIs. The research flags this as a core open problem: you need **resource metering, cross-agent accounting, and auditable attribution** from the user’s top-level intent down to every delegated step—otherwise the economics fall apart. &#x20;
+
+Concretely, future stacks will likely include primitives like **resource metering** and a **Cross-Agent Billing Ledger (CABL)** to settle per-invocation fees, royalties, or chained services. (These appear in proposed “Agentic Web Roadmap” components.)&#x20;
