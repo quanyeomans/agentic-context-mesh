@@ -214,10 +214,10 @@ def summaries_db_path() -> Path:
 def agent_memory_path(agent: str) -> Path:
     """Get the memory directory for an agent.
 
+    Default: {document_root}/04-Agent-Knowledge/{agent}/memory
     Override with KAIRIX_AGENT_MEMORY_ROOT env var for custom layouts.
-    Default: {workspace_root}/{agent}/memory
     """
     override = os.environ.get("KAIRIX_AGENT_MEMORY_ROOT")
     if override:
         return Path(override) / agent / "memory"
-    return workspace_root() / agent / "memory"
+    return document_root() / "04-Agent-Knowledge" / agent / "memory"

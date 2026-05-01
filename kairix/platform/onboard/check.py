@@ -361,32 +361,31 @@ def check_neo4j_reachable() -> CheckResult:
 
 def check_agent_knowledge_populated() -> CheckResult:
     """At least one agent has memory logs (required for briefing pipeline)."""
-    workspace_root = os.environ.get("KAIRIX_WORKSPACE_ROOT", str(Path.home() / ".kairix" / "workspaces"))
-    p = Path(workspace_root)
-    if not p.exists():
+    from kairix.paths import document_root
+
+    agent_knowledge = document_root() / "04-Agent-Knowledge"
+    if not agent_knowledge.exists():
         return CheckResult(
             name="agent_knowledge_populated",
             ok=False,
-            detail=f"Workspace root not found: {workspace_root}",
+            detail=f"Agent knowledge directory not found: {agent_knowledge}",
             fix=(
-                f"Create workspace directories:\n"
-                f"  sudo mkdir -p {workspace_root}/<agent-name>/memory\n"
-                f"  sudo chown -R $(whoami) {workspace_root}\n"
-                f"Or set KAIRIX_WORKSPACE_ROOT in /opt/kairix/service.env."
+                f"Create the directory:\n"
+                f"  mkdir -p {agent_knowledge}/<agent-name>/memory\n"
+                f"Agents write daily memory logs here during sessions."
             ),
         )
 
     # Look for any memory log files
-    memory_files = list(p.rglob("*/memory/*.md"))
+    memory_files = list(agent_knowledge.rglob("*/memory/*.md"))
     if not memory_files:
         return CheckResult(
             name="agent_knowledge_populated",
             ok=False,
-            detail=f"No agent memory logs found under {workspace_root}",
+            detail=f"No agent memory logs found under {agent_knowledge}",
             fix=(
                 "Agent memory logs are written by agents during sessions.\n"
-                "Expected path pattern: {workspace_root}/{agent}/memory/YYYY-MM-DD.md\n"
-                "This is informational — search works without memory logs.\n"
+                f"Expected path: {agent_knowledge}/<agent>/memory/YYYY-MM-DD.md\n"
                 "Briefing synthesis (kairix brief) requires at least some memory content."
             ),
         )
@@ -394,7 +393,7 @@ def check_agent_knowledge_populated() -> CheckResult:
     return CheckResult(
         name="agent_knowledge_populated",
         ok=True,
-        detail=f"Agent memory logs found: {len(memory_files)} files under {workspace_root}",
+        detail=f"Agent memory logs found: {len(memory_files)} files under {agent_knowledge}",
     )
 
 
