@@ -401,7 +401,7 @@ def test_hit_at_k_true_when_relevant_in_top_k() -> None:
 @pytest.mark.unit
 def test_hit_at_k_false_when_outside_k() -> None:
     gold = [{"path": "a.md", "relevance": 2}]
-    retrieved = ["x.md"] * 5 + ["a.md"]
+    retrieved = ["x1.md", "x2.md", "x3.md", "x4.md", "x5.md", "a.md"]
     assert _hit_at_k(retrieved, gold, k=5) is False
 
 

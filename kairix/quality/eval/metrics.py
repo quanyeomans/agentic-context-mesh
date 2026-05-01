@@ -124,6 +124,7 @@ def ndcg_score(retrieved_paths: list[str], gold_paths: list[str], k: int = 10) -
     """NDCG@k with binary relevance (all gold paths equally relevant)."""
     if not gold_paths:
         return 0.0
+    retrieved_paths = list(dict.fromkeys(retrieved_paths))  # dedup, preserve order
     gold_set = {p.lower().replace("\\", "/") for p in gold_paths}
     relevances = [1.0 if p.lower().replace("\\", "/") in gold_set else 0.0 for p in retrieved_paths[:k]]
     ideal_rel = [1.0] * min(len(gold_paths), k)
@@ -164,6 +165,7 @@ def ndcg_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
     """NDCG@k with graded relevance. Supports title-based and path-based gold entries."""
     if not gold:
         return 0.0
+    retrieved = list(dict.fromkeys(retrieved))  # dedup, preserve order
     idcg = ideal_dcg_graded(gold, k)
     if idcg == 0.0:
         return 0.0
@@ -173,11 +175,13 @@ def ndcg_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
 
 def hit_at_k_graded(retrieved: list[str], gold: list[dict], k: int = 5) -> bool:
     """True if any gold entry (relevance >= 1) appears in top-k retrieved."""
+    retrieved = list(dict.fromkeys(retrieved))  # dedup, preserve order
     return any(_gold_matches_any(gold, p) for p in retrieved[:k])
 
 
 def reciprocal_rank_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
     """Reciprocal rank of first relevant gold entry in top-k (0.0 if none)."""
+    retrieved = list(dict.fromkeys(retrieved))  # dedup, preserve order
     for i, p in enumerate(retrieved[:k]):
         if _gold_matches_any(gold, p):
             return 1.0 / (i + 1)

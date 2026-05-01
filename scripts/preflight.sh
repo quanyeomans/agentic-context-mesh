@@ -26,9 +26,9 @@ ruff check kairix/ tests/ --quiet && pass "ruff lint" || fail "ruff lint — run
 # 2. Ruff format
 ruff format --check kairix/ tests/ >/dev/null 2>&1 && pass "ruff format" || fail "ruff format — run: ruff format kairix/ tests/"
 
-# 3. Unit tests
-TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 -m unit 2>&1)
-echo "$TEST_OUT" | grep -qE "[0-9]+ passed" && ! echo "$TEST_OUT" | grep -qE "[0-9]+ failed" && pass "unit tests ($(echo "$TEST_OUT" | grep -oE '[0-9]+ passed'))" || fail "unit tests — run: pytest tests/ -x -m unit"
+# 3. Unit + BDD tests
+TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 -m "unit or bdd" 2>&1)
+echo "$TEST_OUT" | grep -qE "[0-9]+ passed" && ! echo "$TEST_OUT" | grep -qE "[0-9]+ failed" && pass "unit + bdd tests ($(echo "$TEST_OUT" | grep -oE '[0-9]+ passed'))" || fail "unit + bdd tests — run: pytest tests/ -x -m 'unit or bdd'"
 
 # 4. Secret detection (skip in quick mode)
 if [[ "$QUICK" == "false" ]]; then
