@@ -1,4 +1,4 @@
-"""kairix — Self-contained knowledge retrieval engine."""
+"""kairix — Shared knowledge layer for human-agent teams."""
 
 try:
     from importlib.metadata import version
