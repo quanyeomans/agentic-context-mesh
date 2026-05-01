@@ -40,6 +40,17 @@ _DEFAULT_EMBED_DEPLOYMENT = "text-embedding-3-large"
 _EMBED_TIMEOUT_S = 30
 
 
+def _resolve_secret(secret_name: str) -> str | None:
+    """Resolve a single secret, returning None on any failure. Never raises or logs values."""
+    try:
+        from kairix.secrets import get_secret
+
+        return get_secret(secret_name, required=False) or None
+    except Exception:
+        logger.warning("_azure: failed to resolve a required credential")
+        return None
+
+
 @lru_cache(maxsize=1)
 def _get_secrets() -> dict[str, str]:
     """
