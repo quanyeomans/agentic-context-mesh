@@ -36,6 +36,12 @@ from kairix.text import estimate_tokens
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+DEFAULT_SCOPE = "shared+agent"
+
+# ---------------------------------------------------------------------------
 # Budget inference + entity name extraction (AFF-1, AFF-3)
 # ---------------------------------------------------------------------------
 
@@ -146,7 +152,7 @@ def _fetch_entity_card(name: str) -> dict | None:
 def tool_search(
     query: str,
     agent: str | None = None,
-    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
+    scope: Literal["shared", "agent", "shared+agent"] = DEFAULT_SCOPE,
     budget: int = 3000,
 ) -> dict[str, Any]:
     """Search for anything in the knowledge base.
@@ -261,7 +267,7 @@ def tool_prep(
 
         # Retrieve context first — prep is grounded, not hallucinated
         budget = 1500 if tier == "l0" else 3000
-        sr = hybrid_search(query, agent=agent, scope="shared+agent", budget=budget)
+        sr = hybrid_search(query, agent=agent, scope=DEFAULT_SCOPE, budget=budget)
         context_parts = []
         for r in sr.results[:5]:
             context_parts.append(f"[{r.result.title or r.result.path}]\n{r.content[:500]}")
@@ -558,7 +564,7 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
     def search(
         query: str,
         agent: str | None = None,
-        scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
+        scope: Literal["shared", "agent", "shared+agent"] = DEFAULT_SCOPE,
         budget: int = 3000,
     ) -> dict[str, Any]:
         """Search your knowledge store — finds the best answers to any question."""

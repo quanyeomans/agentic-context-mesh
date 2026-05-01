@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 STALENESS_THRESHOLD_DAYS = 90
 
+_NO_ISSUES_LINE = "✅ None."
+
 _ENTITY_LABELS = ("Organisation", "Person", "Outcome", "Concept", "Project", "Framework", "Technology", "Publication")
 
 
@@ -231,7 +233,7 @@ def format_report_text(report: HealthReport) -> str:
         for issue in report.synthesis_failures:
             lines.append(f"- ⚠ `{issue.entity_id}` ({issue.entity_type}) — {issue.detail}")
     else:
-        lines.append("✅ None.")
+        lines.append(_NO_ISSUES_LINE)
 
     lines += [
         "",
@@ -242,7 +244,7 @@ def format_report_text(report: HealthReport) -> str:
         for issue in report.stale_entities:
             lines.append(f"- ⚠ `{issue.entity_id}` ({issue.entity_type}) — {issue.detail}")
     else:
-        lines.append("✅ None.")
+        lines.append(_NO_ISSUES_LINE)
 
     lines += [
         "",
@@ -253,7 +255,7 @@ def format_report_text(report: HealthReport) -> str:
         for issue in report.missing_vault_path:
             lines.append(f"- ⚠ `{issue.entity_id}` ({issue.entity_type}) — {issue.detail}")
     else:
-        lines.append("✅ None.")
+        lines.append(_NO_ISSUES_LINE)
 
     lines += [
         "",
