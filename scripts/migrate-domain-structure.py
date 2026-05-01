@@ -102,6 +102,8 @@ def rewrite_imports_in_file(filepath: Path, dry_run: bool = False) -> list[str]:
                 new_content = updated
 
     if changes and not dry_run:
+        if not filepath.resolve().is_relative_to(REPO_ROOT.resolve()):
+            return []
         filepath.write_text(new_content, encoding="utf-8")
 
     return changes

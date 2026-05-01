@@ -204,7 +204,7 @@ def stage_embedding(
     content_hash: str,
     seq: int,
     pos: int,
-    vector: list[float],
+    _vector: list[float],
     model: str,
     embedded_at: int,
     chunk_date: str | None = None,
@@ -353,7 +353,7 @@ def run_embed(
         logger.info("Nothing to embed — index is up to date.")
         return {"embedded": 0, "skipped": 0, "failed": 0, "duration_s": 0, "estimated_cost_usd": 0.0}
 
-    logger.info(f"Embedding {total} chunks across {len(rows)} documents (batch_size={batch_size})")
+    logger.info("Embedding %d chunks across %d documents (batch_size=%d)", total, len(rows), batch_size)
 
     embedded = 0
     failed_chunks = []
@@ -430,7 +430,7 @@ def run_embed(
 
     if failed_chunks:
         failed_paths = list({c["path"] for c in failed_chunks})[:10]
-        logger.warning(f"{len(failed_chunks)} chunks failed. Affected paths (sample): {failed_paths}")
+        logger.warning("%d chunks failed. Affected paths (sample): %s", len(failed_chunks), [str(p)[:200] for p in failed_paths])
 
     # Count how many chunks have chunk_date populated (for diagnostics / ERR-001 guard)
     chunk_date_count = sum(1 for c in all_chunks if c.get("chunk_date"))

@@ -107,7 +107,7 @@ def chunk_contact(contact: dict[str, Any]) -> list[dict[str, Any]]:
     interactions: list[dict[str, Any]] = contact.get("interactions") or []
 
     if not contact_name:
-        logger.warning("chunk_contact: contact missing contact_name — skipping (%s)", contact)
+        logger.warning("chunk_contact: contact missing contact_name — skipping (keys: %s)", list(contact.keys())[:10])
         return []
 
     chunks: list[dict[str, Any]] = []
