@@ -8,10 +8,11 @@ SECRETS_DIR="${KAIRIX_SECRETS_DIR:-/run/secrets}"
 REFRESH="${REFRESH_INTERVAL_SECONDS:-28800}"
 
 fetch_and_write() {
-    local tmpfile
+    local tmpfile kv_name_local
+    kv_name_local="$KV_NAME"
     tmpfile=$(mktemp "${SECRETS_DIR}/.secrets.XXXXXX")
     chmod 600 "$tmpfile"
-    _fetch() { az keyvault secret show --vault-name "$KV_NAME" --name "$1" --query value -o tsv 2>/dev/null || echo ""; }
+    _fetch() { az keyvault secret show --vault-name "$kv_name_local" --name "$1" --query value -o tsv 2>/dev/null || echo ""; }
     {
         echo "KAIRIX_LLM_API_KEY=$(_fetch kairix-llm-api-key)"
         echo "KAIRIX_LLM_ENDPOINT=$(_fetch kairix-llm-endpoint)"

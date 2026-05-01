@@ -2,12 +2,12 @@
 set -e
 
 # Load secrets if available (Docker secrets or sidecar pattern)
-if [ -f /run/secrets/kairix.env ]; then
+if [[ -f /run/secrets/kairix.env ]]; then
     set -a && . /run/secrets/kairix.env && set +a
 fi
 
 # Load .env if mounted (Docker Compose env_file alternative)
-if [ -f /opt/kairix/.env ]; then
+if [[ -f /opt/kairix/.env ]]; then
     set -a && . /opt/kairix/.env && set +a
 fi
 

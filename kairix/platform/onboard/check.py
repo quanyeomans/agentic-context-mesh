@@ -543,7 +543,7 @@ def _probe_openclaw_harness() -> tuple[bool, str]:
         )
         if _MCP_KAIRIX_SERVER_NAME in result.stdout:
             return True, "OpenClaw: registered (via 'openclaw mcp list')"
-    except (FileNotFoundError, Exception):  # noqa: S110 — expected when openclaw not installed
+    except Exception:  # noqa: S110 — expected when openclaw not installed
         pass
 
     return False, "OpenClaw: not detected"
@@ -598,7 +598,7 @@ def _probe_sse_harness() -> tuple[bool, str]:
             )
         elif state not in ("", "inactive", "failed", "unknown"):
             return False, f"SSE/HTTP: kairix-mcp.service state={state}"
-    except (FileNotFoundError, Exception):  # noqa: S110 — expected when systemctl not available
+    except Exception:  # noqa: S110 — expected when systemctl not available
         pass
 
     return False, f"SSE/HTTP: not listening on port {_MCP_SSE_PORT}"

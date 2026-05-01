@@ -122,7 +122,7 @@ class Neo4jClient:
             self.available = True
             logger.info("Neo4jClient: connected to %s", self._uri)
             self._init_constraints()
-        except (OSError, RuntimeError, Exception) as e:  # broad: neo4j raises diverse types on connect fail
+        except Exception as e:  # broad: neo4j raises diverse types on connect fail
             logger.warning("Neo4jClient: connection failed — %s", e)
             self._driver = None
 

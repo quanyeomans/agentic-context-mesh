@@ -100,9 +100,7 @@ _FILE_PATH_RE = re.compile(r"[/\\][a-zA-Z0-9_.\-]+[/\\][a-zA-Z0-9_.\-/\\]+")
 _VERSION_RE = re.compile(r"\bv?\d+\.\d+(\.\d+)?\b")
 
 # Error code — HTTP codes (4xx/5xx), exception names, ALLCAPS codes, hexadecimal
-_ERROR_CODE_RE = re.compile(
-    r"\b([A-Z]{2,}Error|[A-Z]{2,}Exception|[45]\d{2}|0x[0-9a-fA-F]+|[A-Z]{3,}[-_][A-Z0-9]{2,})\b"
-)
+_ERROR_CODE_RE = re.compile(r"\b([A-Z]{2,}(?:Error|Exception)|[45]\d{2}|0x[0-9a-fA-F]+|[A-Z]{3,}[-_][A-Z0-9]{2,})\b")
 
 # Title Case heuristic: 2+ consecutive capitalised words, none of which are
 # common prepositions or stopwords that appear in natural language headings.
