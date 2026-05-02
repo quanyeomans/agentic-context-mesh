@@ -10,6 +10,7 @@ import yaml
 from kairix.quality.eval.gold_builder import (
     GoldBuildReport,
     PooledCandidate,
+    _path_title,
     grade_candidates,
     pool_candidates,
 )
@@ -86,7 +87,8 @@ class TestGradeCandidates:
     @patch("kairix.quality.eval.gold_builder.judge_batch")
     def test_grades_assigned(self, mock_judge):
         mock_result = MagicMock()
-        mock_result.grades = {"doc1": 2, "doc2": 1}
+        # Keys are _path_title() output: "/path/doc1.md" → "path/doc1"
+        mock_result.grades = {"path/doc1": 2, "path/doc2": 1}
         mock_judge.return_value = mock_result
 
         candidates = [
@@ -108,9 +110,9 @@ class TestGradeCandidates:
             call_count[0] += 1
             mock_result = MagicMock()
             if call_count[0] == 1:
-                mock_result.grades = {"doc1": 2}
+                mock_result.grades = {"path/doc1": 2}
             else:
-                mock_result.grades = {"doc1": 1}
+                mock_result.grades = {"path/doc1": 1}
             return mock_result
 
         mock_judge.side_effect = side_effect
@@ -138,9 +140,9 @@ class TestGradeCandidates:
             call_count[0] += 1
             mock_result = MagicMock()
             if call_count[0] <= 2:
-                mock_result.grades = {"doc1": 2}
+                mock_result.grades = {"path/doc1": 2}
             else:
-                mock_result.grades = {"doc1": 0}
+                mock_result.grades = {"path/doc1": 0}
             return mock_result
 
         mock_judge.side_effect = side_effect
@@ -238,3 +240,164 @@ class TestBuildIndependentGold:
         report = GoldBuildReport()
         assert report.queries_processed == 0
         assert report.grade_distribution == {0: 0, 1: 0, 2: 0}
+
+
+# ---------------------------------------------------------------------------
+# _path_title uniqueness (Bug 1)
+# ---------------------------------------------------------------------------
+
+
+class TestPathTitle:
+    @pytest.mark.unit
+    def test_path_title_unique_for_readme_files(self):
+        """Two readme.md files in different directories produce different titles."""
+        t1 = _path_title("reference-library/engineering/adr-examples/readme.md")
+        t2 = _path_title("reference-library/data-and-analysis/dbt-docs/readme.md")
+        assert t1 != t2
+
+    @pytest.mark.unit
+    def test_path_title_deep_path(self):
+        """Deep paths preserve enough context to be unique."""
+        t = _path_title("reference-library/agentic-ai/panaversity-agentic/03_ai_protocols/01_mcp/readme.md")
+        assert "01_mcp" in t
+        assert "readme" in t
+
+    @pytest.mark.unit
+    def test_path_title_short_path(self):
+        """A short path (2 segments) returns all segments minus extension."""
+        t = _path_title("collection/doc.md")
+        assert t == "collection/doc"
+
+    @pytest.mark.unit
+    def test_path_title_single_segment(self):
+        """A single-segment path returns just the stem."""
+        t = _path_title("readme.md")
+        assert t == "readme"
+
+    @pytest.mark.unit
+    def test_path_title_strips_md_extension(self):
+        t = _path_title("reference-library/engineering/patterns.md")
+        assert not t.endswith(".md")
+        assert "patterns" in t
+
+
+# ---------------------------------------------------------------------------
+# grade_candidates — duplicate stem handling (Bug 2)
+# ---------------------------------------------------------------------------
+
+
+class TestGradeCandidatesDuplicateStem:
+    @pytest.mark.unit
+    @patch("kairix.quality.eval.gold_builder.judge_batch")
+    def test_grade_candidates_distinguishes_same_stem(self, mock_judge):
+        """Two candidates with the same filename stem get independent grades."""
+        # _path_title("col/a/readme.md") → "a/readme"
+        # _path_title("col/b/readme.md") → "b/readme"
+        mock_result = MagicMock()
+        mock_result.grades = {"a/readme": 2, "b/readme": 0}
+        mock_judge.return_value = mock_result
+
+        candidates = [
+            PooledCandidate(path="col/a/readme.md", title="A Readme", snippet="good", collection="col"),
+            PooledCandidate(path="col/b/readme.md", title="B Readme", snippet="bad", collection="col"),
+        ]
+
+        result = grade_candidates("query", candidates, "key", "endpoint", judge_runs=1)
+        assert result[0].grade == 2
+        assert result[1].grade == 0
+
+    @pytest.mark.unit
+    @patch("kairix.quality.eval.gold_builder.judge_batch")
+    def test_judge_receives_path_title_keys(self, mock_judge):
+        """judge_batch receives _path_title() keys, not bare stems."""
+        mock_result = MagicMock()
+        mock_result.grades = {}
+        mock_judge.return_value = mock_result
+
+        candidates = [
+            PooledCandidate(path="col/sub/readme.md", title="Readme", snippet="text", collection="col"),
+        ]
+        grade_candidates("query", candidates, "key", "endpoint", judge_runs=1)
+
+        call_args = mock_judge.call_args
+        sent_candidates = call_args.kwargs.get("candidates") or call_args[1].get("candidates")
+        # The key should be "sub/readme", not just "readme"
+        assert sent_candidates[0][0] == "sub/readme"
+
+
+# ---------------------------------------------------------------------------
+# _bm25_search_with_weights — SQL structure
+# ---------------------------------------------------------------------------
+
+
+class TestBm25SearchWithWeights:
+    @pytest.mark.unit
+    @patch("kairix.core.db.get_db_path")
+    @patch("kairix.core.db.open_db")
+    def test_bm25_search_builds_correct_sql(self, mock_open_db, mock_get_db):
+        """Mocked DB verifies SQL query structure and result formatting."""
+        from kairix.quality.eval.gold_builder import _bm25_search_with_weights
+
+        mock_get_db.return_value = "/tmp/test.db"
+
+        mock_row = {
+            "path": "eng/doc.md",
+            "title": "Doc Title",
+            "doc": "Some document content here",
+            "collection": "eng",
+            "score": -5.0,
+        }
+        mock_db = MagicMock()
+        mock_db.execute.return_value.fetchall.return_value = [mock_row]
+        mock_open_db.return_value = mock_db
+
+        results = _bm25_search_with_weights(
+            "test query",
+            weights=(10.0, 1.0, 1.0),
+            collections=["eng"],
+            limit=5,
+        )
+
+        # Verify the SQL was executed with correct params
+        sql_call = mock_db.execute.call_args
+        sql_str = sql_call[0][0]
+        params = sql_call[0][1]
+
+        assert "bm25(documents_fts" in sql_str
+        assert "10.0" in sql_str  # filepath weight
+        assert "MATCH" in sql_str
+        assert "eng" in params
+        assert 5 in params  # limit
+
+        # Verify result formatting
+        assert len(results) == 1
+        assert results[0]["path"] == "eng/doc.md"
+        assert results[0]["title"] == "Doc Title"
+        assert results[0]["collection"] == "eng"
+        assert len(results[0]["snippet"]) > 0
+
+        mock_db.close.assert_called_once()
+
+    @pytest.mark.unit
+    @patch("kairix.core.db.get_db_path")
+    @patch("kairix.core.db.open_db")
+    def test_bm25_search_strips_frontmatter(self, mock_open_db, mock_get_db):
+        """Documents with YAML frontmatter have it stripped from the snippet."""
+        from kairix.quality.eval.gold_builder import _bm25_search_with_weights
+
+        mock_get_db.return_value = "/tmp/test.db"
+
+        mock_row = {
+            "path": "eng/doc.md",
+            "title": "Doc",
+            "doc": "---\ntitle: Doc\n---\nActual content starts here",
+            "collection": "eng",
+            "score": -5.0,
+        }
+        mock_db = MagicMock()
+        mock_db.execute.return_value.fetchall.return_value = [mock_row]
+        mock_open_db.return_value = mock_db
+
+        results = _bm25_search_with_weights("test query", weights=(1.0, 1.0, 1.0))
+
+        assert results[0]["snippet"].startswith("Actual content")

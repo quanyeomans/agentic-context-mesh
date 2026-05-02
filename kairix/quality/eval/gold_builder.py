@@ -40,15 +40,22 @@ _WEIGHT_PRESETS: dict[str, tuple[float, float, float]] = {
 def _path_title(path: str) -> str:
     """Build a path-based gold title from a document path.
 
-    Uses the last 3 path segments (without .md extension) to create
-    a title that's unique even when filenames are generic ("readme").
+    Uses all path segments after the first (collection root) without the
+    ``.md`` extension, so two different documents never produce the same
+    title — even when filenames are generic (e.g. ``readme.md``).
 
     Example: "reference-library/engineering/adr-examples/readme.md"
            → "engineering/adr-examples/readme"
+
+    For short paths (1-2 segments) the full path (minus extension) is
+    returned as-is.
     """
     parts = Path(path).with_suffix("").parts
-    # Use last 3 segments (or fewer if path is short)
-    return "/".join(parts[-3:]) if len(parts) >= 3 else "/".join(parts)
+    # Drop the first segment (collection root) to keep the rest unique.
+    # For short paths (<=2 segments) return everything.
+    if len(parts) > 2:
+        return "/".join(parts[1:])
+    return "/".join(parts)
 
 
 @dataclass
@@ -261,11 +268,13 @@ def grade_candidates(
     if not candidates:
         return candidates
 
-    # Build (title_stem, snippet) pairs for judge
+    # Build (doc_key, snippet) pairs for judge — use _path_title() for
+    # unique keys so two files with the same stem (e.g. readme.md) get
+    # independent grades.
     judge_candidates = []
     for c in candidates:
-        stem = Path(c.path).stem
-        judge_candidates.append((stem, c.snippet[:150]))
+        doc_key = _path_title(c.path)
+        judge_candidates.append((doc_key, c.snippet[:150]))
 
     for _run in range(judge_runs):
         result: JudgeResult = judge_batch(
@@ -278,8 +287,8 @@ def grade_candidates(
         )
 
         for c in candidates:
-            stem = Path(c.path).stem
-            grade = result.grades.get(stem, 0)
+            doc_key = _path_title(c.path)
+            grade = result.grades.get(doc_key, 0)
             c.grade_votes.append(grade)
 
     # Majority vote
