@@ -18,7 +18,7 @@ import argparse
 import json
 
 from kairix.core.search.config_loader import load_config
-from kairix.core.search.hybrid import SearchResult, search
+from kairix.core.search.pipeline import SearchResult
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -77,18 +77,23 @@ def _format_result(sr: SearchResult, limit: int) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, pipeline=None) -> None:
     import sys
 
     args = _parse_args(argv)
 
     cfg = load_config()
-    sr = search(
+
+    if pipeline is None:
+        from kairix.core.factory import build_search_pipeline
+
+        pipeline = build_search_pipeline(config=cfg)
+
+    sr = pipeline.search(
         query=args.query,
-        agent=args.agent,
-        scope=args.scope,
         budget=args.budget,
-        config=cfg,
+        scope=args.scope,
+        agent=args.agent,
     )
 
     if args.as_json:

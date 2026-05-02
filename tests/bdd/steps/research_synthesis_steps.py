@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from pytest_bdd import given, then, when
 
@@ -37,7 +37,10 @@ def given_low_confidence_results():
 
     chunks = [
         {"path": "docs/overview.md", "snippet": "A general overview of the system."},
-        {"path": "docs/faq.md", "snippet": "Frequently asked questions about the project."},
+        {
+            "path": "docs/faq.md",
+            "snippet": "Frequently asked questions about the project.",
+        },
     ]
 
     # LLM returns low confidence during evaluation
@@ -60,9 +63,8 @@ def given_low_confidence_results():
         max_turns=4,
     )
 
-    # Run evaluate_sufficiency with low confidence
-    with patch("kairix.platform.llm.get_default_backend", return_value=mock_llm):
-        updates = evaluate_sufficiency(_state["research_state"])
+    # Run evaluate_sufficiency with injected LLM backend
+    updates = evaluate_sufficiency(_state["research_state"], llm_backend=mock_llm)
     _state["research_state"].update(updates)
 
     # Store synthesis LLM mock separately
@@ -75,8 +77,7 @@ def given_low_confidence_results():
 
 @when("the agent completes research")
 def agent_completes_research():
-    with patch("kairix.platform.llm.get_default_backend", return_value=_state["synth_llm"]):
-        updates = synthesise(_state["research_state"])
+    updates = synthesise(_state["research_state"], llm_backend=_state["synth_llm"])
     _state["research_state"].update(updates)
 
 

@@ -17,10 +17,7 @@ import datetime
 import pytest
 
 from kairix.core.search.config import TemporalBoostConfig
-from kairix.core.search.rrf import (
-    FusedResult,
-    temporal_date_boost,
-)
+from kairix.core.search.rrf import FusedResult, temporal_date_boost
 
 # Constant kept for backward-compat test math (value from TemporalBoostConfig default)
 TEMPORAL_DATE_BOOST_FACTOR = TemporalBoostConfig().date_path_boost_factor

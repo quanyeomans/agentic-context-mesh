@@ -31,15 +31,9 @@ from typing import Any
 import yaml
 
 from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS
-from kairix.quality.eval.metrics import (
-    hit_at_k_graded as compute_hit_at_k,
-)
-from kairix.quality.eval.metrics import (
-    ndcg_graded as compute_ndcg,
-)
-from kairix.quality.eval.metrics import (
-    reciprocal_rank_graded as compute_mrr,
-)
+from kairix.quality.eval.metrics import hit_at_k_graded as compute_hit_at_k
+from kairix.quality.eval.metrics import ndcg_graded as compute_ndcg
+from kairix.quality.eval.metrics import reciprocal_rank_graded as compute_mrr
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +282,7 @@ def sweep_config_to_retrieval_config(cfg: HybridSweepConfig) -> Any:
     )
 
     return RetrievalConfig(
-        fusion_strategy="bm25_primary" if cfg.mode in ("bm25_only", "bm25_primary") else "rrf",
+        fusion_strategy=("bm25_primary" if cfg.mode in ("bm25_only", "bm25_primary") else "rrf"),
         rrf_k=cfg.rrf_k,
         bm25_limit=cfg.bm25_limit,
         vec_limit=cfg.vec_limit,
@@ -332,6 +326,126 @@ def _retrieve(
 
 
 # ---------------------------------------------------------------------------
+# Extracted helpers for sweep_hybrid_params (reduce cognitive complexity)
+# ---------------------------------------------------------------------------
+
+
+def load_and_validate_suite(
+    suite_path: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Load YAML suite, extract NDCG cases with gold references.
+
+    Returns (all_cases, ndcg_cases). Both empty on load failure.
+    """
+    with open(suite_path) as f:
+        suite_data = yaml.safe_load(f)
+
+    cases = suite_data.get("cases", [])
+    ndcg_cases = [c for c in cases if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))]
+    return cases, ndcg_cases
+
+
+def evaluate_single_config(
+    cfg: HybridSweepConfig,
+    ndcg_cases: list[dict[str, Any]],
+    collections: list[str] | None,
+    category_weights: dict[str, float],
+) -> HybridSweepResult:
+    """Run all queries for one config and return the result."""
+    t_start = time.monotonic()
+
+    ndcg_scores: list[float] = []
+    hit_scores: list[bool] = []
+    mrr_scores: list[float] = []
+    category_ndcg: dict[str, list[float]] = {}
+    total_bm25 = 0
+    total_vec = 0
+    total_fused = 0
+    total_latency = 0.0
+    n_vec_failed = 0
+
+    for case in ndcg_cases:
+        query = case["query"]
+        gold = case.get("gold_titles") or case.get("gold_paths", [])
+        raw_category = case.get("category", "recall")
+        category = CATEGORY_ALIASES.get(raw_category, raw_category)
+
+        t_q_start = time.monotonic()
+        paths, meta = _retrieve(query, collections, cfg)
+        t_q_end = time.monotonic()
+        total_latency += (t_q_end - t_q_start) * 1000.0
+
+        total_bm25 += meta.get("bm25_count", 0)
+        total_vec += meta.get("vec_count", 0)
+        total_fused += meta.get("fused_count", 0)
+        if meta.get("vec_failed"):
+            n_vec_failed += 1
+
+        ndcg = compute_ndcg(paths, gold)
+        hit = compute_hit_at_k(paths, gold)
+        mrr = compute_mrr(paths, gold)
+
+        ndcg_scores.append(ndcg)
+        hit_scores.append(hit)
+        mrr_scores.append(mrr)
+
+        if category not in category_ndcg:
+            category_ndcg[category] = []
+        category_ndcg[category].append(ndcg)
+
+    return aggregate_ndcg_for_config(
+        ndcg_scores,
+        hit_scores,
+        mrr_scores,
+        category_ndcg,
+        len(ndcg_cases),
+        cfg,
+        n_vec_failed,
+        total_bm25,
+        total_vec,
+        total_fused,
+        total_latency,
+        t_start,
+        category_weights,
+    )
+
+
+def aggregate_ndcg_for_config(
+    scores: list[float],
+    hits: list[bool],
+    mrrs: list[float],
+    category_ndcg: dict[str, list[float]],
+    n: int,
+    cfg: HybridSweepConfig,
+    n_vec_failed: int,
+    total_bm25: int,
+    total_vec: int,
+    total_fused: int,
+    total_latency: float,
+    t_start: float,
+    category_weights: dict[str, float],
+) -> HybridSweepResult:
+    """Compute averages and build a HybridSweepResult for one config."""
+    cat_scores = {cat: sum(s) / len(s) if s else 0.0 for cat, s in category_ndcg.items()}
+    weighted_total = sum(cat_scores.get(cat, 0.0) * weight for cat, weight in category_weights.items())
+    return HybridSweepResult(
+        config=cfg,
+        weighted_total=weighted_total,
+        ndcg_at_10=sum(scores) / n if n else 0.0,
+        hit_at_5=sum(hits) / n if n else 0.0,
+        mrr_at_10=sum(mrrs) / n if n else 0.0,
+        category_scores=cat_scores,
+        n_cases=n,
+        n_vec_failed=n_vec_failed,
+        avg_bm25_count=total_bm25 / n if n else 0.0,
+        avg_vec_count=total_vec / n if n else 0.0,
+        avg_fused_count=total_fused / n if n else 0.0,
+        avg_latency_ms=total_latency / n if n else 0.0,
+        duration_s=time.monotonic() - t_start,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main sweep
 # ---------------------------------------------------------------------------
 
@@ -360,15 +474,10 @@ def sweep_hybrid_params(
     if configs is None:
         configs = build_default_configs()
 
-    with open(suite_path) as f:
-        suite_data = yaml.safe_load(f)
-
-    cases = suite_data.get("cases", [])
+    cases, ndcg_cases = load_and_validate_suite(suite_path)
     if not cases:
         logger.error("hybrid_sweep: no cases in suite %s", suite_path)
         return HybridSweepReport()
-
-    ndcg_cases = [c for c in cases if c.get("score_method") == "ndcg" and (c.get("gold_titles") or c.get("gold_paths"))]
     if not ndcg_cases:
         logger.error("hybrid_sweep: no ndcg-scored cases with gold in suite")
         return HybridSweepReport()
@@ -381,6 +490,8 @@ def sweep_hybrid_params(
     )
 
     # Determine collections: CLI override > suite metadata > None (all)
+    with open(suite_path) as f:
+        suite_data = yaml.safe_load(f)
     collections = collections_override or suite_data.get("collections")
 
     report = HybridSweepReport()
@@ -388,77 +499,16 @@ def sweep_hybrid_params(
     t_total_start = time.monotonic()
 
     for cfg in configs:
-        t_start = time.monotonic()
-
-        ndcg_scores: list[float] = []
-        hit_scores: list[bool] = []
-        mrr_scores: list[float] = []
-        category_ndcg: dict[str, list[float]] = {}
-        total_bm25 = 0
-        total_vec = 0
-        total_fused = 0
-        total_latency = 0.0
-        n_vec_failed = 0
-
-        for case in ndcg_cases:
-            query = case["query"]
-            gold = case.get("gold_titles") or case.get("gold_paths", [])
-            raw_category = case.get("category", "recall")
-            category = CATEGORY_ALIASES.get(raw_category, raw_category)
-
-            t_q_start = time.monotonic()
-
-            paths, meta = _retrieve(query, collections, cfg)
-
-            t_q_end = time.monotonic()
-            total_latency += (t_q_end - t_q_start) * 1000.0
-
-            total_bm25 += meta.get("bm25_count", 0)
-            total_vec += meta.get("vec_count", 0)
-            total_fused += meta.get("fused_count", 0)
-            if meta.get("vec_failed"):
-                n_vec_failed += 1
-
-            ndcg = compute_ndcg(paths, gold)
-            hit = compute_hit_at_k(paths, gold)
-            mrr = compute_mrr(paths, gold)
-
-            ndcg_scores.append(ndcg)
-            hit_scores.append(hit)
-            mrr_scores.append(mrr)
-
-            if category not in category_ndcg:
-                category_ndcg[category] = []
-            category_ndcg[category].append(ndcg)
-
-        n = len(ndcg_cases)
-        cat_scores = {cat: sum(scores) / len(scores) if scores else 0.0 for cat, scores in category_ndcg.items()}
-        weighted_total = sum(cat_scores.get(cat, 0.0) * weight for cat, weight in CATEGORY_WEIGHTS.items())
-
-        result = HybridSweepResult(
-            config=cfg,
-            weighted_total=weighted_total,
-            ndcg_at_10=sum(ndcg_scores) / n if n else 0.0,
-            hit_at_5=sum(hit_scores) / n if n else 0.0,
-            mrr_at_10=sum(mrr_scores) / n if n else 0.0,
-            category_scores=cat_scores,
-            n_cases=n,
-            n_vec_failed=n_vec_failed,
-            avg_bm25_count=total_bm25 / n if n else 0.0,
-            avg_vec_count=total_vec / n if n else 0.0,
-            avg_fused_count=total_fused / n if n else 0.0,
-            avg_latency_ms=total_latency / n if n else 0.0,
-            duration_s=time.monotonic() - t_start,
-        )
+        result = evaluate_single_config(cfg, ndcg_cases, collections, CATEGORY_WEIGHTS)
         report.results.append(result)
 
         logger.info(
             "hybrid_sweep: %-30s → weighted=%.4f NDCG=%.4f Hit@5=%.3f vec_fail=%d latency=%.0fms (%ds)",
             cfg.name,
-            weighted_total,
+            result.weighted_total,
             result.ndcg_at_10,
             result.hit_at_5,
-            n_vec_failed,
+            result.n_vec_failed,
             result.avg_latency_ms,
             int(result.duration_s),
         )
@@ -545,7 +595,11 @@ def _print_summary(report: HybridSweepReport) -> None:
 
     logger.info("")
     logger.info("=" * 100)
-    logger.info("HYBRID CALIBRATION SWEEP — %d configs, %.0fs total", report.total_configs, report.total_duration_s)
+    logger.info(
+        "HYBRID CALIBRATION SWEEP — %d configs, %.0fs total",
+        report.total_configs,
+        report.total_duration_s,
+    )
     logger.info("=" * 100)
     logger.info(
         "%-30s  %6s  %6s  %6s  %6s  %5s  %6s",
@@ -586,7 +640,11 @@ def _print_summary(report: HybridSweepReport) -> None:
             b.config.procedural_factor,
         )
         logger.info(
-            "  Weighted=%.4f  NDCG=%.4f  Hit@5=%.3f  MRR=%.4f", b.weighted_total, b.ndcg_at_10, b.hit_at_5, b.mrr_at_10
+            "  Weighted=%.4f  NDCG=%.4f  Hit@5=%.3f  MRR=%.4f",
+            b.weighted_total,
+            b.ndcg_at_10,
+            b.hit_at_5,
+            b.mrr_at_10,
         )
         logger.info(
             "  Categories: %s",

@@ -23,6 +23,7 @@ def write_briefing(
     content: str,
     sources_count: int = 0,
     token_estimate: int = 0,
+    output_dir: Path | None = None,
 ) -> Path:
     """
     Write a briefing to /data/kairix/briefing/<agent>-latest.md.
@@ -35,6 +36,8 @@ def write_briefing(
         content:        Briefing body (markdown, without header).
         sources_count:  Number of sources that contributed.
         token_estimate: Estimated token count of the output.
+        output_dir:     Optional override for the briefing output directory.
+                        Defaults to BRIEFING_DIR.
 
     Returns:
         Path to the written file.
@@ -42,9 +45,10 @@ def write_briefing(
     Raises:
         OSError: If the file cannot be written.
     """
-    BRIEFING_DIR.mkdir(parents=True, exist_ok=True)
+    target_dir = output_dir if output_dir is not None else BRIEFING_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
 
-    out_path = BRIEFING_DIR / f"{agent}-latest.md"
+    out_path = target_dir / f"{agent}-latest.md"
 
     now = datetime.now(timezone.utc)
     ts = now.strftime("%Y-%m-%d %H:%M UTC")

@@ -268,38 +268,46 @@ def _inject_in_text(
             continue
 
         # Find first matchable trigger in text
-        replacement_made = False
-        for idx, trigger in enumerate(triggers):
-            if trigger in skip_entities:
-                continue
-
-            # Case-sensitive for primary name (index 0), case-insensitive for aliases
-            is_alias = idx > 0
-            pattern_flags = re.IGNORECASE if is_alias else 0
-
-            # Whole-word boundary pattern
-            escaped = re.escape(trigger)
-            pattern = rf"(?<!\w){escaped}(?!\w)"
-
-            for m in re.finditer(pattern, result, flags=pattern_flags):
-                match_start = m.start()
-                match_end = m.end()
-
-                # Skip if inside inline code or existing wikilink
-                if _is_in_code_or_link(result, match_start):
-                    continue
-
-                # Replace only the first valid match
-                result = result[:match_start] + entity.link + result[match_end:]
-                newly_linked.append(entity.name)
-                already_linked.update(entity.all_triggers())
-                replacement_made = True
-                break
-
-            if replacement_made:
-                break
+        result, matched = _try_inject_entity(result, entity, triggers, skip_entities)
+        if matched:
+            newly_linked.append(entity.name)
+            already_linked.update(triggers)
 
     return result, newly_linked
+
+
+def _try_inject_entity(
+    text: str,
+    entity: WikiEntity,
+    triggers: list[str],
+    skip_entities: set[str],
+) -> tuple[str, bool]:
+    """Try to inject a wikilink for the first valid trigger match. Returns (text, matched)."""
+    for idx, trigger in enumerate(triggers):
+        if trigger in skip_entities:
+            continue
+
+        # Case-sensitive for primary name (index 0), case-insensitive for aliases
+        pattern_flags = re.IGNORECASE if idx > 0 else 0
+
+        # Whole-word boundary pattern
+        escaped = re.escape(trigger)
+        pattern = rf"(?<!\w){escaped}(?!\w)"
+
+        result = _replace_first_valid_match(text, pattern, pattern_flags, entity.link)
+        if result is not None:
+            return result, True
+
+    return text, False
+
+
+def _replace_first_valid_match(text: str, pattern: str, flags: int, replacement: str) -> str | None:
+    """Find the first regex match not inside code/link and replace it. Returns None if no match."""
+    for m in re.finditer(pattern, text, flags=flags):
+        if _is_in_code_or_link(text, m.start()):
+            continue
+        return text[: m.start()] + replacement + text[m.end() :]
+    return None
 
 
 def _is_in_code_or_link(text: str, pos: int) -> bool:

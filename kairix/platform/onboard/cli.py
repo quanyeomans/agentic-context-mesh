@@ -167,7 +167,10 @@ def cmd_guide(args: argparse.Namespace) -> int:
     """Install the agent usage guide into the document store's shared knowledge base."""
     doc_root = args.document_root or os.environ.get("KAIRIX_DOCUMENT_ROOT", "")
     if not doc_root:
-        print("Error: --document-root is required (or set KAIRIX_DOCUMENT_ROOT)", file=sys.stderr)
+        print(
+            "Error: --document-root is required (or set KAIRIX_DOCUMENT_ROOT)",
+            file=sys.stderr,
+        )
         return 1
 
     doc_path = Path(doc_root)
@@ -276,7 +279,11 @@ def main(argv: list[str] | None = None) -> None:
     p_guide = sub.add_parser("guide", help="Install the agent usage guide into the document store")
     p_guide.add_argument("--document-root", help="Path to document root (default: KAIRIX_DOCUMENT_ROOT)")
     p_guide.add_argument("--output", help="Override destination file path")
-    p_guide.add_argument("--dry-run", action="store_true", help="Show what would be installed without writing")
+    p_guide.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be installed without writing",
+    )
 
     # verify
     p_verify = sub.add_parser("verify", help="Run acceptance tests against live deployment")

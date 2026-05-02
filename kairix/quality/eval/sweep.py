@@ -27,15 +27,9 @@ import yaml
 
 from kairix.quality.eval.constants import CATEGORY_ALIASES as _CATEGORY_ALIASES
 from kairix.quality.eval.constants import CATEGORY_WEIGHTS as _CATEGORY_WEIGHTS
-from kairix.quality.eval.metrics import (
-    hit_at_k_graded as _compute_hit_at_k,
-)
-from kairix.quality.eval.metrics import (
-    ndcg_graded as _compute_ndcg,
-)
-from kairix.quality.eval.metrics import (
-    reciprocal_rank_graded as _compute_mrr,
-)
+from kairix.quality.eval.metrics import hit_at_k_graded as _compute_hit_at_k
+from kairix.quality.eval.metrics import ndcg_graded as _compute_ndcg
+from kairix.quality.eval.metrics import reciprocal_rank_graded as _compute_mrr
 
 logger = logging.getLogger(__name__)
 

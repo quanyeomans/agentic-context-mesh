@@ -44,6 +44,159 @@ class BenchmarkSuite:
 
 
 # ---------------------------------------------------------------------------
+# Loader helpers
+# ---------------------------------------------------------------------------
+
+
+def load_yaml_file(path: Path) -> dict:
+    """Read a YAML file, raise on parse error or unexpected type."""
+    if not path.exists():
+        raise FileNotFoundError(f"Suite file not found: {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"YAML parse error in {path}: {e}") from e
+
+    if not isinstance(raw, dict):
+        raise ValueError(f"Suite file must be a YAML mapping, got {type(raw).__name__}")
+
+    return raw
+
+
+def validate_meta_and_cases_structure(raw: dict, path: str) -> tuple[dict, list[dict], list[str]]:
+    """Validate root dict has valid meta and cases. Returns (meta, raw_cases, errors)."""
+    meta = raw.get("meta", {})
+    if not isinstance(meta, dict):
+        raise ValueError("'meta' must be a mapping")
+
+    raw_cases = raw.get("cases", [])
+    if not isinstance(raw_cases, list):
+        raise ValueError("'cases' must be a list")
+
+    return meta, raw_cases, []
+
+
+def validate_required_fields(case_id: str | None, case: dict, i: int, errors: list[str]) -> None:
+    """Check id, category, query, score_method are present and valid."""
+    if not case_id:
+        errors.append(f"Case [{i}]: missing required field 'id'")
+
+    category = case.get("category")
+    if not category:
+        errors.append(f"Case [{i}] ({case_id}): missing required field 'category'")
+    elif category not in VALID_CATEGORIES:
+        errors.append(
+            f"Case [{i}] ({case_id}): invalid category {category!r}; must be one of {sorted(VALID_CATEGORIES)}"
+        )
+
+    if not case.get("query"):
+        errors.append(f"Case [{i}] ({case_id}): missing required field 'query'")
+
+    score_method = case.get("score_method")
+    if not score_method:
+        errors.append(f"Case [{i}] ({case_id}): missing required field 'score_method'")
+    elif score_method not in VALID_SCORE_METHODS:
+        errors.append(
+            f"Case [{i}] ({case_id}): invalid score_method {score_method!r}; "
+            f"must be one of {sorted(VALID_SCORE_METHODS)}"
+        )
+
+
+def validate_gold_titles_structure(
+    gold_titles: list[dict] | None, case_id: str | None, i: int, errors: list[str]
+) -> None:
+    """Validate each gold_titles entry has title (str) and relevance (int 0-2)."""
+    if not gold_titles or not isinstance(gold_titles, list):
+        return
+
+    for j, gt in enumerate(gold_titles):
+        if not isinstance(gt, dict):
+            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] must be a mapping")
+        elif "title" not in gt:
+            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'title'")
+        elif "relevance" not in gt:
+            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'relevance'")
+        elif gt["relevance"] not in (0, 1, 2):
+            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2")
+
+
+def validate_recall_gold_requirement(
+    category: str | None,
+    gold_path: str | None,
+    gold_paths: list[dict] | None,
+    gold_title: str | None,
+    gold_titles: list[dict] | None,
+    case_id: str | None,
+    i: int,
+    errors: list[str],
+) -> None:
+    """Check recall cases have at least one gold reference."""
+    if category == "recall" and not gold_path and not gold_paths and not gold_title and not gold_titles:
+        if not errors:
+            errors.append(f"Case [{i}] ({case_id}): recall cases must have gold_path, gold_title, or a gold list")
+
+
+def derive_gold_path_from_gold_lists(
+    gold_path: str | None,
+    gold_paths: list[dict] | None,
+    gold_title: str | None,
+    gold_titles: list[dict] | None,
+) -> str | None:
+    """Derive best gold_path from gold lists for backwards compat.
+
+    Priority: explicit gold_path > highest-relevance gold_paths entry
+    > highest-relevance gold_titles entry > gold_title.
+    """
+    if gold_path:
+        return gold_path
+
+    if gold_paths and isinstance(gold_paths, list):
+        best = max(gold_paths, key=lambda g: g.get("relevance", 0), default=None)
+        if best:
+            return best.get("path")
+    elif gold_titles and isinstance(gold_titles, list):
+        best_t = max(gold_titles, key=lambda g: g.get("relevance", 0), default=None)
+        if best_t:
+            return best_t.get("title")  # title as path-equivalent for display
+    elif gold_title:
+        return gold_title
+
+    return None
+
+
+def build_benchmark_case(
+    i: int,
+    case_id: str | None,
+    category: str | None,
+    query: str | None,
+    gold_path: str | None,
+    score_method: str | None,
+    notes: str | None,
+    expected_type: str | None,
+    gold_paths: list[dict] | None,
+    gold_title: str | None,
+    gold_titles: list[dict] | None,
+    case_agent: str | None,
+) -> BenchmarkCase:
+    """Construct a BenchmarkCase from validated fields."""
+    return BenchmarkCase(
+        id=str(case_id) if case_id else f"case_{i}",
+        category=str(category) if category else "",
+        query=str(query) if query else "",
+        gold_path=str(gold_path) if gold_path else None,
+        score_method=str(score_method) if score_method else "",
+        notes=str(notes) if notes else None,
+        expected_type=str(expected_type) if expected_type else None,
+        gold_paths=gold_paths if isinstance(gold_paths, list) else None,
+        gold_title=str(gold_title) if gold_title else None,
+        gold_titles=gold_titles if isinstance(gold_titles, list) else None,
+        agent=str(case_agent) if case_agent else None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
 
@@ -62,31 +215,10 @@ def load_suite(path: str) -> BenchmarkSuite:
         ValueError: If the file cannot be parsed or the schema is invalid.
         FileNotFoundError: If the file does not exist.
     """
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Suite file not found: {path}")
-
-    try:
-        with p.open("r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise ValueError(f"YAML parse error in {path}: {e}") from e
-
-    if not isinstance(raw, dict):
-        raise ValueError(f"Suite file must be a YAML mapping, got {type(raw).__name__}")
-
-    # Validate meta
-    meta = raw.get("meta", {})
-    if not isinstance(meta, dict):
-        raise ValueError("'meta' must be a mapping")
-
-    # Parse cases
-    raw_cases = raw.get("cases", [])
-    if not isinstance(raw_cases, list):
-        raise ValueError("'cases' must be a list")
+    raw = load_yaml_file(Path(path))
+    meta, raw_cases, errors = validate_meta_and_cases_structure(raw, path)
 
     cases: list[BenchmarkCase] = []
-    errors: list[str] = []
 
     for i, raw_case in enumerate(raw_cases):
         if not isinstance(raw_case, dict):
@@ -100,75 +232,32 @@ def load_suite(path: str) -> BenchmarkSuite:
         score_method = raw_case.get("score_method")
         notes = raw_case.get("notes")
         expected_type = raw_case.get("expected_type")
-        gold_paths = raw_case.get("gold_paths")  # list of {path, relevance} for ndcg (path-based)
-        gold_title = raw_case.get("gold_title")  # stable note title for exact/fuzzy (title-based)
-        gold_titles = raw_case.get("gold_titles")  # list of {title, relevance} for ndcg (title-based)
-        case_agent = raw_case.get("agent")  # per-case agent override
+        gold_paths = raw_case.get("gold_paths")
+        gold_title = raw_case.get("gold_title")
+        gold_titles = raw_case.get("gold_titles")
+        case_agent = raw_case.get("agent")
 
-        # Required fields
-        if not case_id:
-            errors.append(f"Case [{i}]: missing required field 'id'")
-        if not category:
-            errors.append(f"Case [{i}] ({case_id}): missing required field 'category'")
-        elif category not in VALID_CATEGORIES:
-            errors.append(
-                f"Case [{i}] ({case_id}): invalid category {category!r}; must be one of {sorted(VALID_CATEGORIES)}"
-            )
-        if not query:
-            errors.append(f"Case [{i}] ({case_id}): missing required field 'query'")
-        if not score_method:
-            errors.append(f"Case [{i}] ({case_id}): missing required field 'score_method'")
-        elif score_method not in VALID_SCORE_METHODS:
-            errors.append(
-                f"Case [{i}] ({case_id}): invalid score_method {score_method!r}; "
-                f"must be one of {sorted(VALID_SCORE_METHODS)}"
-            )
+        validate_required_fields(case_id, raw_case, i, errors)
+        validate_gold_titles_structure(gold_titles, case_id, i, errors)
+        validate_recall_gold_requirement(category, gold_path, gold_paths, gold_title, gold_titles, case_id, i, errors)
 
-        # Validate gold_titles entries: each must have 'title' (str) and 'relevance' (int 0-2)
-        if gold_titles and isinstance(gold_titles, list):
-            for j, gt in enumerate(gold_titles):
-                if not isinstance(gt, dict):
-                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] must be a mapping")
-                elif "title" not in gt:
-                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'title'")
-                elif "relevance" not in gt:
-                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'relevance'")
-                elif gt["relevance"] not in (0, 1, 2):
-                    errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2")
-
-        # For recall cases, require gold_path, gold_paths, gold_title, or gold_titles
-        if category == "recall" and not gold_path and not gold_paths and not gold_title and not gold_titles:
-            if not errors:
-                errors.append(f"Case [{i}] ({case_id}): recall cases must have gold_path, gold_title, or a gold list")
-
-        # Derive gold_path for backwards compat (used in case output JSON and path-based validate_suite)
-        # Priority: explicit gold_path > highest-relevance gold_paths entry > highest-relevance gold_titles entry
-        if not gold_path:
-            if gold_paths and isinstance(gold_paths, list):
-                best = max(gold_paths, key=lambda g: g.get("relevance", 0), default=None)
-                if best:
-                    gold_path = best.get("path")
-            elif gold_titles and isinstance(gold_titles, list):
-                best_t = max(gold_titles, key=lambda g: g.get("relevance", 0), default=None)
-                if best_t:
-                    gold_path = best_t.get("title")  # title as path-equivalent for display
-            elif gold_title:
-                gold_path = gold_title
+        gold_path = derive_gold_path_from_gold_lists(gold_path, gold_paths, gold_title, gold_titles)
 
         if not errors or (case_id and category and query and score_method):
             cases.append(
-                BenchmarkCase(
-                    id=str(case_id) if case_id else f"case_{i}",
-                    category=str(category) if category else "",
-                    query=str(query) if query else "",
-                    gold_path=str(gold_path) if gold_path else None,
-                    score_method=str(score_method) if score_method else "",
-                    notes=str(notes) if notes else None,
-                    expected_type=str(expected_type) if expected_type else None,
-                    gold_paths=gold_paths if isinstance(gold_paths, list) else None,
-                    gold_title=str(gold_title) if gold_title else None,
-                    gold_titles=gold_titles if isinstance(gold_titles, list) else None,
-                    agent=str(case_agent) if case_agent else None,
+                build_benchmark_case(
+                    i,
+                    case_id,
+                    category,
+                    query,
+                    gold_path,
+                    score_method,
+                    notes,
+                    expected_type,
+                    gold_paths,
+                    gold_title,
+                    gold_titles,
+                    case_agent,
                 )
             )
 

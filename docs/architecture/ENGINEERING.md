@@ -13,7 +13,10 @@ Standards, quality gates, and compliance requirements for Kairix contributors.
 5. [Code Style](#5-code-style)
 6. [Dependency Management](#6-dependency-management)
 7. [Branch and PR Conventions](#7-branch-and-pr-conventions)
-8. [Engineering Compliance Checklist](#8-engineering-compliance-checklist)
+8. [CLI Standards](#8-cli-standards)
+9. [Engineering Compliance Checklist](#9-engineering-compliance-checklist)
+10. [Architecture Patterns](#10-architecture-patterns)
+11. [References](#11-references)
 
 ---
 
@@ -81,6 +84,10 @@ push/PR
 | `.github/workflows/ci.yml` | Every push + PR | Four-stage pipeline (all gates) |
 | `.github/workflows/integration.yml` | PR to main | Full integration suite + PR compliance checks |
 | `.github/workflows/benchmark-gate.yml` | Manual dispatch | Benchmark comparison (required for retrieval PRs) |
+| `.github/workflows/reflib-benchmark-gate.yml` | Manual dispatch | Reference library benchmark comparison |
+| `.github/workflows/dependency-review.yml` | PR | Dependency change review |
+| `.github/workflows/docker-publish.yml` | Release/tag | Docker image build and publish |
+| `.github/workflows/publish-pypi.yml` | Release/tag | PyPI package publish |
 | `.github/dependabot.yml` | Weekly Monday 03:00 AEST | Automated dependency updates |
 
 ### 2.3 Deployment
@@ -116,13 +123,15 @@ If a gate must be bypassed:
 
 ```
      ┌─────────┐
-     │   E2E   │  ~5%  KAIRIX_E2E=1 required. Never in CI.
+     │   E2E   │  ~1%  KAIRIX_E2E=1 required. Never in CI.
      ├─────────┤
-     │Integr.  │  ~25%  Real usearch. Skips cleanly if unavailable.
+     │Integr.  │  ~5%  Real usearch. Skips cleanly if unavailable.
      ├─────────┤
-     │Contract │  ~15%  Interface agreements. Zero tolerance. <30s total.
+     │Contract │  ~7%  Interface agreements. Zero tolerance. <30s total.
      ├─────────┤
-     │  Unit   │  ~55%  Mocked externals. Fast. CI matrix (3.10/3.11/3.12).
+     │  Unit   │  ~60%  Mocked externals. Fast. CI matrix (3.10/3.11/3.12).
+     ├─────────┤
+     │Eval/BDD │  ~27%  Benchmark, eval, reflib, BDD, and setup tests.
      └─────────┘
 ```
 
@@ -254,7 +263,7 @@ These rules are enforced by CI (CodeQL, Bandit, detect-secrets) and must be foll
 
 ### CodeQL Suppressions
 
-- Use inline `# lgtm[query-id]` comments only for **confirmed false positives** or **intentional product behaviour** (e.g. the vault-agent sidecar writing secrets to tmpfs, or the briefing CLI outputting user-owned documents).
+- Use inline `# lgtm[query-id]` comments only for **confirmed false positives** or **intentional product behaviour** (e.g. the secret-agent sidecar writing secrets to tmpfs, or the briefing CLI outputting user-owned documents).
 - Every suppression must include a `— reason` comment explaining why it is safe.
 - Do not use blanket path exclusions in `codeql-config.yml` — suppress at the specific line.
 
@@ -493,3 +502,88 @@ RETRIEVAL LOGIC CHANGES ONLY
 SCHEMA CHANGES ONLY
 [ ] Migration script added under the relevant migrations directory
 ```
+
+---
+
+## 10. Architecture Patterns
+
+Kairix follows a protocol-driven architecture. Domain boundaries are defined as protocols (interfaces), composed by pipelines, and wired together by factories. Data access lives in repositories. Behavioural variation is handled by registered strategies, not conditional branches.
+
+### 10.1 Protocols
+
+All domain boundary contracts are defined in `kairix/core/protocols.py`:
+
+| Protocol | Responsibility |
+|---|---|
+| `IntentClassifier` | Classify user query intent (factual, procedural, entity, temporal) |
+| `DocumentRepository` | CRUD operations on documents and metadata |
+| `GraphRepository` | Entity and relationship storage (Neo4j) |
+| `VectorRepository` | Vector index read/write (usearch) |
+| `EmbeddingService` | Text-to-vector embedding |
+| `FusionStrategy` | Combine ranked lists from multiple search backends |
+| `BoostStrategy` | Apply contextual score boosts (entity, temporal, procedural) |
+| `ScoringStrategy` | Evaluate retrieval quality against gold documents |
+| `SearchLogger` | Structured logging for search operations |
+
+Test compliance: `tests/contracts/test_protocols.py` verifies every implementation satisfies its protocol.
+
+### 10.2 Pipelines
+
+Pipelines are orchestrators that compose protocols into end-to-end workflows:
+
+| Pipeline | File | Purpose |
+|---|---|---|
+| `SearchPipeline` | `kairix/core/search/pipeline.py` | Orchestrates classify, retrieve, fuse, boost, and rank |
+| `EmbedPipeline` | `kairix/core/embed/pipeline.py` | Document ingestion: chunk, embed, store |
+| `BenchmarkPipeline` | `kairix/quality/benchmark/pipeline.py` | Run gold-document evaluations and produce scored results |
+| `BriefingPipeline` | `kairix/agents/briefing/pipeline.py` | Agent briefing generation from knowledge store |
+
+### 10.3 Factory
+
+`kairix/core/factory.py` constructs production pipelines at the application boundary. It wires real implementations (Azure embeddings, SQLite, Neo4j, usearch) into pipeline constructors. Test code never calls the factory — tests build pipelines from fakes (`tests/fakes.py`).
+
+### 10.4 Repositories
+
+Repositories own all data access. Production code never issues raw SQL or direct index calls outside a repository.
+
+| Repository | File | Backing store |
+|---|---|---|
+| `SQLiteDocumentRepository` | `kairix/core/db/repository.py` | SQLite (FTS5 for full-text search) |
+| `Neo4jGraphRepository` | `kairix/knowledge/graph/repository.py` | Neo4j (entities and relationships) |
+| `UsearchVectorRepository` | `kairix/core/search/vector_repository.py` | usearch (HNSW vector index) |
+
+### 10.5 Strategies
+
+Behavioural variation is handled by registered strategies, not `if/elif` branches.
+
+**Fusion strategies** (`kairix/core/search/fusion.py`):
+- `RRFFusion` — Reciprocal Rank Fusion combining BM25 and vector results
+- `BM25PrimaryFusion` — BM25-weighted fusion for factual queries
+
+**Boost strategies** (`kairix/core/search/boosts.py`):
+- `EntityBoost` — boost documents mentioning query entities
+- `ProceduralBoost` — boost procedural/how-to content
+- `TemporalBoost` — boost recent or time-relevant documents
+
+**Scoring strategies** (`kairix/quality/eval/scorers.py`):
+- `SCORERS` registry — pluggable scorer implementations for benchmark evaluation
+
+### 10.6 Adapters
+
+Adapters wrap external services behind protocol interfaces, keeping domain logic decoupled from infrastructure.
+
+| Adapter | File |
+|---|---|
+| `BM25SearchBackend` | `kairix/core/search/backends.py` |
+| `VectorSearchBackend` | `kairix/core/search/backends.py` |
+| `AzureEmbeddingService` | `kairix/core/search/backends.py` |
+
+---
+
+## 11. References
+
+| Resource | Location |
+|---|---|
+| Engineering standards | [`CLAUDE.md`](../../CLAUDE.md) |
+| Code quality patterns and boundaries | [`CONSTRAINTS.md`](../../CONSTRAINTS.md) |
+| Ralph pattern (agent delegation) | [Engineering hub](https://github.com/three-cubes/engineering-hub/tree/main/ralph) |

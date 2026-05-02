@@ -6,9 +6,7 @@ import textwrap
 
 import pytest
 
-from kairix.core.search.config import (
-    RetrievalConfig,
-)
+from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.config_loader import (
     ConfigValidationError,
     _load_cached,
@@ -55,7 +53,18 @@ class TestParseConfig:
     @pytest.mark.unit
     def test_temporal_chunk_date_boost_enabled(self):
         cfg = _parse_config(
-            {"retrieval": {"boosts": {"temporal": {"chunk_date_boost": {"enabled": True, "decay_halflife_days": 14}}}}}
+            {
+                "retrieval": {
+                    "boosts": {
+                        "temporal": {
+                            "chunk_date_boost": {
+                                "enabled": True,
+                                "decay_halflife_days": 14,
+                            }
+                        }
+                    }
+                }
+            }
         )
         assert cfg.temporal.chunk_date_boost_enabled is True
         assert cfg.temporal.chunk_date_decay_halflife_days == 14
@@ -370,6 +379,9 @@ class TestLoadCachedEdgeCases:
         config_file = tmp_path / "test2.yaml"
         config_file.write_text("retrieval:\n  boosts:\n    entity:\n      enabled: true\n")
 
-        with patch("kairix.core.search.config_loader._parse_config", side_effect=TypeError("bad parse")):
+        with patch(
+            "kairix.core.search.config_loader._parse_config",
+            side_effect=TypeError("bad parse"),
+        ):
             cfg = _load_cached(config_file)
         assert isinstance(cfg, RetrievalConfig)

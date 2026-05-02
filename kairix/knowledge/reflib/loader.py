@@ -74,7 +74,7 @@ def _upsert_generic_node(neo4j_client: Any, label: str, node: Any) -> bool:
     return result
 
 
-def _build_node(label: str, data: dict) -> Any:
+def build_node(label: str, data: dict[str, Any]) -> Any:
     """Instantiate the correct node dataclass from a JSON dict.
 
     Returns (label, node_instance) or raises ValueError.
@@ -104,7 +104,7 @@ def _build_node(label: str, data: dict) -> Any:
     return cls(**kwargs)
 
 
-def _build_edge(data: dict) -> GraphEdge:
+def _build_edge(data: dict[str, Any]) -> GraphEdge:
     """Instantiate a GraphEdge from a JSON dict."""
     kind_str = data.get("kind", data.get("type", ""))
     try:
@@ -120,6 +120,127 @@ def _build_edge(data: dict) -> GraphEdge:
         kind=kind,
         props=data.get("props", {}),
     )
+
+
+# ---------------------------------------------------------------------------
+# Extracted helpers
+# ---------------------------------------------------------------------------
+
+
+def validate_and_build_node(
+    entry: dict[str, Any],
+    i: int,
+    report: LoadReport,
+) -> tuple[str, Any] | None:
+    """Call build_node, catch errors, return (label, node) or None."""
+    label = entry.get("label", "")
+    node_id = entry.get("id", f"<index {i}>")
+    try:
+        node = build_node(label, entry)
+    except ValueError as e:
+        report.nodes_skipped += 1
+        report.errors.append(f"Node {node_id}: {e}")
+        return None
+    return (label, node)
+
+
+def validate_and_build_edge(
+    entry: dict[str, Any],
+    i: int,
+    report: LoadReport,
+) -> GraphEdge | None:
+    """Call _build_edge, catch errors, return edge or None."""
+    edge_desc = f"{entry.get('from_id', '?')}→{entry.get('to_id', '?')}"
+    try:
+        return _build_edge(entry)
+    except (ValueError, KeyError) as e:
+        report.edges_skipped += 1
+        report.errors.append(f"Edge {edge_desc}: {e}")
+        return None
+
+
+def load_nodes(
+    nodes_path: Path,
+    neo4j_client: Any,
+    dry_run: bool,
+    report: LoadReport,
+) -> None:
+    """Read nodes.json, validate and upsert each node."""
+    if not nodes_path.exists():
+        logger.warning("Nodes file not found: %s", nodes_path)
+        report.errors.append(f"Nodes file not found: {nodes_path}")
+        return
+
+    try:
+        raw_nodes = json.loads(nodes_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        report.errors.append(f"Failed to read {nodes_path}: {e}")
+        return
+
+    for i, entry in enumerate(raw_nodes):
+        result = validate_and_build_node(entry, i, report)
+        if result is None:
+            continue
+        label, node = result
+
+        if dry_run:
+            report.nodes_loaded += 1
+            continue
+
+        if label in _LABEL_DISPATCH:
+            method_name = _LABEL_DISPATCH[label][1]
+            ok = getattr(neo4j_client, method_name)(node)
+        elif label in _GENERIC_LABELS:
+            ok = _upsert_generic_node(neo4j_client, label, node)
+        else:
+            ok = False
+
+        if ok:
+            report.nodes_loaded += 1
+        else:
+            report.nodes_skipped += 1
+            node_id = entry.get("id", f"<index {i}>")
+            report.errors.append(f"Node {node_id}: upsert failed")
+
+
+def load_edges(
+    edges_path: Path,
+    neo4j_client: Any,
+    dry_run: bool,
+    report: LoadReport,
+) -> None:
+    """Read edges.json, validate and upsert each edge."""
+    if not edges_path.exists():
+        logger.warning("Edges file not found: %s", edges_path)
+        report.errors.append(f"Edges file not found: {edges_path}")
+        return
+
+    try:
+        raw_edges = json.loads(edges_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        report.errors.append(f"Failed to read {edges_path}: {e}")
+        return
+
+    for i, entry in enumerate(raw_edges):
+        edge = validate_and_build_edge(entry, i, report)
+        if edge is None:
+            continue
+
+        if dry_run:
+            report.edges_loaded += 1
+            continue
+
+        edge_desc = f"{entry.get('from_id', '?')}→{entry.get('to_id', '?')}"
+        if neo4j_client.upsert_edge(edge):
+            report.edges_loaded += 1
+        else:
+            report.edges_skipped += 1
+            report.errors.append(f"Edge {edge_desc}: upsert failed")
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
 
 def load_entity_stubs(
@@ -141,80 +262,12 @@ def load_entity_stubs(
     """
     report = LoadReport()
 
-    # Guard: Neo4j unavailable
     if not dry_run and (neo4j_client is None or not neo4j_client.available):
         logger.warning("Neo4j unavailable — returning empty load report")
         report.errors.append("Neo4j unavailable")
         return report
 
-    # ── Load nodes ──────────────────────────────────────────────────────────
-    if nodes_path.exists():
-        try:
-            raw_nodes = json.loads(nodes_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            report.errors.append(f"Failed to read {nodes_path}: {e}")
-            raw_nodes = []
-
-        for i, entry in enumerate(raw_nodes):
-            label = entry.get("label", "")
-            node_id = entry.get("id", f"<index {i}>")
-            try:
-                node = _build_node(label, entry)
-            except ValueError as e:
-                report.nodes_skipped += 1
-                report.errors.append(f"Node {node_id}: {e}")
-                continue
-
-            if dry_run:
-                report.nodes_loaded += 1
-                continue
-
-            # Dispatch upsert
-            if label in _LABEL_DISPATCH:
-                method_name = _LABEL_DISPATCH[label][1]
-                ok = getattr(neo4j_client, method_name)(node)
-            elif label in _GENERIC_LABELS:
-                ok = _upsert_generic_node(neo4j_client, label, node)
-            else:
-                ok = False
-
-            if ok:
-                report.nodes_loaded += 1
-            else:
-                report.nodes_skipped += 1
-                report.errors.append(f"Node {node_id}: upsert failed")
-    else:
-        logger.warning("Nodes file not found: %s", nodes_path)
-        report.errors.append(f"Nodes file not found: {nodes_path}")
-
-    # ── Load edges ──────────────────────────────────────────────────────────
-    if edges_path.exists():
-        try:
-            raw_edges = json.loads(edges_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError) as e:
-            report.errors.append(f"Failed to read {edges_path}: {e}")
-            raw_edges = []
-
-        for _i, entry in enumerate(raw_edges):
-            edge_desc = f"{entry.get('from_id', '?')}→{entry.get('to_id', '?')}"
-            try:
-                edge = _build_edge(entry)
-            except (ValueError, KeyError) as e:
-                report.edges_skipped += 1
-                report.errors.append(f"Edge {edge_desc}: {e}")
-                continue
-
-            if dry_run:
-                report.edges_loaded += 1
-                continue
-
-            if neo4j_client.upsert_edge(edge):
-                report.edges_loaded += 1
-            else:
-                report.edges_skipped += 1
-                report.errors.append(f"Edge {edge_desc}: upsert failed")
-    else:
-        logger.warning("Edges file not found: %s", edges_path)
-        report.errors.append(f"Edges file not found: {edges_path}")
+    load_nodes(nodes_path, neo4j_client, dry_run, report)
+    load_edges(edges_path, neo4j_client, dry_run, report)
 
     return report

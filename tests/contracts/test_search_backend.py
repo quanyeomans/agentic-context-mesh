@@ -1,7 +1,9 @@
-"""Contract: SearchBackendProtocol — verify hybrid.search signature conformance.
+"""Contract: SearchBackendProtocol -- verify SearchPipeline.search signature conformance.
 
-Checks that kairix.core.search.hybrid.search has parameters compatible with
-the SearchBackendProtocol defined in kairix.quality.contracts.search.
+Checks that kairix.core.search.pipeline.SearchPipeline.search has parameters
+compatible with the SearchBackendProtocol defined in kairix.quality.contracts.search.
+
+Also verifies the backwards-compatible hybrid.search wrapper retains its public API.
 """
 
 import inspect
@@ -29,49 +31,50 @@ def test_search_backend_protocol_search_signature():
 
 
 @pytest.mark.contract
-def test_hybrid_search_has_query_param():
-    """kairix.core.search.hybrid.search accepts 'query' parameter."""
-    from kairix.core.search.hybrid import search
+def test_pipeline_search_has_query_param():
+    """SearchPipeline.search accepts 'query' parameter."""
+    from kairix.core.search.pipeline import SearchPipeline
 
-    sig = inspect.signature(search)
+    sig = inspect.signature(SearchPipeline.search)
     assert "query" in sig.parameters
 
 
 @pytest.mark.contract
-def test_hybrid_search_has_agent_param():
-    """kairix.core.search.hybrid.search accepts 'agent' parameter."""
-    from kairix.core.search.hybrid import search
+def test_pipeline_search_has_agent_param():
+    """SearchPipeline.search accepts 'agent' parameter."""
+    from kairix.core.search.pipeline import SearchPipeline
 
-    sig = inspect.signature(search)
+    sig = inspect.signature(SearchPipeline.search)
     assert "agent" in sig.parameters
 
 
 @pytest.mark.contract
-def test_hybrid_search_agent_default_is_none():
-    """kairix.core.search.hybrid.search 'agent' defaults to None."""
-    from kairix.core.search.hybrid import search
+def test_pipeline_search_agent_default_is_none():
+    """SearchPipeline.search 'agent' defaults to None."""
+    from kairix.core.search.pipeline import SearchPipeline
 
-    sig = inspect.signature(search)
+    sig = inspect.signature(SearchPipeline.search)
     assert sig.parameters["agent"].default is None
 
 
 @pytest.mark.contract
-def test_hybrid_search_has_budget_param():
-    """kairix.core.search.hybrid.search accepts 'budget' parameter (token budget)."""
-    from kairix.core.search.hybrid import search
+def test_pipeline_search_has_budget_param():
+    """SearchPipeline.search accepts 'budget' parameter (token budget)."""
+    from kairix.core.search.pipeline import SearchPipeline
 
-    sig = inspect.signature(search)
+    sig = inspect.signature(SearchPipeline.search)
     assert "budget" in sig.parameters
 
 
 @pytest.mark.contract
-def test_hybrid_search_query_is_first_positional():
-    """'query' is the first positional parameter of hybrid.search."""
-    from kairix.core.search.hybrid import search
+def test_pipeline_search_query_is_first_positional():
+    """'query' is the first positional parameter of SearchPipeline.search (after self)."""
+    from kairix.core.search.pipeline import SearchPipeline
 
-    sig = inspect.signature(search)
+    sig = inspect.signature(SearchPipeline.search)
     params = list(sig.parameters.keys())
-    assert params[0] == "query"
+    # First param is 'self', second should be 'query'
+    assert params[1] == "query"
 
 
 @pytest.mark.contract

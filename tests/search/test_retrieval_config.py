@@ -8,7 +8,12 @@ from kairix.core.search.config import (
     RetrievalConfig,
     TemporalBoostConfig,
 )
-from kairix.core.search.rrf import FusedResult, entity_boost_neo4j, procedural_boost, temporal_date_boost
+from kairix.core.search.rrf import (
+    FusedResult,
+    entity_boost_neo4j,
+    procedural_boost,
+    temporal_date_boost,
+)
 
 
 def _make_fused(path: str, rrf_score: float = 0.1) -> FusedResult:
@@ -159,7 +164,10 @@ class TestProceduralBoostConfig:
 
     @pytest.mark.unit
     def test_custom_patterns_applied(self):
-        results = [_make_fused("sop-onboarding.md", 0.3), _make_fused("notes/general.md", 0.3)]
+        results = [
+            _make_fused("sop-onboarding.md", 0.3),
+            _make_fused("notes/general.md", 0.3),
+        ]
         cfg = ProceduralBoostConfig(
             enabled=True,
             factor=1.4,
@@ -192,7 +200,10 @@ class TestTemporalDatePathBoost:
 
     @pytest.mark.unit
     def test_enabled_boosts_date_matching_path(self):
-        results = [_make_fused("2026-03-22.md", 0.3), _make_fused("notes/general.md", 0.3)]
+        results = [
+            _make_fused("2026-03-22.md", 0.3),
+            _make_fused("notes/general.md", 0.3),
+        ]
         cfg = TemporalBoostConfig(date_path_boost_enabled=True, date_path_boost_factor=1.35)
         out = temporal_date_boost(results, "what happened on 2026-03-22", config=cfg)
         date_doc = next(r for r in out if "2026-03-22" in r.path)

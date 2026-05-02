@@ -66,7 +66,10 @@ class TestRecommendFromProfile:
         assert result["fusion_strategy"] == "bm25_primary"
 
     def test_llm_failure_returns_rule_based(self) -> None:
-        with patch("kairix.platform.setup.agent._call_llm", side_effect=RuntimeError("LLM unavailable")):
+        with patch(
+            "kairix.platform.setup.agent._call_llm",
+            side_effect=RuntimeError("LLM unavailable"),
+        ):
             result = recommend_from_profile(
                 total_docs=100,
                 format_counts={"md": 100},

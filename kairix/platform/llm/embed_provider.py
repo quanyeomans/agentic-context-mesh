@@ -56,7 +56,12 @@ class AzureEmbedProvider:
 class OpenAIEmbedProvider:
     """Standard OpenAI / OpenRouter embeddings via the openai SDK."""
 
-    def __init__(self, api_key: str, endpoint: str = "https://api.openai.com/v1", max_retries: int = 5) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        endpoint: str = "https://api.openai.com/v1",
+        max_retries: int = 5,
+    ) -> None:
         from kairix.credentials import make_openai_client
 
         self.client = make_openai_client(api_key, endpoint, max_retries=max_retries)

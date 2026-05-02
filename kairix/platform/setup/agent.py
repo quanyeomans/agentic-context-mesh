@@ -8,6 +8,7 @@ Never sends document content — only metadata (counts, patterns, types).
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ def recommend_from_profile(
     entity_pct: float,
     api_key: str | None = None,
     endpoint: str | None = None,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Generate configuration recommendations from corpus profile.
 
     When an API key is provided, calls the LLM with corpus metadata
@@ -30,7 +31,7 @@ def recommend_from_profile(
     Returns a dict with recommended config values, or None on failure.
     """
     # Rule-based recommendations (always available, no LLM needed)
-    rec: dict = {
+    rec: dict[str, Any] = {
         "fusion_strategy": "bm25_primary",
         "temporal_boost": date_file_pct > 0.15,
         "procedural_boost": procedural_pct > 0.05,
@@ -62,7 +63,14 @@ def recommend_from_profile(
     # LLM enhancement (optional, additive)
     if api_key and endpoint:
         try:
-            llm_advice = _call_llm(total_docs, format_counts, date_file_pct, procedural_pct, api_key, endpoint)
+            llm_advice = _call_llm(
+                total_docs,
+                format_counts,
+                date_file_pct,
+                procedural_pct,
+                api_key,
+                endpoint,
+            )
             if llm_advice:
                 rec["llm_advice"] = llm_advice
         except Exception as exc:

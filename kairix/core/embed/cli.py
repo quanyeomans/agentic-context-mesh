@@ -20,12 +20,14 @@ from kairix.core.db import get_db_path, open_db
 
 from .embed import DEFAULT_BATCH_SIZE, run_embed
 from .recall_check import run_recall_gate
-from .schema import (
-    save_run_log,
-    validate_schema,
-)
+from .schema import save_run_log, validate_schema
 
-LOG_FILE = Path(os.environ.get("KAIRIX_EMBED_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "embed.log")))
+LOG_FILE = Path(
+    os.environ.get(
+        "KAIRIX_EMBED_LOG",
+        str(Path.home() / ".cache" / "kairix" / "logs" / "embed.log"),
+    )
+)
 
 
 def _default_lockfile() -> Path:
@@ -74,7 +76,11 @@ def acquire_lock() -> IO[str]:
         holder_pid = int(LOCKFILE.read_text().strip())
         os.kill(holder_pid, 0)  # signal 0 = existence check
         # Process is alive — genuine contention
-        logging.error("Could not acquire lock after %ds — PID %d is still running", LOCK_WAIT_SECS, holder_pid)
+        logging.error(
+            "Could not acquire lock after %ds — PID %d is still running",
+            LOCK_WAIT_SECS,
+            holder_pid,
+        )
         sys.exit(3)
     except (ProcessLookupError, ValueError, OSError):
         # Holder is dead or PID unreadable — stale lock
@@ -223,7 +229,10 @@ def _run_post_embed_summarise() -> None:
         # Open summaries DB and find stale/missing docs
         import sqlite3
 
-        from kairix.knowledge.summaries.staleness import get_stale_paths, init_summaries_db
+        from kairix.knowledge.summaries.staleness import (
+            get_stale_paths,
+            init_summaries_db,
+        )
         from kairix.paths import summaries_db_path
 
         db = sqlite3.connect(str(summaries_db_path()))
@@ -237,7 +246,11 @@ def _run_post_embed_summarise() -> None:
 
         # Cap at 100 docs per embed run to limit API cost
         batch = stale[:100]
-        logging.info("Summarise: generating L0 for %d of %d stale docs (capped at 100)", len(batch), len(stale))
+        logging.info(
+            "Summarise: generating L0 for %d of %d stale docs (capped at 100)",
+            len(batch),
+            len(stale),
+        )
 
         from kairix.knowledge.summaries.generate import generate_summaries
         from kairix.knowledge.summaries.staleness import write_summary
@@ -312,11 +325,24 @@ def main() -> None:
 
     # embed (default)
     embed_p = sub.add_parser("embed", help="Run embedding pipeline (default)")
-    embed_p.add_argument("--force", action="store_true", help="Re-embed all chunks (clears existing vectors)")
+    embed_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-embed all chunks (clears existing vectors)",
+    )
     embed_p.add_argument("--limit", type=int, default=None, help="Cap total chunks (for validation)")
-    embed_p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="Chunks per Azure API call")
+    embed_p.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="Chunks per Azure API call",
+    )
     embed_p.add_argument("--skip-recall-check", action="store_true", help="Skip post-embed quality gate")
-    embed_p.add_argument("--skip-summarise", action="store_true", help="Skip post-embed L0 summary generation")
+    embed_p.add_argument(
+        "--skip-summarise",
+        action="store_true",
+        help="Skip post-embed L0 summary generation",
+    )
 
     # recall-check
     sub.add_parser("recall-check", help="Run recall quality check standalone")

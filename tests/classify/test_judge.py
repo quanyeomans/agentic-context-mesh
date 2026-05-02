@@ -1,18 +1,28 @@
 """
 Tests for the LLM judge (kairix/classify/judge.py).
 
-Uses mocked Azure client to test LLM classification without live API calls.
+Uses injected LLM backend — no monkey-patching needed.
 """
 
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from kairix.core.classify.judge import classify_with_llm
 from kairix.core.classify.rules import ClassificationResult
+
+
+def _make_backend(return_value: str | None = None, side_effect=None):
+    """Build a fake LLM backend with a .chat method."""
+    backend = MagicMock()
+    if side_effect is not None:
+        backend.chat.side_effect = side_effect
+    else:
+        backend.chat.return_value = return_value
+    return backend
 
 
 @pytest.mark.unit
@@ -26,8 +36,11 @@ class TestClassifyWithLLM:
                 "reason": "Contains 'we decided' and rationale",
             }
         )
-        with patch("kairix._azure.chat_completion", return_value=mock_response):
-            result = classify_with_llm("some ambiguous content", agent="builder")
+        result = classify_with_llm(
+            "some ambiguous content",
+            agent="builder",
+            llm_backend=_make_backend(return_value=mock_response),
+        )
         assert isinstance(result, ClassificationResult)
         assert result.type == "semantic-decision"
         assert result.confidence == pytest.approx(0.85)
@@ -42,38 +55,45 @@ class TestClassifyWithLLM:
                 "reason": "Could be episodic or procedural",
             }
         )
-        with patch("kairix._azure.chat_completion", return_value=mock_response):
-            result = classify_with_llm("ambiguous content", agent="builder")
+        result = classify_with_llm(
+            "ambiguous content",
+            agent="builder",
+            llm_backend=_make_backend(return_value=mock_response),
+        )
         assert result.needs_confirmation is True
         assert result.confidence == pytest.approx(0.55)
 
     @pytest.mark.unit
     def test_api_failure_returns_unknown(self):
-        with patch("kairix._azure.chat_completion", return_value=""):
-            result = classify_with_llm("some content", agent="builder")
+        result = classify_with_llm("some content", agent="builder", llm_backend=_make_backend(return_value=""))
         assert result.type == "unknown"
         assert result.confidence == pytest.approx(0.0)
         assert result.needs_confirmation is True
 
     @pytest.mark.unit
     def test_json_parse_error_returns_unknown(self):
-        with patch("kairix._azure.chat_completion", return_value="not valid json"):
-            result = classify_with_llm("some content", agent="builder")
+        result = classify_with_llm(
+            "some content",
+            agent="builder",
+            llm_backend=_make_backend(return_value="not valid json"),
+        )
         assert result.type == "unknown"
         assert result.needs_confirmation is True
 
     @pytest.mark.unit
     def test_empty_content_returns_unknown(self):
-        with patch("kairix._azure.chat_completion", return_value="{}"):
-            result = classify_with_llm("", agent="builder")
+        result = classify_with_llm("", agent="builder")
         assert result.type == "unknown"
         assert result.needs_confirmation is True
 
     @pytest.mark.unit
     def test_code_fence_wrapped_json(self):
         mock_response = '```json\n{"type": "episodic", "confidence": 0.9, "reason": "timestamp"}\n```'
-        with patch("kairix._azure.chat_completion", return_value=mock_response):
-            result = classify_with_llm("## 09:15 did stuff", agent="builder")
+        result = classify_with_llm(
+            "## 09:15 did stuff",
+            agent="builder",
+            llm_backend=_make_backend(return_value=mock_response),
+        )
         assert result.type == "episodic"
         assert result.confidence == pytest.approx(0.9)
 
@@ -86,8 +106,11 @@ class TestClassifyWithLLM:
                 "reason": "contains normative constraint",
             }
         )
-        with patch("kairix._azure.chat_completion", return_value=mock_response):
-            result = classify_with_llm("never do X", agent="builder")
+        result = classify_with_llm(
+            "never do X",
+            agent="builder",
+            llm_backend=_make_backend(return_value=mock_response),
+        )
         assert result.target_path != ""
         assert "rules.md" in result.target_path
 
@@ -105,6 +128,9 @@ class TestClassifyWithLLM:
                 "reason": "infrastructure fact",
             }
         )
-        with patch("kairix._azure.chat_completion", return_value=mock_response):
-            result = classify_with_llm("endpoint: https://api.example.com", agent="shared")
+        result = classify_with_llm(
+            "endpoint: https://api.example.com",
+            agent="shared",
+            llm_backend=_make_backend(return_value=mock_response),
+        )
         assert result.type == "semantic-fact"

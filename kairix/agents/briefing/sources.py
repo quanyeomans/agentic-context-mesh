@@ -230,9 +230,10 @@ def fetch_hybrid_search(agent: str, max_tokens: int = 600) -> str:
     Returns empty string on failure.
     """
     try:
-        from kairix.core.search.hybrid import search
+        from kairix.core.factory import build_search_pipeline
 
-        result = search(query=agent, agent=agent, scope="shared+agent", budget=max_tokens * 2)
+        _pipeline = build_search_pipeline()
+        result = _pipeline.search(query=agent, agent=agent, scope="shared+agent", budget=max_tokens * 2)
 
         if not result.results:
             return ""

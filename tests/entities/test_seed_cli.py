@@ -12,16 +12,19 @@ pytestmark = pytest.mark.unit
 
 
 class TestSeedCLIParsing:
+    @pytest.mark.unit
     def test_seed_subcommand_exists(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["seed"])
         assert args.command == "seed"
 
+    @pytest.mark.unit
     def test_seed_dry_run_flag(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["seed", "--dry-run"])
         assert args.dry_run is True
 
+    @pytest.mark.unit
     def test_seed_limit_flag(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["seed", "--limit", "100"])
@@ -29,12 +32,14 @@ class TestSeedCLIParsing:
 
 
 class TestSeedCLIExecution:
+    @pytest.mark.unit
     @patch("kairix.core.db.get_db_path")
     def test_exits_1_when_no_index(self, mock_db: MagicMock) -> None:
         mock_db.side_effect = FileNotFoundError("no index")
         result = main(["seed"])
         assert result == 1
 
+    @pytest.mark.integration
     @patch("kairix.knowledge.entities.seed.scan_for_entities")
     @patch("kairix.core.db.get_db_path")
     def test_dry_run_does_not_seed(self, mock_db: MagicMock, mock_scan: MagicMock, tmp_path) -> None:
@@ -55,6 +60,7 @@ class TestSeedCLIExecution:
         result = main(["seed", "--dry-run"])
         assert result == 0
 
+    @pytest.mark.integration
     @patch("kairix.knowledge.entities.seed.scan_for_entities")
     @patch("kairix.core.db.get_db_path")
     def test_returns_0_when_no_candidates(self, mock_db: MagicMock, mock_scan: MagicMock, tmp_path) -> None:

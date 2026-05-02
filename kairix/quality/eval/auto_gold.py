@@ -11,6 +11,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
+from typing import Any
 
 import yaml
 
@@ -59,7 +60,7 @@ def analyse_corpus(db: sqlite3.Connection) -> CorpusProfile:
     )
 
 
-def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]:
+def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[str, Any]]:
     """Generate evaluation queries using templates (no LLM required).
 
     Proportions categories based on corpus characteristics:
@@ -67,7 +68,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]
     - More date files → more temporal queries
     - More entity docs → more entity queries
     """
-    queries: list[dict] = []
+    queries: list[dict[str, Any]] = []
     titles = profile.titles[:200]
 
     # Calculate proportions
@@ -196,7 +197,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict]
     return queries[:n]
 
 
-def build_suite(queries: list[dict], output_path: str) -> None:
+def build_suite(queries: list[dict[str, Any]], output_path: str) -> None:
     """Write queries as a kairix benchmark suite YAML file."""
     suite = {
         "meta": {

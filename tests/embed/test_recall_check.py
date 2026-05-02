@@ -3,26 +3,21 @@ Tests for kairix.core.embed.recall_check
 
 Covers:
 - _get_recall_queries(): default, env override, adaptive from DB
-- _embed_query(): missing credentials, request mock
-- _vsearch_usearch(): search via usearch index
 - _build_adaptive_queries(): derive queries from indexed titles
-- check_recall(): end-to-end with mocked embed + search
+- check_recall(): end-to-end with injected embed + search fakes
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
 from kairix.core.embed.recall_check import (
     _build_adaptive_queries,
-    _embed_query,
     _get_recall_queries,
-    _vsearch_usearch,
     check_recall,
 )
 
@@ -54,7 +49,9 @@ def test_get_recall_queries_uses_env_override(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.unit
-def test_get_recall_queries_falls_back_on_bad_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_recall_queries_falls_back_on_bad_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Falls back to defaults when RECALL_QUERIES env var is invalid JSON."""
     monkeypatch.setenv("RECALL_QUERIES", "not-valid-json{{{")
     queries = _get_recall_queries()
@@ -119,83 +116,16 @@ def test_adaptive_queries_used_when_db_available() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _embed_query
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_embed_query_returns_none_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Returns None when embed credentials are not set."""
-    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
-    monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
-    monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
-    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
-    monkeypatch.setenv("KAIRIX_SECRETS_DIR", "/nonexistent-dir-abc123")
-    result = _embed_query("test query")
-    assert result is None
-
-
-@pytest.mark.unit
-def test_embed_query_returns_array_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Returns normalised numpy array when API call succeeds."""
-    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "fake-key")
-    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://fake.example.com/")
-    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
-
-    fake_vec = [0.1] * 1536
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status = MagicMock()
-    mock_resp.json.return_value = {"data": [{"embedding": fake_vec}]}
-
-    with patch("requests.post", return_value=mock_resp):
-        result = _embed_query("test query")
-
-    assert result is not None
-    assert isinstance(result, np.ndarray)
-    assert result.shape == (1536,)
-    # Should be normalised
-    assert abs(np.linalg.norm(result) - 1.0) < 1e-5
-
-
-@pytest.mark.unit
-def test_embed_query_returns_none_on_api_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Returns None when the API call raises an exception."""
-    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "fake-key")
-    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://fake.example.com/")
-    monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
-
-    with patch("requests.post", side_effect=OSError("timeout")):
-        result = _embed_query("test query")
-
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _vsearch_usearch
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_vsearch_usearch_returns_empty_when_index_unavailable() -> None:
-    """Returns [] when usearch index is not available."""
-    with patch("kairix.core.search.hybrid.get_vector_index", return_value=None):
-        result = _vsearch_usearch(np.zeros(1536, dtype=np.float32))
-    assert result == []
-
-
-# ---------------------------------------------------------------------------
-# check_recall
+# check_recall — using DI (embed_fn, vsearch_fn, recall_queries)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_check_recall_skips_when_embed_returns_none() -> None:
-    """check_recall() marks queries as skipped when _embed_query returns None."""
+    """check_recall() marks queries as skipped when embed_fn returns None."""
     db = sqlite3.connect(":memory:")
 
-    with patch("kairix.core.embed.recall_check._embed_query", return_value=None):
-        result = check_recall(db=db)
+    result = check_recall(db=db, embed_fn=lambda _q: None)
 
     assert result["score"] == pytest.approx(0.0)
     assert result["passed"] == 0
@@ -207,8 +137,7 @@ def test_check_recall_returns_structure() -> None:
     """check_recall() always returns a dict with required keys."""
     db = sqlite3.connect(":memory:")
 
-    with patch("kairix.core.embed.recall_check._embed_query", return_value=None):
-        result = check_recall(db=db)
+    result = check_recall(db=db, embed_fn=lambda _q: None)
 
     assert "score" in result
     assert "passed" in result
@@ -219,21 +148,18 @@ def test_check_recall_returns_structure() -> None:
 
 @pytest.mark.unit
 def test_check_recall_counts_hit_when_gold_in_results() -> None:
-    """check_recall() counts a hit when gold fragment appears in usearch results."""
+    """check_recall() counts a hit when gold fragment appears in vsearch results."""
     db = sqlite3.connect(":memory:")
 
     fake_vec = np.array([0.1] * 1536, dtype=np.float32)
     fake_files = ["04-Agent-Knowledge/builder/patterns.md"]
 
-    with (
-        patch("kairix.core.embed.recall_check._embed_query", return_value=fake_vec),
-        patch("kairix.core.embed.recall_check._vsearch_usearch", return_value=fake_files),
-        patch(
-            "kairix.core.embed.recall_check._get_recall_queries",
-            return_value=[("R1", "engineering patterns", "builder/patterns")],
-        ),
-    ):
-        result = check_recall(db=db)
+    result = check_recall(
+        db=db,
+        embed_fn=lambda _q: fake_vec,
+        vsearch_fn=lambda _vec, _k: fake_files,
+        recall_queries=[("R1", "engineering patterns", "builder/patterns")],
+    )
 
     assert result["passed"] == 1
     assert result["score"] == pytest.approx(1.0)

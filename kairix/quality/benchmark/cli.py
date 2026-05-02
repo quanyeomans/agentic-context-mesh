@@ -36,7 +36,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["hybrid", "bm25", "vector"],
         help="Retrieval system (default: hybrid)",
     )
-    run_p.add_argument("--agent", default=None, help="Agent name for collection scoping (omit for no scoping)")
+    run_p.add_argument(
+        "--agent",
+        default=None,
+        help="Agent name for collection scoping (omit for no scoping)",
+    )
     run_p.add_argument("--collection", default=None, help="Restrict search to this collection only")
     run_p.add_argument(
         "--fusion",
@@ -156,6 +160,15 @@ def cmd_validate(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _direction_marker(delta: float, threshold: float = 0.0) -> str:
+    """Return an arrow marker for a numeric delta."""
+    if delta > threshold:
+        return "▲"
+    if delta < -threshold:
+        return "▼"
+    return "=" if threshold == 0.0 else " "
+
+
 def cmd_compare(args: argparse.Namespace) -> int:
     try:
         with open(args.result_a) as f:
@@ -183,14 +196,14 @@ def cmd_compare(args: argparse.Namespace) -> int:
     print(f"  B: {b_label}  total={b_sum.get('weighted_total', 0):.3f}  [{score_tier(b_sum.get('weighted_total', 0))}]")
 
     delta = b_sum.get("weighted_total", 0) - a_sum.get("weighted_total", 0)
-    direction = "▲" if delta > 0 else ("▼" if delta < 0 else "=")
-    print(f"\n  Delta: {direction} {abs(delta):.3f}")
+    print(f"\n  Delta: {_direction_marker(delta)} {abs(delta):.3f}")
     a_ndcg = a_sum.get("ndcg_at_10")
     b_ndcg = b_sum.get("ndcg_at_10")
     if a_ndcg is not None and b_ndcg is not None:
         ndcg_delta = b_ndcg - a_ndcg
-        ndcg_dir = "▲" if ndcg_delta > 0 else ("▼" if ndcg_delta < 0 else "=")
-        print(f"  NDCG@10 delta: {ndcg_dir} {abs(ndcg_delta):.3f}  (A={a_ndcg:.3f}  B={b_ndcg:.3f})")
+        print(
+            f"  NDCG@10 delta: {_direction_marker(ndcg_delta)} {abs(ndcg_delta):.3f}  (A={a_ndcg:.3f}  B={b_ndcg:.3f})"
+        )
     print("")
     print(f"  {'Category':12}  {'A':>6}  {'B':>6}  {'Δ':>6}")
     print(f"  {'-' * 12}  {'-' * 6}  {'-' * 6}  {'-' * 6}")
@@ -201,8 +214,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         a_s = a_cats.get(cat, 0.0)
         b_s = b_cats.get(cat, 0.0)
         d = b_s - a_s
-        marker = "▲" if d > 0.01 else ("▼" if d < -0.01 else " ")
-        print(f"  {cat:12}  {a_s:6.3f}  {b_s:6.3f}  {marker}{abs(d):5.3f}")
+        print(f"  {cat:12}  {a_s:6.3f}  {b_s:6.3f}  {_direction_marker(d, 0.01)}{abs(d):5.3f}")
 
     print("=" * 60)
     return 0

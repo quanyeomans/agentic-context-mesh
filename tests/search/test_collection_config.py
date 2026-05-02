@@ -6,9 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kairix.core.search.config import (
-    RetrievalConfig,
-)
+from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.config_loader import (
     _merge_retrieval_config,
     resolve_retrieval_config,
@@ -18,6 +16,7 @@ pytestmark = pytest.mark.unit
 
 
 class TestMergeRetrievalConfig:
+    @pytest.mark.unit
     def test_top_level_override(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(base, {"fusion_strategy": "rrf", "vec_limit": 30})
@@ -25,6 +24,7 @@ class TestMergeRetrievalConfig:
         assert merged.vec_limit == 30
         assert merged.bm25_limit == base.bm25_limit  # unchanged
 
+    @pytest.mark.unit
     def test_nested_entity_override(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(base, {"boosts": {"entity": {"factor": 0.50}}})
@@ -32,17 +32,20 @@ class TestMergeRetrievalConfig:
         assert merged.entity.cap == base.entity.cap  # unchanged
         assert merged.entity.enabled == base.entity.enabled  # unchanged
 
+    @pytest.mark.unit
     def test_nested_procedural_override(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(base, {"boosts": {"procedural": {"factor": 2.0}}})
         assert merged.procedural.factor == pytest.approx(2.0)
         assert merged.procedural.enabled == base.procedural.enabled
 
+    @pytest.mark.unit
     def test_empty_override_returns_base(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(base, {})
         assert merged == base
 
+    @pytest.mark.unit
     def test_full_override(self) -> None:
         base = RetrievalConfig.defaults()
         merged = _merge_retrieval_config(
@@ -67,6 +70,7 @@ class TestMergeRetrievalConfig:
 
 
 class TestResolveRetrievalConfig:
+    @pytest.mark.unit
     def test_explicit_config_wins(self) -> None:
         explicit = RetrievalConfig.minimal()
         result = resolve_retrieval_config(
@@ -75,6 +79,7 @@ class TestResolveRetrievalConfig:
         )
         assert result is explicit
 
+    @pytest.mark.unit
     def test_reflib_returns_hardcoded(self) -> None:
         from kairix.knowledge.reflib.retrieval_config import REFLIB_RETRIEVAL_CONFIG
 
@@ -83,48 +88,49 @@ class TestResolveRetrievalConfig:
         assert result.vec_limit == 5
         assert result.fusion_strategy == "bm25_primary"
 
+    @pytest.mark.unit
     def test_single_collection_from_list(self) -> None:
         from kairix.knowledge.reflib.retrieval_config import REFLIB_RETRIEVAL_CONFIG
 
         result = resolve_retrieval_config(collections=["reference-library"])
         assert result is REFLIB_RETRIEVAL_CONFIG
 
+    @pytest.mark.unit
     @patch("kairix.core.search.config_loader._get_collection_overrides")
-    @patch("kairix.core.search.config_loader.load_config")
-    def test_single_collection_with_yaml_config(self, mock_load, mock_overrides) -> None:
-        mock_load.return_value = RetrievalConfig.defaults()
+    def test_single_collection_with_yaml_config(self, mock_overrides) -> None:
         mock_overrides.return_value = {
             "my-docs": {"fusion_strategy": "rrf", "vec_limit": 30},
         }
-        result = resolve_retrieval_config(collections=["my-docs"])
+        result = resolve_retrieval_config(
+            collections=["my-docs"],
+            config_fn=RetrievalConfig.defaults,
+        )
         assert result.fusion_strategy == "rrf"
         assert result.vec_limit == 30
 
-    @patch("kairix.core.search.config_loader.load_config")
-    def test_multi_collection_uses_global(self, mock_load) -> None:
+    @pytest.mark.unit
+    def test_multi_collection_uses_global(self) -> None:
         global_cfg = RetrievalConfig.defaults()
-        mock_load.return_value = global_cfg
-        result = resolve_retrieval_config(collections=["a", "b"])
+        result = resolve_retrieval_config(collections=["a", "b"], config_fn=lambda: global_cfg)
         assert result is global_cfg
 
-    @patch("kairix.core.search.config_loader.load_config")
-    def test_no_collection_uses_global(self, mock_load) -> None:
+    @pytest.mark.unit
+    def test_no_collection_uses_global(self) -> None:
         global_cfg = RetrievalConfig.defaults()
-        mock_load.return_value = global_cfg
-        result = resolve_retrieval_config()
+        result = resolve_retrieval_config(config_fn=lambda: global_cfg)
         assert result is global_cfg
 
+    @pytest.mark.unit
     @patch("kairix.core.search.config_loader._get_collection_overrides")
-    @patch("kairix.core.search.config_loader.load_config")
-    def test_unknown_collection_uses_global(self, mock_load, mock_overrides) -> None:
+    def test_unknown_collection_uses_global(self, mock_overrides) -> None:
         global_cfg = RetrievalConfig.defaults()
-        mock_load.return_value = global_cfg
         mock_overrides.return_value = {}
-        result = resolve_retrieval_config(collections=["unknown"])
+        result = resolve_retrieval_config(collections=["unknown"], config_fn=lambda: global_cfg)
         assert result is global_cfg
 
 
 class TestRefLibConfig:
+    @pytest.mark.unit
     def test_baseline_values(self) -> None:
         from kairix.knowledge.reflib.retrieval_config import REFLIB_RETRIEVAL_CONFIG
 
@@ -136,6 +142,7 @@ class TestRefLibConfig:
 
 
 class TestParseCollectionsWithRetrieval:
+    @pytest.mark.unit
     def test_retrieval_overrides_parsed(self) -> None:
         from kairix.core.search.config_loader import parse_collections
 
@@ -152,8 +159,12 @@ class TestParseCollectionsWithRetrieval:
         }
         result = parse_collections(data)
         assert result is not None
-        assert result.shared[0].retrieval_overrides == {"fusion_strategy": "rrf", "vec_limit": 30}
+        assert result.shared[0].retrieval_overrides == {
+            "fusion_strategy": "rrf",
+            "vec_limit": 30,
+        }
 
+    @pytest.mark.unit
     def test_no_retrieval_block_is_none(self) -> None:
         from kairix.core.search.config_loader import parse_collections
 

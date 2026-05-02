@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from pytest_bdd import given, parsers, then, when
 
@@ -47,23 +47,17 @@ def call_tool_contradict(content):
 
     try:
         if _state.get("mock_raises"):
-            with (
-                patch(
-                    "kairix.knowledge.contradict.detector.check_contradiction",
-                    side_effect=RuntimeError("search unavailable"),
-                ),
-                patch("kairix.platform.llm.get_default_backend", return_value=mock_llm),
-            ):
-                _state["result"] = tool_contradict(content=content)
+
+            def _failing_contradict(**kwargs):
+                raise RuntimeError("search unavailable")
+
+            _state["result"] = tool_contradict(content=content, llm_backend=mock_llm, contradict_fn=_failing_contradict)
         else:
-            with (
-                patch(
-                    "kairix.knowledge.contradict.detector.check_contradiction",
-                    return_value=_state["mock_contradictions"],
-                ),
-                patch("kairix.platform.llm.get_default_backend", return_value=mock_llm),
-            ):
-                _state["result"] = tool_contradict(content=content)
+            _state["result"] = tool_contradict(
+                content=content,
+                llm_backend=mock_llm,
+                contradict_fn=lambda **kwargs: _state["mock_contradictions"],
+            )
     except Exception as exc:
         _state["exception"] = exc
 

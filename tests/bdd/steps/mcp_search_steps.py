@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 from pytest_bdd import given, parsers, then, when
 
 from kairix.core.search.budget import BudgetedResult
-from kairix.core.search.hybrid import SearchResult
 from kairix.core.search.intent import QueryIntent
+from kairix.core.search.pipeline import SearchResult
 from kairix.core.search.rrf import FusedResult
 
 _state: dict = {}
@@ -89,28 +87,18 @@ def when_agent_calls_search(query):
     _state["exception"] = None
     try:
         if _state.get("search_raises"):
-            with (
-                patch("kairix.core.search.hybrid.search", side_effect=ValueError("test error")),
-                patch("kairix.core.search.config_loader.load_config", return_value=MagicMock()),
-            ):
-                _state["response"] = tool_search(query=query)
+
+            def _failing_search(**kwargs):
+                raise ValueError("test error")
+
+            _state["response"] = tool_search(query=query, search_fn=_failing_search)
         else:
             entity_card = _state.get("entity_card")
-            mock_fetch = (
-                patch(
-                    "kairix.agents.mcp.server._fetch_entity_card",
-                    return_value=entity_card,
-                )
-                if entity_card
-                else patch("kairix.agents.mcp.server._fetch_entity_card", return_value=None)
+            _state["response"] = tool_search(
+                query=query,
+                search_fn=lambda **kwargs: _state["mock_result"],
+                entity_card_fn=lambda name: entity_card,
             )
-
-            with (
-                patch("kairix.core.search.hybrid.search", return_value=_state["mock_result"]),
-                patch("kairix.core.search.config_loader.load_config", return_value=MagicMock()),
-                mock_fetch,
-            ):
-                _state["response"] = tool_search(query=query)
     except Exception as exc:
         _state["exception"] = exc
         _state["response"] = {}

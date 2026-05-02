@@ -8,24 +8,24 @@ import yaml
 
 @pytest.mark.unit
 def test_load_template_consulting() -> None:
-    from kairix.platform.setup.wizard import _load_template
+    from kairix.platform.setup.wizard import load_template
 
-    template = _load_template("consulting")
+    template = load_template("consulting")
     assert template["name"] == "consulting"
     assert "retrieval" in template
 
 
 @pytest.mark.unit
 def test_load_template_missing_returns_empty() -> None:
-    from kairix.platform.setup.wizard import _load_template
+    from kairix.platform.setup.wizard import load_template
 
-    template = _load_template("nonexistent")
+    template = load_template("nonexistent")
     assert template == {}
 
 
 @pytest.mark.unit
 def test_count_documents(tmp_path: Path) -> None:
-    from kairix.platform.setup.wizard import _count_documents
+    from kairix.platform.setup.wizard import count_documents
 
     # Create some test files
     (tmp_path / "doc1.md").write_text("hello")
@@ -34,25 +34,25 @@ def test_count_documents(tmp_path: Path) -> None:
     (tmp_path / "subdir" / "doc3.md").write_text("nested")
     (tmp_path / "not-markdown.txt").write_text("ignored")
 
-    count, size = _count_documents(str(tmp_path))
+    count, size = count_documents(str(tmp_path))
     assert count == 3  # .md files only
     assert size > 0
 
 
 @pytest.mark.unit
 def test_count_documents_empty_dir(tmp_path: Path) -> None:
-    from kairix.platform.setup.wizard import _count_documents
+    from kairix.platform.setup.wizard import count_documents
 
-    count, size = _count_documents(str(tmp_path))
+    count, size = count_documents(str(tmp_path))
     assert count == 0
     assert size == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_count_documents_nonexistent_path() -> None:
-    from kairix.platform.setup.wizard import _count_documents
+    from kairix.platform.setup.wizard import count_documents
 
-    count, size = _count_documents("/nonexistent/path")
+    count, size = count_documents("/nonexistent/path")
     assert count == 0
     assert size == pytest.approx(0.0)
 
@@ -70,33 +70,37 @@ def test_docker_compose_valid_yaml() -> None:
 
 
 @pytest.mark.unit
-def test_wizard_rejects_nonexistent_document_root(tmp_path: Path, monkeypatch) -> None:
+def test_wizard_rejects_nonexistent_document_root(tmp_path: Path) -> None:
     """Setup wizard fails cleanly when document root doesn't exist."""
     from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "test-config.yaml"
     nonexistent = str(tmp_path / "does-not-exist")
 
-    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: True)
-
     from kairix.platform.setup.prompts import SetupContext
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
-    result = run_setup(output_path=str(output), ctx=ctx, document_path=nonexistent, preset="general")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=nonexistent,
+        preset="general",
+        connection_test_fn=lambda *_a, **_k: True,
+    )
 
     assert result is False, "Wizard should reject a non-existent document root"
     assert not output.exists(), "Config file should not be written for invalid document root"
 
 
 @pytest.mark.unit
-def test_wizard_rejects_nonexistent_document_root_no_continue_option(tmp_path: Path, monkeypatch) -> None:
+def test_wizard_rejects_nonexistent_document_root_no_continue_option(
+    tmp_path: Path,
+) -> None:
     """Wizard must hard-reject a non-existent document root (no 'continue anyway?' escape)."""
     from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "test-config.yaml"
     nonexistent = str(tmp_path / "does-not-exist")
-
-    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: True)
 
     # Use non-interactive context with document_path flag.
     # Before the fix, non-interactive mode returned False due to prompt_yn default.
@@ -104,14 +108,20 @@ def test_wizard_rejects_nonexistent_document_root_no_continue_option(tmp_path: P
     from kairix.platform.setup.prompts import SetupContext
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
-    result = run_setup(output_path=str(output), ctx=ctx, document_path=nonexistent, preset="general")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=nonexistent,
+        preset="general",
+        connection_test_fn=lambda *_a, **_k: True,
+    )
 
     assert result is False
     assert not output.exists()
 
 
 @pytest.mark.unit
-def test_wizard_accepts_valid_document_root(tmp_path: Path, monkeypatch) -> None:
+def test_wizard_accepts_valid_document_root(tmp_path: Path) -> None:
     """Setup wizard accepts a valid existing document root."""
     from kairix.platform.setup.wizard import run_setup
 
@@ -119,12 +129,16 @@ def test_wizard_accepts_valid_document_root(tmp_path: Path, monkeypatch) -> None
     doc_dir = tmp_path / "docs"
     doc_dir.mkdir()
 
-    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: True)
-
     from kairix.platform.setup.prompts import SetupContext
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
-    result = run_setup(output_path=str(output), ctx=ctx, document_path=str(doc_dir), preset="general")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        preset="general",
+        connection_test_fn=lambda *_a, **_k: True,
+    )
 
     assert result is True
     assert output.exists()
@@ -137,7 +151,9 @@ def test_run_setup_generates_config(tmp_path: Path, monkeypatch) -> None:
 
     output = tmp_path / "test-config.yaml"
 
-    # Mock all interactive prompts
+    # Mock all interactive prompts — builtins.input is acceptable here because
+    # prompts.py already uses ctx.interactive guard; we're testing the full
+    # interactive flow end-to-end.
     inputs = iter(
         [
             "1",  # Step 1: Azure OpenAI
@@ -157,10 +173,10 @@ def test_run_setup_generates_config(tmp_path: Path, monkeypatch) -> None:
     )
     monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
-    # Mock LLM connection test to fail (we don't have real credentials)
-    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: False)
-
-    run_setup(output_path=str(output))
+    run_setup(
+        output_path=str(output),
+        connection_test_fn=lambda *_a, **_k: False,
+    )
     # Setup may return False due to connection failure + "continue anyway"
     # but the config file should still be written
 

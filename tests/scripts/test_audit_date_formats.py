@@ -36,25 +36,30 @@ run_audit = _mod.run_audit
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_iso_date_classified_correctly() -> None:
     assert classify_date_value("2026-04-10") == "iso"
 
 
+@pytest.mark.unit
 def test_quoted_iso_date_classified_correctly() -> None:
     assert classify_date_value('"2026-04-10"') == "iso"
 
 
+@pytest.mark.unit
 def test_datetime_string_classified_as_datetime() -> None:
     assert classify_date_value("2026-04-10T09:30") == "datetime"
     assert classify_date_value("2026-04-10 09:30") == "datetime"
 
 
+@pytest.mark.unit
 def test_non_iso_classified_correctly() -> None:
     assert classify_date_value("10 April 2026") == "non_iso"
     assert classify_date_value("April 10, 2026") == "non_iso"
     assert classify_date_value("10/04/2026") == "non_iso"
 
 
+@pytest.mark.unit
 def test_empty_value_classified_as_absent() -> None:
     assert classify_date_value("") == "absent"
 
@@ -64,6 +69,7 @@ def test_empty_value_classified_as_absent() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_iso_frontmatter_detected(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("---\ndate: 2026-04-10\ntitle: Test\n---\n# Body\n")
@@ -72,6 +78,7 @@ def test_iso_frontmatter_detected(tmp_path: Path) -> None:
     assert raw == "2026-04-10"
 
 
+@pytest.mark.integration
 def test_non_iso_frontmatter_detected(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("---\ndate: 10 April 2026\n---\n# Body\n")
@@ -80,6 +87,7 @@ def test_non_iso_frontmatter_detected(tmp_path: Path) -> None:
     assert raw == "10 April 2026"
 
 
+@pytest.mark.integration
 def test_absent_date_no_frontmatter(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("# No frontmatter\nJust body text.\n")
@@ -88,6 +96,7 @@ def test_absent_date_no_frontmatter(tmp_path: Path) -> None:
     assert raw == ""
 
 
+@pytest.mark.integration
 def test_absent_date_frontmatter_no_date_field(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("---\ntitle: No date\ntags: [test]\n---\n# Body\n")
@@ -95,6 +104,7 @@ def test_absent_date_frontmatter_no_date_field(tmp_path: Path) -> None:
     assert cls == "absent"
 
 
+@pytest.mark.integration
 def test_datetime_frontmatter_detected(tmp_path: Path) -> None:
     f = tmp_path / "test.md"
     f.write_text("---\ncreated: 2026-04-10T09:30:00\n---\n# Body\n")
@@ -107,6 +117,7 @@ def test_datetime_frontmatter_detected(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_run_audit_counts_correct(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -122,6 +133,7 @@ def test_run_audit_counts_correct(tmp_path: Path) -> None:
     assert result["total_files"] == 3
 
 
+@pytest.mark.integration
 def test_run_audit_json_structure(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -136,6 +148,7 @@ def test_run_audit_json_structure(tmp_path: Path) -> None:
     assert "extractable_pct" in result
 
 
+@pytest.mark.integration
 def test_extractable_pct_correct(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()

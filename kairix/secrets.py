@@ -101,7 +101,7 @@ def load_secrets(path: str | Path | None = None) -> int:
 
 
 @lru_cache(maxsize=1)
-def _load_secrets_file(path: Path) -> dict[str, str]:
+def load_secrets_file(path: Path) -> dict[str, str]:
     """Parse KEY=VALUE lines from a secrets file. Cached per path."""
     result: dict[str, str] = {}
     try:
@@ -191,7 +191,7 @@ def get_secret(name: str, required: bool = True) -> str | None:
     secrets_dir = os.environ.get("KAIRIX_SECRETS_DIR", _DEFAULT_SECRETS_DIR)
     secrets_file = Path(secrets_dir) / "kairix.env"
     if secrets_file.exists():
-        file_secrets = _load_secrets_file(secrets_file)
+        file_secrets = load_secrets_file(secrets_file)
         if env_var and env_var in file_secrets:
             value = file_secrets[env_var]
             if value:
@@ -237,7 +237,7 @@ def get_secret(name: str, required: bool = True) -> str | None:
 def refresh_secrets(path: str | Path | None = None) -> int:
     """Clear cached secrets and reload from the secrets file.
 
-    Clears the lru_cache on ``_load_secrets_file`` so the next
+    Clears the lru_cache on ``load_secrets_file`` so the next
     ``get_secret`` call re-reads the file. Then calls ``load_secrets``
     to re-populate ``os.environ`` with any new or rotated values.
 
@@ -247,5 +247,5 @@ def refresh_secrets(path: str | Path | None = None) -> int:
 
     Returns the number of environment variables loaded.
     """
-    _load_secrets_file.cache_clear()
+    load_secrets_file.cache_clear()
     return load_secrets(path)

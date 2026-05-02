@@ -8,7 +8,12 @@ Modules:
   cli       — `kairix timeline` subcommand
 """
 
-from kairix.core.temporal.chunker import TemporalChunk, chunk_board, chunk_file, chunk_memory_log
+from kairix.core.temporal.chunker import (
+    TemporalChunk,
+    chunk_board,
+    chunk_file,
+    chunk_memory_log,
+)
 
 __all__ = [
     "TemporalChunk",

@@ -35,7 +35,9 @@ import json
 import logging
 import random
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +61,7 @@ _LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 # They do not reference any vault content.
 # ---------------------------------------------------------------------------
 
-_CALIBRATION_ANCHORS: list[dict] = [
+CALIBRATION_ANCHORS: list[dict[str, Any]] = [
     # --- Grade-2 anchors (document directly answers query) ---
     {
         "query": "What are the key steps to deploy a Docker container?",
@@ -206,7 +208,11 @@ def fetch_llm_credentials() -> tuple[str, str, str]:
         creds = get_credentials("llm")
         if not isinstance(creds, Credentials):
             return "", "", JUDGE_DEPLOYMENT
-        return creds.api_key or "", creds.endpoint or "", creds.model or JUDGE_DEPLOYMENT
+        return (
+            creds.api_key or "",
+            creds.endpoint or "",
+            creds.model or JUDGE_DEPLOYMENT,
+        )
     except Exception:
         return "", "", JUDGE_DEPLOYMENT
 
@@ -222,15 +228,19 @@ def _call_llm(
     endpoint: str,
     deployment: str = JUDGE_DEPLOYMENT,
     max_tokens: int = 200,
+    chat_fn: Callable[..., str] | None = None,
 ) -> str:
     """
     Call Azure OpenAI chat completions. Returns the response content string.
     Raises on any network or API error.
     """
-    from kairix._azure import chat_completion
+    if chat_fn is None:
+        from kairix._azure import chat_completion
+
+        chat_fn = chat_completion
 
     messages = [{"role": "user", "content": prompt}]
-    return chat_completion(messages, max_tokens=max_tokens)
+    return chat_fn(messages, max_tokens=max_tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +293,7 @@ def judge_batch(
     endpoint: str,
     deployment: str = JUDGE_DEPLOYMENT,
     shuffle: bool = True,
+    chat_fn: Callable[..., str] | None = None,
 ) -> JudgeResult:
     """
     Grade relevance of each candidate document for the given query.
@@ -343,7 +354,7 @@ def judge_batch(
     try:
         if not api_key or not endpoint:
             raise ValueError("No API credentials")
-        content = _call_llm(prompt, api_key, endpoint, deployment)
+        content = _call_llm(prompt, api_key, endpoint, deployment, chat_fn=chat_fn)
         label_grades = _parse_grade_response(content, list(labels))
     except Exception as e:
         logger.warning("judge_batch: API error for query %r — %s", query[:60], e)
@@ -371,6 +382,7 @@ def calibrate(
     api_key: str,
     endpoint: str,
     deployment: str = JUDGE_DEPLOYMENT,
+    chat_fn: Callable[..., str] | None = None,
 ) -> bool:
     """
     Run the 15 frozen calibration anchors and verify judge accuracy.
@@ -392,7 +404,7 @@ def calibrate(
     """
     errors: list[str] = []
 
-    for anchor in _CALIBRATION_ANCHORS:
+    for anchor in CALIBRATION_ANCHORS:
         result = judge_batch(
             query=anchor["query"],
             candidates=[(anchor["title"], anchor["snippet"])],
@@ -400,6 +412,7 @@ def calibrate(
             endpoint=endpoint,
             deployment=deployment,
             shuffle=False,  # single candidate, no shuffle needed
+            chat_fn=chat_fn,
         )
         actual = result.grades.get(anchor["title"], 0)
         expected = anchor["expected"]
@@ -408,7 +421,7 @@ def calibrate(
 
     if len(errors) > CALIBRATION_MAX_ERRORS:
         raise JudgeCalibrationError(
-            f"LLM judge failed calibration: {len(errors)}/{len(_CALIBRATION_ANCHORS)} anchors wrong "
+            f"LLM judge failed calibration: {len(errors)}/{len(CALIBRATION_ANCHORS)} anchors wrong "
             f"(threshold: {CALIBRATION_MAX_ERRORS}).\n" + "\n".join(errors)
         )
 
@@ -416,7 +429,7 @@ def calibrate(
         logger.warning(
             "judge calibration: %d/%d anchors wrong (within threshold %d):\n%s",
             len(errors),
-            len(_CALIBRATION_ANCHORS),
+            len(CALIBRATION_ANCHORS),
             CALIBRATION_MAX_ERRORS,
             "\n".join(errors),
         )

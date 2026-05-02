@@ -92,7 +92,9 @@ def test_get_azure_config_returns_tuple(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.unit
-def test_get_azure_config_raises_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_azure_config_raises_without_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
@@ -103,7 +105,9 @@ def test_get_azure_config_raises_without_api_key(monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.unit
-def test_get_azure_config_raises_without_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_azure_config_raises_without_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")
     monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
     monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
@@ -233,6 +237,7 @@ def test_chunk_text_splits_on_paragraph_boundary() -> None:
 @pytest.mark.unit
 def test_run_embed_with_no_chunks_returns_stats() -> None:
     """run_embed() with no pending chunks returns embedded=0 immediately."""
+    from kairix.core.embed.deps import EmbedDependencies
     from kairix.core.embed.embed import run_embed
 
     db = sqlite3.connect(":memory:")
@@ -243,11 +248,14 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
         " (hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT)"
     )
 
-    with (
-        patch("kairix.core.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
-        patch("kairix.core.embed.embed.preflight_check", return_value=1536),
-    ):
-        result = run_embed(db, batch_size=10)
+    deps = EmbedDependencies(
+        get_azure_config=lambda: ("key", "https://ep.com", "deploy"),
+        preflight_check=lambda *_a, **_kw: 1536,
+        migrate_content_vectors=lambda _db: None,
+        open_usearch_index=lambda: None,
+        get_document_root=lambda: None,
+    )
+    result = run_embed(db, batch_size=10, deps=deps)
 
     assert result["embedded"] == 0
     assert "duration_s" in result
@@ -257,14 +265,18 @@ def test_run_embed_with_no_chunks_returns_stats() -> None:
 @pytest.mark.unit
 def test_run_embed_raises_on_dim_mismatch() -> None:
     """run_embed() raises SchemaVersionError when Azure returns unexpected dims."""
+    from kairix.core.embed.deps import EmbedDependencies
     from kairix.core.embed.embed import run_embed
     from kairix.core.embed.schema import SchemaVersionError
 
     db = sqlite3.connect(":memory:")
 
-    with (
-        patch("kairix.core.embed.embed._get_azure_config", return_value=("key", "https://ep.com", "deploy")),
-        patch("kairix.core.embed.embed.preflight_check", return_value=512),  # wrong dims
-    ):
-        with pytest.raises(SchemaVersionError):
-            run_embed(db)
+    deps = EmbedDependencies(
+        get_azure_config=lambda: ("key", "https://ep.com", "deploy"),
+        preflight_check=lambda *_a, **_kw: 512,  # wrong dims
+        migrate_content_vectors=lambda _db: None,
+        open_usearch_index=lambda: None,
+        get_document_root=lambda: None,
+    )
+    with pytest.raises(SchemaVersionError):
+        run_embed(db, deps=deps)

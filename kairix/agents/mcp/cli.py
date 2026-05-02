@@ -83,14 +83,20 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     try:
         from kairix.agents.mcp.server import build_server
     except ImportError:
-        print("Error: MCP dependencies not installed. Run: pip install 'kairix[agents]'", file=sys.stderr)
+        print(
+            "Error: MCP dependencies not installed. Run: pip install 'kairix[agents]'",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     port = _resolve_port(args) if args.transport == "sse" else args.port
     server = build_server(host=args.host, port=port)
 
     if args.transport == "sse":
-        print(f"Starting kairix MCP server on {args.host}:{port} (SSE transport)", file=sys.stderr)
+        print(
+            f"Starting kairix MCP server on {args.host}:{port} (SSE transport)",
+            file=sys.stderr,
+        )
         server.run(transport="sse")
     else:
         print("Starting kairix MCP server (stdio transport)", file=sys.stderr)

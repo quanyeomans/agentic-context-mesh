@@ -1,5 +1,7 @@
 # Contributing
 
+Read [CLAUDE.md](CLAUDE.md) for engineering standards and [CONSTRAINTS.md](CONSTRAINTS.md) for hard boundaries before starting.
+
 ## Setup
 
 ```bash
@@ -8,114 +10,101 @@ cd kairix
 pip install -e ".[dev,neo4j,agents,rerank]"
 ```
 
+## Making changes
+
+1. Create a branch from `develop`
+2. Make your changes
+3. Commit via the gated script: `bash scripts/safe-commit.sh "your message"`
+4. The script runs lint, format, mypy, tests, and security checks. If any fail, fix and re-run.
+5. Open a PR targeting `develop`
+
 ## Running tests
 
 ```bash
-# Unit tests (fast, no external deps required)
-pytest tests/ -m unit -x --timeout=30
+# All tests that must pass before commit (same as safe-commit.sh)
+pytest tests/ -m "unit or bdd or contract" -x --timeout=30
 
-# Integration (requires usearch)
+# Integration (requires real SQLite index)
 pytest tests/ -m integration -v
 
-# E2E (requires real kairix index + Azure credentials)
+# E2E (requires running kairix instance + credentials)
 KAIRIX_E2E=1 pytest tests/e2e/ -v -s
 ```
 
-## Pre-commit checks
+## Testing approach
 
-```bash
-ruff check kairix/ tests/
-ruff format --check kairix/ tests/
-mypy kairix/ --ignore-missing-imports
-pytest tests/ -x --timeout=30 -m unit
-bash scripts/pre-commit-confidential-check.sh
+Tests use protocol fakes, not monkey-patches. See `tests/fakes.py` for fake implementations and `tests/contracts/test_protocols.py` for protocol compliance patterns.
+
+```python
+from tests.fakes import FakeClassifier, FakeDocumentRepository
+from kairix.core.search.pipeline import SearchPipeline
+from kairix.core.search.backends import BM25SearchBackend
+
+pipeline = SearchPipeline(
+    classifier=FakeClassifier(),
+    bm25=BM25SearchBackend(FakeDocumentRepository(documents=[...])),
+    ...
+)
+result = pipeline.search("test query")
 ```
 
-### About skipped tests
-
-Integration tests that exercise vector search are marked `skip` unless usearch
-is installed. usearch is a pip dependency (`usearch>=2.0`) and is loaded automatically.
-The skips are expected on systems where the native extension fails to compile and do not indicate broken tests.
-
-To install usearch:
-
-```bash
-pip install "usearch>=2.0"
-pytest tests/integration/
-```
+See [CONSTRAINTS.md](CONSTRAINTS.md) for what's not allowed in tests.
 
 ## Architecture
 
+Protocols define every boundary. Pipelines compose protocols. Factories build production pipelines. See [CLAUDE.md](CLAUDE.md) for the full architecture overview.
+
+Key files for contributors:
+- `kairix/core/protocols.py` — all domain boundary interfaces
+- `kairix/core/factory.py` — how production pipelines are constructed
+- `kairix/core/search/pipeline.py` — the search pipeline orchestrator
+- `tests/fakes.py` — fake implementations for testing
+
 ```
 kairix/
-  core/           # Search engine
-    search/       # Hybrid BM25 + vector, RRF fusion, boosts
-    embed/        # Embedding pipeline (Azure OpenAI → usearch)
-    db/           # SQLite database, FTS5, schema
-    temporal/     # Temporal query rewriting
-    classify/     # Intent classification + content routing
-  knowledge/      # Knowledge management
-    entities/     # Entity discovery, seeding, validation
-    graph/        # Neo4j client
-    store/        # Document store operations
-    wikilinks/    # Wikilink injection + audit
-    reflib/       # Reference library management
-    summaries/    # Document summarisation
-    contradict/   # Contradiction detection
-  agents/         # Agent-facing capabilities
-    mcp/          # MCP server (tool_search, tool_entity, etc.)
-    briefing/     # Session briefing generation
-    curator/      # Entity graph health agent
-    research/     # Multi-hop research agent
-  quality/        # Evaluation and benchmarking
-    benchmark/    # Benchmark runner, suites, scoring
-    eval/         # Suite generation, monitoring, sweep
-    contracts/    # Protocol definitions
-  platform/       # Deployment and onboarding
-    setup/        # Onboarding wizard
-    onboard/      # Deployment diagnostics
-    llm/          # LLM backend abstraction
+  core/
+    protocols.py         # Domain boundary protocols
+    factory.py           # Production pipeline construction
+    search/
+      pipeline.py        # SearchPipeline orchestrator
+      backends.py        # BM25, Vector search adapters
+      fusion.py          # RRF, BM25Primary fusion strategies
+      boosts.py          # Entity, Procedural, Temporal boost strategies
+    db/
+      repository.py      # SQLiteDocumentRepository
+    embed/
+      pipeline.py        # EmbedPipeline orchestrator
+  knowledge/
+    graph/
+      repository.py      # Neo4jGraphRepository
+  quality/
+    eval/
+      scorers.py         # NDCG, ExactMatch, LLMJudge scoring strategies
+    benchmark/
+      pipeline.py        # BenchmarkPipeline orchestrator
+  agents/
+    briefing/
+      pipeline.py        # BriefingPipeline orchestrator
+tests/
+  fakes.py               # All fake implementations
+  contracts/             # Protocol compliance tests
+  integration/           # Real DB, real paths
 ```
-
-**Key invariant:** `kairix/db/schema.py` is the single source of truth for the database schema.
-`embed.py` calls schema functions — it does not contain raw SQL against the database tables.
-If the schema changes, `schema.py` is the single file to update.
-
-## Schema changes
-
-The schema validation on `kairix onboard check` will tell you if columns or tables are missing.
-Run `pytest tests/ -k "schema" -v` to verify compatibility after any schema change.
-
-## Adding support for other OpenAI-compatible endpoints
-
-The embedding logic in `kairix/core/embed/embed.py` uses the Azure OpenAI REST API format
-(`/openai/deployments/{deployment}/embeddings`). To support standard OpenAI or other
-compatible endpoints, the URL construction in `embed_batch()` and `preflight_check()`
-would need a flag to switch between Azure and OpenAI endpoint formats.
-PRs welcome.
 
 ## Branching model
 
-This repo uses a `develop → main` branching model with CalVer pre-release tags.
-
 | Branch | Purpose |
 |---|---|
-| `main` | Validated stable releases only. Never committed to directly. |
-| `develop` | All PRs merge here. VM deploys from alpha tags cut here. |
+| `main` | Validated stable releases. |
+| `develop` | All PRs merge here. |
 | `feature/*` | One branch per feature or fix. PR targets `develop`. |
-
-**PR targets `develop`, not `main`.** The CI benchmark gate runs automatically on PRs that touch retrieval code.
 
 ## Versioning
 
-CalVer: `YYYY.MM.DD`. Pre-release tags on `develop` use the `aN` suffix: `v2026.4.18a1`, `v2026.4.18a2`.
+CalVer: `YYYY.MM.DD`. Pre-release: `YYYY.MM.DDaN`.
 
 ## Cutting a release
 
-When `develop` is validated on the deployment target:
-
-1. Open a PR `develop → main`
-2. In that PR: change `pyproject.toml` version from `2026.X.YaN` → `2026.X.Y`; update `CHANGELOG.md`
-3. Merge the PR
-4. Tag: `git tag v2026.X.Y && git push origin v2026.X.Y`
-5. Deploy to VM: `./infra/scripts/kairix-deploy.sh v2026.X.Y`
+1. Validate on deployment target
+2. PR `develop → main` — update version in `pyproject.toml`, update `CHANGELOG.md`
+3. Merge, tag: `git tag v2026.X.Y && git push origin v2026.X.Y`

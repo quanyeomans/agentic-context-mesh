@@ -6,7 +6,7 @@ Covers:
   - validate_suite(): missing gold path returns error string
   - validate_suite(): duplicate gold paths returns error string
   - _exact_match(): case-insensitive substring match
-  - run_benchmark(): mocked retrieval, correct weighted total calculation
+  - run_benchmark(): DI retrieve_fn, correct weighted total calculation
 """
 
 from __future__ import annotations
@@ -15,15 +15,11 @@ import json
 import sqlite3
 import textwrap
 from pathlib import Path
-from unittest.mock import patch
+from typing import Any
 
 import pytest
 
-from kairix.quality.benchmark.runner import (
-    BenchmarkResult,
-    _exact_match,
-    run_benchmark,
-)
+from kairix.quality.benchmark.runner import BenchmarkResult, _exact_match, run_benchmark
 from kairix.quality.benchmark.suite import (
     BenchmarkCase,
     BenchmarkSuite,
@@ -39,8 +35,7 @@ from kairix.quality.benchmark.suite import (
 @pytest.fixture
 def minimal_suite_yaml(tmp_path: Path) -> Path:
     """Create a minimal valid suite YAML file."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test-agent
           collections:
@@ -62,8 +57,7 @@ def minimal_suite_yaml(tmp_path: Path) -> Path:
             gold_path: null
             score_method: llm
             notes: null
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     return p
@@ -73,8 +67,7 @@ def minimal_suite_yaml(tmp_path: Path) -> Path:
 def in_memory_db() -> sqlite3.Connection:
     """Create an in-memory SQLite DB mimicking the kairix documents table."""
     db = sqlite3.connect(":memory:")
-    db.execute(
-        """
+    db.execute("""
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY,
             collection TEXT,
@@ -85,19 +78,57 @@ def in_memory_db() -> sqlite3.Connection:
             modified_at TEXT,
             active INTEGER DEFAULT 1
         )
-        """
-    )
+        """)
     # Insert some test documents
     db.executemany(
         "INSERT INTO documents (collection, path, title, active) VALUES (?, ?, ?, 1)",
         [
             ("vault", "01-projects/arize/report.md", "Arize Report"),
             ("vault", "04-agent-knowledge/builder/rules.md", "Builder Rules"),
-            ("vault", "01-projects/kairix-platform/architecture.md", "Kairix Architecture"),
+            (
+                "vault",
+                "01-projects/kairix-platform/architecture.md",
+                "Kairix Architecture",
+            ),
         ],
     )
     db.commit()
     return db
+
+
+# ---------------------------------------------------------------------------
+# Fake retrieve helper
+# ---------------------------------------------------------------------------
+
+
+def _mock_retrieve_result(
+    paths: list[str],
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Build a fake retrieve return value: (paths, snippets, metadata)."""
+    snippets = ["snippet"] * len(paths)
+    meta = {
+        "intent": "semantic",
+        "bm25_count": len(paths),
+        "vec_count": len(paths),
+        "fused_count": len(paths),
+        "vec_failed": False,
+        "latency_ms": 50.0,
+    }
+    return paths, snippets, meta
+
+
+def _make_retrieve_fn(
+    results_by_call: list[tuple[list[str], list[str], dict[str, Any]]],
+) -> object:
+    """Return a retrieve_fn that returns successive results from the list."""
+    call_idx = [0]
+
+    def _fn(**kwargs: Any) -> tuple[list[str], list[str], dict[str, Any]]:
+        idx = min(call_idx[0], len(results_by_call) - 1)
+        call_idx[0] += 1
+        return results_by_call[idx]
+
+    return _fn
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +182,7 @@ def test_load_suite_invalid_yaml_raises_value_error(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_suite_missing_required_field_raises_value_error(tmp_path: Path) -> None:
     """Missing required field raises ValueError with details."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test
         cases:
@@ -161,8 +191,7 @@ def test_load_suite_missing_required_field_raises_value_error(tmp_path: Path) ->
             # query is missing
             gold_path: "some/path.md"
             score_method: exact
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     with pytest.raises(ValueError, match="query"):
@@ -172,8 +201,7 @@ def test_load_suite_missing_required_field_raises_value_error(tmp_path: Path) ->
 @pytest.mark.unit
 def test_load_suite_invalid_category_raises_value_error(tmp_path: Path) -> None:
     """Invalid category raises ValueError."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test
         cases:
@@ -182,8 +210,7 @@ def test_load_suite_invalid_category_raises_value_error(tmp_path: Path) -> None:
             query: "test query"
             gold_path: null
             score_method: llm
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     with pytest.raises(ValueError, match="invalid_category"):
@@ -193,8 +220,7 @@ def test_load_suite_invalid_category_raises_value_error(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_suite_all_categories_accepted(tmp_path: Path) -> None:
     """All valid categories are accepted."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test
         cases:
@@ -228,8 +254,7 @@ def test_load_suite_all_categories_accepted(tmp_path: Path) -> None:
             query: "test procedural"
             gold_path: null
             score_method: llm
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))
@@ -262,8 +287,7 @@ def test_validate_suite_missing_gold_path_returns_error(
     tmp_path: Path,
 ) -> None:
     """Missing gold path returns an error string describing the problem."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test
         cases:
@@ -272,8 +296,7 @@ def test_validate_suite_missing_gold_path_returns_error(
             query: "something specific"
             gold_path: "path/that/does/not/exist.md"
             score_method: exact
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))
@@ -292,8 +315,7 @@ def test_validate_suite_duplicate_gold_paths_returns_error(
     tmp_path: Path,
 ) -> None:
     """Two cases with the same gold path return an error string."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test
         cases:
@@ -307,8 +329,7 @@ def test_validate_suite_duplicate_gold_paths_returns_error(
             query: "second query about arize"
             gold_path: "01-projects/arize/report.md"
             score_method: exact
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))
@@ -328,8 +349,7 @@ def test_validate_suite_non_recall_cases_not_validated(
     tmp_path: Path,
 ) -> None:
     """Non-recall cases without gold paths do not generate errors."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           agent: test
         cases:
@@ -343,8 +363,7 @@ def test_validate_suite_non_recall_cases_not_validated(
             query: "what is the architecture"
             gold_path: null
             score_method: llm
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))
@@ -417,31 +436,17 @@ def test_exact_match_empty_gold_returns_0() -> None:
 
 
 # ---------------------------------------------------------------------------
-# run_benchmark() tests — mocked retrieval
+# run_benchmark() tests — DI retrieve_fn
 # ---------------------------------------------------------------------------
-
-
-def _mock_retrieve_result(paths: list[str]) -> tuple:
-    """Build a mock _retrieve() return value: (paths, snippets, metadata)."""
-    snippets = ["snippet"] * len(paths)
-    meta = {
-        "intent": "semantic",
-        "bm25_count": len(paths),
-        "vec_count": len(paths),
-        "fused_count": len(paths),
-        "vec_failed": False,
-        "latency_ms": 50.0,
-    }
-    return paths, snippets, meta
 
 
 @pytest.mark.unit
 def test_run_benchmark_mocked_retrieval_correct_scores() -> None:
     """
-    run_benchmark with mocked _retrieve returns correct scores.
+    run_benchmark with fake retrieve_fn returns correct scores.
 
-    R01 gold path appears in results → score=1.0
-    R02 gold path does NOT appear → score=0.0
+    R01 gold path appears in results -> score=1.0
+    R02 gold path does NOT appear -> score=0.0
     Recall category score: (1.0 + 0.0) / 2 = 0.5
     """
     suite = BenchmarkSuite(
@@ -467,13 +472,17 @@ def test_run_benchmark_mocked_retrieval_correct_scores() -> None:
     r01_paths = ["vault/01-projects/arize/report.md", "vault/other.md"]
     r02_paths = ["vault/something-else.md"]
 
-    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
-        mock_retrieve.side_effect = [
-            _mock_retrieve_result(r01_paths),
-            _mock_retrieve_result(r02_paths),
-        ]
+    retrieve_results = [
+        _mock_retrieve_result(r01_paths),
+        _mock_retrieve_result(r02_paths),
+    ]
 
-        result = run_benchmark(suite, system="hybrid", agent="test")
+    result = run_benchmark(
+        suite,
+        system="hybrid",
+        agent="test",
+        retrieve_fn=_make_retrieve_fn(retrieve_results),
+    )
 
     assert isinstance(result, BenchmarkResult)
     assert len(result.cases) == 2
@@ -502,17 +511,53 @@ def test_run_benchmark_weighted_total_calculation() -> None:
     suite = BenchmarkSuite(
         meta={"agent": "test", "collections": ["vault"]},
         cases=[
-            BenchmarkCase(id="R01", category="recall", query="q1", gold_path="p1.md", score_method="exact"),
-            BenchmarkCase(id="T01", category="temporal", query="q2", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="E01", category="entity", query="q3", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="C01", category="conceptual", query="q4", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="M01", category="multi_hop", query="q5", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="P01", category="procedural", query="q6", gold_path=None, score_method="llm"),
+            BenchmarkCase(
+                id="R01",
+                category="recall",
+                query="q1",
+                gold_path="p1.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="T01",
+                category="temporal",
+                query="q2",
+                gold_path=None,
+                score_method="llm",
+            ),
+            BenchmarkCase(
+                id="E01",
+                category="entity",
+                query="q3",
+                gold_path=None,
+                score_method="llm",
+            ),
+            BenchmarkCase(
+                id="C01",
+                category="conceptual",
+                query="q4",
+                gold_path=None,
+                score_method="llm",
+            ),
+            BenchmarkCase(
+                id="M01",
+                category="multi_hop",
+                query="q5",
+                gold_path=None,
+                score_method="llm",
+            ),
+            BenchmarkCase(
+                id="P01",
+                category="procedural",
+                query="q6",
+                gold_path=None,
+                score_method="llm",
+            ),
         ],
     )
 
-    # R01: gold path p1.md appears in results → score=1.0
-    # All others: empty paths → _llm_judge patched to return 0.0
+    # R01: gold path p1.md appears in results -> score=1.0
+    # All others: empty paths -> _llm_judge with no chat_fn defaults to 0.0 (no Azure creds)
     retrieve_results = [
         _mock_retrieve_result(["p1.md"]),  # R01 — exact match hits
         _mock_retrieve_result([]),  # T01
@@ -522,10 +567,12 @@ def test_run_benchmark_weighted_total_calculation() -> None:
         _mock_retrieve_result([]),  # P01
     ]
 
-    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
-        mock_retrieve.side_effect = retrieve_results
-        with patch("kairix.quality.benchmark.runner._llm_judge", return_value=0.0):
-            result = run_benchmark(suite, system="hybrid", agent="test")
+    result = run_benchmark(
+        suite,
+        system="hybrid",
+        agent="test",
+        retrieve_fn=_make_retrieve_fn(retrieve_results),
+    )
 
     assert result.summary["category_scores"]["recall"] == pytest.approx(1.0)
     assert result.summary["category_scores"]["temporal"] == pytest.approx(0.0)
@@ -537,33 +584,74 @@ def test_run_benchmark_weighted_total_calculation() -> None:
 @pytest.mark.unit
 def test_run_benchmark_all_scores_1_gives_weighted_total_1() -> None:
     """When all cases score 1.0, weighted total is 1.0."""
-    suite = BenchmarkSuite(
+    # Use all exact score_method cases so scoring works without Azure creds.
+    suite_exact = BenchmarkSuite(
         meta={"agent": "test", "collections": ["vault"]},
         cases=[
-            BenchmarkCase(id="R01", category="recall", query="q1", gold_path="path/to/doc.md", score_method="exact"),
-            BenchmarkCase(id="T01", category="temporal", query="q2", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="E01", category="entity", query="q3", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="C01", category="conceptual", query="q4", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="M01", category="multi_hop", query="q5", gold_path=None, score_method="llm"),
-            BenchmarkCase(id="P01", category="procedural", query="q6", gold_path=None, score_method="llm"),
+            BenchmarkCase(
+                id="R01",
+                category="recall",
+                query="q1",
+                gold_path="path/to/doc.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="T01",
+                category="temporal",
+                query="q2",
+                gold_path="path/to/temporal.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="E01",
+                category="entity",
+                query="q3",
+                gold_path="path/to/entity.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="C01",
+                category="conceptual",
+                query="q4",
+                gold_path="path/to/concept.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="M01",
+                category="multi_hop",
+                query="q5",
+                gold_path="path/to/multi.md",
+                score_method="exact",
+            ),
+            BenchmarkCase(
+                id="P01",
+                category="procedural",
+                query="q6",
+                gold_path="path/to/proc.md",
+                score_method="exact",
+            ),
         ],
     )
 
-    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
-        mock_retrieve.side_effect = [
-            _mock_retrieve_result(["path/to/doc.md"]),
-            _mock_retrieve_result(["result.md"]),
-            _mock_retrieve_result(["result.md"]),
-            _mock_retrieve_result(["result.md"]),
-            _mock_retrieve_result(["result.md"]),
-            _mock_retrieve_result(["result.md"]),
-        ]
-        with patch("kairix.quality.benchmark.runner._llm_judge", return_value=1.0):
-            result = run_benchmark(suite, system="hybrid", agent="test")
+    retrieve_results = [
+        _mock_retrieve_result(["path/to/doc.md"]),
+        _mock_retrieve_result(["path/to/temporal.md"]),
+        _mock_retrieve_result(["path/to/entity.md"]),
+        _mock_retrieve_result(["path/to/concept.md"]),
+        _mock_retrieve_result(["path/to/multi.md"]),
+        _mock_retrieve_result(["path/to/proc.md"]),
+    ]
+
+    result = run_benchmark(
+        suite_exact,
+        system="hybrid",
+        agent="test",
+        retrieve_fn=_make_retrieve_fn(retrieve_results),
+    )
 
     assert result.summary["category_scores"]["recall"] == pytest.approx(1.0)
     assert result.summary["category_scores"]["temporal"] == pytest.approx(1.0)
-    # All 6 categories = 1.0, all weights sum to 1.0 → weighted_total = 1.0
+    # All 6 categories = 1.0, all weights sum to 1.0 -> weighted_total = 1.0
     assert result.summary["weighted_total"] == pytest.approx(1.0)
 
 
@@ -573,14 +661,24 @@ def test_run_benchmark_saves_json_to_output_dir(tmp_path: Path) -> None:
     suite = BenchmarkSuite(
         meta={"agent": "test", "name": "test-suite", "collections": ["vault"]},
         cases=[
-            BenchmarkCase(id="R01", category="recall", query="q1", gold_path="p.md", score_method="exact"),
+            BenchmarkCase(
+                id="R01",
+                category="recall",
+                query="q1",
+                gold_path="p.md",
+                score_method="exact",
+            ),
         ],
     )
     output_dir = str(tmp_path / "results")
 
-    with patch("kairix.quality.benchmark.runner._retrieve") as mock_retrieve:
-        mock_retrieve.return_value = _mock_retrieve_result([])
-        _ = run_benchmark(suite, system="bm25", agent="test", output_dir=output_dir)
+    run_benchmark(
+        suite,
+        system="bm25",
+        agent="test",
+        output_dir=output_dir,
+        retrieve_fn=_make_retrieve_fn([_mock_retrieve_result([])]),
+    )
 
     json_files = list(Path(output_dir).glob("*.json"))
     assert len(json_files) == 1
@@ -603,8 +701,7 @@ def test_run_benchmark_saves_json_to_output_dir(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_suite_parses_gold_titles(tmp_path: Path) -> None:
     """gold_titles field is parsed into BenchmarkCase.gold_titles list."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           name: test
           version: "1.0"
@@ -618,8 +715,7 @@ def test_load_suite_parses_gold_titles(tmp_path: Path) -> None:
                 relevance: 2
               - title: team-overview
                 relevance: 1
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))
@@ -634,8 +730,7 @@ def test_load_suite_parses_gold_titles(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_gold_title_field_parsed(tmp_path: Path) -> None:
     """gold_title (single) is parsed for exact/fuzzy cases."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           name: test
           version: "1.0"
@@ -645,8 +740,7 @@ def test_gold_title_field_parsed(tmp_path: Path) -> None:
             query: "engineering patterns"
             score_method: exact
             gold_title: patterns
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))
@@ -658,8 +752,7 @@ def test_gold_title_field_parsed(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_gold_title_validated_requires_title_and_relevance(tmp_path: Path) -> None:
     """A gold_titles entry missing 'title' raises ValueError."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           name: test
           version: "1.0"
@@ -670,8 +763,7 @@ def test_gold_title_validated_requires_title_and_relevance(tmp_path: Path) -> No
             score_method: ndcg
             gold_titles:
               - relevance: 2
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     with pytest.raises(ValueError, match="title"):
@@ -680,7 +772,7 @@ def test_gold_title_validated_requires_title_and_relevance(tmp_path: Path) -> No
 
 @pytest.mark.unit
 def test_duplicate_gold_titles_detected(tmp_path: Path, in_memory_db: sqlite3.Connection) -> None:
-    """Same gold_title used in two recall cases → validation error."""
+    """Same gold_title used in two recall cases -> validation error."""
     suite = BenchmarkSuite(
         meta={"name": "test", "version": "1.0"},
         cases=[
@@ -709,8 +801,7 @@ def test_duplicate_gold_titles_detected(tmp_path: Path, in_memory_db: sqlite3.Co
 @pytest.mark.unit
 def test_gold_titles_highest_relevance_derives_gold_path(tmp_path: Path) -> None:
     """gold_path auto-derived from the highest-relevance gold_titles entry."""
-    content = textwrap.dedent(
-        """\
+    content = textwrap.dedent("""\
         meta:
           name: test
           version: "1.0"
@@ -724,8 +815,7 @@ def test_gold_titles_highest_relevance_derives_gold_path(tmp_path: Path) -> None
                 relevance: 1
               - title: projects
                 relevance: 2
-        """
-    )
+        """)
     p = tmp_path / "suite.yaml"
     p.write_text(content)
     suite = load_suite(str(p))

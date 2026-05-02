@@ -29,6 +29,28 @@ def is_too_small(text: str, min_size: int = MIN_FILE_SIZE) -> bool:
     return len(stripped.encode("utf-8")) < min_size
 
 
+def _collect_sections(text: str, headings: list[re.Match[str]]) -> list[tuple[str, str]]:
+    """Extract (slug, content) sections from heading match positions."""
+    sections: list[tuple[str, str]] = []
+    for i, match in enumerate(headings):
+        start = match.start()
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
+        section_text = text[start:end].strip()
+
+        if section_text:
+            heading_text = match.group(2).strip()
+            section_slug = _heading_slug(heading_text)
+            sections.append((section_slug, section_text))
+
+    # Include any preamble before the first heading
+    if headings[0].start() > 0:
+        preamble = text[: headings[0].start()].strip()
+        if preamble and not is_too_small(preamble):
+            sections.insert(0, ("preamble", preamble))
+
+    return sections
+
+
 def split_at_headings(
     text: str,
     stem: str,
@@ -55,23 +77,7 @@ def split_at_headings(
         # No headings to split on — return as-is
         return [(stem, text)]
 
-    # Split at heading boundaries
-    sections: list[tuple[str, str]] = []
-    for i, match in enumerate(headings):
-        start = match.start()
-        end = headings[i + 1].start() if i + 1 < len(headings) else len(text)
-        section_text = text[start:end].strip()
-
-        if section_text:
-            heading_text = match.group(2).strip()
-            section_slug = _heading_slug(heading_text)
-            sections.append((section_slug, section_text))
-
-    # Include any preamble before the first heading
-    if headings and headings[0].start() > 0:
-        preamble = text[: headings[0].start()].strip()
-        if preamble and not is_too_small(preamble):
-            sections.insert(0, ("preamble", preamble))
+    sections = _collect_sections(text, headings)
 
     if not sections:
         return [(stem, text)]

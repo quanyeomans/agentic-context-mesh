@@ -22,9 +22,13 @@ def main() -> int:
         baseline = json.loads(BASELINE_PATH.read_text())
     except (json.JSONDecodeError, OSError) as e:
         print(f"Cannot read baseline: {e}")
-        return 0
+        return 1
 
     baseline_wt = baseline.get("summary", {}).get("weighted_total", 0)
+    if baseline_wt <= 0:
+        print(f"Baseline weighted_total is {baseline_wt:.3f} — invalid or missing")
+        return 1
+
     print(f"Baseline weighted_total: {baseline_wt:.3f}")
     print("Comparison check ready (run contract suite first to generate current results)")
     return 0

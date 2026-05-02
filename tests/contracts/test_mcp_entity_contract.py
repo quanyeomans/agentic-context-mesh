@@ -3,11 +3,11 @@
 Verifies that tool_entity returns non-null name, type, and a synthesised
 summary when the Neo4j graph contains an entity with type-specific properties.
 Guards the boundary between MCP tool output and Neo4j node properties.
+
+Uses dependency injection — no monkey-patching required.
 """
 
 from __future__ import annotations
-
-from unittest.mock import patch
 
 import pytest
 
@@ -31,6 +31,7 @@ class _FakeNeo4jClient:
 class TestEntityCardPersonNode:
     """PersonNode entities return role/org in the summary."""
 
+    @pytest.mark.contract
     def test_person_returns_populated_fields(self) -> None:
         fake = _FakeNeo4jClient(
             [
@@ -49,8 +50,7 @@ class TestEntityCardPersonNode:
                 }
             ]
         )
-        with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
-            result = tool_entity(name="Alistair Black")
+        result = tool_entity(name="Alistair Black", neo4j_client=fake)
 
         assert result["name"] == "Alistair Black"
         assert result["type"] == "Person"
@@ -61,6 +61,7 @@ class TestEntityCardPersonNode:
         assert result["vault_path"] != ""
         assert result["error"] == ""
 
+    @pytest.mark.contract
     def test_person_without_role_returns_empty_summary(self) -> None:
         fake = _FakeNeo4jClient(
             [
@@ -79,8 +80,7 @@ class TestEntityCardPersonNode:
                 }
             ]
         )
-        with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
-            result = tool_entity(name="Jane Doe")
+        result = tool_entity(name="Jane Doe", neo4j_client=fake)
 
         assert result["name"] == "Jane Doe"
         assert result["summary"] == ""
@@ -89,6 +89,7 @@ class TestEntityCardPersonNode:
 class TestEntityCardOrganisationNode:
     """OrganisationNode entities return tier/engagement in the summary."""
 
+    @pytest.mark.contract
     def test_org_returns_populated_fields(self) -> None:
         fake = _FakeNeo4jClient(
             [
@@ -107,8 +108,7 @@ class TestEntityCardOrganisationNode:
                 }
             ]
         )
-        with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
-            result = tool_entity(name="Acme Corp")
+        result = tool_entity(name="Acme Corp", neo4j_client=fake)
 
         assert result["name"] == "Acme Corp"
         assert result["type"] == "Organisation"
@@ -121,6 +121,7 @@ class TestEntityCardOrganisationNode:
 class TestEntityCardConceptNode:
     """Concept/Outcome nodes return domain in the summary."""
 
+    @pytest.mark.contract
     def test_concept_returns_domain(self) -> None:
         fake = _FakeNeo4jClient(
             [
@@ -139,8 +140,7 @@ class TestEntityCardConceptNode:
                 }
             ]
         )
-        with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
-            result = tool_entity(name="Zero Trust")
+        result = tool_entity(name="Zero Trust", neo4j_client=fake)
 
         assert result["type"] == "Concept"
         assert "cybersecurity" in result["summary"]
@@ -149,10 +149,10 @@ class TestEntityCardConceptNode:
 class TestEntityNotFound:
     """Missing entities return an error, not a crash."""
 
+    @pytest.mark.contract
     def test_missing_entity_returns_error(self) -> None:
         fake = _FakeNeo4jClient([])
-        with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
-            result = tool_entity(name="Nobody Real")
+        result = tool_entity(name="Nobody Real", neo4j_client=fake)
 
         assert result["error"] != ""
         assert result["name"] == "Nobody Real"

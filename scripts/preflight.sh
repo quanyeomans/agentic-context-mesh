@@ -26,7 +26,10 @@ ruff check kairix/ tests/ --quiet && pass "ruff lint" || fail "ruff lint — run
 # 2. Ruff format
 ruff format --check kairix/ tests/ >/dev/null 2>&1 && pass "ruff format" || fail "ruff format — run: ruff format kairix/ tests/"
 
-# 3. Unit + BDD + Contract tests (matches CI Stage 2)
+# 3. mypy strict (matches CI Stage 2)
+mypy kairix/ --strict --no-error-summary 2>&1 | grep -q "error" && fail "mypy strict — run: mypy kairix/ --strict" || pass "mypy strict"
+
+# 4. Unit + BDD + Contract tests (matches CI Stage 2)
 TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
 echo "$TEST_OUT" | grep -qE "[0-9]+ passed" && ! echo "$TEST_OUT" | grep -qE "[0-9]+ failed" && pass "unit + bdd + contract tests ($(echo "$TEST_OUT" | grep -oE '[0-9]+ passed'))" || fail "unit + bdd + contract tests — run: pytest tests/ -x -m 'unit or bdd or contract'"
 

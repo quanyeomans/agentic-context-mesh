@@ -15,7 +15,10 @@ def test_frontmatter_date():
 
 
 @pytest.mark.bdd
-@scenario(FEATURE, "Documents without a date field still get a date from when the file was last changed")
+@scenario(
+    FEATURE,
+    "Documents without a date field still get a date from when the file was last changed",
+)
 def test_mtime_fallback():
     pass
 

@@ -68,7 +68,9 @@ def run_onboard_check():
     doc_root = os.environ.get("KAIRIX_DOCUMENT_ROOT", "")
     if doc_root and Path(doc_root).exists():
         results["document_root_configured"] = CheckResult(
-            name="document_root_configured", ok=True, detail=f"Document root: {doc_root}"
+            name="document_root_configured",
+            ok=True,
+            detail=f"Document root: {doc_root}",
         )
     else:
         results["document_root_configured"] = CheckResult(
