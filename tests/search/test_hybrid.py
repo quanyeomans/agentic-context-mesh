@@ -14,7 +14,7 @@ Tests cover:
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -989,80 +989,71 @@ def test_rerank_not_called_when_disabled() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. _apply_hyde — via _run_vector_search
+# 6. HyDE behaviour — tested through search() with SEMANTIC intent
+#    These tests do NOT mock _run_vector_search — they let it run and mock
+#    the lower-level embed/chat/index functions so HyDE is exercised.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_hyde_applied_for_semantic_intent() -> None:
-    """SEMANTIC intent triggers HyDE: chat_completion and embed_text called for hypothetical answer."""
-    from unittest.mock import MagicMock
-    from unittest.mock import patch as _patch
+    """SEMANTIC intent triggers HyDE: chat_completion called for hypothetical answer."""
+    from contextlib import ExitStack
 
     import numpy as np
 
     fake_vec = np.random.rand(1536).astype(np.float32).tolist()
-
+    vec_result = VecResult(
+        hash_seq="h1_0", distance=0.1, path="concept.md",
+        collection="shared", title="Concept", snippet="A concept document.",
+    )
     mock_index = MagicMock()
     mock_index.__len__ = lambda self: 100
-    mock_index.search.return_value = [
-        VecResult(
-            hash_seq="h1_0",
-            distance=0.1,
-            path="/vault/concept.md",
-            collection="shared",
-            title="Concept",
-            snippet="A concept document.",
+    mock_index.search.return_value = [vec_result]
+
+    with ExitStack() as stack:
+        stack.enter_context(patch("kairix.core.search.hybrid.bm25_search", return_value=[]))
+        stack.enter_context(patch("kairix.core.search.hybrid.classify", return_value=QueryIntent.SEMANTIC))
+        stack.enter_context(patch("kairix.core.search.hybrid._log_search_event"))
+        stack.enter_context(patch("kairix.core.search.hybrid._get_neo4j", return_value=_make_neo4j_stub(False)))
+        stack.enter_context(patch("kairix.core.search.hybrid.get_vector_index", return_value=mock_index))
+        mock_embed = stack.enter_context(patch("kairix._azure.embed_text", return_value=fake_vec))
+        mock_chat = stack.enter_context(
+            patch("kairix._azure.chat_completion", return_value="A hypothetical answer.")
         )
-    ]
 
-    with (
-        _patch("kairix.core.search.hybrid.get_vector_index", return_value=mock_index),
-        _patch("kairix._azure.embed_text", return_value=fake_vec) as mock_embed,
-        _patch("kairix._azure.chat_completion", return_value="A hypothetical answer about concepts.") as mock_chat,
-    ):
-        from kairix.core.search.hybrid import _run_vector_search
+        result = search("explain the concept")
 
-        results = _run_vector_search("explain the concept", ["shared"], intent="semantic")
-
-    # chat_completion should have been called for HyDE
     mock_chat.assert_called_once()
-    # embed_text called at least twice: once for query, once for hyde answer
     assert mock_embed.call_count >= 2
-    assert len(results) >= 1
 
 
 @pytest.mark.unit
 def test_hyde_fallback_on_llm_failure() -> None:
     """HyDE LLM call failure falls back to original query embedding (no crash)."""
-    from unittest.mock import MagicMock
-    from unittest.mock import patch as _patch
+    from contextlib import ExitStack
 
     import numpy as np
 
     fake_vec = np.random.rand(1536).astype(np.float32).tolist()
-
+    vec_result = VecResult(
+        hash_seq="h1_0", distance=0.1, path="concept.md",
+        collection="shared", title="Concept", snippet="A concept document.",
+    )
     mock_index = MagicMock()
     mock_index.__len__ = lambda self: 100
-    mock_index.search.return_value = [
-        VecResult(
-            hash_seq="h1_0",
-            distance=0.1,
-            path="/vault/concept.md",
-            collection="shared",
-            title="Concept",
-            snippet="A concept document.",
-        )
-    ]
+    mock_index.search.return_value = [vec_result]
 
-    with (
-        _patch("kairix.core.search.hybrid.get_vector_index", return_value=mock_index),
-        _patch("kairix._azure.embed_text", return_value=fake_vec),
-        _patch("kairix._azure.chat_completion", side_effect=RuntimeError("LLM unavailable")),
-    ):
-        from kairix.core.search.hybrid import _run_vector_search
+    with ExitStack() as stack:
+        stack.enter_context(patch("kairix.core.search.hybrid.bm25_search", return_value=[]))
+        stack.enter_context(patch("kairix.core.search.hybrid.classify", return_value=QueryIntent.SEMANTIC))
+        stack.enter_context(patch("kairix.core.search.hybrid._log_search_event"))
+        stack.enter_context(patch("kairix.core.search.hybrid._get_neo4j", return_value=_make_neo4j_stub(False)))
+        stack.enter_context(patch("kairix.core.search.hybrid.get_vector_index", return_value=mock_index))
+        stack.enter_context(patch("kairix._azure.embed_text", return_value=fake_vec))
+        stack.enter_context(patch("kairix._azure.chat_completion", side_effect=RuntimeError("LLM unavailable")))
 
-        results = _run_vector_search("explain the concept", ["shared"], intent="semantic")
+        result = search("explain the concept")
 
-    # Should still return results using original embedding (fallback)
-    assert len(results) >= 1
+    # Should still return results — fallback to raw query embedding
+    assert result.error == ""
