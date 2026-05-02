@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.quality.eval.gold_builder import _path_title
+from kairix.quality.eval.gold_builder import path_title
 from kairix.quality.eval.metrics import match_gold_to_path
 from kairix.quality.eval.metrics import relevance_for_path as _relevance_for_path
 
@@ -13,15 +13,15 @@ pytestmark = pytest.mark.unit
 
 class TestPathTitle:
     def test_generates_path_based_title(self) -> None:
-        result = _path_title("reference-library/engineering/adr-examples/readme.md")
+        result = path_title("reference-library/engineering/adr-examples/readme.md")
         assert result == "engineering/adr-examples/readme"
 
     def test_short_path(self) -> None:
-        result = _path_title("docs/readme.md")
+        result = path_title("docs/readme.md")
         assert result == "docs/readme"
 
     def test_single_segment(self) -> None:
-        result = _path_title("readme.md")
+        result = path_title("readme.md")
         assert result == "readme"
 
 

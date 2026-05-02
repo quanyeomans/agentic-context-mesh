@@ -278,7 +278,7 @@ class HybridSweepReport:
 # ---------------------------------------------------------------------------
 
 
-def _sweep_config_to_retrieval_config(cfg: HybridSweepConfig) -> Any:
+def sweep_config_to_retrieval_config(cfg: HybridSweepConfig) -> Any:
     """Convert a sweep config to a RetrievalConfig for the main search pipeline."""
     from kairix.core.search.config import (
         EntityBoostConfig,
@@ -316,7 +316,7 @@ def _retrieve(
     """Run retrieval via the shared retrieval module."""
     from kairix.quality.eval.retrieval import retrieve
 
-    config = _sweep_config_to_retrieval_config(cfg)
+    config = sweep_config_to_retrieval_config(cfg)
     result = retrieve(
         query=query,
         system="hybrid",

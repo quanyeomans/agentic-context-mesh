@@ -37,7 +37,7 @@ _WEIGHT_PRESETS: dict[str, tuple[float, float, float]] = {
 }
 
 
-def _path_title(path: str) -> str:
+def path_title(path: str) -> str:
     """Build a path-based gold title from a document path.
 
     Uses all path segments after the first (collection root) without the
@@ -268,12 +268,12 @@ def grade_candidates(
     if not candidates:
         return candidates
 
-    # Build (doc_key, snippet) pairs for judge — use _path_title() for
+    # Build (doc_key, snippet) pairs for judge — use path_title() for
     # unique keys so two files with the same stem (e.g. readme.md) get
     # independent grades.
     judge_candidates = []
     for c in candidates:
-        doc_key = _path_title(c.path)
+        doc_key = path_title(c.path)
         judge_candidates.append((doc_key, c.snippet[:150]))
 
     for _run in range(judge_runs):
@@ -287,7 +287,7 @@ def grade_candidates(
         )
 
         for c in candidates:
-            doc_key = _path_title(c.path)
+            doc_key = path_title(c.path)
             grade = result.grades.get(doc_key, 0)
             c.grade_votes.append(grade)
 
@@ -378,7 +378,7 @@ def build_independent_gold(
             if c.grade >= 1:
                 gold_titles.append(
                     {
-                        "title": _path_title(c.path),
+                        "title": path_title(c.path),
                         "relevance": c.grade,
                     }
                 )
