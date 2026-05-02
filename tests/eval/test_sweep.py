@@ -163,3 +163,251 @@ class TestCategoryAliases:
 
         total = sum(CATEGORY_WEIGHTS.values())
         assert total == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# sweep_bm25_params — public interface tests
+# ---------------------------------------------------------------------------
+
+
+class TestSweepBm25Params:
+    """Test sweep_bm25_params through its public interface with mocked DB."""
+
+    @pytest.mark.unit
+    def test_empty_suite_returns_empty_report(self, tmp_path):
+        """Sweep returns empty report when suite has no cases."""
+        import yaml
+
+        from kairix.quality.eval.sweep import sweep_bm25_params
+
+        suite = {"meta": {"version": "1.0"}, "cases": []}
+        suite_path = tmp_path / "empty.yaml"
+        with open(suite_path, "w") as f:
+            yaml.dump(suite, f)
+
+        report = sweep_bm25_params(suite_path)
+        assert report.results == []
+        assert report.best is None
+
+    @pytest.mark.unit
+    def test_no_ndcg_cases_returns_empty_report(self, tmp_path):
+        """Sweep returns empty report when no ndcg-scored cases exist."""
+        import yaml
+
+        from kairix.quality.eval.sweep import sweep_bm25_params
+
+        suite = {
+            "meta": {"version": "1.0"},
+            "cases": [
+                {"query": "test", "category": "recall", "score_method": "hit"},
+            ],
+        }
+        suite_path = tmp_path / "no-ndcg.yaml"
+        with open(suite_path, "w") as f:
+            yaml.dump(suite, f)
+
+        report = sweep_bm25_params(suite_path)
+        assert report.results == []
+        assert report.best is None
+
+    @pytest.mark.unit
+    def test_sweep_runs_all_style_and_weight_combos(self, tmp_path):
+        """Sweep evaluates every (weight, style) combination."""
+        import sqlite3
+
+        import yaml
+
+        from kairix.quality.eval.sweep import sweep_bm25_params
+
+        # Create a minimal FTS5 database
+        db_path = tmp_path / "index.sqlite"
+        db = sqlite3.connect(str(db_path))
+        db.executescript("""
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                path TEXT NOT NULL,
+                title TEXT,
+                hash TEXT NOT NULL,
+                active INTEGER DEFAULT 1,
+                UNIQUE(collection, path)
+            );
+            CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
+            CREATE VIRTUAL TABLE documents_fts USING fts5(
+                path, title, doc, content='', tokenize='porter unicode61'
+            );
+            INSERT INTO documents (collection, path, title, hash, active)
+            VALUES ('test', 'docs/architecture.md', 'Architecture Guide', 'h1', 1);
+            INSERT INTO content (hash, doc) VALUES ('h1', 'Architecture patterns and decisions.');
+            INSERT INTO documents_fts (rowid, path, title, doc)
+            VALUES (1, 'docs/architecture.md', 'Architecture Guide', 'Architecture patterns and decisions.');
+        """)
+        db.close()
+
+        suite = {
+            "meta": {"version": "1.0"},
+            "cases": [
+                {
+                    "query": "architecture patterns",
+                    "category": "recall",
+                    "score_method": "ndcg",
+                    "gold_titles": [{"title": "Architecture Guide", "relevance": 2}],
+                },
+            ],
+        }
+        suite_path = tmp_path / "suite.yaml"
+        with open(suite_path, "w") as f:
+            yaml.dump(suite, f)
+
+        weights = [(1.0, 1.0, 1.0), (10.0, 1.0, 1.0)]
+        styles = ["bare", "prefix"]
+
+        from unittest.mock import patch
+
+        with (
+            patch("kairix.core.db.get_db_path", return_value=str(db_path)),
+            patch("kairix.core.db.open_db", side_effect=lambda p: sqlite3.connect(str(p))),
+        ):
+            report = sweep_bm25_params(
+                suite_path,
+                weight_configs=weights,
+                query_styles=styles,
+            )
+
+        assert report.total_configs == 4  # 2 weights x 2 styles
+        assert len(report.results) == 4
+        assert report.best is not None
+        # Results sorted descending
+        scores = [r.weighted_total for r in report.results]
+        assert scores == sorted(scores, reverse=True)
+
+    @pytest.mark.unit
+    def test_sweep_writes_csv_output(self, tmp_path):
+        """Sweep writes CSV when output_path is provided."""
+        import sqlite3
+
+        import yaml
+
+        from kairix.quality.eval.sweep import sweep_bm25_params
+
+        db_path = tmp_path / "index.sqlite"
+        db = sqlite3.connect(str(db_path))
+        db.executescript("""
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                path TEXT NOT NULL,
+                title TEXT,
+                hash TEXT NOT NULL,
+                active INTEGER DEFAULT 1,
+                UNIQUE(collection, path)
+            );
+            CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
+            CREATE VIRTUAL TABLE documents_fts USING fts5(
+                path, title, doc, content='', tokenize='porter unicode61'
+            );
+            INSERT INTO documents (collection, path, title, hash, active)
+            VALUES ('test', 'docs/test.md', 'Test Doc', 'h1', 1);
+            INSERT INTO content (hash, doc) VALUES ('h1', 'Testing document content.');
+            INSERT INTO documents_fts (rowid, path, title, doc)
+            VALUES (1, 'docs/test.md', 'Test Doc', 'Testing document content.');
+        """)
+        db.close()
+
+        suite = {
+            "meta": {"version": "1.0"},
+            "cases": [
+                {
+                    "query": "testing document",
+                    "category": "recall",
+                    "score_method": "ndcg",
+                    "gold_titles": [{"title": "Test Doc", "relevance": 2}],
+                },
+            ],
+        }
+        suite_path = tmp_path / "suite.yaml"
+        with open(suite_path, "w") as f:
+            yaml.dump(suite, f)
+
+        csv_path = tmp_path / "results.csv"
+
+        from unittest.mock import patch
+
+        with (
+            patch("kairix.core.db.get_db_path", return_value=str(db_path)),
+            patch("kairix.core.db.open_db", side_effect=lambda p: sqlite3.connect(str(p))),
+        ):
+            sweep_bm25_params(
+                suite_path,
+                output_path=csv_path,
+                weight_configs=[(1.0, 1.0, 1.0)],
+                query_styles=["prefix"],
+            )
+
+        assert csv_path.exists()
+        lines = csv_path.read_text().splitlines()
+        assert len(lines) == 2  # header + 1 data row
+        assert "fp_weight" in lines[0]
+
+    @pytest.mark.unit
+    def test_sweep_report_best_is_highest_weighted(self, tmp_path):
+        """The best result has the highest weighted_total."""
+        import sqlite3
+
+        import yaml
+
+        from kairix.quality.eval.sweep import sweep_bm25_params
+
+        db_path = tmp_path / "index.sqlite"
+        db = sqlite3.connect(str(db_path))
+        db.executescript("""
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection TEXT NOT NULL,
+                path TEXT NOT NULL,
+                title TEXT,
+                hash TEXT NOT NULL,
+                active INTEGER DEFAULT 1,
+                UNIQUE(collection, path)
+            );
+            CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
+            CREATE VIRTUAL TABLE documents_fts USING fts5(
+                path, title, doc, content='', tokenize='porter unicode61'
+            );
+            INSERT INTO documents (collection, path, title, hash, active)
+            VALUES ('test', 'docs/arch.md', 'Architecture', 'h1', 1);
+            INSERT INTO content (hash, doc) VALUES ('h1', 'Software architecture guide.');
+            INSERT INTO documents_fts (rowid, path, title, doc)
+            VALUES (1, 'docs/arch.md', 'Architecture', 'Software architecture guide.');
+        """)
+        db.close()
+
+        suite = {
+            "meta": {"version": "1.0"},
+            "cases": [
+                {
+                    "query": "architecture guide",
+                    "category": "recall",
+                    "score_method": "ndcg",
+                    "gold_titles": [{"title": "Architecture", "relevance": 2}],
+                },
+            ],
+        }
+        suite_path = tmp_path / "suite.yaml"
+        with open(suite_path, "w") as f:
+            yaml.dump(suite, f)
+
+        from unittest.mock import patch
+
+        with (
+            patch("kairix.core.db.get_db_path", return_value=str(db_path)),
+            patch("kairix.core.db.open_db", side_effect=lambda p: sqlite3.connect(str(p))),
+        ):
+            report = sweep_bm25_params(
+                suite_path,
+                weight_configs=[(1.0, 1.0, 1.0), (10.0, 5.0, 1.0)],
+                query_styles=["prefix", "bare", "quoted"],
+            )
+
+        assert report.best is not None
+        assert report.best.weighted_total == max(r.weighted_total for r in report.results)
