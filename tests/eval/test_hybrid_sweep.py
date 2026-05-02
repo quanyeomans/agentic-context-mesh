@@ -2,6 +2,8 @@
 Tests for kairix.quality.eval.hybrid_sweep — hybrid pipeline calibration sweep.
 """
 
+from pathlib import Path
+
 import pytest
 
 from kairix.quality.eval.hybrid_sweep import (
@@ -10,10 +12,13 @@ from kairix.quality.eval.hybrid_sweep import (
     HybridSweepConfig,
     HybridSweepReport,
     HybridSweepResult,
+    _sweep_config_to_retrieval_config,
+    _write_csv,
     build_default_configs,
     compute_hit_at_k,
     compute_mrr,
     compute_ndcg,
+    sweep_hybrid_params,
 )
 from kairix.quality.eval.metrics import relevance_for_path as _match_relevance
 
@@ -272,3 +277,268 @@ def test_sweep_report_defaults() -> None:
     assert report.results == []
     assert report.best is None
     assert report.total_configs == 0
+
+
+# ---------------------------------------------------------------------------
+# _sweep_config_to_retrieval_config
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_sweep_config_to_retrieval_config_hybrid() -> None:
+    """Hybrid mode produces RRF fusion strategy."""
+    cfg = HybridSweepConfig(name="test", mode="hybrid", rrf_k=40, entity_enabled=False)
+    rc = _sweep_config_to_retrieval_config(cfg)
+    assert rc.fusion_strategy == "rrf"
+    assert rc.rrf_k == 40
+    assert rc.entity.enabled is False
+
+
+@pytest.mark.unit
+def test_sweep_config_to_retrieval_config_bm25_only() -> None:
+    """BM25-only mode sets skip_vector and bm25_primary fusion."""
+    cfg = HybridSweepConfig(name="test", mode="bm25_only")
+    rc = _sweep_config_to_retrieval_config(cfg)
+    assert rc.skip_vector is True
+    assert rc.fusion_strategy == "bm25_primary"
+
+
+@pytest.mark.unit
+def test_sweep_config_to_retrieval_config_bm25_primary() -> None:
+    """BM25-primary mode sets bm25_primary fusion without skip_vector."""
+    cfg = HybridSweepConfig(name="test", mode="bm25_primary")
+    rc = _sweep_config_to_retrieval_config(cfg)
+    assert rc.fusion_strategy == "bm25_primary"
+    assert rc.skip_vector is False
+
+
+@pytest.mark.unit
+def test_sweep_config_to_retrieval_config_preserves_boost_params() -> None:
+    """Boost parameters are forwarded to RetrievalConfig."""
+    cfg = HybridSweepConfig(
+        name="test",
+        mode="hybrid",
+        entity_enabled=True,
+        entity_factor=1.5,
+        entity_cap=3,
+        procedural_enabled=True,
+        procedural_factor=2.0,
+    )
+    rc = _sweep_config_to_retrieval_config(cfg)
+    assert rc.entity.enabled is True
+    assert rc.entity.factor == 1.5
+    assert rc.entity.cap == 3
+    assert rc.procedural.enabled is True
+    assert rc.procedural.factor == 2.0
+
+
+# ---------------------------------------------------------------------------
+# _retrieve
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_retrieve_delegates_to_retrieval_module() -> None:
+    """_retrieve calls the shared retrieval module with correct config."""
+    from unittest.mock import MagicMock, patch
+
+    from kairix.quality.eval.hybrid_sweep import _retrieve
+
+    cfg = HybridSweepConfig(name="test", mode="hybrid", rrf_k=40)
+
+    mock_result = MagicMock()
+    mock_result.paths = ["a.md", "b.md"]
+    mock_result.meta = {
+        "bm25_count": 5,
+        "vec_count": 3,
+        "fused_count": 8,
+        "vec_failed": False,
+    }
+
+    with patch("kairix.quality.eval.retrieval.retrieve", return_value=mock_result) as mock_fn:
+        paths, meta = _retrieve("test query", ["reference-library"], cfg)
+
+    assert paths == ["a.md", "b.md"]
+    assert meta["bm25_count"] == 5
+    assert meta["vec_count"] == 3
+    assert meta["fused_count"] == 8
+    assert meta["vec_failed"] is False
+    mock_fn.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# sweep_hybrid_params
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_sweep_hybrid_params_with_mock(tmp_path: Path) -> None:
+    """Sweep runs against a minimal suite and produces sorted results."""
+    from unittest.mock import patch
+
+    import yaml
+
+    suite = {
+        "meta": {"version": "1.0"},
+        "cases": [
+            {
+                "query": "test query",
+                "category": "recall",
+                "score_method": "ndcg",
+                "gold_titles": [{"title": "test-doc", "relevance": 2}],
+            },
+        ],
+    }
+    suite_path = tmp_path / "test-suite.yaml"
+    with open(suite_path, "w") as f:
+        yaml.dump(suite, f)
+
+    def mock_retrieve(query, collections, cfg):
+        return ["test-doc.md", "other.md"], {
+            "bm25_count": 5,
+            "vec_count": 3,
+            "fused_count": 8,
+            "vec_failed": False,
+        }
+
+    configs = [
+        HybridSweepConfig(name="config-a", mode="hybrid", rrf_k=20),
+        HybridSweepConfig(name="config-b", mode="hybrid", rrf_k=60),
+    ]
+
+    with patch("kairix.quality.eval.hybrid_sweep._retrieve", side_effect=mock_retrieve):
+        report = sweep_hybrid_params(suite_path, configs=configs)
+
+    assert report.total_configs == 2
+    assert len(report.results) == 2
+    assert report.best is not None
+    # Results sorted descending by weighted_total
+    assert report.results[0].weighted_total >= report.results[1].weighted_total
+
+
+@pytest.mark.unit
+def test_sweep_hybrid_params_empty_cases(tmp_path: Path) -> None:
+    """Sweep returns empty report when suite has no cases."""
+    import yaml
+
+    suite = {"meta": {"version": "1.0"}, "cases": []}
+    suite_path = tmp_path / "empty-suite.yaml"
+    with open(suite_path, "w") as f:
+        yaml.dump(suite, f)
+
+    report = sweep_hybrid_params(suite_path, configs=[])
+    assert report.results == []
+    assert report.best is None
+
+
+@pytest.mark.unit
+def test_sweep_hybrid_params_no_ndcg_cases(tmp_path: Path) -> None:
+    """Sweep returns empty report when suite has no ndcg-scored cases."""
+    import yaml
+
+    suite = {
+        "meta": {"version": "1.0"},
+        "cases": [
+            {"query": "q", "category": "recall", "score_method": "hit"},
+        ],
+    }
+    suite_path = tmp_path / "no-ndcg-suite.yaml"
+    with open(suite_path, "w") as f:
+        yaml.dump(suite, f)
+
+    report = sweep_hybrid_params(suite_path, configs=[])
+    assert report.results == []
+    assert report.best is None
+
+
+@pytest.mark.unit
+def test_sweep_hybrid_params_writes_csv(tmp_path: Path) -> None:
+    """Sweep writes CSV when output_path is provided."""
+    from unittest.mock import patch
+
+    import yaml
+
+    suite = {
+        "meta": {"version": "1.0"},
+        "cases": [
+            {
+                "query": "test query",
+                "category": "recall",
+                "score_method": "ndcg",
+                "gold_titles": [{"title": "test-doc", "relevance": 2}],
+            },
+        ],
+    }
+    suite_path = tmp_path / "suite.yaml"
+    with open(suite_path, "w") as f:
+        yaml.dump(suite, f)
+
+    csv_path = tmp_path / "results.csv"
+    configs = [HybridSweepConfig(name="only", mode="hybrid")]
+
+    def mock_retrieve(query, collections, cfg):
+        return ["test-doc.md"], {
+            "bm25_count": 1,
+            "vec_count": 1,
+            "fused_count": 2,
+            "vec_failed": False,
+        }
+
+    with patch("kairix.quality.eval.hybrid_sweep._retrieve", side_effect=mock_retrieve):
+        sweep_hybrid_params(suite_path, output_path=csv_path, configs=configs)
+
+    assert csv_path.exists()
+    lines = csv_path.read_text().splitlines()
+    assert len(lines) == 2  # header + 1 data row
+
+
+# ---------------------------------------------------------------------------
+# _write_csv
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_write_csv_creates_file(tmp_path: Path) -> None:
+    """CSV writer creates a file with header and data rows."""
+    cfg = HybridSweepConfig(name="test", mode="hybrid")
+    result = HybridSweepResult(config=cfg, weighted_total=0.75, ndcg_at_10=0.8)
+    report = HybridSweepReport(results=[result], best=result, total_configs=1)
+
+    csv_path = tmp_path / "results.csv"
+    _write_csv(csv_path, report)
+
+    assert csv_path.exists()
+    lines = csv_path.read_text().splitlines()
+    assert len(lines) == 2  # header + 1 data row
+    assert "test" in lines[1]
+
+
+@pytest.mark.unit
+def test_write_csv_multiple_results(tmp_path: Path) -> None:
+    """CSV writer handles multiple results."""
+    cfg_a = HybridSweepConfig(name="config-a", mode="hybrid")
+    cfg_b = HybridSweepConfig(name="config-b", mode="bm25_only")
+    result_a = HybridSweepResult(config=cfg_a, weighted_total=0.9)
+    result_b = HybridSweepResult(config=cfg_b, weighted_total=0.7)
+    report = HybridSweepReport(results=[result_a, result_b], best=result_a, total_configs=2)
+
+    csv_path = tmp_path / "multi.csv"
+    _write_csv(csv_path, report)
+
+    lines = csv_path.read_text().splitlines()
+    assert len(lines) == 3  # header + 2 data rows
+    assert "config-a" in lines[1]
+    assert "config-b" in lines[2]
+
+
+@pytest.mark.unit
+def test_write_csv_creates_parent_dirs(tmp_path: Path) -> None:
+    """CSV writer creates parent directories if they do not exist."""
+    cfg = HybridSweepConfig(name="test", mode="hybrid")
+    result = HybridSweepResult(config=cfg, weighted_total=0.5)
+    report = HybridSweepReport(results=[result], best=result, total_configs=1)
+
+    csv_path = tmp_path / "nested" / "dir" / "results.csv"
+    _write_csv(csv_path, report)
+
+    assert csv_path.exists()
