@@ -136,6 +136,15 @@ def cmd_embed(args: argparse.Namespace) -> int:
             else:
                 scan_collections = [CollectionConfig(name="default", path=".")]
 
+            # Auto-append reference library if present (ships inside Docker container)
+            from kairix.paths import reference_library_root
+
+            reflib_root = reference_library_root()
+            if reflib_root.is_dir():
+                scan_collections.append(
+                    CollectionConfig(name="reference-library", path=str(reflib_root), glob="**/*.md")
+                )
+
             scan_report = scanner.scan(scan_collections)
             if scan_report.new > 0 or scan_report.updated > 0:
                 logging.info(

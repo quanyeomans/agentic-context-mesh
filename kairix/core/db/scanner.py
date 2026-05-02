@@ -159,7 +159,7 @@ class DocumentScanner:
     def _scan_collection(self, config: CollectionConfig) -> ScanReport:
         """Scan a single collection."""
         report = ScanReport()
-        collection_path = self._document_root / config.path
+        collection_path = Path(config.path) if Path(config.path).is_absolute() else self._document_root / config.path
 
         if not collection_path.exists():
             logger.warning("db.scanner: collection path does not exist: %s", collection_path)
