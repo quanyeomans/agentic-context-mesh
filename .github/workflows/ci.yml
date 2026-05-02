@@ -380,6 +380,16 @@ jobs:
         run: |
           docker run --rm --entrypoint python kairix:ci -c "import kairix; print('OK')"
 
+      - name: Verify reference library in container
+        run: |
+          COUNT=$(docker run --rm --entrypoint sh kairix:ci -c "find /opt/kairix/reference-library -name '*.md' | wc -l")
+          echo "Reference library docs: $COUNT"
+          if [ "$COUNT" -lt 5000 ]; then
+            echo "::error::Reference library has only $COUNT docs (expected 5800+)"
+            exit 1
+          fi
+          docker run --rm --entrypoint sh kairix:ci -c "ls /opt/kairix/suites/*.yaml"
+
       - name: Image size gate (max 3GB)
         run: |
           SIZE_BYTES=$(docker image inspect kairix:ci --format '{{.Size}}')
