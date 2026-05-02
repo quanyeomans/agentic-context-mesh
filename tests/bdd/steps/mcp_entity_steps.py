@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from pytest_bdd import given, parsers, then, when
 
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
@@ -77,11 +75,10 @@ def call_tool_entity(name):
     _state["exception"] = None
     _state["result"] = None
     fake = _state.get("fake_neo4j", _EntityAwareFakeNeo4j(entities=[]))
-    with patch("kairix.knowledge.graph.client.get_client", return_value=fake):
-        try:
-            _state["result"] = tool_entity(name=name)
-        except Exception as exc:
-            _state["exception"] = exc
+    try:
+        _state["result"] = tool_entity(name=name, neo4j_client=fake)
+    except Exception as exc:
+        _state["exception"] = exc
 
 
 @then(parsers.parse('the entity response has name "{expected}"'))

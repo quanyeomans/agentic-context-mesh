@@ -28,7 +28,7 @@ from kairix.knowledge.wikilinks import WIKILINK_RE
 from kairix.utils import display_name, slugify
 
 if TYPE_CHECKING:
-    from kairix.knowledge.graph.models import OrganisationNode
+    from kairix.knowledge.graph.models import OrganisationNode, PersonNode
 
 logger = logging.getLogger(__name__)
 
@@ -60,77 +60,76 @@ class CrawlReport:
         return len(self.errors) == 0
 
 
-def crawl(
-    document_root: str | Path,
-    neo4j_client: Any,
-    dry_run: bool = False,
-) -> CrawlReport:
-    """
-    Crawl the document store and upsert entity nodes + edges into Neo4j.
+# ---------------------------------------------------------------------------
+# Domain handlers
+# ---------------------------------------------------------------------------
 
-    Args:
-        document_root: Absolute path to the Obsidian document store root.
-        neo4j_client: An open Neo4jClient instance. Pass a mock for testing.
-        dry_run: When True, discover and log entities without writing to Neo4j.
 
-    Returns:
-        CrawlReport describing nodes found and upserted.
-    """
-    from kairix.knowledge.graph.models import EdgeKind, GraphEdge, OrganisationNode, OutcomeNode, PersonNode
+def crawl_organisations(
+    root: Path, report: CrawlReport, neo4j_client: Any, dry_run: bool
+) -> dict[str, OrganisationNode]:
+    """Discover org dirs under 02-Areas/00-Clients, parse frontmatter, build nodes, upsert."""
+    from kairix.knowledge.graph.models import OrganisationNode
 
-    root = Path(document_root)
-    report = CrawlReport(document_root=str(root), dry_run=dry_run)
-
-    if not root.exists():
-        report.errors.append(f"document_root does not exist: {root}")
-        return report
-
-    # ── 1. Organisation nodes ─────────────────────────────────────────────────
     orgs: dict[str, OrganisationNode] = {}
     clients_dir = root / "02-Areas" / "00-Clients"
-    if clients_dir.exists():
-        for org_dir in sorted(clients_dir.iterdir()):
-            if not org_dir.is_dir():
-                continue
-            org_id = _to_slug(org_dir.name)
-            # Canonical note: {OrgDir}/{OrgDir}.md (index file)
-            index_md = org_dir / f"{org_dir.name}.md"
-            canonical: Path | None
-            if index_md.exists():
-                canonical = index_md
+    if not clients_dir.exists():
+        return orgs
+
+    for org_dir in sorted(clients_dir.iterdir()):
+        if not org_dir.is_dir():
+            continue
+        org_id = _to_slug(org_dir.name)
+        # Canonical note: {OrgDir}/{OrgDir}.md (index file)
+        index_md = org_dir / f"{org_dir.name}.md"
+        canonical: Path | None
+        if index_md.exists():
+            canonical = index_md
+        else:
+            # Fall back to any .md file in the directory
+            mds = list(org_dir.glob("*.md"))
+            canonical = mds[0] if mds else None
+
+        fm: dict[str, Any] = {}
+        if canonical:
+            fm = _parse_frontmatter(canonical)
+
+        vault_path = str(canonical.relative_to(root)) if canonical else str(org_dir.relative_to(root))
+        node = OrganisationNode(
+            id=org_id,
+            name=fm.get("name") or _to_display_name(org_dir.name),
+            tier=str(fm.get("tier", "client")),
+            engagement_status=str(fm.get("engagement_status", "active")),
+            vault_path=vault_path,
+            industry=_as_list(fm.get("industry")),
+            geography=_as_list(fm.get("geography")),
+            stakeholder_personas=_as_list(fm.get("stakeholder_personas")),
+            aliases=_as_list(fm.get("aliases")),
+        )
+        orgs[org_dir.name.lower()] = node
+        orgs[org_id] = node
+        report.organisations_found += 1
+        logger.debug("org: %s (%s)", node.name, vault_path)
+
+        if not dry_run:
+            if neo4j_client.upsert_organisation(node):
+                report.organisations_upserted += 1
             else:
-                # Fall back to any .md file in the directory
-                mds = list(org_dir.glob("*.md"))
-                canonical = mds[0] if mds else None
+                report.errors.append(f"Failed to upsert org: {org_id}")
 
-            fm: dict[str, Any] = {}
-            if canonical:
-                fm = _parse_frontmatter(canonical)
+    return orgs
 
-            vault_path = str(canonical.relative_to(root)) if canonical else str(org_dir.relative_to(root))
-            node = OrganisationNode(
-                id=org_id,
-                name=fm.get("name") or _to_display_name(org_dir.name),
-                tier=str(fm.get("tier", "client")),
-                engagement_status=str(fm.get("engagement_status", "active")),
-                vault_path=vault_path,
-                industry=_as_list(fm.get("industry")),
-                geography=_as_list(fm.get("geography")),
-                stakeholder_personas=_as_list(fm.get("stakeholder_personas")),
-                aliases=_as_list(fm.get("aliases")),
-            )
-            orgs[org_dir.name.lower()] = node
-            orgs[org_id] = node
-            report.organisations_found += 1
-            logger.debug("org: %s (%s)", node.name, vault_path)
 
-            if not dry_run:
-                if neo4j_client.upsert_organisation(node):
-                    report.organisations_upserted += 1
-                else:
-                    report.errors.append(f"Failed to upsert org: {org_id}")
+def crawl_persons(
+    root: Path,
+    orgs: dict[str, OrganisationNode],
+    report: CrawlReport,
+    neo4j_client: Any,
+    dry_run: bool,
+) -> dict[str, PersonNode]:
+    """Discover person files, resolve orgs, build nodes, create WORKS_AT edges."""
+    from kairix.knowledge.graph.models import EdgeKind, GraphEdge, PersonNode
 
-    # ── 2. Person nodes ───────────────────────────────────────────────────────
     persons: dict[str, PersonNode] = {}
     for people_dir in _find_people_dirs(root):
         for md_file in sorted(people_dir.glob("*.md")):
@@ -179,32 +178,49 @@ def crawl(
                     else:
                         report.errors.append(f"Failed to upsert WORKS_AT edge: {person_id}→{org_id}")
 
-    # ── 3. Outcome nodes (optional) ───────────────────────────────────────────
+    return persons
+
+
+def crawl_outcomes(root: Path, report: CrawlReport, neo4j_client: Any, dry_run: bool) -> None:
+    """Discover outcome files under 05-Knowledge/01-Domain-Outcomes, build nodes, upsert."""
+    from kairix.knowledge.graph.models import OutcomeNode
+
     outcomes_dir = root / "05-Knowledge" / "01-Domain-Outcomes"
-    if outcomes_dir.exists():
-        for md_file in sorted(outcomes_dir.rglob("*.md")):
-            outcome_id = _to_slug(md_file.stem)
-            fm = _parse_frontmatter(md_file)
-            vault_path = str(md_file.relative_to(root))
+    if not outcomes_dir.exists():
+        return
 
-            from kairix.knowledge.graph.models import OutcomeNode
+    for md_file in sorted(outcomes_dir.rglob("*.md")):
+        outcome_id = _to_slug(md_file.stem)
+        fm = _parse_frontmatter(md_file)
+        vault_path = str(md_file.relative_to(root))
 
-            outcome_node = OutcomeNode(
-                id=outcome_id,
-                name=fm.get("name") or _to_display_name(md_file.stem),
-                domain=str(fm.get("domain") or ""),
-                vault_path=vault_path,
-            )
-            report.outcomes_found += 1
-            logger.debug("outcome: %s (%s)", outcome_node.name, vault_path)
+        outcome_node = OutcomeNode(
+            id=outcome_id,
+            name=fm.get("name") or _to_display_name(md_file.stem),
+            domain=str(fm.get("domain") or ""),
+            vault_path=vault_path,
+        )
+        report.outcomes_found += 1
+        logger.debug("outcome: %s (%s)", outcome_node.name, vault_path)
 
-            if not dry_run:
-                if neo4j_client.upsert_outcome(outcome_node):
-                    report.outcomes_upserted += 1
-                else:
-                    report.errors.append(f"Failed to upsert outcome: {outcome_id}")
+        if not dry_run:
+            if neo4j_client.upsert_outcome(outcome_node):
+                report.outcomes_upserted += 1
+            else:
+                report.errors.append(f"Failed to upsert outcome: {outcome_id}")
 
-    # ── 4. MENTIONS edges from wikilinks ──────────────────────────────────────
+
+def crawl_wikilink_edges(
+    root: Path,
+    orgs: dict[str, OrganisationNode],
+    persons: dict[str, PersonNode],
+    report: CrawlReport,
+    neo4j_client: Any,
+    dry_run: bool,
+) -> None:
+    """Extract wikilinks from all .md files and create MENTIONS edges."""
+    from kairix.knowledge.graph.models import EdgeKind, GraphEdge
+
     all_known = set(orgs.keys()) | set(persons.keys())
     for md_file in root.rglob("*.md"):
         try:
@@ -235,6 +251,40 @@ def crawl(
             if not dry_run:
                 if neo4j_client.upsert_edge(edge):
                     report.edges_upserted += 1
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def crawl(
+    document_root: str | Path,
+    neo4j_client: Any,
+    dry_run: bool = False,
+) -> CrawlReport:
+    """
+    Crawl the document store and upsert entity nodes + edges into Neo4j.
+
+    Args:
+        document_root: Absolute path to the Obsidian document store root.
+        neo4j_client: An open Neo4jClient instance. Pass a mock for testing.
+        dry_run: When True, discover and log entities without writing to Neo4j.
+
+    Returns:
+        CrawlReport describing nodes found and upserted.
+    """
+    root = Path(document_root)
+    report = CrawlReport(document_root=str(root), dry_run=dry_run)
+
+    if not root.exists():
+        report.errors.append(f"document_root does not exist: {root}")
+        return report
+
+    orgs = crawl_organisations(root, report, neo4j_client, dry_run)
+    persons = crawl_persons(root, orgs, report, neo4j_client, dry_run)
+    crawl_outcomes(root, report, neo4j_client, dry_run)
+    crawl_wikilink_edges(root, orgs, persons, report, neo4j_client, dry_run)
 
     return report
 

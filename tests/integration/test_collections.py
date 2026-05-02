@@ -58,6 +58,7 @@ def multi_collection_dirs(tmp_path: Path) -> dict[str, Path]:
 class TestMultiCollectionScanning:
     """DocumentScanner handles multiple collections."""
 
+    @pytest.mark.integration
     def test_single_collection_scans_root(self, multi_collection_dirs: dict, tmp_path: Path) -> None:
         """Default single-collection scan finds all documents under root."""
         import sqlite3
@@ -68,6 +69,7 @@ class TestMultiCollectionScanning:
         report = scanner.scan([CollectionConfig(name="default", path=".")])
         assert report.new == 4  # 2 docs + 2 workspace memories
 
+    @pytest.mark.integration
     def test_multi_collection_scans_separately(self, multi_collection_dirs: dict) -> None:
         """Multiple collections scan their own directories."""
         import sqlite3
@@ -88,6 +90,7 @@ class TestMultiCollectionScanning:
         assert "docs" in names
         assert "workspaces" in names
 
+    @pytest.mark.integration
     def test_empty_collection_returns_zero(self, tmp_path: Path) -> None:
         """A collection pointing to an empty directory returns 0 new."""
         import sqlite3
@@ -100,6 +103,7 @@ class TestMultiCollectionScanning:
         report = scanner.scan([CollectionConfig(name="empty", path="empty")])
         assert report.new == 0
 
+    @pytest.mark.integration
     def test_fallback_when_no_collections_configured(self, multi_collection_dirs: dict) -> None:
         """When no collections config exists, embed falls back to single default collection."""
         from kairix.core.search.config_loader import parse_collections
@@ -107,6 +111,7 @@ class TestMultiCollectionScanning:
         result = parse_collections({})
         assert result is None  # triggers fallback in embed CLI
 
+    @pytest.mark.integration
     def test_workspace_glob_filters_correctly(self, multi_collection_dirs: dict) -> None:
         """Workspace glob only matches files under memory/ subdirectories."""
         # Add a non-memory file to workspaces

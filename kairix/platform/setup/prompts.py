@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -18,7 +19,7 @@ class SetupContext:
     interactive: bool
     json_mode: bool
     state_path: Path
-    answers: dict = field(default_factory=dict)
+    answers: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def auto_detect(

@@ -28,7 +28,16 @@ STALENESS_THRESHOLD_DAYS = 90
 
 _NO_ISSUES_LINE = "✅ None."
 
-_ENTITY_LABELS = ("Organisation", "Person", "Outcome", "Concept", "Project", "Framework", "Technology", "Publication")
+_ENTITY_LABELS = (
+    "Organisation",
+    "Person",
+    "Outcome",
+    "Concept",
+    "Project",
+    "Framework",
+    "Technology",
+    "Publication",
+)
 
 
 @dataclass
@@ -76,7 +85,7 @@ def _query_entity_issues(
     cypher: str,
     detail: str,
     log_label: str,
-    params: dict | None = None,
+    params: dict[str, Any] | None = None,
     log_level: str = "warning",
 ) -> list[HealthIssue]:
     """Run a Cypher query and convert rows to HealthIssue objects.
@@ -98,7 +107,14 @@ def _query_entity_issues(
             row_detail = detail
             if "last_seen" in r:
                 row_detail = f"last seen: {r.get('last_seen') or 'never'}"
-            issues.append(HealthIssue(entity_id=eid, name=name, entity_type=label.lower(), detail=row_detail))
+            issues.append(
+                HealthIssue(
+                    entity_id=eid,
+                    name=name,
+                    entity_type=label.lower(),
+                    detail=row_detail,
+                )
+            )
     except Exception as exc:
         getattr(logger, log_level)("health: %s query failed — %s", log_label, exc)
     return issues
@@ -229,14 +245,16 @@ def format_report_text(report: HealthReport) -> str:
         lines.append("_No entities found._")
 
     lines += _format_issue_section(
-        f"## Synthesis Failures ({len(report.synthesis_failures)})", report.synthesis_failures
+        f"## Synthesis Failures ({len(report.synthesis_failures)})",
+        report.synthesis_failures,
     )
     lines += _format_issue_section(
         f"## Stale Entities ({len(report.stale_entities)}, threshold: {report.staleness_threshold_days} days)",
         report.stale_entities,
     )
     lines += _format_issue_section(
-        f"## Missing Vault Path ({len(report.missing_vault_path)})", report.missing_vault_path
+        f"## Missing Vault Path ({len(report.missing_vault_path)})",
+        report.missing_vault_path,
     )
 
     lines += ["", "## Graph (Neo4j)", ""]

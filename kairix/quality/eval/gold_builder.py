@@ -19,12 +19,19 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-from kairix.quality.eval.judge import JudgeResult, calibrate, fetch_llm_credentials, judge_batch
+from kairix.quality.eval.judge import (
+    JudgeResult,
+    calibrate,
+    fetch_llm_credentials,
+    judge_batch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +133,7 @@ def _bm25_search_with_weights(
                 ORDER BY score ASC
                 LIMIT ?
             """
-            params: list = [fts_query, *collections, limit]
+            params: list[Any] = [fts_query, *collections, limit]
         else:
             # safe: float() cast on bm25 weights, no ? binding available for bm25 args
             sql = f"""
@@ -214,16 +221,26 @@ def pool_candidates(
     systems: list[str],
     collections: list[str] | None = None,
     limit_per_system: int = 10,
+    search_fns: dict[str, Callable[..., list[dict[str, str]]]] | None = None,
 ) -> list[PooledCandidate]:
     """
     Pool top-k results from multiple retrieval systems for a single query.
 
     Deduplicates by path. Records which systems retrieved each document.
+
+    Args:
+        search_fns: Optional mapping of system name to search callable.
+                    Each callable receives (query, collections, limit) and
+                    returns list of {path, title, snippet, collection} dicts.
+                    Production defaults to internal BM25/vector functions.
     """
+    _fns = search_fns or {}
     candidates: dict[str, PooledCandidate] = {}
 
     for system in systems:
-        if system == "vector":
+        if system in _fns:
+            results = _fns[system](query, collections, limit_per_system)
+        elif system == "vector":
             results = _vector_search(query, collections, limit_per_system)
         elif system in _WEIGHT_PRESETS:
             results = _bm25_search_with_weights(query, _WEIGHT_PRESETS[system], collections, limit_per_system)
@@ -252,6 +269,7 @@ def grade_candidates(
     endpoint: str,
     deployment: str = "gpt-4o-mini",
     judge_runs: int = 2,
+    judge_fn: Callable[..., JudgeResult] | None = None,
 ) -> list[PooledCandidate]:
     """
     Grade each candidate using the LLM judge.
@@ -259,7 +277,7 @@ def grade_candidates(
     Runs judge_runs times and uses majority vote for final grade.
     """
     if not candidates:
-        return candidates
+        return []
 
     # Build (doc_key, snippet) pairs for judge — use path_title() for
     # unique keys so two files with the same stem (e.g. readme.md) get
@@ -269,8 +287,12 @@ def grade_candidates(
         doc_key = path_title(c.path)
         judge_candidates.append((doc_key, c.snippet[:150]))
 
+    _judge = judge_fn or judge_batch
+
+    graded_candidates: list[PooledCandidate] = list(candidates)
+
     for _run in range(judge_runs):
-        result: JudgeResult = judge_batch(
+        result: JudgeResult = _judge(
             query=query,
             candidates=judge_candidates,
             api_key=api_key,
@@ -279,17 +301,17 @@ def grade_candidates(
             shuffle=True,
         )
 
-        for c in candidates:
+        for c in graded_candidates:
             doc_key = path_title(c.path)
             grade = result.grades.get(doc_key, 0)
             c.grade_votes.append(grade)
 
     # Majority vote
-    for c in candidates:
+    for c in graded_candidates:
         if c.grade_votes:
             c.grade = max(set(c.grade_votes), key=c.grade_votes.count)
 
-    return candidates
+    return graded_candidates
 
 
 def build_independent_gold(
@@ -299,6 +321,10 @@ def build_independent_gold(
     judge_runs: int = 2,
     calibrate_first: bool = True,
     limit_per_system: int = 10,
+    credentials: tuple[str, str, str] | None = None,
+    search_fns: dict[str, Callable[..., list[dict[str, str]]]] | None = None,
+    calibrate_fn: Callable[[str, str, str], bool] | None = None,
+    grade_fn: Callable[..., list[PooledCandidate]] | None = None,
 ) -> GoldBuildReport:
     """
     Build an independent gold suite using TREC-style pooling + LLM judge.
@@ -332,15 +358,19 @@ def build_independent_gold(
         return GoldBuildReport()
 
     # Fetch credentials
-    api_key, endpoint, deployment = fetch_llm_credentials()
+    if credentials is not None:
+        api_key, endpoint, deployment = credentials
+    else:
+        api_key, endpoint, deployment = fetch_llm_credentials()
     if not api_key or not endpoint:
         logger.error("gold_builder: no API credentials — cannot run judge")
         return GoldBuildReport()
 
     # Calibrate judge
+    _calibrate = calibrate_fn or calibrate
     if calibrate_first:
         logger.info("gold_builder: running calibration...")
-        calibrate(api_key, endpoint, deployment)
+        _calibrate(api_key, endpoint, deployment)
         logger.info("gold_builder: calibration passed")
 
     report = GoldBuildReport()
@@ -353,7 +383,7 @@ def build_independent_gold(
         logger.info("gold_builder: [%d/%d] %s", i + 1, len(cases), query[:60])
 
         # Pool candidates
-        candidates = pool_candidates(query, systems, limit_per_system=limit_per_system)
+        candidates = pool_candidates(query, systems, limit_per_system=limit_per_system, search_fns=search_fns)
         report.total_candidates_pooled += len(candidates)
 
         if not candidates:
@@ -361,7 +391,8 @@ def build_independent_gold(
             continue
 
         # Grade with LLM judge
-        candidates = grade_candidates(query, candidates, api_key, endpoint, deployment, judge_runs)
+        _grade = grade_fn or grade_candidates
+        candidates = _grade(query, candidates, api_key, endpoint, deployment, judge_runs)
         report.total_judge_calls += len(candidates) * judge_runs
 
         # Build gold_titles from graded candidates (grade >= 1)

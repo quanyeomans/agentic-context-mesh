@@ -108,6 +108,7 @@ def _make_mock_client(available: bool = True) -> MagicMock:
 class TestLoadFromFixtures:
     """Load from fixture JSON files with a mocked Neo4j client."""
 
+    @pytest.mark.unit
     def test_loads_all_nodes_and_edges(self, tmp_path: Path):
         nodes_path = tmp_path / "entities" / "nodes.json"
         edges_path = tmp_path / "entities" / "edges.json"
@@ -131,6 +132,7 @@ class TestLoadFromFixtures:
         # Edges via upsert_edge
         assert client.upsert_edge.call_count == 2
 
+    @pytest.mark.unit
     def test_generic_node_upsert_uses_upsert_node(self, tmp_path: Path):
         """Concept, Framework, Technology, Publication go through upsert_node."""
         nodes_path = tmp_path / "nodes.json"
@@ -150,6 +152,7 @@ class TestLoadFromFixtures:
         # upsert_node should have been called for each generic node
         assert client.upsert_node.call_count == 4
 
+    @pytest.mark.unit
     def test_skips_unknown_label(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"
@@ -164,6 +167,7 @@ class TestLoadFromFixtures:
         assert len(report.errors) == 1
         assert "Unknown node label" in report.errors[0]
 
+    @pytest.mark.unit
     def test_skips_unknown_edge_kind(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"
@@ -193,6 +197,7 @@ class TestLoadFromFixtures:
 class TestDryRun:
     """Dry run produces a report without calling any Neo4j mutations."""
 
+    @pytest.mark.unit
     def test_dry_run_no_mutations(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"
@@ -219,6 +224,7 @@ class TestDryRun:
 class TestMissingFiles:
     """Graceful handling when entity files are missing."""
 
+    @pytest.mark.unit
     def test_missing_nodes_file(self, tmp_path: Path):
         nodes_path = tmp_path / "missing_nodes.json"
         edges_path = tmp_path / "edges.json"
@@ -231,6 +237,7 @@ class TestMissingFiles:
         assert report.edges_loaded == 2
         assert any("not found" in e for e in report.errors)
 
+    @pytest.mark.unit
     def test_missing_edges_file(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "missing_edges.json"
@@ -243,6 +250,7 @@ class TestMissingFiles:
         assert report.edges_loaded == 0
         assert any("not found" in e for e in report.errors)
 
+    @pytest.mark.unit
     def test_both_files_missing(self, tmp_path: Path):
         nodes_path = tmp_path / "nope_nodes.json"
         edges_path = tmp_path / "nope_edges.json"
@@ -254,6 +262,7 @@ class TestMissingFiles:
         assert report.edges_loaded == 0
         assert len(report.errors) == 2
 
+    @pytest.mark.unit
     def test_neo4j_unavailable_returns_empty_report(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"
@@ -267,6 +276,7 @@ class TestMissingFiles:
         assert report.edges_loaded == 0
         assert "Neo4j unavailable" in report.errors
 
+    @pytest.mark.integration
     def test_malformed_json(self, tmp_path: Path):
         nodes_path = tmp_path / "nodes.json"
         edges_path = tmp_path / "edges.json"

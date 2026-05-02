@@ -49,7 +49,11 @@ _TEST_DOCUMENTS = [
         "title": "FEAT-081",
         "body": "FEAT-081 implementation status: done. Merged in sprint 2A.",
     },
-    {"path": "features/FEAT-082.md", "title": "FEAT-082", "body": "FEAT-082 entity expansion. Target: sprint 2B."},
+    {
+        "path": "features/FEAT-082.md",
+        "title": "FEAT-082",
+        "body": "FEAT-082 entity expansion. Target: sprint 2B.",
+    },
     # semantic
     {
         "path": "strategy/infra-cost.md",

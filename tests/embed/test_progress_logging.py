@@ -2,10 +2,10 @@
 
 import logging
 import sqlite3
-from unittest.mock import patch
 
 import pytest
 
+from kairix.core.embed.deps import EmbedDependencies
 from kairix.core.embed.embed import run_embed
 
 pytestmark = pytest.mark.unit
@@ -37,8 +37,14 @@ def embed_db(tmp_path):
     # Insert two small docs so we get at least one batch
     for i in range(2):
         h = f"hash{i}"
-        conn.execute("INSERT INTO documents (hash, path, active) VALUES (?, ?, 1)", (h, f"doc{i}.md"))
-        conn.execute("INSERT INTO content (hash, doc) VALUES (?, ?)", (h, f"Body text number {i} for testing."))
+        conn.execute(
+            "INSERT INTO documents (hash, path, active) VALUES (?, ?, 1)",
+            (h, f"doc{i}.md"),
+        )
+        conn.execute(
+            "INSERT INTO content (hash, doc) VALUES (?, ?)",
+            (h, f"Body text number {i} for testing."),
+        )
     conn.execute("""
         CREATE TABLE content_vectors (
             hash TEXT,
@@ -69,20 +75,21 @@ def embed_db(tmp_path):
     conn.close()
 
 
+@pytest.mark.unit
 def test_embed_progress_logging_emitted(embed_db, caplog):
     """run_embed must emit 'Embed progress:' log lines during batch processing."""
     dims = 1536
 
-    with (
-        patch("kairix.core.embed.embed._get_azure_config", return_value=("key", "https://endpoint", "deploy")),
-        patch("kairix.core.embed.embed.preflight_check", return_value=dims),
-        patch("kairix.core.embed.embed.migrate_content_vectors"),
-        patch("kairix.core.embed.embed.embed_batch", return_value=[_fake_vec(dims)]),
-        patch("kairix.core.embed.embed.stage_embedding"),
-        patch("kairix.core.embed.embed._open_usearch_index", return_value=None),
-    ):
-        with caplog.at_level(logging.INFO, logger="kairix.core.embed.embed"):
-            result = run_embed(embed_db, batch_size=50, limit=2)
+    deps = EmbedDependencies(
+        get_azure_config=lambda: ("key", "https://endpoint", "deploy"),
+        preflight_check=lambda *_a, **_kw: dims,
+        embed_batch=lambda *_a, **_kw: [_fake_vec(dims)],
+        migrate_content_vectors=lambda _db: None,
+        open_usearch_index=lambda: None,
+        get_document_root=lambda: None,
+    )
+    with caplog.at_level(logging.INFO, logger="kairix.core.embed.embed"):
+        result = run_embed(embed_db, batch_size=50, limit=2, deps=deps)
 
     # Verify the progress log line was actually emitted
     progress_lines = [r for r in caplog.records if "Embed progress:" in r.message]

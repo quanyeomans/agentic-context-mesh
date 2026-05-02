@@ -6,37 +6,34 @@
 
 - [ ] Bug fix
 - [ ] New feature / enhancement
-- [ ] Refactor (no behaviour change)
+- [ ] Architecture (protocols, pipelines, repositories)
 - [ ] Documentation only
 - [ ] Dependency update
 
-## Testing
+## Quality gates
 
-- [ ] Unit tests pass: `pytest tests/ -m unit`
-- [ ] Contract tests pass: `pytest tests/ -m contract`
-- [ ] Integration tests pass: `pytest tests/ -m integration`
-- [ ] New tests added for changed behaviour (if applicable)
+- [ ] `bash scripts/safe-commit.sh` passes (lint, format, mypy, tests, secrets)
+- [ ] No `@patch` or monkey-patching in new test code — uses fakes from `tests/fakes.py`
+- [ ] No private function imports in tests
+- [ ] Every new test has a marker (`@pytest.mark.unit`, `contract`, `bdd`, or `integration`)
+- [ ] Protocol compliance verified if new protocols/implementations added
 
 ## Retrieval quality
 
 *Required if this PR changes search, embed, entity, or temporal logic.*
 
 - [ ] Benchmark run completed: `kairix benchmark run --suite suites/<suite>.yaml`
-- [ ] NDCG@10 result: **__.__** (baseline: 0.7756)
+- [ ] NDCG@10 result: **__.__**
 - [ ] No category regressed by more than 0.02
-
-*Skip this section for documentation-only or ops-tooling PRs.*
 
 ## Security
 
-- [ ] No secrets, API keys, or real vault content in this PR
-- [ ] `detect-secrets scan` passes: no new detections
+- [ ] No secrets, API keys, or real agent/client names in this PR
+- [ ] `detect-secrets scan` passes
 - [ ] `bandit` passes: zero HIGH/MEDIUM findings
-- [ ] `pip-audit` passes (if dependencies changed)
 
 ## Checklist
 
-- [ ] `ruff check kairix/ tests/` — zero errors
-- [ ] `mypy kairix/` — zero errors (for changed modules)
 - [ ] Coverage ≥ 80% maintained
-- [ ] Documentation updated (if behaviour or CLI surface changed)
+- [ ] Documentation updated (if behaviour or API surface changed)
+- [ ] CONSTRAINTS.md respected

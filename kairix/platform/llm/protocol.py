@@ -12,7 +12,7 @@ from the Azure-specific implementation and enables:
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -27,7 +27,7 @@ class LLMBackend(Protocol):
 
     def chat(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         max_tokens: int = 800,
     ) -> str:
         """

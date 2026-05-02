@@ -13,7 +13,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.quality.eval.monitor import MonitorResult, _load_log, _rolling_average, generate_report, run_monitor
+from kairix.quality.eval.monitor import (
+    MonitorResult,
+    _load_log,
+    _rolling_average,
+    generate_report,
+    run_monitor,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -216,7 +222,10 @@ def test_run_monitor_returns_false_on_benchmark_error(tmp_path: Path) -> None:
     log_path = str(tmp_path / "monitor.jsonl")
     suite_path = str(tmp_path / "canary.yaml")
 
-    with patch("kairix.quality.benchmark.suite.load_suite", side_effect=FileNotFoundError("suite not found")):
+    with patch(
+        "kairix.quality.benchmark.suite.load_suite",
+        side_effect=FileNotFoundError("suite not found"),
+    ):
         result = run_monitor(suite_path=suite_path, log_path=log_path)
 
     assert isinstance(result, MonitorResult)
@@ -234,7 +243,10 @@ def test_run_monitor_appends_to_log(tmp_path: Path) -> None:
     for _ in range(3):
         with (
             patch("kairix.quality.benchmark.suite.load_suite") as mock_load,
-            patch("kairix.quality.benchmark.runner.run_benchmark", return_value=mock_result),
+            patch(
+                "kairix.quality.benchmark.runner.run_benchmark",
+                return_value=mock_result,
+            ),
         ):
             mock_suite = MagicMock()
             mock_suite.cases = [MagicMock()] * 3

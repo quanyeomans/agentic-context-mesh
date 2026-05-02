@@ -17,6 +17,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -41,7 +42,7 @@ RECALL_LIMIT = 5  # top-k results to check for gold hit
 ADAPTIVE_SAMPLE_SIZE = 5  # number of documents to sample for adaptive queries
 
 
-def _get_recall_queries(db: sqlite3.Connection | None = None) -> list[tuple]:
+def _get_recall_queries(db: sqlite3.Connection | None = None) -> list[tuple[str, str, str]]:
     """Return recall queries — from env var, adaptive corpus sample, or defaults.
 
     Priority:
@@ -65,7 +66,7 @@ def _get_recall_queries(db: sqlite3.Connection | None = None) -> list[tuple]:
     return DEFAULT_RECALL_QUERIES
 
 
-def _build_adaptive_queries(db: sqlite3.Connection) -> list[tuple]:
+def _build_adaptive_queries(db: sqlite3.Connection) -> list[tuple[str, str, str]]:
     """Build recall queries from a random sample of indexed document titles."""
     try:
         rows = db.execute(
@@ -153,14 +154,31 @@ def _vsearch_usearch(query_vec: np.ndarray, limit: int = RECALL_LIMIT) -> list[s
         return []
 
 
-def check_recall(db: sqlite3.Connection | None = None) -> dict:
+def check_recall(
+    db: sqlite3.Connection | None = None,
+    *,
+    embed_fn: Callable[[str], np.ndarray | None] | None = None,
+    vsearch_fn: Callable[[np.ndarray, int], list[str]] | None = None,
+    recall_queries: list[tuple[str, str, str]] | None = None,
+) -> dict[str, Any]:
     """
     Run recall check queries via usearch vector search.
     Returns {score, passed, total, detail}.
     Score is fraction of queries where gold path fragment appears in top-5.
 
     If db is None, opens the kairix DB internally (for adaptive query building).
+
+    Args:
+        db: SQLite connection for adaptive query building.
+        embed_fn: Callable to embed a query string. Defaults to _embed_query.
+        vsearch_fn: Callable to run vector search. Defaults to _vsearch_usearch.
+        recall_queries: Override recall queries (skip adaptive/default logic).
     """
+    if embed_fn is None:
+        embed_fn = _embed_query
+    if vsearch_fn is None:
+        vsearch_fn = _vsearch_usearch
+
     close_db = False
     if db is None:
         try:
@@ -171,12 +189,12 @@ def check_recall(db: sqlite3.Connection | None = None) -> dict:
         except FileNotFoundError:
             db = None
 
-    queries = _get_recall_queries(db)
+    queries = recall_queries if recall_queries is not None else _get_recall_queries(db)
     passed = 0
     detail = []
 
     for qid, query, gold_fragment in queries:
-        query_vec = _embed_query(query)
+        query_vec = embed_fn(query)
         if query_vec is None:
             detail.append(
                 {
@@ -190,7 +208,7 @@ def check_recall(db: sqlite3.Connection | None = None) -> dict:
             )
             continue
 
-        files = _vsearch_usearch(query_vec)
+        files = vsearch_fn(query_vec, RECALL_LIMIT)
         hit = any(gold_fragment.lower() in f.lower() for f in files)
         if hit:
             passed += 1
@@ -232,7 +250,7 @@ def load_previous_score() -> float | None:
     return None
 
 
-def save_recall_result(result: dict) -> None:
+def save_recall_result(result: dict[str, Any]) -> None:
     """Append recall result to the log. Keep last 90 entries."""
     runs = []
     if RECALL_LOG.exists():
@@ -245,7 +263,9 @@ def save_recall_result(result: dict) -> None:
     RECALL_LOG.write_text(json.dumps(runs, indent=2))
 
 
-def run_recall_gate(alert_callback: Callable[[str], None] | None = None) -> tuple[bool, dict]:
+def run_recall_gate(
+    alert_callback: Callable[[str], None] | None = None,
+) -> tuple[bool, dict[str, Any]]:
     """
     Run the recall gate. Returns (passed, result_dict).
 

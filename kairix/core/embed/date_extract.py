@@ -35,7 +35,7 @@ _PATH_DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 # Year-month only (YYYY-MM) in frontmatter — not followed by a day component.
 # Maps to first day of month (YYYY-MM-01) for temporal filtering purposes.
-_FRONTMATTER_YEARMONTH_PATTERN = re.compile(
+FRONTMATTER_YEARMONTH_PATTERN = re.compile(
     # Match YYYY-MM date fields but NOT YYYY-MM-DD (negative lookahead for -DD)
     r"^[ \t]*(?:date|created|updated|created_at|date_added)[ \t]*:[ \t]*"
     r"[\"']*([0-9]{4}-[0-9]{2})(?!-[0-9]{2})[\"'\s]*$",
@@ -85,7 +85,7 @@ def extract_chunk_date(doc: str, path: str, document_root: str | Path | None = N
 
     # 2. Year-month frontmatter (YYYY-MM → YYYY-MM-01)
     if not any(_FRONTMATTER_PATTERN.finditer(head)):
-        for match in _FRONTMATTER_YEARMONTH_PATTERN.finditer(head):
+        for match in FRONTMATTER_YEARMONTH_PATTERN.finditer(head):
             ym = match.group(1)  # "YYYY-MM"
             candidate = ym + "-01"
             if _is_valid_date(candidate):

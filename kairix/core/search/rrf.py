@@ -49,17 +49,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kairix.core.search.bm25 import BM25Result
-from kairix.core.search.config import EntityBoostConfig, ProceduralBoostConfig, TemporalBoostConfig
+from kairix.core.search.config import (
+    EntityBoostConfig,
+    ProceduralBoostConfig,
+    TemporalBoostConfig,
+)
 from kairix.core.search.vec_index import VecResult
-from kairix.core.temporal.rewriter import (
-    QUERY_ISO_DATE_RE as _QUERY_ISO_DATE_RE,
-)
-from kairix.core.temporal.rewriter import (
-    QUERY_YEAR_MONTH_RE as _QUERY_YEAR_MONTH_RE,
-)
-from kairix.core.temporal.rewriter import (
-    RELATIVE_TEMPORAL_RE as _RELATIVE_TEMPORAL_RE,
-)
+from kairix.core.temporal.rewriter import QUERY_ISO_DATE_RE as _QUERY_ISO_DATE_RE
+from kairix.core.temporal.rewriter import QUERY_YEAR_MONTH_RE as _QUERY_YEAR_MONTH_RE
+from kairix.core.temporal.rewriter import RELATIVE_TEMPORAL_RE as _RELATIVE_TEMPORAL_RE
 from kairix.utils import slugify
 
 logger = logging.getLogger(__name__)

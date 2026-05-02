@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from kairix.text import estimate_tokens, truncate_to_tokens
 
@@ -90,7 +93,14 @@ def _trim_context(context: dict[str, str]) -> dict[str, str]:
     return trimmed
 
 
-def generate_briefing(agent: str) -> str:
+def generate_briefing(
+    agent: str,
+    *,
+    synthesise_fn: Callable[..., str] | None = None,
+    write_fn: Callable[..., Path] | None = None,
+    sources: dict[str, Callable] | None = None,
+    output_dir: Path | None = None,
+) -> str:
     """
     Generate a session briefing for the given agent.
 
@@ -100,33 +110,70 @@ def generate_briefing(agent: str) -> str:
     8:   Write to file
 
     Args:
-        agent: Agent name (e.g. "builder", "shape").
+        agent:         Agent name (e.g. "builder", "shape").
+        synthesise_fn: Optional replacement for the LLM synthesis step.
+                       Signature: (agent, context, max_tokens=800) -> str.
+        write_fn:      Optional replacement for the file writer step.
+                       Signature: (agent, content, sources_count, token_estimate) -> Path.
 
     Returns:
         Full briefing content (with header). Never raises.
     """
-    from kairix.agents.briefing.sources import (
-        fetch_entity_stub,
-        fetch_hybrid_search,
-        fetch_knowledge_rules,
-        fetch_memory_logs,
-        fetch_recent_decisions,
-        fetch_recent_memory,
-    )
-    from kairix.agents.briefing.synthesiser import synthesise
-    from kairix.agents.briefing.writer import write_briefing
+    from kairix.agents.briefing.synthesiser import synthesise as _default_synthesise
+    from kairix.agents.briefing.writer import write_briefing as _default_write
+
+    synthesise = synthesise_fn or _default_synthesise
+    write_briefing = write_fn or _default_write
 
     t_start = time.monotonic()
     logger.info("pipeline: generating briefing for agent %r", agent)
 
+    # Resolve source fetchers — allow per-source overrides via the `sources` dict
+    _src = sources or {}
+
+    def _resolve_source(name: str, default_import_path: str) -> Callable:
+        if name in _src:
+            return _src[name]
+        # Lazy import from default module
+        from kairix.agents.briefing import sources as _sources_mod
+
+        return getattr(_sources_mod, default_import_path)
+
+    _fetch_memory_logs = _resolve_source("memory_logs", "fetch_memory_logs")
+    _fetch_recent_memory = _resolve_source("recent_memory", "fetch_recent_memory")
+    _fetch_entity_stub = _resolve_source("entity_stub", "fetch_entity_stub")
+    _fetch_knowledge_rules = _resolve_source("knowledge_rules", "fetch_knowledge_rules")
+    _fetch_recent_decisions = _resolve_source("recent_decisions", "fetch_recent_decisions")
+    _fetch_hybrid_search = _resolve_source("hybrid_search", "fetch_hybrid_search")
+
     # Steps 1-6: concurrent source fetching
     source_tasks = [
-        ("memory_logs", fetch_memory_logs, agent, _SOURCE_TOKEN_CAPS["memory_logs"]),
-        ("recent_memory", fetch_recent_memory, agent, _SOURCE_TOKEN_CAPS["recent_memory"]),
-        ("entity_stub", fetch_entity_stub, agent, _SOURCE_TOKEN_CAPS["entity_stub"]),
-        ("knowledge_rules", fetch_knowledge_rules, agent, _SOURCE_TOKEN_CAPS["knowledge_rules"]),
-        ("recent_decisions", fetch_recent_decisions, agent, _SOURCE_TOKEN_CAPS["recent_decisions"]),
-        ("hybrid_search", fetch_hybrid_search, agent, _SOURCE_TOKEN_CAPS["hybrid_search"]),
+        ("memory_logs", _fetch_memory_logs, agent, _SOURCE_TOKEN_CAPS["memory_logs"]),
+        (
+            "recent_memory",
+            _fetch_recent_memory,
+            agent,
+            _SOURCE_TOKEN_CAPS["recent_memory"],
+        ),
+        ("entity_stub", _fetch_entity_stub, agent, _SOURCE_TOKEN_CAPS["entity_stub"]),
+        (
+            "knowledge_rules",
+            _fetch_knowledge_rules,
+            agent,
+            _SOURCE_TOKEN_CAPS["knowledge_rules"],
+        ),
+        (
+            "recent_decisions",
+            _fetch_recent_decisions,
+            agent,
+            _SOURCE_TOKEN_CAPS["recent_decisions"],
+        ),
+        (
+            "hybrid_search",
+            _fetch_hybrid_search,
+            agent,
+            _SOURCE_TOKEN_CAPS["hybrid_search"],
+        ),
     ]
 
     context: dict[str, str] = {}
@@ -218,3 +265,52 @@ def generate_briefing(agent: str) -> str:
         f"_Generated: {ts} | Sources: {sources_count} | Tokens: ~{token_estimate}_\n\n"
     )
     return header + briefing_body
+
+
+# ---------------------------------------------------------------------------
+# BriefingPipeline class — composable orchestrator
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BriefingPipeline:
+    """Composable briefing orchestrator.
+
+    Wraps the procedural generate_briefing() in a dataclass so callers
+    can construct it once with injected dependencies and call generate()
+    for each agent.
+
+    Attributes:
+        sources:        Per-source callable overrides (key = source name).
+        synthesise_fn:  LLM synthesis callable. Signature:
+                        (agent, context, max_tokens=800) -> str.
+        write_fn:       File writer callable. Signature:
+                        (agent, content, sources_count, token_estimate) -> Path.
+        output_dir:     Optional output directory override (unused by
+                        generate_briefing today, reserved for future).
+    """
+
+    sources: dict[str, Callable] = field(default_factory=dict)
+    synthesise_fn: Callable[..., str] | None = None
+    write_fn: Callable[..., Path] | None = None
+    output_dir: Path | None = None
+
+    def generate(self, agent: str) -> str:
+        """Generate a session briefing for the given agent.
+
+        Delegates to the procedural generate_briefing() with the
+        configured dependencies.
+
+        Args:
+            agent: Agent name (e.g. "builder", "shape").
+
+        Returns:
+            Full briefing content string. Never raises.
+        """
+        return generate_briefing(
+            agent=agent,
+            synthesise_fn=self.synthesise_fn,
+            write_fn=self.write_fn,
+            sources=self.sources if self.sources else None,
+            output_dir=self.output_dir,
+        )

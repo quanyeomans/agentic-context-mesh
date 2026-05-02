@@ -31,7 +31,7 @@ labels: bug
 
 ## Logs
 
-<!-- Paste relevant log output (sanitise any API keys or vault content) -->
+<!-- Paste relevant log output (sanitise any API keys or knowledge store content) -->
 
 ```
 ```

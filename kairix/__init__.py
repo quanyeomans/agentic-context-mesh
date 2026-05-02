@@ -7,15 +7,12 @@ try:
 except Exception:
     __version__ = "0.0.0"  # fallback for editable installs without metadata
 
-__all__ = ["QueryIntent", "RetrievalConfig", "SearchResult", "__version__", "hybrid_search"]
+__all__ = ["QueryIntent", "RetrievalConfig", "SearchResult", "__version__"]
 
 # Public API surface — guarded so the package loads even when optional deps
 # (e.g. neo4j) are missing.
-# Note: search() is aliased to hybrid_search to avoid shadowing the
-# kairix.core.search subpackage in sys.modules.
 try:
-    from kairix.core.search.hybrid import SearchResult
-    from kairix.core.search.hybrid import search as hybrid_search
+    from kairix.core.search.pipeline import SearchResult
 except ImportError:
     pass
 

@@ -122,7 +122,10 @@ class TestApplyBudget:
     def test_unexpected_exception_returns_empty(self) -> None:
         """apply_budget should never raise — returns [] on internal error."""
         results = [_fused()]
-        with patch("kairix.core.search.budget._apply_budget_impl", side_effect=RuntimeError("boom")):
+        with patch(
+            "kairix.core.search.budget._apply_budget_impl",
+            side_effect=RuntimeError("boom"),
+        ):
             result = apply_budget(results, budget=3000)
         assert result == []
 

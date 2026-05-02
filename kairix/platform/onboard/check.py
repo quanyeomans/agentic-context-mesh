@@ -24,6 +24,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,11 @@ def check_wrapper_installed() -> CheckResult:
                 ),
             )
         if first_line.startswith("#!") and ("bash" in first_line or "sh" in first_line):
-            return CheckResult(name="wrapper_installed", ok=True, detail=f"wrapper installed at {resolved}")
+            return CheckResult(
+                name="wrapper_installed",
+                ok=True,
+                detail=f"wrapper installed at {resolved}",
+            )
 
         return CheckResult(
             name="wrapper_installed",
@@ -241,9 +246,10 @@ def check_document_root_configured() -> CheckResult:
 def check_vector_search_working() -> CheckResult:
     """Vector search returns results with vec_count > 0 (not BM25-only fallback)."""
     try:
-        from kairix.core.search.hybrid import search
+        from kairix.core.factory import build_search_pipeline
 
-        result = search(query="knowledge management", budget=500)
+        _pipeline = build_search_pipeline()
+        result = _pipeline.search(query="knowledge management", budget=500)
 
         vec_count = getattr(result, "vec_count", None)
         bm25_count = getattr(result, "bm25_count", None)
@@ -303,12 +309,20 @@ def check_vector_search_working() -> CheckResult:
         )
 
 
-def check_neo4j_reachable() -> CheckResult:
-    """Neo4j is reachable and contains entities."""
-    try:
-        from kairix.knowledge.graph.client import get_client
+def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
+    """Neo4j is reachable and contains entities.
 
-        client = get_client()
+    Args:
+        neo4j_client: Injectable Neo4j client for testing.
+                      Defaults to the production client.
+    """
+    try:
+        if neo4j_client is not None:
+            client = neo4j_client
+        else:
+            from kairix.knowledge.graph.client import get_client
+
+            client = get_client()
         if not getattr(client, "available", False):
             return CheckResult(
                 name="neo4j_reachable",
@@ -527,8 +541,14 @@ def _probe_openclaw_harness() -> tuple[bool, str]:
                 cmd = entry.get("command", "")
                 cmd_ok = bool(cmd) and Path(cmd).exists() and os.access(cmd, os.X_OK)
                 if cmd_ok:
-                    return True, f"OpenClaw: registered in {p.name}, start command executable"
-                return False, f"OpenClaw: registered but start command missing/not executable: {cmd}"
+                    return (
+                        True,
+                        f"OpenClaw: registered in {p.name}, start command executable",
+                    )
+                return (
+                    False,
+                    f"OpenClaw: registered but start command missing/not executable: {cmd}",
+                )
         except (OSError, _json.JSONDecodeError):
             continue
 
@@ -536,7 +556,11 @@ def _probe_openclaw_harness() -> tuple[bool, str]:
     try:
         # safe: subprocess with trusted system binary (openclaw)
         result = subprocess.run(
-            ["openclaw", "mcp", "list"],  # noqa: S607 — openclaw is a known trusted binary
+            [
+                "openclaw",
+                "mcp",
+                "list",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
@@ -585,7 +609,11 @@ def _probe_sse_harness() -> tuple[bool, str]:
     try:
         # safe: subprocess with trusted system binary (systemctl)
         result = subprocess.run(
-            ["systemctl", "is-active", "kairix-mcp.service"],  # noqa: S607 — systemctl is a trusted binary
+            [
+                "systemctl",
+                "is-active",
+                "kairix-mcp.service",
+            ],
             capture_output=True,
             text=True,
             timeout=5,
@@ -620,9 +648,23 @@ def check_mcp_service() -> CheckResult:
     claude_ok, claude_detail = _probe_claude_desktop_harness()
     sse_ok, sse_detail = _probe_sse_harness()
 
-    active = [d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if ok]
+    active = [
+        d
+        for ok, d in [
+            (openclaw_ok, openclaw_detail),
+            (claude_ok, claude_detail),
+            (sse_ok, sse_detail),
+        ]
+        if ok
+    ]
     inactive = [
-        d for ok, d in [(openclaw_ok, openclaw_detail), (claude_ok, claude_detail), (sse_ok, sse_detail)] if not ok
+        d
+        for ok, d in [
+            (openclaw_ok, openclaw_detail),
+            (claude_ok, claude_detail),
+            (sse_ok, sse_detail),
+        ]
+        if not ok
     ]
 
     if active:

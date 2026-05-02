@@ -2,14 +2,40 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import pytest
 
 from kairix.core.search.config import RetrievalConfig
+from kairix.core.search.intent import QueryIntent
 
 pytestmark = pytest.mark.unit
+
+
+@dataclass
+class _FakeSearchResult:
+    """Minimal fake for SearchResult used in retrieve() tests."""
+
+    results: list = field(default_factory=list)
+    intent: QueryIntent = QueryIntent.SEMANTIC
+    bm25_count: int = 0
+    vec_count: int = 0
+    fused_count: int = 0
+    vec_failed: bool = False
+    latency_ms: float = 1.0
+
+
+class _CapturingSearch:
+    """Callable that captures its call kwargs and returns a fixed result."""
+
+    def __init__(self, result: _FakeSearchResult | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self._result = result or _FakeSearchResult()
+
+    def __call__(self, **kwargs: Any) -> _FakeSearchResult:
+        self.calls.append(kwargs)
+        return self._result
 
 
 class TestFusionOverride:
@@ -35,78 +61,49 @@ class TestFusionOverride:
 class TestRetrieveCollectionWiring:
     """Verify that _retrieve passes collection and fusion_override to search()."""
 
-    @patch("kairix.core.search.hybrid.search")
-    def test_collection_passed_to_search(self, mock_search: MagicMock) -> None:
-        from kairix.quality.benchmark.runner import _retrieve
+    def test_collection_passed_to_search(self) -> None:
+        from kairix.quality.benchmark.runner import retrieve
 
-        # Set up mock search result
-        mock_sr = MagicMock()
-        mock_sr.results = []
-        mock_sr.intent.value = "SEMANTIC"
-        mock_sr.bm25_count = 0
-        mock_sr.vec_count = 0
-        mock_sr.fused_count = 0
-        mock_sr.vec_failed = False
-        mock_sr.latency_ms = 1.0
-        mock_search.return_value = mock_sr
+        search = _CapturingSearch()
+        retrieve(
+            "test query",
+            "hybrid",
+            "shape",
+            collection="reference-library",
+            search_fn=search,
+        )
 
-        _retrieve("test query", "hybrid", "shape", collection="reference-library")
+        assert len(search.calls) == 1
+        assert search.calls[0]["collections"] == ["reference-library"]
 
-        mock_search.assert_called_once()
-        call_kwargs = mock_search.call_args[1]
-        assert call_kwargs["collections"] == ["reference-library"]
+    def test_no_collection_passes_none(self) -> None:
+        from kairix.quality.benchmark.runner import retrieve
 
-    @patch("kairix.core.search.hybrid.search")
-    def test_no_collection_passes_none(self, mock_search: MagicMock) -> None:
-        from kairix.quality.benchmark.runner import _retrieve
+        search = _CapturingSearch()
+        retrieve("test query", "hybrid", "shape", search_fn=search)
 
-        mock_sr = MagicMock()
-        mock_sr.results = []
-        mock_sr.intent.value = "SEMANTIC"
-        mock_sr.bm25_count = 0
-        mock_sr.vec_count = 0
-        mock_sr.fused_count = 0
-        mock_sr.vec_failed = False
-        mock_sr.latency_ms = 1.0
-        mock_search.return_value = mock_sr
+        assert search.calls[0]["collections"] is None
 
-        _retrieve("test query", "hybrid", "shape")
+    def test_fusion_override_calls_search(self) -> None:
+        """fusion_override still triggers a search call (config handled at pipeline construction)."""
+        from kairix.quality.benchmark.runner import retrieve
 
-        call_kwargs = mock_search.call_args[1]
-        assert call_kwargs["collections"] is None
+        search = _CapturingSearch()
+        retrieve("test query", "hybrid", "shape", fusion_override="rrf", search_fn=search)
 
-    @patch("kairix.core.search.config_loader.load_config")
-    @patch("kairix.core.search.hybrid.search")
-    def test_fusion_override_applied(self, mock_search: MagicMock, mock_load: MagicMock) -> None:
-        from kairix.quality.benchmark.runner import _retrieve
-
-        mock_load.return_value = RetrievalConfig.defaults()
-
-        mock_sr = MagicMock()
-        mock_sr.results = []
-        mock_sr.intent.value = "SEMANTIC"
-        mock_sr.bm25_count = 0
-        mock_sr.vec_count = 0
-        mock_sr.fused_count = 0
-        mock_sr.vec_failed = False
-        mock_sr.latency_ms = 1.0
-        mock_search.return_value = mock_sr
-
-        _retrieve("test query", "hybrid", "shape", fusion_override="rrf")
-
-        call_kwargs = mock_search.call_args[1]
-        assert call_kwargs["config"].fusion_strategy == "rrf"
+        assert len(search.calls) == 1
+        assert search.calls[0]["query"] == "test query"
 
 
 class TestRunBenchmarkMetadata:
     """Verify that collection and fusion_override appear in result metadata."""
 
-    @patch("kairix.quality.benchmark.runner._retrieve")
-    def test_metadata_includes_collection(self, mock_retrieve: MagicMock) -> None:
+    def test_metadata_includes_collection(self) -> None:
         from kairix.quality.benchmark.runner import run_benchmark
         from kairix.quality.benchmark.suite import BenchmarkCase, BenchmarkSuite
 
-        mock_retrieve.return_value = (["path/a.md"], ["snippet"], {"system": "hybrid"})
+        def _fake_retrieve(**kwargs):
+            return (["path/a.md"], ["snippet"], {"system": "hybrid"})
 
         suite = BenchmarkSuite(
             meta={"name": "test", "version": "1.0"},
@@ -121,16 +118,21 @@ class TestRunBenchmarkMetadata:
             ],
         )
 
-        result = run_benchmark(suite, collection="reference-library", fusion_override="rrf")
+        result = run_benchmark(
+            suite,
+            collection="reference-library",
+            fusion_override="rrf",
+            retrieve_fn=_fake_retrieve,
+        )
         assert result.meta["collection"] == "reference-library"
         assert result.meta["fusion_override"] == "rrf"
 
-    @patch("kairix.quality.benchmark.runner._retrieve")
-    def test_metadata_none_when_unset(self, mock_retrieve: MagicMock) -> None:
+    def test_metadata_none_when_unset(self) -> None:
         from kairix.quality.benchmark.runner import run_benchmark
         from kairix.quality.benchmark.suite import BenchmarkCase, BenchmarkSuite
 
-        mock_retrieve.return_value = (["path/a.md"], ["snippet"], {"system": "hybrid"})
+        def _fake_retrieve(**kwargs):
+            return (["path/a.md"], ["snippet"], {"system": "hybrid"})
 
         suite = BenchmarkSuite(
             meta={"name": "test", "version": "1.0"},
@@ -145,6 +147,6 @@ class TestRunBenchmarkMetadata:
             ],
         )
 
-        result = run_benchmark(suite)
+        result = run_benchmark(suite, retrieve_fn=_fake_retrieve)
         assert result.meta["collection"] is None
         assert result.meta["fusion_override"] is None

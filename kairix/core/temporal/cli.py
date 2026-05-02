@@ -60,7 +60,10 @@ Examples:
     args = parser.parse_args(argv if argv is not None else sys.argv[2:])
 
     # Lazy imports
-    from kairix.core.temporal.rewriter import extract_time_window, rewrite_temporal_query
+    from kairix.core.temporal.rewriter import (
+        extract_time_window,
+        rewrite_temporal_query,
+    )
 
     # Determine date window
     start: date | None = None

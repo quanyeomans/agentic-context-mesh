@@ -15,6 +15,9 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+_REFLIB_ROOT_HELP = "Reference library root directory (default: KAIRIX_REFLIB_ROOT env var)"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -32,7 +35,7 @@ def main(argv: list[str] | None = None) -> None:
     install_p.add_argument(
         "--reflib-root",
         default=None,
-        help="Reference library root directory (default: KAIRIX_REFLIB_ROOT env var)",
+        help=_REFLIB_ROOT_HELP,
     )
     install_p.add_argument("--dry-run", action="store_true", help="Validate without writing to Neo4j")
     install_p.add_argument("--verbose", action="store_true", help="Show per-entity detail")
@@ -45,7 +48,7 @@ def main(argv: list[str] | None = None) -> None:
     status_p.add_argument(
         "--reflib-root",
         default=None,
-        help="Reference library root directory (default: KAIRIX_REFLIB_ROOT env var)",
+        help=_REFLIB_ROOT_HELP,
     )
     status_p.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
 
@@ -57,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     extract_p.add_argument(
         "--reflib-root",
         default=None,
-        help="Reference library root directory (default: KAIRIX_REFLIB_ROOT env var)",
+        help=_REFLIB_ROOT_HELP,
     )
     extract_p.add_argument(
         "--collection",
@@ -104,7 +107,10 @@ def _cmd_install(args: argparse.Namespace) -> None:
 
     if not entities_dir.is_dir():
         print(f"Error: entities directory not found at {entities_dir}", file=sys.stderr)
-        print("Run 'kairix reference-library extract' first to generate entity files.", file=sys.stderr)
+        print(
+            "Run 'kairix reference-library extract' first to generate entity files.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if not nodes_path.exists() and not edges_path.exists():
@@ -148,10 +154,10 @@ def _cmd_status(args: argparse.Namespace) -> None:
     reflib_root = Path(_resolve_reflib_root(args.reflib_root))
     entities_dir = reflib_root / "entities"
 
-    status: dict = {
+    status: dict[str, Any] = {
         "reflib_root": str(reflib_root),
         "entities_dir_exists": entities_dir.is_dir(),
-        "collections": [],
+        "collections": _discover_collections(reflib_root),
         "nodes_file": None,
         "edges_file": None,
         "node_count": 0,
@@ -159,13 +165,25 @@ def _cmd_status(args: argparse.Namespace) -> None:
         "last_modified": None,
     }
 
-    # Discover collections (top-level dirs in reflib root)
-    if reflib_root.is_dir():
-        status["collections"] = sorted(
-            d.name for d in reflib_root.iterdir() if d.is_dir() and not d.name.startswith((".", "_"))
-        )
+    _read_entity_files(entities_dir, status)
 
-    # Check entity files
+    if args.json_out:
+        print(json.dumps(status, indent=2))
+    else:
+        print(_format_status_text(status))
+
+    sys.exit(0)
+
+
+def _discover_collections(reflib_root: Path) -> list[str]:
+    """Walk top-level dirs in reflib root and return collection names."""
+    if not reflib_root.is_dir():
+        return []
+    return sorted(d.name for d in reflib_root.iterdir() if d.is_dir() and not d.name.startswith((".", "_")))
+
+
+def _read_entity_files(entities_dir: Path, status: dict[str, Any]) -> None:
+    """Read nodes.json and edges.json, updating status dict in place."""
     nodes_path = entities_dir / "nodes.json"
     edges_path = entities_dir / "edges.json"
 
@@ -187,22 +205,22 @@ def _cmd_status(args: argparse.Namespace) -> None:
         except (json.JSONDecodeError, OSError):
             status["edges_file"] = f"{edges_path} (unreadable)"
 
-    if args.json_out:
-        print(json.dumps(status, indent=2))
-    else:
-        print("Reference Library Status")
-        print(f"  Root:       {status['reflib_root']}")
-        print(f"  Collections: {len(status['collections'])}")
-        if status["collections"]:
-            for c in status["collections"]:
-                print(f"    - {c}")
-        print(f"  Entities dir: {'yes' if status['entities_dir_exists'] else 'no'}")
-        print(f"  Nodes:  {status['node_count']}")
-        print(f"  Edges:  {status['edge_count']}")
-        if status["last_modified"]:
-            print(f"  Last indexed: {status['last_modified']}")
 
-    sys.exit(0)
+def _format_status_text(status: dict[str, Any]) -> str:
+    """Format status dict as human-readable text."""
+    lines = [
+        "Reference Library Status",
+        f"  Root:       {status['reflib_root']}",
+        f"  Collections: {len(status['collections'])}",
+    ]
+    for c in status["collections"]:
+        lines.append(f"    - {c}")
+    lines.append(f"  Entities dir: {'yes' if status['entities_dir_exists'] else 'no'}")
+    lines.append(f"  Nodes:  {status['node_count']}")
+    lines.append(f"  Edges:  {status['edge_count']}")
+    if status["last_modified"]:
+        lines.append(f"  Last indexed: {status['last_modified']}")
+    return "\n".join(lines)
 
 
 def _cmd_extract(args: argparse.Namespace) -> None:

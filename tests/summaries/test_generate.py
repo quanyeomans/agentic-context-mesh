@@ -1,8 +1,8 @@
 """
 Tests for kairix.knowledge.summaries.generate
-"""
 
-from unittest.mock import patch
+Uses chat_fn parameter for dependency injection — no monkey-patching needed.
+"""
 
 import pytest
 
@@ -22,13 +22,13 @@ def test_generate_l0_returns_string():
     """generate_l0() makes one API call and returns the abstract string."""
     expected = "This doc covers Azure Key Vault setup and token rotation."
 
-    with patch("kairix._azure.chat_completion", return_value=expected):
-        result = generate_l0(
-            path="docs/azure.md",
-            content="Some content about Azure Key Vault.",
-            api_key="test-key",
-            endpoint="https://test.openai.azure.com",
-        )
+    result = generate_l0(
+        path="docs/azure.md",
+        content="Some content about Azure Key Vault.",
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com",
+        chat_fn=lambda msgs, max_tokens=150: expected,
+    )
 
     assert result == expected
 
@@ -45,15 +45,15 @@ def test_generate_l0_uses_first_800_words():
         captured_messages.append(messages)
         return "abstract"
 
-    with patch("kairix._azure.chat_completion", side_effect=capture_chat):
-        generate_l0(
-            path="docs/long.md",
-            content=long_content,
-            api_key="k",
-            endpoint="https://ep",
-        )
+    generate_l0(
+        path="docs/long.md",
+        content=long_content,
+        api_key="k",
+        endpoint="https://ep",
+        chat_fn=capture_chat,
+    )
 
-    assert captured_messages, "chat_completion was not called"
+    assert captured_messages, "chat_fn was not called"
     user_msg = captured_messages[0][1]["content"]
     # Should contain word_799 but NOT word_800
     assert "word_799" in user_msg
@@ -94,12 +94,12 @@ def test_generate_summaries_returns_list(tmp_path):
     (tmp_path / "a.md").write_text("Hello world content about testing.")
     (tmp_path / "b.md").write_text("Another document about architecture.")
 
-    with patch("kairix._azure.chat_completion", return_value="Summary text."):
-        result = generate_summaries(
-            [str(tmp_path / "a.md"), str(tmp_path / "b.md")],
-            api_key="k",
-            endpoint="https://ep",
-        )
+    result = generate_summaries(
+        [str(tmp_path / "a.md"), str(tmp_path / "b.md")],
+        api_key="k",
+        endpoint="https://ep",
+        chat_fn=lambda msgs, max_tokens=150: "Summary text.",
+    )
 
     assert isinstance(result, list)
     assert len(result) == 2

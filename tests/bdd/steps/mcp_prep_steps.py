@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from pytest_bdd import given, parsers, then, when
 
 from kairix.core.search.budget import BudgetedResult
-from kairix.core.search.hybrid import SearchResult
 from kairix.core.search.intent import QueryIntent
+from kairix.core.search.pipeline import SearchResult
 from kairix.core.search.rrf import FusedResult
 
 _state: dict = {}
@@ -68,15 +66,19 @@ def when_agent_calls_prep(query, tier):
     _state["exception"] = None
     try:
         if _state.get("search_raises"):
-            with patch("kairix.core.search.hybrid.search", side_effect=ValueError("test error")):
-                _state["response"] = tool_prep(query=query, tier=tier)
+
+            def _failing_search(*args, **kwargs):
+                raise ValueError("test error")
+
+            _state["response"] = tool_prep(query=query, tier=tier, search_fn=_failing_search)
         else:
             mock_summary = _state.get("mock_summary", "A summary.")
-            with (
-                patch("kairix.core.search.hybrid.search", return_value=_state.get("mock_search")),
-                patch("kairix._azure.chat_completion", return_value=mock_summary),
-            ):
-                _state["response"] = tool_prep(query=query, tier=tier)
+            _state["response"] = tool_prep(
+                query=query,
+                tier=tier,
+                search_fn=lambda *args, **kwargs: _state.get("mock_search"),
+                chat_fn=lambda *args, **kwargs: mock_summary,
+            )
     except Exception as exc:
         _state["exception"] = exc
         _state["response"] = {}

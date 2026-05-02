@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from kairix.core.db.scanner import CollectionConfig, DocumentScanner, ScanReport, _hash_content
+from kairix.core.db.scanner import (
+    CollectionConfig,
+    DocumentScanner,
+    ScanReport,
+    _hash_content,
+)
 from kairix.knowledge.reflib.frontmatter import extract_title as _extract_title
 
 
@@ -138,7 +143,9 @@ def test_scan_detects_updated_files(tmp_path: __import__("pathlib").Path) -> Non
 
 
 @pytest.mark.unit
-def test_scan_marks_removed_files_inactive(tmp_path: __import__("pathlib").Path) -> None:
+def test_scan_marks_removed_files_inactive(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
     """Deleted files are marked as active=0."""
     vault = tmp_path / "vault"
     area = vault / "02-Areas"
@@ -221,7 +228,9 @@ _SCANNER_SCHEMA = """
 
 
 @pytest.mark.unit
-def test_scan_skips_duplicate_content_across_collections(tmp_path: __import__("pathlib").Path) -> None:
+def test_scan_skips_duplicate_content_across_collections(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
     """Same content at different paths is only indexed once."""
     vault = tmp_path / "vault"
     # Create identical content in two collection paths
@@ -253,7 +262,9 @@ def test_scan_skips_duplicate_content_across_collections(tmp_path: __import__("p
 
 
 @pytest.mark.unit
-def test_scan_allows_update_to_existing_path(tmp_path: __import__("pathlib").Path) -> None:
+def test_scan_allows_update_to_existing_path(
+    tmp_path: __import__("pathlib").Path,
+) -> None:
     """Changed content at the same path is updated, not blocked by dedup."""
     vault = tmp_path / "vault"
     area = vault / "docs"

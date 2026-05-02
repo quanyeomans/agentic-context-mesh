@@ -6,7 +6,7 @@
 exclude: ^reference-library/
 
 repos:
-  # ── Ruff (lint + format) ───────────────────────────────────────────────────
+  # ── Ruff (lint + isort + format — replaces black, isort, flake8) ───────────
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.12
     hooks:

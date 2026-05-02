@@ -34,20 +34,20 @@ _SYNTHETIC_AGENTS_DIR = _FIXTURES_DIR / "synthetic_agents"
 def _populate_fts(db: sqlite3.Connection) -> None:
     """Rebuild the FTS5 index from all active documents."""
     db.execute("DELETE FROM documents_fts")
-    db.execute(
-        """
+    db.execute("""
         INSERT INTO documents_fts (rowid, filepath, title, doc)
         SELECT d.id, d.path, d.title, c.doc
         FROM documents d
         JOIN content c ON c.hash = d.hash
         WHERE d.active = 1
-        """
-    )
+        """)
     db.commit()
 
 
 @pytest.fixture(scope="session")
-def _integration_env(tmp_path_factory: pytest.TempPathFactory) -> tuple[sqlite3.Connection, Path]:
+def _integration_env(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[sqlite3.Connection, Path]:
     """Session-scoped: build temp dir, DB, scan, and FTS index."""
     tmp_root = tmp_path_factory.mktemp("integration_docs")
 
@@ -99,7 +99,9 @@ def real_db(_integration_env: tuple[sqlite3.Connection, Path]) -> sqlite3.Connec
 
 
 @pytest.fixture(scope="session")
-def _integration_paths(_integration_env: tuple[sqlite3.Connection, Path]) -> tuple[Path, Path]:
+def _integration_paths(
+    _integration_env: tuple[sqlite3.Connection, Path],
+) -> tuple[Path, Path]:
     """Session-scoped paths: (tmp_root, db_path)."""
     _db, tmp_root = _integration_env
     db_path = tmp_root / "test_index.sqlite"

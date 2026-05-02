@@ -34,6 +34,7 @@ def retrieve(
     collections: list[str] | None = None,
     fusion_override: str | None = None,
     config: Any | None = None,
+    search_fn: Any | None = None,
 ) -> RetrievalResult:
     """
     Run retrieval and return a RetrievalResult.
@@ -63,6 +64,7 @@ def retrieve(
             collections=collections,
             fusion_override=fusion_override,
             config=config,
+            search_fn=search_fn,
         )
     elif system == "bm25":
         return _retrieve_bm25(query=query, agent=agent, limit=limit)
@@ -87,9 +89,14 @@ def _retrieve_hybrid(
     collections: list[str] | None = None,
     fusion_override: str | None = None,
     config: Any | None = None,
+    search_fn: Any | None = None,
 ) -> RetrievalResult:
     """Hybrid search backend."""
-    from kairix.core.search.hybrid import search
+    if search_fn is None:
+        from kairix.core.factory import build_search_pipeline
+
+        _pipeline = build_search_pipeline(config=config)
+        search_fn = _pipeline.search
 
     if config is None and fusion_override:
         from dataclasses import replace
@@ -104,14 +111,13 @@ def _retrieve_hybrid(
     search_kwargs: dict[str, Any] = {
         "query": query,
         "budget": 500_000,
-        "config": config,
         "collections": effective_collections,
     }
     if agent:
         search_kwargs["agent"] = agent
         search_kwargs["scope"] = "shared+agent"
 
-    sr = search(**search_kwargs)
+    sr = search_fn(**search_kwargs)
     paths = [b.result.path for b in sr.results]
     snippets = [b.content[:500] for b in sr.results]
     meta = {

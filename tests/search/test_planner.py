@@ -159,7 +159,7 @@ class TestDecompose:
         planner = QueryPlanner()
         neo4j_mock = MagicMock(available=False)
 
-        with patch("kairix.core.search.planner._neo4j_graph_context", return_value=None):
+        with patch("kairix.core.search.planner.neo4j_graph_context", return_value=None):
             result = planner.decompose("active projects techcorp", neo4j_client=neo4j_mock)
 
         # Should still return a list
@@ -176,11 +176,12 @@ class TestDecompose:
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["entity-aware sub-query"]'
 
-        with (
-            patch("kairix.core.search.planner._neo4j_graph_context", return_value=context_str),
-            patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
-        ):
-            result = planner.decompose("what is techcorp doing", neo4j_client=neo4j_mock)
+        with patch("kairix.core.search.planner.neo4j_graph_context", return_value=context_str):
+            result = planner.decompose(
+                "what is techcorp doing",
+                neo4j_client=neo4j_mock,
+                llm_backend=mock_backend,
+            )
 
         assert isinstance(result, list)
 
@@ -334,18 +335,20 @@ class TestRetrieveAndMerge:
 
 @pytest.mark.unit
 class TestNeo4jGraphContext:
+    @pytest.mark.unit
     def test_returns_none_when_no_entities_found(self) -> None:
         """Should return None when client finds no matching entities."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = []
-        result = _neo4j_graph_context("what is the meaning of life", client)
+        result = neo4j_graph_context("what is the meaning of life", client)
         assert result is None
 
+    @pytest.mark.unit
     def test_returns_context_string_with_entities(self) -> None:
         """Should return a context string when entities and relationships are found."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"id": "e1", "name": "TechCorp"}]
@@ -353,56 +356,61 @@ class TestNeo4jGraphContext:
             {"name": "GlobalTech"},
             {"name": "BuilderCo"},
         ]
-        result = _neo4j_graph_context("what does TechCorp build", client)
+        result = neo4j_graph_context("what does TechCorp build", client)
         assert result is not None
         assert "TechCorp" in result
         assert "GlobalTech" in result
 
+    @pytest.mark.unit
     def test_skips_entities_without_id(self) -> None:
         """Entities missing 'id' should be skipped."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"name": "NoId"}]  # no "id" key
-        result = _neo4j_graph_context("query about NoId entity", client)
+        result = neo4j_graph_context("query about NoId entity", client)
         assert result is None
 
+    @pytest.mark.unit
     def test_handles_find_by_name_exception(self) -> None:
         """Should continue silently when find_by_name raises."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.side_effect = RuntimeError("neo4j down")
-        result = _neo4j_graph_context("query words here today", client)
+        result = neo4j_graph_context("query words here today", client)
         assert result is None
 
+    @pytest.mark.unit
     def test_handles_related_entities_exception(self) -> None:
         """Should skip entity gracefully when related_entities raises."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"id": "e1", "name": "Entity1"}]
         client.related_entities.side_effect = RuntimeError("timeout")
-        result = _neo4j_graph_context("query about Entity1 topic", client)
+        result = neo4j_graph_context("query about Entity1 topic", client)
         # Entity found but no relationships retrieved — context_parts has only header
         assert result is None
 
+    @pytest.mark.unit
     def test_deduplicates_entities_by_id(self) -> None:
         """Same entity ID from multiple words should appear only once."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         entity = {"id": "e1", "name": "SameEntity"}
         client.find_by_name.return_value = [entity]
         client.related_entities.return_value = [{"name": "Related1"}]
-        result = _neo4j_graph_context("SameEntity also SameEntity again", client)
+        result = neo4j_graph_context("SameEntity also SameEntity again", client)
         # Should still produce a valid context with entity appearing once
         assert result is not None
         assert result.count("SameEntity") >= 1
 
+    @pytest.mark.unit
     def test_filters_self_from_related(self) -> None:
         """Related entities with same name as source should be excluded."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = [{"id": "e1", "name": "Alpha"}]
@@ -411,17 +419,18 @@ class TestNeo4jGraphContext:
             {"name": "Alpha"},  # self — should be filtered
             {"name": "Beta"},
         ]
-        result = _neo4j_graph_context("Alpha projects overview", client)
+        result = neo4j_graph_context("Alpha projects overview", client)
         assert result is not None
         assert "Beta" in result
 
+    @pytest.mark.unit
     def test_short_words_filtered_out(self) -> None:
         """Words with 3 or fewer chars after stripping should be skipped."""
-        from kairix.core.search.planner import _neo4j_graph_context
+        from kairix.core.search.planner import neo4j_graph_context
 
         client = MagicMock()
         client.find_by_name.return_value = []
-        _neo4j_graph_context("is it a ok", client)
+        neo4j_graph_context("is it a ok", client)
         # find_by_name should not be called for short words
         # Only words > 3 chars are queried — none in this query
         client.find_by_name.assert_not_called()
@@ -440,8 +449,7 @@ class TestDecomposeEdgeCases:
         planner = QueryPlanner()
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["valid", 123, "also valid"]'
-        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
-            result = planner.decompose("mixed types query")
+        result = planner.decompose("mixed types query", llm_backend=mock_backend)
         assert result == ["valid", "also valid"]
 
     @pytest.mark.unit
@@ -450,8 +458,7 @@ class TestDecomposeEdgeCases:
         planner = QueryPlanner()
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["valid", "   ", "also valid"]'
-        with patch("kairix.platform.llm.get_default_backend", return_value=mock_backend):
-            result = planner.decompose("whitespace items query")
+        result = planner.decompose("whitespace items query", llm_backend=mock_backend)
         assert result == ["valid", "also valid"]
 
     @pytest.mark.unit
@@ -462,11 +469,15 @@ class TestDecomposeEdgeCases:
         mock_backend = MagicMock()
         mock_backend.chat.return_value = '["fallback query"]'
 
-        with (
-            patch("kairix.core.search.planner._neo4j_graph_context", side_effect=RuntimeError("neo4j crash")),
-            patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
+        with patch(
+            "kairix.core.search.planner.neo4j_graph_context",
+            side_effect=RuntimeError("neo4j crash"),
         ):
-            result = planner.decompose("query with broken neo4j", neo4j_client=neo4j_mock)
+            result = planner.decompose(
+                "query with broken neo4j",
+                neo4j_client=neo4j_mock,
+                llm_backend=mock_backend,
+            )
         assert isinstance(result, list)
         assert len(result) >= 1
 

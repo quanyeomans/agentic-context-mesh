@@ -15,6 +15,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from kairix.knowledge.wikilinks import WIKILINK_RE
 from kairix.knowledge.wikilinks.injector import MAX_FILE_SIZE, should_inject
@@ -32,8 +33,9 @@ _WIKILINK_RE = WIKILINK_RE
 
 
 def find_broken_links(
-    document_root: str = str(Path.home() / "kairix-vault"), vault_root: str | None = None
-) -> list[dict]:
+    document_root: str = str(Path.home() / "kairix-vault"),
+    vault_root: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Scan document store for [[wikilinks]] pointing to non-existent files/folders.
 
@@ -53,7 +55,7 @@ def find_broken_links(
             target_to_path[m.group(1)] = entity.vault_path
 
     doc_path = Path(root)
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
 
     # Walk all markdown files in document store
     for md_file in doc_path.rglob("*.md"):
@@ -96,7 +98,7 @@ def find_unlinked_mentions(
     document_root: str,
     entities: list[WikiEntity],
     sample_size: int = 50,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Sample eligible files and find entity mentions that are NOT wikilinked.
 
@@ -126,7 +128,7 @@ def find_unlinked_mentions(
     else:
         sampled = list(eligible)
 
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     for md_file in sampled:
         try:
             size = md_file.stat().st_size
@@ -300,10 +302,10 @@ def weekly_report(document_root: str, entities: list[WikiEntity]) -> str:
     return "\n".join(lines)
 
 
-def _read_recent_log(days: int = 7) -> list[dict]:
+def _read_recent_log(days: int = 7) -> list[dict[str, Any]]:
     """Read injection log entries from the last N days."""
     cutoff = time.time() - (days * 86400)
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     try:
         with open(_LOG_PATH, encoding="utf-8") as fh:
             for line in fh:

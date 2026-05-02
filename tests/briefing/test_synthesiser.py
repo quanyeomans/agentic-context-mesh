@@ -1,16 +1,26 @@
 """
 Tests for the briefing synthesiser (kairix/briefing/synthesiser.py).
 
-Uses mocked Azure client — no live API calls.
+Uses injected LLM backend — no monkey-patching needed.
 """
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.agents.briefing.synthesiser import _fallback_briefing, synthesise
+from kairix.agents.briefing.synthesiser import fallback_briefing, synthesise
+
+
+def _make_backend(return_value: str | None = None, side_effect=None):
+    """Build a fake LLM backend with a .chat method."""
+    backend = MagicMock()
+    if side_effect is not None:
+        backend.chat.side_effect = side_effect
+    else:
+        backend.chat.return_value = return_value
+    return backend
 
 
 @pytest.mark.unit
@@ -29,8 +39,7 @@ class TestSynthesise:
             "recent_decisions": "ADR-007: Use RRF",
             "knowledge_rules": "Never write credentials to disk",
         }
-        with patch("kairix._azure.chat_completion", return_value=mock_body):
-            result = synthesise("builder", context)
+        result = synthesise("builder", context, llm_backend=_make_backend(return_value=mock_body))
         assert "Pending" in result
         assert "Decisions" in result or "ADR" in result
 
@@ -41,15 +50,21 @@ class TestSynthesise:
 
     @pytest.mark.unit
     def test_api_failure_returns_fallback(self):
-        with patch("kairix._azure.chat_completion", return_value=""):
-            result = synthesise("builder", {"memory_logs": "some content"})
+        result = synthesise(
+            "builder",
+            {"memory_logs": "some content"},
+            llm_backend=_make_backend(return_value=""),
+        )
         assert isinstance(result, str)
         assert len(result) > 0
 
     @pytest.mark.unit
     def test_api_exception_returns_fallback(self):
-        with patch("kairix._azure.chat_completion", side_effect=Exception("API down")):
-            result = synthesise("builder", {"memory_logs": "some content"})
+        result = synthesise(
+            "builder",
+            {"memory_logs": "some content"},
+            llm_backend=_make_backend(side_effect=Exception("API down")),
+        )
         assert isinstance(result, str)
         # Should contain fallback message
         assert "synthesis" in result.lower() or "failed" in result.lower()
@@ -64,8 +79,9 @@ class TestSynthesise:
             return "## Pending & Blocked\nNone."
 
         context = {"memory_logs": "UNIQUE_MARKER_12345"}
-        with patch("kairix._azure.chat_completion", side_effect=mock_chat):
-            synthesise("builder", context)
+        backend = MagicMock()
+        backend.chat = mock_chat
+        synthesise("builder", context, llm_backend=backend)
 
         full_prompt = " ".join(str(m) for m in captured_messages)
         assert "UNIQUE_MARKER_12345" in full_prompt
@@ -80,8 +96,9 @@ class TestSynthesise:
             captured_messages.extend(messages)
             return "## Pending & Blocked\nNone."
 
-        with patch("kairix._azure.chat_completion", side_effect=mock_chat):
-            synthesise("builder", context)
+        backend = MagicMock()
+        backend.chat = mock_chat
+        synthesise("builder", context, llm_backend=backend)
 
         full_prompt = " ".join(str(m) for m in captured_messages)
         # Should be truncated — context block should not contain all 5000 words
@@ -92,7 +109,7 @@ class TestSynthesise:
 class TestFallbackBriefing:
     @pytest.mark.unit
     def test_contains_all_sections(self):
-        result = _fallback_briefing("builder", "test error")
+        result = fallback_briefing("builder", "test error")
         assert "Pending" in result
         assert "Decisions" in result
         assert "Active Projects" in result
@@ -100,10 +117,10 @@ class TestFallbackBriefing:
 
     @pytest.mark.unit
     def test_includes_reason(self):
-        result = _fallback_briefing("builder", "network timeout")
+        result = fallback_briefing("builder", "network timeout")
         assert "network timeout" in result
 
     @pytest.mark.unit
     def test_includes_fallback_path(self):
-        result = _fallback_briefing("builder", "any error")
+        result = fallback_briefing("builder", "any error")
         assert "builder" in result

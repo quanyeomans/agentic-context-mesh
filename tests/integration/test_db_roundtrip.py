@@ -9,10 +9,7 @@ import time
 import pytest
 
 from kairix.core.embed.embed import stage_embedding
-from kairix.core.embed.schema import (
-    SchemaVersionError,
-    validate_schema,
-)
+from kairix.core.embed.schema import SchemaVersionError, validate_schema
 
 pytestmark = pytest.mark.integration
 
@@ -68,10 +65,12 @@ def tmp_db():
 @pytest.mark.contract
 @pytest.mark.integration
 class TestSchemaValidation:
+    @pytest.mark.integration
     def test_valid_schema_passes(self, tmp_db):
         validate_schema(tmp_db)  # Should not raise
         assert True, "smoke: valid schema accepted without error"
 
+    @pytest.mark.integration
     def test_missing_content_vectors_column_raises(self, tmp_db):
         tmp_db.execute("DROP TABLE content_vectors")
         tmp_db.execute("CREATE TABLE content_vectors (hash TEXT PRIMARY KEY)")
@@ -79,6 +78,7 @@ class TestSchemaValidation:
         with pytest.raises(SchemaVersionError, match="missing columns"):
             validate_schema(tmp_db)
 
+    @pytest.mark.integration
     def test_missing_content_column_raises(self, tmp_db):
         tmp_db.execute("DROP TABLE content")
         tmp_db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY)")
@@ -91,6 +91,7 @@ class TestSchemaValidation:
 
 
 class TestInsertEmbedding:
+    @pytest.mark.integration
     def test_stage_embedding_inserts_to_content_vectors(self, tmp_db):
         """stage_embedding writes directly to content_vectors."""
         vec = [0.1, 0.2, 0.3, 0.4]
@@ -102,6 +103,7 @@ class TestInsertEmbedding:
         assert row[0] == "testhash"
         assert row[1] == 0
 
+    @pytest.mark.integration
     def test_idempotent_insert(self, tmp_db):
         """Duplicate stage_embedding calls for the same hash+seq replace, not duplicate."""
         vec = [0.1, 0.2, 0.3, 0.4]

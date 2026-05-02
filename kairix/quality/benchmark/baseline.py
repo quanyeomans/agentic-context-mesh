@@ -47,6 +47,52 @@ def load_result(path: str | Path) -> dict:
     return data
 
 
+def _build_summary_lines(
+    baseline_total: float,
+    current_total: float,
+    overall_delta: float,
+    baseline_cats: dict[str, float],
+    current_cats: dict[str, float],
+    all_cats: list[str],
+    category_deltas: dict[str, float],
+    category_warns: list[str],
+    category_fails: list[str],
+    regression: bool,
+) -> list[str]:
+    """Build human-readable summary lines for CI output."""
+    lines: list[str] = [
+        "Benchmark Gate — Contract Suite",
+        "=" * 45,
+        f"Baseline:  {baseline_total:.4f}",
+        f"Current:   {current_total:.4f}",
+        f"Delta:     {overall_delta:+.4f}",
+        "",
+        "Category breakdown:",
+    ]
+    for cat in all_cats:
+        b = baseline_cats.get(cat, 0.0)
+        c = current_cats.get(cat, 0.0)
+        d = category_deltas[cat]
+        flag = ""
+        if cat in category_fails:
+            flag = " ❌ BELOW FLOOR"
+        elif cat in category_warns:
+            flag = " ⚠️  WARN"
+        lines.append(f"  {cat:<14} {b:.4f} → {c:.4f}  ({d:+.4f}){flag}")
+    lines.append("")
+
+    if regression:
+        lines.append(f"❌ FAIL: weighted_total dropped {abs(overall_delta):.4f} (threshold: {REGRESSION_THRESHOLD})")
+    elif category_fails:
+        lines.append(f"❌ FAIL: categories below floor ({CATEGORY_FLOOR}): {', '.join(category_fails)}")
+    else:
+        if category_warns:
+            lines.append(f"⚠️  WARN: category regression in: {', '.join(category_warns)}")
+        lines.append("✅ PASS: no regression detected")
+
+    return lines
+
+
 def compare(baseline: dict, current: dict) -> dict:
     """
     Compare current benchmark result to baseline.
@@ -89,35 +135,18 @@ def compare(baseline: dict, current: dict) -> dict:
     regression = overall_delta < -REGRESSION_THRESHOLD
     passed = not regression and not category_fails
 
-    lines: list[str] = [
-        "Benchmark Gate — Contract Suite",
-        "=" * 45,
-        f"Baseline:  {baseline_total:.4f}",
-        f"Current:   {current_total:.4f}",
-        f"Delta:     {overall_delta:+.4f}",
-        "",
-        "Category breakdown:",
-    ]
-    for cat in all_cats:
-        b = baseline_cats.get(cat, 0.0)
-        c = current_cats.get(cat, 0.0)
-        d = category_deltas[cat]
-        flag = ""
-        if cat in category_fails:
-            flag = " ❌ BELOW FLOOR"
-        elif cat in category_warns:
-            flag = " ⚠️  WARN"
-        lines.append(f"  {cat:<14} {b:.4f} → {c:.4f}  ({d:+.4f}){flag}")
-    lines.append("")
-
-    if regression:
-        lines.append(f"❌ FAIL: weighted_total dropped {abs(overall_delta):.4f} (threshold: {REGRESSION_THRESHOLD})")
-    elif category_fails:
-        lines.append(f"❌ FAIL: categories below floor ({CATEGORY_FLOOR}): {', '.join(category_fails)}")
-    else:
-        if category_warns:
-            lines.append(f"⚠️  WARN: category regression in: {', '.join(category_warns)}")
-        lines.append("✅ PASS: no regression detected")
+    lines = _build_summary_lines(
+        baseline_total,
+        current_total,
+        overall_delta,
+        baseline_cats,
+        current_cats,
+        all_cats,
+        category_deltas,
+        category_warns,
+        category_fails,
+        regression,
+    )
 
     return {
         "passed": passed,

@@ -496,7 +496,10 @@ def test_canonical_path_no_longer_handles_qmd_scheme() -> None:
 def test_rrf_deduplicates_same_doc_different_prefix() -> None:
     """Same doc at bare path and obsidian-vault/ prefix fuses into one result."""
     results = rrf(
-        [_bm25("04-Agent-Knowledge/foo.md"), _bm25("obsidian-vault/04-Agent-Knowledge/foo.md")],
+        [
+            _bm25("04-Agent-Knowledge/foo.md"),
+            _bm25("obsidian-vault/04-Agent-Knowledge/foo.md"),
+        ],
         [],
     )
     assert len(results) == 1
@@ -507,7 +510,10 @@ def test_rrf_deduplicates_same_doc_different_prefix() -> None:
 def test_bm25_primary_deduplicates_same_doc_different_prefix() -> None:
     """Same doc at bare path and obsidian-vault/ prefix appears once in bm25_primary."""
     results = bm25_primary_fuse(
-        [_bm25("04-Agent-Knowledge/foo.md"), _bm25("obsidian-vault/04-Agent-Knowledge/foo.md")],
+        [
+            _bm25("04-Agent-Knowledge/foo.md"),
+            _bm25("obsidian-vault/04-Agent-Knowledge/foo.md"),
+        ],
         [_vec("obsidian-vault/04-Agent-Knowledge/foo.md")],
     )
     assert len(results) == 1

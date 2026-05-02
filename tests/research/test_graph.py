@@ -31,19 +31,24 @@ def test_run_research_sufficient_first_pass() -> None:
     mock_backend = MagicMock()
     # evaluate_sufficiency returns high confidence
     mock_backend.chat.side_effect = [
-        json.dumps({"confidence": 0.9, "sufficient": True, "refined_query": None, "reasoning": "good"}),
+        json.dumps(
+            {
+                "confidence": 0.9,
+                "sufficient": True,
+                "refined_query": None,
+                "reasoning": "good",
+            }
+        ),
         "Synthesised answer from search results.",
     ]
 
-    with (
-        patch(
-            "kairix.core.search.hybrid.search",
-            return_value=_mock_search_result([("doc.md", "content")]),
-        ),
-        patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
-        patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
-    ):
-        result = run_research("simple question", max_turns=4)
+    result = run_research(
+        "simple question",
+        max_turns=4,
+        search_fn=lambda **kwargs: _mock_search_result([("doc.md", "content")]),
+        llm_backend=mock_backend,
+        classify_fn=lambda q: MagicMock(value="semantic"),
+    )
 
     assert result["confidence"] >= 0.7
     assert result["synthesis"] != ""
@@ -58,9 +63,23 @@ def test_run_research_refines_then_succeeds() -> None:
     mock_backend = MagicMock()
     mock_backend.chat.side_effect = [
         # First eval: insufficient
-        json.dumps({"confidence": 0.3, "sufficient": False, "refined_query": "better query", "reasoning": "need more"}),
+        json.dumps(
+            {
+                "confidence": 0.3,
+                "sufficient": False,
+                "refined_query": "better query",
+                "reasoning": "need more",
+            }
+        ),
         # Second eval: sufficient
-        json.dumps({"confidence": 0.9, "sufficient": True, "refined_query": None, "reasoning": "good now"}),
+        json.dumps(
+            {
+                "confidence": 0.9,
+                "sufficient": True,
+                "refined_query": None,
+                "reasoning": "good now",
+            }
+        ),
         # Synthesis
         "Final answer with citations.",
     ]
@@ -72,12 +91,13 @@ def test_run_research_refines_then_succeeds() -> None:
         call_count += 1
         return _mock_search_result([(f"doc{call_count}.md", f"content {call_count}")])
 
-    with (
-        patch("kairix.core.search.hybrid.search", side_effect=mock_search),
-        patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
-        patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
-    ):
-        result = run_research("complex question", max_turns=4)
+    result = run_research(
+        "complex question",
+        max_turns=4,
+        search_fn=mock_search,
+        llm_backend=mock_backend,
+        classify_fn=lambda q: MagicMock(value="semantic"),
+    )
 
     assert result["turns"] == 1  # refined once
     assert result["confidence"] >= 0.7
@@ -91,8 +111,18 @@ def test_run_research_synthesises_best_effort_after_max_turns() -> None:
 
     mock_backend = MagicMock()
     # Evaluation always returns low confidence; final call is synthesis
-    eval_low = {"confidence": 0.2, "sufficient": False, "refined_query": "still trying", "reasoning": "not enough"}
-    eval_low2 = {"confidence": 0.3, "sufficient": False, "refined_query": "still trying", "reasoning": "not enough"}
+    eval_low = {
+        "confidence": 0.2,
+        "sufficient": False,
+        "refined_query": "still trying",
+        "reasoning": "not enough",
+    }
+    eval_low2 = {
+        "confidence": 0.3,
+        "sufficient": False,
+        "refined_query": "still trying",
+        "reasoning": "not enough",
+    }
     mock_backend.chat.side_effect = [
         # Turn 0 eval: insufficient
         json.dumps(eval_low),
@@ -109,12 +139,13 @@ def test_run_research_synthesises_best_effort_after_max_turns() -> None:
         call_count += 1
         return _mock_search_result([(f"a{call_count}.md", "x")])
 
-    with (
-        patch("kairix.core.search.hybrid.search", side_effect=mock_search),
-        patch("kairix.platform.llm.get_default_backend", return_value=mock_backend),
-        patch("kairix.core.search.intent.classify", return_value=MagicMock(value="semantic")),
-    ):
-        result = run_research("hard question", max_turns=2)
+    result = run_research(
+        "hard question",
+        max_turns=2,
+        search_fn=mock_search,
+        llm_backend=mock_backend,
+        classify_fn=lambda q: MagicMock(value="semantic"),
+    )
 
     assert result["synthesis"] != ""
     assert result["turns"] >= 1
@@ -126,7 +157,10 @@ def test_run_research_handles_exception() -> None:
     """Graph returns error dict when something goes wrong."""
     from kairix.agents.research.graph import run_research
 
-    with patch("kairix.agents.research.graph.build_researcher_graph", side_effect=RuntimeError("boom")):
+    with patch(
+        "kairix.agents.research.graph.build_researcher_graph",
+        side_effect=RuntimeError("boom"),
+    ):
         result = run_research("broken query")
 
     assert result["error"] != ""

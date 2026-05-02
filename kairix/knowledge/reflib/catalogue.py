@@ -63,7 +63,10 @@ def generate_catalogue(entries: list[CatalogueEntry]) -> str:
         lines.append("")
 
     # Summary
-    lines.insert(6, f"**Total: {total_files} files, {total_size:.0f} KB across {len(by_collection)} collections**")
+    lines.insert(
+        6,
+        f"**Total: {total_files} files, {total_size:.0f} KB across {len(by_collection)} collections**",
+    )
     lines.insert(7, "")
 
     return "\n".join(lines) + "\n"

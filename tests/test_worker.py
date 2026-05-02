@@ -1,12 +1,12 @@
 """Tests for kairix.worker — scheduled background task runner.
 
 Covers:
-  - _run_embed catches exceptions without crashing
-  - _run_entity_seed catches exceptions without crashing
-  - _run_health_check catches exceptions without crashing
-  - _run_embed calls embed_main on success
-  - _run_entity_seed calls store_main on success
-  - _run_health_check counts results on success
+  - run_embed catches exceptions without crashing
+  - run_entity_seed catches exceptions without crashing
+  - run_health_check catches exceptions without crashing
+  - run_embed calls embed_fn on success
+  - run_entity_seed calls entity_seed_fn on success
+  - run_health_check counts results on success
   - Shutdown signal (SIGTERM / SIGINT) sets running=False and exits the loop
   - Main loop scheduling logic
 """
@@ -14,104 +14,130 @@ Covers:
 from __future__ import annotations
 
 import signal
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
 
 import pytest
+
+from kairix.worker import (
+    EMBED_INTERVAL,
+    ENTITY_SEED_INTERVAL,
+    HEALTH_CHECK_INTERVAL,
+    main,
+    run_embed,
+    run_entity_seed,
+    run_health_check,
+)
 
 pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# _run_embed() tests
+# run_embed() tests
 # ---------------------------------------------------------------------------
 
 
 def test_run_embed_catches_exceptions() -> None:
-    """_run_embed should catch exceptions and not re-raise."""
-    from kairix.worker import _run_embed
+    """run_embed should catch exceptions and not re-raise."""
 
-    with patch("kairix.core.embed.cli.main", side_effect=RuntimeError("embed failed")):
-        _run_embed()  # should not raise
+    def _failing_embed() -> None:
+        raise RuntimeError("embed failed")
+
+    run_embed(embed_fn=_failing_embed)  # should not raise
 
 
 def test_run_embed_catches_import_error() -> None:
-    """_run_embed should catch ImportError without crashing."""
-    from kairix.worker import _run_embed
+    """run_embed should catch ImportError without crashing."""
 
-    with patch("kairix.core.embed.cli.main", side_effect=ImportError("no module")):
-        _run_embed()
+    def _import_error_embed() -> None:
+        raise ImportError("no module")
+
+    run_embed(embed_fn=_import_error_embed)
 
 
-def test_run_embed_calls_embed_main() -> None:
-    """_run_embed should call embed CLI main."""
-    from kairix.worker import _run_embed
+def test_run_embed_calls_embed_fn() -> None:
+    """run_embed should call the injected embed_fn."""
+    calls: list[bool] = []
 
-    with patch("kairix.core.embed.cli.main") as mock:
-        _run_embed()
-    mock.assert_called_once_with()
+    def _tracking_embed() -> None:
+        calls.append(True)
+
+    run_embed(embed_fn=_tracking_embed)
+    assert len(calls) == 1
 
 
 # ---------------------------------------------------------------------------
-# _run_entity_seed() tests
+# run_entity_seed() tests
 # ---------------------------------------------------------------------------
 
 
 def test_run_entity_seed_catches_exceptions() -> None:
-    """_run_entity_seed should catch exceptions and not re-raise."""
-    from kairix.worker import _run_entity_seed
+    """run_entity_seed should catch exceptions and not re-raise."""
 
-    with patch("kairix.knowledge.store.cli.main", side_effect=RuntimeError("store crawl failed")):
-        _run_entity_seed()  # should not raise
+    def _failing_seed() -> None:
+        raise RuntimeError("store crawl failed")
+
+    run_entity_seed(entity_seed_fn=_failing_seed)  # should not raise
 
 
 def test_run_entity_seed_catches_import_error() -> None:
-    """_run_entity_seed should catch ImportError without crashing."""
-    from kairix.worker import _run_entity_seed
+    """run_entity_seed should catch ImportError without crashing."""
 
-    with patch("kairix.knowledge.store.cli.main", side_effect=ImportError("no module")):
-        _run_entity_seed()
+    def _import_error_seed() -> None:
+        raise ImportError("no module")
+
+    run_entity_seed(entity_seed_fn=_import_error_seed)
 
 
-def test_run_entity_seed_calls_store_main() -> None:
-    """_run_entity_seed should call store CLI main with crawl args."""
-    from kairix.worker import _run_entity_seed
+def test_run_entity_seed_calls_entity_seed_fn() -> None:
+    """run_entity_seed should call the injected entity_seed_fn."""
+    calls: list[bool] = []
 
-    with patch("kairix.knowledge.store.cli.main") as mock:
-        _run_entity_seed()
-    mock.assert_called_once()
-    args = mock.call_args[0][0]
-    assert args[0] == "crawl"
+    def _tracking_seed() -> None:
+        calls.append(True)
+
+    run_entity_seed(entity_seed_fn=_tracking_seed)
+    assert len(calls) == 1
 
 
 # ---------------------------------------------------------------------------
-# _run_health_check() tests
+# run_health_check() tests
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeCheckResult:
+    ok: bool
 
 
 def test_run_health_check_catches_exceptions() -> None:
-    """_run_health_check should catch exceptions and not re-raise."""
-    from kairix.worker import _run_health_check
+    """run_health_check should catch exceptions and not re-raise."""
 
-    with patch("kairix.platform.onboard.check.run_all_checks", side_effect=RuntimeError("check failed")):
-        _run_health_check()  # should not raise
+    def _failing_check() -> list:
+        raise RuntimeError("check failed")
+
+    run_health_check(health_check_fn=_failing_check)  # should not raise
 
 
 def test_run_health_check_catches_import_error() -> None:
-    """_run_health_check should catch ImportError without crashing."""
-    from kairix.worker import _run_health_check
+    """run_health_check should catch ImportError without crashing."""
 
-    with patch("kairix.platform.onboard.check.run_all_checks", side_effect=ImportError("no module")):
-        _run_health_check()
+    def _import_error_check() -> list:
+        raise ImportError("no module")
+
+    run_health_check(health_check_fn=_import_error_check)
 
 
 def test_run_health_check_counts_results() -> None:
-    """_run_health_check should count passed/total results."""
-    from kairix.worker import _run_health_check
+    """run_health_check should count passed/total results."""
 
-    ok_result = MagicMock(ok=True)
-    fail_result = MagicMock(ok=False)
-    with patch("kairix.platform.onboard.check.run_all_checks", return_value=[ok_result, fail_result, ok_result]):
-        _run_health_check()  # should not raise
+    def _mixed_results() -> list:
+        return [
+            _FakeCheckResult(ok=True),
+            _FakeCheckResult(ok=False),
+            _FakeCheckResult(ok=True),
+        ]
+
+    run_health_check(health_check_fn=_mixed_results)  # should not raise
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +156,6 @@ def test_worker_has_required_imports() -> None:
 
 def test_worker_constants() -> None:
     """Worker module should define scheduling interval constants."""
-    from kairix.worker import EMBED_INTERVAL, ENTITY_SEED_INTERVAL, HEALTH_CHECK_INTERVAL
-
     assert EMBED_INTERVAL == 3600
     assert ENTITY_SEED_INTERVAL == 86400
     assert HEALTH_CHECK_INTERVAL == 21600
@@ -144,11 +168,7 @@ def test_worker_constants() -> None:
 
 def test_shutdown_handler_sets_running_false() -> None:
     """The _shutdown signal handler should set running=False via nonlocal."""
-    # We test the signal-handler wiring by calling main() and having
-    # the patched _run_embed trigger a shutdown via os.kill(SIGTERM).
     import os
-
-    from kairix import worker
 
     call_count = 0
 
@@ -159,17 +179,15 @@ def test_shutdown_handler_sets_running_false() -> None:
             # Send SIGTERM to our own process — signal handler should fire
             os.kill(os.getpid(), signal.SIGTERM)
 
-    with (
-        patch.object(worker, "_run_embed", side_effect=embed_then_signal),
-        patch.object(worker, "_run_entity_seed"),
-        patch.object(worker, "_run_health_check"),
-        patch.object(worker.time, "sleep"),
-        patch.object(worker, "EMBED_INTERVAL", 999999),
-        patch.object(worker, "ENTITY_SEED_INTERVAL", 999999),
-        patch.object(worker, "HEALTH_CHECK_INTERVAL", 999999),
-    ):
-        # main() should return after SIGTERM is handled
-        worker.main()
+    main(
+        embed_fn=embed_then_signal,
+        entity_seed_fn=lambda: None,
+        health_check_fn=lambda: [],
+        sleep_fn=lambda _s: None,
+        embed_interval=999999,
+        entity_seed_interval=999999,
+        health_check_interval=999999,
+    )
 
     assert call_count >= 1, "embed was never called"
 
@@ -178,9 +196,9 @@ def test_main_loop_runs_embed_on_interval() -> None:
     """Main loop should run embed when interval has elapsed."""
     import os
 
-    from kairix import worker
-
     call_count = 0
+    entity_called = False
+    health_called = False
 
     def embed_counter() -> None:
         nonlocal call_count
@@ -188,29 +206,25 @@ def test_main_loop_runs_embed_on_interval() -> None:
         if call_count >= 2:
             os.kill(os.getpid(), signal.SIGTERM)
 
-    entity_called = False
-
     def entity_then_noop() -> None:
         nonlocal entity_called
         entity_called = True
 
-    health_called = False
-
-    def health_then_noop() -> None:
+    def health_then_noop() -> list:
         nonlocal health_called
         health_called = True
+        return []
 
-    with (
-        patch.object(worker, "_run_embed", side_effect=embed_counter),
-        patch.object(worker, "_run_entity_seed", side_effect=entity_then_noop),
-        patch.object(worker, "_run_health_check", side_effect=health_then_noop),
-        patch.object(worker.time, "sleep"),
+    main(
+        embed_fn=embed_counter,
+        entity_seed_fn=entity_then_noop,
+        health_check_fn=health_then_noop,
+        sleep_fn=lambda _s: None,
         # Set all intervals to 0 so every task fires on every loop iteration
-        patch.object(worker, "EMBED_INTERVAL", 0),
-        patch.object(worker, "ENTITY_SEED_INTERVAL", 0),
-        patch.object(worker, "HEALTH_CHECK_INTERVAL", 0),
-    ):
-        worker.main()
+        embed_interval=0,
+        entity_seed_interval=0,
+        health_check_interval=0,
+    )
 
     # embed is called once on startup + once in the loop = at least 2
     assert call_count >= 2
@@ -222,8 +236,6 @@ def test_shutdown_handler_via_sigint() -> None:
     """SIGINT should also trigger graceful shutdown."""
     import os
 
-    from kairix import worker
-
     call_count = 0
 
     def embed_then_sigint() -> None:
@@ -232,15 +244,14 @@ def test_shutdown_handler_via_sigint() -> None:
         if call_count == 1:
             os.kill(os.getpid(), signal.SIGINT)
 
-    with (
-        patch.object(worker, "_run_embed", side_effect=embed_then_sigint),
-        patch.object(worker, "_run_entity_seed"),
-        patch.object(worker, "_run_health_check"),
-        patch.object(worker.time, "sleep"),
-        patch.object(worker, "EMBED_INTERVAL", 999999),
-        patch.object(worker, "ENTITY_SEED_INTERVAL", 999999),
-        patch.object(worker, "HEALTH_CHECK_INTERVAL", 999999),
-    ):
-        worker.main()
+    main(
+        embed_fn=embed_then_sigint,
+        entity_seed_fn=lambda: None,
+        health_check_fn=lambda: [],
+        sleep_fn=lambda _s: None,
+        embed_interval=999999,
+        entity_seed_interval=999999,
+        health_check_interval=999999,
+    )
 
     assert call_count >= 1

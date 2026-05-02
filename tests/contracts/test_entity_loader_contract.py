@@ -1,7 +1,7 @@
 """Contract test: emit.py output is loadable by loader.py.
 
 Verifies that the JSON format written by emit_entity_stubs() can be
-parsed and validated by the loader's _build_node() and _build_edge().
+parsed and validated by the loader's build_node() and _build_edge().
 This guards the integration boundary between reflib/emit.py and
 reflib/loader.py.
 """
@@ -13,7 +13,7 @@ import pytest
 
 from kairix.knowledge.reflib.emit import emit_entity_stubs
 from kairix.knowledge.reflib.extract import RawRelationship, scan_reference_library
-from kairix.knowledge.reflib.loader import _build_node, load_entity_stubs
+from kairix.knowledge.reflib.loader import build_node, load_entity_stubs
 from kairix.knowledge.reflib.resolve import ResolvedEntity, resolve_entities
 
 pytestmark = pytest.mark.contract
@@ -22,8 +22,9 @@ FIXTURE_ROOT = Path(__file__).resolve().parent.parent / "integration" / "reflib_
 
 
 class TestEmitNodesParsedByLoader:
-    """Nodes emitted by emit.py must be parseable by loader's _build_node()."""
+    """Nodes emitted by emit.py must be parseable by loader's build_node()."""
 
+    @pytest.mark.contract
     def test_emitted_nodes_have_required_fields(self, tmp_path: Path) -> None:
         """Every emitted node has 'id', 'label', and 'name' fields."""
         entities = [
@@ -55,6 +56,7 @@ class TestEmitNodesParsedByLoader:
             assert "label" in node, f"Node missing 'label': {node}"
             assert "name" in node, f"Node missing 'name': {node}"
 
+    @pytest.mark.contract
     def test_emitted_person_node_loadable(self, tmp_path: Path) -> None:
         """A Person node from emit can be built by loader's _build_node."""
         entities = [
@@ -73,9 +75,10 @@ class TestEmitNodesParsedByLoader:
         assert len(nodes) == 1
         node_data = nodes[0]
         # _build_node should not raise for a valid Person node
-        node = _build_node(node_data["label"], node_data)
+        node = build_node(node_data["label"], node_data)
         assert node.id == "marcus-aurelius"
 
+    @pytest.mark.contract
     def test_emitted_publication_node_loadable(self, tmp_path: Path) -> None:
         """A Publication node from emit can be built by loader's _build_node."""
         entities = [
@@ -92,9 +95,10 @@ class TestEmitNodesParsedByLoader:
         nodes = json.loads(nodes_path.read_text())
 
         node_data = nodes[0]
-        node = _build_node(node_data["label"], node_data)
+        node = build_node(node_data["label"], node_data)
         assert node.id == "meditations"
 
+    @pytest.mark.contract
     def test_emitted_concept_node_loadable(self, tmp_path: Path) -> None:
         """A Concept node from emit can be built by loader's _build_node."""
         entities = [
@@ -111,13 +115,14 @@ class TestEmitNodesParsedByLoader:
         nodes = json.loads(nodes_path.read_text())
 
         node_data = nodes[0]
-        node = _build_node(node_data["label"], node_data)
+        node = build_node(node_data["label"], node_data)
         assert node.id == "twelve-factor-app"
 
 
 class TestEmitEdgesFormat:
     """Edges emitted by emit.py are tested for loader compatibility."""
 
+    @pytest.mark.contract
     def test_emitted_edges_have_required_fields(self, tmp_path: Path) -> None:
         """Every emitted edge has from_id, to_id, and kind."""
         entities = [
@@ -156,6 +161,7 @@ class TestEmitEdgesFormat:
             assert "to_id" in edge, f"Edge missing 'to_id': {edge}"
             assert "kind" in edge, f"Edge missing 'kind': {edge}"
 
+    @pytest.mark.contract
     def test_emitted_edge_kind_is_valid(self, tmp_path: Path) -> None:
         """Edge kinds emitted are valid EdgeKind enum values."""
         from kairix.knowledge.graph.models import EdgeKind
@@ -200,6 +206,7 @@ class TestEmitEdgesFormat:
 class TestFullPipelineRoundtrip:
     """End-to-end: extract -> resolve -> emit -> dry_run load."""
 
+    @pytest.mark.contract
     def test_fixture_entities_survive_roundtrip(self, tmp_path: Path) -> None:
         """Entities extracted from the fixture can be emitted and dry-run loaded."""
         if not FIXTURE_ROOT.exists():
