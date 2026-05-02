@@ -30,6 +30,12 @@ case "$MODE" in
         echo "Starting background worker (embed hourly, entity seed nightly)..."
         exec python -m kairix.worker
         ;;
+    eval)
+        echo "Indexing reference library..."
+        kairix embed
+        echo "Running reference library benchmark..."
+        exec kairix benchmark run --suite /opt/kairix/suites/reflib-gold-v1.yaml
+        ;;
     *)
         # Pass through to kairix CLI
         exec kairix "$@"
