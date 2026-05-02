@@ -12,7 +12,7 @@ def test_briefing_fetches_memory_logs(real_document_root):
     """Briefing source fetcher finds synthetic agent memory logs."""
     from kairix.agents.briefing.sources import fetch_memory_logs
 
-    content = fetch_memory_logs("shape", max_tokens=500)
+    content = fetch_memory_logs("agent-alpha", max_tokens=500)
     assert content  # non-empty string
     assert "pending" in content.lower() or "session" in content.lower()
 

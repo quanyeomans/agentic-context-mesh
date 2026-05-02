@@ -47,7 +47,7 @@ def multi_collection_dirs(tmp_path: Path) -> dict[str, Path]:
     (docs_dir / "runbook.md").write_text("# Runbook\nRestart sequence.")
 
     # Agent workspace memories
-    ws_dir = tmp_path / "workspaces" / "builder" / "memory"
+    ws_dir = tmp_path / "workspaces" / "agent-beta" / "memory"
     ws_dir.mkdir(parents=True)
     (ws_dir / "2026-04-27.md").write_text("# Session Notes\nDeployed kairix v2.")
     (ws_dir / "2026-04-26.md").write_text("# Session Notes\nFixed CI pipeline.")
@@ -110,7 +110,7 @@ class TestMultiCollectionScanning:
     def test_workspace_glob_filters_correctly(self, multi_collection_dirs: dict) -> None:
         """Workspace glob only matches files under memory/ subdirectories."""
         # Add a non-memory file to workspaces
-        tool_dir = multi_collection_dirs["workspaces"] / "builder" / "tools"
+        tool_dir = multi_collection_dirs["workspaces"] / "agent-beta" / "tools"
         tool_dir.mkdir(parents=True)
         (tool_dir / "output.md").write_text("# Tool Output\nThis should be excluded.")
 
