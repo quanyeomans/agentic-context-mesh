@@ -33,8 +33,11 @@ case "$MODE" in
     eval)
         echo "Indexing reference library..."
         kairix embed
-        echo "Running reference library benchmark..."
-        exec kairix benchmark run --suite /opt/kairix/suites/reflib-gold-v1.yaml
+        echo "Running reference library benchmark (200 cases, RRF k=10)..."
+        kairix benchmark run --suite /opt/kairix/suites/reflib-gold-v3.yaml --collection reference-library
+        echo ""
+        echo "Baseline: weighted=0.901 NDCG@10=0.990 Hit@5=99.0%"
+        echo "Config: RRF k=10, boosts off, vec_limit=10"
         ;;
     *)
         # Pass through to kairix CLI

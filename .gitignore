@@ -17,6 +17,8 @@ htmlcov/
 # Exception: the contract suite baseline is safe (mock data only, no vault content)
 benchmark-results/*.json
 !benchmark-results/contract-baseline.json
+!benchmark-results/reflib-contract-baseline.json
+!benchmark-results/reflib-gold-v3-baseline.json
 
 # Live database file — not a repo artefact
 entities.db
