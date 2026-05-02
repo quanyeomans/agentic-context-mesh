@@ -20,6 +20,7 @@ import pytest
 
 from kairix.core.search.bm25 import BM25Result
 from kairix.core.search.budget import DEFAULT_BUDGET, apply_budget
+from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.hybrid import SearchResult, _collections_for, search
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.rrf import rrf
@@ -683,3 +684,385 @@ def test_enrich_chunk_dates_no_matching_paths(tmp_path: Path) -> None:
     ]
     _enrich_chunk_dates(fused, db_path)
     assert fused[0].chunk_date == ""
+
+
+# ---------------------------------------------------------------------------
+# Helper branch coverage — tested through search() public interface
+# ---------------------------------------------------------------------------
+
+
+def _make_neo4j_stub(available: bool = False):
+    """Create a minimal Neo4j client stub."""
+    return type("Neo4jStub", (), {"available": available, "cypher": lambda self, q: []})()
+
+
+def _common_patches(
+    bm25_data=None,
+    vec_data=None,
+    neo4j_available=False,
+    intent_override=None,
+    config_override=None,
+    vec_side_effect=None,
+):
+    """Build a dict of common patches for search() tests.
+
+    Returns a context manager stack. Caller uses ``with _apply_patches(...):``.
+    """
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    stack = ExitStack()
+    mocks = {}
+
+    bm25 = bm25_data if bm25_data is not None else []
+    vec = vec_data if vec_data is not None else []
+
+    stack.enter_context(patch("kairix.core.search.hybrid.bm25_search", return_value=bm25))
+    if vec_side_effect is not None:
+        m = stack.enter_context(patch("kairix.core.search.hybrid._run_vector_search", side_effect=vec_side_effect))
+    else:
+        m = stack.enter_context(patch("kairix.core.search.hybrid._run_vector_search", return_value=vec))
+    mocks["vec_search"] = m
+
+    stack.enter_context(patch("kairix.core.search.hybrid._log_search_event"))
+    stack.enter_context(patch("kairix.core.search.hybrid._get_neo4j", return_value=_make_neo4j_stub(neo4j_available)))
+
+    if intent_override is not None:
+        stack.enter_context(patch("kairix.core.search.hybrid.classify", return_value=intent_override))
+
+    if config_override is not None:
+        stack.enter_context(
+            patch(
+                "kairix.core.search.config_loader.resolve_retrieval_config",
+                return_value=config_override,
+            )
+        )
+
+    return stack, mocks
+
+
+# ---------------------------------------------------------------------------
+# 1. _check_entity_prerequisites
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_entity_intent_neo4j_unavailable_returns_error() -> None:
+    """ENTITY intent with Neo4j unavailable returns SearchResult with error."""
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result()],
+        neo4j_available=False,
+        intent_override=QueryIntent.ENTITY,
+    )
+    with stack:
+        result = search("tell me about Acme Corp")
+
+    assert result.error != ""
+    assert "Neo4j" in result.error
+    assert result.results == []
+    assert result.intent == QueryIntent.ENTITY
+
+
+@pytest.mark.unit
+def test_non_entity_intent_neo4j_unavailable_proceeds() -> None:
+    """Non-ENTITY intent with Neo4j unavailable proceeds normally (returns results)."""
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/doc.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.SEMANTIC,
+    )
+    with stack:
+        result = search("explain how caching works")
+
+    assert result.error == ""
+    assert result.intent == QueryIntent.SEMANTIC
+    assert len(result.results) >= 1
+
+
+# ---------------------------------------------------------------------------
+# 2. _dispatch_parallel_search — skip_vector and vec empty
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_skip_vector_config_produces_no_vec_results() -> None:
+    """skip_vector=True in config means vec_results is empty and vec_failed is False."""
+    cfg = RetrievalConfig(skip_vector=True)
+    stack, mocks = _common_patches(
+        bm25_data=[_bm25_result("/vault/a.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.SEMANTIC,
+        config_override=cfg,
+    )
+    with stack:
+        result = search("test query")
+
+    assert result.vec_count == 0
+    assert result.vec_failed is False
+    assert result.bm25_count == 1
+    # Vector search should NOT have been called
+    mocks["vec_search"].assert_not_called()
+
+
+@pytest.mark.unit
+def test_vector_search_empty_marks_vec_failed() -> None:
+    """Vector search returning empty sets vec_failed=True, BM25 results still present."""
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/a.md"), _bm25_result("/vault/b.md")],
+        vec_data=[],
+        neo4j_available=False,
+        intent_override=QueryIntent.SEMANTIC,
+    )
+    with stack:
+        result = search("semantic query about architecture")
+
+    assert result.vec_failed is True
+    assert result.vec_count == 0
+    assert result.bm25_count == 2
+    assert len(result.results) == 2
+
+
+# ---------------------------------------------------------------------------
+# 3. _apply_intent_boosts — PROCEDURAL and TEMPORAL
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_procedural_intent_applies_procedural_boost() -> None:
+    """PROCEDURAL intent triggers procedural_boost call."""
+    from unittest.mock import patch as _patch
+
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/how-to-deploy.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.PROCEDURAL,
+    )
+    with stack, _patch("kairix.core.search.hybrid.procedural_boost", wraps=None) as mock_proc:
+        # procedural_boost must return a list of FusedResult
+        mock_proc.side_effect = lambda fused, **kw: fused
+        result = search("how to deploy the application")
+
+    mock_proc.assert_called_once()
+    assert result.intent == QueryIntent.PROCEDURAL
+
+
+@pytest.mark.unit
+def test_temporal_intent_applies_temporal_boosts() -> None:
+    """TEMPORAL intent triggers temporal_date_boost call."""
+    from unittest.mock import patch as _patch
+
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/2026-04-01.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.TEMPORAL,
+    )
+    with stack, _patch("kairix.core.search.hybrid.temporal_date_boost", wraps=None) as mock_temporal:
+        mock_temporal.side_effect = lambda fused, *a, **kw: fused
+        result = search("what happened last week?")
+
+    mock_temporal.assert_called_once()
+    assert result.intent == QueryIntent.TEMPORAL
+
+
+# ---------------------------------------------------------------------------
+# 4. _inject_temporal_chunks — with and without temporal marker
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_temporal_chunks_injected_when_temporal_marker_present() -> None:
+    """TEMPORAL intent with explicit temporal marker injects chunks into results."""
+    from types import SimpleNamespace
+    from unittest.mock import patch as _patch
+
+    # Create a fake temporal chunk
+    fake_chunk = SimpleNamespace(
+        source_path="/vault/memory/2026-04-20.md",
+        text="Session notes from April 20th with relevant content for testing",
+        metadata={"section_heading": "Daily standup"},
+    )
+
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/other.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.TEMPORAL,
+    )
+    # Mock temporal preprocessing to return chunks
+    with (
+        stack,
+        _patch(
+            "kairix.core.search.hybrid._preprocess_temporal",
+            return_value=("what happened on 2026-04-20", [fake_chunk], None),
+        ),
+        _patch(
+            "kairix.core.search.hybrid._query_has_temporal_marker",
+            return_value=True,
+        ),
+    ):
+        result = search("what happened on 2026-04-20")
+
+    paths = [r.result.path for r in result.results]
+    assert "/vault/memory/2026-04-20.md" in paths
+
+
+@pytest.mark.unit
+def test_temporal_chunks_not_injected_without_temporal_marker() -> None:
+    """TEMPORAL intent without explicit temporal marker does NOT inject chunks."""
+    from types import SimpleNamespace
+    from unittest.mock import patch as _patch
+
+    fake_chunk = SimpleNamespace(
+        source_path="/vault/memory/2026-04-20.md",
+        text="Session notes that should not appear",
+        metadata={"section_heading": "Daily standup"},
+    )
+
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/architecture.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.TEMPORAL,
+    )
+    # Temporal preprocessing returns chunks, but marker check returns False
+    with (
+        stack,
+        _patch(
+            "kairix.core.search.hybrid._preprocess_temporal",
+            return_value=("what changed and why", [fake_chunk], None),
+        ),
+        _patch(
+            "kairix.core.search.hybrid._query_has_temporal_marker",
+            return_value=False,
+        ),
+    ):
+        result = search("what changed and why")
+
+    paths = [r.result.path for r in result.results]
+    assert "/vault/memory/2026-04-20.md" not in paths
+
+
+# ---------------------------------------------------------------------------
+# 5. _apply_reranking — enabled vs disabled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_rerank_called_when_enabled() -> None:
+    """Rerank function is called when rerank.enabled=True in config."""
+    from unittest.mock import patch as _patch
+
+    from kairix.core.search.config import RerankConfig
+
+    cfg = RetrievalConfig(rerank=RerankConfig(enabled=True))
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/a.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.KEYWORD,
+        config_override=cfg,
+    )
+    with stack, _patch("kairix.core.search.rerank.rerank") as mock_rerank:
+        mock_rerank.side_effect = lambda query, results, **kw: results
+        search("SchemaVersionError")
+
+    mock_rerank.assert_called_once()
+
+
+@pytest.mark.unit
+def test_rerank_not_called_when_disabled() -> None:
+    """Rerank function is NOT called when rerank.enabled=False and intent not in rerank_intents."""
+    from unittest.mock import patch as _patch
+
+    from kairix.core.search.config import RerankConfig
+
+    # KEYWORD intent is not in default rerank_intents, and rerank.enabled=False
+    cfg = RetrievalConfig(rerank=RerankConfig(enabled=False), rerank_intents=())
+    stack, _ = _common_patches(
+        bm25_data=[_bm25_result("/vault/a.md")],
+        neo4j_available=False,
+        intent_override=QueryIntent.KEYWORD,
+        config_override=cfg,
+    )
+    with stack, _patch("kairix.core.search.rerank.rerank") as mock_rerank:
+        mock_rerank.side_effect = lambda query, results, **kw: results
+        search("SchemaVersionError")
+
+    mock_rerank.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 6. _apply_hyde — via _run_vector_search
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_hyde_applied_for_semantic_intent() -> None:
+    """SEMANTIC intent triggers HyDE: chat_completion and embed_text called for hypothetical answer."""
+    from unittest.mock import MagicMock
+    from unittest.mock import patch as _patch
+
+    import numpy as np
+
+    fake_vec = np.random.rand(1536).astype(np.float32).tolist()
+
+    mock_index = MagicMock()
+    mock_index.__len__ = lambda self: 100
+    mock_index.search.return_value = [
+        VecResult(
+            hash_seq="h1_0",
+            distance=0.1,
+            path="/vault/concept.md",
+            collection="shared",
+            title="Concept",
+            snippet="A concept document.",
+        )
+    ]
+
+    with (
+        _patch("kairix.core.search.hybrid.get_vector_index", return_value=mock_index),
+        _patch("kairix._azure.embed_text", return_value=fake_vec) as mock_embed,
+        _patch("kairix._azure.chat_completion", return_value="A hypothetical answer about concepts.") as mock_chat,
+    ):
+        from kairix.core.search.hybrid import _run_vector_search
+
+        results = _run_vector_search("explain the concept", ["shared"], intent="semantic")
+
+    # chat_completion should have been called for HyDE
+    mock_chat.assert_called_once()
+    # embed_text called at least twice: once for query, once for hyde answer
+    assert mock_embed.call_count >= 2
+    assert len(results) >= 1
+
+
+@pytest.mark.unit
+def test_hyde_fallback_on_llm_failure() -> None:
+    """HyDE LLM call failure falls back to original query embedding (no crash)."""
+    from unittest.mock import MagicMock
+    from unittest.mock import patch as _patch
+
+    import numpy as np
+
+    fake_vec = np.random.rand(1536).astype(np.float32).tolist()
+
+    mock_index = MagicMock()
+    mock_index.__len__ = lambda self: 100
+    mock_index.search.return_value = [
+        VecResult(
+            hash_seq="h1_0",
+            distance=0.1,
+            path="/vault/concept.md",
+            collection="shared",
+            title="Concept",
+            snippet="A concept document.",
+        )
+    ]
+
+    with (
+        _patch("kairix.core.search.hybrid.get_vector_index", return_value=mock_index),
+        _patch("kairix._azure.embed_text", return_value=fake_vec),
+        _patch("kairix._azure.chat_completion", side_effect=RuntimeError("LLM unavailable")),
+    ):
+        from kairix.core.search.hybrid import _run_vector_search
+
+        results = _run_vector_search("explain the concept", ["shared"], intent="semantic")
+
+    # Should still return results using original embedding (fallback)
+    assert len(results) >= 1
