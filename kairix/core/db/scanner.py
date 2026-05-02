@@ -185,7 +185,10 @@ class DocumentScanner:
             if not file_path.is_file():
                 continue
 
-            rel_path = str(file_path.relative_to(self._document_root))
+            # For absolute collection paths (e.g. reference library at /opt/kairix/reference-library),
+            # compute relative to the collection root, not document_root.
+            rel_base = collection_path.parent if Path(config.path).is_absolute() else self._document_root
+            rel_path = str(file_path.relative_to(rel_base))
             if any(pattern in rel_path for pattern in exclude_patterns):
                 continue
 
