@@ -613,6 +613,7 @@ def generate_suite(
     calibrate_first: bool = True,
     seed: int | None = None,
     agent: str = "shape",
+    collections: list[str] | None = None,
     sample_fn: Callable[..., list[dict[str, Any]]] | None = None,
     query_fn: Callable[..., list[GeneratedQuery]] | None = None,
     retrieve_fn: Callable[..., tuple[list[str], list[str]]] | None = None,
@@ -663,7 +664,7 @@ def generate_suite(
 
     # Sample documents — oversample to allow for rejection
     _sample = sample_fn or sample_documents
-    docs = _sample(db_path=db_path, n=n_cases * 10, collections=None, seed=seed)
+    docs = _sample(db_path=db_path, n=n_cases * 10, collections=collections, seed=seed)
     if not docs:
         errors.append("sample_documents: no documents returned — check db_path")
         return _empty_generation_result(output_path, calibration_passed, errors)
