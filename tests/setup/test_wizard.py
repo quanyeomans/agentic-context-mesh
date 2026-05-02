@@ -70,6 +70,67 @@ def test_docker_compose_valid_yaml() -> None:
 
 
 @pytest.mark.unit
+def test_wizard_rejects_nonexistent_document_root(tmp_path: Path, monkeypatch) -> None:
+    """Setup wizard fails cleanly when document root doesn't exist."""
+    from kairix.platform.setup.wizard import run_setup
+
+    output = tmp_path / "test-config.yaml"
+    nonexistent = str(tmp_path / "does-not-exist")
+
+    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: True)
+
+    from kairix.platform.setup.prompts import SetupContext
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(output_path=str(output), ctx=ctx, document_path=nonexistent, preset="general")
+
+    assert result is False, "Wizard should reject a non-existent document root"
+    assert not output.exists(), "Config file should not be written for invalid document root"
+
+
+@pytest.mark.unit
+def test_wizard_rejects_nonexistent_document_root_no_continue_option(tmp_path: Path, monkeypatch) -> None:
+    """Wizard must hard-reject a non-existent document root (no 'continue anyway?' escape)."""
+    from kairix.platform.setup.wizard import run_setup
+
+    output = tmp_path / "test-config.yaml"
+    nonexistent = str(tmp_path / "does-not-exist")
+
+    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: True)
+
+    # Use non-interactive context with document_path flag.
+    # Before the fix, non-interactive mode returned False due to prompt_yn default.
+    # After the fix, the wizard hard-rejects without even asking.
+    from kairix.platform.setup.prompts import SetupContext
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(output_path=str(output), ctx=ctx, document_path=nonexistent, preset="general")
+
+    assert result is False
+    assert not output.exists()
+
+
+@pytest.mark.unit
+def test_wizard_accepts_valid_document_root(tmp_path: Path, monkeypatch) -> None:
+    """Setup wizard accepts a valid existing document root."""
+    from kairix.platform.setup.wizard import run_setup
+
+    output = tmp_path / "test-config.yaml"
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+
+    monkeypatch.setattr("kairix.platform.setup.wizard._test_llm_connection", lambda *a, **k: True)
+
+    from kairix.platform.setup.prompts import SetupContext
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(output_path=str(output), ctx=ctx, document_path=str(doc_dir), preset="general")
+
+    assert result is True
+    assert output.exists()
+
+
+@pytest.mark.unit
 def test_run_setup_generates_config(tmp_path: Path, monkeypatch) -> None:
     """run_setup writes a valid YAML config file."""
     from kairix.platform.setup.wizard import run_setup

@@ -147,19 +147,22 @@ def run_setup(
     print("Step 2 of 7: Document Source\n")
 
     if document_path:
-        vault_path = os.path.expanduser(document_path)
+        doc_root = os.path.expanduser(document_path)
     else:
-        vault_path = prompt(ctx, "Where are your documents? (path to folder)", default=str(Path.home() / "Documents"))
-        vault_path = os.path.expanduser(vault_path)
+        doc_root = prompt(
+            ctx,
+            "Where are your documents? (path to folder)",
+            default=str(Path.home() / "Documents"),
+        )
+        doc_root = os.path.expanduser(doc_root)
 
-    if not os.path.isdir(vault_path):
-        print(f"  Warning: '{vault_path}' does not exist or is not a directory")
-        if not prompt_yn(ctx, "Continue anyway?", default=False):
-            return False
-        file_count, size_mb = 0, 0.0
-    else:
-        file_count, size_mb = _count_documents(vault_path)
-        print(f"\n  Found: {file_count:,} markdown files ({size_mb:.1f} MB)\n")
+    if not os.path.isdir(doc_root):
+        print(f"\n  Error: '{doc_root}' does not exist or is not a directory.")
+        print("  Create the folder first, then re-run setup.\n")
+        return False
+
+    file_count, size_mb = _count_documents(doc_root)
+    print(f"\n  Found: {file_count:,} markdown files ({size_mb:.1f} MB)\n")
 
     # ── Step 3: Storage Location ──────────────────────────────────────────
     print("Step 3 of 7: Where to store the search index\n")
@@ -323,7 +326,7 @@ def run_setup(
 
     # Paths section
     full_config["paths"] = {
-        "document_root": vault_path,
+        "document_root": doc_root,
         "db_path": db_path,
         "log_dir": log_dir,
     }
@@ -371,7 +374,7 @@ def run_setup(
         else:
             print("  Skipped. Run 'kairix embed' when you're ready.\n")
     else:
-        print("  No documents found to index. Add documents to your vault folder")
+        print("  No documents found to index. Add documents to your document store")
         print("  and run 'kairix embed' when ready.\n")
 
     # ── Health check ─────────────────────────────────────────────────────
