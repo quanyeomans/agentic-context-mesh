@@ -187,6 +187,11 @@ def document_root() -> Path:
     return KairixPaths.resolve().document_root
 
 
+def reference_library_root() -> Path:
+    """Reference library root — ships inside the container at /opt/kairix/reference-library."""
+    return Path(os.environ.get("KAIRIX_REFLIB_ROOT", "reference-library"))
+
+
 def db_path() -> Path:
     """Get the database path."""
     return KairixPaths.resolve().db_path

@@ -21,14 +21,12 @@ coverage.xml
 tests/
 docs/
 scripts/
-suites/
 benchmark-results/
 
 # Docker build files (prevent recursive context)
 docker/vault-agent/
 
 # Data files (mounted as volumes, not baked into image)
-reference-library/
 vault
 *.sqlite
 *.db

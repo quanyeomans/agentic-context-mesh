@@ -21,7 +21,7 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Create runtime directories and install runtime-only system deps (curl for healthchecks)
-RUN mkdir -p /data/vault /data/kairix /data/kairix/workspaces /opt/kairix/bin /opt/kairix/cron \
+RUN mkdir -p /data/documents /data/kairix /data/kairix/workspaces /opt/kairix/bin /opt/kairix/cron \
     && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Copy entrypoint and default config
@@ -29,9 +29,13 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 COPY kairix.example.config.yaml /opt/kairix/kairix.config.yaml
 
+# Reference library + evaluation suites (stable test corpus, ships with the container)
+COPY reference-library/ /opt/kairix/reference-library/
+COPY suites/ /opt/kairix/suites/
+
 ENV KAIRIX_DB_PATH=/data/kairix/index.sqlite \
-    KAIRIX_DOCUMENT_ROOT=/data/vault \
-    KAIRIX_VAULT_ROOT=/data/vault \
+    KAIRIX_DOCUMENT_ROOT=/data/documents \
+    KAIRIX_REFLIB_ROOT=/opt/kairix/reference-library \
     KAIRIX_WORKSPACE_ROOT=/data/kairix/workspaces \
     KAIRIX_DATA_DIR=/data/kairix \
     KAIRIX_CONFIG_PATH=/opt/kairix/kairix.config.yaml
