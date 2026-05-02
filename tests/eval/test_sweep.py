@@ -6,15 +6,9 @@ import math
 
 import pytest
 
-from kairix.quality.eval.metrics import (
-    hit_at_k_graded as _compute_hit_at_k,
-)
-from kairix.quality.eval.metrics import (
-    ndcg_graded as _compute_ndcg,
-)
-from kairix.quality.eval.metrics import (
-    reciprocal_rank_graded as _compute_mrr,
-)
+from kairix.quality.eval.metrics import hit_at_k_graded as _compute_hit_at_k
+from kairix.quality.eval.metrics import ndcg_graded as _compute_ndcg
+from kairix.quality.eval.metrics import reciprocal_rank_graded as _compute_mrr
 
 # ---------------------------------------------------------------------------
 # ndcg_graded (was _compute_ndcg)

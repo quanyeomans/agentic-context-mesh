@@ -4,7 +4,12 @@ import sqlite3
 
 import pytest
 
-from kairix.core.db.schema import SCHEMA_VERSION, create_schema, migrate, validate_schema
+from kairix.core.db.schema import (
+    SCHEMA_VERSION,
+    create_schema,
+    migrate,
+    validate_schema,
+)
 
 
 @pytest.mark.unit
@@ -188,7 +193,16 @@ def test_create_schema_documents_table_columns() -> None:
     create_schema(db)
 
     cols = {row[1] for row in db.execute("PRAGMA table_info(documents)")}
-    expected = {"id", "collection", "path", "title", "hash", "created_at", "modified_at", "active"}
+    expected = {
+        "id",
+        "collection",
+        "path",
+        "title",
+        "hash",
+        "created_at",
+        "modified_at",
+        "active",
+    }
     assert expected.issubset(cols)
 
 

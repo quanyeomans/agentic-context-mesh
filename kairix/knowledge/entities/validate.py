@@ -12,7 +12,9 @@ Timeout: 10 seconds. Never raises — returns empty result on any failure.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import requests
 
@@ -33,18 +35,27 @@ class WikidataMatch:
     confidence: str  # "high" | "medium" | "low" based on label match
 
 
-def search_wikidata(name: str, language: str = "en") -> list[WikidataMatch]:
+def search_wikidata(
+    name: str,
+    language: str = "en",
+    http_get: Callable[..., requests.Response] | None = None,
+) -> list[WikidataMatch]:
     """
     Search Wikidata for entities matching name.
 
     Args:
         name: Entity name to search for.
         language: Language code for labels and descriptions.
+        http_get: Injectable HTTP GET function for testing.
+                  Defaults to ``requests.get``.
 
     Returns:
         List of WikidataMatch (up to 5), ordered by Wikidata relevance.
         Returns [] on any network error or API failure. Never raises.
     """
+    if http_get is None:
+        http_get = requests.get
+
     params: dict[str, str | int] = {
         "action": "wbsearchentities",
         "search": name,
@@ -54,7 +65,7 @@ def search_wikidata(name: str, language: str = "en") -> list[WikidataMatch]:
         "type": "item",
     }
     try:
-        resp = requests.get(
+        resp = http_get(
             WIKIDATA_SEARCH_URL,
             params=params,
             timeout=_DEFAULT_TIMEOUT,
@@ -100,7 +111,8 @@ def validate_entity(
     name: str,
     neo4j_client: object,
     update: bool = False,
-) -> dict:
+    http_get: Callable[..., requests.Response] | None = None,
+) -> dict[str, Any]:
     """
     Validate an entity against Wikidata and optionally update the Neo4j node.
 
@@ -124,7 +136,7 @@ def validate_entity(
         logger.warning("validate_entity: Neo4j lookup failed — %s", exc)
 
     # Search Wikidata
-    matches = search_wikidata(name)
+    matches = search_wikidata(name, http_get=http_get)
 
     updated = False
     if update and neo4j_id and matches:
@@ -136,7 +148,11 @@ def validate_entity(
                     {"id": neo4j_id, "qid": best.qid},
                 )
                 updated = True
-                logger.info("validate_entity: set wikidata_qid=%s on node %s", best.qid, neo4j_id)
+                logger.info(
+                    "validate_entity: set wikidata_qid=%s on node %s",
+                    best.qid,
+                    neo4j_id,
+                )
             except Exception as exc:
                 logger.warning("validate_entity: Neo4j update failed — %s", exc)
 

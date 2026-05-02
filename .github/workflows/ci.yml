@@ -1,4 +1,4 @@
-name: CI
+name: "1 · CI Pipeline"
 
 # Engineering hub compliance: 4-stage pipeline (contracts -> unit+type -> integration -> security)
 # Ref: engineering-hub/standards/DEVELOPMENT-WORKFLOW.md, TESTING-STRATEGY.md

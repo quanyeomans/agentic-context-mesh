@@ -7,7 +7,7 @@ and what's still missing.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class ResearcherState(TypedDict, total=False):
@@ -16,9 +16,9 @@ class ResearcherState(TypedDict, total=False):
     query: str  # original question
     refined_query: str  # current search query (may be rephrased)
     intent: str  # classified question type (entity, semantic, etc.)
-    retrieved_chunks: list  # accumulated search results
-    entities_found: list  # people/companies/topics discovered
-    gaps: list  # what's missing from the knowledge base
+    retrieved_chunks: list[dict[str, Any]]  # accumulated search results
+    entities_found: list[str]  # people/companies/topics discovered
+    gaps: list[str]  # what's missing from the knowledge base
     synthesis: str  # final answer with sources cited
     turns: int  # how many search rounds so far
     confidence: float  # 0.0 to 1.0 — how well the results answer the question

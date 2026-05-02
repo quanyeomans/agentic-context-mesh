@@ -32,7 +32,10 @@ _TEMPORAL_PATTERNS: list[re.Pattern[str]] = [
     ),
     re.compile(r"\b(yesterday|today|recently|lately|this\s+week|this\s+month)\b", re.IGNORECASE),
     re.compile(r"\bwhen\s+did\b", re.IGNORECASE),
-    re.compile(r"\bwhat\s+(changed|happened|was\s+done|was\s+completed|was\s+fixed|was\s+shipped)\b", re.IGNORECASE),
+    re.compile(
+        r"\bwhat\s+(changed|happened|was\s+done|was\s+completed|was\s+fixed|was\s+shipped)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\bcompleted\s+on\b", re.IGNORECASE),
     re.compile(r"\bsince\s+(last|the|a\s+few)\b", re.IGNORECASE),
     re.compile(r"\bover\s+the\s+(last|past)\b", re.IGNORECASE),
@@ -61,7 +64,10 @@ _ENTITY_PATTERNS: list[re.Pattern[str]] = [
 # ---------------------------------------------------------------------------
 _PROCEDURAL_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bhow\s+(to|do\s+I|do\s+we|should\s+I|can\s+I)\b", re.IGNORECASE),
-    re.compile(r"\bwhat('s|\s+is)\s+the\s+(rule|process|procedure|workflow|standard|convention)\b", re.IGNORECASE),
+    re.compile(
+        r"\bwhat('s|\s+is)\s+the\s+(rule|process|procedure|workflow|standard|convention)\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\bshould\s+I\b", re.IGNORECASE),
     re.compile(r"\bwhat\s+do\s+I\s+do\s+when\b", re.IGNORECASE),
     re.compile(r"\bstep[s\s]+to\b", re.IGNORECASE),

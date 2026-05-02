@@ -39,33 +39,41 @@ def _make_md(title: str, source: str, domain: str, subdomain: str, body: str) ->
 
 
 class TestDomainFromPath:
+    @pytest.mark.unit
     def test_engineering_collection(self):
         assert _domain_from_path("engineering/foo/bar.md") == "software-engineering"
 
+    @pytest.mark.unit
     def test_philosophy_collection(self):
         assert _domain_from_path("philosophy/classical/text.md") == "philosophy"
 
+    @pytest.mark.unit
     def test_unknown_collection(self):
         assert _domain_from_path("unknown-col/x.md") == "unknown-col"
 
 
 class TestStopHeading:
+    @pytest.mark.unit
     def test_generic_headings_are_stopped(self):
         assert _is_stop_heading("Overview") is True
         assert _is_stop_heading("Introduction") is True
         assert _is_stop_heading("Getting Started") is True
 
+    @pytest.mark.unit
     def test_short_headings_stopped(self):
         assert _is_stop_heading("AB") is True
 
+    @pytest.mark.unit
     def test_valid_heading_passes(self):
         assert _is_stop_heading("Twelve-Factor Application Design") is False
 
+    @pytest.mark.unit
     def test_lowercase_heading_stopped(self):
         assert _is_stop_heading("some lowercase heading") is True
 
 
 class TestFrontmatterExtraction:
+    @pytest.mark.unit
     def test_extracts_document_and_org(self):
         fm = {
             "title": "OpenTelemetry Basics",
@@ -80,6 +88,7 @@ class TestFrontmatterExtraction:
         assert "Document" in types
         assert "Organisation" in types
 
+    @pytest.mark.unit
     def test_authored_by_relationship(self):
         fm = {"title": "My Doc", "source": "Google"}
         entities: list[RawEntity] = []
@@ -90,6 +99,7 @@ class TestFrontmatterExtraction:
         assert len(authored) == 1
         assert authored[0].to_name == "Google"
 
+    @pytest.mark.unit
     def test_framework_title_detected(self):
         fm = {"title": "Service Design Framework", "source": "X"}
         entities: list[RawEntity] = []
@@ -102,6 +112,7 @@ class TestFrontmatterExtraction:
 
 
 class TestHeadingExtraction:
+    @pytest.mark.unit
     def test_framework_pattern_in_heading(self):
         body = "# Introduction\n\n## Agile Delivery Framework\n\nSome text."
         entities: list[RawEntity] = []
@@ -111,6 +122,7 @@ class TestHeadingExtraction:
         frameworks = [e for e in entities if e.entity_type == "Framework"]
         assert any("Agile Delivery Framework" in e.name for e in frameworks)
 
+    @pytest.mark.unit
     def test_teaches_relationship(self):
         body = "# Main\n\n## Sub Topic Here\n\nContent."
         entities: list[RawEntity] = []
@@ -123,6 +135,7 @@ class TestHeadingExtraction:
 
 
 class TestSeedEntities:
+    @pytest.mark.unit
     def test_detects_known_person(self):
         text = "The writings of Marcus Aurelius influenced Stoic philosophy."
         entities: list[RawEntity] = []
@@ -132,6 +145,7 @@ class TestSeedEntities:
         people = [e for e in entities if e.entity_type == "Person"]
         assert any(e.name == "Marcus Aurelius" for e in people)
 
+    @pytest.mark.unit
     def test_detects_known_org(self):
         text = "OWASP provides security guidance for web applications."
         entities: list[RawEntity] = []
@@ -141,6 +155,7 @@ class TestSeedEntities:
         orgs = [e for e in entities if e.entity_type == "Organisation"]
         assert any(e.name == "OWASP" for e in orgs)
 
+    @pytest.mark.unit
     def test_detects_known_publication(self):
         text = "The Art of War describes military strategy."
         entities: list[RawEntity] = []
@@ -152,6 +167,7 @@ class TestSeedEntities:
 
 
 class TestScanReferenceLibrary:
+    @pytest.mark.integration
     def test_scan_with_temp_files(self, tmp_path: Path):
         """Scan a small temporary reference library."""
         col = tmp_path / "engineering" / "test-source"
@@ -172,6 +188,7 @@ class TestScanReferenceLibrary:
         assert "Document" in types
         assert "Organisation" in types
 
+    @pytest.mark.integration
     def test_scan_skips_root_files(self, tmp_path: Path):
         """Root-level files like CATALOGUE.md are skipped."""
         (tmp_path / "CATALOGUE.md").write_text("# Catalogue\n\nIgnored.")

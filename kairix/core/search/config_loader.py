@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -354,6 +355,7 @@ def resolve_retrieval_config(
     collection: str | None = None,
     collections: list[str] | None = None,
     explicit_config: RetrievalConfig | None = None,
+    config_fn: Callable[[], RetrievalConfig] | None = None,
 ) -> RetrievalConfig:
     """Resolve the retrieval config for a search request.
 
@@ -367,7 +369,8 @@ def resolve_retrieval_config(
     if explicit_config is not None:
         return explicit_config
 
-    global_cfg = load_config()
+    _load = config_fn or load_config
+    global_cfg = _load()
 
     # Determine target collection (only for single-collection searches)
     target = collection

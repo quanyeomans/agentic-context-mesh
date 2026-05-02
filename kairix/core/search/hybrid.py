@@ -1,7 +1,7 @@
-"""
-Hybrid search orchestrator for the kairix pipeline.
+"""Hybrid search orchestrator for the kairix pipeline.
 
 Orchestrates the full search pipeline:
+
   1. Classify query intent
   2. Dispatch BM25 and vector search in parallel (ThreadPoolExecutor)
   3. Fuse results with RRF
@@ -20,6 +20,8 @@ Logs every search event to the path set by KAIRIX_SEARCH_LOG (default: /data/kai
 Never raises — returns SearchResult with empty results on any failure.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -28,22 +30,20 @@ import shutil
 import sqlite3
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from kairix.core.db import get_db_path, open_db
-from kairix.core.search.bm25 import BM25Result, bm25_search
-from kairix.core.search.budget import BudgetedResult, apply_budget
+from kairix.core.search.bm25 import BM25Result
+from kairix.core.search.budget import apply_budget
 from kairix.core.search.config import RetrievalConfig
-from kairix.core.search.intent import QueryIntent, classify
+from kairix.core.search.intent import QueryIntent
 from kairix.core.search.rrf import (
     FusedResult,
-    bm25_primary_fuse,
     chunk_date_boost,
     entity_boost_neo4j,
     procedural_boost,
-    rrf,
     temporal_date_boost,
 )
 from kairix.core.search.vec_index import VECTOR_DEFAULT_K, VecResult
@@ -70,13 +70,19 @@ def _get_llm():  # type: ignore[return]
 # ---------------------------------------------------------------------------
 
 SEARCH_LOG_PATH = Path(
-    os.environ.get("KAIRIX_SEARCH_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "search.jsonl"))
+    os.environ.get(
+        "KAIRIX_SEARCH_LOG",
+        str(Path.home() / ".cache" / "kairix" / "logs" / "search.jsonl"),
+    )
 )
 
 # Query logging (privacy-sensitive — disabled by default)
 _LOG_QUERIES: bool = os.getenv("KAIRIX_LOG_QUERIES", "0") == "1"
 _QUERY_LOG_PATH: Path = Path(
-    os.getenv("KAIRIX_QUERY_LOG", str(Path.home() / ".cache" / "kairix" / "logs" / "queries.jsonl"))
+    os.getenv(
+        "KAIRIX_QUERY_LOG",
+        str(Path.home() / ".cache" / "kairix" / "logs" / "queries.jsonl"),
+    )
 )
 
 # Rotate when file exceeds this size
@@ -122,27 +128,10 @@ def _get_agent_pattern() -> str:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class SearchResult:
-    """Full result from the hybrid search pipeline."""
-
-    query: str
-    intent: QueryIntent
-    results: list[BudgetedResult] = field(default_factory=list)
-
-    # Diagnostic info
-    bm25_count: int = 0
-    vec_count: int = 0
-    fused_count: int = 0
-    collections: list[str] = field(default_factory=list)
-    tiers_used: list[str] = field(default_factory=list)
-    total_tokens: int = 0
-    latency_ms: float = 0.0
-    vec_failed: bool = False
-    fallback_used: bool = False  # True when BM25 returned 0 and vector was the sole source
-    error: str = ""
-    _temporal_chunks: list | None = None
-
+# Backwards-compat alias — canonical definition is in pipeline.py.
+# Deprecated: import from kairix.core.search.pipeline instead.
+# Will be removed no sooner than 2 releases after 2026.04.
+from kairix.core.search.pipeline import SearchResult as SearchResult  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -214,12 +203,19 @@ def _query_has_temporal_marker(query: str) -> bool:
     return bool(iso_date.search(query) or rel_term.search(query))
 
 
-def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
+def _enrich_chunk_dates(
+    fused: list[FusedResult],
+    db_path: Path,
+    doc_repo: object | None = None,
+) -> None:
     """
     Populate FusedResult.chunk_date from the kairix SQLite DB for TMP-7B.
 
     Does a single SQL query joining content_vectors to documents on hash,
     then sets r.chunk_date for any results whose path has a non-null chunk_date.
+
+    When doc_repo (DocumentRepository) is provided, delegates to
+    doc_repo.get_chunk_dates() instead of direct SQL.
 
     Safe when DB is unavailable — logs a warning and returns silently.
     Never raises.
@@ -230,6 +226,19 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
     paths = [r.path for r in fused if r.path]
     if not paths:
         return
+
+    # Delegate to DocumentRepository when provided
+    if doc_repo is not None:
+        try:
+            path_to_date = doc_repo.get_chunk_dates(paths)  # type: ignore[union-attr]
+            for r in fused:
+                cd = path_to_date.get(r.path)
+                if cd:
+                    r.chunk_date = cd
+            return
+        except Exception as e:
+            logger.warning("hybrid: _enrich_chunk_dates doc_repo failed — %s", e)
+            return
 
     try:
         db = open_db(Path(db_path))
@@ -277,90 +286,6 @@ def _enrich_chunk_dates(fused: list[FusedResult], db_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_multi_hop(
-    query: str,
-    agent: str | None,
-    scope: str,
-    budget: int,
-    cfg: RetrievalConfig,
-    neo4j_client: object,
-    collections: list[str],
-    t_start: float,
-) -> SearchResult:
-    """Decompose a MULTI_HOP query into sub-queries, run each through hybrid
-    search, merge and deduplicate results, then apply budget.
-
-    Raises on planner failure so the caller can fall back to SEMANTIC.
-    """
-    from dataclasses import replace as _replace
-
-    from kairix.core.search.planner import QueryPlanner
-
-    planner = QueryPlanner()
-    sub_queries = planner.decompose(query, neo4j_client=neo4j_client)
-    logger.debug("hybrid: MULTI_HOP sub-queries: %s", sub_queries)
-
-    def _hybrid_search_fn(sq: str) -> list:
-        sub_result = search(sq, agent=agent, scope=scope, budget=budget, _no_multi_hop=True)
-        return sub_result.results
-
-    fused_results = planner.retrieve_and_merge(sub_queries, _hybrid_search_fn, top_k_per_sub=6, final_top_k=8)
-
-    seen_paths: set[str] = set()
-    fused_for_budget: list[FusedResult] = []
-    for r in fused_results:
-        if not hasattr(r, "result") or not r.result.path:
-            continue
-        if r.result.path in seen_paths:
-            continue
-        seen_paths.add(r.result.path)
-        snippet = r.result.snippet or ""
-        # Preserve original RRF/boosted scores from the planner's merge
-        # instead of overwriting with positional scores.
-        merged_fr = _replace(
-            r.result,
-            snippet=snippet[:600] if len(snippet) > 600 else snippet,
-        )
-        fused_for_budget.append(merged_fr)
-
-    budgeted = apply_budget(fused_for_budget, budget=budget)
-    total_tokens = sum(r.token_estimate for r in budgeted)
-    tiers_used = sorted({r.tier for r in budgeted})
-    t_end = time.monotonic()
-    latency_ms = (t_end - t_start) * 1000.0
-    query_hash = hashlib.sha256(query.encode()).hexdigest()[:12]
-
-    result = SearchResult(
-        query=query,
-        intent=QueryIntent.MULTI_HOP,
-        results=budgeted,
-        bm25_count=len(fused_results),
-        vec_count=0,
-        fused_count=len(fused_for_budget),
-        collections=collections,
-        tiers_used=tiers_used,
-        total_tokens=total_tokens,
-        latency_ms=latency_ms,
-        vec_failed=False,
-        fallback_used=False,
-    )
-    _log_search_event(
-        {
-            "query_hash": query_hash,
-            "intent": QueryIntent.MULTI_HOP.value,
-            "agent": agent,
-            "scope": scope,
-            "bm25_count": len(fused_results),
-            "vec_count": 0,
-            "fused_count": len(fused_for_budget),
-            "budget_tokens": total_tokens,
-            "latency_ms": latency_ms,
-            "sub_queries": len(sub_queries),
-        }
-    )
-    return result
-
-
 # ---------------------------------------------------------------------------
 # Extracted pipeline stages (I7 — independently testable)
 # ---------------------------------------------------------------------------
@@ -406,7 +331,10 @@ def _preprocess_temporal(
         from datetime import date as _date
 
         from kairix.core.temporal.index import query_temporal_chunks
-        from kairix.core.temporal.rewriter import extract_time_window, rewrite_temporal_query
+        from kairix.core.temporal.rewriter import (
+            extract_time_window,
+            rewrite_temporal_query,
+        )
 
         active_query = rewrite_temporal_query(query, reference_date=_date.today())
         start, end = extract_time_window(query, reference_date=_date.today())
@@ -495,6 +423,8 @@ def _dispatch_parallel_search(
 
     Returns (bm25_results, vec_results, vec_failed).
     """
+    from kairix.core.search.bm25 import bm25_search as _bm25_search_fn
+
     bm25_results: list[BM25Result] = []
     vec_results: list[VecResult] = []
     vec_failed = False
@@ -503,11 +433,21 @@ def _dispatch_parallel_search(
         futures: dict[str, Future] = {}
 
         futures["bm25"] = executor.submit(
-            bm25_search, active_query, collections, cfg.bm25_limit, None, date_filter_paths
+            _bm25_search_fn,
+            active_query,
+            collections,
+            cfg.bm25_limit,
+            None,
+            date_filter_paths,
         )
         if not cfg.skip_vector:
             futures["vec"] = executor.submit(
-                _run_vector_search, active_query, collections, date_filter_paths, cfg.vec_limit, intent.value
+                _run_vector_search,
+                active_query,
+                collections,
+                date_filter_paths,
+                cfg.vec_limit,
+                intent.value,
             )
 
         for name, future in futures.items():
@@ -526,7 +466,10 @@ def _dispatch_parallel_search(
         vec_failed = False  # not a failure — intentionally skipped
     elif not vec_results:
         vec_failed = True
-        logger.info("hybrid: vector search returned no results, using BM25 only (query=%r)", query[:60])
+        logger.info(
+            "hybrid: vector search returned no results, using BM25 only (query=%r)",
+            query[:60],
+        )
 
     return bm25_results, vec_results, vec_failed
 
@@ -702,8 +645,10 @@ def _build_search_result(state: _SearchPipelineState) -> SearchResult:
         result._temporal_chunks = state.temporal_chunks
 
     # Log event
+    _log_fn = _log_search_event
+    _log_q_fn = _log_query_event
     query_hash = hashlib.sha256(state.query.encode()).hexdigest()[:12]
-    _log_search_event(
+    _log_fn(
         {
             "query_hash": query_hash,
             "intent": state.intent.value,
@@ -723,7 +668,7 @@ def _build_search_result(state: _SearchPipelineState) -> SearchResult:
     )
 
     # Optional raw query log (privacy-sensitive — controlled by KAIRIX_LOG_QUERIES)
-    _log_query_event(
+    _log_q_fn(
         {
             "ts": int(time.time()),
             "query": state.query,
@@ -740,126 +685,12 @@ def _build_search_result(state: _SearchPipelineState) -> SearchResult:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Search pipeline
-# ---------------------------------------------------------------------------
-
-
-def search(
+def _apply_hyde(
     query: str,
-    agent: str | None = None,
-    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
-    budget: int = 3000,
-    _no_multi_hop: bool = False,
-    config: RetrievalConfig | None = None,
-    collections: list[str] | None = None,
-) -> SearchResult:
-    """
-    Run the full hybrid search pipeline.
-
-    Pipeline:
-      1. Classify intent
-      2. Determine collections
-      3. Dispatch BM25 + vector in parallel (ThreadPoolExecutor)
-      4. Fuse with RRF
-      5. Entity boost via Neo4j graph
-      6. Apply token budget
-      7. Log event
-
-    Falls back to BM25-only if vector search fails.
-
-    Args:
-        query:       Search query string.
-        agent:       Agent name for collection scoping (e.g. "shape", "builder").
-        scope:       Collection scope: "shared", "agent", or "shared+agent".
-        budget:      Token budget cap. Default 3000.
-        collections: Explicit collection list. Overrides scope-based resolution when set.
-
-    Returns:
-        SearchResult with results and diagnostic metadata.
-        Never raises.
-    """
-    t_start = time.monotonic()
-
-    intent = classify(query)
-    if collections is None:
-        collections = _collections_for(agent, scope)
-
-    # Resolve config: explicit > per-collection > global > defaults
-    from kairix.core.search.config_loader import resolve_retrieval_config
-
-    cfg = resolve_retrieval_config(
-        collections=collections,
-        explicit_config=config,
-    )
-
-    # Temporal query rewriting — expand query with explicit date tokens before retrieval
-    active_query, temporal_chunks, date_filter_paths = _preprocess_temporal(query, intent)
-
-    # Neo4j client — used by planner (entity context) and entity_boost
-    # lgtm — false positive: _get_neo4j() returns a client object, no credentials logged
-    neo4j_client = _get_neo4j()
-
-    # Entity intent requires Neo4j — reject early if unavailable
-    error = _check_entity_prerequisites(intent, neo4j_client, query)
-    if error:
-        return error
-
-    # Multi-hop: decompose and run sub-queries in parallel, then merge.
-    if intent == QueryIntent.MULTI_HOP and not _no_multi_hop:
-        try:
-            return _run_multi_hop(query, agent, scope, budget, cfg, neo4j_client, collections, t_start)
-        except Exception as _mh_e:  # broad catch justified: planner involves LLM + Neo4j — diverse failure modes
-            logger.warning("hybrid: MULTI_HOP planner failed (%s) — falling back to SEMANTIC", _mh_e)
-            intent = QueryIntent.SEMANTIC
-
-    # Dispatch BM25 and vector search in parallel for all intents
-    bm25_results, vec_results, vec_failed = _dispatch_parallel_search(
-        active_query, collections, cfg, date_filter_paths, intent, query
-    )
-
-    # Fuse results using the configured strategy
-    if cfg.fusion_strategy == "rrf":
-        fused: list[FusedResult] = rrf(bm25_results, vec_results, k=cfg.rrf_k)
-    else:
-        fused = bm25_primary_fuse(bm25_results, vec_results)
-
-    # Populate chunk_date metadata for TMP-7B (only when DB available)
-    try:
-        _enrich_chunk_dates(fused, get_db_path())
-    except (sqlite3.Error, OSError) as _cde:
-        logger.debug("hybrid: chunk_date enrichment skipped — %s", _cde)
-
-    # Apply all intent-specific boosts
-    fused = _apply_intent_boosts(fused, intent, active_query, neo4j_client, cfg)
-
-    # Merge temporal chunks
-    fused = _inject_temporal_chunks(fused, temporal_chunks, intent, active_query)
-
-    # Cross-encoder re-ranking
-    fused = _apply_reranking(fused, active_query, intent, cfg)
-
-    # Build final result: apply budget, compute diagnostics, log events
-    return _build_search_result(
-        _SearchPipelineState(
-            fused=fused,
-            query=query,
-            intent=intent,
-            budget=budget,
-            t_start=t_start,
-            bm25_count=len(bm25_results),
-            vec_count=len(vec_results),
-            collections=collections,
-            vec_failed=vec_failed,
-            fallback_used=False,
-            temporal_chunks=temporal_chunks or None,
-            agent=agent,
-            scope=scope,
-        )
-    )
-
-
-def _apply_hyde(query: str, query_vec: Any) -> Any:
+    query_vec: Any,
+    embed: Any = None,
+    chat: Any = None,
+) -> Any:
     """Apply HyDE (Hypothetical Document Embeddings) to a query vector.
 
     Generates a short hypothetical answer via LLM, embeds it, and blends
@@ -870,16 +701,25 @@ def _apply_hyde(query: str, query_vec: Any) -> Any:
     import numpy as np
 
     try:
-        from kairix._azure import chat_completion, embed_text
+        if embed is None or chat is None:
+            from kairix._azure import chat_completion, embed_text
 
-        hyde_answer = chat_completion(
-            [{"role": "user", "content": f"Write a short paragraph that answers: {query}"}],
+            embed = embed or embed_text
+            chat = chat or chat_completion
+
+        hyde_answer = chat(
+            [
+                {
+                    "role": "user",
+                    "content": f"Write a short paragraph that answers: {query}",
+                }
+            ],
             max_tokens=150,
         )
         if not hyde_answer:
             return query_vec
 
-        hyde_vec = embed_text(hyde_answer)
+        hyde_vec = embed(hyde_answer)
         if not hyde_vec:
             return query_vec
 
@@ -921,13 +761,16 @@ def _run_vector_search(
     import numpy as np
 
     try:
-        from kairix._azure import embed_text
+        from kairix._azure import chat_completion as _chat
+        from kairix._azure import embed_text as _embed
 
-        vec = embed_text(query)
+        _get_index = get_vector_index
+
+        vec = _embed(query)
         if not vec:
             logger.warning("hybrid: embed returned empty on first try — retrying once")
             _time.sleep(0.5)
-            vec = embed_text(query)
+            vec = _embed(query)
         if not vec:
             logger.warning("hybrid: embed returned empty after retry — skipping vector search")
             return []
@@ -938,9 +781,9 @@ def _run_vector_search(
             query_vec /= norm
 
         if intent in ("semantic", "multi_hop"):
-            query_vec = _apply_hyde(query, query_vec)
+            query_vec = _apply_hyde(query, query_vec, embed=_embed, chat=_chat)
 
-        index = get_vector_index()
+        index = _get_index()
         if index is None or len(index) == 0:
             return []
 

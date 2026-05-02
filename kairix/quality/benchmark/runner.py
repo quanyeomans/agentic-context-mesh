@@ -15,13 +15,18 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from kairix.quality.benchmark.suite import BenchmarkSuite
-from kairix.quality.eval.constants import CATEGORY_ALIASES, CATEGORY_WEIGHTS, PHASE_GATES
+from kairix.quality.eval.constants import (
+    CATEGORY_ALIASES,
+    CATEGORY_WEIGHTS,
+    PHASE_GATES,
+)
 from kairix.quality.eval.metrics import (
     hit_at_k_graded,
     match_gold_to_path,
@@ -97,19 +102,34 @@ def _exact_match(paths: list[str], gold: str) -> float:
     return 0.0
 
 
-def _classification_score(query: str, expected_type: str) -> float:
+def _classification_score(
+    query: str,
+    expected_type: str,
+    classify_fn: Callable[..., Any] | None = None,
+    classify_llm_fn: Callable[..., Any] | None = None,
+) -> float:
     """
     Score a classification case by running kairix classify and comparing type.
     Returns 1.0 if result type matches expected_type, 0.0 otherwise.
+
+    Args:
+        classify_fn:     Injectable rules classifier. Defaults to ``classify_content``.
+        classify_llm_fn: Injectable LLM classifier fallback. Defaults to ``classify_with_llm``.
     """
     try:
-        from kairix.core.classify.judge import classify_with_llm
-        from kairix.core.classify.rules import classify_content
+        if classify_fn is None:
+            from kairix.core.classify.rules import classify_content
 
-        result = classify_content(query, agent="shared")
+            classify_fn = classify_content
+        if classify_llm_fn is None:
+            from kairix.core.classify.judge import classify_with_llm
+
+            classify_llm_fn = classify_with_llm
+
+        result = classify_fn(query, agent="shared")
         if result.type == "unknown":
             # Try LLM fallback
-            result = classify_with_llm(query, agent="shared")
+            result = classify_llm_fn(query, agent="shared")
 
         return 1.0 if result.type == expected_type else 0.0
     except Exception:
@@ -137,14 +157,25 @@ def _llm_judge(
     query: str,
     paths: list[str],
     snippets: list[str],
+    chat_fn: Callable[..., str] | None = None,
 ) -> float:
     """
     Score 0.0-1.0 using gpt-4o-mini as relevance judge.
 
+    Args:
+        query:    The search query to judge.
+        paths:    Retrieved document paths.
+        snippets: Retrieved document snippets.
+        chat_fn:  Optional chat completion callable for dependency injection.
+                  Defaults to ``kairix._azure.chat_completion``.
+
     Returns 0.0 on any failure (API error, parse error, timeout).
     """
     try:
-        from kairix._azure import chat_completion
+        if chat_fn is None:
+            from kairix._azure import chat_completion
+
+            chat_fn = chat_completion
 
         if not paths:
             return 0.0
@@ -167,7 +198,7 @@ def _llm_judge(
         )
 
         messages = [{"role": "user", "content": prompt}]
-        content = chat_completion(messages, max_tokens=10)
+        content = chat_fn(messages, max_tokens=10)
         score = float(content)
         return max(0.0, min(1.0, score))
 
@@ -180,7 +211,7 @@ def _llm_judge(
 # ---------------------------------------------------------------------------
 
 
-def _retrieve(
+def retrieve(
     query: str,
     system: str,
     agent: str,
@@ -188,9 +219,14 @@ def _retrieve(
     db_path: str | None = None,
     collection: str | None = None,
     fusion_override: str | None = None,
+    search_fn: Callable | None = None,
 ) -> tuple[list[str], list[str], dict[str, Any]]:
     """
     Run retrieval and return (paths, snippets, metadata).
+
+    Args:
+        search_fn: Injectable search function for testing.
+                   Defaults to the production hybrid search.
     """
     from kairix.quality.eval.retrieval import retrieve
 
@@ -202,6 +238,7 @@ def _retrieve(
         db_path=db_path,
         collection=collection,
         fusion_override=fusion_override,
+        search_fn=search_fn,
     )
     return result.paths, result.snippets, result.meta
 
@@ -279,6 +316,117 @@ def format_interpretation(result: BenchmarkResult) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Extracted helpers for run_benchmark (reduce cognitive complexity)
+# ---------------------------------------------------------------------------
+
+
+def score_case(
+    case: Any,
+    paths: list[str],
+    snippets: list[str],
+    retrieval_meta: dict[str, Any],
+) -> tuple[float, dict[str, Any]]:
+    """Dispatch to the correct score method for a single benchmark case.
+
+    Returns (score, ndcg_detail) where ndcg_detail is non-empty only for NDCG cases.
+    """
+    if case.score_method == "classification":
+        return _classification_score(case.query, case.expected_type or ""), {}
+
+    if case.score_method == "exact":
+        if case.gold_title:
+            score = 1.0 if _title_in_retrieved(case.gold_title, paths, EXACT_MATCH_TOPK) else 0.0
+        else:
+            score = _exact_match(paths, case.gold_path or "")
+        return score, {}
+
+    if case.score_method == "fuzzy":
+        if case.gold_title:
+            score = 1.0 if _title_in_retrieved(case.gold_title, paths, FUZZY_MATCH_TOPK) else 0.0
+        else:
+            score = _fuzzy_match(paths, case.gold_path or "")
+        return score, {}
+
+    if case.score_method == "ndcg":
+        effective_gold = (
+            case.gold_titles
+            or case.gold_paths
+            or ([{"path": case.gold_path, "relevance": 2}] if case.gold_path else [])
+        )
+        score = ndcg_graded(paths, effective_gold, k=10)
+        ndcg_detail = {
+            "hit_at_5": hit_at_k_graded(paths, effective_gold, k=5),
+            "rr": reciprocal_rank_graded(paths, effective_gold, k=10),
+        }
+        return score, ndcg_detail
+
+    # llm fallback
+    return _llm_judge(query=case.query, paths=paths, snippets=snippets), {}
+
+
+def retrieve_case(
+    case: Any,
+    system: str,
+    agent: str | None,
+    db_path: str | None,
+    collection: str | None,
+    fusion_override: str | None,
+    retrieve_fn: Callable[..., tuple[list[str], list[str], dict[str, Any]]] | None,
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Wrap retrieval with error handling; classification cases skip retrieval."""
+    if case.score_method == "classification":
+        return [], [], {"scored_by": "classification"}
+    try:
+        _retrieve = retrieve_fn or retrieve
+        return _retrieve(
+            query=case.query,
+            system=system,
+            agent=case.agent or agent,
+            db_path=db_path,
+            collection=collection,
+            fusion_override=fusion_override,
+        )
+    except Exception as exc:
+        return [], [], {"error": str(exc)}
+
+
+def aggregate_scores_by_category(
+    category_scores: dict[str, list[float]],
+) -> dict[str, float]:
+    """Compute per-category averages from accumulated score lists."""
+    return {cat: round(sum(scores) / len(scores), 4) if scores else 0.0 for cat, scores in category_scores.items()}
+
+
+def compute_weighted_total(
+    per_category_avg: dict[str, float],
+    suite_version: str,
+) -> float:
+    """Apply category weights (with Phase 3 classification adjustment) and return weighted total."""
+    effective_weights = dict(CATEGORY_WEIGHTS)
+    if suite_version >= "1.1" and per_category_avg.get("classification", 0.0) > 0:
+        effective_weights["classification"] = 0.15
+        effective_weights["temporal"] = 0.10
+    return round(
+        sum(per_category_avg.get(cat, 0.0) * w for cat, w in effective_weights.items()),
+        4,
+    )
+
+
+def aggregate_ndcg_metrics(
+    case_results: list[dict[str, Any]],
+) -> tuple[float | None, float | None, float | None]:
+    """Compute NDCG@10, Hit@5, MRR@10 averages across NDCG-scored cases."""
+    ndcg_cases = [c for c in case_results if c.get("score_method") == "ndcg"]
+    if not ndcg_cases:
+        return None, None, None
+    n = len(ndcg_cases)
+    ndcg_at_10 = round(sum(c["score"] for c in ndcg_cases) / n, 4)
+    hit_rate_at_5 = round(sum(float(c.get("hit_at_5", 0)) for c in ndcg_cases) / n, 4)
+    mrr_at_10 = round(sum(c.get("rr", 0.0) for c in ndcg_cases) / n, 4)
+    return ndcg_at_10, hit_rate_at_5, mrr_at_10
+
+
+# ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
 
@@ -324,6 +472,7 @@ def run_benchmark(
     db_path: str | None = None,
     collection: str | None = None,
     fusion_override: str | None = None,
+    retrieve_fn: Callable[..., tuple[list[str], list[str], dict[str, Any]]] | None = None,
 ) -> BenchmarkResult:
     """
     Run all benchmark cases and return a BenchmarkResult.
@@ -343,64 +492,22 @@ def run_benchmark(
     _validate_suite_prerequisites(suite)
 
     case_results: list[dict[str, Any]] = []
-    # Include all valid categories including classification
     all_categories = set(CATEGORY_WEIGHTS.keys()) | {"classification"}
     category_scores: dict[str, list[float]] = {cat: [] for cat in all_categories}
 
     for case in suite.cases:
         t0 = time.time()
 
-        # Classification cases don't use retrieval
-        if case.score_method == "classification":
-            paths, snippets, retrieval_meta = [], [], {"scored_by": "classification"}
-        else:
-            try:
-                paths, snippets, retrieval_meta = _retrieve(
-                    query=case.query,
-                    system=system,
-                    agent=case.agent or agent,
-                    db_path=db_path,
-                    collection=collection,
-                    fusion_override=fusion_override,
-                )
-            except Exception as exc:
-                paths, snippets, retrieval_meta = [], [], {"error": str(exc)}
-
-        # Score
-        ndcg_detail: dict[str, Any] = {}
-        if case.score_method == "classification":
-            # Classification cases: run classify and compare type (no retrieval needed)
-            score = _classification_score(case.query, case.expected_type or "")
-        elif case.score_method == "exact":
-            if case.gold_title:
-                # Title-based: path-agnostic, survives vault reorganisation
-                score = 1.0 if _title_in_retrieved(case.gold_title, paths, EXACT_MATCH_TOPK) else 0.0
-            else:
-                score = _exact_match(paths, case.gold_path or "")
-        elif case.score_method == "fuzzy":
-            if case.gold_title:
-                score = 1.0 if _title_in_retrieved(case.gold_title, paths, FUZZY_MATCH_TOPK) else 0.0
-            else:
-                score = _fuzzy_match(paths, case.gold_path or "")
-        elif case.score_method == "ndcg":
-            # Unified scoring: works with both gold_titles and gold_paths
-            effective_gold = (
-                case.gold_titles
-                or case.gold_paths
-                or ([{"path": case.gold_path, "relevance": 2}] if case.gold_path else [])
-            )
-            score = ndcg_graded(paths, effective_gold, k=10)
-            ndcg_detail = {
-                "hit_at_5": hit_at_k_graded(paths, effective_gold, k=5),
-                "rr": reciprocal_rank_graded(paths, effective_gold, k=10),
-            }
-        else:  # llm
-            score = _llm_judge(
-                query=case.query,
-                paths=paths,
-                snippets=snippets,
-            )
-
+        paths, snippets, retrieval_meta = retrieve_case(
+            case,
+            system,
+            agent,
+            db_path,
+            collection,
+            fusion_override,
+            retrieve_fn,
+        )
+        score, ndcg_detail = score_case(case, paths, snippets, retrieval_meta)
         elapsed_ms = (time.time() - t0) * 1000
 
         cat = CATEGORY_ALIASES.get(case.category, case.category)
@@ -424,35 +531,14 @@ def run_benchmark(
         )
 
     # Aggregate
-    per_category_avg: dict[str, float] = {}
-    for cat, scores in category_scores.items():
-        per_category_avg[cat] = round(sum(scores) / len(scores), 4) if scores else 0.0
+    per_category_avg = aggregate_scores_by_category(category_scores)
 
-    # For suite version >= 1.1, include classification in weighted total.
-    # Phase 3 weight model: classification gets 0.15 weight (new Phase 3 capability);
-    # temporal reduced from 0.20 to 0.10 (temporal is a Phase 4 target, currently
-    # structurally limited by ingestion — date-aware chunking not yet implemented).
-    # Total weights: recall=0.25 + temporal=0.10 + entity=0.20 + conceptual=0.15
-    #              + multi_hop=0.10 + procedural=0.10 + classification=0.15 = 1.05
-    # Slightly >1.0 is acceptable: classification is additive evidence for Phase 3.
+    # Phase 3 weight model: classification gets 0.15 weight; temporal reduced to 0.10.
     suite_version = suite.meta.get("version", "1.0")
-    effective_weights = dict(CATEGORY_WEIGHTS)
-    if suite_version >= "1.1" and per_category_avg.get("classification", 0.0) > 0:
-        # Phase 3 weight redistribution: add classification, reduce temporal ceiling
-        effective_weights["classification"] = 0.15
-        effective_weights["temporal"] = 0.10  # Phase 4 target — reduce from 0.20
-
-    weighted_total = round(sum(per_category_avg.get(cat, 0.0) * w for cat, w in effective_weights.items()), 4)
+    weighted_total = compute_weighted_total(per_category_avg, suite_version)
 
     gates = {gate: weighted_total >= threshold for gate, threshold in PHASE_GATES.items()}
-
-    # Aggregate NDCG-specific metrics across ndcg-scored cases
-    ndcg_cases = [c for c in case_results if c.get("score_method") == "ndcg"]
-    ndcg_at_10 = round(sum(c["score"] for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
-    hit_rate_at_5 = (
-        round(sum(float(c.get("hit_at_5", 0)) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
-    )
-    mrr_at_10 = round(sum(c.get("rr", 0.0) for c in ndcg_cases) / len(ndcg_cases), 4) if ndcg_cases else None
+    ndcg_at_10, hit_rate_at_5, mrr_at_10 = aggregate_ndcg_metrics(case_results)
 
     result = BenchmarkResult(
         meta={

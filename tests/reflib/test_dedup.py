@@ -14,26 +14,32 @@ from kairix.knowledge.reflib.dedup import (
 
 @pytest.mark.unit
 class TestHashContent:
+    @pytest.mark.unit
     def test_same_content_same_hash(self):
         assert hash_content("Hello world") == hash_content("Hello world")
 
+    @pytest.mark.unit
     def test_different_content_different_hash(self):
         assert hash_content("Hello") != hash_content("World")
 
 
 @pytest.mark.unit
 class TestJaccardSimilarity:
+    @pytest.mark.unit
     def test_identical_texts(self):
         assert jaccard_similarity("the quick brown fox", "the quick brown fox") == pytest.approx(1.0)
 
+    @pytest.mark.unit
     def test_similar_texts(self):
         sim = jaccard_similarity("the quick brown fox", "the quick brown dog")
         assert 0.5 < sim < 1.0
 
+    @pytest.mark.unit
     def test_completely_different(self):
         sim = jaccard_similarity("aaa bbb ccc", "xxx yyy zzz")
         assert sim < 0.1
 
+    @pytest.mark.unit
     def test_empty_text(self):
         # Empty strings produce empty shingle sets
         assert jaccard_similarity("", "abc def ghi") == pytest.approx(0.0)
@@ -41,6 +47,7 @@ class TestJaccardSimilarity:
 
 @pytest.mark.unit
 class TestFindExactDuplicates:
+    @pytest.mark.unit
     def test_finds_duplicates(self):
         files = [
             (Path("a/doc.md"), "hash1"),
@@ -52,6 +59,7 @@ class TestFindExactDuplicates:
         assert len(dupes["hash1"]) == 2
         assert "hash2" not in dupes
 
+    @pytest.mark.unit
     def test_no_duplicates(self):
         files = [
             (Path("a.md"), "hash1"),
@@ -62,15 +70,18 @@ class TestFindExactDuplicates:
 
 @pytest.mark.unit
 class TestChooseCanonical:
+    @pytest.mark.unit
     def test_prefers_longer_body(self):
         paths = [Path("short.md"), Path("long.md")]
         bodies = {Path("short.md"): "x" * 10, Path("long.md"): "x" * 1000}
         result = choose_canonical(paths, bodies)
         assert result == Path("long.md")
 
+    @pytest.mark.unit
     def test_single_path(self):
         assert choose_canonical([Path("only.md")]) == Path("only.md")
 
+    @pytest.mark.unit
     def test_empty_raises(self):
         with pytest.raises(ValueError):
             choose_canonical([])

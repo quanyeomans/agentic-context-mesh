@@ -48,7 +48,13 @@ def neo4j_missing_vault_path():
     class ClientWithMissingVaultPath(FakeNeo4jClient):
         def cypher(self, query, params=None):
             if "vault_path IS NULL" in query or "vault_path IS NULL OR" in query:
-                return [{"id": "broken-entity", "name": "Broken Entity", "label": "Organisation"}]
+                return [
+                    {
+                        "id": "broken-entity",
+                        "name": "Broken Entity",
+                        "label": "Organisation",
+                    }
+                ]
             return super().cypher(query, params)
 
     _state["neo4j"] = ClientWithMissingVaultPath(entities=entities)

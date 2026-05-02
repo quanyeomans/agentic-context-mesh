@@ -1,14 +1,13 @@
 """
 Unit tests for kairix.quality.eval.generate.
 
-All external calls (SQLite, hybrid search, LLM API) are mocked.
+All external calls (SQLite, hybrid search, LLM API) use DI fakes.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -68,14 +67,14 @@ def test_generate_queries_returns_list_on_valid_response() -> None:
         ]
     )
 
-    with patch("kairix.quality.eval.generate._call_llm", return_value=mock_response):
-        results = generate_queries(
-            doc_title="docker-guide",
-            doc_body="Deploy with docker build, tag, push, run -d.",
-            n=2,
-            api_key="test-key",
-            endpoint="https://test.openai.azure.com",
-        )
+    results = generate_queries(
+        doc_title="docker-guide",
+        doc_body="Deploy with docker build, tag, push, run -d.",
+        n=2,
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com",
+        llm_fn=lambda *_a: mock_response,
+    )
 
     assert len(results) == 2
     assert all(isinstance(q, GeneratedQuery) for q in results)
@@ -87,14 +86,14 @@ def test_generate_queries_returns_list_on_valid_response() -> None:
 @pytest.mark.unit
 def test_generate_queries_returns_empty_on_parse_failure() -> None:
     """generate_queries returns [] on JSON parse failure after 2 attempts."""
-    with patch("kairix.quality.eval.generate._call_llm", return_value="not a json array"):
-        results = generate_queries(
-            doc_title="test-doc",
-            doc_body="some content",
-            n=2,
-            api_key="test-key",
-            endpoint="https://test.openai.azure.com",
-        )
+    results = generate_queries(
+        doc_title="test-doc",
+        doc_body="some content",
+        n=2,
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com",
+        llm_fn=lambda *_a: "not a json array",
+    )
 
     assert results == []
 
@@ -102,14 +101,18 @@ def test_generate_queries_returns_empty_on_parse_failure() -> None:
 @pytest.mark.unit
 def test_generate_queries_returns_empty_on_api_error() -> None:
     """generate_queries returns [] on API error."""
-    with patch("kairix.quality.eval.generate._call_llm", side_effect=OSError("connection error")):
-        results = generate_queries(
-            doc_title="test-doc",
-            doc_body="some content",
-            n=2,
-            api_key="test-key",
-            endpoint="https://test.openai.azure.com",
-        )
+
+    def _raise(*_a: object) -> str:
+        raise OSError("connection error")
+
+    results = generate_queries(
+        doc_title="test-doc",
+        doc_body="some content",
+        n=2,
+        api_key="test-key",
+        endpoint="https://test.openai.azure.com",
+        llm_fn=_raise,
+    )
 
     assert results == []
 
@@ -136,14 +139,14 @@ def test_generate_queries_defaults_unknown_intent_to_recall() -> None:
         ]
     )
 
-    with patch("kairix.quality.eval.generate._call_llm", return_value=mock_response):
-        results = generate_queries(
-            doc_title="test",
-            doc_body="content",
-            n=1,
-            api_key="test-key",
-            endpoint="https://test",
-        )
+    results = generate_queries(
+        doc_title="test",
+        doc_body="content",
+        n=1,
+        api_key="test-key",
+        endpoint="https://test",
+        llm_fn=lambda *_a: mock_response,
+    )
 
     assert len(results) == 1
     assert results[0].intent == "recall"
@@ -227,7 +230,7 @@ def test_build_case_gold_titles_sorted_by_relevance_desc() -> None:
 
 
 # ---------------------------------------------------------------------------
-# generate_suite — smoke test (mocked dependencies)
+# generate_suite — smoke test (DI fakes)
 # ---------------------------------------------------------------------------
 
 
@@ -237,8 +240,18 @@ def test_generate_suite_writes_valid_yaml(tmp_path: Path) -> None:
     output = tmp_path / "test-suite.yaml"
 
     mock_docs = [
-        {"path": "docs/docker-guide.md", "title": "Docker Guide", "collection": "knowledge", "body": "x" * 500},
-        {"path": "docs/api-guide.md", "title": "API Guide", "collection": "knowledge", "body": "y" * 500},
+        {
+            "path": "docs/docker-guide.md",
+            "title": "Docker Guide",
+            "collection": "knowledge",
+            "body": "x" * 500,
+        },
+        {
+            "path": "docs/api-guide.md",
+            "title": "API Guide",
+            "collection": "knowledge",
+            "body": "y" * 500,
+        },
     ]
     mock_queries = [
         GeneratedQuery(
@@ -248,23 +261,22 @@ def test_generate_suite_writes_valid_yaml(tmp_path: Path) -> None:
             source_doc_title="Docker Guide",
         ),
     ]
-    mock_judge = _JUDGE_RESULT_WITH_GRADE2
 
-    with (
-        patch("kairix.quality.eval.generate.sample_documents", return_value=mock_docs),
-        patch("kairix.quality.eval.generate.generate_queries", return_value=mock_queries),
-        patch(
-            "kairix.quality.eval.generate._retrieve",
-            return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"]),
+    generate_suite(
+        output_path=str(output),
+        n_cases=5,
+        calibrate_first=False,
+        api_key="key",
+        endpoint="https://ep",
+        deployment="gpt-4o-mini",
+        sample_fn=lambda **_kw: mock_docs,
+        query_fn=lambda **_kw: mock_queries,
+        retrieve_fn=lambda *_a, **_kw: (
+            ["docker-deployment-guide.md", "ci-cd-pipeline.md"],
+            ["s1", "s2"],
         ),
-        patch("kairix.quality.eval.generate.judge_batch", return_value=mock_judge),
-        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
-    ):
-        generate_suite(
-            output_path=str(output),
-            n_cases=5,
-            calibrate_first=False,
-        )
+        judge_fn=lambda **_kw: _JUDGE_RESULT_WITH_GRADE2,
+    )
 
     assert output.exists()
     with open(output, encoding="utf-8") as f:
@@ -279,15 +291,15 @@ def test_generate_suite_returns_result_on_empty_docs(tmp_path: Path) -> None:
     """generate_suite returns a GenerationResult (not raises) when no docs sampled."""
     output = tmp_path / "empty-suite.yaml"
 
-    with (
-        patch("kairix.quality.eval.generate.sample_documents", return_value=[]),
-        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
-    ):
-        result = generate_suite(
-            output_path=str(output),
-            n_cases=10,
-            calibrate_first=False,
-        )
+    result = generate_suite(
+        output_path=str(output),
+        n_cases=10,
+        calibrate_first=False,
+        api_key="key",
+        endpoint="https://ep",
+        deployment="gpt-4o-mini",
+        sample_fn=lambda **_kw: [],
+    )
 
     assert isinstance(result, GenerationResult)
     assert result.n_accepted == 0
@@ -321,18 +333,18 @@ def test_enrich_suite_writes_valid_yaml_with_gold_titles(tmp_path: Path) -> None
     with open(input_path, "w", encoding="utf-8") as f:
         yaml.dump(input_suite, f)
 
-    with (
-        patch(
-            "kairix.quality.eval.generate._retrieve",
-            return_value=(["docker-deployment-guide.md", "ci-cd-pipeline.md"], ["s1", "s2"]),
+    result = enrich_suite(
+        suite_path=str(input_path),
+        output_path=str(output_path),
+        api_key="key",
+        endpoint="https://ep",
+        deployment="gpt-4o-mini",
+        retrieve_fn=lambda *_a, **_kw: (
+            ["docker-deployment-guide.md", "ci-cd-pipeline.md"],
+            ["s1", "s2"],
         ),
-        patch("kairix.quality.eval.generate.judge_batch", return_value=_JUDGE_RESULT_WITH_GRADE2),
-        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("key", "https://ep", "gpt-4o-mini")),
-    ):
-        result = enrich_suite(
-            suite_path=str(input_path),
-            output_path=str(output_path),
-        )
+        judge_fn=lambda **_kw: _JUDGE_RESULT_WITH_GRADE2,
+    )
 
     assert isinstance(result, EnrichmentResult)
     assert result.n_cases == 1
@@ -369,17 +381,20 @@ def test_enrich_suite_preserves_existing_fields(tmp_path: Path) -> None:
     with open(input_path, "w", encoding="utf-8") as f:
         yaml.dump(input_suite, f)
 
-    with (
-        patch("kairix.quality.eval.generate._retrieve", return_value=(["daily-log.md"], ["snippet"])),
-        patch(
-            "kairix.quality.eval.generate.judge_batch",
-            return_value=JudgeResult(
-                query="q", grades={"daily-log": 2}, shuffle_order=["daily-log"], judge_model="gpt-4o-mini"
-            ),
+    enrich_suite(
+        suite_path=str(input_path),
+        output_path=str(output_path),
+        api_key="k",
+        endpoint="https://ep",
+        deployment="gpt-4o-mini",
+        retrieve_fn=lambda *_a, **_kw: (["daily-log.md"], ["snippet"]),
+        judge_fn=lambda **_kw: JudgeResult(
+            query="q",
+            grades={"daily-log": 2},
+            shuffle_order=["daily-log"],
+            judge_model="gpt-4o-mini",
         ),
-        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
-    ):
-        enrich_suite(suite_path=str(input_path), output_path=str(output_path))
+    )
 
     with open(output_path, encoding="utf-8") as f:
         parsed = yaml.safe_load(f)
@@ -411,12 +426,15 @@ def test_enrich_suite_skips_case_when_no_relevant_doc(tmp_path: Path) -> None:
     with open(input_path, "w", encoding="utf-8") as f:
         yaml.dump(input_suite, f)
 
-    with (
-        patch("kairix.quality.eval.generate._retrieve", return_value=(["unrelated.md"], ["snippet"])),
-        patch("kairix.quality.eval.generate.judge_batch", return_value=_JUDGE_RESULT_ALL_ZERO),
-        patch("kairix.quality.eval.generate.fetch_llm_credentials", return_value=("k", "https://ep", "gpt-4o-mini")),
-    ):
-        result = enrich_suite(suite_path=str(input_path), output_path=str(output_path))
+    result = enrich_suite(
+        suite_path=str(input_path),
+        output_path=str(output_path),
+        api_key="k",
+        endpoint="https://ep",
+        deployment="gpt-4o-mini",
+        retrieve_fn=lambda *_a, **_kw: (["unrelated.md"], ["snippet"]),
+        judge_fn=lambda **_kw: _JUDGE_RESULT_ALL_ZERO,
+    )
 
     assert result.n_skipped == 1
     assert result.n_enriched == 0

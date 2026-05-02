@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kairix.knowledge.entities.suggest import SuggestedEntity, format_suggestions, suggest_entities
+from kairix.knowledge.entities.suggest import (
+    SuggestedEntity,
+    format_suggestions,
+    suggest_entities,
+)
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
 
@@ -127,7 +131,13 @@ def test_format_suggestions_jsonl():
     import json
 
     suggestions = [
-        SuggestedEntity(text="OpenClaw", label="ORG", existing_id="openclaw", existing_name="OpenClaw", is_new=False),
+        SuggestedEntity(
+            text="OpenClaw",
+            label="ORG",
+            existing_id="openclaw",
+            existing_name="OpenClaw",
+            is_new=False,
+        ),
     ]
     result = format_suggestions(suggestions, fmt="jsonl")
     parsed = json.loads(result.strip())
@@ -140,7 +150,11 @@ def test_suggested_entity_is_new_flag():
     """is_new must be True when entity not in graph, False when found."""
     new_entity = SuggestedEntity(text="NewCorp", label="ORG", existing_id=None, existing_name=None, is_new=True)
     existing_entity = SuggestedEntity(
-        text="OpenClaw", label="ORG", existing_id="openclaw", existing_name="OpenClaw", is_new=False
+        text="OpenClaw",
+        label="ORG",
+        existing_id="openclaw",
+        existing_name="OpenClaw",
+        is_new=False,
     )
     assert new_entity.is_new is True
     assert existing_entity.is_new is False

@@ -213,7 +213,12 @@ def summaries_db_path() -> Path:
     Configurable via KAIRIX_SUMMARIES_DB env var.
     Default: ~/.cache/kairix/summaries.db
     """
-    return Path(os.environ.get("KAIRIX_SUMMARIES_DB", str(Path.home() / ".cache" / "kairix" / "summaries.db")))
+    return Path(
+        os.environ.get(
+            "KAIRIX_SUMMARIES_DB",
+            str(Path.home() / ".cache" / "kairix" / "summaries.db"),
+        )
+    )
 
 
 def agent_memory_path(agent: str) -> Path:

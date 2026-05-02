@@ -6,7 +6,11 @@ from datetime import date
 
 import pytest
 
-from kairix.knowledge.reflib.catalogue import CatalogueEntry, generate_catalogue, generate_licence_notices
+from kairix.knowledge.reflib.catalogue import (
+    CatalogueEntry,
+    generate_catalogue,
+    generate_licence_notices,
+)
 
 
 def _make_entries() -> list[CatalogueEntry]:

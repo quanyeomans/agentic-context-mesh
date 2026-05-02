@@ -78,7 +78,14 @@ def write_summary(result: SummaryResult, db: sqlite3.Connection) -> None:
             generated_at = excluded.generated_at,
             source_mtime = excluded.source_mtime
         """,
-        (result.path, result.l0, result.l1, result.model, result.generated_at, source_mtime),
+        (
+            result.path,
+            result.l0,
+            result.l1,
+            result.model,
+            result.generated_at,
+            source_mtime,
+        ),
     )
     db.commit()
 

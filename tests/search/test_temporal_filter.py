@@ -4,13 +4,14 @@ Tests for TMP-2: date-range path filtering in BM25 search.
 Covers:
   - bm25_search date_filter_paths post-filter
   - Graceful degradation when date_filter_paths is empty or None
+
+Uses db_path parameter for dependency injection — no monkey-patching needed.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -61,8 +62,7 @@ def _create_test_db(tmp_path: Path) -> Path:
 def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
     """date_filter_paths=None -> results not filtered."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
-        results = bm25_search("test document filtering", date_filter_paths=None)
+    results = bm25_search("test document filtering", date_filter_paths=None, db_path=db_path)
 
     assert len(results) == 2
 
@@ -71,8 +71,7 @@ def test_bm25_date_filter_none_no_filtering(tmp_path: Path) -> None:
 def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
     """date_filter_paths=frozenset() -> results not filtered (empty = no-filter)."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
-        results = bm25_search("test document filtering", date_filter_paths=frozenset())
+    results = bm25_search("test document filtering", date_filter_paths=frozenset(), db_path=db_path)
 
     assert len(results) == 2
 
@@ -81,11 +80,11 @@ def test_bm25_date_filter_empty_no_filtering(tmp_path: Path) -> None:
 def test_bm25_date_filter_applied(tmp_path: Path) -> None:
     """date_filter_paths with one path -> only matching result returned."""
     db_path = _create_test_db(tmp_path)
-    with patch("kairix.core.search.bm25.get_db_path", return_value=db_path):
-        results = bm25_search(
-            "test document filtering",
-            date_filter_paths=frozenset({"02-Areas/good.md"}),
-        )
+    results = bm25_search(
+        "test document filtering",
+        date_filter_paths=frozenset({"02-Areas/good.md"}),
+        db_path=db_path,
+    )
 
     assert len(results) == 1
     assert results[0]["file"] == "02-Areas/good.md"

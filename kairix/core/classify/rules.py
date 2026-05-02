@@ -24,7 +24,14 @@ from kairix.core.classify.router import VALID_AGENTS
 # ---------------------------------------------------------------------------
 
 VALID_TYPES = frozenset(
-    {"episodic", "procedural-rule", "procedural-pattern", "semantic-decision", "semantic-fact", "entity"}
+    {
+        "episodic",
+        "procedural-rule",
+        "procedural-pattern",
+        "semantic-decision",
+        "semantic-fact",
+        "entity",
+    }
 )
 
 
@@ -127,11 +134,31 @@ def classify_by_rules(content: str) -> tuple[str | None, str]:
 
     # Rules in priority order: each group is (patterns, type, reason_prefix)
     _rule_groups: list[tuple[list[re.Pattern], str, str]] = [
-        (_RE_PROCEDURAL_PATTERN_STRONG, "procedural-pattern", "contains procedural pattern marker"),
-        (_RE_PROCEDURAL_RULE_PATTERNS, "procedural-rule", "contains normative language"),
-        (_RE_PROCEDURAL_PATTERN_WEAK, "procedural-pattern", "contains procedural pattern marker"),
-        (_RE_SEMANTIC_DECISION_PATTERNS, "semantic-decision", "contains decision marker"),
-        (_RE_SEMANTIC_FACT_PATTERNS, "semantic-fact", "contains infrastructure/config fact"),
+        (
+            _RE_PROCEDURAL_PATTERN_STRONG,
+            "procedural-pattern",
+            "contains procedural pattern marker",
+        ),
+        (
+            _RE_PROCEDURAL_RULE_PATTERNS,
+            "procedural-rule",
+            "contains normative language",
+        ),
+        (
+            _RE_PROCEDURAL_PATTERN_WEAK,
+            "procedural-pattern",
+            "contains procedural pattern marker",
+        ),
+        (
+            _RE_SEMANTIC_DECISION_PATTERNS,
+            "semantic-decision",
+            "contains decision marker",
+        ),
+        (
+            _RE_SEMANTIC_FACT_PATTERNS,
+            "semantic-fact",
+            "contains infrastructure/config fact",
+        ),
     ]
 
     for patterns, cls_type, reason_prefix in _rule_groups:

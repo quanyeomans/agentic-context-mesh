@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class NodeLabel(str, Enum):
@@ -70,7 +71,7 @@ class OrganisationNode:
     key_platforms: list[str] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -112,7 +113,7 @@ class PersonNode:
     interests: list[str] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -142,7 +143,7 @@ class OutcomeNode:
     domain: str = ""
     vault_path: str = ""
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -169,7 +170,7 @@ class ConceptNode:
     vault_path: str = ""
     aliases: list[str] = field(default_factory=list)
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -197,7 +198,7 @@ class FrameworkNode:
     vault_path: str = ""
     aliases: list[str] = field(default_factory=list)
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -225,7 +226,7 @@ class TechnologyNode:
     vault_path: str = ""
     aliases: list[str] = field(default_factory=list)
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -255,7 +256,7 @@ class PublicationNode:
     vault_path: str = ""
     aliases: list[str] = field(default_factory=list)
 
-    def to_neo4j_props(self) -> dict:
+    def to_neo4j_props(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -278,7 +279,7 @@ class GraphEdge:
     to_id: str
     to_label: str
     kind: EdgeKind
-    props: dict = field(default_factory=dict)
+    props: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.from_label not in _VALID_LABELS:

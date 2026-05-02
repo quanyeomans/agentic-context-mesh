@@ -15,11 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.core.temporal.chunker import (
-    chunk_board,
-    chunk_file,
-    chunk_memory_log,
-)
+from kairix.core.temporal.chunker import chunk_board, chunk_file, chunk_memory_log
 
 # ---------------------------------------------------------------------------
 # Fixtures

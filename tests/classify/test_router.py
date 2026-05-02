@@ -138,7 +138,12 @@ class TestEntityRouting:
 
     @pytest.mark.unit
     def test_entity_organisation(self):
-        path = resolve_target_path("builder", "entity", entity_type="organisation", entity_slug="triad-consulting")
+        path = resolve_target_path(
+            "builder",
+            "entity",
+            entity_type="organisation",
+            entity_slug="triad-consulting",
+        )
         assert "entities/organisation/triad-consulting.md" in path
 
     @pytest.mark.unit

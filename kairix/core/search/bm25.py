@@ -245,6 +245,8 @@ def bm25_search(
     limit: int = BM25_DEFAULT_LIMIT,
     agent: str | None = None,
     date_filter_paths: frozenset[str] | None = None,
+    db_path: Path | None = None,
+    doc_repo: object | None = None,
 ) -> list[BM25Result]:
     """
     Run BM25 search via direct SQLite FTS5 query.
@@ -255,6 +257,10 @@ def bm25_search(
         limit:             Maximum number of results to return.
         agent:             Optional agent name — reserved for future collection scoping.
         date_filter_paths: Optional set of paths to restrict results to (TEMPORAL).
+        db_path:           Optional path to the SQLite database. Defaults to
+                           get_db_path().
+        doc_repo:          Optional DocumentRepository. When provided, delegates
+                           to doc_repo.search_fts() instead of direct SQL.
 
     Returns:
         List of BM25Result dicts. Returns [] on any failure.
@@ -263,14 +269,35 @@ def bm25_search(
     if not query or not query.strip():
         return []
 
+    # Delegate to DocumentRepository when provided
+    if doc_repo is not None:
+        try:
+            raw = doc_repo.search_fts(query, collections=collections, limit=limit)  # type: ignore[union-attr]
+            results = [
+                BM25Result(
+                    file=r.get("file", r.get("path", "")),
+                    title=r.get("title", ""),
+                    snippet=r.get("snippet", r.get("content", "")[:300]),
+                    score=r.get("score", 0.0),
+                    collection=r.get("collection", ""),
+                )
+                for r in raw
+            ]
+            if date_filter_paths:
+                results = [r for r in results if r["file"] in date_filter_paths]
+            return results
+        except Exception as e:
+            logger.warning("bm25_search: doc_repo.search_fts failed — %s", e)
+            return []
+
     fts_query = _normalise_fts_query(query)
     if not fts_query:
         logger.debug("bm25_search: empty FTS query after normalisation (original=%r)", query[:60])
         return []
 
     try:
-        db_path = get_db_path()
-        db = open_db(Path(db_path))
+        resolved_path = db_path if db_path is not None else get_db_path()
+        db = open_db(Path(resolved_path))
         db.row_factory = sqlite3.Row
     except Exception as e:
         logger.warning("bm25_search: cannot open database — %s", e)

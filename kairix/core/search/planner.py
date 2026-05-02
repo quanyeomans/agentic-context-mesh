@@ -64,7 +64,7 @@ def _build_entity_relationships(entities: list[dict], client: object) -> list[st
     return lines
 
 
-def _neo4j_graph_context(query: str, client: object) -> str | None:
+def neo4j_graph_context(query: str, client: object) -> str | None:
     """
     Build an entity relationship context string from Neo4j for use in the
     decompose LLM prompt. Finds entities mentioned in the query and returns
@@ -135,7 +135,7 @@ class QueryPlanner:
     embeddings, no extra SDK dependencies.
     """
 
-    def decompose(self, query: str, neo4j_client: object | None = None) -> list[str]:
+    def decompose(self, query: str, neo4j_client: object | None = None, llm_backend=None) -> list[str]:
         """
         Decompose a complex query into 2-3 focused sub-queries.
 
@@ -143,14 +143,16 @@ class QueryPlanner:
         prompt for reliable parsing. Falls back to [query] on any failure.
         """
         try:
-            from kairix.platform.llm import get_default_backend as _get_llm
+            if llm_backend is None:
+                from kairix.platform.llm import get_default_backend as _get_llm
 
-            chat_completion = _get_llm().chat
+                llm_backend = _get_llm()
+            chat_completion = llm_backend.chat
             # Inject entity graph context when available
             ctx = None
             if neo4j_client is not None and getattr(neo4j_client, "available", False):
                 try:
-                    ctx = _neo4j_graph_context(query, neo4j_client)
+                    ctx = neo4j_graph_context(query, neo4j_client)
                 except Exception:  # broad catch justified: Neo4j driver can raise arbitrary exceptions
                     logger.debug("planner: Neo4j graph context unavailable")
             if ctx:
@@ -239,5 +241,9 @@ class QueryPlanner:
 
         ranked_keys = sorted(rrf_scores, key=lambda k: rrf_scores[k], reverse=True)
         merged = [all_results[k] for k in ranked_keys[:final_top_k] if k in all_results]
-        logger.debug("planner: merged %d results from %d sub-queries", len(merged), len(sub_queries))
+        logger.debug(
+            "planner: merged %d results from %d sub-queries",
+            len(merged),
+            len(sub_queries),
+        )
         return merged

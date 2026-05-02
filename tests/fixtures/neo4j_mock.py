@@ -70,6 +70,26 @@ class FakeNeo4jClient:
         """Return related entities — always empty in the fake."""
         return []
 
+    def find_entity(self, name: str) -> dict | None:
+        """Find entity by name (case-insensitive). Satisfies GraphRepository protocol."""
+        name_lower = name.lower()
+        for e in self._entities:
+            if e.get("name", "").lower() == name_lower:
+                return e
+        return None
+
+    def entity_in_degrees(self) -> list[dict]:
+        """Return all entities with in-degree data. Satisfies GraphRepository protocol."""
+        return [
+            {
+                "vault_path": e.get("vault_path", ""),
+                "name": e.get("name", ""),
+                "labels": [e.get("label", "")],
+                "in_degree": 1,
+            }
+            for e in self._entities
+        ]
+
     def upsert_organisation(self, **kwargs) -> dict:
         """Stub — no-op in fake."""
         return kwargs

@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from kairix.knowledge.reflib.frontmatter import build_frontmatter, extract_title, inject_frontmatter
+from kairix.knowledge.reflib.frontmatter import (
+    build_frontmatter,
+    extract_title,
+    inject_frontmatter,
+)
 from kairix.knowledge.reflib.sources import SourceDef
 
 pytestmark = pytest.mark.contract
@@ -29,6 +33,7 @@ def _make_source() -> SourceDef:
 class TestNormalisedFrontmatterParsedByScanner:
     """Normalised documents must have titles extractable by the scanner."""
 
+    @pytest.mark.contract
     def test_frontmatter_title_extracted(self, tmp_path: Path) -> None:
         """Scanner extracts the same title that normalisation injected."""
         source = _make_source()
@@ -42,6 +47,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         extracted = extract_title(normalised, file_path)
         assert extracted == fm.title, f"Scanner extracted {extracted!r} but normalisation set {fm.title!r}"
 
+    @pytest.mark.contract
     def test_frontmatter_with_quoted_title(self, tmp_path: Path) -> None:
         """Titles with special characters survive the roundtrip."""
         source = _make_source()
@@ -55,6 +61,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         extracted = extract_title(normalised, file_path)
         assert extracted, "Scanner should extract a non-empty title"
 
+    @pytest.mark.contract
     def test_frontmatter_with_no_heading_uses_filename(self, tmp_path: Path) -> None:
         """Documents without headings get a title from filename."""
         source = _make_source()
@@ -68,6 +75,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         extracted = extract_title(normalised, file_path)
         assert extracted, "Scanner should extract a title even without headings"
 
+    @pytest.mark.contract
     def test_existing_frontmatter_preserved(self, tmp_path: Path) -> None:
         """If a document already has frontmatter, the title should be preserved."""
         text_with_fm = (
@@ -79,6 +87,7 @@ class TestNormalisedFrontmatterParsedByScanner:
         extracted = extract_title(text_with_fm, file_path)
         assert extracted == "Existing Title", f"Expected 'Existing Title', got {extracted!r}"
 
+    @pytest.mark.contract
     def test_fixture_docs_all_have_extractable_titles(self) -> None:
         """Every document in the integration fixture has a title extractable by scanner."""
         fixture_root = Path(__file__).resolve().parent.parent / "integration" / "reflib_fixture"

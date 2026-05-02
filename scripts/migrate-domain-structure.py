@@ -61,6 +61,9 @@ for old, new in MIGRATION_MAP.items():
 
 def rewrite_imports_in_file(filepath: Path, dry_run: bool = False) -> list[str]:
     """Rewrite kairix imports in a single file. Returns list of changes made."""
+    if not filepath.resolve().is_relative_to(REPO_ROOT.resolve()):
+        return []
+
     try:
         content = filepath.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
@@ -102,8 +105,6 @@ def rewrite_imports_in_file(filepath: Path, dry_run: bool = False) -> list[str]:
                 new_content = updated
 
     if changes and not dry_run:
-        if not filepath.resolve().is_relative_to(REPO_ROOT.resolve()):
-            return []
         filepath.write_text(new_content, encoding="utf-8")
 
     return changes

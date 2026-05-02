@@ -45,23 +45,28 @@ def synthesise(
     agent: str,
     context: dict[str, str],
     max_tokens: int = 800,
+    llm_backend=None,
 ) -> str:
     """
     Call GPT-4o-mini to synthesise a session briefing.
 
     Args:
-        agent:      Agent name (e.g. "builder").
-        context:    Dict mapping source name to content string.
-        max_tokens: Max tokens for the generated briefing.
+        agent:       Agent name (e.g. "builder").
+        context:     Dict mapping source name to content string.
+        max_tokens:  Max tokens for the generated briefing.
+        llm_backend: Optional LLM backend instance for dependency injection.
+                     Defaults to get_default_backend().
 
     Returns:
         Synthesised briefing markdown string.
         Returns formatted partial briefing with error note on failure.
         Never raises.
     """
-    from kairix.platform.llm import get_default_backend as _get_llm
+    if llm_backend is None:
+        from kairix.platform.llm import get_default_backend as _get_llm
 
-    chat_completion = _get_llm().chat
+        llm_backend = _get_llm()
+    chat_completion = llm_backend.chat
     # Build context block
     context_parts: list[str] = []
     for source_name, content in context.items():
@@ -69,7 +74,7 @@ def synthesise(
             context_parts.append(f"=== {source_name} ===\n{content}")
 
     if not context_parts:
-        return _fallback_briefing(agent, "no context sources available")
+        return fallback_briefing(agent, "no context sources available")
 
     context_block = "\n\n".join(context_parts)
 
@@ -96,13 +101,13 @@ def synthesise(
         return result.strip()
     except Exception as e:
         logger.warning("synthesiser: synthesis API call failed - %s", e)
-        # str(e) is acceptable here: _fallback_briefing embeds it in a markdown
+        # str(e) is acceptable here: fallback_briefing embeds it in a markdown
         # block that is written to a local file, not returned to an external caller.
         # The briefing is consumed by the agent operator, not an untrusted API client.
-        return _fallback_briefing(agent, str(e))
+        return fallback_briefing(agent, str(e))
 
 
-def _fallback_briefing(agent: str, reason: str) -> str:
+def fallback_briefing(agent: str, reason: str) -> str:
     """Generate a minimal fallback briefing when synthesis fails."""
     return (
         "## Pending & Blocked\n"

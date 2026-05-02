@@ -28,22 +28,27 @@ cdi = _load_script()
 # ── _extract_date ─────────────────────────────────────────────────────────────
 
 
+@pytest.mark.unit
 def test_extract_date_iso_utc():
     assert cdi._extract_date("2026-04-06T09:00:00Z") == "2026-04-06"
 
 
+@pytest.mark.unit
 def test_extract_date_iso_offset():
     assert cdi._extract_date("2026-04-06T19:00:00+10:00") == "2026-04-06"
 
 
+@pytest.mark.unit
 def test_extract_date_date_only():
     assert cdi._extract_date("2026-04-06") == "2026-04-06"
 
 
+@pytest.mark.unit
 def test_extract_date_invalid():
     assert cdi._extract_date("not-a-date") is None
 
 
+@pytest.mark.unit
 def test_extract_date_empty():
     assert cdi._extract_date("") is None
 
@@ -51,6 +56,7 @@ def test_extract_date_empty():
 # ── parse_crm_export ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.integration
 def test_parse_crm_export_valid(tmp_path):
     data = [{"contact_name": "Alice Smith", "company": "Acme", "interactions": []}]
     p = tmp_path / "export.json"
@@ -59,6 +65,7 @@ def test_parse_crm_export_valid(tmp_path):
     assert result == data
 
 
+@pytest.mark.integration
 def test_parse_crm_export_not_array(tmp_path):
     p = tmp_path / "export.json"
     p.write_text('{"key": "value"}')
@@ -66,6 +73,7 @@ def test_parse_crm_export_not_array(tmp_path):
         cdi.parse_crm_export(p)
 
 
+@pytest.mark.integration
 def test_parse_crm_export_invalid_json(tmp_path):
     p = tmp_path / "export.json"
     p.write_text("not json")
@@ -96,11 +104,13 @@ SAMPLE_CONTACT = {
 }
 
 
+@pytest.mark.unit
 def test_chunk_contact_produces_one_chunk_per_interaction():
     chunks = cdi.chunk_contact(SAMPLE_CONTACT)
     assert len(chunks) == 2
 
 
+@pytest.mark.unit
 def test_chunk_contact_date_extraction():
     chunks = cdi.chunk_contact(SAMPLE_CONTACT)
     dates = {c["date"] for c in chunks}
@@ -108,6 +118,7 @@ def test_chunk_contact_date_extraction():
     assert "2026-03-15" in dates
 
 
+@pytest.mark.unit
 def test_chunk_contact_meeting_type():
     chunks = cdi.chunk_contact(SAMPLE_CONTACT)
     types = {c["meeting_type"] for c in chunks}
@@ -115,6 +126,7 @@ def test_chunk_contact_meeting_type():
     assert "call" in types
 
 
+@pytest.mark.unit
 def test_chunk_contact_skips_missing_event_time():
     contact = {
         "contact_name": "Carol White",
@@ -127,24 +139,36 @@ def test_chunk_contact_skips_missing_event_time():
     assert chunks == []
 
 
+@pytest.mark.unit
 def test_chunk_contact_skips_empty_body():
     contact = {
         "contact_name": "Dave Brown",
         "company": "Bar",
         "interactions": [
-            {"id": "y", "event_time": "2026-04-01T10:00:00Z", "meeting_type": "call", "body": ""},
+            {
+                "id": "y",
+                "event_time": "2026-04-01T10:00:00Z",
+                "meeting_type": "call",
+                "body": "",
+            },
         ],
     }
     chunks = cdi.chunk_contact(contact)
     assert chunks == []
 
 
+@pytest.mark.unit
 def test_chunk_contact_skips_missing_name():
     contact = {
         "contact_name": "",
         "company": "Baz",
         "interactions": [
-            {"id": "z", "event_time": "2026-04-01T10:00:00Z", "meeting_type": "call", "body": "Hi"},
+            {
+                "id": "z",
+                "event_time": "2026-04-01T10:00:00Z",
+                "meeting_type": "call",
+                "body": "Hi",
+            },
         ],
     }
     chunks = cdi.chunk_contact(contact)
@@ -154,6 +178,7 @@ def test_chunk_contact_skips_missing_name():
 # ── render_chunk ──────────────────────────────────────────────────────────────
 
 
+@pytest.mark.unit
 def test_render_chunk_contains_frontmatter():
     chunk = {
         "date": "2026-04-06",
@@ -172,6 +197,7 @@ def test_render_chunk_contains_frontmatter():
     assert "source: crm_crm" in rendered
 
 
+@pytest.mark.unit
 def test_render_chunk_has_section_heading():
     chunk = {
         "date": "2026-04-06",
@@ -186,6 +212,7 @@ def test_render_chunk_has_section_heading():
     assert "Quick call." in rendered
 
 
+@pytest.mark.unit
 def test_render_chunk_omits_company_line_if_empty():
     chunk = {
         "date": "2026-04-06",
@@ -202,6 +229,7 @@ def test_render_chunk_omits_company_line_if_empty():
 # ── process_export integration ────────────────────────────────────────────────
 
 
+@pytest.mark.integration
 def test_process_export_writes_files(tmp_path):
     export = [
         {
@@ -232,13 +260,19 @@ def test_process_export_writes_files(tmp_path):
     assert "Intro call." in content
 
 
+@pytest.mark.integration
 def test_process_export_dry_run_no_files_written(tmp_path):
     export = [
         {
             "contact_name": "Bob Test",
             "company": "Test Co",
             "interactions": [
-                {"id": "bbb-222", "event_time": "2026-04-05T10:00:00Z", "meeting_type": "call", "body": "Called."},
+                {
+                    "id": "bbb-222",
+                    "event_time": "2026-04-05T10:00:00Z",
+                    "meeting_type": "call",
+                    "body": "Called.",
+                },
             ],
         }
     ]
@@ -253,21 +287,37 @@ def test_process_export_dry_run_no_files_written(tmp_path):
     assert not output_dir.exists()
 
 
+@pytest.mark.integration
 def test_process_export_multiple_contacts(tmp_path):
     export = [
         {
             "contact_name": "Carol One",
             "company": "CorpA",
             "interactions": [
-                {"id": "c1", "event_time": "2026-04-01T08:00:00Z", "meeting_type": "meeting", "body": "Met."},
-                {"id": "c2", "event_time": "2026-04-03T10:00:00Z", "meeting_type": "call", "body": "Called."},
+                {
+                    "id": "c1",
+                    "event_time": "2026-04-01T08:00:00Z",
+                    "meeting_type": "meeting",
+                    "body": "Met.",
+                },
+                {
+                    "id": "c2",
+                    "event_time": "2026-04-03T10:00:00Z",
+                    "meeting_type": "call",
+                    "body": "Called.",
+                },
             ],
         },
         {
             "contact_name": "Dave Two",
             "company": "CorpB",
             "interactions": [
-                {"id": "d1", "event_time": "2026-04-05T09:00:00Z", "meeting_type": "meeting", "body": "Intro."},
+                {
+                    "id": "d1",
+                    "event_time": "2026-04-05T09:00:00Z",
+                    "meeting_type": "meeting",
+                    "body": "Intro.",
+                },
             ],
         },
     ]

@@ -1,4 +1,4 @@
-name: Benchmark gate
+name: "2 · Benchmark Gate"
 
 # Automatic regression gate — runs on every PR that touches retrieval logic.
 # Uses the mock retrieval backend (no Azure API required).

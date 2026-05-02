@@ -74,10 +74,12 @@ def test_index(tmp_path: Path) -> Any:
 
 
 class TestVectorIndex:
+    @pytest.mark.unit
     def test_build_creates_index_file(self, test_index: Any, tmp_path: Path) -> None:
         assert (tmp_path / "vectors.usearch").exists()
         assert len(test_index) == 20
 
+    @pytest.mark.unit
     def test_search_returns_k_results(self, test_index: Any) -> None:
         rng = np.random.default_rng(99)
         query = rng.random(1536).astype(np.float32)
@@ -85,6 +87,7 @@ class TestVectorIndex:
         results = test_index.search(query, k=5)
         assert len(results) == 5
 
+    @pytest.mark.unit
     def test_search_results_sorted_by_distance(self, test_index: Any) -> None:
         rng = np.random.default_rng(99)
         query = rng.random(1536).astype(np.float32)
@@ -93,6 +96,7 @@ class TestVectorIndex:
         distances = [r["distance"] for r in results]
         assert distances == sorted(distances)
 
+    @pytest.mark.unit
     def test_collection_filter_excludes_non_matching(self, test_index: Any) -> None:
         rng = np.random.default_rng(99)
         query = rng.random(1536).astype(np.float32)
@@ -101,6 +105,7 @@ class TestVectorIndex:
         for r in results:
             assert r["collection"] == "reference-library"
 
+    @pytest.mark.unit
     def test_collection_filter_returns_fewer_results(self, test_index: Any) -> None:
         rng = np.random.default_rng(99)
         query = rng.random(1536).astype(np.float32)
@@ -109,6 +114,7 @@ class TestVectorIndex:
         filtered = test_index.search(query, k=20, collections=["reference-library"])
         assert len(filtered) <= len(all_results)
 
+    @pytest.mark.unit
     def test_save_and_load(self, test_index: Any, tmp_path: Path) -> None:
         from kairix.core.search.vec_index import VectorIndex
 
@@ -128,6 +134,7 @@ class TestVectorIndex:
         results = loaded.search(query, k=5)
         assert len(results) == 5
 
+    @pytest.mark.unit
     def test_add_vectors_incremental(self, test_index: Any) -> None:
         rng = np.random.default_rng(123)
         new_vec = rng.random(1536).astype(np.float32)
@@ -136,6 +143,7 @@ class TestVectorIndex:
         assert count == 1
         assert len(test_index) == 21
 
+    @pytest.mark.unit
     def test_empty_index_returns_empty(self, tmp_path: Path) -> None:
         from kairix.core.search.vec_index import VectorIndex
 
@@ -149,6 +157,7 @@ class TestVectorIndex:
         results = idx.search(query, k=5)
         assert results == []
 
+    @pytest.mark.unit
     def test_search_results_have_required_fields(self, test_index: Any) -> None:
         """Each search result must have path, title, snippet, collection, distance."""
         rng = np.random.default_rng(99)
@@ -163,6 +172,7 @@ class TestVectorIndex:
             assert "distance" in r, "result missing 'distance'"
             assert isinstance(r["distance"], float)
 
+    @pytest.mark.unit
     def test_add_vectors_updates_existing_doc(self, test_index: Any) -> None:
         """Adding a vector for an existing document's hash_seq makes it searchable."""
         # Use hash0_0 which exists in the DB. Replace its vector with a known value.
@@ -175,6 +185,7 @@ class TestVectorIndex:
         assert len(results) == 1
         assert results[0]["distance"] < 0.01  # near-zero distance
 
+    @pytest.mark.unit
     def test_multiple_collection_filter(self, test_index: Any) -> None:
         """Filtering by multiple collections returns docs from both."""
         rng = np.random.default_rng(99)
@@ -184,6 +195,7 @@ class TestVectorIndex:
         collections = {r["collection"] for r in results}
         assert collections <= {"reference-library", "vault-projects"}
 
+    @pytest.mark.unit
     def test_nonexistent_collection_returns_empty(self, test_index: Any) -> None:
         """Filtering by a collection with no docs returns empty results."""
         rng = np.random.default_rng(99)

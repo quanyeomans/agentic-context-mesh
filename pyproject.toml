@@ -134,6 +134,11 @@ module = [
 # Modules not yet fully annotated — will be removed phase by phase
 ignore_errors = true
 
+# FastMCP decorator is untyped — suppress locally, CI doesn't have fastmcp installed
+[[tool.mypy.overrides]]
+module = ["kairix.agents.mcp.server"]
+disallow_untyped_decorators = false
+
 # ── ruff ─────────────────────────────────────────────────────────────────────
 # Engineering hub: "Linting / code quality: blocks merge"
 [tool.ruff]
@@ -166,7 +171,12 @@ ignore = [
 "kairix/**/cli.py" = ["T201", "S108", "S110", "E501"] # CLI modules: allow print for user output
 "kairix/cli.py" = ["T201"]
 "kairix/_azure.py" = ["S603", "S607"]  # Azure CLI subprocess (az keyvault) is intentional
+"kairix/platform/onboard/check.py" = ["S607"]  # Trusted system binaries (openclaw, systemctl)
 "scripts/*" = ["S", "T20", "B007"]    # Scripts: allow subprocess, print, unused loop vars
+
+[tool.ruff.lint.isort]
+# Match standalone isort profile="black"
+known-first-party = ["kairix"]
 
 [tool.ruff.format]
 quote-style = "double"

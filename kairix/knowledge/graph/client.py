@@ -144,7 +144,7 @@ class Neo4jClient:
     # Upsert methods — idempotent MERGE on node id
     # -------------------------------------------------------------------------
 
-    def upsert_node(self, label: str, node_id: str, props: dict) -> bool:
+    def upsert_node(self, label: str, node_id: str, props: dict[str, Any]) -> bool:
         """Generic node upsert — MERGE on id, SET properties."""
         if not self._driver:
             return False
@@ -224,7 +224,7 @@ class Neo4jClient:
     # Query methods
     # -------------------------------------------------------------------------
 
-    def get_organisation(self, entity_id: str) -> dict | None:
+    def get_organisation(self, entity_id: str) -> dict[str, Any] | None:
         """Return org node properties by id, or None if not found."""
         if not self._driver:
             return None
@@ -240,7 +240,7 @@ class Neo4jClient:
             logger.warning("get_organisation(%s): %s", entity_id, e)
             return None
 
-    def get_person(self, entity_id: str) -> dict | None:
+    def get_person(self, entity_id: str) -> dict[str, Any] | None:
         """Return person node properties by id, or None if not found."""
         if not self._driver:
             return None
@@ -256,7 +256,7 @@ class Neo4jClient:
             logger.warning("get_person(%s): %s", entity_id, e)
             return None
 
-    def related_entities(self, entity_id: str, max_hops: int = 2) -> list[dict]:
+    def related_entities(self, entity_id: str, max_hops: int = 2) -> list[dict[str, Any]]:
         """
         Return entities connected to entity_id within max_hops.
 
@@ -289,7 +289,7 @@ class Neo4jClient:
             logger.warning("related_entities(%s): %s", entity_id, e)
             return []
 
-    def find_by_name(self, name: str) -> list[dict]:
+    def find_by_name(self, name: str) -> list[dict[str, Any]]:
         """
         Search for nodes by name or alias (case-insensitive).
 
@@ -315,7 +315,7 @@ class Neo4jClient:
             logger.warning("find_by_name(%s): %s", name, e)
             return []
 
-    def cypher(self, query: str, params: dict | None = None) -> list[dict]:
+    def cypher(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """
         Execute an arbitrary read Cypher query.
 

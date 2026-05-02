@@ -41,6 +41,7 @@ def _mock_response(texts: list[str], value: float = 0.1) -> MagicMock:
 
 
 class TestEmbedBatch:
+    @pytest.mark.unit
     def test_success(self) -> None:
         texts = ["hello", "world"]
         with patch("openai.AzureOpenAI") as mock_cls:
@@ -51,10 +52,12 @@ class TestEmbedBatch:
         assert len(result) == 2
         assert all(len(v) == DIMS for v in result)
 
+    @pytest.mark.unit
     def test_empty_batch_returns_empty(self) -> None:
         result = embed_batch([], API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
         assert result == []
 
+    @pytest.mark.unit
     def test_results_ordered_by_index(self) -> None:
         texts = ["a", "b", "c"]
         resp = MagicMock()
@@ -73,6 +76,7 @@ class TestEmbedBatch:
         assert result[1][0] == pytest.approx(0.2)
         assert result[2][0] == pytest.approx(0.3)
 
+    @pytest.mark.unit
     def test_bad_request_splits_batch(self) -> None:
         """BadRequestError on a multi-item batch splits and retries."""
         import openai
@@ -100,6 +104,7 @@ class TestEmbedBatch:
         assert len(result) == 2
         assert call_count == 3  # 1 failed + 2 single-item retries
 
+    @pytest.mark.unit
     def test_bad_request_single_item_raises(self) -> None:
         """BadRequestError on a single-item batch raises."""
         import openai
@@ -116,6 +121,7 @@ class TestEmbedBatch:
             with pytest.raises(openai.BadRequestError):
                 embed_batch(texts, API_KEY, ENDPOINT, DEPLOYMENT, DIMS)
 
+    @pytest.mark.unit
     def test_sdk_creates_client_with_correct_params(self) -> None:
         """Verify the SDK client is configured with the right retry and timeout."""
         texts = ["hello"]

@@ -59,7 +59,10 @@ class TestAnalyseCorpus:
 
 class TestGenerateQueries:
     def test_generates_correct_count(self) -> None:
-        from kairix.quality.eval.auto_gold import CorpusProfile, generate_template_queries
+        from kairix.quality.eval.auto_gold import (
+            CorpusProfile,
+            generate_template_queries,
+        )
 
         profile = CorpusProfile(
             total_docs=100,
@@ -73,7 +76,10 @@ class TestGenerateQueries:
         assert len(queries) == 20
 
     def test_covers_multiple_categories(self) -> None:
-        from kairix.quality.eval.auto_gold import CorpusProfile, generate_template_queries
+        from kairix.quality.eval.auto_gold import (
+            CorpusProfile,
+            generate_template_queries,
+        )
 
         profile = CorpusProfile(
             total_docs=100,
@@ -97,7 +103,10 @@ class TestGenerateQueries:
         assert len(categories) >= 3  # at least 3 different categories
 
     def test_queries_reference_real_titles(self) -> None:
-        from kairix.quality.eval.auto_gold import CorpusProfile, generate_template_queries
+        from kairix.quality.eval.auto_gold import (
+            CorpusProfile,
+            generate_template_queries,
+        )
 
         titles = ["microservices", "kubernetes", "testing"]
         profile = CorpusProfile(
@@ -120,7 +129,11 @@ class TestBuildSuite:
 
         import yaml
 
-        from kairix.quality.eval.auto_gold import CorpusProfile, build_suite, generate_template_queries
+        from kairix.quality.eval.auto_gold import (
+            CorpusProfile,
+            build_suite,
+            generate_template_queries,
+        )
 
         profile = CorpusProfile(
             total_docs=50,

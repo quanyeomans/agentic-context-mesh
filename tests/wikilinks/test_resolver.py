@@ -16,9 +16,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.knowledge.wikilinks.resolver import (
+from kairix.knowledge.wikilinks.resolver import (  # noqa: F401 — imported to confirm it exists for monkeypatching
     WikiEntity,
-    _neo4j_get_client,  # noqa: F401 — imported to confirm it exists for monkeypatching
+    _neo4j_get_client,
     get_entities,
     load_entities_from_bootstrap,
     load_entities_from_neo4j,
@@ -70,12 +70,42 @@ SYNTHETIC_BOOTSTRAP = """\
 """
 
 _NEO4J_ROWS = [
-    {"id": "acme-health", "name": "Acme Corp", "aliases": ["Acme"], "vault_path": "02-Areas/Clients/Acme-Corp/"},
-    {"id": "zenith-energy", "name": "Zenith Ltd", "aliases": [], "vault_path": "02-Areas/Clients/Zenith-Ltd/"},
-    {"id": "nexus-digital", "name": "Nexus Digital", "aliases": [], "vault_path": "02-Areas/Work/Orgs/NexusDigital/"},
-    {"id": "jordan-blake", "name": "Jordan Blake", "aliases": [], "vault_path": "02-Areas/People/JordanBlake/"},
-    {"id": "project-atlas", "name": "Project Atlas", "aliases": [], "vault_path": "01-Projects/Atlas/"},
-    {"id": "triad-method", "name": "Triad Method", "aliases": [], "vault_path": "05-Knowledge/Frameworks/TriadMethod/"},
+    {
+        "id": "acme-health",
+        "name": "Acme Corp",
+        "aliases": ["Acme"],
+        "vault_path": "02-Areas/Clients/Acme-Corp/",
+    },
+    {
+        "id": "zenith-energy",
+        "name": "Zenith Ltd",
+        "aliases": [],
+        "vault_path": "02-Areas/Clients/Zenith-Ltd/",
+    },
+    {
+        "id": "nexus-digital",
+        "name": "Nexus Digital",
+        "aliases": [],
+        "vault_path": "02-Areas/Work/Orgs/NexusDigital/",
+    },
+    {
+        "id": "jordan-blake",
+        "name": "Jordan Blake",
+        "aliases": [],
+        "vault_path": "02-Areas/People/JordanBlake/",
+    },
+    {
+        "id": "project-atlas",
+        "name": "Project Atlas",
+        "aliases": [],
+        "vault_path": "01-Projects/Atlas/",
+    },
+    {
+        "id": "triad-method",
+        "name": "Triad Method",
+        "aliases": [],
+        "vault_path": "05-Knowledge/Frameworks/TriadMethod/",
+    },
 ]
 
 
@@ -191,7 +221,9 @@ def test_neo4j_load_returns_entities(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_neo4j_load_returns_empty_when_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_neo4j_load_returns_empty_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """load_entities_from_neo4j() returns [] when Neo4j is unavailable."""
     import kairix.knowledge.wikilinks.resolver as resolver_mod
 
@@ -208,7 +240,12 @@ def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Aliases list from Neo4j row is included in all_triggers()."""
     import kairix.knowledge.wikilinks.resolver as resolver_mod
 
-    row = {"id": "acme", "name": "Acme Corp", "aliases": ["Acme", "AH"], "vault_path": "02-Areas/Clients/Acme/"}
+    row = {
+        "id": "acme",
+        "name": "Acme Corp",
+        "aliases": ["Acme", "AH"],
+        "vault_path": "02-Areas/Clients/Acme/",
+    }
     # side_effect: first call (Organisation) returns the row, second (Person) returns []
     client = MagicMock()
     client.available = True
@@ -223,7 +260,9 @@ def test_neo4j_load_merges_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.unit
-def test_neo4j_load_returns_empty_on_cypher_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_neo4j_load_returns_empty_on_cypher_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """load_entities_from_neo4j() returns [] on any cypher exception."""
     import kairix.knowledge.wikilinks.resolver as resolver_mod
 
@@ -264,7 +303,9 @@ def test_get_entities_uses_neo4j_when_sufficient(
         ],
     )
     monkeypatch.setattr(
-        resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
+        resolver_mod,
+        "load_entities_from_bootstrap",
+        lambda: load_entities_from_bootstrap(bootstrap_file),
     )
 
     entities = get_entities()
@@ -301,7 +342,9 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_sparse(
     ]
     monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: sparse_rows)
     monkeypatch.setattr(
-        resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
+        resolver_mod,
+        "load_entities_from_bootstrap",
+        lambda: load_entities_from_bootstrap(bootstrap_file),
     )
 
     entities = get_entities()
@@ -319,7 +362,9 @@ def test_get_entities_falls_back_to_bootstrap_when_neo4j_unavailable(
 
     monkeypatch.setattr(resolver_mod, "load_entities_from_neo4j", lambda: [])
     monkeypatch.setattr(
-        resolver_mod, "load_entities_from_bootstrap", lambda: load_entities_from_bootstrap(bootstrap_file)
+        resolver_mod,
+        "load_entities_from_bootstrap",
+        lambda: load_entities_from_bootstrap(bootstrap_file),
     )
 
     entities = get_entities()

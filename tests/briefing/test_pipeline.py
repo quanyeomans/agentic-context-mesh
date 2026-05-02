@@ -6,16 +6,30 @@ Uses mocked sources and synthesiser — no live API calls or file system depende
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
 from kairix.agents.briefing.pipeline import (
     _TOTAL_CONTEXT_CAP,
+    BriefingPipeline,
     _trim_context,
     generate_briefing,
 )
 from kairix.text import estimate_tokens
+
+
+def _noop_source(*args, **kwargs):
+    return ""
+
+
+def _const_source(value: str):
+    """Return a source fetcher that always returns the given value."""
+    return lambda *args, **kwargs: value
+
+
+def _failing_source(*args, **kwargs):
+    raise RuntimeError("simulated source failure")
 
 
 @pytest.mark.unit
@@ -65,30 +79,72 @@ class TestTrimContext:
         assert len(result.get("hybrid_search", "")) <= len(long_text)
 
 
+def _fake_synthesise(agent: str, context: dict[str, str], max_tokens: int = 800) -> str:
+    """Fake synthesiser that returns deterministic content without LLM calls."""
+    return (
+        "## Pending & Blocked\nNone.\n\n"
+        "## Recent Decisions\nADR-007 adopted.\n\n"
+        "## Active Projects\nKairix Phase 3.\n\n"
+        "## Relevant Context\nHybrid search working.\n\n"
+        "## Key Constraints\nNever write credentials."
+    )
+
+
+def _make_fake_writer(out_dir: Path):
+    """Return a fake writer function that writes to the given directory."""
+    from datetime import datetime, timezone
+
+    def _write(agent: str, content: str, sources_count: int = 0, token_estimate: int = 0) -> Path:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{agent}-latest.md"
+        now = datetime.now(timezone.utc)
+        ts = now.strftime("%Y-%m-%d %H:%M UTC")
+        date_str = now.strftime("%Y-%m-%d")
+        header = (
+            f"# Agent Briefing — {agent} — {date_str}\n"
+            f"_Generated: {ts} | Sources: {sources_count} | Tokens: ~{token_estimate}_\n\n"
+        )
+        out_path.write_text(header + content, encoding="utf-8")
+        return out_path
+
+    return _write
+
+
+def _all_empty_sources():
+    """Return a sources dict where every source returns empty string."""
+    return {
+        "memory_logs": _noop_source,
+        "recent_memory": _noop_source,
+        "entity_stub": _noop_source,
+        "knowledge_rules": _noop_source,
+        "recent_decisions": _noop_source,
+        "hybrid_search": _noop_source,
+    }
+
+
+def _all_content_sources():
+    """Return a sources dict with sample content."""
+    return {
+        "memory_logs": _const_source("memory logs content"),
+        "recent_memory": _const_source("recent memory"),
+        "entity_stub": _const_source("entity stub"),
+        "knowledge_rules": _const_source("rules content"),
+        "recent_decisions": _const_source("decisions"),
+        "hybrid_search": _const_source("search results"),
+    }
+
+
 @pytest.mark.unit
 class TestGenerateBriefing:
     @pytest.mark.unit
     def test_basic_pipeline_runs(self, tmp_path):
         """Test that pipeline runs and returns a string."""
-        mock_briefing_body = (
-            "## Pending & Blocked\nNone.\n\n"
-            "## Recent Decisions\nADR-007 adopted.\n\n"
-            "## Active Projects\nKairix Phase 3.\n\n"
-            "## Relevant Context\nHybrid search working.\n\n"
-            "## Key Constraints\nNever write credentials."
+        result = generate_briefing(
+            "builder",
+            synthesise_fn=_fake_synthesise,
+            write_fn=_make_fake_writer(tmp_path),
+            sources=_all_content_sources(),
         )
-
-        with (
-            patch("kairix.agents.briefing.sources.fetch_memory_logs", return_value="memory logs content"),
-            patch("kairix.agents.briefing.sources.fetch_recent_memory", return_value="recent memory"),
-            patch("kairix.agents.briefing.sources.fetch_entity_stub", return_value="entity stub"),
-            patch("kairix.agents.briefing.sources.fetch_knowledge_rules", return_value="rules content"),
-            patch("kairix.agents.briefing.sources.fetch_recent_decisions", return_value="decisions"),
-            patch("kairix.agents.briefing.sources.fetch_hybrid_search", return_value="search results"),
-            patch("kairix.agents.briefing.synthesiser.synthesise", return_value=mock_briefing_body),
-            patch("kairix.agents.briefing.writer.BRIEFING_DIR", tmp_path),
-        ):
-            result = generate_briefing("builder")
 
         assert isinstance(result, str)
         assert len(result) > 0
@@ -96,17 +152,12 @@ class TestGenerateBriefing:
 
     @pytest.mark.unit
     def test_header_is_included(self, tmp_path):
-        with (
-            patch("kairix.agents.briefing.sources.fetch_memory_logs", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_recent_memory", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_entity_stub", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_knowledge_rules", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_recent_decisions", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_hybrid_search", return_value=""),
-            patch("kairix.agents.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("kairix.agents.briefing.writer.BRIEFING_DIR", tmp_path),
-        ):
-            result = generate_briefing("builder")
+        result = generate_briefing(
+            "builder",
+            synthesise_fn=lambda agent, ctx, max_tokens=800: "## Pending\nNone.",
+            write_fn=_make_fake_writer(tmp_path),
+            sources=_all_empty_sources(),
+        )
 
         assert "# Agent Briefing" in result
         assert "builder" in result.lower()
@@ -114,57 +165,86 @@ class TestGenerateBriefing:
     @pytest.mark.unit
     def test_source_failure_does_not_raise(self, tmp_path):
         """Pipeline must not raise when a source fetcher fails."""
+        sources = _all_content_sources()
+        sources["memory_logs"] = _failing_source
 
-        def failing_source(*args, **kwargs):
-            raise RuntimeError("simulated source failure")
-
-        with (
-            patch("kairix.agents.briefing.sources.fetch_memory_logs", side_effect=failing_source),
-            patch("kairix.agents.briefing.sources.fetch_recent_memory", return_value="some memory"),
-            patch("kairix.agents.briefing.sources.fetch_entity_stub", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_knowledge_rules", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_recent_decisions", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_hybrid_search", return_value=""),
-            patch("kairix.agents.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("kairix.agents.briefing.writer.BRIEFING_DIR", tmp_path),
-        ):
-            result = generate_briefing("builder")
+        result = generate_briefing(
+            "builder",
+            synthesise_fn=_fake_synthesise,
+            write_fn=_make_fake_writer(tmp_path),
+            sources=sources,
+        )
 
         assert isinstance(result, str)
 
     @pytest.mark.unit
     def test_synthesis_failure_returns_partial_briefing(self, tmp_path):
         """Synthesis API failure should return a partial/fallback briefing, not raise."""
-        with (
-            patch("kairix.agents.briefing.sources.fetch_memory_logs", return_value="some logs"),
-            patch("kairix.agents.briefing.sources.fetch_recent_memory", return_value="memory"),
-            patch("kairix.agents.briefing.sources.fetch_entity_stub", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_knowledge_rules", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_recent_decisions", return_value=""),
-            patch("kairix.agents.briefing.sources.fetch_hybrid_search", return_value=""),
-            patch("kairix.agents.briefing.synthesiser.synthesise", return_value="synthesis unavailable"),
-            patch("kairix.agents.briefing.writer.BRIEFING_DIR", tmp_path),
-        ):
-            result = generate_briefing("builder")
+        result = generate_briefing(
+            "builder",
+            synthesise_fn=lambda agent, ctx, max_tokens=800: "synthesis unavailable",
+            write_fn=_make_fake_writer(tmp_path),
+            sources=_all_content_sources(),
+        )
 
         assert isinstance(result, str)
         assert len(result) > 0
 
     @pytest.mark.unit
     def test_output_file_is_written(self, tmp_path):
-        with (
-            patch("kairix.agents.briefing.sources.fetch_memory_logs", return_value="logs"),
-            patch("kairix.agents.briefing.sources.fetch_recent_memory", return_value="memory"),
-            patch("kairix.agents.briefing.sources.fetch_entity_stub", return_value="entity"),
-            patch("kairix.agents.briefing.sources.fetch_knowledge_rules", return_value="rules"),
-            patch("kairix.agents.briefing.sources.fetch_recent_decisions", return_value="decisions"),
-            patch("kairix.agents.briefing.sources.fetch_hybrid_search", return_value="search"),
-            patch("kairix.agents.briefing.synthesiser.synthesise", return_value="## Pending\nNone."),
-            patch("kairix.agents.briefing.writer.BRIEFING_DIR", tmp_path),
-        ):
-            generate_briefing("builder")
+        generate_briefing(
+            "builder",
+            synthesise_fn=_fake_synthesise,
+            write_fn=_make_fake_writer(tmp_path),
+            sources=_all_content_sources(),
+        )
 
         expected = tmp_path / "builder-latest.md"
         assert expected.exists()
         content = expected.read_text()
         assert "Briefing" in content or "briefing" in content.lower() or "builder" in content
+
+
+@pytest.mark.unit
+class TestBriefingPipeline:
+    @pytest.mark.unit
+    def test_generate_returns_string(self, tmp_path):
+        """BriefingPipeline.generate delegates to generate_briefing."""
+        pipeline = BriefingPipeline(
+            sources=_all_content_sources(),
+            synthesise_fn=_fake_synthesise,
+            write_fn=_make_fake_writer(tmp_path),
+        )
+
+        result = pipeline.generate("builder")
+
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    @pytest.mark.unit
+    def test_generate_with_empty_sources(self, tmp_path):
+        """BriefingPipeline handles empty sources gracefully."""
+        pipeline = BriefingPipeline(
+            sources=_all_empty_sources(),
+            synthesise_fn=lambda agent, ctx, max_tokens=800: "## Pending\nNone.",
+            write_fn=_make_fake_writer(tmp_path),
+        )
+
+        result = pipeline.generate("shape")
+
+        assert isinstance(result, str)
+        assert "Briefing" in result or "shape" in result.lower()
+
+    @pytest.mark.unit
+    def test_generate_writes_output_file(self, tmp_path):
+        """BriefingPipeline.generate writes the briefing file."""
+        pipeline = BriefingPipeline(
+            sources=_all_content_sources(),
+            synthesise_fn=_fake_synthesise,
+            write_fn=_make_fake_writer(tmp_path),
+        )
+
+        pipeline.generate("builder")
+
+        expected = tmp_path / "builder-latest.md"
+        assert expected.exists()

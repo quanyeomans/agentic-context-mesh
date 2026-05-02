@@ -9,10 +9,7 @@ _state: dict = {}
 
 
 @when(
-    parsers.re(
-        r'the agent calls tool_timeline with query "(?P<query>[^"]*)"'
-        r'(?: and anchor "(?P<anchor>[^"]*)")?'
-    )
+    parsers.re(r'the agent calls tool_timeline with query "(?P<query>[^"]*)"' r'(?: and anchor "(?P<anchor>[^"]*)")?')
 )
 def call_tool_timeline(query, anchor):
     _state["exception"] = None

@@ -11,7 +11,7 @@ Tests for kairix.quality.benchmark.runner — covers previously-untested paths:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from dataclasses import dataclass
 
 import pytest
 
@@ -26,25 +26,12 @@ from kairix.quality.benchmark.runner import (
     format_interpretation,
     score_tier,
 )
-from kairix.quality.eval.metrics import (
-    _normalise_title,
-    _stem_from_path,
-)
-from kairix.quality.eval.metrics import (
-    dcg as _dcg,
-)
-from kairix.quality.eval.metrics import (
-    hit_at_k_graded as _hit_at_k,
-)
-from kairix.quality.eval.metrics import (
-    ideal_dcg_graded as _ideal_dcg,
-)
-from kairix.quality.eval.metrics import (
-    ndcg_graded as _ndcg_score,
-)
-from kairix.quality.eval.metrics import (
-    reciprocal_rank_graded as _reciprocal_rank,
-)
+from kairix.quality.eval.metrics import _normalise_title, _stem_from_path
+from kairix.quality.eval.metrics import dcg as _dcg
+from kairix.quality.eval.metrics import hit_at_k_graded as _hit_at_k
+from kairix.quality.eval.metrics import ideal_dcg_graded as _ideal_dcg
+from kairix.quality.eval.metrics import ndcg_graded as _ndcg_score
+from kairix.quality.eval.metrics import reciprocal_rank_graded as _reciprocal_rank
 
 # Aliases for title-based tests — these are the same functions now (unified matching)
 _ndcg_score_by_title = _ndcg_score
@@ -124,60 +111,53 @@ def test_fuzzy_match_respects_topk_limit() -> None:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _FakeClassifyResult:
+    type: str
+
+
 @pytest.mark.unit
 def test_classification_score_returns_1_for_correct_type() -> None:
     """Returns 1.0 when classifier returns the expected type."""
-    mock_result = MagicMock()
-    mock_result.type = "decision"
-
-    with (
-        patch("kairix.core.classify.rules.classify_content", return_value=mock_result),
-        patch("kairix.quality.benchmark.runner.classify_content", return_value=mock_result, create=True),
-    ):
-        score = _classification_score("We decided to use PostgreSQL.", "decision")
-
+    score = _classification_score(
+        "We decided to use PostgreSQL.",
+        "decision",
+        classify_fn=lambda query, agent: _FakeClassifyResult(type="decision"),
+    )
     assert score == pytest.approx(1.0)
 
 
 @pytest.mark.unit
 def test_classification_score_returns_0_for_wrong_type() -> None:
     """Returns 0.0 when classifier returns a different type."""
-    mock_result = MagicMock()
-    mock_result.type = "pattern"
-
-    with (
-        patch("kairix.core.classify.rules.classify_content", return_value=mock_result),
-        patch("kairix.quality.benchmark.runner.classify_content", return_value=mock_result, create=True),
-    ):
-        score = _classification_score("We decided to use PostgreSQL.", "decision")
-
+    score = _classification_score(
+        "We decided to use PostgreSQL.",
+        "decision",
+        classify_fn=lambda query, agent: _FakeClassifyResult(type="pattern"),
+    )
     assert score == pytest.approx(0.0)
 
 
 @pytest.mark.unit
 def test_classification_score_returns_0_on_exception() -> None:
     """Returns 0.0 when classifier raises an exception."""
-    with patch("kairix.core.classify.rules.classify_content", side_effect=RuntimeError("oops")):
-        score = _classification_score("anything", "decision")
 
+    def _raise(query, agent):
+        raise RuntimeError("oops")
+
+    score = _classification_score("anything", "decision", classify_fn=_raise)
     assert score == pytest.approx(0.0)
 
 
 @pytest.mark.unit
-def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_classification_score_tries_llm_when_unknown() -> None:
     """Falls back to LLM judge when rules return 'unknown'."""
-    unknown_result = MagicMock()
-    unknown_result.type = "unknown"
-
-    llm_result = MagicMock()
-    llm_result.type = "decision"
-
-    with (
-        patch("kairix.core.classify.rules.classify_content", return_value=unknown_result),
-        patch("kairix.core.classify.judge.classify_with_llm", return_value=llm_result),
-    ):
-        score = _classification_score("We decided to use PostgreSQL.", "decision")
-
+    score = _classification_score(
+        "We decided to use PostgreSQL.",
+        "decision",
+        classify_fn=lambda query, agent: _FakeClassifyResult(type="unknown"),
+        classify_llm_fn=lambda query, agent: _FakeClassifyResult(type="decision"),
+    )
     assert score == pytest.approx(1.0)
 
 
@@ -189,12 +169,12 @@ def test_classification_score_tries_llm_when_unknown(monkeypatch: pytest.MonkeyP
 @pytest.mark.unit
 def test_llm_judge_returns_score_from_api() -> None:
     """Returns float score from API response."""
-    with patch("kairix._azure.chat_completion", return_value="0.8"):
-        score = _llm_judge(
-            query="what are our engineering patterns?",
-            paths=["04-Agent-Knowledge/builder/patterns.md"],
-            snippets=["Engineering patterns for Builder"],
-        )
+    score = _llm_judge(
+        query="what are our engineering patterns?",
+        paths=["04-Agent-Knowledge/builder/patterns.md"],
+        snippets=["Engineering patterns for Builder"],
+        chat_fn=lambda msgs, max_tokens=10: "0.8",
+    )
 
     assert score == pytest.approx(0.8)
 
@@ -202,8 +182,7 @@ def test_llm_judge_returns_score_from_api() -> None:
 @pytest.mark.unit
 def test_llm_judge_clamps_to_range() -> None:
     """Clamps score to [0.0, 1.0]."""
-    with patch("kairix._azure.chat_completion", return_value="1.5"):
-        score = _llm_judge("q", ["p.md"], ["s"])
+    score = _llm_judge("q", ["p.md"], ["s"], chat_fn=lambda msgs, max_tokens=10: "1.5")
 
     assert score == pytest.approx(1.0)
 
@@ -211,8 +190,11 @@ def test_llm_judge_clamps_to_range() -> None:
 @pytest.mark.unit
 def test_llm_judge_returns_0_on_api_error() -> None:
     """Returns 0.0 when API call fails."""
-    with patch("kairix._azure.chat_completion", side_effect=OSError("timeout")):
-        score = _llm_judge("q", ["p.md"], ["s"])
+
+    def _raise(msgs, max_tokens=10):
+        raise OSError("timeout")
+
+    score = _llm_judge("q", ["p.md"], ["s"], chat_fn=_raise)
 
     assert score == pytest.approx(0.0)
 
@@ -227,8 +209,7 @@ def test_llm_judge_returns_0_for_empty_paths() -> None:
 @pytest.mark.unit
 def test_llm_judge_returns_0_on_bad_json() -> None:
     """Returns 0.0 when chat_completion returns non-numeric text."""
-    with patch("kairix._azure.chat_completion", return_value="not a number"):
-        score = _llm_judge("q", ["p.md"], ["s"])
+    score = _llm_judge("q", ["p.md"], ["s"], chat_fn=lambda msgs, max_tokens=10: "not a number")
 
     assert score == pytest.approx(0.0)
 
@@ -289,7 +270,12 @@ def test_category_diagnosis_unknown_category() -> None:
 @pytest.mark.unit
 def test_format_interpretation_returns_string() -> None:
     result = BenchmarkResult(
-        meta={"suite_name": "test-suite", "system": "hybrid", "date": "2026-03-23", "n_cases": 4},
+        meta={
+            "suite_name": "test-suite",
+            "system": "hybrid",
+            "date": "2026-03-23",
+            "n_cases": 4,
+        },
         summary={
             "weighted_total": 0.762,
             "category_scores": {
@@ -533,7 +519,7 @@ def test_ndcg_by_title_partial_retrieval() -> None:
         {"title": "jordan-blake", "relevance": 2},
         {"title": "team-overview", "relevance": 1},
     ]
-    # Only second gold retrieved; first (highest relevance) not found → NDCG < 1
+    # Only second gold retrieved; first (highest relevance) not found -> NDCG < 1
     retrieved = ["shared/team-overview.md", "other/doc.md"]
     score = _ndcg_score_by_title(retrieved, gold, k=10)
     assert 0.0 < score < 1.0
@@ -620,7 +606,12 @@ def test_reciprocal_rank_by_title_not_found() -> None:
 @pytest.mark.unit
 def test_format_interpretation_shows_ndcg_when_present() -> None:
     result = BenchmarkResult(
-        meta={"suite_name": "test-suite", "system": "hybrid", "date": "2026-04-15", "n_cases": 5},
+        meta={
+            "suite_name": "test-suite",
+            "system": "hybrid",
+            "date": "2026-04-15",
+            "n_cases": 5,
+        },
         summary={
             "weighted_total": 0.55,
             "category_scores": {"recall": 0.60, "entity": 0.70},
@@ -642,7 +633,12 @@ def test_format_interpretation_shows_ndcg_when_present() -> None:
 @pytest.mark.unit
 def test_format_interpretation_omits_ndcg_section_when_absent() -> None:
     result = BenchmarkResult(
-        meta={"suite_name": "test-suite", "system": "hybrid", "date": "2026-04-15", "n_cases": 3},
+        meta={
+            "suite_name": "test-suite",
+            "system": "hybrid",
+            "date": "2026-04-15",
+            "n_cases": 3,
+        },
         summary={
             "weighted_total": 0.70,
             "category_scores": {"recall": 0.75},

@@ -36,7 +36,12 @@ class TestAutoGoldCLIExecution:
     @patch("kairix.quality.eval.auto_gold.analyse_corpus")
     @patch("kairix.core.db.get_db_path")
     def test_generates_suite(
-        self, mock_db: MagicMock, mock_analyse: MagicMock, mock_gen: MagicMock, mock_build: MagicMock, tmp_path
+        self,
+        mock_db: MagicMock,
+        mock_analyse: MagicMock,
+        mock_gen: MagicMock,
+        mock_build: MagicMock,
+        tmp_path,
     ) -> None:
         import sqlite3
 
@@ -47,11 +52,20 @@ class TestAutoGoldCLIExecution:
         mock_db.return_value = db_path
 
         mock_analyse.return_value = CorpusProfile(
-            total_docs=100, collections={"default": 100}, procedural_count=10, date_filename_count=5, entity_doc_count=8
+            total_docs=100,
+            collections={"default": 100},
+            procedural_count=10,
+            date_filename_count=5,
+            entity_doc_count=8,
         )
 
         mock_gen.return_value = [
-            {"id": "AG-R001", "category": "recall", "query": "test", "score_method": "ndcg"},
+            {
+                "id": "AG-R001",
+                "category": "recall",
+                "query": "test",
+                "score_method": "ndcg",
+            },
         ]
 
         output = str(tmp_path / "auto-gold.yaml")

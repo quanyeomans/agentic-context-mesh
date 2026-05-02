@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.classify.rules import ClassificationResult, classify_by_rules, classify_content
+from kairix.core.classify.rules import (
+    ClassificationResult,
+    classify_by_rules,
+    classify_content,
+)
 
 # ---------------------------------------------------------------------------
 # classify_by_rules unit tests

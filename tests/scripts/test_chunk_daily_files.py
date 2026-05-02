@@ -35,6 +35,7 @@ find_memory_logs = _mod.find_memory_logs
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.unit
 def test_splits_on_h2_headings() -> None:
     content = "## Morning\nDid standup.\n\n## Afternoon\nWrote code."
     sections = split_into_sections(content)
@@ -43,6 +44,7 @@ def test_splits_on_h2_headings() -> None:
     assert sections[1] == ("Afternoon", "Wrote code.")
 
 
+@pytest.mark.unit
 def test_preamble_before_first_heading() -> None:
     content = "Intro text.\n\n## Section One\nBody."
     sections = split_into_sections(content)
@@ -51,6 +53,7 @@ def test_preamble_before_first_heading() -> None:
     assert sections[1] == ("Section One", "Body.")
 
 
+@pytest.mark.unit
 def test_empty_sections_excluded() -> None:
     content = "## Empty\n   \n## Full\nContent here."
     sections = split_into_sections(content)
@@ -58,6 +61,7 @@ def test_empty_sections_excluded() -> None:
     assert sections[0][0] == "Full"
 
 
+@pytest.mark.unit
 def test_body_only_no_headings_returns_single() -> None:
     content = "Just some body text with no headings."
     sections = split_into_sections(content)
@@ -70,6 +74,7 @@ def test_body_only_no_headings_returns_single() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_extracts_date_from_filename(tmp_path: Path) -> None:
     log = tmp_path / "2026-04-08.md"
     log.write_text("## Morning\nDid something.\n")
@@ -78,6 +83,7 @@ def test_extracts_date_from_filename(tmp_path: Path) -> None:
     assert chunks[0]["date"] == "2026-04-08"
 
 
+@pytest.mark.integration
 def test_chunk_has_heading_and_body(tmp_path: Path) -> None:
     log = tmp_path / "2026-04-08.md"
     log.write_text("## Work Log\nFixed bug.\n\n## Reflections\nLearned things.\n")
@@ -87,6 +93,7 @@ def test_chunk_has_heading_and_body(tmp_path: Path) -> None:
     assert "Fixed bug" in chunks[0]["body"]
 
 
+@pytest.mark.integration
 def test_non_memory_log_returns_empty(tmp_path: Path) -> None:
     log = tmp_path / "not-a-date.md"
     log.write_text("## Section\nBody.\n")
@@ -94,6 +101,7 @@ def test_non_memory_log_returns_empty(tmp_path: Path) -> None:
     assert chunks == []
 
 
+@pytest.mark.integration
 def test_frontmatter_stripped_from_body(tmp_path: Path) -> None:
     log = tmp_path / "2026-04-08.md"
     log.write_text("---\ndate: 2026-04-08\n---\n\n## Section\nReal body.\n")
@@ -108,6 +116,7 @@ def test_frontmatter_stripped_from_body(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_output_file_created(tmp_path: Path) -> None:
     chunk = {
         "heading": "Work Log",
@@ -124,6 +133,7 @@ def test_output_file_created(tmp_path: Path) -> None:
     assert "Did important work" in content
 
 
+@pytest.mark.integration
 def test_chunk_frontmatter_has_source(tmp_path: Path) -> None:
     chunk = {
         "heading": "Reflections",
@@ -142,6 +152,7 @@ def test_chunk_frontmatter_has_source(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 def test_find_memory_logs_only_dated_files(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()

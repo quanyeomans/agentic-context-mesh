@@ -36,7 +36,10 @@ class TestClassifyCLIOutput:
     @pytest.mark.unit
     def test_procedural_rule_output_format(self):
         stdout, _, exit_code = run_classify_cli(
-            ["Never write credentials to disk. Always fetch from Key Vault at runtime.", "--no-llm"]
+            [
+                "Never write credentials to disk. Always fetch from Key Vault at runtime.",
+                "--no-llm",
+            ]
         )
         assert exit_code == 0
         parsed = json.loads(stdout.strip())

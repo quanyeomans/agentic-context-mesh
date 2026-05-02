@@ -109,7 +109,112 @@ def _pick_canonical(names: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Resolution pipeline
+# Resolution pipeline — extracted steps
+# ---------------------------------------------------------------------------
+
+
+def group_by_slug_and_type(
+    raw: list[RawEntity],
+) -> dict[tuple[str, str], list[RawEntity]]:
+    """Group raw entities by (slug, entity_type) key."""
+    groups: dict[tuple[str, str], list[RawEntity]] = defaultdict(list)
+    for entity in raw:
+        slug = slugify(entity.name)
+        if not slug:
+            continue
+        groups[(slug, entity.entity_type)].append(entity)
+    return groups
+
+
+def merge_within_groups(
+    groups: dict[tuple[str, str], list[RawEntity]],
+) -> dict[tuple[str, str], ResolvedEntity]:
+    """Merge aliases, descriptions, and domains within each (slug, type) group."""
+    merged: dict[tuple[str, str], ResolvedEntity] = {}
+    for (slug, etype), members in groups.items():
+        names = [m.name for m in members]
+        canonical = _pick_canonical(names)
+        all_aliases = _merge_lists(*[m.aliases for m in members])
+        for n in names:
+            if n != canonical and n not in all_aliases:
+                all_aliases.append(n)
+
+        all_domains = _merge_lists(*[m.domains for m in members])
+        all_docs = _merge_lists(*[m.source_docs for m in members])
+        best_conf = max(m.confidence for m in members)
+        desc = max((m.description for m in members), key=len, default="")
+
+        merged[(slug, etype)] = ResolvedEntity(
+            id=slug,
+            canonical_name=canonical,
+            entity_type=etype,
+            description=desc,
+            domains=all_domains,
+            source_docs=all_docs,
+            aliases=all_aliases,
+            confidence=best_conf,
+        )
+    return merged
+
+
+def fuzzy_match_and_merge_same_type(
+    merged: dict[tuple[str, str], ResolvedEntity],
+) -> dict[tuple[str, str], ResolvedEntity]:
+    """O(n^2) fuzzy dedup within each entity type using Levenshtein similarity."""
+    skip_fuzzy_types = {"Concept", "Document"}
+
+    by_type: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for key in merged:
+        by_type[key[1]].append(key)
+
+    merge_map: dict[tuple[str, str], tuple[str, str]] = {}
+
+    for etype, keys in by_type.items():
+        if etype in skip_fuzzy_types:
+            continue
+        slugs = sorted(keys, key=lambda k: k[0])
+        if len(slugs) > 2000:
+            continue
+        for i in range(len(slugs)):
+            if slugs[i] in merge_map:
+                continue
+            for j in range(i + 1, len(slugs)):
+                if slugs[j] in merge_map:
+                    continue
+                sim = _similarity(slugs[i][0], slugs[j][0])
+                if sim >= 0.85:
+                    a = merged[slugs[i]]
+                    b = merged[slugs[j]]
+                    if len(b.source_docs) > len(a.source_docs):
+                        merge_map[slugs[i]] = slugs[j]
+                    else:
+                        merge_map[slugs[j]] = slugs[i]
+
+    # Apply merges
+    for victim, winner in merge_map.items():
+        while winner in merge_map:
+            winner = merge_map[winner]
+        v = merged.pop(victim)
+        w = merged[winner]
+        w.source_docs = _merge_lists(w.source_docs, v.source_docs)
+        w.domains = _merge_lists(w.domains, v.domains)
+        w.aliases = _merge_lists(w.aliases, [v.canonical_name], v.aliases)
+        w.confidence = max(w.confidence, v.confidence)
+        if len(v.description) > len(w.description):
+            w.description = v.description
+
+    return merged
+
+
+def build_final_list(
+    merged: dict[tuple[str, str], ResolvedEntity],
+) -> list[ResolvedEntity]:
+    """Sort resolved entities by (type, id) and return the final list."""
+    return sorted(merged.values(), key=lambda e: (e.entity_type, e.id))
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
 # ---------------------------------------------------------------------------
 
 
@@ -128,89 +233,7 @@ def resolve_entities(raw: list[RawEntity]) -> list[ResolvedEntity]:
     Returns:
         List of resolved, deduplicated entities.
     """
-    # Step 1: group by (slug, type)
-    groups: dict[tuple[str, str], list[RawEntity]] = defaultdict(list)
-    for entity in raw:
-        slug = slugify(entity.name)
-        if not slug:
-            continue
-        groups[(slug, entity.entity_type)].append(entity)
-
-    # Step 2: merge within each group
-    merged: dict[tuple[str, str], ResolvedEntity] = {}
-    for (slug, etype), members in groups.items():
-        names = [m.name for m in members]
-        canonical = _pick_canonical(names)
-        all_aliases = _merge_lists(*[m.aliases for m in members])
-        # Add non-canonical names as aliases
-        for n in names:
-            if n != canonical and n not in all_aliases:
-                all_aliases.append(n)
-
-        all_domains = _merge_lists(*[m.domains for m in members])
-        all_docs = _merge_lists(*[m.source_docs for m in members])
-        best_conf = max(m.confidence for m in members)
-        # Use the longest description
-        desc = max((m.description for m in members), key=len, default="")
-
-        merged[(slug, etype)] = ResolvedEntity(
-            id=slug,
-            canonical_name=canonical,
-            entity_type=etype,
-            description=desc,
-            domains=all_domains,
-            source_docs=all_docs,
-            aliases=all_aliases,
-            confidence=best_conf,
-        )
-
-    # Step 3: fuzzy-match within same type
-    # Skip fuzzy matching for high-cardinality types where O(n^2) is too slow
-    # and fuzzy dedup adds little value (concepts from headings, individual docs).
-    skip_fuzzy_types = {"Concept", "Document"}
-
-    by_type: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for key in merged:
-        by_type[key[1]].append(key)
-
-    merge_map: dict[tuple[str, str], tuple[str, str]] = {}  # victim -> winner
-
-    for etype, keys in by_type.items():
-        if etype in skip_fuzzy_types:
-            continue
-        slugs = sorted(keys, key=lambda k: k[0])
-        # Safety: skip if group is very large (>2000) to avoid long runtime
-        if len(slugs) > 2000:
-            continue
-        for i in range(len(slugs)):
-            if slugs[i] in merge_map:
-                continue
-            for j in range(i + 1, len(slugs)):
-                if slugs[j] in merge_map:
-                    continue
-                sim = _similarity(slugs[i][0], slugs[j][0])
-                if sim >= 0.85:
-                    # Merge j into i (keep the one with more source docs)
-                    a = merged[slugs[i]]
-                    b = merged[slugs[j]]
-                    if len(b.source_docs) > len(a.source_docs):
-                        merge_map[slugs[i]] = slugs[j]
-                    else:
-                        merge_map[slugs[j]] = slugs[i]
-
-    # Apply merges
-    for victim, winner in merge_map.items():
-        # Follow chains
-        while winner in merge_map:
-            winner = merge_map[winner]
-        v = merged.pop(victim)
-        w = merged[winner]
-        w.source_docs = _merge_lists(w.source_docs, v.source_docs)
-        w.domains = _merge_lists(w.domains, v.domains)
-        w.aliases = _merge_lists(w.aliases, [v.canonical_name], v.aliases)
-        w.confidence = max(w.confidence, v.confidence)
-        if len(v.description) > len(w.description):
-            w.description = v.description
-
-    # Step 4: produce final list, sorted by id
-    return sorted(merged.values(), key=lambda e: (e.entity_type, e.id))
+    groups = group_by_slug_and_type(raw)
+    merged = merge_within_groups(groups)
+    merged = fuzzy_match_and_merge_same_type(merged)
+    return build_final_list(merged)

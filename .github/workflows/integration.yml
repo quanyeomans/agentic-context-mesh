@@ -1,4 +1,4 @@
-name: Integration (PR to main)
+name: "4 · Integration (PR to main)"
 
 # Runs full integration suite on PRs targeting main.
 # Separated from ci.yml so it can use larger runners when needed.

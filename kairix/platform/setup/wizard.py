@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -52,7 +54,7 @@ def _test_llm_connection(provider: str, endpoint: str, api_key: str, embed_model
         return False
 
 
-def _count_documents(path: str) -> tuple[int, float]:
+def count_documents(path: str) -> tuple[int, float]:
     """Count markdown files and total size in MB."""
     p = Path(path)
     if not p.is_dir():
@@ -62,7 +64,7 @@ def _count_documents(path: str) -> tuple[int, float]:
     return len(files), total_bytes / (1024 * 1024)
 
 
-def _load_template(name: str) -> dict:
+def load_template(name: str) -> dict[str, Any]:
     """Load an ontology template by name."""
     template_dir = Path(__file__).parent / "templates"
     template_path = template_dir / f"{name}.yaml"
@@ -77,14 +79,21 @@ def run_setup(
     ctx: SetupContext | None = None,
     preset: str | None = None,
     document_path: str | None = None,
+    connection_test_fn: Callable[[str, str, str, str], bool] | None = None,
 ) -> bool:
     """Run the setup wizard.
 
     Supports interactive (terminal), non-interactive (flags/defaults),
     and JSON output modes via SetupContext.
 
+    Args:
+        connection_test_fn: Callable(provider, endpoint, api_key, embed_model) -> bool.
+                            Defaults to _test_llm_connection.
+
     Returns True if setup completed successfully.
     """
+    if connection_test_fn is None:
+        connection_test_fn = _test_llm_connection
     if ctx is None:
         ctx = SetupContext.auto_detect()
 
@@ -92,7 +101,7 @@ def run_setup(
     print("This will configure your knowledge base in a few steps.")
     print("You'll need: an LLM API key and a folder of documents.\n")
 
-    config: dict = {}
+    config: dict[str, Any] = {}
 
     # ── Step 0: Use-case survey (new — tailors defaults) ────────────────
     if preset is None:
@@ -136,7 +145,7 @@ def run_setup(
         prompt(ctx, "Chat model name")  # consumed by future config expansion
 
     print("\n  Testing connection...")
-    if _test_llm_connection(provider_key, endpoint, api_key, embed_model):
+    if connection_test_fn(provider_key, endpoint, api_key, embed_model):
         print("  \u2713 Connected successfully\n")
     else:
         print("  \u2717 Connection failed — check your credentials and try again\n")
@@ -161,7 +170,7 @@ def run_setup(
         print("  Create the folder first, then re-run setup.\n")
         return False
 
-    file_count, size_mb = _count_documents(doc_root)
+    file_count, size_mb = count_documents(doc_root)
     print(f"\n  Found: {file_count:,} markdown files ({size_mb:.1f} MB)\n")
 
     # ── Step 3: Storage Location ──────────────────────────────────────────
@@ -212,7 +221,7 @@ def run_setup(
     print("Step 5 of 7: Search Configuration\n")
     print(f"  Using '{preset_key}' preset from your use-case selection.\n")
 
-    template = _load_template(preset_key)
+    template = load_template(preset_key)
     template_name = template.get("name", preset_key)
     print(f"\n  Using '{template_name}' preset.\n")
 
@@ -229,7 +238,7 @@ def run_setup(
     ]
     coll_idx = prompt_choice(ctx, "How do you want to organise your documents?", collection_options)
 
-    collections_config: dict | None = None
+    collections_config: dict[str, Any] | None = None
     if coll_idx == 0:
         collections_config = {
             "shared": [{"name": "all", "path": ".", "glob": "**/*.md"}],
@@ -266,7 +275,11 @@ def run_setup(
         collections_config = {
             "shared": [
                 {"name": "all", "path": ".", "glob": "**/*.md"},
-                {"name": "workspaces", "path": workspace_root, "glob": "**/memory/**/*.md"},
+                {
+                    "name": "workspaces",
+                    "path": workspace_root,
+                    "glob": "**/memory/**/*.md",
+                },
             ],
         }
         print(f"  \u2713 Documents + agent workspace memories ({workspace_root}) configured.\n")
@@ -322,7 +335,7 @@ def run_setup(
     if not config:
         config = {"fusion_strategy": "bm25_primary"}
 
-    full_config: dict = {}
+    full_config: dict[str, Any] = {}
 
     # Paths section
     full_config["paths"] = {

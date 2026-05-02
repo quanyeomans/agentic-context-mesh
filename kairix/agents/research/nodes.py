@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from kairix.agents.research.state import (
@@ -21,21 +22,33 @@ from kairix.agents.research.state import (
 logger = logging.getLogger(__name__)
 
 
-def classify_intent(state: ResearcherState) -> dict[str, Any]:
-    """Work out what kind of question this is (entity lookup, date-based, etc.)."""
-    try:
-        from kairix.core.search.intent import classify
+def classify_intent(state: ResearcherState, *, classify_fn: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """Work out what kind of question this is (entity lookup, date-based, etc.).
 
-        intent = classify(state["query"])
+    Args:
+        classify_fn: Injectable intent classifier for testing.
+                     Defaults to ``kairix.core.search.intent.classify``.
+    """
+    try:
+        if classify_fn is None:
+            from kairix.core.search.intent import classify
+
+            classify_fn = classify
+
+        intent = classify_fn(state["query"])
         return {"intent": intent.value}
     except Exception as exc:
         logger.warning("research: classify_intent failed — %s", exc)
         return {"intent": "semantic"}
 
 
-def retrieve(state: ResearcherState) -> dict[str, Any]:
+def retrieve(state: ResearcherState, *, search_fn: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Search the knowledge base for answers to the current query."""
-    from kairix.core.search.hybrid import search
+    if search_fn is None:
+        from kairix.core.factory import build_search_pipeline
+
+        _pipeline = build_search_pipeline()
+        search_fn = _pipeline.search
 
     query = state.get("refined_query") or state["query"]
     turns = state.get("turns", 0)
@@ -43,7 +56,7 @@ def retrieve(state: ResearcherState) -> dict[str, Any]:
     # Use a bigger budget on refinement turns — we need more context
     budget = INITIAL_BUDGET if turns == 0 else REFINEMENT_BUDGET
 
-    sr = search(query=query, budget=budget)
+    sr = search_fn(query=query, budget=budget)
 
     # Convert SearchResult to list-of-dicts for accumulation
     new_results = [{"path": b.result.path, "snippet": b.content[:500]} for b in sr.results]
@@ -58,14 +71,17 @@ def retrieve(state: ResearcherState) -> dict[str, Any]:
             existing.append(r)
             seen_paths.add(r.get("path", ""))
 
-    logger.info("research: retrieve turn=%d new=%d accumulated=%d", turns, len(new_results), len(existing))
+    logger.info(
+        "research: retrieve turn=%d new=%d accumulated=%d",
+        turns,
+        len(new_results),
+        len(existing),
+    )
     return {"retrieved_chunks": existing}
 
 
-def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
+def evaluate_sufficiency(state: ResearcherState, *, llm_backend: Any = None) -> dict[str, Any]:
     """Ask the LLM whether the search results answer the question well enough."""
-    from kairix.platform.llm import get_default_backend
-
     query = state["query"]
     chunks = state.get("retrieved_chunks", [])
     turns = state.get("turns", 0)
@@ -99,8 +115,11 @@ def evaluate_sufficiency(state: ResearcherState) -> dict[str, Any]:
     ]
 
     try:
-        llm = get_default_backend()
-        response = llm.chat(messages, max_tokens=300)
+        if llm_backend is None:
+            from kairix.platform.llm import get_default_backend
+
+            llm_backend = get_default_backend()
+        response = llm_backend.chat(messages, max_tokens=300)
 
         # Parse JSON from response
         parsed = json.loads(response)
@@ -134,10 +153,8 @@ def refine_query(state: ResearcherState) -> dict[str, Any]:
     return {"turns": turns + 1}
 
 
-def synthesise(state: ResearcherState) -> dict[str, Any]:
+def synthesise(state: ResearcherState, *, llm_backend: Any = None) -> dict[str, Any]:
     """Build a clear answer from the search results, citing sources."""
-    from kairix.platform.llm import get_default_backend
-
     query = state["query"]
     chunks = state.get("retrieved_chunks", [])
 
@@ -159,8 +176,11 @@ def synthesise(state: ResearcherState) -> dict[str, Any]:
     ]
 
     try:
-        llm = get_default_backend()
-        synthesis = llm.chat(messages, max_tokens=500)
+        if llm_backend is None:
+            from kairix.platform.llm import get_default_backend
+
+            llm_backend = get_default_backend()
+        synthesis = llm_backend.chat(messages, max_tokens=500)
         return {"synthesis": synthesis, "confidence": state.get("confidence", 0.0)}
     except Exception as exc:
         logger.warning("research: synthesise LLM call failed — %s", exc)

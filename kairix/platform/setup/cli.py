@@ -28,7 +28,14 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--preset",
-        choices=["consulting", "technical", "daily-log", "general", "agent-memory", "exploring"],
+        choices=[
+            "consulting",
+            "technical",
+            "daily-log",
+            "general",
+            "agent-memory",
+            "exploring",
+        ],
         default=None,
         help="Use a preset configuration (skips the use-case survey)",
     )

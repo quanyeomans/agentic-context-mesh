@@ -66,9 +66,7 @@ def _make_raw_library(tmp_path: Path) -> Path:
         "## Best Practices\n\n"
         "Always set a reasonable max_tokens value. "
         "Use temperature to control randomness. "
-        "Implement retry logic for rate limits.\n"
-        + ("Additional detail. " * 20)  # pad to exceed min_file_size
-        + "\n",
+        "Implement retry logic for rate limits.\n" + ("Additional detail. " * 20) + "\n",  # pad to exceed min_file_size
         encoding="utf-8",
     )
 
@@ -104,6 +102,7 @@ def _make_raw_library(tmp_path: Path) -> Path:
 
 
 class TestDiscoverSources:
+    @pytest.mark.integration
     def test_finds_source_dirs(self, tmp_path: Path) -> None:
         raw = _make_raw_library(tmp_path)
         results = _discover_sources(raw)
@@ -113,6 +112,7 @@ class TestDiscoverSources:
         assert ("agentic-ai", "openai-cookbook") in dir_pairs
         assert ("engineering", "adr-examples") in dir_pairs
 
+    @pytest.mark.integration
     def test_skips_non_directories(self, tmp_path: Path) -> None:
         raw = tmp_path / "raw"
         raw.mkdir()
@@ -127,6 +127,7 @@ class TestDiscoverSources:
 
 
 class TestCollectMarkdownFiles:
+    @pytest.mark.integration
     def test_finds_md_files(self, tmp_path: Path) -> None:
         d = tmp_path / "src"
         d.mkdir()
@@ -143,6 +144,7 @@ class TestCollectMarkdownFiles:
 
 
 class TestIsGutenbergText:
+    @pytest.mark.unit
     def test_gutenberg_source(self) -> None:
         src = SourceDef(
             name="Test",
@@ -155,6 +157,7 @@ class TestIsGutenbergText:
         )
         assert _is_gutenberg_text(src) is True
 
+    @pytest.mark.unit
     def test_non_gutenberg_source(self) -> None:
         src = SourceDef(
             name="Test",
@@ -174,12 +177,14 @@ class TestIsGutenbergText:
 
 
 class TestDataclasses:
+    @pytest.mark.unit
     def test_normalise_config_defaults(self, tmp_path: Path) -> None:
         cfg = NormaliseConfig(input_dir=tmp_path, output_dir=tmp_path / "out")
         assert cfg.max_tier == 3
         assert cfg.dry_run is False
         assert cfg.dedup is True
 
+    @pytest.mark.unit
     def test_normalise_report_defaults(self) -> None:
         report = NormaliseReport()
         assert report.total_input == 0
@@ -193,6 +198,7 @@ class TestDataclasses:
 
 
 class TestNormalisePipeline:
+    @pytest.mark.integration
     def test_full_pipeline_produces_correct_output(self, tmp_path: Path) -> None:
         """Run normalise() on a small temp library and verify outputs."""
         raw = _make_raw_library(tmp_path)
@@ -241,6 +247,7 @@ class TestNormalisePipeline:
         licence_notices = out / "LICENSE-NOTICES.md"
         assert licence_notices.exists(), "LICENSE-NOTICES.md was not generated"
 
+    @pytest.mark.integration
     def test_dry_run_does_not_write(self, tmp_path: Path) -> None:
         """dry_run=True should produce a report but not create output files."""
         raw = _make_raw_library(tmp_path)
@@ -257,6 +264,7 @@ class TestNormalisePipeline:
         assert report.total_output >= 2
         assert not out.exists(), "dry_run should not create output directory"
 
+    @pytest.mark.integration
     def test_unregistered_source_recorded(self, tmp_path: Path) -> None:
         """Source directories not in the registry should be logged."""
         raw = tmp_path / "raw"
@@ -269,6 +277,7 @@ class TestNormalisePipeline:
         report = normalise(config)
         assert "agentic-ai/not-a-real-source" in report.unregistered_sources
 
+    @pytest.mark.integration
     def test_licence_tier_filtering(self, tmp_path: Path) -> None:
         """Sources above max_tier should be excluded."""
         raw = _make_raw_library(tmp_path)

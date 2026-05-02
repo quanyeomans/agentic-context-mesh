@@ -17,6 +17,8 @@ htmlcov/
 # Exception: the contract suite baseline is safe (mock data only, no vault content)
 benchmark-results/*.json
 !benchmark-results/contract-baseline.json
+!benchmark-results/reflib-contract-baseline.json
+!benchmark-results/reflib-gold-v3-baseline.json
 
 # Live database file — not a repo artefact
 entities.db
@@ -49,5 +51,5 @@ scripts/benchmark-path-audit.py
 !env.example
 PRD.md
 .claude/
-CLAUDE.md
 .confidential-patterns
+*.DS_Store

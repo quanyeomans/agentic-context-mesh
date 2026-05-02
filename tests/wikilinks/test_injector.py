@@ -187,7 +187,9 @@ def test_no_match_for_substring() -> None:
 def test_no_self_link_on_own_page() -> None:
     content = "Acme Corp is a major health insurer with global operations."
     modified, injected = inject_wikilinks(
-        content, [ACME_CORP], source_path="/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md"
+        content,
+        [ACME_CORP],
+        source_path="/tmp/test-vault/02-Areas/Clients/Acme-Corp/Overview.md",
     )
     assert injected == []
     assert "[[Acme-Corp]]" not in modified

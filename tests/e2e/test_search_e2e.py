@@ -14,7 +14,10 @@ import pytest
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.skipif(os.environ.get("KAIRIX_E2E") != "1", reason="E2E tests skipped unless KAIRIX_E2E=1"),
+    pytest.mark.skipif(
+        os.environ.get("KAIRIX_E2E") != "1",
+        reason="E2E tests skipped unless KAIRIX_E2E=1",
+    ),
 ]
 
 
@@ -24,24 +27,20 @@ def fts5_db(tmp_path):
     db_path = tmp_path / "index.sqlite"
     db = sqlite3.connect(str(db_path))
 
-    db.execute(
-        """
+    db.execute("""
         CREATE TABLE documents (
             hash TEXT PRIMARY KEY,
             path TEXT NOT NULL,
             title TEXT,
             collection TEXT
         )
-        """
-    )
+        """)
 
-    db.execute(
-        """
+    db.execute("""
         CREATE VIRTUAL TABLE documents_fts USING fts5(
             title, content, path UNINDEXED, hash UNINDEXED
         )
-        """
-    )
+        """)
 
     docs = [
         (
@@ -158,6 +157,7 @@ def _patch_search_deps(fts5_db, monkeypatch):
 class TestSearchE2E:
     """End-to-end tests for the hybrid search pipeline with real BM25."""
 
+    @pytest.mark.integration
     def test_search_returns_results(self, _patch_search_deps):
         """Hybrid search returns results from FTS5 BM25 backend."""
         from kairix.core.search.hybrid import search
@@ -165,6 +165,7 @@ class TestSearchE2E:
         result = search("infrastructure Azure VM")
         assert len(result.results) > 0, "Expected at least one result"
 
+    @pytest.mark.integration
     def test_search_intent_classified(self, _patch_search_deps):
         """Search result includes a classified intent."""
         from kairix.core.search.hybrid import SearchResult, search
@@ -174,6 +175,7 @@ class TestSearchE2E:
         assert isinstance(result, SearchResult)
         assert isinstance(result.intent, QueryIntent)
 
+    @pytest.mark.integration
     def test_search_bm25_results_present(self, _patch_search_deps):
         """BM25 results are present in the fused output."""
         from kairix.core.search.hybrid import search
@@ -181,6 +183,7 @@ class TestSearchE2E:
         result = search("observability tracing Arize")
         assert result.bm25_count > 0, "Expected BM25 to contribute results"
 
+    @pytest.mark.integration
     def test_search_no_errors(self, _patch_search_deps):
         """Search completes without error."""
         from kairix.core.search.hybrid import search
@@ -188,6 +191,7 @@ class TestSearchE2E:
         result = search("project engagement Q2")
         assert result.error == ""
 
+    @pytest.mark.integration
     def test_search_returns_search_result_type(self, _patch_search_deps):
         """search() always returns SearchResult dataclass."""
         from kairix.core.search.hybrid import SearchResult, search

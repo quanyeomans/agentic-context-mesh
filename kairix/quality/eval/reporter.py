@@ -39,7 +39,7 @@ class PerformanceReporter:
         result: dict[str, Any] = json.loads(text)
         return result
 
-    def _category_scores(self, results: dict) -> dict[str, float]:
+    def _category_scores(self, results: dict[str, Any]) -> dict[str, float]:
         scores: dict[str, float] = {}
         for check in results.get("checks", []):
             cat = check.get("category") or check.get("name", "")
@@ -91,36 +91,48 @@ class PerformanceReporter:
 
         all_cats = sorted(set(list(scores.keys()) + list(self._gates.keys())))
         for cat in all_cats:
-            score = scores.get(cat, None)
-            gate = self._gates.get(cat)
-            score_str = f"{score:.3f}" if score is not None else "—"
-            gate_str = f"{gate:.2f}" if gate is not None else "—"
+            row = _build_score_row(cat, scores.get(cat), self._gates.get(cat), prev_scores.get(cat))
+            lines.append(row)
 
-            if score is None:
-                status = "⬜ no data"
-            elif gate is None:
-                status = "(i) no gate"
-            elif score >= gate:
-                status = "✅ pass"
-            else:
-                status = "❌ FAIL"
-
-            prev = prev_scores.get(cat)
-            if prev is not None and score is not None:
-                delta = score - prev
-                delta_str = f"{delta:+.3f}"
-            else:
-                delta_str = "—"
-
-            lines.append(f"| {cat} | {score_str} | {gate_str} | {status} | {delta_str} |")
-
-        lines += ["", "## Gate Summary", ""]
-        failures = self.gate_failures()
-        if not failures:
-            lines.append("✅ **All gates passed.**")
-        else:
-            lines.append("❌ **Gate failures:**")
-            for cat, actual, threshold in failures:
-                lines.append(f"- `{cat}`: {actual:.3f} < {threshold:.2f} (gap: {threshold - actual:.3f})")
+        lines += _build_gate_summary_section(self.gate_failures())
 
         return "\n".join(lines) + "\n"
+
+
+def _build_score_row(
+    cat: str,
+    score: float | None,
+    gate: float | None,
+    prev_score: float | None,
+) -> str:
+    """Build one markdown table row for a category score."""
+    score_str = f"{score:.3f}" if score is not None else "—"
+    gate_str = f"{gate:.2f}" if gate is not None else "—"
+
+    if score is None:
+        status = "⬜ no data"
+    elif gate is None:
+        status = "(i) no gate"
+    elif score >= gate:
+        status = "✅ pass"
+    else:
+        status = "❌ FAIL"
+
+    if prev_score is not None and score is not None:
+        delta_str = f"{score - prev_score:+.3f}"
+    else:
+        delta_str = "—"
+
+    return f"| {cat} | {score_str} | {gate_str} | {status} | {delta_str} |"
+
+
+def _build_gate_summary_section(failures: list[tuple[str, float, float]]) -> list[str]:
+    """Build the gate pass/fail markdown section."""
+    lines = ["", "## Gate Summary", ""]
+    if not failures:
+        lines.append("✅ **All gates passed.**")
+    else:
+        lines.append("❌ **Gate failures:**")
+        for cat, actual, threshold in failures:
+            lines.append(f"- `{cat}`: {actual:.3f} < {threshold:.2f} (gap: {threshold - actual:.3f})")
+    return lines

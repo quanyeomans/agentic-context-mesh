@@ -23,9 +23,15 @@ def main(argv: list[str] | None = None) -> None:
     # ── crawl ────────────────────────────────────────────────────────────────
     crawl_p = sub.add_parser("crawl", help="Crawl document store structure → upsert entities into Neo4j")
     crawl_p.add_argument(
-        "--document-root", default=None, help="Document root directory (default: KAIRIX_DOCUMENT_ROOT env var)"
+        "--document-root",
+        default=None,
+        help="Document root directory (default: KAIRIX_DOCUMENT_ROOT env var)",
     )
-    crawl_p.add_argument("--dry-run", action="store_true", help="Print what would be written without writing")
+    crawl_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be written without writing",
+    )
     crawl_p.add_argument("--verbose", action="store_true", help="Log each entity discovered")
 
     # ── health ───────────────────────────────────────────────────────────────

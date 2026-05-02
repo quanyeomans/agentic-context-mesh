@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from collections.abc import Callable
 from typing import Any, Literal
 
 import requests
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_SCOPE = "shared+agent"
+DEFAULT_SCOPE: Literal["shared+agent"] = "shared+agent"
 
 # ---------------------------------------------------------------------------
 # Budget inference + entity name extraction (AFF-1, AFF-3)
@@ -53,20 +54,30 @@ _ENTITY_PREFIX_RE = re.compile(
 )
 
 
-def _infer_budget(query: str, explicit_budget: int) -> int:
+def _infer_budget(
+    query: str,
+    explicit_budget: int,
+    classify_fn: Callable[[str], QueryIntent] | None = None,
+) -> int:
     """Automatically adjust the token budget based on question type.
 
     Quick lookups (person/company names, keywords) get a small budget.
     Research-style questions get a larger one. If the caller explicitly
     set a budget, that value is used unchanged.
+
+    Args:
+        classify_fn: Injectable intent classifier for testing.
+                     Defaults to ``kairix.core.search.intent.classify``.
     """
     if explicit_budget != 3000:
         return explicit_budget
     try:
-        from kairix.core.search.intent import QueryIntent, classify
+        from kairix.core.search.intent import QueryIntent as _QueryIntent
+        from kairix.core.search.intent import classify as _default_classify
 
-        intent = classify(query)
-        if intent in (QueryIntent.ENTITY, QueryIntent.KEYWORD):
+        _classify = classify_fn or _default_classify
+        intent = _classify(query)
+        if intent in (_QueryIntent.ENTITY, _QueryIntent.KEYWORD):
             return 1500
     except (ImportError, ValueError, TypeError, RuntimeError):
         logger.debug("_infer_budget: classify failed, using heuristics", exc_info=True)
@@ -86,17 +97,25 @@ def _extract_entity_name(query: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _fetch_entity_card(name: str) -> dict | None:
+def _fetch_entity_card(name: str, *, neo4j_client: Any | None = None) -> dict[str, Any] | None:
     """Fetch entity card directly from Neo4j, bypassing MCP tool layer.
 
     Returns a dict with id, name, type, summary, vault_path on success,
     or None if the entity is not found or Neo4j is unavailable.
+
+    Args:
+        neo4j_client: Injectable Neo4j client for testing.
+                      Defaults to the production client.
     """
     try:
-        from kairix.knowledge.graph.client import get_client
         from kairix.utils import slugify as _slugify
 
-        neo4j = get_client()
+        if neo4j_client is not None:
+            neo4j = neo4j_client
+        else:
+            from kairix.knowledge.graph.client import get_client
+
+            neo4j = get_client()
         if not neo4j.available:
             return None
 
@@ -152,8 +171,11 @@ def _fetch_entity_card(name: str) -> dict | None:
 def tool_search(
     query: str,
     agent: str | None = None,
-    scope: Literal["shared", "agent", "shared+agent"] = DEFAULT_SCOPE,
+    scope: Literal["shared", "agent", "shared+agent"] = "shared+agent",
     budget: int = 3000,
+    *,
+    search_fn: Callable[..., Any] | None = None,
+    entity_card_fn: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Search for anything in the knowledge base.
 
@@ -161,13 +183,23 @@ def tool_search(
     what you need, including handling date-based queries (temporal) and
     setting the right amount of context automatically. You don't need
     to configure anything.
+
+    Args:
+        search_fn:      Injectable search function for testing.
+                        Defaults to the production hybrid search.
+        entity_card_fn: Injectable entity card function for testing.
+                        Defaults to _fetch_entity_card.
     """
     logger.info("mcp.search: agent=%r scope=%r", agent, scope)
     try:
-        from kairix.core.search.hybrid import search
+        if search_fn is None:
+            from kairix.core.factory import build_search_pipeline
+
+            _pipeline = build_search_pipeline()
+            search_fn = _pipeline.search
 
         budget = _infer_budget(query, budget)
-        result = search(query=query, agent=agent, scope=scope, budget=budget)
+        result = search_fn(query=query, agent=agent, scope=scope, budget=budget)
 
         intent_value = result.intent.value if hasattr(result.intent, "value") else str(result.intent)
         results_list = [
@@ -187,7 +219,8 @@ def tool_search(
         if intent_value == QueryIntent.ENTITY.value:
             entity_name = _extract_entity_name(query)
             if entity_name:
-                card = _fetch_entity_card(entity_name)
+                _entity_card = entity_card_fn or _fetch_entity_card
+                card = _entity_card(entity_name)
                 if card is not None:
                     results_list.insert(
                         0,
@@ -213,7 +246,13 @@ def tool_search(
             "latency_ms": result.latency_ms,
             "error": result.error,
         }
-    except (ImportError, sqlite3.Error, requests.RequestException, KeyError, ValueError) as exc:
+    except (
+        ImportError,
+        sqlite3.Error,
+        requests.RequestException,
+        KeyError,
+        ValueError,
+    ) as exc:
         logger.warning("mcp.search failed: %s", exc, exc_info=True)
         return {
             "query": query,
@@ -237,37 +276,66 @@ def tool_search(
 
 def tool_entity(
     name: str,
+    *,
+    neo4j_client: Any | None = None,
 ) -> dict[str, Any]:
     """Look up a specific person, company, or topic by name.
 
     This is a quick, direct lookup from the knowledge graph (Neo4j) —
     use it when you already know the name of what you're looking for.
+
+    Args:
+        neo4j_client: Injectable Neo4j client for testing.
+                      Defaults to the production client.
     """
-    card = _fetch_entity_card(name)
+    card = _fetch_entity_card(name, neo4j_client=neo4j_client)
     if card is not None:
         return {**card, "error": ""}
 
-    return {"id": "", "name": name, "type": "", "summary": "", "vault_path": "", "error": f"Entity not found: {name}"}
+    return {
+        "id": "",
+        "name": name,
+        "type": "",
+        "summary": "",
+        "vault_path": "",
+        "error": f"Entity not found: {name}",
+    }
 
 
 def tool_prep(
     query: str,
     agent: str | None = None,
     tier: Literal["l0", "l1"] = "l0",
+    *,
+    search_fn: Callable[..., Any] | None = None,
+    chat_fn: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Get a short summary of a topic before committing to a full search.
 
     Choose 'l0' for 2-3 sentences or 'l1' for a structured overview.
     Uses less resources than a full search — good for quick context checks.
     Retrieves relevant documents first, then summarises from them.
+
+    Args:
+        search_fn: Injectable search function for testing.
+                   Defaults to the production hybrid search.
+        chat_fn:   Injectable chat completion function for testing.
+                   Defaults to the production Azure chat completion.
     """
     try:
-        from kairix._azure import chat_completion
-        from kairix.core.search.hybrid import search as hybrid_search
+        if search_fn is None:
+            from kairix.core.factory import build_search_pipeline
+
+            _pipeline = build_search_pipeline()
+            search_fn = _pipeline.search
+        if chat_fn is None:
+            from kairix._azure import chat_completion
+
+            chat_fn = chat_completion
 
         # Retrieve context first — prep is grounded, not hallucinated
         budget = 1500 if tier == "l0" else 3000
-        sr = hybrid_search(query, agent=agent, scope=DEFAULT_SCOPE, budget=budget)
+        sr = search_fn(query, agent=agent, scope=DEFAULT_SCOPE, budget=budget)
         context_parts = []
         for r in sr.results[:5]:
             context_parts.append(f"[{r.result.title or r.result.path}]\n{r.content[:500]}")
@@ -296,7 +364,7 @@ def tool_prep(
             {"role": "system", "content": system},
             {"role": "user", "content": f"Topic: {query}\n\nDocuments:\n{context}"},
         ]
-        summary = chat_completion(messages, max_tokens=max_tokens)
+        summary = chat_fn(messages, max_tokens=max_tokens)
         return {
             "query": query,
             "tier": tier,
@@ -320,17 +388,33 @@ def tool_prep(
 def tool_timeline(
     query: str,
     anchor_date: str | None = None,
+    *,
+    extract_fn: Callable[..., Any] | None = None,
+    rewrite_fn: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Check how a date-related question will be interpreted.
 
     For debugging only — you don't need to call this before searching;
     date handling is automatic. Shows how date expressions like "last week"
     or "yesterday" are rewritten into specific date ranges.
+
+    Args:
+        extract_fn: Injectable time window extraction for testing.
+                    Defaults to extract_time_window.
+        rewrite_fn: Injectable temporal rewriter for testing.
+                    Defaults to rewrite_temporal_query.
     """
     try:
         from datetime import date as _date
 
-        from kairix.core.temporal.rewriter import extract_time_window, rewrite_temporal_query
+        if extract_fn is None:
+            from kairix.core.temporal.rewriter import extract_time_window
+
+            extract_fn = extract_time_window
+        if rewrite_fn is None:
+            from kairix.core.temporal.rewriter import rewrite_temporal_query
+
+            rewrite_fn = rewrite_temporal_query
 
         anchor: _date | None = None
         if anchor_date:
@@ -342,7 +426,7 @@ def tool_timeline(
         # Detect temporal intent from BOTH relative ("last week") and absolute ("April 2026") expressions
         time_window: dict[str, str] = {}
         try:
-            start, end = extract_time_window(query=query, reference_date=anchor)
+            start, end = extract_fn(query=query, reference_date=anchor)
             if start or end:
                 time_window = {
                     "start": str(start) if start else "",
@@ -353,7 +437,7 @@ def tool_timeline(
             logger.debug("extract_time_window failed", exc_info=True)
 
         is_temporal = bool(time_window)
-        rewritten = rewrite_temporal_query(query=query, reference_date=anchor) if is_temporal else query
+        rewritten = rewrite_fn(query=query, reference_date=anchor) if is_temporal else query
 
         return {
             "original_query": query,
@@ -377,6 +461,8 @@ def tool_research(
     query: str,
     agent: str | None = None,
     max_turns: int = 4,
+    *,
+    research_fn: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Ask a research question. The system searches multiple times, refining
     its approach until it finds a good answer or reports what's missing.
@@ -385,9 +471,11 @@ def tool_research(
     For simple lookups, use search instead — it's faster.
 
     Args:
-        query:      The question to research.
-        agent:      Agent name for collection scoping.
-        max_turns:  Maximum search rounds (default 4).
+        query:       The question to research.
+        agent:       Agent name for collection scoping.
+        max_turns:   Maximum search rounds (default 4).
+        research_fn: Injectable research function for testing.
+                     Defaults to run_research.
 
     Returns:
         dict with: query, synthesis, retrieved_chunks, gaps, confidence, turns, error.
@@ -395,9 +483,12 @@ def tool_research(
     # Clamp max_turns to prevent unbounded LLM call amplification
     max_turns = min(max(1, max_turns), 10)
     try:
-        from kairix.agents.research.graph import run_research
+        if research_fn is None:
+            from kairix.agents.research.graph import run_research
 
-        result = run_research(query=query, max_turns=max_turns)
+            research_fn = run_research
+
+        result = research_fn(query=query, max_turns=max_turns)
         return {
             "query": result.get("query", query),
             "synthesis": result.get("synthesis", ""),
@@ -491,7 +582,11 @@ def tool_usage_guide(topic: str = "") -> dict[str, Any]:
 
     except Exception as exc:
         logger.warning("mcp.usage_guide failed: %s", exc)
-        return {"topic": topic, "content": "", "error": "Usage guide lookup failed — check server logs for details."}
+        return {
+            "topic": topic,
+            "content": "",
+            "error": "Usage guide lookup failed — check server logs for details.",
+        }
 
 
 def tool_contradict(
@@ -499,28 +594,48 @@ def tool_contradict(
     agent: str | None = None,
     top_k: int = 5,
     threshold: float = 0.6,
+    *,
+    llm_backend: Any | None = None,
+    contradict_fn: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Check new content against existing knowledge for contradictions.
 
     Use before writing new facts — catches conflicts with what's already
     in the knowledge base. Returns a list of contradicting documents with
     scores and explanations.
+
+    Args:
+        llm_backend:   Injectable LLM backend for testing.
+                       Defaults to the production backend.
+        contradict_fn: Injectable contradiction checker for testing.
+                       Defaults to check_contradiction.
     """
     try:
-        from kairix.knowledge.contradict.detector import check_contradiction
-        from kairix.platform.llm import get_default_backend
+        if contradict_fn is None:
+            from kairix.knowledge.contradict.detector import check_contradiction
 
-        llm = get_default_backend()
-        results = check_contradiction(
+            contradict_fn = check_contradiction
+        if llm_backend is None:
+            from kairix.platform.llm import get_default_backend
+
+            llm_backend = get_default_backend()
+
+        results = contradict_fn(
             content=content,
-            llm=llm,
+            llm=llm_backend,
             top_k=top_k,
             threshold=threshold,
         )
         return {
             "content": content,
             "contradictions": [
-                {"path": r.doc_path, "score": r.score, "reason": r.reason, "snippet": r.snippet} for r in results
+                {
+                    "path": r.doc_path,
+                    "score": r.score,
+                    "reason": r.reason,
+                    "snippet": r.snippet,
+                }
+                for r in results
             ],
             "has_contradictions": len(results) > 0,
             "error": "",

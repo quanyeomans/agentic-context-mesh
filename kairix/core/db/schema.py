@@ -92,7 +92,11 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
     )
 
     db.commit()
-    logger.info("db.schema: kairix schema initialised (version=%s, dims=%d)", SCHEMA_VERSION, dims)
+    logger.info(
+        "db.schema: kairix schema initialised (version=%s, dims=%d)",
+        SCHEMA_VERSION,
+        dims,
+    )
 
 
 def validate_schema(db: sqlite3.Connection) -> list[str]:

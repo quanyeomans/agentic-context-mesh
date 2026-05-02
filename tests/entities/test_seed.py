@@ -34,6 +34,7 @@ def _make_test_db() -> sqlite3.Connection:
 
 
 class TestScanForEntities:
+    @pytest.mark.unit
     def test_discovers_entities_from_titles(self) -> None:
         from kairix.knowledge.entities.seed import scan_for_entities
 
@@ -42,6 +43,7 @@ class TestScanForEntities:
         # Should find entities from document titles (people/, clients/ folders)
         assert len(candidates) > 0
 
+    @pytest.mark.unit
     def test_respects_limit(self) -> None:
         from kairix.knowledge.entities.seed import scan_for_entities
 
@@ -49,6 +51,7 @@ class TestScanForEntities:
         candidates = scan_for_entities(db, limit=2)
         assert len(candidates) <= 2
 
+    @pytest.mark.unit
     def test_returns_entity_candidates_with_required_fields(self) -> None:
         from kairix.knowledge.entities.seed import scan_for_entities
 
@@ -61,6 +64,7 @@ class TestScanForEntities:
             assert hasattr(c, "source_docs")
             assert 0.0 <= c.confidence <= 1.0
 
+    @pytest.mark.unit
     def test_deduplicates_by_name(self) -> None:
         from kairix.knowledge.entities.seed import scan_for_entities
 
@@ -71,6 +75,7 @@ class TestScanForEntities:
 
 
 class TestSeedGraph:
+    @pytest.mark.unit
     def test_upserts_confirmed_candidates(self) -> None:
         from kairix.knowledge.entities.seed import EntityCandidate, seed_graph
 
@@ -79,13 +84,24 @@ class TestSeedGraph:
         mock_client.upsert_node.return_value = True
 
         candidates = [
-            EntityCandidate(name="Acme Corp", entity_type="Organisation", confidence=0.9, source_docs=["acme-corp.md"]),
-            EntityCandidate(name="Alice Chen", entity_type="Person", confidence=0.85, source_docs=["alice-chen.md"]),
+            EntityCandidate(
+                name="Acme Corp",
+                entity_type="Organisation",
+                confidence=0.9,
+                source_docs=["acme-corp.md"],
+            ),
+            EntityCandidate(
+                name="Alice Chen",
+                entity_type="Person",
+                confidence=0.85,
+                source_docs=["alice-chen.md"],
+            ),
         ]
         count = seed_graph(mock_client, candidates)
         assert count == 2
         assert mock_client.upsert_node.call_count == 2
 
+    @pytest.mark.unit
     def test_returns_zero_when_neo4j_unavailable(self) -> None:
         from kairix.knowledge.entities.seed import EntityCandidate, seed_graph
 
@@ -93,11 +109,17 @@ class TestSeedGraph:
         mock_client.available = False
 
         candidates = [
-            EntityCandidate(name="Test", entity_type="Organisation", confidence=0.9, source_docs=["t.md"]),
+            EntityCandidate(
+                name="Test",
+                entity_type="Organisation",
+                confidence=0.9,
+                source_docs=["t.md"],
+            ),
         ]
         count = seed_graph(mock_client, candidates)
         assert count == 0
 
+    @pytest.mark.unit
     def test_handles_upsert_failure_gracefully(self) -> None:
         from kairix.knowledge.entities.seed import EntityCandidate, seed_graph
 
@@ -106,7 +128,12 @@ class TestSeedGraph:
         mock_client.upsert_node.return_value = False  # upsert fails
 
         candidates = [
-            EntityCandidate(name="Failing Entity", entity_type="Organisation", confidence=0.9, source_docs=["f.md"]),
+            EntityCandidate(
+                name="Failing Entity",
+                entity_type="Organisation",
+                confidence=0.9,
+                source_docs=["f.md"],
+            ),
         ]
         count = seed_graph(mock_client, candidates)
         assert count == 0  # failed upserts don't count

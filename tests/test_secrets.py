@@ -234,9 +234,9 @@ def test_get_secret_from_file(tmp_path, monkeypatch) -> None:
     p.write_text("KAIRIX_LLM_ENDPOINT=https://example.openai.azure.com\n", encoding="utf-8")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path))
     # Clear lru_cache so this path is freshly read
-    from kairix.secrets import _load_secrets_file
+    from kairix.secrets import load_secrets_file
 
-    _load_secrets_file.cache_clear()
+    load_secrets_file.cache_clear()
     value = get_secret("kairix-llm-endpoint")
     assert value == "https://example.openai.azure.com"
 
@@ -250,9 +250,9 @@ def test_get_secret_file_ignores_comments_and_blank_lines(tmp_path, monkeypatch)
     p = tmp_path / "kairix.env"
     p.write_text(content, encoding="utf-8")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path))
-    from kairix.secrets import _load_secrets_file
+    from kairix.secrets import load_secrets_file
 
-    _load_secrets_file.cache_clear()
+    load_secrets_file.cache_clear()
     value = get_secret("kairix-neo4j-password")
     assert value == "s3cr3t"
 
@@ -314,14 +314,14 @@ def test_get_secret_oserror_message_is_informative(monkeypatch) -> None:
 @pytest.mark.unit
 def test_refresh_secrets_clears_cache_and_reloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """refresh_secrets clears lru_cache and re-reads the secrets file."""
-    from kairix.secrets import _load_secrets_file, refresh_secrets
+    from kairix.secrets import load_secrets_file, refresh_secrets
 
     secrets_file = tmp_path / "kairix.env"
     secrets_file.write_text("MY_SECRET_A=original\n")
     monkeypatch.setenv("KAIRIX_SECRETS_FILE", str(secrets_file))
 
     # First load
-    _load_secrets_file.cache_clear()
+    load_secrets_file.cache_clear()
     loaded = refresh_secrets(str(secrets_file))
     assert loaded >= 1
     assert os.environ.get("MY_SECRET_A") == "original"

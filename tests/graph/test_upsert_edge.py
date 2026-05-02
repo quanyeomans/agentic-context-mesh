@@ -37,6 +37,7 @@ def mock_neo4j_client() -> MagicMock:
 class TestDocumentMentionsEdge:
     """upsert_edge creates Document nodes via MERGE for MENTIONS edges."""
 
+    @pytest.mark.unit
     def test_document_source_uses_merge_not_match(self, mock_neo4j_client: MagicMock) -> None:
         """Document from_label uses MERGE to create node if it doesn't exist."""
         edge = GraphEdge(
@@ -54,6 +55,7 @@ class TestDocumentMentionsEdge:
         assert "MERGE (a:Document" in cypher
         assert "MATCH (b:Person" in cypher
 
+    @pytest.mark.unit
     def test_non_document_source_uses_match(self, mock_neo4j_client: MagicMock) -> None:
         """Non-Document from_label uses MATCH (nodes must pre-exist)."""
         edge = GraphEdge(
@@ -72,6 +74,7 @@ class TestDocumentMentionsEdge:
         assert "MATCH (b:Person" in cypher
         assert "MERGE" not in cypher.split("MATCH")[0]  # No MERGE before first MATCH
 
+    @pytest.mark.unit
     def test_upsert_edge_returns_false_on_driver_error(self, mock_neo4j_client: MagicMock) -> None:
         """upsert_edge returns False (not raises) when Neo4j errors."""
         session = mock_neo4j_client._driver.session.return_value.__enter__.return_value
@@ -88,6 +91,7 @@ class TestDocumentMentionsEdge:
         result = mock_neo4j_client.upsert_edge(edge)
         assert result is False
 
+    @pytest.mark.unit
     def test_upsert_edge_returns_true_on_success(self, mock_neo4j_client: MagicMock) -> None:
         """upsert_edge returns True when edge creation succeeds."""
         edge = GraphEdge(
@@ -101,6 +105,7 @@ class TestDocumentMentionsEdge:
         result = mock_neo4j_client.upsert_edge(edge)
         assert result is True
 
+    @pytest.mark.unit
     def test_upsert_edge_returns_false_when_driver_none(self) -> None:
         """upsert_edge returns False when no Neo4j driver is available."""
         with patch("kairix.knowledge.graph.client._try_import_neo4j", return_value=None):
@@ -120,6 +125,7 @@ class TestDocumentMentionsEdge:
             result = client.upsert_edge(edge)
             assert result is False
 
+    @pytest.mark.unit
     def test_mentions_edge_sets_properties(self, mock_neo4j_client: MagicMock) -> None:
         """MENTIONS edge passes props to SET r += $props."""
         edge = GraphEdge(
@@ -134,4 +140,7 @@ class TestDocumentMentionsEdge:
 
         session = mock_neo4j_client._driver.session.return_value.__enter__.return_value
         call_kwargs = session.run.call_args[1]
-        assert call_kwargs["props"] == {"source_path": "projects/doc-1.md", "weight": 1.0}
+        assert call_kwargs["props"] == {
+            "source_path": "projects/doc-1.md",
+            "weight": 1.0,
+        }

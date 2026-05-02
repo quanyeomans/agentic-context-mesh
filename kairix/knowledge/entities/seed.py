@@ -122,7 +122,7 @@ def seed_graph(client: Any, candidates: list[EntityCandidate]) -> int:
 
     count = 0
     for c in candidates:
-        props: dict = {"name": c.name}
+        props: dict[str, Any] = {"name": c.name}
         if c.source_docs:
             props["source_docs"] = c.source_docs[:5]  # cap for Neo4j property size
 

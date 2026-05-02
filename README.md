@@ -140,14 +140,20 @@ ln -s ~/my-notes ./documents # point to your documents
 docker compose up -d         # starts kairix + worker + Neo4j
 ```
 
-See the [full quick-start guide](docs/getting-started/quick-start.md) for detailed setup and troubleshooting.
+**Verify it works** — the container includes a reference library and gold suite. After setup:
+```bash
+docker compose exec kairix kairix eval    # runs 200-case benchmark, prints scores
+docker compose exec kairix kairix onboard check   # verifies all 9 deployment checks pass
+```
+
+See the [full quick-start guide](docs/getting-started/quick-start.md) for detailed setup.
 
 **What you need:**
 - Python 3.10+ (Option A) or Docker (Option B)
 - An LLM API key for embeddings (Azure OpenAI or any OpenAI-compatible API)
 - A folder of documents
 
-**Ships with:** 5,800+ curated reference library documents on AI agents, engineering, data, and security — searchable immediately.
+**Ships with:** 5,800+ reference library documents and a 200-case gold suite for immediate quality verification.
 
 ---
 

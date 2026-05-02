@@ -256,7 +256,10 @@ def test_crawl_person_no_org_no_edge(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_crawl_finds_outcome(tmp_path: Path) -> None:
     outcomes = tmp_path / "05-Knowledge" / "01-Domain-Outcomes"
-    _write(outcomes / "ai-governance.md", "---\nname: AI Governance\ndomain: technology\n---")
+    _write(
+        outcomes / "ai-governance.md",
+        "---\nname: AI Governance\ndomain: technology\n---",
+    )
 
     client = _make_neo4j()
     report = crawl(document_root=tmp_path, neo4j_client=client)
@@ -280,7 +283,10 @@ def test_crawl_creates_mentions_edge_for_wikilink(tmp_path: Path) -> None:
 
     # A document that wikilinks [[Acme]]
     docs = tmp_path / "01-Projects"
-    _write(docs / "insurance-analysis.md", "We worked with [[Acme]] on their digital strategy.")
+    _write(
+        docs / "insurance-analysis.md",
+        "We worked with [[Acme]] on their digital strategy.",
+    )
 
     client = _make_neo4j()
     crawl(document_root=tmp_path, neo4j_client=client)

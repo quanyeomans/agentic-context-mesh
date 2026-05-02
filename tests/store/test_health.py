@@ -10,7 +10,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kairix.knowledge.store.health import StoreHealthReport, format_health_text, run_store_health
+from kairix.knowledge.store.health import (
+    StoreHealthReport,
+    format_health_text,
+    run_store_health,
+)
 
 # Backwards-compat aliases verified below — kept so old test references still work
 VaultHealthReport = StoreHealthReport

@@ -162,7 +162,7 @@ class VectorIndex:
                         "path": row["path"],
                         "collection": row["collection"],
                         "title": row["title"],
-                        "snippet": strip_frontmatter(row["snippet"])[:300] if row["snippet"] else "",
+                        "snippet": (strip_frontmatter(row["snippet"])[:300] if row["snippet"] else ""),
                     }
                 )
                 if len(results) >= k:
@@ -218,7 +218,10 @@ class VectorIndex:
             self._mutable = True
         except Exception:
             # Index is immutable — rebuild as mutable
-            logger.info("vec_index: converting immutable index to mutable (%d vectors)", len(self._index))
+            logger.info(
+                "vec_index: converting immutable index to mutable (%d vectors)",
+                len(self._index),
+            )
             old_keys = np.array(list(self._key_to_hash_seq.keys()), dtype=np.int64)
             old_vecs = np.array([self._index[k] for k in old_keys], dtype=np.float32)
             self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")

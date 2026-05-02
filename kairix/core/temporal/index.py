@@ -47,6 +47,7 @@ def _boards_dir() -> Path:
 def get_memory_log_paths(
     start: date | None,
     end: date | None,
+    document_root: Path | None = None,
 ) -> list[str]:
     """
     Return all memory log paths across agent knowledge dirs, filtered by date range.
@@ -57,15 +58,18 @@ def get_memory_log_paths(
     If both are None, returns all logs found.
 
     Args:
-        start: Inclusive start date (or None for no lower bound).
-        end:   Inclusive end date (or None for no upper bound).
+        start:         Inclusive start date (or None for no lower bound).
+        end:           Inclusive end date (or None for no upper bound).
+        document_root: Override for the document root directory.
+                       Defaults to paths.document_root() when None.
 
     Returns:
         Sorted list of matching file paths.
     """
     paths: list[str] = []
+    doc_root = document_root or _doc_root_fn()
 
-    agent_knowledge_dir = _doc_root_fn() / "04-Agent-Knowledge"
+    agent_knowledge_dir = doc_root / "04-Agent-Knowledge"
     if not agent_knowledge_dir.is_dir():
         return paths
 
@@ -166,6 +170,7 @@ def query_temporal_chunks(
     end: date | None,
     chunk_types: list[str] | None = None,
     limit: int = 20,
+    document_root: Path | None = None,
 ) -> list[TemporalChunk]:
     """
     Query the temporal chunk store for chunks matching topic in the date range.
@@ -178,12 +183,14 @@ def query_temporal_chunks(
       5. Return top-N by combined score
 
     Args:
-        topic:       Topic string to rank chunks against.
-        start:       Inclusive start date (None = no lower bound).
-        end:         Inclusive end date (None = no upper bound).
-        chunk_types: Optional filter — "board_card" and/or "memory_section".
-                     If None, both types are included.
-        limit:       Maximum number of chunks to return.
+        topic:         Topic string to rank chunks against.
+        start:         Inclusive start date (None = no lower bound).
+        end:           Inclusive end date (None = no upper bound).
+        chunk_types:   Optional filter — "board_card" and/or "memory_section".
+                       If None, both types are included.
+        limit:         Maximum number of chunks to return.
+        document_root: Override for the document root directory.
+                       Defaults to paths.document_root() when None.
 
     Returns:
         List of TemporalChunk objects sorted by score (best first).
@@ -201,12 +208,16 @@ def query_temporal_chunks(
                 logger.warning("query_temporal_chunks: error chunking board %r — %s", board_path, e)
 
         # 2. Memory logs in date range
-        memory_paths = get_memory_log_paths(start, end)
+        memory_paths = get_memory_log_paths(start, end, document_root=document_root)
         for log_path in memory_paths:
             try:
                 all_chunks.extend(chunk_memory_log(log_path))
             except Exception as e:
-                logger.warning("query_temporal_chunks: error chunking memory log %r — %s", log_path, e)
+                logger.warning(
+                    "query_temporal_chunks: error chunking memory log %r — %s",
+                    log_path,
+                    e,
+                )
 
         # 3. Filter by date range
         date_filtered: list[TemporalChunk] = []

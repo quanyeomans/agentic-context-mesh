@@ -11,8 +11,16 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from kairix.knowledge.reflib.catalogue import CatalogueEntry, generate_catalogue, generate_licence_notices
-from kairix.knowledge.reflib.dedup import choose_canonical, find_exact_duplicates, hash_content
+from kairix.knowledge.reflib.catalogue import (
+    CatalogueEntry,
+    generate_catalogue,
+    generate_licence_notices,
+)
+from kairix.knowledge.reflib.dedup import (
+    choose_canonical,
+    find_exact_duplicates,
+    hash_content,
+)
 from kairix.knowledge.reflib.filters import filter_collection
 from kairix.knowledge.reflib.frontmatter import build_frontmatter, inject_frontmatter
 from kairix.knowledge.reflib.markdown import clean_markdown
@@ -92,6 +100,145 @@ def _is_gutenberg_text(source: SourceDef) -> bool:
     return source.format == "text" and "gutenberg" in source.source_url.lower()
 
 
+def collect_and_filter_source_files(
+    source_path: Path,
+    source: SourceDef,
+    config: NormaliseConfig,
+    report: NormaliseReport,
+) -> list[Path]:
+    """Read and filter .md files for a source, updating the report."""
+    md_files = _collect_markdown_files(source_path)
+    report.total_input += len(md_files)
+    filtered = filter_collection(md_files, source)
+    report.filtered_boilerplate += len(md_files) - len(filtered)
+    return filtered
+
+
+def process_source_collection(
+    collection: str,
+    dir_name: str,
+    source_path: Path,
+    config: NormaliseConfig,
+    source: SourceDef,
+    is_gutenberg: bool,
+    report: NormaliseReport,
+) -> dict[Path, str]:
+    """Read files, filter, clean, inject frontmatter, handle splitting.
+
+    Returns a mapping of output path to content for this source.
+    """
+    filtered = collect_and_filter_source_files(source_path, source, config, report)
+    output_files: dict[Path, str] = {}
+
+    for file_path in filtered:
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            logger.warning("Cannot read: %s", file_path)
+            continue
+
+        # Clean markdown
+        original_len = len(text)
+        text = clean_markdown(text, is_gutenberg=is_gutenberg)
+        if len(text) != original_len:
+            report.html_cleaned += 1
+
+        # Check minimum size (skip for README files — curated lists are valuable)
+        is_readme = file_path.name.lower() in ("readme.md", "index.md")
+        if not is_readme and is_too_small(text, config.min_file_size):
+            report.filtered_too_small += 1
+            continue
+
+        # Build frontmatter
+        fm = build_frontmatter(file_path, source, text)
+        text = inject_frontmatter(text, fm)
+        report.frontmatter_added += 1
+
+        # Compute relative output path
+        rel = file_path.relative_to(source_path)
+        parts = [to_kebab_case(str(p)) if p.suffix else p.name.lower() for p in [Path(seg) for seg in rel.parts]]
+        if parts and not parts[-1].endswith(".md"):
+            parts[-1] = parts[-1] + ".md"
+
+        if str(rel) != "/".join(parts):
+            report.renamed += 1
+
+        # Handle splitting
+        if needs_split(text, config.max_file_size):
+            stem = Path(parts[-1]).stem
+            parent_parts = parts[:-1]
+            chunks = split_at_headings(text, stem, config.max_file_size)
+            report.split_count += len(chunks) - 1
+
+            for chunk_stem, chunk_text in chunks:
+                chunk_filename = f"{chunk_stem}.md"
+                out_path = config.output_dir / collection / dir_name / "/".join(parent_parts) / chunk_filename
+                output_files[out_path] = chunk_text
+        else:
+            out_path = config.output_dir / collection / dir_name / "/".join(parts)
+            output_files[out_path] = text
+
+    return output_files
+
+
+def deduplicate_output(
+    all_hashed: list[tuple[Path, str]],
+    output_files: dict[Path, str],
+    config: NormaliseConfig,
+    report: NormaliseReport,
+) -> None:
+    """Find and remove exact duplicates from output_files in-place."""
+    if not config.dedup:
+        return
+    duplicates = find_exact_duplicates(all_hashed)
+    for _dup_hash, dup_paths in duplicates.items():
+        canonical = choose_canonical(dup_paths)
+        for p in dup_paths:
+            if p != canonical and p in output_files:
+                del output_files[p]
+                report.exact_duplicates += 1
+
+
+def write_output_files(
+    config: NormaliseConfig,
+    output_files: dict[Path, str],
+    catalogue_entries: list[CatalogueEntry],
+) -> None:
+    """Create output dir, write files, generate CATALOGUE.md and LICENSE-NOTICES.md."""
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+
+    for out_path, content in output_files.items():
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(content, encoding="utf-8")
+
+    cat_text = generate_catalogue(catalogue_entries)
+    (config.output_dir / "CATALOGUE.md").write_text(cat_text, encoding="utf-8")
+
+    lic_text = generate_licence_notices(catalogue_entries)
+    (config.output_dir / "LICENSE-NOTICES.md").write_text(lic_text, encoding="utf-8")
+
+
+def build_catalogue_entry(
+    collection: str,
+    dir_name: str,
+    source: SourceDef,
+    count: int,
+    size: int,
+    today: str,
+) -> CatalogueEntry:
+    """Construct a CatalogueEntry for a processed source."""
+    return CatalogueEntry(
+        collection=collection,
+        source_name=source.name,
+        source_url=source.source_url,
+        licence=source.licence,
+        licence_tier=source.licence_tier,
+        file_count=count,
+        total_size_kb=size / 1024,
+        date_verified=today,
+    )
+
+
 def normalise(config: NormaliseConfig) -> NormaliseReport:
     """Run the full normalisation pipeline.
 
@@ -110,9 +257,7 @@ def normalise(config: NormaliseConfig) -> NormaliseReport:
     report = NormaliseReport()
     catalogue_entries: list[CatalogueEntry] = []
 
-    # All files with their hashes for dedup
     all_hashed: list[tuple[Path, str]] = []
-    # All files with output path -> content mapping
     output_files: dict[Path, str] = {}
 
     sources = _discover_sources(config.input_dir)
@@ -122,137 +267,63 @@ def normalise(config: NormaliseConfig) -> NormaliseReport:
         source = get_source(collection, dir_name)
 
         if source is None:
-            # Try collection root
             if dir_name == "":
-                # Files at collection root, not a registered source — skip
                 continue
             report.unregistered_sources.append(f"{collection}/{dir_name}")
             logger.warning("Unregistered source: %s/%s — skipping", collection, dir_name)
             continue
 
-        # Check licence tier
         if source.licence_tier > config.max_tier:
             md_files = list(source_path.rglob("*.md"))
             report.filtered_licence += len(md_files)
             logger.info(
-                "Excluded (tier %d): %s/%s (%d files)", source.licence_tier, collection, dir_name, len(md_files)
+                "Excluded (tier %d): %s/%s (%d files)",
+                source.licence_tier,
+                collection,
+                dir_name,
+                len(md_files),
             )
             continue
 
-        # Collect and filter files
-        md_files = _collect_markdown_files(source_path)
-        report.total_input += len(md_files)
-
-        filtered = filter_collection(md_files, source)
-        report.filtered_boilerplate += len(md_files) - len(filtered)
-
         is_gutenberg = _is_gutenberg_text(source)
-        source_output_count = 0
-        source_output_size = 0
-
-        for file_path in filtered:
-            try:
-                text = file_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                logger.warning("Cannot read: %s", file_path)
-                continue
-
-            # Clean markdown
-            original_len = len(text)
-            text = clean_markdown(text, is_gutenberg=is_gutenberg)
-            if len(text) != original_len:
-                report.html_cleaned += 1
-
-            # Check minimum size (skip for README files — curated lists are valuable)
-            is_readme = file_path.name.lower() in ("readme.md", "index.md")
-            if not is_readme and is_too_small(text, config.min_file_size):
-                report.filtered_too_small += 1
-                continue
-
-            # Build frontmatter
-            fm = build_frontmatter(file_path, source, text)
-            text = inject_frontmatter(text, fm)
-            report.frontmatter_added += 1
-
-            # Compute relative output path
-            rel = file_path.relative_to(source_path)
-            # Normalise each path component to kebab-case
-            parts = [to_kebab_case(str(p)) if p.suffix else p.name.lower() for p in [Path(seg) for seg in rel.parts]]
-            # Ensure .md extension on the final file
-            if parts and not parts[-1].endswith(".md"):
-                parts[-1] = parts[-1] + ".md"
-
-            if str(rel) != "/".join(parts):
-                report.renamed += 1
-
-            # Handle splitting
-            if needs_split(text, config.max_file_size):
-                stem = Path(parts[-1]).stem
-                parent_parts = parts[:-1]
-                chunks = split_at_headings(text, stem, config.max_file_size)
-                report.split_count += len(chunks) - 1
-
-                for chunk_stem, chunk_text in chunks:
-                    chunk_filename = f"{chunk_stem}.md"
-                    out_path = config.output_dir / collection / dir_name / "/".join(parent_parts) / chunk_filename
-                    content_hash = hash_content(chunk_text)
-                    all_hashed.append((out_path, content_hash))
-                    output_files[out_path] = chunk_text
-                    source_output_count += 1
-                    source_output_size += len(chunk_text.encode("utf-8"))
-            else:
-                out_path = config.output_dir / collection / dir_name / "/".join(parts)
-                content_hash = hash_content(text)
-                all_hashed.append((out_path, content_hash))
-                output_files[out_path] = text
-                source_output_count += 1
-                source_output_size += len(text.encode("utf-8"))
-
-        report.collections[f"{collection}/{dir_name}"] = source_output_count
-
-        catalogue_entries.append(
-            CatalogueEntry(
-                collection=collection,
-                source_name=source.name,
-                source_url=source.source_url,
-                licence=source.licence,
-                licence_tier=source.licence_tier,
-                file_count=source_output_count,
-                total_size_kb=source_output_size / 1024,
-                date_verified=today,
-            )
+        source_files = process_source_collection(
+            collection,
+            dir_name,
+            source_path,
+            config,
+            source,
+            is_gutenberg,
+            report,
         )
 
-    # Deduplication
-    if config.dedup:
-        duplicates = find_exact_duplicates(all_hashed)
-        for _dup_hash, dup_paths in duplicates.items():
-            canonical = choose_canonical(dup_paths)
-            for p in dup_paths:
-                if p != canonical and p in output_files:
-                    del output_files[p]
-                    report.exact_duplicates += 1
+        source_output_count = len(source_files)
+        source_output_size = sum(len(c.encode("utf-8")) for c in source_files.values())
 
+        for out_path, content in source_files.items():
+            content_hash = hash_content(content)
+            all_hashed.append((out_path, content_hash))
+            output_files[out_path] = content
+
+        report.collections[f"{collection}/{dir_name}"] = source_output_count
+        catalogue_entries.append(
+            build_catalogue_entry(collection, dir_name, source, source_output_count, source_output_size, today),
+        )
+
+    deduplicate_output(all_hashed, output_files, config, report)
     report.total_output = len(output_files)
 
-    # Write output
     if not config.dry_run:
-        config.output_dir.mkdir(parents=True, exist_ok=True)
-
-        for out_path, content in output_files.items():
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(content, encoding="utf-8")
-
-        # Generate catalogue
-        cat_text = generate_catalogue(catalogue_entries)
-        (config.output_dir / "CATALOGUE.md").write_text(cat_text, encoding="utf-8")
-
-        # Generate licence notices
-        lic_text = generate_licence_notices(catalogue_entries)
-        (config.output_dir / "LICENSE-NOTICES.md").write_text(lic_text, encoding="utf-8")
-
-        logger.info("Normalisation complete: %d → %d files", report.total_input, report.total_output)
+        write_output_files(config, output_files, catalogue_entries)
+        logger.info(
+            "Normalisation complete: %d → %d files",
+            report.total_input,
+            report.total_output,
+        )
     else:
-        logger.info("Dry run: would produce %d files from %d input", report.total_output, report.total_input)
+        logger.info(
+            "Dry run: would produce %d files from %d input",
+            report.total_output,
+            report.total_input,
+        )
 
     return report

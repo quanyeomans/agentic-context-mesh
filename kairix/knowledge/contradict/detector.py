@@ -13,6 +13,7 @@ Never raises — failures return empty lists. Pass a mock LLM/search for testing
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,6 +48,7 @@ def check_contradiction(
     llm: Any,
     top_k: int = 5,
     threshold: float = 0.5,
+    search_fn: Callable[..., Any] | None = None,
 ) -> list[ContradictionResult]:
     """
     Check whether *content* contradicts existing knowledge in the document store.
@@ -56,12 +58,18 @@ def check_contradiction(
         llm:       An LLMBackend instance (must implement `chat(messages)`).
         top_k:     How many similar documents to compare against.
         threshold: Minimum contradiction score (0.0-1.0) to include in results.
+        search_fn: Injectable search function for testing.
+                   Defaults to ``SearchPipeline.search()`` via the factory.
 
     Returns:
         List of ContradictionResult, sorted by score descending.
         Empty list when no contradictions found or on any failure.
     """
-    from kairix.core.search.hybrid import search as hybrid_search
+    if search_fn is None:
+        from kairix.core.factory import build_search_pipeline
+
+        _pipeline = build_search_pipeline()
+        search_fn = _pipeline.search
 
     results: list[ContradictionResult] = []
 
@@ -70,7 +78,7 @@ def check_contradiction(
     search_query = content[:500]
 
     try:
-        sr = hybrid_search(query=search_query, budget=5000)
+        sr = search_fn(query=search_query, budget=5000)
         candidates = sr.results[:top_k]
         logger.info(
             "contradict: retrieved %d candidates (query length=%d, threshold=%.2f)",

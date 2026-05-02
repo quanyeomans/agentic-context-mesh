@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import re
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Core DCG helpers
@@ -31,7 +32,7 @@ def ideal_dcg(relevances: list[float], k: int) -> float:
     return dcg(ideal)
 
 
-def ideal_dcg_graded(gold: list[dict], k: int) -> float:
+def ideal_dcg_graded(gold: list[dict[str, Any]], k: int) -> float:
     """IDCG from graded gold list: sort by relevance desc, take top k."""
     sorted_rels = sorted([g.get("relevance", 0) for g in gold], reverse=True)
     return dcg(sorted_rels, k)
@@ -79,7 +80,7 @@ def match_gold_to_path(gold_ref: str, result_path: str) -> bool:
     return _stem_from_path(result_path) == norm_gold
 
 
-def relevance_for_path(path: str, gold_list: list[dict]) -> int:
+def relevance_for_path(path: str, gold_list: list[dict[str, Any]]) -> int:
     """Return the relevance grade for a retrieved path against a gold list.
 
     Supports both {"title": ..., "relevance": N} and {"path": ..., "relevance": N}
@@ -100,7 +101,7 @@ def relevance_for_path(path: str, gold_list: list[dict]) -> int:
     return 0
 
 
-def _gold_matches_any(gold_list: list[dict], retrieved_path: str) -> bool:
+def _gold_matches_any(gold_list: list[dict[str, Any]], retrieved_path: str) -> bool:
     """True if the retrieved path matches any gold entry with relevance >= 1."""
     for g in gold_list:
         if int(g.get("relevance", 0)) < 1:
@@ -154,14 +155,14 @@ def mean_reciprocal_rank(retrieved_paths: list[str], gold_paths: list[str]) -> f
 
 
 # ---------------------------------------------------------------------------
-# Graded-relevance API (gold: list[dict])
+# Graded-relevance API (gold: list[dict[str, Any]])
 #
 # Accepts both {"title": ..., "relevance": N} and {"path": ..., "relevance": N}.
 # Uses match_gold_to_path() for consistent dual-mode matching across all metrics.
 # ---------------------------------------------------------------------------
 
 
-def ndcg_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
+def ndcg_graded(retrieved: list[str], gold: list[dict[str, Any]], k: int = 10) -> float:
     """NDCG@k with graded relevance. Supports title-based and path-based gold entries."""
     if not gold:
         return 0.0
@@ -173,13 +174,13 @@ def ndcg_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
     return dcg(rels, k) / idcg
 
 
-def hit_at_k_graded(retrieved: list[str], gold: list[dict], k: int = 5) -> bool:
+def hit_at_k_graded(retrieved: list[str], gold: list[dict[str, Any]], k: int = 5) -> bool:
     """True if any gold entry (relevance >= 1) appears in top-k retrieved."""
     retrieved = list(dict.fromkeys(retrieved))  # dedup, preserve order
     return any(_gold_matches_any(gold, p) for p in retrieved[:k])
 
 
-def reciprocal_rank_graded(retrieved: list[str], gold: list[dict], k: int = 10) -> float:
+def reciprocal_rank_graded(retrieved: list[str], gold: list[dict[str, Any]], k: int = 10) -> float:
     """Reciprocal rank of first relevant gold entry in top-k (0.0 if none)."""
     retrieved = list(dict.fromkeys(retrieved))  # dedup, preserve order
     for i, p in enumerate(retrieved[:k]):

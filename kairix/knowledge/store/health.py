@@ -183,7 +183,10 @@ def format_health_text(report: StoreHealthReport) -> str:
     ]
 
     if not report.neo4j_available:
-        lines += ["⚠ Neo4j unavailable — run `kairix store crawl` to populate the graph", ""]
+        lines += [
+            "⚠ Neo4j unavailable — run `kairix store crawl` to populate the graph",
+            "",
+        ]
         for issue in report.issues:
             lines.append(f"  - {issue}")
         return "\n".join(lines)

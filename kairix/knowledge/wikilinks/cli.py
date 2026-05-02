@@ -16,6 +16,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from kairix.knowledge.wikilinks.injector import (
     _LOG_PATH,
@@ -79,7 +80,10 @@ def _inject_cmd(argv: list[str]) -> None:
 
     entities = get_entities()
     if not entities:
-        print("⚠️  No entities loaded — check Neo4j connection and bootstrap index.", file=sys.stderr)
+        print(
+            "⚠️  No entities loaded — check Neo4j connection and bootstrap index.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     print(f"Loaded {len(entities)} entities.")
@@ -97,7 +101,7 @@ def _inject_cmd(argv: list[str]) -> None:
         _write_last_run()
 
 
-def _inject_single(path: str, entities: list, dry_run: bool) -> None:
+def _inject_single(path: str, entities: list[Any], dry_run: bool) -> None:
     """Inject wikilinks into a single file."""
     if not should_inject(path):
         print(f"⚠️  {path} is not eligible for injection.")
@@ -112,7 +116,7 @@ def _inject_single(path: str, entities: list, dry_run: bool) -> None:
         print(f"  — {path}: no new links")
 
 
-def _inject_all(entities: list, dry_run: bool) -> None:
+def _inject_all(entities: list[Any], dry_run: bool) -> None:
     """Inject wikilinks into all eligible vault and workspace files."""
     files = _gather_eligible_files()
     total_files = 0
@@ -131,7 +135,7 @@ def _inject_all(entities: list, dry_run: bool) -> None:
     print(f"\nDone. {total_files} files updated, {total_links} wikilinks injected.")
 
 
-def _inject_changed(entities: list, dry_run: bool) -> None:
+def _inject_changed(entities: list[Any], dry_run: bool) -> None:
     """Inject only files modified since last run."""
     last_run = _read_last_run()
     if last_run is None:
@@ -265,9 +269,9 @@ def _read_last_run() -> float | None:
         return None
 
 
-def _read_log_entries() -> list[dict]:
+def _read_log_entries() -> list[dict[str, Any]]:
     """Read all entries from injection log."""
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     try:
         with open(_LOG_PATH, encoding="utf-8") as fh:
             for line in fh:

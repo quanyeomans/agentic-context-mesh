@@ -34,13 +34,15 @@ Return JSON only:
 """
 
 
-def classify_with_llm(content: str, agent: str = "shared") -> ClassificationResult:  # noqa: F821
+def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> ClassificationResult:  # noqa: F821
     """
     Use GPT-4o-mini to classify ambiguous content.
 
     Args:
-        content: Content string to classify.
-        agent:   Agent name (used for routing after classification).
+        content:     Content string to classify.
+        agent:       Agent name (used for routing after classification).
+        llm_backend: Optional LLM backend instance for dependency injection.
+                     Defaults to get_default_backend().
 
     Returns:
         ClassificationResult. On failure, returns confidence=0.0 and needs_confirmation=True.
@@ -67,9 +69,11 @@ def classify_with_llm(content: str, agent: str = "shared") -> ClassificationResu
     ]
 
     try:
-        from kairix.platform.llm import get_default_backend as _get_llm
+        if llm_backend is None:
+            from kairix.platform.llm import get_default_backend as _get_llm
 
-        raw = _get_llm().chat(messages, max_tokens=200)
+            llm_backend = _get_llm()
+        raw = llm_backend.chat(messages, max_tokens=200)
         if not raw:
             raise ValueError("empty response from LLM")
 

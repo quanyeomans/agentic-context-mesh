@@ -18,6 +18,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+_DEFAULT_DB_PATH = str(Path.home() / ".cache/kairix/index.sqlite")
+_DEFAULT_DEPLOYMENT = "gpt-4o-mini"
+_DEFAULT_AGENT = "shape"
+_AGENT_HELP = "Agent for retrieval scoping (default: shape)"
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -172,7 +178,10 @@ def _cmd_hybrid_sweep(args: argparse.Namespace) -> int:
     import logging
     from pathlib import Path
 
-    from kairix.quality.eval.hybrid_sweep import build_default_configs, sweep_hybrid_params
+    from kairix.quality.eval.hybrid_sweep import (
+        build_default_configs,
+        sweep_hybrid_params,
+    )
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -245,7 +254,11 @@ def _cmd_auto_gold(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from kairix.core.db import get_db_path, open_db
-    from kairix.quality.eval.auto_gold import analyse_corpus, build_suite, generate_template_queries
+    from kairix.quality.eval.auto_gold import (
+        analyse_corpus,
+        build_suite,
+        generate_template_queries,
+    )
 
     try:
         db_path = get_db_path()
@@ -395,29 +408,41 @@ def main(argv: list[str] | None = None) -> None:
     p_gen.add_argument("--categories", help="Comma-separated categories (default: all)")
     p_gen.add_argument(
         "--db",
-        default=str(__import__("pathlib").Path.home() / ".cache/kairix/index.sqlite"),
+        default=_DEFAULT_DB_PATH,
         help="kairix SQLite path (default: ~/.cache/kairix/index.sqlite)",
     )
-    p_gen.add_argument("--deployment", default="gpt-4o-mini", help="Azure deployment (default: gpt-4o-mini)")
+    p_gen.add_argument(
+        "--deployment",
+        default=_DEFAULT_DEPLOYMENT,
+        help="Azure deployment (default: gpt-4o-mini)",
+    )
     p_gen.add_argument("--no-calibrate", action="store_true", help="Skip calibration anchor check")
     p_gen.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
-    p_gen.add_argument("--agent", default="shape", help="Agent for retrieval scoping (default: shape)")
+    p_gen.add_argument("--agent", default=_DEFAULT_AGENT, help=_AGENT_HELP)
 
     # --- enrich ---
     p_enr = subparsers.add_parser("enrich", help="Enrich an existing suite with graded gold_titles")
     p_enr.add_argument("--suite", required=True, help="Input suite YAML path")
     p_enr.add_argument("--output", required=True, help="Output suite YAML path")
     p_enr.add_argument(
-        "--db", default=str(__import__("pathlib").Path.home() / ".cache/kairix/index.sqlite"), help="kairix SQLite path"
+        "--db",
+        default=_DEFAULT_DB_PATH,
+        help="kairix SQLite path",
     )
-    p_enr.add_argument("--deployment", default="gpt-4o-mini", help="Azure deployment (default: gpt-4o-mini)")
-    p_enr.add_argument("--agent", default="shape", help="Agent for retrieval scoping (default: shape)")
+    p_enr.add_argument(
+        "--deployment",
+        default=_DEFAULT_DEPLOYMENT,
+        help="Azure deployment (default: gpt-4o-mini)",
+    )
+    p_enr.add_argument("--agent", default=_DEFAULT_AGENT, help=_AGENT_HELP)
 
     # --- monitor ---
     p_mon = subparsers.add_parser("monitor", help="Run canary suite and check for regression")
     p_mon.add_argument("--suite", required=True, help="Canary suite YAML path")
     p_mon.add_argument(
-        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)"
+        "--log",
+        default=None,
+        help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)",
     )
     p_mon.add_argument(
         "--alert-threshold",
@@ -426,14 +451,19 @@ def main(argv: list[str] | None = None) -> None:
         help="Relative NDCG drop that triggers regression (default: 0.05)",
     )
     p_mon.add_argument(
-        "--window-days", type=int, default=7, help="Rolling window for baseline average in days (default: 7)"
+        "--window-days",
+        type=int,
+        default=7,
+        help="Rolling window for baseline average in days (default: 7)",
     )
-    p_mon.add_argument("--agent", default="shape", help="Agent for retrieval scoping (default: shape)")
+    p_mon.add_argument("--agent", default=_DEFAULT_AGENT, help=_AGENT_HELP)
 
     # --- report ---
     p_rep = subparsers.add_parser("report", help="Generate markdown report from monitor log")
     p_rep.add_argument(
-        "--log", default=None, help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)"
+        "--log",
+        default=None,
+        help="Monitor log path (default: KAIRIX_MONITOR_LOG or ~/.cache/kairix/monitor.jsonl)",
     )
     p_rep.add_argument("--days", type=int, default=30, help="Days of history to include (default: 30)")
     p_rep.add_argument("--output", default=None, help="Markdown output path (stdout if omitted)")
@@ -452,14 +482,26 @@ def main(argv: list[str] | None = None) -> None:
     p_gold.add_argument("--limit", type=int, default=10, help="Top-k per system (default: 10)")
 
     # --- auto-gold ---
-    p_ag = subparsers.add_parser("auto-gold", help="Generate evaluation suite from corpus analysis (no LLM needed)")
-    p_ag.add_argument("--output", default=None, help="Output suite YAML path (default: suites/auto-gold.yaml)")
+    p_ag = subparsers.add_parser(
+        "auto-gold",
+        help="Generate evaluation suite from corpus analysis (no LLM needed)",
+    )
+    p_ag.add_argument(
+        "--output",
+        default=None,
+        help="Output suite YAML path (default: suites/auto-gold.yaml)",
+    )
     p_ag.add_argument("--count", type=int, default=50, help="Target query count (default: 50)")
 
     # --- tune ---
     p_tune = subparsers.add_parser("tune", help="Analyse benchmark results and recommend parameter tuning")
     p_tune.add_argument("--result", required=True, help="Benchmark result JSON file")
-    p_tune.add_argument("--floor", type=float, default=0.50, help="Category floor threshold (default: 0.50)")
+    p_tune.add_argument(
+        "--floor",
+        type=float,
+        default=0.50,
+        help="Category floor threshold (default: 0.50)",
+    )
 
     # --- sweep ---
     p_sweep = subparsers.add_parser("sweep", help="Grid search BM25 column weights and query styles")
@@ -468,12 +510,17 @@ def main(argv: list[str] | None = None) -> None:
 
     # --- hybrid-sweep ---
     p_hsweep = subparsers.add_parser(
-        "hybrid-sweep", help="Grid search over hybrid pipeline: RRF k, boosts, retrieval modes"
+        "hybrid-sweep",
+        help="Grid search over hybrid pipeline: RRF k, boosts, retrieval modes",
     )
     p_hsweep.add_argument("--suite", required=True, help="Independent gold suite YAML")
     p_hsweep.add_argument("--output", default=None, help="CSV output path")
     p_hsweep.add_argument("--collection", default=None, help="Restrict search to this collection only")
-    p_hsweep.add_argument("--quick", action="store_true", help="Quick mode: run only baseline + key RRF k variants")
+    p_hsweep.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick mode: run only baseline + key RRF k variants",
+    )
 
     args = parser.parse_args(argv)
 

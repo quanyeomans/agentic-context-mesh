@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -21,4 +22,4 @@ class QueryLogEntry:
     session_id: str | None = None  # OpenClaw session ID if available
     vec_failed: bool = False  # True if vector search failed (dim mismatch etc.)
     error: str | None = None  # Error string if search failed
-    extra: dict = field(default_factory=dict)  # Any additional diagnostic fields
+    extra: dict[str, Any] = field(default_factory=dict)  # Any additional diagnostic fields

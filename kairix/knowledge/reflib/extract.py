@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from kairix.knowledge.reflib.frontmatter import extract_existing_frontmatter
 
@@ -71,8 +72,11 @@ _COLLECTION_DOMAIN: dict[str, str] = {
 # Known seed entities (high-value, unambiguous)
 # ---------------------------------------------------------------------------
 
-_SEED_PEOPLE: dict[str, dict] = {
-    "Marcus Aurelius": {"domain": "philosophy", "aliases": ["Marcus Aurelius Antoninus"]},
+_SEED_PEOPLE: dict[str, dict[str, Any]] = {
+    "Marcus Aurelius": {
+        "domain": "philosophy",
+        "aliases": ["Marcus Aurelius Antoninus"],
+    },
     "Epictetus": {"domain": "philosophy"},
     "Seneca": {"domain": "philosophy", "aliases": ["Lucius Annaeus Seneca"]},
     "Sun Tzu": {"domain": "philosophy", "aliases": ["Sunzi"]},
@@ -86,9 +90,15 @@ _SEED_PEOPLE: dict[str, dict] = {
     "Maria Montessori": {"domain": "education"},
 }
 
-_SEED_ORGANISATIONS: dict[str, dict] = {
-    "OWASP": {"domain": "cybersecurity", "aliases": ["Open Web Application Security Project"]},
-    "CNCF": {"domain": "software-engineering", "aliases": ["Cloud Native Computing Foundation"]},
+_SEED_ORGANISATIONS: dict[str, dict[str, Any]] = {
+    "OWASP": {
+        "domain": "cybersecurity",
+        "aliases": ["Open Web Application Security Project"],
+    },
+    "CNCF": {
+        "domain": "software-engineering",
+        "aliases": ["Cloud Native Computing Foundation"],
+    },
     "Google": {"domain": "technology"},
     "Microsoft": {"domain": "technology"},
     "Mozilla": {"domain": "technology", "aliases": ["Mozilla Foundation"]},
@@ -96,12 +106,24 @@ _SEED_ORGANISATIONS: dict[str, dict] = {
     "PostHog": {"domain": "data-science"},
     "OpenAI": {"domain": "artificial-intelligence"},
     "EleutherAI": {"domain": "artificial-intelligence"},
-    "Stanford": {"domain": "artificial-intelligence", "aliases": ["Stanford University"]},
+    "Stanford": {
+        "domain": "artificial-intelligence",
+        "aliases": ["Stanford University"],
+    },
     "18F": {"domain": "software-engineering"},
-    "USDS": {"domain": "product-management", "aliases": ["United States Digital Service"]},
-    "GDS": {"domain": "software-engineering", "aliases": ["Government Digital Service"]},
+    "USDS": {
+        "domain": "product-management",
+        "aliases": ["United States Digital Service"],
+    },
+    "GDS": {
+        "domain": "software-engineering",
+        "aliases": ["Government Digital Service"],
+    },
     "Meta": {"domain": "technology", "aliases": ["Facebook"]},
-    "BIAN": {"domain": "industry-standards", "aliases": ["Banking Industry Architecture Network"]},
+    "BIAN": {
+        "domain": "industry-standards",
+        "aliases": ["Banking Industry Architecture Network"],
+    },
     "MOSIP": {"domain": "industry-standards"},
     "Dropbox": {"domain": "technology"},
     "DAIR.AI": {"domain": "artificial-intelligence"},
@@ -113,24 +135,42 @@ _SEED_ORGANISATIONS: dict[str, dict] = {
     "Gong": {"domain": "product-management"},
 }
 
-_SEED_FRAMEWORKS: dict[str, dict] = {
-    "Twelve-Factor App": {"domain": "software-engineering", "aliases": ["12-Factor", "12 Factor App"]},
-    "SLSA": {"domain": "cybersecurity", "aliases": ["Supply-chain Levels for Software Artifacts"]},
+_SEED_FRAMEWORKS: dict[str, dict[str, Any]] = {
+    "Twelve-Factor App": {
+        "domain": "software-engineering",
+        "aliases": ["12-Factor", "12 Factor App"],
+    },
+    "SLSA": {
+        "domain": "cybersecurity",
+        "aliases": ["Supply-chain Levels for Software Artifacts"],
+    },
     "CycloneDX": {"domain": "cybersecurity"},
     "arc42": {"domain": "software-engineering"},
-    "HELM": {"domain": "artificial-intelligence", "aliases": ["Holistic Evaluation of Language Models"]},
-    "FSRS": {"domain": "personal-development", "aliases": ["Free Spaced Repetition Scheduler"]},
-    "OKR": {"domain": "personal-development", "aliases": ["Objectives and Key Results"]},
+    "HELM": {
+        "domain": "artificial-intelligence",
+        "aliases": ["Holistic Evaluation of Language Models"],
+    },
+    "FSRS": {
+        "domain": "personal-development",
+        "aliases": ["Free Spaced Repetition Scheduler"],
+    },
+    "OKR": {
+        "domain": "personal-development",
+        "aliases": ["Objectives and Key Results"],
+    },
     "Business Model Canvas": {"domain": "strategy"},
     "OpenTelemetry": {"domain": "software-engineering", "aliases": ["OTel"]},
     "ADR": {
         "domain": "software-engineering",
         "aliases": ["Architecture Decision Record", "Architecture Decision Records"],
     },
-    "MADR": {"domain": "software-engineering", "aliases": ["Markdown ADR", "Markdown Architecture Decision Record"]},
+    "MADR": {
+        "domain": "software-engineering",
+        "aliases": ["Markdown ADR", "Markdown Architecture Decision Record"],
+    },
 }
 
-_SEED_TECHNOLOGIES: dict[str, dict] = {
+_SEED_TECHNOLOGIES: dict[str, dict[str, Any]] = {
     "AutoGen": {"domain": "artificial-intelligence"},
     "Robyn": {"domain": "strategy", "aliases": ["Meta Robyn"]},
     "Meridian": {"domain": "strategy", "aliases": ["Google Meridian"]},
@@ -138,8 +178,11 @@ _SEED_TECHNOLOGIES: dict[str, dict] = {
     "Neo4j": {"domain": "technology"},
 }
 
-_SEED_PUBLICATIONS: dict[str, dict] = {
-    "Tao Te Ching": {"domain": "philosophy", "aliases": ["Tao Teh King", "Dao De Jing"]},
+_SEED_PUBLICATIONS: dict[str, dict[str, Any]] = {
+    "Tao Te Ching": {
+        "domain": "philosophy",
+        "aliases": ["Tao Teh King", "Dao De Jing"],
+    },
     "Art of War": {"domain": "philosophy", "aliases": ["The Art of War"]},
     "Bhagavad Gita": {"domain": "philosophy"},
     "Yoga Sutras": {"domain": "philosophy", "aliases": ["Yoga Sutras of Patanjali"]},
@@ -415,7 +458,7 @@ def _extract_from_headings(
 
 
 # Pre-build a combined lookup: name -> (entity_type, description_prefix, info_dict)
-_ALL_SEEDS: dict[str, tuple[str, str, dict]] = {}
+_ALL_SEEDS: dict[str, tuple[str, str, dict[str, Any]]] = {}
 for _n, _i in _SEED_PEOPLE.items():
     _ALL_SEEDS[_n] = ("Person", "Historical/notable person", _i)
 for _n, _i in _SEED_ORGANISATIONS.items():

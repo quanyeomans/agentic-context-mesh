@@ -22,21 +22,38 @@ from kairix.agents.research.state import DEFAULT_MAX_TURNS, ResearcherState
 logger = logging.getLogger(__name__)
 
 
-def build_researcher_graph() -> Any:
+def build_researcher_graph(
+    *,
+    search_fn: Any | None = None,
+    llm_backend: Any | None = None,
+    classify_fn: Any | None = None,
+) -> Any:
     """Build the LangGraph state machine for iterative research.
+
+    Args:
+        search_fn:   Injectable search function (passed to retrieve node).
+        llm_backend: Injectable LLM backend (passed to evaluate/synthesise nodes).
+        classify_fn: Injectable intent classifier (passed to classify_intent node).
 
     Returns a compiled graph ready to invoke with an initial state.
     """
+    from functools import partial
+
     from langgraph.graph import END, StateGraph
 
     graph = StateGraph(ResearcherState)
 
-    # Add nodes
-    graph.add_node("classify_intent", classify_intent)
-    graph.add_node("retrieve", retrieve)
-    graph.add_node("evaluate_sufficiency", evaluate_sufficiency)
+    # Add nodes — inject dependencies via partial where provided
+    _classify = partial(classify_intent, classify_fn=classify_fn) if classify_fn else classify_intent
+    _retrieve = partial(retrieve, search_fn=search_fn) if search_fn else retrieve
+    _eval = partial(evaluate_sufficiency, llm_backend=llm_backend) if llm_backend else evaluate_sufficiency
+    _synth = partial(synthesise, llm_backend=llm_backend) if llm_backend else synthesise
+
+    graph.add_node("classify_intent", _classify)
+    graph.add_node("retrieve", _retrieve)
+    graph.add_node("evaluate_sufficiency", _eval)
     graph.add_node("refine_query", refine_query)
-    graph.add_node("synthesise", synthesise)
+    graph.add_node("synthesise", _synth)
 
     # Wire edges
     graph.set_entry_point("classify_intent")
@@ -59,6 +76,10 @@ def build_researcher_graph() -> Any:
 def run_research(
     query: str,
     max_turns: int = DEFAULT_MAX_TURNS,
+    *,
+    search_fn: Any | None = None,
+    llm_backend: Any | None = None,
+    classify_fn: Any | None = None,
 ) -> dict[str, Any]:
     """Run a research query through the full iterative search pipeline.
 
@@ -66,15 +87,22 @@ def run_research(
     question, and refines the search if needed — up to max_turns rounds.
 
     Args:
-        query:      The question to research.
-        max_turns:  Maximum search rounds before giving up (default 4).
+        query:       The question to research.
+        max_turns:   Maximum search rounds before giving up (default 4).
+        search_fn:   Injectable search function for testing.
+        llm_backend: Injectable LLM backend for testing.
+        classify_fn: Injectable intent classifier for testing.
 
     Returns:
         dict with: query, synthesis, retrieved_chunks, entities_found,
         gaps, confidence, turns, error.
     """
     try:
-        compiled = build_researcher_graph()
+        compiled = build_researcher_graph(
+            search_fn=search_fn,
+            llm_backend=llm_backend,
+            classify_fn=classify_fn,
+        )
 
         initial_state: ResearcherState = {
             "query": query,

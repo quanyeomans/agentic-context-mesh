@@ -34,10 +34,12 @@ from kairix.platform.llm.embed_provider import (  # noqa: E402
 
 @pytest.mark.unit
 class TestEmbedProviderProtocol:
+    @pytest.mark.unit
     def test_azure_provider_is_embed_provider(self) -> None:
         provider = AzureEmbedProvider(endpoint="https://test.openai.azure.com", api_key="key")
         assert isinstance(provider, EmbedProvider)
 
+    @pytest.mark.unit
     def test_openai_provider_is_embed_provider(self) -> None:
         provider = OpenAIEmbedProvider(api_key="key")
         assert isinstance(provider, EmbedProvider)
@@ -45,6 +47,7 @@ class TestEmbedProviderProtocol:
 
 @pytest.mark.unit
 class TestAzureEmbedProvider:
+    @pytest.mark.unit
     def test_embed_batch_delegates_to_sdk(self) -> None:
         provider = AzureEmbedProvider(endpoint="https://test.openai.azure.com", api_key="key")
 
@@ -55,6 +58,7 @@ class TestAzureEmbedProvider:
         result = provider.embed_batch(["hello"], model="text-embedding-3-large", dims=1536)
         assert result == [[0.1, 0.2, 0.3]]
 
+    @pytest.mark.unit
     def test_batch_returns_correct_count(self) -> None:
         provider = AzureEmbedProvider(endpoint="https://test", api_key="key")
 
@@ -67,6 +71,7 @@ class TestAzureEmbedProvider:
 
 @pytest.mark.unit
 class TestOpenAIEmbedProvider:
+    @pytest.mark.unit
     def test_embed_batch_delegates_to_sdk(self) -> None:
         provider = OpenAIEmbedProvider(api_key="key")
 
@@ -80,12 +85,14 @@ class TestOpenAIEmbedProvider:
 
 @pytest.mark.unit
 class TestGetEmbedProvider:
+    @pytest.mark.unit
     def test_returns_azure_when_env_vars_set(self, monkeypatch) -> None:
         monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://test.openai.azure.com")
         monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")
         provider = get_embed_provider()
         assert isinstance(provider, AzureEmbedProvider)
 
+    @pytest.mark.unit
     def test_falls_back_to_openai(self, monkeypatch) -> None:
         monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
         monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
@@ -96,6 +103,7 @@ class TestGetEmbedProvider:
             provider = get_embed_provider()
         assert isinstance(provider, OpenAIEmbedProvider)
 
+    @pytest.mark.unit
     def test_raises_when_no_credentials(self, monkeypatch) -> None:
         monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
         monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)

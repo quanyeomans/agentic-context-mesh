@@ -62,11 +62,24 @@ def _get_cross_encoder(model: str):
         return None
 
 
+def get_cross_encoder(model: str = RERANK_MODEL):
+    """Load and cache the cross-encoder model.
+
+    Public API for dependency injection. Returns None on any import/load failure.
+
+    .. deprecated:: 2025.04
+        ``_get_cross_encoder`` is now ``get_cross_encoder``. The private name
+        remains as an alias.
+    """
+    return _get_cross_encoder(model)
+
+
 def rerank(
     query: str,
     results: list[FusedResult],
     model: str = RERANK_MODEL,
     candidate_limit: int = RERANK_CANDIDATE_LIMIT,
+    encoder=None,
 ) -> list[FusedResult]:
     """
     Re-sort results by cross-encoder relevance score (post-RRF semantic pass).
@@ -84,6 +97,8 @@ def rerank(
         results:         FusedResult list from RRF + boost pipeline.
         model:           Cross-encoder model name. Default: ms-marco-MiniLM-L-6-v2.
         candidate_limit: Number of top candidates to pass to the cross-encoder.
+        encoder:         Optional pre-loaded cross-encoder instance for
+                         dependency injection. Defaults to lazy-loaded singleton.
 
     Returns:
         Results re-sorted by re-rank score. Returns ``results`` unchanged on any
@@ -92,7 +107,8 @@ def rerank(
     if not results:
         return results
 
-    encoder = _get_cross_encoder(model)
+    if encoder is None:
+        encoder = _get_cross_encoder(model)
     if encoder is None:
         return results
 

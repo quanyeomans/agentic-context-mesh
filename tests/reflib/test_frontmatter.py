@@ -25,6 +25,7 @@ _TEST_SOURCE = SourceDef(
 
 @pytest.mark.unit
 class TestExtractExistingFrontmatter:
+    @pytest.mark.unit
     def test_parses_yaml_block(self):
         text = "---\ntitle: My Doc\nauthor: Jane\n---\n\nBody content."
         fm, body = extract_existing_frontmatter(text)
@@ -33,12 +34,14 @@ class TestExtractExistingFrontmatter:
         assert fm["author"] == "Jane"
         assert "Body content." in body
 
+    @pytest.mark.unit
     def test_no_frontmatter_returns_none(self):
         text = "# Just a heading\n\nBody."
         fm, body = extract_existing_frontmatter(text)
         assert fm is None
         assert body == text
 
+    @pytest.mark.unit
     def test_strips_quotes_from_values(self):
         text = '---\ntitle: "Quoted Title"\n---\n\nBody.'
         fm, _body = extract_existing_frontmatter(text)
@@ -47,18 +50,22 @@ class TestExtractExistingFrontmatter:
 
 @pytest.mark.unit
 class TestExtractTitle:
+    @pytest.mark.unit
     def test_from_frontmatter(self):
         text = "---\ntitle: FM Title\n---\n\n# Heading\n\nBody."
         assert extract_title(text, Path("doc.md")) == "FM Title"
 
+    @pytest.mark.unit
     def test_from_heading(self):
         text = "# My Heading\n\nBody content."
         assert extract_title(text, Path("doc.md")) == "My Heading"
 
+    @pytest.mark.unit
     def test_from_filename(self):
         text = "No heading, just body content."
         assert extract_title(text, Path("my-great-doc.md")) == "My Great Doc"
 
+    @pytest.mark.unit
     def test_heading_strips_links(self):
         text = "# [Linked Heading](http://example.com)\n\nBody."
         assert extract_title(text, Path("doc.md")) == "Linked Heading"
@@ -66,6 +73,7 @@ class TestExtractTitle:
 
 @pytest.mark.unit
 class TestBuildFrontmatter:
+    @pytest.mark.unit
     def test_builds_from_source(self):
         text = "# Test Document\n\nContent."
         fm = build_frontmatter(Path("test.md"), _TEST_SOURCE, text)
@@ -78,6 +86,7 @@ class TestBuildFrontmatter:
 
 @pytest.mark.unit
 class TestInjectFrontmatter:
+    @pytest.mark.unit
     def test_adds_frontmatter_to_bare_markdown(self):
         text = "# Document\n\nContent."
         fm = Frontmatter(
@@ -95,6 +104,7 @@ class TestInjectFrontmatter:
         assert "# Document" in result
         assert "Content." in result
 
+    @pytest.mark.unit
     def test_replaces_existing_frontmatter(self):
         text = "---\ntitle: Old Title\n---\n\n# Doc\n\nBody."
         fm = Frontmatter(

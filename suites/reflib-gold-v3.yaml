@@ -1,0 +1,2092 @@
+meta:
+  version: '1.0'
+  generated_by: kairix eval generate
+  n_cases: 200
+  categories:
+  - recall
+  - temporal
+  - entity
+  - conceptual
+  - multi_hop
+  - procedural
+  score_method: ndcg
+cases:
+- id: GEN-C001
+  category: conceptual
+  query: What is the purpose of the SOP for SOC analysts regarding command line executions?
+  score_method: ndcg
+  gold_titles:
+  - title: sop-suspicious-command-execution
+    relevance: 2
+  - title: sop-investigating-suspicious-command-line
+    relevance: 2
+- id: GEN-C002
+  category: conceptual
+  query: What is the focus of the Learn Modern AI Python course?
+  score_method: ndcg
+  gold_titles:
+  - title: llms
+    relevance: 2
+- id: GEN-R001
+  category: recall
+  query: Where can I find resources for learning Python with type hints?
+  score_method: ndcg
+  gold_titles:
+  - title: llms
+    relevance: 2
+- id: GEN-C003
+  category: conceptual
+  query: What is Content Security Policy and how does it help prevent attacks?
+  score_method: ndcg
+  gold_titles:
+  - title: content-security-policy
+    relevance: 2
+- id: GEN-P002
+  category: procedural
+  query: How do I configure Content Security Policy for PostHog?
+  score_method: ndcg
+  gold_titles:
+  - title: content-security-policy
+    relevance: 2
+- id: GEN-R002
+  category: recall
+  query: What are the character traits of an operations agent on a starship?
+  score_method: ndcg
+  gold_titles:
+  - title: agents
+    relevance: 2
+  - title: soul
+    relevance: 1
+  - title: method-agent-operations-governance
+    relevance: 1
+- id: GEN-R003
+  category: recall
+  query: What are the recent updates in OpenTelemetry for CI/CD observability?
+  score_method: ndcg
+  gold_titles:
+  - title: otel-in-focus-04
+    relevance: 2
+  - title: otel-in-focus-06
+    relevance: 2
+  - title: open-telemetry
+    relevance: 1
+  - title: index
+    relevance: 1
+  - title: end-user-q-and-a-01
+    relevance: 1
+  - title: RESEARCH-OUTPUT
+    relevance: 1
+  - title: end-user-q-and-a-04
+    relevance: 1
+- id: GEN-C006
+  category: conceptual
+  query: Why is observability important for CI/CD pipelines?
+  score_method: ndcg
+  gold_titles:
+  - title: observability-pipelines
+    relevance: 2
+  - title: index
+    relevance: 1
+- id: GEN-R004
+  category: recall
+  query: Why is unit testing important for developers?
+  score_method: ndcg
+  gold_titles:
+  - title: why-unit-tests
+    relevance: 2
+  - title: testing-unittest
+    relevance: 2
+  - title: unit-tests
+    relevance: 1
+- id: GEN-R005
+  category: recall
+  query: What are some examples of small changes I can make to a document?
+  score_method: ndcg
+  gold_titles:
+  - title: cl-descriptions
+    relevance: 2
+  - title: consolidate-projects
+    relevance: 1
+  - title: ab-testing-guide-for-engineers
+    relevance: 1
+- id: GEN-C008
+  category: conceptual
+  query: When should I consider making targeted improvements to a long file?
+  score_method: ndcg
+  gold_titles:
+  - title: blackbox-agent-part-33-purpose
+    relevance: 2
+  - title: blackbox-agent-part-34-when-to-use
+    relevance: 1
+- id: GEN-C009
+  category: conceptual
+  query: What are the key insights I can gain from product intelligence?
+  score_method: ndcg
+  gold_titles:
+  - title: product-intelligence
+    relevance: 2
+  - title: account-planning
+    relevance: 1
+  - title: gartner-walking-golden-path-to-value-it-symposium-2025-841940
+    relevance: 1
+  - title: microsoft-build-2024-highlights
+    relevance: 1
+  - title: ai-agents-cluster-insights
+    relevance: 1
+  - title: partnership-research
+    relevance: 1
+  - title: readme
+    relevance: 1
+- id: GEN-P004
+  category: procedural
+  query: How can I validate product hypotheses before investing in engineering?
+  score_method: ndcg
+  gold_titles:
+  - title: how-to-run-pretotype-validation
+    relevance: 2
+  - title: Rapid Pretotyping Idea Builder
+    relevance: 1
+  - title: build-a-prototype
+    relevance: 1
+- id: GEN-C010
+  category: conceptual
+  query: How does OpenTelemetry plan to enhance stability and reliability?
+  score_method: ndcg
+  gold_titles:
+  - title: stability-proposal-announcement
+    relevance: 2
+  - title: open-telemetry
+    relevance: 1
+- id: GEN-R007
+  category: recall
+  query: What are the possible values for the on_schema_change parameter in Vertica
+    configurations?
+  score_method: ndcg
+  gold_titles:
+  - title: vertica-configs
+    relevance: 2
+- id: GEN-P005
+  category: procedural
+  query: How do I configure the ignore parameter for incremental models in Vertica?
+  score_method: ndcg
+  gold_titles:
+  - title: vertica-configs
+    relevance: 2
+- id: GEN-P006
+  category: procedural
+  query: What are the steps to conduct a design studio session?
+  score_method: ndcg
+  gold_titles:
+  - title: design-studio
+    relevance: 2
+  - title: readme
+    relevance: 1
+- id: GEN-R008
+  category: recall
+  query: How many participants should be invited to a design studio?
+  score_method: ndcg
+  gold_titles:
+  - title: design-studio
+    relevance: 2
+- id: GEN-C011
+  category: conceptual
+  query: What are the reasons to switch from dbt Core to dbt platform?
+  score_method: ndcg
+  gold_titles:
+  - title: core-migration-table
+    relevance: 2
+  - title: core-migration-2
+    relevance: 1
+  - title: core-migration-1
+    relevance: 1
+- id: GEN-C012
+  category: conceptual
+  query: What is the best way to denote placeholders in ADR?
+  score_method: ndcg
+  gold_titles:
+  - title: 0012-use-curly-braces-to-denote-placeholder
+    relevance: 2
+  - title: tpl-adr
+    relevance: 1
+- id: GEN-P008
+  category: procedural
+  query: What are the pros and cons of using curly braces for placeholders?
+  score_method: ndcg
+  gold_titles:
+  - title: 0012-use-curly-braces-to-denote-placeholder
+    relevance: 2
+  - title: 0006-use-names-as-identifier
+    relevance: 1
+- id: GEN-R009
+  category: recall
+  query: What packages do I need to install for OpenTelemetry in ASP.NET Core?
+  score_method: ndcg
+  gold_titles:
+  - title: getting-started-aspnetcore
+    relevance: 2
+  - title: getting-started
+    relevance: 1
+  - title: libraries
+    relevance: 1
+- id: GEN-C013
+  category: conceptual
+  query: What does RFC 9278 define for accessing protected resources?
+  score_method: ndcg
+  gold_titles:
+  - title: 01-rfc-9728
+    relevance: 2
+- id: GEN-P010
+  category: procedural
+  query: How can a client application discover its Authorization Server according
+    to RFC 9278?
+  score_method: ndcg
+  gold_titles:
+  - title: 01-rfc-9728
+    relevance: 2
+- id: GEN-R010
+  category: recall
+  query: What is the recommended layout method priority for Tailwind CSS?
+  score_method: ndcg
+  gold_titles:
+  - title: 2025-08-11-prompt-part-22-tailwind-implementation
+    relevance: 2
+  - title: 2025-08-11-prompt-part-21-layout-structure
+    relevance: 1
+- id: GEN-P011
+  category: procedural
+  query: How should I use gap utilities in Tailwind CSS?
+  score_method: ndcg
+  gold_titles:
+  - title: 2025-08-11-prompt-part-22-tailwind-implementation
+    relevance: 2
+  - title: index
+    relevance: 1
+- id: GEN-P012
+  category: procedural
+  query: How do I use the QuickEdit component for small code modifications?
+  score_method: ndcg
+  gold_titles:
+  - title: v0-part-08-quickedit
+    relevance: 2
+  - title: v0-part-17-quickedit
+    relevance: 2
+  - title: blackbox-agent-part-34-when-to-use
+    relevance: 1
+- id: GEN-C014
+  category: conceptual
+  query: What are the limitations of using QuickEdit for code changes?
+  score_method: ndcg
+  gold_titles:
+  - title: v0-part-08-quickedit
+    relevance: 2
+  - title: v0-part-17-quickedit
+    relevance: 2
+  - title: blackbox-agent-part-35-advantages
+    relevance: 1
+  - title: blackbox-agent-part-34-when-to-use
+    relevance: 1
+- id: GEN-R011
+  category: recall
+  query: What are the types of group chat available in AutoGen?
+  score_method: ndcg
+  gold_titles:
+  - title: group-chat-overview
+    relevance: 2
+  - title: migration-guide-part-26-group-chat
+    relevance: 1
+  - title: group-chat
+    relevance: 1
+- id: GEN-C015
+  category: conceptual
+  query: How does @AutoGen.Core.RoundRobinGroupChat work?
+  score_method: ndcg
+  gold_titles:
+  - title: roundrobin-chat
+    relevance: 2
+  - title: group-chat-overview
+    relevance: 1
+  - title: migration-guide-part-28-create-a-group-chat-manager-to-manage-the-group-chat-use-rou
+    relevance: 1
+  - title: group-chat
+    relevance: 1
+- id: GEN-R012
+  category: recall
+  query: What are some examples of team processes for submitting code?
+  score_method: ndcg
+  gold_titles:
+  - title: example-workflows
+    relevance: 2
+  - title: code-review
+    relevance: 1
+- id: GEN-R013
+  category: recall
+  query: Where can I find workflows for different projects like eRegs and cloud.gov?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: example-workflows
+    relevance: 1
+- id: GEN-P014
+  category: procedural
+  query: What strategies can be implemented to reduce customer churn?
+  score_method: ndcg
+  gold_titles:
+  - title: churn-rate-vs-retention-rate
+    relevance: 2
+  - title: outcome-delivery-and-margin
+    relevance: 1
+  - title: utilization-by-business-type-part-01-b2b-saas
+    relevance: 1
+  - title: service-offering-cx-platform-modernisation
+    relevance: 1
+- id: GEN-C016
+  category: conceptual
+  query: How can customer success be promoted across the organization?
+  score_method: ndcg
+  gold_titles:
+  - title: index-part-05-customer-success
+    relevance: 2
+  - title: AI-driven consulting operating model for midmarket digital transformation
+    relevance: 1
+  - title: consulting-industry-ai-inflection
+    relevance: 1
+- id: GEN-C018
+  category: conceptual
+  query: What are the advantages of using a monorepo for software development?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+  - title: readme
+    relevance: 1
+- id: GEN-R016
+  category: recall
+  query: What are the features of Cost Insights in dbt?
+  score_method: ndcg
+  gold_titles:
+  - title: dbt-cloud-release-notes-gen-part-41-new
+    relevance: 2
+  - title: cost-insights
+    relevance: 1
+  - title: explore-cost-data
+    relevance: 1
+  - title: set-up-cost-insights
+    relevance: 1
+- id: GEN-P017
+  category: procedural
+  query: How can I request access to the private beta of Cost Insights?
+  score_method: ndcg
+  gold_titles:
+  - title: cost-insights
+    relevance: 2
+  - title: dbt-cloud-release-notes-gen-part-41-new
+    relevance: 1
+  - title: set-up-cost-insights
+    relevance: 1
+- id: GEN-R017
+  category: recall
+  query: What is the purpose of the Platform as a Product research survey?
+  score_method: ndcg
+  gold_titles:
+  - title: announce-paap-survey
+    relevance: 2
+  - title: announce-paap-research
+    relevance: 2
+  - title: paap-research-guide
+    relevance: 1
+  - title: product-intelligence
+    relevance: 1
+- id: GEN-P019
+  category: procedural
+  query: How can companies participate in the Platform as a Product research?
+  score_method: ndcg
+  gold_titles:
+  - title: announce-paap-research
+    relevance: 2
+  - title: announce-paap-survey
+    relevance: 1
+  - title: paap-research-guide
+    relevance: 1
+- id: GEN-P020
+  category: procedural
+  query: How can I deploy generative AI using NVIDIA NIM?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+- id: GEN-C020
+  category: conceptual
+  query: What is the Auto SDK in OpenTelemetry Go?
+  score_method: ndcg
+  gold_titles:
+  - title: autosdk
+    relevance: 2
+  - title: sdk
+    relevance: 1
+  - title: configuration-part-03-zero-code-sdk-autoconfigure
+    relevance: 1
+  - title: configuration-part-01-preamble
+    relevance: 1
+- id: GEN-P021
+  category: procedural
+  query: How do I use the Auto SDK for custom spans in Go?
+  score_method: ndcg
+  gold_titles:
+  - title: autosdk
+    relevance: 2
+  - title: instrumentation
+    relevance: 1
+  - title: configuration-part-03-zero-code-sdk-autoconfigure
+    relevance: 1
+  - title: sdk-part-03-sdk-components
+    relevance: 1
+- id: GEN-P022
+  category: procedural
+  query: What is the process for fitting a model on the entire dataset?
+  score_method: ndcg
+  gold_titles:
+  - title: dbt-python-snowpark-part-12-training-a-model-to-predict-in-machine-learning
+    relevance: 2
+  - title: dbt-python-snowpark-part-11-prepare-for-machine-learning-cleaning-encoding-and-splits
+    relevance: 1
+  - title: ml-model-checklist
+    relevance: 1
+- id: GEN-C022
+  category: conceptual
+  query: What are common fit issues in model diagnostics?
+  score_method: ndcg
+  gold_titles:
+  - title: model-fit
+    relevance: 2
+- id: GEN-P024
+  category: procedural
+  query: How does Dapr integrate with Helm for deployment on Kubernetes?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+- id: GEN-P025
+  category: procedural
+  query: How does the LangChain ecosystem facilitate LLM-driven applications?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: 03-technology-stack
+    relevance: 1
+  - title: 01-what-are-multi-agent-systems
+    relevance: 1
+  - title: RESEARCH-OUTPUT-v2
+    relevance: 1
+- id: GEN-R020
+  category: recall
+  query: What are the recent enhancements made to the dbt platform?
+  score_method: ndcg
+  gold_titles:
+  - title: dbt-cloud-release-notes-gen-part-42-enhancements
+    relevance: 2
+  - title: dbt-cloud-release-notes-gen-part-38-enhancements
+    relevance: 2
+  - title: 2025-release-notes
+    relevance: 1
+  - title: release-notes
+    relevance: 1
+  - title: 2024-release-notes-part-07-july-2024
+    relevance: 1
+  - title: 2023-release-notes-part-09-april-2023
+    relevance: 1
+  - title: 05-upgrading-to-v1-10
+    relevance: 1
+- id: GEN-C027
+  category: conceptual
+  query: What are the benefits of using automatic code formatting tools?
+  score_method: ndcg
+  gold_titles:
+  - title: code-quality-style-formatting
+    relevance: 2
+  - title: lint-format
+    relevance: 1
+- id: GEN-C028
+  category: conceptual
+  query: What are the advantages of using native instrumentation with OpenTelemetry?
+  score_method: ndcg
+  gold_titles:
+  - title: libraries
+    relevance: 2
+  - title: open-telemetry
+    relevance: 1
+  - title: demystifying-auto-instrumentation
+    relevance: 1
+- id: GEN-R022
+  category: recall
+  query: How does OpenTelemetry improve observability for libraries?
+  score_method: ndcg
+  gold_titles:
+  - title: open-telemetry
+    relevance: 2
+  - title: euwg-future-of-observability-panel
+    relevance: 1
+- id: GEN-C029
+  category: conceptual
+  query: How are contributions tracked in The Turing Way?
+  score_method: ndcg
+  gold_titles:
+  - title: contributors-record
+    relevance: 2
+  - title: all-contributors-part-01-all-contributors
+    relevance: 2
+  - title: infrastructure-contributors
+    relevance: 1
+  - title: os-comms-issue-tracking
+    relevance: 1
+  - title: maintain-review-review
+    relevance: 1
+  - title: os-comms
+    relevance: 1
+  - title: embracing-digital-commons
+    relevance: 1
+- id: GEN-R023
+  category: recall
+  query: What is the All Contributors section in The Turing Way?
+  score_method: ndcg
+  gold_titles:
+  - title: all-contributors-part-01-all-contributors
+    relevance: 2
+  - title: profiles-part-02-personal-highlights-from-the-turing-way-contributors
+    relevance: 1
+  - title: profiles-part-01-individual-contributors
+    relevance: 1
+- id: GEN-P028
+  category: procedural
+  query: How can I organize my frequently accessed resources in the Catalog?
+  score_method: ndcg
+  gold_titles:
+  - title: dbt-cloud-release-notes-gen-part-55-january-21-2026
+    relevance: 2
+  - title: dbt-explorer-faqs
+    relevance: 1
+- id: GEN-R025
+  category: recall
+  query: What are the key changes in dbt Core v1.4?
+  score_method: ndcg
+  gold_titles:
+  - title: 12-upgrading-to-v1-4
+    relevance: 2
+- id: GEN-T001
+  category: temporal
+  query: When was the final release of dbt Core v1.4?
+  score_method: ndcg
+  gold_titles:
+  - title: 12-upgrading-to-v1-4
+    relevance: 2
+- id: GEN-R026
+  category: recall
+  query: What optional configurations can I use when materializing a model as a table
+    in dbt-databricks?
+  score_method: ndcg
+  gold_titles:
+  - title: databricks-configs-part-01-configuring-tables
+    relevance: 2
+  - title: databricks-configs-part-02-configuring-columns
+    relevance: 1
+  - title: databricks-configs-part-06-selecting-compute-per-model
+    relevance: 1
+- id: GEN-P029
+  category: procedural
+  query: How do I set the table format to iceberg in dbt-databricks?
+  score_method: ndcg
+  gold_titles:
+  - title: databricks-configs-part-01-configuring-tables
+    relevance: 2
+  - title: databricks-iceberg-support
+    relevance: 1
+  - title: databricks-configs-part-11-setting-table-properties
+    relevance: 1
+- id: GEN-C030
+  category: conceptual
+  query: What are the standard methods for collecting logs?
+  score_method: ndcg
+  gold_titles:
+  - title: logging
+    relevance: 2
+  - title: open-telemetry
+    relevance: 1
+- id: GEN-P030
+  category: procedural
+  query: What are the advantages and disadvantages of directly written log events?
+  score_method: ndcg
+  gold_titles:
+  - title: opentelemetry-logging-and-you
+    relevance: 2
+  - title: logging
+    relevance: 1
+- id: GEN-C031
+  category: conceptual
+  query: How does the full_refresh config affect resource updates in dbt?
+  score_method: ndcg
+  gold_titles:
+  - title: full-refresh
+    relevance: 2
+- id: GEN-P031
+  category: procedural
+  query: What is the syntax for setting full_refresh in dbt_project.yml?
+  score_method: ndcg
+  gold_titles:
+  - title: full-refresh
+    relevance: 2
+  - title: firebolt-configs
+    relevance: 1
+- id: GEN-P032
+  category: procedural
+  query: How do I get started with the dbt Fusion engine?
+  score_method: ndcg
+  gold_titles:
+  - title: fusion
+    relevance: 2
+  - title: fusion-manual-install
+    relevance: 1
+  - title: about-fusion
+    relevance: 1
+  - title: get-started-fusion
+    relevance: 1
+  - title: about-fusion-install
+    relevance: 1
+- id: GEN-C032
+  category: conceptual
+  query: What features does the dbt Fusion engine provide?
+  score_method: ndcg
+  gold_titles:
+  - title: about-fusion
+    relevance: 2
+  - title: fusion
+    relevance: 1
+  - title: fusion-availability
+    relevance: 1
+- id: GEN-R027
+  category: recall
+  query: What metrics are tracked in product growth reviews?
+  score_method: ndcg
+  gold_titles:
+  - title: metrics
+    relevance: 2
+  - title: per-product-growth-reviews
+    relevance: 1
+  - title: aarrr-pirate-funnel
+    relevance: 1
+  - title: method-advisory-dashboard-design
+    relevance: 1
+  - title: mit-cisr-dashboarding-pays-off
+    relevance: 1
+- id: GEN-P033
+  category: procedural
+  query: How can new product managers incorporate additional metrics into growth reviews?
+  score_method: ndcg
+  gold_titles:
+  - title: per-product-growth-reviews
+    relevance: 2
+  - title: metrics
+    relevance: 1
+- id: GEN-C033
+  category: conceptual
+  query: What is agentic AI and how does it work for social media automation?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: 02h-social-media-agent-architecture
+    relevance: 1
+- id: GEN-P034
+  category: procedural
+  query: How can agentic AI help in managing social media tasks?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: 02h-social-media-agent-architecture
+    relevance: 1
+- id: GEN-P035
+  category: procedural
+  query: How do I add a credit for a customer in the billing admin?
+  score_method: ndcg
+  gold_titles:
+  - title: credits
+    relevance: 2
+  - title: refunds
+    relevance: 1
+  - title: billing
+    relevance: 1
+- id: GEN-C034
+  category: conceptual
+  query: What reasons can I select when giving credits to customers?
+  score_method: ndcg
+  gold_titles:
+  - title: credits
+    relevance: 2
+  - title: contract-rules
+    relevance: 1
+- id: GEN-R028
+  category: recall
+  query: What are some examples of object storage implementations in Openlane?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+- id: GEN-R030
+  category: recall
+  query: Who does the cybersecurity reporting policy apply to?
+  score_method: ndcg
+  gold_titles:
+  - title: pol-security-reporting-mailbox
+    relevance: 2
+- id: GEN-C036
+  category: conceptual
+  query: What is the purpose of the shared mailbox for reporting cybersecurity incidents?
+  score_method: ndcg
+  gold_titles:
+  - title: pol-security-reporting-mailbox
+    relevance: 2
+  - title: pol-contacting-soc
+    relevance: 1
+- id: GEN-P037
+  category: procedural
+  query: What are the conditions for redistributing software under the Neuromatch
+    Academy license?
+  score_method: ndcg
+  gold_titles:
+  - title: license-code
+    relevance: 2
+  - title: licensing-compatibility
+    relevance: 1
+- id: GEN-P038
+  category: procedural
+  query: How is entry_point used in Snowflake and BigQuery for Python UDFs?
+  score_method: ndcg
+  gold_titles:
+  - title: entry-point
+    relevance: 2
+- id: GEN-P039
+  category: procedural
+  query: What questions should I ask during a platform engineering interview?
+  score_method: ndcg
+  gold_titles:
+  - title: platform-engineer-interview-script
+    relevance: 2
+  - title: phone-screens
+    relevance: 1
+  - title: paap-research-guide
+    relevance: 1
+  - title: 10x-engineers-do-user-interviews
+    relevance: 1
+  - title: consulting-skills-evaluation-topics
+    relevance: 1
+- id: GEN-C039
+  category: conceptual
+  query: How is a platform defined within an organization?
+  score_method: ndcg
+  gold_titles:
+  - title: 2024-06-20-platform-engineering-pp
+    relevance: 2
+  - title: index
+    relevance: 1
+- id: GEN-C040
+  category: conceptual
+  query: What are the key features of Open Peer Review?
+  score_method: ndcg
+  gold_titles:
+  - title: peer-review-open
+    relevance: 2
+  - title: peer-review-guidance
+    relevance: 1
+- id: GEN-M001
+  category: multi_hop
+  query: How does collaboration play a role in Open Peer Review?
+  score_method: ndcg
+  gold_titles:
+  - title: peer-review-open
+    relevance: 2
+  - title: peer-review
+    relevance: 1
+- id: GEN-C041
+  category: conceptual
+  query: What are Data Hazards labels and their purpose?
+  score_method: ndcg
+  gold_titles:
+  - title: dh-intro
+    relevance: 2
+  - title: data-hazards
+    relevance: 1
+- id: GEN-P040
+  category: procedural
+  query: How can I use the Data Hazards materials in my work?
+  score_method: ndcg
+  gold_titles:
+  - title: dh-how-to-use
+    relevance: 2
+  - title: data-hazards
+    relevance: 1
+  - title: dh-intro
+    relevance: 1
+  - title: dh-case-study
+    relevance: 1
+- id: GEN-C042
+  category: conceptual
+  query: What are community adapters and how can I contribute to them?
+  score_method: ndcg
+  gold_titles:
+  - title: community-adapters
+    relevance: 2
+  - title: contribute-core-adapters
+    relevance: 1
+  - title: adapter-creation-part-20-document-a-new-adapter
+    relevance: 1
+  - title: adapter-creation-part-21-promote-a-new-adapter
+    relevance: 1
+  - title: project-repo-participation
+    relevance: 1
+  - title: contributing-coding
+    relevance: 1
+  - title: contributor-expectations
+    relevance: 1
+  - title: acknowledgement-members
+    relevance: 1
+- id: GEN-R031
+  category: recall
+  query: What community adapters are available and where can I find their setup guides?
+  score_method: ndcg
+  gold_titles:
+  - title: adapter-creation-part-03-build-a-new-adapter
+    relevance: 2
+- id: GEN-C045
+  category: conceptual
+  query: What is the purpose of gathering feedback for the Open Leadership Framework?
+  score_method: ndcg
+  gold_titles:
+  - title: vision
+    relevance: 2
+  - title: framework
+    relevance: 1
+- id: GEN-R034
+  category: recall
+  query: What metrics should I track for LLM-powered applications?
+  score_method: ndcg
+  gold_titles:
+  - title: llm-product-metrics
+    relevance: 2
+  - title: llm-observability
+    relevance: 1
+  - title: readme
+    relevance: 1
+  - title: ai-llm-observability
+    relevance: 1
+- id: GEN-C046
+  category: conceptual
+  query: How do LLM apps differ from regular SaaS apps in terms of metrics?
+  score_method: ndcg
+  gold_titles:
+  - title: llm-product-metrics
+    relevance: 2
+  - title: utilization-by-business-type-part-01-b2b-saas
+    relevance: 1
+- id: GEN-C047
+  category: conceptual
+  query: What is the purpose of a phone screen in the hiring process?
+  score_method: ndcg
+  gold_titles:
+  - title: phone-screens
+    relevance: 2
+- id: GEN-E002
+  category: entity
+  query: Who conducts the phone screens for 18F Engineering positions?
+  score_method: ndcg
+  gold_titles:
+  - title: phone-screens
+    relevance: 2
+  - title: index
+    relevance: 1
+- id: GEN-R035
+  category: recall
+  query: What are the prerequisites for deploying the OpenTelemetry demo on Kubernetes?
+  score_method: ndcg
+  gold_titles:
+  - title: kubernetes-deployment
+    relevance: 2
+  - title: index
+    relevance: 1
+  - title: getting-started
+    relevance: 1
+- id: GEN-P041
+  category: procedural
+  query: How do I install the OpenTelemetry demo using Helm?
+  score_method: ndcg
+  gold_titles:
+  - title: kubernetes-deployment
+    relevance: 2
+  - title: demo
+    relevance: 1
+  - title: kubernetes-helm
+    relevance: 1
+- id: GEN-C050
+  category: conceptual
+  query: How does Lovable assist users with web application development?
+  score_method: ndcg
+  gold_titles:
+  - title: prompt-part-01-preamble
+    relevance: 2
+  - title: agent-prompt
+    relevance: 2
+  - title: prompt-part-05-how-can-i-edit-this-code
+    relevance: 1
+- id: GEN-P042
+  category: procedural
+  query: What are the best practices Lovable follows when making code changes?
+  score_method: ndcg
+  gold_titles:
+  - title: loveable-old
+    relevance: 2
+  - title: agent-prompt
+    relevance: 2
+  - title: prompt-part-01-preamble
+    relevance: 2
+  - title: development-process
+    relevance: 1
+  - title: prompt-part-27-commands
+    relevance: 1
+  - title: traits
+    relevance: 1
+- id: GEN-C051
+  category: conceptual
+  query: What are the benefits of using flexible hosting environments for digital
+    services?
+  score_method: ndcg
+  gold_titles:
+  - title: 09
+    relevance: 2
+- id: GEN-P043
+  category: procedural
+  query: How can resources be provisioned to handle spikes in user demand?
+  score_method: ndcg
+  gold_titles:
+  - title: 09
+    relevance: 2
+  - title: capacity
+    relevance: 1
+  - title: engagement-phase-3-cloud-finops-and-operational-maturity
+    relevance: 1
+  - title: 03-technology-stack
+    relevance: 1
+- id: GEN-R037
+  category: recall
+  query: What are the performance standards for tested code in a QASP?
+  score_method: ndcg
+  gold_titles:
+  - title: quality-indicators
+    relevance: 2
+  - title: qasp
+    relevance: 1
+- id: GEN-R038
+  category: recall
+  query: How is accessibility assessed according to the Sample Quality Assessment
+    Surveillance Plan?
+  score_method: ndcg
+  gold_titles:
+  - title: qasp
+    relevance: 2
+- id: GEN-R039
+  category: recall
+  query: What is the primary goal of the Ops team at PostHog?
+  score_method: ndcg
+  gold_titles:
+  - title: overview
+    relevance: 2
+- id: GEN-P044
+  category: procedural
+  query: How does the Ops team support other teams at PostHog?
+  score_method: ndcg
+  gold_titles:
+  - title: overview
+    relevance: 2
+  - title: team-structure
+    relevance: 1
+- id: GEN-P045
+  category: procedural
+  query: How can I view downstream exposures in the catalog?
+  score_method: ndcg
+  gold_titles:
+  - title: auto-exposures-view
+    relevance: 2
+  - title: view-downstream-exposures
+    relevance: 1
+  - title: downstream-exposures
+    relevance: 1
+  - title: downstream-exposures-tableau
+    relevance: 1
+  - title: orchestrate-exposures
+    relevance: 1
+  - title: explore-projects
+    relevance: 1
+  - title: explorer-qs
+    relevance: 1
+- id: GEN-R040
+  category: recall
+  query: What information is displayed in the exposures menu?
+  score_method: ndcg
+  gold_titles:
+  - title: orchestrate-exposures
+    relevance: 2
+  - title: auto-exposures-view
+    relevance: 1
+- id: GEN-R041
+  category: recall
+  query: What are the prerequisites for using OpenTelemetry in Go?
+  score_method: ndcg
+  gold_titles:
+  - title: getting-started
+    relevance: 2
+- id: GEN-P047
+  category: procedural
+  query: What checklist should I follow to ensure compliance with laws and policies
+    in my work?
+  score_method: ndcg
+  gold_titles:
+  - title: law-policy-resources
+    relevance: 2
+  - title: compliance
+    relevance: 1
+- id: GEN-C052
+  category: conceptual
+  query: How can I ensure that my work respects and protects human rights?
+  score_method: ndcg
+  gold_titles:
+  - title: law-policy-rights
+    relevance: 2
+  - title: law-policy-resources
+    relevance: 1
+  - title: bok-ai-workplace-regulatory-and-ethics
+    relevance: 1
+  - title: 1010 - Artificial Intelligence
+    relevance: 1
+  - title: ethics-committees
+    relevance: 1
+  - title: 1000 – Speaking Up and Zero Tolerance for Retaliation
+    relevance: 1
+  - title: 1003 - Ensuring Meritocracy and Non-discrimination
+    relevance: 1
+  - title: 1001 - Respecting The Individual
+    relevance: 1
+- id: GEN-R042
+  category: recall
+  query: What are the incremental materialization strategies supported in dbt-redshift?
+  score_method: ndcg
+  gold_titles:
+  - title: redshift-configs
+    relevance: 2
+  - title: singlestore-configs
+    relevance: 1
+  - title: create-new-materializations
+    relevance: 1
+- id: GEN-R043
+  category: recall
+  query: What tool is used to generate the PostHog API documentation?
+  score_method: ndcg
+  gold_titles:
+  - title: api-docs
+    relevance: 2
+  - title: readme
+    relevance: 1
+- id: GEN-C053
+  category: conceptual
+  query: What are the key communication principles for congratulating a company on
+    funding or acquisition?
+  score_method: ndcg
+  gold_titles:
+  - title: communications-templates-fundraising
+    relevance: 2
+- id: GEN-T003
+  category: temporal
+  query: When should I send a follow-up message after congratulating a company on
+    their funding?
+  score_method: ndcg
+  gold_titles:
+  - title: template-follow-up-emails
+    relevance: 2
+- id: GEN-C054
+  category: conceptual
+  query: How does Azure Private Link ensure secure connectivity for dbt?
+  score_method: ndcg
+  gold_titles:
+  - title: self-hosted
+    relevance: 2
+- id: GEN-P050
+  category: procedural
+  query: What is the process for handling grievances and disciplinary issues?
+  score_method: ndcg
+  gold_titles:
+  - title: grievances
+    relevance: 2
+- id: GEN-C056
+  category: conceptual
+  query: What is the Holistic Evaluation of Language Models (HELM) framework?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: vhelm
+    relevance: 1
+  - title: medhelm
+    relevance: 1
+- id: GEN-R046
+  category: recall
+  query: What features does the HELM framework provide for evaluating language models?
+  score_method: ndcg
+  gold_titles:
+  - title: readme-part-04-overview
+    relevance: 2
+  - title: readme
+    relevance: 1
+  - title: medhelm
+    relevance: 1
+- id: GEN-P051
+  category: procedural
+  query: What tools should I use for editing files in a workflow?
+  score_method: ndcg
+  gold_titles:
+  - title: blackbox-agent-part-37-workflow-tips
+    relevance: 2
+  - title: blackbox-agent-part-91-workflow-tips
+    relevance: 2
+  - title: index
+    relevance: 1
+  - title: install-dbt-extension
+    relevance: 1
+- id: GEN-C057
+  category: conceptual
+  query: How does the Model Context Protocol (MCP) enhance file editing capabilities?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: blackbox-agent-part-91-workflow-tips
+    relevance: 1
+- id: GEN-P052
+  category: procedural
+  query: How do I create a JSON file with specific content in a frontend application?
+  score_method: ndcg
+  gold_titles:
+  - title: blackbox-agent-part-25-example-2-requesting-to-create-a-new-file
+    relevance: 2
+  - title: blackbox-agent-part-12-example-2-requesting-to-write-to-a-file
+    relevance: 1
+- id: GEN-R048
+  category: recall
+  query: What are the key takeaways for improving architecture with DACA?
+  score_method: ndcg
+  gold_titles:
+  - title: comprehensive-guide-daca-part-17-take-aways-for-your-architecture
+    relevance: 2
+  - title: comprehensive-guide-daca-part-05-what-is-daca
+    relevance: 1
+  - title: comprehensive-guide-daca-part-19-why-these-examples-work-with-daca
+    relevance: 1
+- id: GEN-P053
+  category: procedural
+  query: How can I ensure compliance and security in my architecture planning?
+  score_method: ndcg
+  gold_titles:
+  - title: gcc-compliance-requirements-singapore
+    relevance: 2
+  - title: compliance
+    relevance: 1
+  - title: bok-cloud-data-sovereignty-and-compliance
+    relevance: 1
+  - title: data-architects-data-product-delivery-G836344
+    relevance: 1
+  - title: Frontier security solution prototype design
+    relevance: 1
+- id: GEN-C058
+  category: conceptual
+  query: What are the key considerations for selecting a browser automation framework
+    for E2E testing?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+- id: GEN-M002
+  category: multi_hop
+  query: How do Playwright and Selenium compare for testing interactive charts and
+    dashboards?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+- id: GEN-P054
+  category: procedural
+  query: What factors should I consider when choosing a venue for an event?
+  score_method: ndcg
+  gold_titles:
+  - title: ppie-events-location
+    relevance: 2
+  - title: organising-coding-cafe
+    relevance: 1
+- id: GEN-C059
+  category: conceptual
+  query: How can I ensure my event location is accessible for attendees with lived
+    experience?
+  score_method: ndcg
+  gold_titles:
+  - title: ppie-events-tech
+    relevance: 2
+  - title: ppie-events-planning
+    relevance: 2
+  - title: ppie-events-location
+    relevance: 1
+  - title: ppie-events-comms
+    relevance: 1
+  - title: ppie-events-schedules
+    relevance: 1
+- id: GEN-C060
+  category: conceptual
+  query: What is MMLU-Pro and how does it improve upon the original MMLU benchmark?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: readme-part-01-tasks
+    relevance: 1
+- id: GEN-R050
+  category: recall
+  query: What are the account-specific features available in dbt based on plan type?
+  score_method: ndcg
+  gold_titles:
+  - title: account-specific-features
+    relevance: 2
+  - title: billing
+    relevance: 1
+- id: GEN-C061
+  category: conceptual
+  query: How does the Copilot feature in dbt assist users with their development workflow?
+  score_method: ndcg
+  gold_titles:
+  - title: dbt-copilot-overview
+    relevance: 2
+  - title: dbt-copilot
+    relevance: 2
+  - title: develop-copilot
+    relevance: 1
+  - title: dbt-copilot-faqs
+    relevance: 1
+  - title: copilot-chat-in-studio
+    relevance: 1
+- id: GEN-C062
+  category: conceptual
+  query: What are some best practices for writing Kubernetes operators?
+  score_method: ndcg
+  gold_titles:
+  - title: operator-white-paper-v1-0-part-09-successful-patterns
+    relevance: 2
+  - title: 08-best-practices
+    relevance: 1
+  - title: index-part-07-operator-frameworks-for-kubernetes
+    relevance: 1
+  - title: index-part-14-well-known-operators-patterns
+    relevance: 1
+- id: GEN-P055
+  category: procedural
+  query: How does requirement analysis apply to designing operators in Kubernetes?
+  score_method: ndcg
+  gold_titles:
+  - title: operator-white-paper-v1-0-part-10-designing-operators
+    relevance: 2
+  - title: index-part-15-designing-operators
+    relevance: 1
+  - title: 09-designing-operators
+    relevance: 1
+  - title: index-part-06-security
+    relevance: 1
+  - title: operator-white-paper-v1-0-part-05-security
+    relevance: 1
+- id: GEN-R051
+  category: recall
+  query: What are the emerging patterns in Operator lifecycle management?
+  score_method: ndcg
+  gold_titles:
+  - title: operator-white-paper-v1-0-part-11-emerging-patterns-of-the-future
+    relevance: 2
+  - title: index-part-16-emerging-patterns-of-the-future
+    relevance: 2
+- id: GEN-C063
+  category: conceptual
+  query: How are policy-aware operators different from traditional operators?
+  score_method: ndcg
+  gold_titles:
+  - title: gartner-predicts-2026-agentic-automation
+    relevance: 2
+  - title: operator-white-paper-v1-0-part-11-emerging-patterns-of-the-future
+    relevance: 1
+  - title: index-part-16-emerging-patterns-of-the-future
+    relevance: 1
+  - title: index-part-02-definition
+    relevance: 1
+  - title: framework-agentic-first-operating-model-transformation
+    relevance: 1
+  - title: agentic-ai-factory-prd
+    relevance: 1
+- id: GEN-R052
+  category: recall
+  query: What are the quick links for course materials and policies?
+  score_method: ndcg
+  gold_titles:
+  - title: links-policy
+    relevance: 2
+  - title: gpt-action-canvas
+    relevance: 1
+  - title: 1461 – Social Media
+    relevance: 1
+- id: GEN-R053
+  category: recall
+  query: Where can I find the Code of Conduct Violations Form?
+  score_method: ndcg
+  gold_titles:
+  - title: coc-reporting
+    relevance: 2
+- id: GEN-C064
+  category: conceptual
+  query: What happens when I add new columns to my dbt snapshot query?
+  score_method: ndcg
+  gold_titles:
+  - title: snapshot-schema-changes
+    relevance: 2
+  - title: snapshots-jinja-legacy
+    relevance: 1
+- id: GEN-R054
+  category: recall
+  query: Will dbt delete columns from the destination snapshot if they are removed
+    from the source query?
+  score_method: ndcg
+  gold_titles:
+  - title: snapshot-schema-changes
+    relevance: 2
+  - title: hard-deletes
+    relevance: 1
+- id: GEN-C065
+  category: conceptual
+  query: What is git and how does it function as a version control system?
+  score_method: ndcg
+  gold_titles:
+  - title: vcs-git-general
+    relevance: 2
+  - title: git-version-control
+    relevance: 1
+  - title: vcs
+    relevance: 1
+- id: GEN-R055
+  category: recall
+  query: What are the benefits of using git for software development?
+  score_method: ndcg
+  gold_titles:
+  - title: vcs-git-general
+    relevance: 2
+  - title: vcs
+    relevance: 1
+  - title: why-open-source
+    relevance: 1
+- id: GEN-P056
+  category: procedural
+  query: How can I ensure my event is inclusive for people with lived experience?
+  score_method: ndcg
+  gold_titles:
+  - title: ppie-events-planning
+    relevance: 2
+  - title: ppie-events-tech
+    relevance: 2
+  - title: ppie-events-schedules
+    relevance: 1
+  - title: ppie-events
+    relevance: 1
+  - title: ppie-events-comms
+    relevance: 1
+  - title: ppie-events-socials
+    relevance: 1
+  - title: accessibility-event-organising
+    relevance: 1
+- id: GEN-C066
+  category: conceptual
+  query: What considerations should I have when planning an event for diverse audiences?
+  score_method: ndcg
+  gold_titles:
+  - title: ppie-events-tech
+    relevance: 2
+  - title: ppie-events-schedules
+    relevance: 2
+  - title: ppie-events-planning
+    relevance: 1
+  - title: ppie-events-comms
+    relevance: 1
+  - title: ppie-events-location
+    relevance: 1
+- id: GEN-C067
+  category: conceptual
+  query: What are the key principles for effective communication in a team?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+  - title: readme
+    relevance: 1
+  - title: RESEARCH-OUTPUT-v2
+    relevance: 1
+  - title: collaborate
+    relevance: 1
+- id: GEN-C068
+  category: conceptual
+  query: What are the characteristics of good product engineers?
+  score_method: ndcg
+  gold_titles:
+  - title: traits
+    relevance: 2
+- id: GEN-R056
+  category: recall
+  query: Who are the new community managers for OTel?
+  score_method: ndcg
+  gold_titles:
+  - title: new-community-managers
+    relevance: 2
+  - title: announcing-community-manager
+    relevance: 1
+- id: GEN-P059
+  category: procedural
+  query: How do I choose the right database technology for my AI agent?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+- id: GEN-C071
+  category: conceptual
+  query: What is the purpose of conducting per-product growth reviews?
+  score_method: ndcg
+  gold_titles:
+  - title: per-product-growth-reviews
+    relevance: 2
+- id: GEN-T006
+  category: temporal
+  query: When should growth reviews be conducted for products?
+  score_method: ndcg
+  gold_titles:
+  - title: per-product-growth-reviews
+    relevance: 2
+  - title: growth-sessions
+    relevance: 1
+- id: GEN-P060
+  category: procedural
+  query: How can I raise a compiler error in dbt?
+  score_method: ndcg
+  gold_titles:
+  - title: exceptions
+    relevance: 2
+- id: GEN-C072
+  category: conceptual
+  query: What is the purpose of the exceptions.warn method in dbt?
+  score_method: ndcg
+  gold_titles:
+  - title: exceptions
+    relevance: 2
+  - title: warnings
+    relevance: 1
+- id: GEN-C073
+  category: conceptual
+  query: What are the types of caching available for common queries?
+  score_method: ndcg
+  gold_titles:
+  - title: sl-cache
+    relevance: 2
+  - title: exports
+    relevance: 1
+  - title: sl-faqs
+    relevance: 1
+- id: GEN-C075
+  category: conceptual
+  query: What are the FAIR Principles for sharing research outputs?
+  score_method: ndcg
+  gold_titles:
+  - title: rdm-fair
+    relevance: 2
+  - title: pd-overview-sharing
+    relevance: 1
+- id: GEN-P061
+  category: procedural
+  query: How can I make my research data accessible and reusable?
+  score_method: ndcg
+  gold_titles:
+  - title: pd-overview-sharing
+    relevance: 2
+  - title: rdm-sharing
+    relevance: 1
+  - title: open
+    relevance: 1
+  - title: rdm-fair
+    relevance: 1
+  - title: mit-cisr-data-liquidity-levers-caterpillar
+    relevance: 1
+  - title: rdm-find
+    relevance: 1
+- id: GEN-C076
+  category: conceptual
+  query: Why did the management team decide to allow employees to work from home?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+- id: GEN-P062
+  category: procedural
+  query: How do I reproduce a public leaderboard using the HELM package?
+  score_method: ndcg
+  gold_titles:
+  - title: reproducing-leaderboards
+    relevance: 2
+  - title: efficient-benchmarking
+    relevance: 1
+- id: GEN-R058
+  category: recall
+  query: Where can I find the run_entries and schema files for HELM leaderboards?
+  score_method: ndcg
+  gold_titles:
+  - title: reproducing-leaderboards
+    relevance: 2
+  - title: medhelm
+    relevance: 1
+- id: GEN-C077
+  category: conceptual
+  query: What is the Lean UX process and how does it fit into agile development?
+  score_method: ndcg
+  gold_titles:
+  - title: 18f-agile-based-project-approach
+    relevance: 2
+  - title: stay-lean
+    relevance: 1
+- id: GEN-R059
+  category: recall
+  query: How does 18F manage risk in their design process?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+  - title: 18f-agile-based-project-approach
+    relevance: 1
+  - title: build-a-prototype
+    relevance: 1
+  - title: introduction
+    relevance: 1
+- id: GEN-R061
+  category: recall
+  query: Can you suggest some philosophical texts related to neuroscience?
+  score_method: ndcg
+  gold_titles:
+  - title: RESEARCH-OUTPUT
+    relevance: 2
+  - title: further-reading
+    relevance: 1
+- id: GEN-C079
+  category: conceptual
+  query: What is the importance of giving feedback at PostHog?
+  score_method: ndcg
+  gold_titles:
+  - title: feedback
+    relevance: 2
+  - title: user-feedback
+    relevance: 1
+- id: GEN-P064
+  category: procedural
+  query: How should feedback be delivered to team members at PostHog?
+  score_method: ndcg
+  gold_titles:
+  - title: feedback
+    relevance: 2
+  - title: management
+    relevance: 1
+  - title: culture
+    relevance: 1
+- id: GEN-R062
+  category: recall
+  query: What tutorials are included in the W3D5 Network Causality course?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+- id: GEN-C080
+  category: conceptual
+  query: What is the purpose of the Security Operations Center policy?
+  score_method: ndcg
+  gold_titles:
+  - title: pol-tierless-soc
+    relevance: 2
+  - title: pol-24x7-scheduling
+    relevance: 1
+  - title: pol-minimizing-business-impact
+    relevance: 1
+  - title: pol-contacting-soc
+    relevance: 1
+  - title: pol-metrics
+    relevance: 1
+  - title: pol-vip-users-and-white-glove
+    relevance: 1
+  - title: pol-alert-queue-management
+    relevance: 1
+  - title: pol-credential-management
+    relevance: 1
+- id: GEN-R063
+  category: recall
+  query: Who can I consult if I have questions about the SOC policy?
+  score_method: ndcg
+  gold_titles:
+  - title: pol-contacting-soc
+    relevance: 2
+  - title: pol-democracy-of-ideas
+    relevance: 1
+  - title: pol-senior-analyst-availability
+    relevance: 1
+- id: GEN-C081
+  category: conceptual
+  query: What is the purpose of the SOP for investigating suspicious domain registrations?
+  score_method: ndcg
+  gold_titles:
+  - title: sop-investigating-suspicious-domain-registration
+    relevance: 2
+- id: GEN-P066
+  category: procedural
+  query: What tools do SOC analysts need to investigate suspicious domain registrations?
+  score_method: ndcg
+  gold_titles:
+  - title: sop-investigating-suspicious-domain-registration
+    relevance: 2
+  - title: sop-look-alike-domain-or-typosquat
+    relevance: 1
+- id: GEN-R064
+  category: recall
+  query: What are the hard requirements for formatting in The Turing Way?
+  score_method: ndcg
+  gold_titles:
+  - title: consistency-formatting
+    relevance: 2
+  - title: style-consistency
+    relevance: 1
+  - title: consistency-structure
+    relevance: 1
+- id: GEN-P067
+  category: procedural
+  query: How should content be formatted in The Turing Way?
+  score_method: ndcg
+  gold_titles:
+  - title: consistency-formatting
+    relevance: 2
+  - title: contributing-workflow
+    relevance: 1
+  - title: style-consistency
+    relevance: 1
+  - title: newsletters-style
+    relevance: 1
+  - title: contributing-chapters
+    relevance: 1
+  - title: presenting
+    relevance: 1
+- id: GEN-C082
+  category: conceptual
+  query: Why are there so many macros in my dbt output?
+  score_method: ndcg
+  gold_titles:
+  - title: why-so-many-macros
+    relevance: 2
+  - title: using-jinja
+    relevance: 1
+  - title: prompt-cookbook
+    relevance: 1
+  - title: adapter-creation-part-03-build-a-new-adapter
+    relevance: 1
+- id: GEN-R065
+  category: recall
+  query: What does dbt include in its project that affects the number of macros?
+  score_method: ndcg
+  gold_titles:
+  - title: why-so-many-macros
+    relevance: 2
+  - title: statement-blocks
+    relevance: 1
+- id: GEN-P068
+  category: procedural
+  query: What are the key steps in risk management for software projects?
+  score_method: ndcg
+  gold_titles:
+  - title: risk-management
+    relevance: 2
+  - title: risk-assess
+    relevance: 1
+  - title: risk-assess-impact
+    relevance: 1
+  - title: 3-planning
+    relevance: 1
+- id: GEN-C083
+  category: conceptual
+  query: How do agile methodologies incorporate risk management principles?
+  score_method: ndcg
+  gold_titles:
+  - title: risk-management
+    relevance: 2
+  - title: 18f-agile-based-project-approach
+    relevance: 1
+  - title: 2-basic-principles
+    relevance: 1
+- id: GEN-R066
+  category: recall
+  query: What feedback is being requested for the OpenTelemetry Android agent API?
+  score_method: ndcg
+  gold_titles:
+  - title: index
+    relevance: 2
+  - title: android
+    relevance: 1
+- id: GEN-P069
+  category: procedural
+  query: What are the best practices for preparing a pull request for review?
+  score_method: ndcg
+  gold_titles:
+  - title: pull-requests
+    relevance: 2
+  - title: author-guidance
+    relevance: 2
+  - title: code-review
+    relevance: 1
+  - title: reviewing-workflow
+    relevance: 1
+- id: GEN-C084
+  category: conceptual
+  query: Why is it important to keep pull requests small?
+  score_method: ndcg
+  gold_titles:
+  - title: small-cls
+    relevance: 2
+  - title: pull-requests
+    relevance: 1
+- id: GEN-P070
+  category: procedural
+  query: How do I set up auto deployment with GitHub Actions?
+  score_method: ndcg
+  gold_titles:
+  - title: git-hub-actions-build-and-deploy
+    relevance: 2
+  - title: ci-github-actions
+    relevance: 1
+  - title: github-workflows
+    relevance: 1
+- id: GEN-R067
+  category: recall
+  query: What do I need before using GitHub Actions for auto deployment?
+  score_method: ndcg
+  gold_titles:
+  - title: git-hub-actions-build-and-deploy
+    relevance: 2
+  - title: readme
+    relevance: 1
+  - title: ci-github-actions
+    relevance: 1
+- id: GEN-C085
+  category: conceptual
+  query: What role do platforms play in digital product development?
+  score_method: ndcg
+  gold_titles:
+  - title: index-part-08-conclusion
+    relevance: 2
+  - title: index
+    relevance: 1
+- id: GEN-P071
+  category: procedural
+  query: How can a maturity model assist in platform engineering?
+  score_method: ndcg
+  gold_titles:
+  - title: index-part-04-how-to-use-this-model
+    relevance: 2
+  - title: index-part-08-conclusion
+    relevance: 1
+  - title: index-part-02-introduction
+    relevance: 1
+- id: GEN-C086
+  category: conceptual
+  query: What are the responsibilities of designers regarding accessibility for people
+    with disabilities?
+  score_method: ndcg
+  gold_titles:
+  - title: accessibility
+    relevance: 2
+  - title: method-accessibility-standards
+    relevance: 2
+  - title: ppie-events-planning
+    relevance: 1
+  - title: Recruiting-for-Diversity
+    relevance: 1
+- id: GEN-P072
+  category: procedural
+  query: How can research practices be made accessible for individuals using assistive
+    technology?
+  score_method: ndcg
+  gold_titles:
+  - title: accessibility
+    relevance: 2
+  - title: comms-overview-accessibly
+    relevance: 1
+  - title: ppie-events-planning
+    relevance: 1
+- id: GEN-P073
+  category: procedural
+  query: How can I suppress print messages in dbt?
+  score_method: ndcg
+  gold_titles:
+  - title: print-output
+    relevance: 2
+- id: GEN-T008
+  category: temporal
+  query: What changes were made to tool use in group chat from version 0.2 to 0.4?
+  score_method: ndcg
+  gold_titles:
+  - title: migration-guide-part-32-group-chat-with-tool-use
+    relevance: 2
+  - title: migration-guide-part-01-migration-guide-for-v02-to-v04
+    relevance: 1
+- id: GEN-C087
+  category: conceptual
+  query: How do tools function in the group chat system?
+  score_method: ndcg
+  gold_titles:
+  - title: migration-guide-part-32-group-chat-with-tool-use
+    relevance: 2
+  - title: migration-guide-part-23-register-the-tool-function-to-the-tool-caller-and-executor
+    relevance: 1
+  - title: event-tools
+    relevance: 1
+- id: GEN-C088
+  category: conceptual
+  query: What are some next steps for using Dapr bindings effectively?
+  score_method: ndcg
+  gold_titles:
+  - title: readme-part-08-7-next-steps
+    relevance: 2
+  - title: readme-part-01-step-3-bindingshttpsdocsdapriodeveloping-applicationsbuildin
+    relevance: 1
+  - title: readme-part-03-2-dapr-bindings-in-agentic-systems-daca-context
+    relevance: 1
+- id: GEN-P077
+  category: procedural
+  query: How do I use the SQL LIKE operator in a WHERE clause?
+  score_method: ndcg
+  gold_titles:
+  - title: sql-like
+    relevance: 2
+- id: GEN-C091
+  category: conceptual
+  query: What are the SQL wildcards used with the LIKE operator?
+  score_method: ndcg
+  gold_titles:
+  - title: sql-like
+    relevance: 2
+- id: GEN-C092
+  category: conceptual
+  query: What are some best practices for designing maintainable software?
+  score_method: ndcg
+  gold_titles:
+  - title: maintainability
+    relevance: 2
+  - title: readme
+    relevance: 1
+- id: GEN-C093
+  category: conceptual
+  query: What are the challenges in configuring OpenTelemetry for health check endpoints?
+  score_method: ndcg
+  gold_titles:
+  - title: declarative-config
+    relevance: 2
+- id: GEN-T009
+  category: temporal
+  query: Why did it take so long to implement span dropping in OpenTelemetry?
+  score_method: ndcg
+  gold_titles:
+  - title: declarative-config
+    relevance: 2
+  - title: open-telemetry
+    relevance: 1
+  - title: index
+    relevance: 1
+- id: GEN-R070
+  category: recall
+  query: What are the different roles in the sales team?
+  score_method: ndcg
+  gold_titles:
+  - title: competency-rubric-and-sizing
+    relevance: 2
+  - title: how-we-work
+    relevance: 1
+  - title: sales-cs-hiring
+    relevance: 1
+- id: GEN-P079
+  category: procedural
+  query: How do I create a new announcement in Hugo?
+  score_method: ndcg
+  gold_titles:
+  - title: announcements
+    relevance: 2
+  - title: index
+    relevance: 1
+- id: GEN-C094
+  category: conceptual
+  query: What are the features of announcements in Hugo?
+  score_method: ndcg
+  gold_titles:
+  - title: announcements
+    relevance: 2
+- id: GEN-C095
+  category: conceptual
+  query: What is The Turing Way project about?
+  score_method: ndcg
+  gold_titles:
+  - title: readme-part-01-the-turing-way
+    relevance: 2
+  - title: readme-dutch
+    relevance: 2
+  - title: background
+    relevance: 1
+  - title: embracing-digital-commons
+    relevance: 1
+  - title: subprojects
+    relevance: 1
+  - title: governance-roles
+    relevance: 1
+  - title: collaborators
+    relevance: 1
+  - title: communication-channels
+    relevance: 1
+  - title: ways-of-working
+    relevance: 1
+  - title: community
+    relevance: 1
+- id: GEN-R071
+  category: recall
+  query: In which languages is The Turing Way available?
+  score_method: ndcg
+  gold_titles:
+  - title: readme-part-01-the-turing-way
+    relevance: 2
+  - title: readme-french
+    relevance: 1
+  - title: readme-german
+    relevance: 1
+- id: GEN-C096
+  category: conceptual
+  query: What are the key characteristics of AI agents?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: three-differentiators-framework
+    relevance: 1
+- id: GEN-P080
+  category: procedural
+  query: How do AI agents operate without human intervention?
+  score_method: ndcg
+  gold_titles:
+  - title: gartner-impact-ai-agents-digital-workplace-it-operations-826828
+    relevance: 2
+  - title: readme
+    relevance: 1
+  - title: gartner-impact-ai-agents-digital-workplace
+    relevance: 1
+- id: GEN-P081
+  category: procedural
+  query: How can I create cross-references in MyST Markdown?
+  score_method: ndcg
+  gold_titles:
+  - title: style-crossref
+    relevance: 2
+  - title: style-citing
+    relevance: 1
+- id: GEN-C097
+  category: conceptual
+  query: What is the purpose of using labels for cross-referencing in documents?
+  score_method: ndcg
+  gold_titles:
+  - title: style-crossref
+    relevance: 2
+- id: GEN-C098
+  category: conceptual
+  query: What is the Icelandic WinoGrande dataset and its purpose?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+- id: GEN-P082
+  category: procedural
+  query: How is the Icelandic WinoGrande evaluated for language models?
+  score_method: ndcg
+  gold_titles:
+  - title: readme
+    relevance: 2
+  - title: readme-part-01-language-model-evaluation-harness
+    relevance: 1
+- id: GEN-R072
+  category: recall
+  query: What is the legacy image component in Next.js 13?
+  score_method: ndcg
+  gold_titles:
+  - title: v0-part-26-image-legacy
+    relevance: 2
+- id: GEN-P083
+  category: procedural
+  query: How do I upgrade from the old next/image to the new next/image in Next.js?
+  score_method: ndcg
+  gold_titles:
+  - title: v0-part-26-image-legacy
+    relevance: 2
+- id: GEN-P084
+  category: procedural
+  query: What are the steps to implement streaming payments using Interledger and
+    Web Monetization?
+  score_method: ndcg
+  gold_titles:
+  - title: readme-part-18-practical-guidance-short-and-actionable
+    relevance: 2
+  - title: readme-part-15-interledger-web-monetization-open-payments
+    relevance: 1
+- id: GEN-C100
+  category: conceptual
+  query: How can I use Lightning for global micro-settlement in machine-to-machine
+    applications?
+  score_method: ndcg
+  gold_titles:
+  - title: readme-part-16-bitcoin-lightning-network-plus-taproot-assets-for-stablecoin
+    relevance: 2
+  - title: readme-part-18-practical-guidance-short-and-actionable
+    relevance: 1
+  - title: readme-part-12-why-micropayments-matter
+    relevance: 1
+- id: GEN-P085
+  category: procedural
+  query: How do I use the Discovery API to check data pipeline health?
+  score_method: ndcg
+  gold_titles:
+  - title: discovery-use-cases-and-examples
+    relevance: 2
+  - title: discovery-api
+    relevance: 1
+  - title: discovery-querying
+    relevance: 1
+- id: GEN-P087
+  category: procedural
+  query: What is the policy for taking time off at PostHog?
+  score_method: ndcg
+  gold_titles:
+  - title: time-off
+    relevance: 2
+  - title: grown-ups
+    relevance: 1
+- id: GEN-R076
+  category: recall
+  query: What courses are available for learning about the dbt Semantic Layer?
+  score_method: ndcg
+  gold_titles:
+  - title: sl-course
+    relevance: 2

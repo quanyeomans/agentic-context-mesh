@@ -25,7 +25,10 @@ def cmd_suggest(args: argparse.Namespace) -> int:
         neo4j = get_client()
         suggestions = suggest_entities(text, neo4j)
     except ImportError:
-        print("ERROR: Entity suggestion requires spaCy NLP. Run: pip install 'kairix[nlp]'", file=sys.stderr)
+        print(
+            "ERROR: Entity suggestion requires spaCy NLP. Run: pip install 'kairix[nlp]'",
+            file=sys.stderr,
+        )
         return 1
 
     print(format_suggestions(suggestions, fmt=args.format))
@@ -45,8 +48,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
     from kairix.knowledge.entities.validate import validate_entity
     from kairix.knowledge.graph.client import get_client
 
-    neo4j = get_client()
-    result = validate_entity(args.name, neo4j, update=args.update)
+    try:
+        neo4j = get_client()
+        result = validate_entity(args.name, neo4j, update=args.update)
+    except Exception as exc:
+        print(f"ERROR: Validation failed: {exc}", file=sys.stderr)
+        return 1
 
     if args.format == "json":
         print(_json.dumps(result, indent=2))
@@ -61,7 +68,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     if not result["matches"]:
         print("No Wikidata matches found.")
-        return 0
+        return 1
 
     print(f"{'QID':<12} {'CONFIDENCE':<12} {'LABEL':<30} DESCRIPTION")
     print("-" * 90)
@@ -130,7 +137,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_suggest.add_argument("text", nargs="?", default="", help="Text to analyse (or use --file)")
     p_suggest.add_argument("--file", "-f", default=None, help="Read text from file")
     p_suggest.add_argument(
-        "--format", choices=["table", "jsonl"], default="table", help="Output format (default: table)"
+        "--format",
+        choices=["table", "jsonl"],
+        default="table",
+        help="Output format (default: table)",
     )
     p_suggest.set_defaults(func=cmd_suggest)
 

@@ -26,6 +26,7 @@ import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from kairix.quality.eval.constants import CATEGORY_WEIGHTS
 
@@ -61,7 +62,7 @@ class MonitorResult:
 # ---------------------------------------------------------------------------
 
 
-def _load_log(log_path: str) -> list[dict]:
+def _load_log(log_path: str) -> list[dict[str, Any]]:
     """Load existing monitor log entries. Returns [] on missing file or parse error."""
     p = Path(log_path)
     if not p.exists():
@@ -80,7 +81,7 @@ def _load_log(log_path: str) -> list[dict]:
     return entries
 
 
-def _append_log(log_path: str, entry: dict, max_entries: int = _MAX_LOG_ENTRIES) -> None:
+def _append_log(log_path: str, entry: dict[str, Any], max_entries: int = _MAX_LOG_ENTRIES) -> None:
     """Append a log entry and trim to max_entries. Never raises."""
     try:
         entries = _load_log(log_path)
@@ -100,7 +101,7 @@ def _append_log(log_path: str, entry: dict, max_entries: int = _MAX_LOG_ENTRIES)
 # ---------------------------------------------------------------------------
 
 
-def _rolling_average(entries: list[dict], window_days: int) -> float | None:
+def _rolling_average(entries: list[dict[str, Any]], window_days: int) -> float | None:
     """
     Compute the weighted_ndcg rolling average over the last window_days.
 
@@ -249,6 +250,21 @@ def run_monitor(
 # ---------------------------------------------------------------------------
 
 
+def _filter_recent_entries(entries: list[dict[str, Any]], cutoff: datetime) -> list[dict[str, Any]]:
+    """Return entries with a timestamp at or after the cutoff."""
+    recent: list[dict[str, Any]] = []
+    for e in entries:
+        try:
+            ts = datetime.fromisoformat(e["ts"])
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts >= cutoff:
+                recent.append(e)
+        except (KeyError, ValueError):
+            pass
+    return recent
+
+
 def generate_report(log_path: str, days: int = 30) -> str:
     """
     Generate a markdown report from the monitor log.
@@ -269,16 +285,7 @@ def generate_report(log_path: str, days: int = 30) -> str:
     now = datetime.now(tz=timezone.utc)
     cutoff = now - timedelta(days=days)
 
-    recent = []
-    for e in entries:
-        try:
-            ts = datetime.fromisoformat(e["ts"])
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if ts >= cutoff:
-                recent.append(e)
-        except (KeyError, ValueError):
-            pass
+    recent = _filter_recent_entries(entries, cutoff)
 
     if not recent:
         return f"# Kairix Monitor Report\n\nNo data in the last {days} days.\n"

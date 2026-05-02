@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import inspect
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -38,57 +37,91 @@ class TestBudgetInference:
     def test_entity_intent_returns_1500(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.ENTITY):
-            assert _infer_budget("tell me about Acme", 3000) == 1500
+        assert _infer_budget("tell me about Acme", 3000, classify_fn=lambda q: QueryIntent.ENTITY) == 1500
 
     @pytest.mark.unit
     def test_keyword_intent_returns_1500(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.KEYWORD):
-            assert _infer_budget("KFEAT-010", 3000) == 1500
+        assert _infer_budget("KFEAT-010", 3000, classify_fn=lambda q: QueryIntent.KEYWORD) == 1500
 
     @pytest.mark.unit
     def test_research_query_returns_5000(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
-            assert _infer_budget("research the competitive landscape", 3000) == 5000
+        assert (
+            _infer_budget(
+                "research the competitive landscape",
+                3000,
+                classify_fn=lambda q: QueryIntent.SEMANTIC,
+            )
+            == 5000
+        )
 
     @pytest.mark.unit
     def test_compare_query_returns_5000(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
-            assert _infer_budget("compare the two frameworks", 3000) == 5000
+        assert (
+            _infer_budget(
+                "compare the two frameworks",
+                3000,
+                classify_fn=lambda q: QueryIntent.SEMANTIC,
+            )
+            == 5000
+        )
 
     @pytest.mark.unit
     def test_analyse_query_returns_5000(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
-            assert _infer_budget("analyse the quarterly results", 3000) == 5000
+        assert (
+            _infer_budget(
+                "analyse the quarterly results",
+                3000,
+                classify_fn=lambda q: QueryIntent.SEMANTIC,
+            )
+            == 5000
+        )
 
     @pytest.mark.unit
     def test_comprehensive_query_returns_5000(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
-            assert _infer_budget("give me a comprehensive overview", 3000) == 5000
+        assert (
+            _infer_budget(
+                "give me a comprehensive overview",
+                3000,
+                classify_fn=lambda q: QueryIntent.SEMANTIC,
+            )
+            == 5000
+        )
 
     @pytest.mark.unit
     def test_detailed_query_returns_5000(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
-            assert _infer_budget("detailed breakdown of costs", 3000) == 5000
+        assert (
+            _infer_budget(
+                "detailed breakdown of costs",
+                3000,
+                classify_fn=lambda q: QueryIntent.SEMANTIC,
+            )
+            == 5000
+        )
 
     @pytest.mark.unit
     def test_default_returns_3000(self) -> None:
         from kairix.core.search.intent import QueryIntent
 
-        with patch("kairix.core.search.intent.classify", return_value=QueryIntent.SEMANTIC):
-            assert _infer_budget("how does the build system work", 3000) == 3000
+        assert (
+            _infer_budget(
+                "how does the build system work",
+                3000,
+                classify_fn=lambda q: QueryIntent.SEMANTIC,
+            )
+            == 3000
+        )
 
     @pytest.mark.unit
     def test_explicit_override_preserved(self) -> None:
@@ -99,14 +132,20 @@ class TestBudgetInference:
     @pytest.mark.unit
     def test_classify_failure_falls_back_to_heuristics(self) -> None:
         """When classify raises, research words still trigger 5000."""
-        with patch("kairix.core.search.intent.classify", side_effect=RuntimeError("broken")):
-            assert _infer_budget("research the topic", 3000) == 5000
+
+        def _failing_classify(q):
+            raise RuntimeError("broken")
+
+        assert _infer_budget("research the topic", 3000, classify_fn=_failing_classify) == 5000
 
     @pytest.mark.unit
     def test_classify_failure_default_3000(self) -> None:
         """When classify raises and no research words, default is 3000."""
-        with patch("kairix.core.search.intent.classify", side_effect=RuntimeError("broken")):
-            assert _infer_budget("hello world", 3000) == 3000
+
+        def _failing_classify(q):
+            raise RuntimeError("broken")
+
+        assert _infer_budget("hello world", 3000, classify_fn=_failing_classify) == 3000
 
 
 # ---------------------------------------------------------------------------
@@ -185,21 +224,19 @@ class TestEntityFirstHint:
             error="",
         )
 
-        mock_neo4j = MagicMock()
-        mock_neo4j.available = True
-        mock_neo4j.cypher.return_value = [
-            {
-                "id": "acme",
-                "name": "Acme",
-                "type": "Organisation",
-                "summary": "A health org",
-                "vault_path": "02-Areas/00-Clients/Acme/Acme.md",
-            }
-        ]
+        entity_card = {
+            "id": "acme",
+            "name": "Acme",
+            "type": "Organisation",
+            "summary": "A health org",
+            "vault_path": "02-Areas/00-Clients/Acme/Acme.md",
+        }
 
-        with patch("kairix.core.search.hybrid.search", return_value=mock_result):
-            with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
-                result = tool_search(query="tell me about Acme")
+        result = tool_search(
+            query="tell me about Acme",
+            search_fn=lambda **kwargs: mock_result,
+            entity_card_fn=lambda name: entity_card,
+        )
 
         assert len(result["results"]) == 2
         first = result["results"][0]
@@ -224,13 +261,11 @@ class TestEntityFirstHint:
             error="",
         )
 
-        mock_neo4j = MagicMock()
-        mock_neo4j.available = True
-        mock_neo4j.cypher.return_value = []  # not found
-
-        with patch("kairix.core.search.hybrid.search", return_value=mock_result):
-            with patch("kairix.knowledge.graph.client.get_client", return_value=mock_neo4j):
-                result = tool_search(query="tell me about UnknownCorp")
+        result = tool_search(
+            query="tell me about UnknownCorp",
+            search_fn=lambda **kwargs: mock_result,
+            entity_card_fn=lambda name: None,
+        )
 
         assert len(result["results"]) == 1
         assert result["results"][0].get("source") is None
@@ -247,8 +282,10 @@ class TestEntityFirstHint:
             error="",
         )
 
-        with patch("kairix.core.search.hybrid.search", return_value=mock_result):
-            result = tool_search(query="how to deploy")
+        result = tool_search(
+            query="how to deploy",
+            search_fn=lambda **kwargs: mock_result,
+        )
 
         assert all(r.get("source") != "entity_graph" for r in result["results"])
 
