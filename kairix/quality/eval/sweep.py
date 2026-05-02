@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -61,12 +60,6 @@ DEFAULT_QUERY_STYLES: list[str] = [
 ]
 
 
-def _get_stop_words() -> frozenset[str]:
-    from kairix.core.search.bm25 import FTS_STOP_WORDS
-
-    return FTS_STOP_WORDS
-
-
 @dataclass
 class SweepResult:
     """Result of a single sweep configuration."""
@@ -93,21 +86,13 @@ class SweepReport:
 
 
 def _build_query(query: str, style: str) -> str | None:
-    """Build FTS5 query string in the specified style."""
-    raw = query.replace("-", " ").replace("_", " ").replace("'", " ").replace("\u2019", " ")
-    tokens = re.findall(r"[a-zA-Z0-9]+", raw.lower())
-    tokens = [t for t in tokens if t not in _get_stop_words() and len(t) >= 2]
-    if not tokens:
-        return None
+    """Build FTS5 query string in the specified style.
 
-    if style == "bare":
-        return " ".join(tokens)
-    elif style == "prefix":
-        return " AND ".join(f'"{t}"*' for t in tokens)
-    elif style == "quoted":
-        return " AND ".join(f'"{t}"' for t in tokens)
-    else:
-        return " ".join(tokens)
+    Delegates to :func:`kairix.core.search.tokenizer.tokenize_fts_query`.
+    """
+    from kairix.core.search.tokenizer import tokenize_fts_query
+
+    return tokenize_fts_query(query, style=style)
 
 
 def _bm25_search_config(

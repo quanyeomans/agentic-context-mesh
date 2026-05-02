@@ -93,20 +93,13 @@ def _bm25_search_with_weights(
 
     Returns list of {path, title, snippet, collection} dicts.
     """
-    import re
-
     from kairix.core.db import get_db_path, open_db
+    from kairix.core.search.tokenizer import tokenize_fts_query
 
-    # Stop words (same as bm25.py)
-    from kairix.core.search.bm25 import FTS_STOP_WORDS
-
-    # Build FTS5 query
-    raw = query.replace("-", " ").replace("_", " ").replace("'", " ").replace("\u2019", " ")
-    tokens = re.findall(r"[a-zA-Z0-9]+", raw.lower())
-    tokens = [t for t in tokens if t not in FTS_STOP_WORDS and len(t) >= 2]
-    if not tokens:
+    # Build FTS5 query (bare style — gold builder pools with implicit AND)
+    fts_query = tokenize_fts_query(query, style="bare")
+    if not fts_query:
         return []
-    fts_query = " ".join(tokens)
 
     try:
         db_path = get_db_path()

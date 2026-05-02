@@ -11,7 +11,6 @@ BM25Result is a TypedDict for lightweight, serialisable results.
 """
 
 import logging
-import re
 import sqlite3
 from pathlib import Path
 from typing import TypedDict
@@ -183,23 +182,13 @@ def _normalise_fts_query(query: str) -> str:
     """
     Build an FTS5 query from natural language using quoted prefix match.
 
-    Matches the buildFTS5Query() behaviour: each meaningful token becomes
-    ``"token"*`` (quoted with prefix wildcard), joined with AND. This gives
-    exact token matches with prefix expansion, which is more precise than
-    bare tokens for technical identifiers (ADR-012 → ``"adr"* AND "012"*``).
-
-    Returns empty string if no meaningful tokens remain.
+    Delegates to :func:`kairix.core.search.tokenizer.tokenize_fts_query`
+    with ``style="prefix"`` and converts ``None`` to empty string for
+    backwards compatibility.
     """
-    # Replace hyphens, underscores, and apostrophes with spaces
-    query = query.replace("-", " ").replace("_", " ").replace("'", " ").replace("\u2019", " ")
-    # Extract word tokens (alphanumeric sequences only)
-    raw_tokens = re.findall(r"[a-zA-Z0-9]+", query.lower())
-    # Filter stop words and very short tokens
-    tokens = [t for t in raw_tokens if t not in FTS_STOP_WORDS and len(t) >= 2]
-    if not tokens:
-        return ""
-    # Quoted prefix match per token, AND-joined
-    return " AND ".join(f'"{t}"*' for t in tokens)
+    from kairix.core.search.tokenizer import tokenize_fts_query
+
+    return tokenize_fts_query(query, style="prefix") or ""
 
 
 def _build_bm25_query(
