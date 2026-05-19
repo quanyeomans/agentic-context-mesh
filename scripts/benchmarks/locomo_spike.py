@@ -396,9 +396,27 @@ def _run_kairix_cli_backend(
 ) -> list[dict[str, Any]]:
     """Existing subprocess path: write sessions → kairix embed → kairix prep.
 
-    Preserves the v2026.5.19a2 behaviour exactly. Each question shells
-    out to ``kairix prep`` and the response is whatever the CLI renders.
+    Per-conversation isolation: each invocation resets the vault directory
+    to contain ONLY this conversation's sessions before embedding. Without
+    the reset, kairix indexes all prior conversations cumulatively and
+    retrieval cross-contaminates (e.g. conv-47 questions about John surface
+    chunks from conv-43 where another John lives). mem0's backend isolates
+    via user_id; kairix-cli needs vault reset for the same isolation.
     """
+    import shutil
+
+    if vault_path.exists():
+        shutil.rmtree(vault_path)
+    vault_path.mkdir(parents=True, exist_ok=True)
+    # Also drop the kairix data directory's index files so the embed starts
+    # from a clean SQLite + vector index. The KAIRIX_DATA_DIR env var must
+    # point at a sibling of vault_path for this to work — _spike_env enforces.
+    data_dir_str = os.environ.get("KAIRIX_DATA_DIR")
+    if data_dir_str:
+        data_dir = Path(data_dir_str)
+        if data_dir.exists():
+            shutil.rmtree(data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
     write_sessions_to_vault(sessions, vault_path, conv_id)
     run_kairix_embed(vault_path)
 
