@@ -1149,3 +1149,125 @@ class FakeProviderRegistry:
 
     def available(self) -> list[str]:
         return sorted(self._providers)
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 — memory-backend Protocol fakes.
+#
+# FakeMemory satisfies the Memory Protocol (id/content/score/metadata).
+# FakeMemoryStore implements the MemoryStore surface as a dict-backed
+# in-memory store with naive substring scoring — enough to exercise
+# Protocol conformance and round-trip semantics without dragging in a
+# real backend. FakeConversationStore extends with add_turn for the
+# chat-paradigm protocol probe.
+# ---------------------------------------------------------------------------
+
+
+class FakeMemory:
+    """Minimal Memory satisfying the runtime-checkable Memory Protocol."""
+
+    def __init__(
+        self,
+        *,
+        id: str,
+        content: str,
+        score: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self._id = id
+        self._content = content
+        self._score = score
+        self._metadata = dict(metadata or {})
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def content(self) -> str:
+        return self._content
+
+    @property
+    def score(self) -> float:
+        return self._score
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return dict(self._metadata)
+
+
+class FakeMemoryStore:
+    """In-memory MemoryStore — dict-backed, naive substring scoring.
+
+    Satisfies the runtime-checkable ``MemoryStore`` Protocol. Used by
+    contract tests to pin the add/search/update/delete round-trip
+    semantics without standing up a real backend.
+
+    Search scoring: returns memories whose content shares any word
+    with the query, sorted by overlap ratio. Crude on purpose — the
+    point of the fake is Protocol conformance, not retrieval quality.
+    """
+
+    def __init__(self) -> None:
+        self._memories: dict[str, FakeMemory] = {}
+        self._next_id = 0
+
+    def _mint_id(self) -> str:
+        self._next_id += 1
+        return f"fake-mem-{self._next_id:04d}"
+
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str:
+        mem_id = self._mint_id()
+        self._memories[mem_id] = FakeMemory(id=mem_id, content=content, score=1.0, metadata=metadata)
+        return mem_id
+
+    def search(self, query: str, *, top_k: int = 10) -> list[FakeMemory]:
+        q_words = set(query.lower().split())
+        scored: list[tuple[float, FakeMemory]] = []
+        for mem in self._memories.values():
+            c_words = set(mem.content.lower().split())
+            overlap = len(q_words & c_words)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(q_words), 1)
+            scored.append((score, FakeMemory(id=mem.id, content=mem.content, score=score, metadata=mem.metadata)))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [m for _, m in scored[:top_k]]
+
+    def update(self, memory_id: str, content: str) -> None:
+        if memory_id not in self._memories:
+            raise KeyError(f"FakeMemoryStore: no memory with id {memory_id!r}")
+        existing = self._memories[memory_id]
+        self._memories[memory_id] = FakeMemory(
+            id=existing.id,
+            content=content,
+            score=existing.score,
+            metadata=existing.metadata,
+        )
+
+    def delete(self, memory_id: str) -> None:
+        self._memories.pop(memory_id, None)
+
+
+class FakeConversationStore(FakeMemoryStore):
+    """FakeMemoryStore + turn ingestion for the ConversationStore Protocol probe.
+
+    ``add_turn`` records the turn metadata alongside the content so
+    benchmark tests can verify that timestamp/role/conversation_id
+    round-trip through the search surface.
+    """
+
+    def add_turn(
+        self,
+        *,
+        message: str,
+        role: str,
+        conversation_id: str,
+        timestamp: str | None = None,
+    ) -> str:
+        metadata = {
+            "role": role,
+            "conversation_id": conversation_id,
+            "timestamp": timestamp or "1970-01-01T00:00:00Z",
+        }
+        return self.add(message, metadata=metadata)

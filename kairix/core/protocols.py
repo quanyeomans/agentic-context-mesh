@@ -272,3 +272,115 @@ class Retriever(Protocol):
         collections: list[str] | None = None,
         cfg: Any = None,
     ) -> Any: ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 of mem0-vs-kairix-uplift plan — pluggable memory-backend Protocol.
+#
+# MemoryStore is the boundary between kairix's use cases (prep, search,
+# brief, ...) and the configured memory backend. Two production
+# implementations are planned: KairixNativeMemoryStore (wraps the existing
+# SearchPipeline / chunk store, vault paradigm) and Mem0MemoryStore (wraps
+# mem0.Memory, conversation paradigm). The Protocol is intentionally
+# backend-agnostic: chunk-shaped and fact-shaped stores both satisfy it;
+# the consumer-side code in use cases doesn't know which is configured.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class MemoryStore(Protocol):
+    """Memory backend boundary — vault-shaped or conversation-shaped.
+
+    The lingua-franca surface for "store and recall a memory" across
+    all backends. Implementations translate their native record shape
+    (kairix chunks, mem0 facts, ...) into the common ``Memory`` value
+    object returned by ``search``.
+
+    Implementations must be safe to construct repeatedly (idempotent
+    init) and tolerate concurrent ``search`` calls from the MCP layer.
+    Persistence semantics are backend-specific; the Protocol does not
+    pin durability guarantees beyond "writes from ``add`` are visible
+    to subsequent ``search`` calls in the same process".
+    """
+
+    # add(content, *, metadata): backend-assigned id. metadata carries
+    # backend-agnostic fields (source path, agent, timestamp, entity hints);
+    # backends ignore unknown keys and round-trip the rest on search.
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str: ...
+
+    # search(query, *, top_k): up to top_k Memory-shaped objects, best
+    # first. Empty list is a valid "no relevant content" signal — callers
+    # MUST tolerate it. Implementations may return fewer than top_k.
+    def search(self, query: str, *, top_k: int = 10) -> list[Any]: ...
+
+    # update(memory_id, content): replace content of an existing memory.
+    # Raises KeyError (or backend equivalent) if id absent. Backends with
+    # append-only semantics (mem0 consolidation) may supersede rather than
+    # replace — the Protocol does not pin the strategy.
+    def update(self, memory_id: str, content: str) -> None: ...
+
+    # delete(memory_id): remove. No-op if id is already absent.
+    def delete(self, memory_id: str) -> None: ...
+
+
+@runtime_checkable
+class ConversationStore(Protocol):
+    """Chat-paradigm memory store — adds turn-level ingestion.
+
+    Specialisation of ``MemoryStore`` for backends that ingest
+    individual conversation turns (mem0, future LLM-fact-extractor
+    layer in kairix-native uplift). Backends typically run an
+    LLM-extraction pass per turn or sliding window; ``add_turn``
+    returns the id of the most recently-produced memory record.
+
+    Composition note: implementations of ``ConversationStore`` MUST
+    also satisfy ``MemoryStore`` (the ``add``/``search``/``update``/
+    ``delete`` surface) — the duplication here keeps the
+    ``runtime_checkable`` isinstance() probe simple while documenting
+    the chat-specific entry point.
+    """
+
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str: ...
+    def search(self, query: str, *, top_k: int = 10) -> list[Any]: ...
+    def update(self, memory_id: str, content: str) -> None: ...
+    def delete(self, memory_id: str) -> None: ...
+
+    # add_turn(*, message, role, conversation_id, timestamp): adds a single
+    # turn; returns the id of the most-recently-produced memory record.
+    # Distinct from add(): backends like mem0 run an LLM-extraction pass
+    # per turn or batch to emit canonical records. timestamp is ISO-8601
+    # (RFC3339 subset); benchmarks against historical corpora MUST pass
+    # the in-corpus timestamp so temporal queries resolve.
+    def add_turn(
+        self,
+        *,
+        message: str,
+        role: str,
+        conversation_id: str,
+        timestamp: str | None = None,
+    ) -> str: ...
+
+
+@runtime_checkable
+class Memory(Protocol):
+    """A recalled memory across any ``MemoryStore`` backend.
+
+    Lingua-franca shape for what ``MemoryStore.search`` returns. The
+    Protocol pins the four attributes use-case code reads
+    (``id``/``content``/``score``/``metadata``). Implementations are
+    typically frozen dataclasses; concrete backends may carry
+    additional fields beyond these four.
+
+    ``score`` is rescaled to ``[0.0, 1.0]`` (1.0 = best match).
+    Backends translate their native ranking into this scale so
+    cross-backend fusion at the use-case layer is meaningful.
+    """
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def content(self) -> str: ...
+    @property
+    def score(self) -> float: ...
+    @property
+    def metadata(self) -> dict[str, Any]: ...
