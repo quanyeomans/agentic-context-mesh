@@ -371,27 +371,34 @@ def _parse_judge_output(raw: str) -> dict[str, Any]:
 # ----------------------------------------------------------------------------
 
 
-def run_conversation(
-    conversation: dict[str, Any],
+# ----------------------------------------------------------------------------
+# Backend dispatch — Phase 0.3 of the mem0-vs-kairix-uplift plan.
+#
+# Each backend implements (ingest, answer): given a conversation's sessions
+# and a question, return a synthesised answer string. The benchmark wraps
+# both behind the same shape so the same 10 LoCoMo questions run through
+# either kairix-cli (existing CLI subprocess) or mem0 (Phase 1) with one
+# flag flip. The judge call is backend-agnostic — it scores whatever the
+# backend returns against the LoCoMo ground truth.
+# ----------------------------------------------------------------------------
+
+
+_KAIRIX_CLI_BACKEND = "kairix-cli"
+_MEM0_BACKEND = "mem0"
+_SUPPORTED_BACKENDS = (_KAIRIX_CLI_BACKEND, _MEM0_BACKEND)
+
+
+def _run_kairix_cli_backend(
+    conv_id: str,
+    sessions: list[Any],
+    questions: list[dict[str, str]],
     vault_path: Path,
-    max_questions: int,
 ) -> list[dict[str, Any]]:
-    """Embed one conversation's sessions, then run + judge its questions."""
-    conv_id = str(conversation.get("sample_id") or conversation.get("id") or "unknown")
+    """Existing subprocess path: write sessions → kairix embed → kairix prep.
 
-    LOGGER.info("=== Conversation %s ===", conv_id)
-    sessions = _extract_sessions(conversation)
-    questions = _extract_questions(conversation)
-    if not sessions:
-        LOGGER.warning("Conversation %s has no sessions; skipping.", conv_id)
-        return []
-    if not questions:
-        LOGGER.warning("Conversation %s has no questions; skipping.", conv_id)
-        return []
-
-    questions = questions[:max_questions]
-    LOGGER.info("Writing %d sessions, will ask %d questions.", len(sessions), len(questions))
-
+    Preserves the v2026.5.19a2 behaviour exactly. Each question shells
+    out to ``kairix prep`` and the response is whatever the CLI renders.
+    """
     write_sessions_to_vault(sessions, vault_path, conv_id)
     run_kairix_embed(vault_path)
 
@@ -402,10 +409,11 @@ def run_conversation(
         judgment = judge_response(qa["question"], qa["ground_truth"], response)
         rows.append(
             {
+                "backend": _KAIRIX_CLI_BACKEND,
                 "conv_id": conv_id,
                 "question": qa["question"],
                 "ground_truth": qa["ground_truth"],
-                "kairix_response": response,
+                "response": response,
                 "judge_correct": judgment["correct"],
                 "judge_score": judgment["score"],
                 "judge_reasoning": judgment["reasoning"],
@@ -421,13 +429,73 @@ def run_conversation(
     return rows
 
 
+def _run_mem0_backend(
+    _conv_id: str,
+    _sessions: list[Any],
+    _questions: list[dict[str, str]],
+    _vault_path: Path,
+) -> list[dict[str, Any]]:
+    """Mem0 backend — Phase 1 of the mem0-vs-kairix-uplift plan.
+
+    Will install ``mem0ai``, ingest turns via ``mem0.Memory.add``, then
+    call ``mem0.Memory.search`` per question and synthesise via the
+    configured LLM backend. Not yet implemented — Phase 0.3 lands the
+    dispatch surface; Phase 1 fills in the body.
+    """
+    raise NotImplementedError(
+        "mem0 backend lands in Phase 1 of "
+        "Architecture/decisions/2026-05-20-mem0-vs-kairix-uplift-plan.md. "
+        "fix: rerun with --backend kairix-cli to use the existing path. "
+        "next: implement scripts/benchmarks/locomo_spike.py::_run_mem0_backend."
+    )
+
+
+_BACKEND_DISPATCH: dict[str, Any] = {
+    _KAIRIX_CLI_BACKEND: _run_kairix_cli_backend,
+    _MEM0_BACKEND: _run_mem0_backend,
+}
+
+
+def run_conversation(
+    conversation: dict[str, Any],
+    vault_path: Path,
+    max_questions: int,
+    backend: str = _KAIRIX_CLI_BACKEND,
+) -> list[dict[str, Any]]:
+    """Run one conversation's sessions + questions through the chosen backend."""
+    conv_id = str(conversation.get("sample_id") or conversation.get("id") or "unknown")
+
+    LOGGER.info("=== Conversation %s (backend=%s) ===", conv_id, backend)
+    sessions = _extract_sessions(conversation)
+    questions = _extract_questions(conversation)
+    if not sessions:
+        LOGGER.warning("Conversation %s has no sessions; skipping.", conv_id)
+        return []
+    if not questions:
+        LOGGER.warning("Conversation %s has no questions; skipping.", conv_id)
+        return []
+
+    questions = questions[:max_questions]
+    LOGGER.info("Writing %d sessions, will ask %d questions.", len(sessions), len(questions))
+
+    runner = _BACKEND_DISPATCH.get(backend)
+    if runner is None:
+        raise ValueError(
+            f"unknown backend {backend!r}; supported: {sorted(_BACKEND_DISPATCH)}. "
+            f"fix: pass --backend with one of those names. "
+            f"next: see Architecture/decisions/2026-05-20-mem0-vs-kairix-uplift-plan.md"
+        )
+    return runner(conv_id, sessions, questions, vault_path)
+
+
 def write_results_csv(rows: list[dict[str, Any]], output_csv: Path) -> None:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
+        "backend",
         "conv_id",
         "question",
         "ground_truth",
-        "kairix_response",
+        "response",
         "judge_correct",
         "judge_score",
         "judge_reasoning",
@@ -446,10 +514,12 @@ def print_summary(rows: list[dict[str, Any]]) -> None:
         return
     pass_count = sum(1 for r in rows if r["judge_correct"])
     mean_score = sum(r["judge_score"] for r in rows) / n
+    backends = sorted({r.get("backend", "unknown") for r in rows})
     print()
     print("=" * 60)
     print("LoCoMo spike — summary")
     print("=" * 60)
+    print(f"Backend(s)       : {', '.join(backends)}")
     print(f"Questions scored : {n}")
     print(f"Pass rate        : {pass_count}/{n} ({100 * pass_count / n:.1f}%)")
     print(f"Mean judge score : {mean_score:.3f}")
@@ -477,6 +547,16 @@ def main() -> int:
         action="store_true",
         help="Delete the vault root before starting. Recommended for spike runs.",
     )
+    parser.add_argument(
+        "--backend",
+        choices=_SUPPORTED_BACKENDS,
+        default=_KAIRIX_CLI_BACKEND,
+        help=(
+            "Memory backend under benchmark. 'kairix-cli' shells out to the kairix CLI "
+            "(existing v2026.5.19a2 behaviour, default). 'mem0' uses mem0.Memory "
+            "(Phase 1 of mem0-vs-kairix-uplift plan — not yet implemented)."
+        ),
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -503,7 +583,7 @@ def main() -> int:
     all_rows: list[dict[str, Any]] = []
     for conv in conversations:
         try:
-            rows = run_conversation(conv, args.vault_root, args.max_questions)
+            rows = run_conversation(conv, args.vault_root, args.max_questions, backend=args.backend)
             all_rows.extend(rows)
         except Exception as exc:
             LOGGER.exception("Conversation run failed: %s", exc)
