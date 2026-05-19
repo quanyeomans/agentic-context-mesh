@@ -429,25 +429,208 @@ def _run_kairix_cli_backend(
     return rows
 
 
+def _patch_mem0_for_gpt5_routing() -> None:
+    """Extend mem0's reasoning-model detection to include the gpt-5.x family.
+
+    Mem0 v2.0.2's ``OpenAILLM._is_reasoning_model`` matches ``o1-`` / ``o3-``
+    prefixes and the exact strings ``gpt-5`` / ``gpt-5o*``, but **excludes**
+    ``gpt-5.4-mini`` by design (comment in mem0 source: "supports temperature").
+    The actual Azure deployment disagrees — it rejects ``max_tokens`` with
+    ``Unsupported parameter`` and demands ``max_completion_tokens``.
+
+    Patches the class so any ``gpt-5`` / ``gpt-5.x-*`` / ``gpt-5-*`` model is
+    recognised as reasoning-class, causing mem0 to drop ``temperature`` and
+    ``max_tokens`` from the request. Kairix's azure_foundry provider already
+    does this routing; this brings mem0's behaviour into parity for the
+    head-to-head benchmark.
+    """
+    from mem0.llms.openai import OpenAILLM
+
+    _original = OpenAILLM._is_reasoning_model
+
+    def _patched(self: Any, model: str) -> bool:
+        if _original(self, model):
+            return True
+        base = model.lower().rsplit("/", 1)[-1]
+        return base.startswith(("gpt-5.", "gpt-5-"))
+
+    OpenAILLM._is_reasoning_model = _patched  # type: ignore[method-assign] — patching mem0's class IS the point of this helper
+
+
+def _build_mem0_memory() -> Any:
+    """Configure mem0 against the same Foundry endpoint kairix uses.
+
+    The kairix LLM endpoint is project-scoped Foundry on the OpenAI-compatible
+    ``/openai/v1`` path. mem0's ``openai`` provider supports a custom
+    ``openai_base_url`` so the LLM + embedder both point at the same
+    Azure-Foundry resource. The deployment-name + model-name from kairix's
+    secrets bundle flow through verbatim — no separate mem0 deployment
+    needs to be created.
+    """
+    try:
+        from mem0 import (
+            Memory,  # type: ignore[import-not-found] — mem0ai is optional, not in pyproject extras; ImportError caught below
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "mem0 backend requires 'mem0ai' to be installed. "
+            "fix: pip install mem0ai qdrant-client. "
+            "next: rerun the spike with --backend mem0"
+        ) from exc
+
+    # Bring mem0's reasoning-model detection into parity with kairix's
+    # azure_foundry provider so gpt-5.4-mini routes correctly.
+    _patch_mem0_for_gpt5_routing()
+
+    llm_api_key = os.environ.get("KAIRIX_LLM_API_KEY", "").strip()
+    llm_endpoint = os.environ.get("KAIRIX_LLM_ENDPOINT", "").strip()
+    llm_model = os.environ.get("KAIRIX_LLM_MODEL", "").strip() or "gpt-5.4-mini"
+    embed_api_key = os.environ.get("KAIRIX_EMBED_API_KEY", llm_api_key).strip()
+    embed_endpoint = os.environ.get("KAIRIX_EMBED_ENDPOINT", llm_endpoint).strip()
+    embed_model = os.environ.get("KAIRIX_EMBED_MODEL", "").strip() or "text-embedding-3-large"
+
+    if not llm_api_key or not llm_endpoint:
+        raise RuntimeError(
+            "mem0 backend requires KAIRIX_LLM_API_KEY + KAIRIX_LLM_ENDPOINT in env. "
+            "fix: source the kairix secrets file before invoking the spike."
+        )
+
+    # Embed endpoint at kairix needs the /openai/v1 alias appended when not present —
+    # mirrors what kairix.credentials.make_openai_client does internally.
+    embed_base_url = embed_endpoint
+    if not embed_base_url.rstrip("/").endswith("/openai/v1"):
+        embed_base_url = embed_base_url.rstrip("/") + "/openai/v1"
+
+    config = {
+        "llm": {
+            "provider": "openai",
+            "config": {
+                "model": llm_model,
+                "api_key": llm_api_key,
+                "openai_base_url": llm_endpoint,
+                "temperature": 0.3,
+                "max_tokens": 800,
+            },
+        },
+        "embedder": {
+            "provider": "openai",
+            "config": {
+                "model": embed_model,
+                "api_key": embed_api_key,
+                "openai_base_url": embed_base_url,
+                "embedding_dims": 1536,
+            },
+        },
+        "vector_store": {
+            "provider": "qdrant",
+            "config": {
+                "collection_name": "locomo_spike",
+                "embedding_model_dims": 1536,
+                "path": "/tmp/qdrant-locomo-spike",
+                "on_disk": False,
+            },
+        },
+    }
+    return Memory.from_config(config)
+
+
+def _synthesise_answer_from_memories(question: str, memories: list[dict[str, Any]]) -> str:
+    """Build an answer string from mem0 search results using the LLM backend.
+
+    mem0 returns canonical fact records; the spike's job is to synthesise an
+    answer that the LoCoMo judge can score against ground truth. Uses the
+    same LLM the kairix-cli backend's judge call uses — fair comparison
+    because both backends route through the same Azure-Foundry deployment.
+    """
+    from kairix.platform.llm import get_default_backend
+
+    backend = get_default_backend()
+    if not memories:
+        return "No relevant memories found."
+    bullets = "\n".join(f"- {m.get('memory') or m.get('text') or ''}" for m in memories[:10])
+    prompt = (
+        "Answer the question concisely (1-2 sentences) using ONLY the listed memories. "
+        "If the memories do not contain the answer, say so explicitly.\n\n"
+        f"Question: {question}\n\n"
+        f"Memories:\n{bullets}\n\n"
+        "Answer:"
+    )
+    try:
+        return backend.chat([{"role": "user", "content": prompt}], max_tokens=200).strip()
+    except Exception as exc:
+        return f"ERROR: synthesis failed: {type(exc).__name__}: {exc!s}"
+
+
 def _run_mem0_backend(
-    _conv_id: str,
-    _sessions: list[Any],
-    _questions: list[dict[str, str]],
+    conv_id: str,
+    sessions: list[Any],
+    questions: list[dict[str, str]],
     _vault_path: Path,
 ) -> list[dict[str, Any]]:
-    """Mem0 backend — Phase 1 of the mem0-vs-kairix-uplift plan.
+    """Mem0 backend — ingest turns via Memory.add; recall via Memory.search.
 
-    Will install ``mem0ai``, ingest turns via ``mem0.Memory.add``, then
-    call ``mem0.Memory.search`` per question and synthesise via the
-    configured LLM backend. Not yet implemented — Phase 0.3 lands the
-    dispatch surface; Phase 1 fills in the body.
+    Phase 1 of Architecture/decisions/2026-05-20-mem0-vs-kairix-uplift-plan.md.
+    Wires mem0 against the same Azure-Foundry deployment kairix uses so the
+    only variable between the kairix-cli and mem0 backends is the memory
+    architecture — same LLM, same embedder, same corpus, same judge.
     """
-    raise NotImplementedError(
-        "mem0 backend lands in Phase 1 of "
-        "Architecture/decisions/2026-05-20-mem0-vs-kairix-uplift-plan.md. "
-        "fix: rerun with --backend kairix-cli to use the existing path. "
-        "next: implement scripts/benchmarks/locomo_spike.py::_run_mem0_backend."
-    )
+    memory = _build_mem0_memory()
+    user_id = f"locomo-{conv_id}"
+
+    # Ingest sessions turn-by-turn so mem0 runs its LLM-extraction pass
+    # on each turn (the distinctive mem0 design — facts emerge from
+    # turn-level extraction, not corpus-level chunking).
+    # ``sessions`` is a list of session-lists; each session-list is a list
+    # of turn-dicts with ``speaker`` + ``text`` keys (LoCoMo schema).
+    turn_count = 0
+    for session_turns in sessions:
+        if not isinstance(session_turns, list):
+            continue
+        for turn in session_turns:
+            if not isinstance(turn, dict):
+                continue
+            speaker = turn.get("speaker") or turn.get("role") or "unknown"
+            text = turn.get("text") or turn.get("content") or ""
+            if not text:
+                continue
+            try:
+                memory.add(text, user_id=user_id, metadata={"speaker": speaker})
+                turn_count += 1
+            except Exception as exc:
+                LOGGER.warning("mem0 add failed for turn (speaker=%s): %s", speaker, exc)
+    LOGGER.info("mem0 ingested %d turns for conv_id=%s", turn_count, conv_id)
+
+    rows: list[dict[str, Any]] = []
+    for i, qa in enumerate(questions, start=1):
+        LOGGER.info("[Q %d/%d] %s", i, len(questions), qa["question"][:80])
+        try:
+            # mem0 v2 moved user_id from a top-level kwarg into filters={}.
+            search_result = memory.search(qa["question"], filters={"user_id": user_id}, top_k=10)
+            memories = search_result.get("results") if isinstance(search_result, dict) else search_result
+            response = _synthesise_answer_from_memories(qa["question"], memories or [])
+        except Exception as exc:
+            response = f"ERROR: mem0 search failed: {type(exc).__name__}: {exc!s}"
+        judgment = judge_response(qa["question"], qa["ground_truth"], response)
+        rows.append(
+            {
+                "backend": _MEM0_BACKEND,
+                "conv_id": conv_id,
+                "question": qa["question"],
+                "ground_truth": qa["ground_truth"],
+                "response": response,
+                "judge_correct": judgment["correct"],
+                "judge_score": judgment["score"],
+                "judge_reasoning": judgment["reasoning"],
+            }
+        )
+        LOGGER.info(
+            "   -> correct=%s score=%.2f (%s)",
+            judgment["correct"],
+            judgment["score"],
+            judgment["reasoning"][:100],
+        )
+
+    return rows
 
 
 _BACKEND_DISPATCH: dict[str, Any] = {
