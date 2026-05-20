@@ -40,6 +40,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TextIO
 
+from kairix.core.facts.consolidation import (
+    ConsolidationOutcome,
+    ConsolidationPass,
+    default_contradict,
+)
 from kairix.core.protocols import FactExtractor, FactStore
 from kairix.paths import KairixPaths
 
@@ -63,12 +68,18 @@ class IngestChatResult:
 
     All counts are non-negative integers; the dataclass is frozen so
     callers can pass it as a value object through downstream pipelines.
+
+    ``facts_superseded`` counts prior facts the ingest-time consolidation
+    pass marked superseded by a newly extracted fact — surfaced so the
+    operator can spot conversations that rewrote a lot of prior ground
+    truth.
     """
 
     turns_ingested: int
     conversations_processed: int
     facts_added: int
     windows_extracted: int
+    facts_superseded: int = 0
 
 
 # Field-name constants — F17 (no string literal of ≥10 chars duplicated ≥3
@@ -246,6 +257,7 @@ def ingest_chat(
     paths: KairixPaths,
     fact_store: FactStore,
     fact_extractor: FactExtractor,
+    consolidation: ConsolidationPass | None = None,
     namespace: str = "shared",
     window_turns: int = 5,
     no_extract: bool = False,
@@ -260,7 +272,9 @@ def ingest_chat(
        ``paths.document_root / "conversations"``.
     4. If ``no_extract=False``, slice each conversation into
        ``window_turns``-sized windows, run ``fact_extractor.extract`` on
-       each window, and persist returned records via ``fact_store.add``.
+       each window, persist returned records via ``fact_store.add``, then
+       run the configured :class:`ConsolidationPass` against each new
+       fact so contradicting prior facts are marked superseded.
 
     Returns aggregate counts in an :class:`IngestChatResult`.
 
@@ -274,6 +288,11 @@ def ingest_chat(
         Implementation of :class:`FactStore` Protocol (real or fake).
     fact_extractor:
         Implementation of :class:`FactExtractor` Protocol.
+    consolidation:
+        Optional :class:`ConsolidationPass`. Defaults to a pass over the
+        same ``fact_store`` using :func:`default_contradict`. Passing
+        ``None`` is the production wire-up; tests can inject a scripted
+        consolidation pass to pin branch coverage.
     namespace:
         Engagement-scope tag stamped onto every emitted FactRecord that
         doesn't already carry one. Defaults to ``"shared"``.
@@ -289,8 +308,15 @@ def ingest_chat(
     conversations_dir.mkdir(parents=True, exist_ok=True)
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    resolved_consolidation = (
+        consolidation
+        if consolidation is not None
+        else ConsolidationPass(fact_store=fact_store, contradict=default_contradict)
+    )
+
     facts_added = 0
     windows_extracted = 0
+    facts_superseded = 0
 
     for cid, conv_turns in grouped.items():
         markdown = _render_markdown(cid, conv_turns, ingested_at)
@@ -308,12 +334,23 @@ def ingest_chat(
                 fact_to_add = _apply_namespace(fact, namespace)
                 fact_store.add(fact_to_add)
                 facts_added += 1
+                # Defensive: a duck-typed fact may not expose the full
+                # FactRecord Protocol (e.g. ``namespace``). ``_apply_namespace``
+                # already tolerates that branch; consolidation skips it too
+                # rather than crashing the ingest pipeline on a Protocol-
+                # incomplete fact. The Protocol contract still requires
+                # ``namespace`` for production extractors.
+                if not hasattr(fact_to_add, "namespace"):
+                    continue
+                outcome: ConsolidationOutcome = resolved_consolidation.process(fact_to_add)
+                facts_superseded += len(outcome.superseded_ids)
 
     return IngestChatResult(
         turns_ingested=len(turns),
         conversations_processed=len(grouped),
         facts_added=facts_added,
         windows_extracted=windows_extracted,
+        facts_superseded=facts_superseded,
     )
 
 
@@ -453,6 +490,7 @@ def _format_human(result: IngestChatResult) -> str:
         f"  conversations processed: {result.conversations_processed}\n"
         f"  windows extracted:       {result.windows_extracted}\n"
         f"  facts added:             {result.facts_added}\n"
+        f"  facts superseded:        {result.facts_superseded}\n"
     )
 
 
@@ -464,13 +502,16 @@ def main(
     paths: KairixPaths | None = None,
     fact_store: FactStore | None = None,
     fact_extractor: FactExtractor | None = None,
+    consolidation: ConsolidationPass | None = None,
 ) -> int:
     """CLI entry point for ``kairix ingest-chat``.
 
-    The keyword-only ``paths`` / ``fact_store`` / ``fact_extractor``
-    arguments are the test-injection seam. Production callers leave
-    them ``None``; the CLI resolves real implementations and ImportError
-    if Capability #3 isn't present yet.
+    The keyword-only ``paths`` / ``fact_store`` / ``fact_extractor`` /
+    ``consolidation`` arguments are the test-injection seam. Production
+    callers leave them ``None``; the CLI resolves real implementations
+    and ImportError if Capability #3 isn't present yet. ``consolidation``
+    defaults to a :class:`ConsolidationPass` over the resolved store
+    using :func:`default_contradict`.
     """
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -502,6 +543,7 @@ def main(
         paths=resolved_paths,
         fact_store=fact_store,
         fact_extractor=resolved_extractor,
+        consolidation=consolidation,
         namespace=args.namespace,
         window_turns=args.window_turns,
         no_extract=args.no_extract,
