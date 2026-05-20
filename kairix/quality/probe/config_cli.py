@@ -54,6 +54,18 @@ from kairix.quality.probe.config_runner import (
     TransportSnapshotter,
     run_probe_config,
 )
+from kairix.quality.probe.perf_runner import (
+    DEFAULT_PERF_ITERATIONS,
+    OperationCallable,
+    PerfReport,
+    build_default_operations,
+    load_budgets,
+    run_perf_probe,
+)
+
+# Default location of the pinned perf budgets file shipped in-repo.
+# Tests point at a smaller/regression-shaped JSON via ``--perf-budgets``.
+_DEFAULT_PERF_BUDGETS = Path(__file__).resolve().parents[3] / "suites" / "perf" / "budgets.json"
 
 _HELP_DESCRIPTION = """\
 kairix probe-config — probe the configured provider for health and tuning advice.
@@ -128,6 +140,35 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_REPEATED_SAMPLES,
         help=f"repeated-query samples for the cache phase (>=1). Default {DEFAULT_REPEATED_SAMPLES}.",
+    )
+    p.add_argument(
+        "--perf",
+        nargs="?",
+        const=DEFAULT_PERF_ITERATIONS,
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            f"run the per-capability perf budgets sweep (N iterations per operation, "
+            f"default {DEFAULT_PERF_ITERATIONS}). Emits p50/p99 per operation and compares "
+            "against suites/perf/budgets.json. Exit 0 if every operation is within budget, "
+            "exit 1 if any operation breaches budget."
+        ),
+    )
+    p.add_argument(
+        "--perf-budgets",
+        default=None,
+        metavar="BUDGETS_JSON",
+        help=(
+            "override the perf budgets JSON path (default: suites/perf/budgets.json). "
+            "Useful for regression-shaped budgets in tests."
+        ),
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="emit the perf report as machine-readable JSON instead of human text.",
     )
     return p
 
@@ -271,12 +312,90 @@ def _emit_report(report: ProbeConfigReport, output_path: str | None) -> None:
         print(payload)
 
 
+def _render_perf_human(report: PerfReport) -> str:
+    """Human-readable per-capability perf table.
+
+    Format matches the dispatch brief: one line per operation showing
+    observed p50/p99, the budget pair, and a verdict marker. Skipped
+    operations render the skip reason in place of the latency numbers.
+    """
+    lines = ["kairix probe-config --perf"]
+    longest = max((len(r.operation) for r in report.results), default=0)
+    for r in report.results:
+        op = r.operation.ljust(longest)
+        budget = f"budget={int(r.budget_p50_ms)}/{int(r.budget_p99_ms)}"
+        if r.skipped:
+            lines.append(f"  {op}  {budget}  - {r.skip_reason}")
+            continue
+        verdict = "PASS" if r.within_budget else "FAIL"
+        suffix = ""
+        if not r.within_budget:
+            over_p99 = max(0.0, r.p99_ms - r.budget_p99_ms)
+            over_p50 = max(0.0, r.p50_ms - r.budget_p50_ms)
+            details = []
+            if over_p50 > 0:
+                details.append(f"p50 +{over_p50:.0f}ms over")
+            if over_p99 > 0:
+                details.append(f"p99 +{over_p99:.0f}ms over")
+            if details:
+                suffix = " (" + ", ".join(details) + ")"
+        lines.append(
+            f"  {op}  p50={r.p50_ms:.1f}ms  p99={r.p99_ms:.1f}ms  {budget}  {verdict}{suffix}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _emit_perf_report(report: PerfReport, *, as_json: bool, output_path: str | None) -> None:
+    """Render a :class:`PerfReport` as JSON or human text to stdout / file."""
+    if as_json:
+        payload = json.dumps(report.to_dict(), indent=2, sort_keys=False)
+    else:
+        payload = _render_perf_human(report)
+    if output_path:
+        Path(output_path).write_text(payload + ("\n" if as_json else ""), encoding="utf-8")
+    else:
+        sys.stdout.write(payload if not as_json else payload + "\n")
+
+
+def _run_perf_path(
+    args: argparse.Namespace,
+    *,
+    perf_operations: dict[str, OperationCallable] | None,
+) -> int:
+    """Implement ``--perf``: load budgets, run the sweep, emit, exit 0/1.
+
+    Test seam: ``perf_operations`` defaults to
+    :func:`build_default_operations` with no production wiring (so
+    every operation skips). Tests inject a dict of deterministic
+    closures so the suite runs sub-second and the budget-violation
+    branch is reachable without real workloads.
+    """
+    iterations: int = args.perf
+    if iterations < 1:
+        return _invalid_args(f"--perf iterations must be >= 1; got {iterations}")
+    budgets_path = Path(args.perf_budgets) if args.perf_budgets else _DEFAULT_PERF_BUDGETS
+    if not budgets_path.exists():
+        return _invalid_args(
+            f"perf budgets file not found: {budgets_path}. "
+            "fix: pass --perf-budgets <path> or create suites/perf/budgets.json"
+        )
+    try:
+        budgets = load_budgets(budgets_path)
+    except (ValueError, json.JSONDecodeError, OSError) as exc:
+        return _invalid_args(f"perf budgets file malformed ({budgets_path}): {exc}")
+    operations = perf_operations if perf_operations is not None else build_default_operations()
+    report = run_perf_probe(iterations=iterations, budgets=budgets, operations=operations)
+    _emit_perf_report(report, as_json=args.as_json, output_path=args.output)
+    return 1 if report.any_violation else 0
+
+
 def main(
     argv: list[str] | None = None,
     *,
     registry: ProviderRegistry | None = None,
     snapshotter: TransportSnapshotter | None = None,
     env_provider_lookup: Callable[[], str | None] | None = None,
+    perf_operations: dict[str, OperationCallable] | None = None,
 ) -> int:
     """Entry point invoked from ``kairix/cli.py``.
 
@@ -300,6 +419,14 @@ def main(
     if env_provider_lookup is None:
         env_provider_lookup = _default_env_provider_lookup
     args = _build_parser().parse_args(argv)
+
+    # --perf is a separate dispatch path that bypasses provider probing —
+    # the perf sweep measures end-to-end capability latency, not provider
+    # connectivity, so no provider resolution / transport snapshot is
+    # required.
+    if args.perf is not None:
+        return _run_perf_path(args, perf_operations=perf_operations)
+
     if args.warm_samples < 1:
         return _invalid_args(f"--warm-samples must be >= 1; got {args.warm_samples}")
     if args.concurrency < 1:

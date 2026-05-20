@@ -1,0 +1,8 @@
+{
+  "kairix_prep_vault_only": {"p50_ms": 1500, "p99_ms": 5000},
+  "kairix_prep_facts_federated": {"p50_ms": 2000, "p99_ms": 6000},
+  "kairix_ingest_chat_per_turn": {"p50_ms": 1500, "p99_ms": 3000},
+  "kairix_ingest_chat_100_turn": {"p50_ms": 90000, "p99_ms": 180000},
+  "fact_find_conflicts": {"p50_ms": 10, "p99_ms": 50},
+  "federated_search_top_k_15": {"p50_ms": 250, "p99_ms": 800}
+}
