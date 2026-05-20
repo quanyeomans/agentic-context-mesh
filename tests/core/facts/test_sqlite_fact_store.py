@@ -184,12 +184,8 @@ def test_mint_id_is_order_independent_on_source_turn_ids() -> None:
     Sabotage-proof: remove the ``sorted()`` call in ``mint_id`` and
     the two id strings stop matching.
     """
-    id_a = StoredFactRecord.mint_id(
-        entity="X", attribute="y", source_turn_ids=("t1", "t2", "t3")
-    )
-    id_b = StoredFactRecord.mint_id(
-        entity="X", attribute="y", source_turn_ids=("t3", "t1", "t2")
-    )
+    id_a = StoredFactRecord.mint_id(entity="X", attribute="y", source_turn_ids=("t1", "t2", "t3"))
+    id_b = StoredFactRecord.mint_id(entity="X", attribute="y", source_turn_ids=("t3", "t1", "t2"))
     assert id_a == id_b
 
 
