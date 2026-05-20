@@ -24,6 +24,7 @@ from typing import Any
 from kairix.core.protocols import (
     BoostStrategy,
     CollectionResolver,
+    FactStore,
     FusionStrategy,
     GraphRepository,
     SearchLogger,
@@ -33,6 +34,7 @@ from kairix.core.search.budget import apply_budget
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.query_cache import QueryResultCache, make_cache_key
+from kairix.core.search.rrf import FusedResult
 from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ class SearchResult:
     # Diagnostic info
     bm25_count: int = 0
     vec_count: int = 0
+    fact_count: int = 0
     fused_count: int = 0
     # Per-stage wall-clock latency (ms) — populated by SearchPipeline.search.
     # Keys: classify, resolve, dispatch (bm25+vec parallel), fuse, enrich,
@@ -88,6 +91,16 @@ class SearchPipeline:
     # constructed directly with fakes. Factories that want caching
     # inject a shared QueryResultCache instance per process.
     query_cache: QueryResultCache | None = None
+    # Plan B-parity Capability #5 — optional fact retriever federated
+    # alongside BM25 + vector. When ``None``, the federation stage is a
+    # no-op and the pipeline degenerates to today's chunk-only behaviour
+    # (regression-pinned). When wired, attribute-fact queries weight
+    # fact hits ~2x their chunk counterparts in the fusion stage.
+    fact_retriever: FactStore | None = None
+    # Top-k feed into the fact retriever. Lossier than chunks, so the
+    # default is roomy enough to give the intent-weighted fusion stage
+    # genuine candidates to surface.
+    top_k_facts: int = 15
 
     def search(
         self,
@@ -96,8 +109,13 @@ class SearchPipeline:
         scope: Scope = Scope.SHARED_AGENT,
         agent: str | None = None,
         collections: list[str] | None = None,
+        namespace: str | None = None,
     ) -> SearchResult:
         """Execute the full search pipeline using composed components.
+
+        ``namespace`` is the engagement-scoped recall key threaded through
+        to the optional ``fact_retriever`` (Capability #5). When the
+        pipeline has no fact retriever wired, ``namespace`` is ignored.
 
         Never raises — returns SearchResult with empty results on any failure.
         """
@@ -139,9 +157,16 @@ class SearchPipeline:
         bm25_results, vec_results, vec_failed = self._dispatch_backends(query, collections, stages)
         _stage("dispatch", t)
 
-        # 5. Fuse
+        # 4b. Federation — dispatch the optional fact retriever (Cap #5).
+        # Degrades to empty list when no retriever is wired or it raises;
+        # never poisons the chunk-only pipeline result.
         t = time.monotonic()
-        fused = self._fuse(bm25_results, vec_results)
+        fact_hits = self._dispatch_facts(query, namespace)
+        _stage("facts", t)
+
+        # 5. Fuse — intent-weighted when the fact layer is wired (Cap #5).
+        t = time.monotonic()
+        fused = self._fuse_with_intent(bm25_results, vec_results, fact_hits, intent)
         _stage("fuse", t)
 
         # 5b. Enrich each fused result with chunk_date metadata so the boost
@@ -172,6 +197,7 @@ class SearchPipeline:
             results=budgeted,
             bm25_count=len(bm25_results),
             vec_count=len(vec_results),
+            fact_count=len(fact_hits),
             fused_count=len(fused),
             collections=collections or [],
             tiers_used=tiers_used,
@@ -281,6 +307,26 @@ class SearchPipeline:
             _logger.warning("pipeline: vector search failed — %s", e)
             return [], True
 
+    def _dispatch_facts(self, query: str, namespace: str | None) -> list[Any]:
+        """Dispatch the optional fact retriever; degrade gracefully on failure.
+
+        Returns the FactHit list verbatim — the conversion to fused
+        ``FusedResult`` shape happens inside ``_fuse_with_intent`` so
+        fact_count diagnostics still see the raw hit list.
+
+        Plan B-parity Capability #5. When ``fact_retriever`` is None the
+        federation stage is a no-op; when it raises, the chunk-only
+        pipeline is returned as a graceful degradation (logged at WARN
+        so operators can triage without poisoning the response).
+        """
+        if self.fact_retriever is None:
+            return []
+        try:
+            return list(self.fact_retriever.search(query, top_k=self.top_k_facts, namespace=namespace))
+        except Exception as e:
+            _logger.warning("pipeline: fact retriever raised — facts excluded from fusion: %s", e)
+            return []
+
     def _fuse(self, bm25_results: list[dict], vec_results: list[dict]) -> list:
         """Fuse BM25 + vector results; on fusion failure return empty list."""
         try:
@@ -288,6 +334,51 @@ class SearchPipeline:
         except Exception as e:
             _logger.warning("pipeline: fusion failed — %s — falling back to empty fused list", e)
             return []
+
+    def _fuse_with_intent(
+        self,
+        bm25_results: list[dict],
+        vec_results: list[dict],
+        fact_hits: list[Any],
+        intent: QueryIntent,
+    ) -> list:
+        """Intent-weighted fusion across BM25 + vector + fact hits.
+
+        Three-way fusion (Plan B-parity Capability #5):
+
+        - ATTRIBUTE_FACT → facts dominate (0.6 / 0.3 / 0.1)
+        - MULTI_HOP     → chunks dominate (0.7 / 0.2 / 0.1)
+        - default       → balanced (today's chunk-only fusion is preserved
+                          when ``fact_hits`` is empty).
+
+        When ``fact_hits`` is empty (no retriever wired, or it returned
+        nothing, or it raised), the fact_weight branch contributes zero
+        and the pipeline degenerates EXACTLY to ``_fuse`` (regression
+        contract — pinned in test_pipeline_without_fact_retriever_unchanged).
+        """
+        chunk_fused = self._fuse(bm25_results, vec_results)
+        if not fact_hits:
+            return chunk_fused
+
+        fact_w, chunk_w, _graph_w = _fusion_weights_for_intent(intent)
+        # Normalise each layer's scores to [0, 1] before applying the
+        # per-intent weights. Without this, fact-store overlap scores
+        # (raw range 0..1) overwhelm RRF scores (raw range 0..~0.033)
+        # regardless of weighting — the weighting contract only holds
+        # when both layers are on the same scale. Normalisation is
+        # max-relative so a single-row layer still scores 1.0 x weight.
+        max_chunk = max((_read_rrf_score(r) for r in chunk_fused), default=0.0) or 1.0
+        for fused_result in chunk_fused:
+            current = _read_rrf_score(fused_result)
+            _write_rrf_score(fused_result, (current / max_chunk) * chunk_w)
+
+        max_fact = max((float(h.score) for h in fact_hits), default=0.0) or 1.0
+        fact_fused = [_fused_from_fact_hit(hit, fact_w, denom=max_fact) for hit in fact_hits]
+
+        # Merge by weighted-and-normalised score.
+        combined: list[Any] = list(chunk_fused) + list(fact_fused)
+        combined.sort(key=_read_rrf_score, reverse=True)
+        return combined
 
     def _enrich_chunk_dates(self, fused: list) -> None:
         """Fill in ``chunk_date`` on each fused result so date-aware boosts see it."""
@@ -362,6 +453,82 @@ _ENTITY_GRAPH_UNAVAILABLE = (
 
 
 _logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Intent-weighted fusion helpers (Plan B-parity Capability #5).
+#
+# Tuple shape: (fact_weight, chunk_weight, graph_weight).
+# graph_weight is reserved for the future entity-graph contribution
+# inside the federation stage; today it's threaded through unused so the
+# weighting matrix can grow without changing call sites.
+# ---------------------------------------------------------------------------
+
+_FUSION_WEIGHTS: dict[QueryIntent, tuple[float, float, float]] = {
+    QueryIntent.ATTRIBUTE_FACT: (0.6, 0.3, 0.1),
+    QueryIntent.MULTI_HOP: (0.2, 0.7, 0.1),
+}
+_FUSION_WEIGHTS_DEFAULT = (0.33, 0.33, 0.34)
+
+
+def _fusion_weights_for_intent(intent: QueryIntent) -> tuple[float, float, float]:
+    """Return the (fact, chunk, graph) weights for ``intent``.
+
+    Anything not pinned in ``_FUSION_WEIGHTS`` falls through to the
+    balanced default — SEMANTIC, KEYWORD, TEMPORAL, ENTITY, PROCEDURAL.
+    """
+    return _FUSION_WEIGHTS.get(intent, _FUSION_WEIGHTS_DEFAULT)
+
+
+def _fused_from_fact_hit(hit: Any, fact_weight: float, *, denom: float = 1.0) -> FusedResult:
+    """Adapt a ``FactHit`` to ``FusedResult`` so the boost/budget stages consume it.
+
+    Each fact's ``record.value`` becomes the snippet body and the
+    synthesised path namespaces it under ``facts://<id>`` so downstream
+    consumers (logger, MCP renderer) can tell fact rows apart from chunk
+    rows without sniffing field shapes.
+
+    ``denom`` normalises the raw FactHit score against the strongest
+    hit in this query's batch — same scale as the normalised chunk
+    layer, so per-intent weighting is meaningful.
+    """
+    record = hit.record
+    score = (float(hit.score) / denom) * fact_weight if denom else 0.0
+    snippet = f"{record.entity} {record.attribute}: {record.value}"
+    return FusedResult(
+        path=f"facts://{record.id}",
+        collection="facts",
+        title=f"{record.entity} — {record.attribute}",
+        snippet=snippet,
+        rrf_score=score,
+        in_bm25=False,
+        in_vec=False,
+    )
+
+
+def _read_rrf_score(row: Any) -> float:
+    """Read ``rrf_score`` from a row that may be a dataclass or a dict."""
+    if isinstance(row, dict):
+        return float(row.get("rrf_score", row.get("score", 0.0)) or 0.0)
+    return float(getattr(row, "rrf_score", 0.0) or 0.0)
+
+
+def _write_rrf_score(row: Any, value: float) -> None:
+    """Set ``rrf_score`` to ``value``; mutate in place.
+
+    Supports both ``FusedResult`` dataclass rows (production fusion
+    strategies) and plain ``dict`` rows (``FakeFusion`` in unit tests).
+    """
+    if isinstance(row, dict):
+        row["rrf_score"] = float(value)
+        return
+    try:
+        row.rrf_score = float(value)
+    except (AttributeError, TypeError):
+        # Row is read-only; degrade silently. Fact rows (synthesised as
+        # FusedResult) always accept the write; this branch covers
+        # immutable rows in third-party fusion strategies.
+        pass
 
 
 def _extract_query_date(query: str) -> datetime.date | None:
