@@ -451,6 +451,33 @@ def build_search_pipeline(
     vector = VectorSearchBackend(embed_service, _build_vector_repo())
     graph = _build_graph()
 
+    # Auto-wire the fact retriever when the operator's data dir contains a
+    # facts table. The SQLiteFactStore uses the same SQLite database file as
+    # the chunk store; if the operator has called ``kairix ingest-chat``,
+    # the table exists and federation activates automatically. Vault-only
+    # operators have no facts table → fact_retriever stays None → today's
+    # chunk-only behaviour preserved. Explicit ``fact_retriever=`` kwarg
+    # still wins (tests + future config-driven opt-in).
+    resolved_fact_retriever = fact_retriever
+    if resolved_fact_retriever is None:
+        try:
+            import sqlite3 as _sqlite3
+
+            from kairix.core.facts.store import SQLiteFactStore
+
+            db_path = get_db_path()
+            if db_path.exists():
+                with _sqlite3.connect(str(db_path)) as conn:
+                    has_facts = bool(
+                        conn.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts' LIMIT 1"
+                        ).fetchone()
+                    )
+                if has_facts:
+                    resolved_fact_retriever = SQLiteFactStore(db_path=db_path)
+        except Exception:  # noqa: S110 — auto-wire is best-effort; absence falls back to chunk-only
+            pass
+
     pipeline = SearchPipeline(
         classifier=_RuleClassifier(),
         bm25=bm25,
@@ -466,7 +493,8 @@ def build_search_pipeline(
         query_cache=_get_or_create_query_cache(),
         # Plan B-parity Capability #5 — opt-in fact federation. ``None``
         # preserves today's chunk-only behaviour for vault-only deployments.
-        fact_retriever=fact_retriever,
+        # Auto-wired above when the operator's data dir contains a facts table.
+        fact_retriever=resolved_fact_retriever,
     )
     _PIPELINE_CACHE[cfg] = pipeline
     return pipeline
