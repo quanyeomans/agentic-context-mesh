@@ -1,0 +1,83 @@
+name: "1d · Eval LoCoMo nightly"
+
+# Plan B-parity Week 4 Stream A — nightly LoCoMo eval.
+#
+# Runs `kairix eval` against the LoCoMo suite (small N for cost — 3
+# conversations by default) on a nightly cron. Uploads the resulting
+# JSON/CSV to GitHub artifacts, then compares against the prior run's
+# artifact: if the pass rate drops by more than 2pp, comments on the
+# develop-branch tip commit so the regression surfaces in dev review.
+#
+# Why nightly + cron, not per-PR: LoCoMo is multi-conversation and
+# burns LLM quota; the per-PR gate (1c) handles engagement-* corpora
+# fast enough to stay in the PR loop, while LoCoMo trends on a slower
+# cadence.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      conversation_count:
+        description: "Number of LoCoMo conversations to sample (default: 3)"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+env:
+  SUITE_PATH: suites/locomo
+  CONVERSATION_COUNT: ${{ github.event.inputs.conversation_count || '3' }}
+
+jobs:
+  eval-locomo:
+    name: LoCoMo nightly eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: develop
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install kairix
+        run: pip install -e ".[dev]"
+
+      - name: Verify LoCoMo suite is present
+        id: suite_check
+        run: |
+          if [ ! -d "$SUITE_PATH" ]; then
+            echo "::warning::LoCoMo suite directory $SUITE_PATH not found — nothing to evaluate"
+            echo "fix: land the LoCoMo suite at $SUITE_PATH or update SUITE_PATH in this workflow"
+            echo "next: this nightly run will exit cleanly until the suite lands"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run LoCoMo eval
+        if: steps.suite_check.outputs.present == 'true'
+        run: bash scripts/ci/locomo-nightly-run.sh
+
+      - name: Upload nightly artifacts
+        if: steps.suite_check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: locomo-nightly-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Compare against prior nightly + comment on develop
+        if: steps.suite_check.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/locomo-nightly-compare.sh

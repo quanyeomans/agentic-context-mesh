@@ -1,0 +1,17 @@
+{
+  "suite_name": "engagement-alpha",
+  "n_questions": 8,
+  "n_passed": 1,
+  "mean_score": 0.125,
+  "per_category": {
+    "single-hop": {"n": 3, "passed": 1, "mean": 0.333},
+    "multi-hop": {"n": 2, "passed": 0, "mean": 0.0},
+    "temporal": {"n": 1, "passed": 0, "mean": 0.0},
+    "open-domain": {"n": 1, "passed": 0, "mean": 0.0},
+    "adversarial": {"n": 1, "passed": 0, "mean": 0.0}
+  },
+  "per_extraction_f1": null,
+  "extraction_precision": null,
+  "extraction_recall": null,
+  "_note": "Plan B-parity Week 4 Stream A initial baseline. Reproduces the Cap #4 measured baseline (12.5% pass rate on the 8 ground-truth queries). Update via `kairix eval reference-library/conversations/engagement-alpha --json > reference-library/conversations/expected/engagement-alpha.json` once the production wire-up shifts the score and the gate should pin the new floor."
+}

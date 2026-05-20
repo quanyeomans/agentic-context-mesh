@@ -1,0 +1,4 @@
+{
+  "baseline": "not-yet-measured",
+  "_note": "Plan B-parity Week 4 Stream A sentinel — the CI gate detects this shape and runs the corpus in 'establishing baseline' mode (records the result, does not regression-gate). Replace with a full SuiteResult JSON once a green run is pinned: `kairix eval reference-library/conversations/engagement-gamma --json > reference-library/conversations/expected/engagement-gamma.json`."
+}
