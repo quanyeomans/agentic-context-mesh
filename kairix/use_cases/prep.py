@@ -148,22 +148,31 @@ def _build_messages(query: str, tier: str, context: str) -> list[dict[str, str]]
     ]
 
 
-# Without this floor, a top-5 hit with a 12-character snippet ("see ref-001")
-# gets fed to the LLM as "context" — the model treats it as authoritative and
-# hallucinates to fill the gap (#254 dogfood). 40 chars is empirical: an actual
-# sentence-worth of grounding; anything shorter is title-equivalent.
+# Without this floor, a top-5 chunk hit with a 12-character snippet ("see
+# ref-001") gets fed to the LLM as "context" — the model treats it as
+# authoritative and hallucinates to fill the gap (#254 dogfood). 40 chars
+# is empirical: a sentence-worth of grounding; anything shorter is
+# title-equivalent. The floor is CHUNK-tier only — fact rows are
+# structured triplets ("Caroline role: VP of People" ~ 27 chars) whose
+# compactness is the feature, not a bug, and they get a dedicated
+# minimum below (#327 Plan-B remediation D1).
 _MIN_USEFUL_SNIPPET_CHARS = 40
+_MIN_FACT_SNIPPET_CHARS = 1
 
 
 def _format_context(search_result: Any) -> tuple[str, list[str]]:
     """Project a SearchResult's top 5 hits into a context string + source titles.
 
-    Only hits with non-trivial snippet content (≥ ``_MIN_USEFUL_SNIPPET_CHARS``)
-    are included in the LLM context. Hits with empty/title-only content are
-    still returned in ``sources`` if at least one usable hit exists, so the
-    operator can see what the retrieval found even when its content was thin.
-    Returns ``("", [])`` when no hit has usable snippet content — the caller
-    treats this as "no relevant documents" rather than calling the LLM.
+    Chunk hits need ``_MIN_USEFUL_SNIPPET_CHARS`` of snippet content to
+    earn LLM context inclusion — anything shorter is title-equivalent
+    and feeds hallucination. Fact rows (synthesised under the
+    ``facts://`` path by SearchPipeline's fact federation) carry
+    intentionally compact entity-attribute-value triplets and are
+    exempt from the chunk floor; they only need to be non-empty.
+
+    Returns ``("", [])`` when no hit has usable snippet content — the
+    caller treats this as "no relevant documents" rather than calling
+    the LLM.
     """
     parts: list[str] = []
     sources: list[str] = []
@@ -173,7 +182,9 @@ def _format_context(search_result: Any) -> tuple[str, list[str]]:
             continue
         title = getattr(inner, "title", "") or getattr(inner, "path", "")
         snippet = (getattr(budgeted, "content", "") or "").strip()
-        if len(snippet) < _MIN_USEFUL_SNIPPET_CHARS:
+        is_fact = str(getattr(inner, "path", "")).startswith("facts://")
+        floor = _MIN_FACT_SNIPPET_CHARS if is_fact else _MIN_USEFUL_SNIPPET_CHARS
+        if len(snippet) < floor:
             continue
         parts.append(f"[{title}]\n{snippet[:500]}")
         sources.append(str(title))
