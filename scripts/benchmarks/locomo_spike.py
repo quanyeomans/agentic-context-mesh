@@ -447,36 +447,28 @@ def _run_kairix_cli_backend(
     return rows
 
 
-def _patch_mem0_for_gpt5_routing() -> None:
-    """Extend mem0's reasoning-model detection to include the gpt-5.x family.
-
-    Mem0 v2.0.2's ``OpenAILLM._is_reasoning_model`` matches ``o1-`` / ``o3-``
-    prefixes and the exact strings ``gpt-5`` / ``gpt-5o*``, but **excludes**
-    ``gpt-5.4-mini`` by design (comment in mem0 source: "supports temperature").
-    The actual Azure deployment disagrees — it rejects ``max_tokens`` with
-    ``Unsupported parameter`` and demands ``max_completion_tokens``.
-
-    Patches the class so any ``gpt-5`` / ``gpt-5.x-*`` / ``gpt-5-*`` model is
-    recognised as reasoning-class, causing mem0 to drop ``temperature`` and
-    ``max_tokens`` from the request. Kairix's azure_foundry provider already
-    does this routing; this brings mem0's behaviour into parity for the
-    head-to-head benchmark.
-    """
-    from mem0.llms.openai import OpenAILLM
-
-    _original = OpenAILLM._is_reasoning_model
-
-    def _patched(self: Any, model: str) -> bool:
-        if _original(self, model):
-            return True
-        base = model.lower().rsplit("/", 1)[-1]
-        return base.startswith(("gpt-5.", "gpt-5-"))
-
-    OpenAILLM._is_reasoning_model = _patched  # type: ignore[method-assign] — patching mem0's class IS the point of this helper
-
-
 def _build_mem0_memory() -> Any:
     """Configure mem0 against the same Foundry endpoint kairix uses.
+
+    Compatibility note (mem0 v2.0.2): mem0's ``OpenAILLM._is_reasoning_model``
+    explicitly excludes ``gpt-5.x`` variants like ``gpt-5.4-mini`` (comment in
+    mem0 source: "supports temperature"). Azure's actual deployment of
+    gpt-5.4-mini disagrees and rejects ``max_tokens`` with
+    ``Unsupported parameter: 'max_tokens' is not supported with this model``.
+
+    Two acceptable paths to re-enable the mem0 backend on the project-scoped
+    Foundry deployment without monkeypatching:
+
+    - **Configure a chat-class model** (e.g. ``gpt-4o-mini``) on the Foundry
+      project. ``KAIRIX_LLM_MODEL=gpt-4o-mini`` flips both kairix-native and
+      mem0 backends onto chat-class routing; no library changes needed.
+    - **Upstream fix in mem0**: file an issue / PR against snap-research/mem0
+      extending ``_is_reasoning_model`` to match the ``gpt-5.`` / ``gpt-5-``
+      prefixes. Pin to that version once merged.
+
+    Running this backend with the current mem0 + gpt-5.4-mini combination
+    will produce 400-error responses on every ingest; the spike harness
+    surfaces those as failures rather than masking them.
 
     The kairix LLM endpoint is project-scoped Foundry on the OpenAI-compatible
     ``/openai/v1`` path. mem0's ``openai`` provider supports a custom
@@ -495,10 +487,6 @@ def _build_mem0_memory() -> Any:
             "fix: pip install mem0ai qdrant-client. "
             "next: rerun the spike with --backend mem0"
         ) from exc
-
-    # Bring mem0's reasoning-model detection into parity with kairix's
-    # azure_foundry provider so gpt-5.4-mini routes correctly.
-    _patch_mem0_for_gpt5_routing()
 
     llm_api_key = os.environ.get("KAIRIX_LLM_API_KEY", "").strip()
     llm_endpoint = os.environ.get("KAIRIX_LLM_ENDPOINT", "").strip()
