@@ -2126,6 +2126,140 @@ allow-list covers that).
 
 ---
 
+### F30 — Every CLI subcommand and MCP tool has an outcome test
+
+#### Statement
+
+Every subcommand listed in `kairix/cli.py:COMMANDS` AND every
+`@server.tool()`-decorated function in `kairix/agents/mcp/server.py`
+MUST have at least one test that:
+
+1. Spawns the kairix subprocess (or invokes the MCP tool handler), AND
+2. Asserts on captured stdout / stderr / returned envelope content —
+   NOT on `returncode == 0` alone, NOT on internal call-counts of fakes.
+
+Pre-existing surfaces without outcome tests are grandfathered in
+`.architecture/baseline/f30-operator-outcome-tests-files.txt`. The
+baseline shrinks only — adding an outcome test removes the
+corresponding entry in the same commit. Net-new subcommands /
+net-new MCP tools without outcome tests hard-fail.
+
+#### Why
+
+Plan B-parity (v2026.5.x) shipped 5 capabilities across 6 weeks with
+5233 unit + contract + BDD tests green at every gate. The post-Plan-B
+LoCoMo benchmark returned **5.0%** — below the **11%** pre-Plan-B
+baseline. Root cause: the `_hit_from_fact` adapter returned empty
+`snippet` / `path`, the synthesiser saw empty context, and the
+user-visible response was "No relevant content found in the knowledge
+store" — even though `fact_retriever` was firing and 2536 facts were
+indexed.
+
+Every layer's unit tests passed because every layer injected fakes.
+The composition `subprocess → kairix prep → SearchPipeline →
+fact_retriever → fusion → synthesiser → LLM` was untested against a
+real ingested fact.
+
+> **Tests at object/method boundaries can be silently irrelevant.**
+> A passing test suite is not evidence that the user-visible feature
+> works — it's evidence that each component, given the inputs the
+> test author imagined, returns the outputs the test author expected.
+> The composition through the production code path is what the user
+> consumes; outcome tests are the only thing that mechanically verifies
+> the composition.
+
+F30 mechanises the rule "the production code path gets exercised
+end-to-end with realistic input + observable output assertions."
+
+#### Detection
+
+`scripts/checks/check_f30_operator_outcome_tests.py`. Steps:
+
+1. AST-parse `kairix/cli.py` → enumerate `COMMANDS` dict keys (subcommand names)
+2. AST-parse `kairix/agents/mcp/server.py` → enumerate `@server.tool()`-decorated function names (MCP tool names)
+3. Walk `tests/**/*.py`; for each test file:
+   - For each `subprocess.run(...)` / `subprocess.Popen(...)` call, collect every string-literal in the first positional argument. If any matches a subcommand name AND the same file contains at least one `assert` referencing `.stdout` / `.stderr`, that subcommand counts as covered.
+   - For each direct call to `tool_<name>(...)` (or `<obj>.tool_<name>(...)`), if the matching MCP tool exists AND the same file contains at least one `assert` operating on a `Subscript` or `Attribute` (envelope-content assertion), that MCP tool counts as covered.
+4. Subcommands NOT covered → anchor the violation at the canonical implementation file (resolved from `COMMANDS` module path).
+5. MCP tools NOT covered → anchor the violation at the synthetic path `kairix/agents/mcp/server.py/@tool:<name>` (one entry per uncovered tool).
+6. Gate via `_arch_lib.gate(...)` — net-new violations fail; baseline shrinks only.
+
+#### Hard-fail mechanics
+
+Per the project directive *"hard fail for any changed code (so this is
+refactored upfront in any new features or defect remediation)"*:
+
+- **New subcommand or MCP tool** without a matching outcome test → hard-fail commit. Baseline cannot be expanded.
+- **Existing baselined subcommand whose outcome test exists** — removing or weakening the test → hard-fail commit.
+- **Existing baselined subcommand** — modifying the subcommand's primary implementation file is permitted, but PR review should expect the outcome test to land in the same PR. The "refactor upfront" mechanic relies on author + reviewer judgement here; F30's mechanical gate is on the existence of the outcome test, not on the diff scope.
+- **Baseline shrinks only.** Every commit that adds an outcome test removes the corresponding baseline entry. Net direction is monotonic.
+
+#### Out of scope
+
+F30 measures the **existence of an outcome test**. It does not measure:
+
+- Test coverage percentage within the outcome test (that's F7 / F9)
+- Whether the outcome test exercises every code path
+- Whether the outcome test runs in CI (assumed — CI markers are F8's job)
+- Performance of the outcome test (acceptable for it to be slow — `@pytest.mark.integration`)
+
+The single signal: does the production code path get exercised
+end-to-end with realistic input + observable output assertions?
+F30 is binary per subcommand / per MCP tool.
+
+#### Examples
+
+**Pass**:
+
+```python
+@pytest.mark.integration
+def test_ingest_chat_then_prep_round_trip_surfaces_fact(tmp_path):
+    """Ingest a fact, query for it, assert the value appears."""
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        json.dumps({"role": "user", "content": "Caroline is VP of People"}) + "\n"
+    )
+    subprocess.run(["kairix", "ingest-chat", str(transcript)], ..., check=True)
+
+    r = subprocess.run(
+        ["kairix", "prep", "What is Caroline's role?"],
+        capture_output=True, check=False, env=env, timeout=120,
+    )
+    out = r.stdout.decode()
+    assert "VP" in out                          # value surfaces
+    assert "No relevant content" not in out     # explicit anti-template
+```
+
+**Forbidden** (the pattern Plan B-parity used everywhere):
+
+```python
+def test_prep_smoke(fake_search):
+    result = prep_main(["What is X?"], search=fake_search)
+    assert fake_search.called  # internal-fake assertion, not outcome
+    # — never exercises the subprocess path; synth bugs invisible
+```
+
+#### Fix pattern
+
+Add `tests/integration/test_<subcommand>_outcome.py` with:
+
+- `@pytest.mark.integration` marker (carries category for F8)
+- `subprocess.run(["kairix", "<subcommand>", ...])` invocation
+- Realistic input (multi-word natural-language, not lorem-ipsum)
+- Assert on captured stdout / stderr content (not just `returncode == 0`)
+- Sabotage-proof: mutate the production implementation → confirm the
+  outcome test fails → restore. Document the sabotage proof in a
+  comment per existing project convention.
+
+Then remove the file's entry from `.architecture/baseline/f30-operator-outcome-tests-files.txt` in the same commit.
+
+#### Reference
+
+The Plan B-parity post-mortem document is the canonical motivation
+record: see `docs/architecture/decisions/2026-05-21-plan-b-parity-remediation.md` (also `/tmp/plan-b-remediation-2026-05-21.md`).
+
+---
+
 ## SDLC integration map
 
 Each fitness function fires at multiple lifecycle stages. The same
