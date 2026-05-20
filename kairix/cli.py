@@ -62,7 +62,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "vault": ("kairix.knowledge.store.cli", "main", True),  # backwards-compat alias
     "mcp": ("kairix.agents.mcp.cli", "main", True),
     "onboard": ("kairix.platform.onboard.cli", "main", True),
-    "eval": ("kairix.quality.eval.cli", "main", True),
+    "eval": ("kairix.use_cases.eval_suite", "main", True),
     "reference-library": ("kairix.knowledge.reflib.cli", "main", True),
     "setup": ("kairix.platform.setup.cli", "main", True),
     "worker": ("kairix.worker_cli", "main", True),

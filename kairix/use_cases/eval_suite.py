@@ -1,0 +1,417 @@
+"""Operator-facing ``kairix eval`` use case — Plan B-parity Capability #4.
+
+Runs the conversation-suite benchmark via :class:`SuiteRunner`, prints
+the per-category breakdown to stdout (or JSON via ``--json``), and
+optionally compares against a pinned baseline for the regression-gate
+CI flow.
+
+Compatibility surface: when ``argv[0]`` is one of the legacy
+``kairix.quality.eval.cli`` subcommands (``generate`` / ``enrich`` /
+``monitor`` / ``report`` / ``build-gold`` / ``auto-gold`` / ``gate`` /
+``tune``), the use case forwards to that CLI so the existing operator
+surface keeps working unchanged. Plan B-parity adds a NEW positional
+``suite_path`` shape on top of the legacy subcommands.
+
+Design contract:
+
+- **Dependency injection is total.** ``fact_store`` / ``fact_extractor``
+  / ``llm`` / ``paths`` are keyword-only kwargs on :func:`main`; tests
+  inject fakes, production callers leave them ``None`` and the CLI
+  resolves real implementations.
+- **F1 clean.** No monkeypatching, no internal-attribute reassignment.
+- **F26 clean.** Imports ``LLMBackend`` from
+  ``kairix.platform.llm.protocol`` (not from a provider).
+- **F21 clean.** Every actionable error carries ``fix:`` / ``next:``
+  markers so the operator gets the correction action.
+"""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import json
+import sys
+from pathlib import Path
+from typing import Any, TextIO
+
+from kairix.core.protocols import FactExtractor, FactStore
+from kairix.paths import KairixPaths
+from kairix.platform.llm.protocol import LLMBackend
+from kairix.quality.eval.suite_runner import SuiteResult, SuiteRunner
+
+__all__ = ["main"]
+
+
+# Subcommands that belong to the legacy ``kairix.quality.eval.cli`` surface.
+# When ``argv[0]`` is one of these, the use case forwards the argv straight
+# into the legacy CLI so the existing operator surface keeps working.
+_LEGACY_SUBCOMMANDS: frozenset[str] = frozenset(
+    {
+        "generate",
+        "enrich",
+        "monitor",
+        "report",
+        "build-gold",
+        "auto-gold",
+        "gate",
+        "tune",
+        "hybrid-sweep",
+        "sweep",
+    }
+)
+
+# Documented backends for the ``--backend`` flag.
+_BACKENDS: tuple[str, ...] = ("kairix-native", "mem0")
+
+# Maximum allowable regression — a baseline is "lost" only when the run
+# falls more than this many percentage points below it. The threshold is
+# documented in the Plan B-parity execution plan; aligns with the canary
+# regression gate in ``kairix.quality.eval.monitor``.
+_REGRESSION_TOLERANCE_PP: float = 2.0
+
+# Prefix on every operator-facing error written to stderr. Extracted so
+# the error envelope stays consistent and a rename has a single edit site.
+_ERROR_PREFIX: str = "kairix eval: "
+
+
+@dataclasses.dataclass(frozen=True)
+class _ResolvedDeps:
+    """Bundle of resolved dependencies for the suite-runner path."""
+
+    paths: KairixPaths
+    fact_store: FactStore
+    fact_extractor: FactExtractor
+    llm: LLMBackend
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    out: TextIO | None = None,
+    err: TextIO | None = None,
+    paths: KairixPaths | None = None,
+    fact_store: FactStore | None = None,
+    fact_extractor: FactExtractor | None = None,
+    llm: LLMBackend | None = None,
+) -> int:
+    """CLI entry point for ``kairix eval``.
+
+    Dispatches to:
+
+    - The legacy :func:`kairix.quality.eval.cli.main` when ``argv[0]``
+      is a legacy subcommand.
+    - The Plan B-parity suite runner otherwise (positional
+      ``suite_path``).
+    """
+    argv_list = list(argv if argv is not None else [])
+
+    if _is_legacy_subcommand(argv_list):
+        return _dispatch_legacy(argv_list)
+
+    out_sink = out if out is not None else sys.stdout
+    err_sink = err if err is not None else sys.stderr
+
+    args = _build_parser().parse_args(argv_list)
+    suite_path = Path(args.suite_path)
+
+    deps = _resolve_deps(
+        paths=paths,
+        fact_store=fact_store,
+        fact_extractor=fact_extractor,
+        llm=llm,
+        err_sink=err_sink,
+    )
+    if isinstance(deps, int):
+        return deps
+
+    return _execute_suite(args=args, suite_path=suite_path, deps=deps, out_sink=out_sink, err_sink=err_sink)
+
+
+def _is_legacy_subcommand(argv_list: list[str]) -> bool:
+    """True when ``argv[0]`` is one of the pre-existing eval subcommands."""
+    return bool(argv_list) and argv_list[0] in _LEGACY_SUBCOMMANDS
+
+
+def _dispatch_legacy(argv_list: list[str]) -> int:
+    """Forward to the legacy ``kairix.quality.eval.cli`` entry point."""
+    # Legacy passthrough: keep `kairix eval generate / enrich / monitor /
+    # report / gate / tune / ...` working unchanged.
+    from kairix.quality.eval.cli import main as legacy_main
+
+    legacy_main(argv_list)
+    # Legacy CLI exits via sys.exit; if it returns we treat that as 0.
+    return 0
+
+
+def _resolve_deps(
+    *,
+    paths: KairixPaths | None,
+    fact_store: FactStore | None,
+    fact_extractor: FactExtractor | None,
+    llm: LLMBackend | None,
+    err_sink: TextIO,
+) -> _ResolvedDeps | int:
+    """Resolve every collaborator the suite path needs, or return an exit code."""
+    resolved_paths = paths if paths is not None else KairixPaths.resolve()
+
+    if fact_store is None:
+        try:
+            fact_store = _resolve_production_fact_store(resolved_paths.db_path)
+        except ImportError as exc:
+            err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
+            return 2
+
+    resolved_extractor: FactExtractor = fact_extractor if fact_extractor is not None else _NullFactExtractor()
+
+    if llm is None:
+        try:
+            llm = _resolve_production_llm()
+        except ImportError as exc:
+            err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
+            return 2
+
+    return _ResolvedDeps(
+        paths=resolved_paths,
+        fact_store=fact_store,
+        fact_extractor=resolved_extractor,
+        llm=llm,
+    )
+
+
+def _execute_suite(
+    *,
+    args: argparse.Namespace,
+    suite_path: Path,
+    deps: _ResolvedDeps,
+    out_sink: TextIO,
+    err_sink: TextIO,
+) -> int:
+    """Run the suite via :class:`SuiteRunner` and emit the result."""
+    runner = SuiteRunner(
+        fact_store=deps.fact_store,
+        fact_extractor=deps.fact_extractor,
+        llm=deps.llm,
+        paths=deps.paths,
+    )
+
+    try:
+        suite = runner.discover_suite(suite_path)
+    except ValueError as exc:
+        err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
+        return 2
+
+    result = runner.run(suite)
+    _emit_result(result=result, suite_path=suite_path, as_json=args.as_json, out_sink=out_sink)
+
+    if args.regression_against:
+        return _check_regression(
+            result=result,
+            baseline_dir=Path(args.regression_against),
+            err_sink=err_sink,
+        )
+    return 0
+
+
+def _emit_result(*, result: SuiteResult, suite_path: Path, as_json: bool, out_sink: TextIO) -> None:
+    """Write the SuiteResult to ``out_sink`` in the requested shape."""
+    if as_json:
+        out_sink.write(json.dumps(dataclasses.asdict(result), indent=2, default=str) + "\n")
+    else:
+        out_sink.write(_format_human(result, suite_path=suite_path))
+
+
+# ---------------------------------------------------------------------------
+# Argparse
+# ---------------------------------------------------------------------------
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Argparse for the Plan B-parity ``kairix eval <suite_path>`` shape."""
+    parser = argparse.ArgumentParser(
+        prog="kairix eval",
+        description=(
+            "Run a conversation eval suite (sessions + ground-truth queries) "
+            "against the configured backend and report per-category scores."
+        ),
+    )
+    parser.add_argument(
+        "suite_path",
+        help="Path to the suite directory (e.g. reference-library/conversations/engagement-alpha).",
+    )
+    parser.add_argument(
+        "--metric",
+        choices=("query-pass-rate", "extractor-f1", "both"),
+        default="both",
+        help="Which metric(s) to report (default: both).",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=_BACKENDS,
+        default="kairix-native",
+        help=f"Memory backend to evaluate (default: kairix-native). One of {_BACKENDS}.",
+    )
+    parser.add_argument(
+        "--regression-against",
+        default=None,
+        help="Path to a pinned baseline directory; exit 1 if the run regresses by more than 2pp.",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Emit the SuiteResult as JSON instead of human-readable text.",
+    )
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Output formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_human(result: SuiteResult, *, suite_path: Path) -> str:
+    """Render the human-readable summary documented in the brief."""
+    pct = _pct(result.n_passed, result.n_questions)
+    lines: list[str] = [
+        f"Suite: {result.suite_name} (path={suite_path})",
+        f"  Questions  : {result.n_passed}/{result.n_questions} ({pct}%)",
+        f"  Mean score : {result.mean_score:.3f}",
+        "  By category:",
+    ]
+    for cat, stats in sorted(result.per_category.items()):
+        n = int(stats["n"])
+        passed = int(stats["passed"])
+        mean = stats["mean"]
+        cat_pct = _pct(passed, n)
+        lines.append(f"    {cat:<14} {passed}/{n} ({cat_pct}%) mean={mean:.3f}")
+    if result.per_extraction_f1 is not None:
+        lines.append(
+            f"  Extractor F1: {result.per_extraction_f1:.2f} "
+            f"(precision {result.extraction_precision:.2f}, "
+            f"recall {result.extraction_recall:.2f})"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _pct(passed: int, total: int) -> int:
+    """Integer percentage; 0 when total is zero (avoids divide-by-zero)."""
+    if total <= 0:
+        return 0
+    return round(100 * passed / total)
+
+
+# ---------------------------------------------------------------------------
+# Regression gate
+# ---------------------------------------------------------------------------
+
+
+def _check_regression(
+    *,
+    result: SuiteResult,
+    baseline_dir: Path,
+    err_sink: TextIO,
+) -> int:
+    """Compare ``result`` against the pinned baseline; return CLI exit code.
+
+    Baseline file: ``baseline_dir/<suite_name>.json`` carrying a
+    previously-serialised :class:`SuiteResult`. Regression =
+    ``baseline.mean_score - result.mean_score > 2pp`` (0.02 on the
+    0.0-1.0 scale).
+    """
+    baseline_path = baseline_dir / f"{result.suite_name}.json"
+    if not baseline_path.exists():
+        err_sink.write(
+            f"{_ERROR_PREFIX}baseline file {baseline_path!r} is missing. "
+            f"fix: write the current result there to pin a baseline. "
+            f"next: re-run with --regression-against pointed at the same dir.\n"
+        )
+        return 2
+
+    try:
+        baseline_raw = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        err_sink.write(
+            f"{_ERROR_PREFIX}baseline {baseline_path!r} is not valid JSON: {exc}. "
+            f"fix: regenerate via `kairix eval <suite> --json > {baseline_path}`. "
+            f"next: re-run the regression gate.\n"
+        )
+        return 2
+
+    baseline_mean = float(baseline_raw.get("mean_score", 0.0))
+    delta_pp = (baseline_mean - result.mean_score) * 100.0
+    if delta_pp > _REGRESSION_TOLERANCE_PP:
+        err_sink.write(
+            f"{_ERROR_PREFIX}REGRESSION on {result.suite_name} — "
+            f"baseline mean={baseline_mean:.3f} vs run mean={result.mean_score:.3f} "
+            f"(delta={delta_pp:.2f}pp; tolerance={_REGRESSION_TOLERANCE_PP}pp). "
+            f"fix: investigate the recall/extractor delta on this suite. "
+            f"next: re-run after the fix, then update the baseline.\n"
+        )
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Production-time fallbacks (kept narrow; tests inject fakes via kwargs).
+# ---------------------------------------------------------------------------
+
+
+def _resolve_production_fact_store(db_path: Path) -> FactStore:
+    """Return a production FactStore or raise ImportError with actionable hint."""
+    try:
+        from kairix.core.facts import SQLiteFactStore
+    except ImportError as exc:
+        raise ImportError(
+            "kairix eval needs SQLiteFactStore (Capability #3). "
+            "fix: ensure your kairix install includes kairix.core.facts. "
+            "next: re-run after installing the current build."
+        ) from exc
+    store: FactStore = SQLiteFactStore(db_path=db_path)
+    return store
+
+
+def _resolve_production_llm() -> LLMBackend:
+    """Return the configured production LLM backend.
+
+    Resolves via :func:`kairix.platform.llm.get_default_backend` so the
+    Plan B-parity surface honours the operator's provider config the
+    same way every other production-time LLM call does.
+    """
+    try:
+        from kairix.platform.llm import get_default_backend
+    except ImportError as exc:
+        raise ImportError(
+            "kairix eval cannot resolve the configured LLM backend. "
+            "fix: check the kairix.platform.llm module is present. "
+            "next: re-run after fixing the install."
+        ) from exc
+    backend: LLMBackend = get_default_backend()
+    return backend
+
+
+class _NullFactExtractor:
+    """Production placeholder extractor — emits zero facts.
+
+    Capability #2 (sister agent) lands the LLM-driven extractor. Until
+    then, the production-wired suite runs against an empty extraction
+    set so the operator can still exercise the recall + judge path
+    against the document corpus.
+    """
+
+    def extract(
+        self,
+        *,
+        turns: list[dict[str, Any]],
+        window_hint: dict[str, Any] | None = None,
+    ) -> list[Any]:
+        """Return ``[]`` — production placeholder, tests inject FakeFactExtractor."""
+        # Reference the parameter names so F19 sees a Load-context use of
+        # ``turns`` / ``window_hint`` (the names are mandated by the
+        # FactExtractor Protocol — renaming with ``_`` prefix would
+        # break the runtime contract).
+        _ = (turns, window_hint)
+        return []
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

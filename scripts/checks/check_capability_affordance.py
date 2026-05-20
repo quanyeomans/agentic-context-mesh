@@ -66,6 +66,8 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         "curator",
         "timeline",
         "reference-library",
+        # eval is an operator-side benchmark harness — load-generating against
+        # a synthetic corpus, not an agent-callable retrieval surface.
         "eval",
         "worker",
         "usage-guide",

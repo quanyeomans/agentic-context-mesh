@@ -116,6 +116,8 @@ pytest_plugins = [
     "tests.bdd.steps.config_layering_steps",
     # Plan B-parity Week 1 — conversation ingest CLI/use-case.
     "tests.bdd.steps.ingest_chat_steps",
+    # Plan B-parity Week 2 — eval suite CLI/use-case.
+    "tests.bdd.steps.eval_suite_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
