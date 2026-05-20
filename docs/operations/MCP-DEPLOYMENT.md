@@ -215,3 +215,55 @@ If the plugin loaded but the bootstrap envelope is missing from agent sessions, 
 ### Failure contract — degraded != broken
 
 The plugin **never blocks session start**. On every failure path — missing binary, non-zero exit, timeout, blank agent name, empty stdout — it appends the fallback string above and returns normally. This matches the #246 affordance contract: the agent reads the fallback in its system prompt, knows kairix orientation is unavailable, and surfaces that to the user instead of silently failing. Full failure-mode notes are in `kairix/plugins/openclaw/memory-prompt/README.md`.
+
+## Running eval from the deployed container
+
+The Plan B-parity eval suite runner (`kairix eval`) ships in the image so operators can run quality regressions against a deployed container without rebuilding. Reference corpora and perf budgets are baked in at stable paths.
+
+### Stable paths inside the image
+
+| Path | Contents | Env var |
+|------|----------|---------|
+| `/opt/kairix/reference-library/conversations/` | five engagement corpora (engagement-alpha … engagement-epsilon), each with sessions + ground-truth queries | `KAIRIX_EVAL_CORPORA_ROOT` |
+| `/opt/kairix/suites/perf/budgets.json` | per-capability latency budgets consumed by `kairix probe-config --perf` | `KAIRIX_PERF_BUDGETS` |
+| `/opt/kairix/suites/` | top-level eval suite directory (reflib-gold-v3.yaml etc.) | (none — fixed path) |
+
+Both env vars are exported in the image as documented stable references. The eval CLI does not read them today; operators templating commands should point at the literal paths above and treat the env vars as the durable contract for "where the corpora live inside the container".
+
+### `docker exec` examples
+
+Run a single engagement corpus against the kairix-native backend, JSON output:
+
+```bash
+docker exec <container> kairix eval \
+    /opt/kairix/reference-library/conversations/engagement-alpha \
+    --json
+```
+
+Compare both metrics (query pass rate + extractor F1) and check against a pinned baseline:
+
+```bash
+docker exec <container> kairix eval \
+    /opt/kairix/reference-library/conversations/engagement-alpha \
+    --metric both \
+    --regression-against /opt/kairix/reference-library/conversations/expected/engagement-alpha
+```
+
+Cross-backend comparison (kairix-native vs mem0):
+
+```bash
+for backend in kairix-native mem0; do
+    docker exec <container> kairix eval \
+        /opt/kairix/reference-library/conversations/engagement-beta \
+        --backend "$backend" --json > "/tmp/eval-$backend.json"
+done
+```
+
+The `--regression-against` flag exits non-zero if the run regresses by more than 2pp against the pinned baseline — wire it into your nightly cron to catch quality drift between releases.
+
+### Legacy `eval` shortcut renamed
+
+The pre-Plan-B `eval` entrypoint mode (which ran `kairix embed && kairix benchmark run --suite reflib-gold-v3.yaml`) is now `benchmark-reflib`. The rename frees the `eval` arg so it dispatches to the new `kairix eval` suite runner via the entrypoint's pass-through case. Operators with cron entries that ran `docker run kairix eval` should switch to either:
+
+- `docker run kairix benchmark-reflib` — same legacy reference-library quality benchmark, or
+- `docker run kairix eval /opt/kairix/reference-library/conversations/<corpus>` — the new conversation-eval suite runner.

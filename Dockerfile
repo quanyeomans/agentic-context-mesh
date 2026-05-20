@@ -70,7 +70,14 @@ ENV KAIRIX_DB_PATH=/data/kairix/index.sqlite \
     KAIRIX_REFLIB_ROOT=/opt/kairix/reference-library \
     KAIRIX_WORKSPACE_ROOT=/data/kairix/workspaces \
     KAIRIX_DATA_DIR=/data/kairix \
-    KAIRIX_CONFIG_PATH=/opt/kairix/kairix.config.yaml
+    KAIRIX_CONFIG_PATH=/opt/kairix/kairix.config.yaml \
+    KAIRIX_EVAL_CORPORA_ROOT=/opt/kairix/reference-library/conversations \
+    KAIRIX_PERF_BUDGETS=/opt/kairix/suites/perf/budgets.json
+# KAIRIX_EVAL_CORPORA_ROOT and KAIRIX_PERF_BUDGETS are documented stable
+# paths for operators running ``docker exec <container> kairix eval ...``
+# (Plan B-parity Week 5 Stream C). They are not read by the eval CLI today;
+# they exist so the ``docker exec`` examples in
+# docs/operations/MCP-DEPLOYMENT.md stay stable across image releases.
 
 EXPOSE 8080
 
