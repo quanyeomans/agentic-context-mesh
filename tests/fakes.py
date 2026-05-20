@@ -1271,3 +1271,182 @@ class FakeConversationStore(FakeMemoryStore):
             "timestamp": timestamp or "1970-01-01T00:00:00Z",
         }
         return self.add(message, metadata=metadata)
+
+
+# ---------------------------------------------------------------------------
+# Plan B-parity — fact-extraction Protocol fakes.
+#
+# FakeFactRecord satisfies the FactRecord Protocol (read-only view of
+# the canonical entity-attribute-value shape). FakeFactExtractor returns
+# scripted records so contract tests can pin consumer behaviour without
+# an LLM call. FakeFactStore is a dict-backed in-memory implementation
+# of the FactStore Protocol — exercises add/search/find_conflicts/
+# supersede round-trip semantics without standing up SQLite.
+# ---------------------------------------------------------------------------
+
+
+class FakeFactRecord:
+    """Minimal FactRecord satisfying the runtime-checkable Protocol.
+
+    Properties mirror the Protocol's read surface; backing store is
+    plain instance state so test code can construct records inline.
+    """
+
+    def __init__(
+        self,
+        *,
+        id: str,
+        entity: str,
+        attribute: str,
+        value: str,
+        confidence: float = 0.9,
+        source_turn_ids: tuple[str, ...] = (),
+        extracted_at: str = "1970-01-01T00:00:00Z",
+        superseded_by: str | None = None,
+        namespace: str = "shared",
+    ) -> None:
+        self._id = id
+        self._entity = entity
+        self._attribute = attribute
+        self._value = value
+        self._confidence = confidence
+        self._source_turn_ids = source_turn_ids
+        self._extracted_at = extracted_at
+        self._superseded_by = superseded_by
+        self._namespace = namespace
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def entity(self) -> str:
+        return self._entity
+
+    @property
+    def attribute(self) -> str:
+        return self._attribute
+
+    @property
+    def value(self) -> str:
+        return self._value
+
+    @property
+    def confidence(self) -> float:
+        return self._confidence
+
+    @property
+    def source_turn_ids(self) -> tuple[str, ...]:
+        return self._source_turn_ids
+
+    @property
+    def extracted_at(self) -> str:
+        return self._extracted_at
+
+    @property
+    def superseded_by(self) -> str | None:
+        return self._superseded_by
+
+    @property
+    def namespace(self) -> str:
+        return self._namespace
+
+
+class FakeFactHit:
+    """Minimal FactHit Protocol satisfier — ``record`` + ``score`` properties."""
+
+    def __init__(self, *, record: Any, score: float) -> None:
+        self._record = record
+        self._score = score
+
+    @property
+    def record(self) -> Any:
+        return self._record
+
+    @property
+    def score(self) -> float:
+        return self._score
+
+
+class FakeFactExtractor:
+    """Scripted FactExtractor — returns a preconfigured list of facts.
+
+    Production-shape: an LLM-driven extractor. The fake skips the LLM
+    call entirely so contract tests run sub-millisecond. Pass
+    ``scripted_facts=[FakeFactRecord(...)]`` to configure what
+    ``extract`` returns regardless of ``turns``.
+
+    Records every ``extract`` invocation in ``calls`` for assertion.
+    """
+
+    def __init__(self, scripted_facts: list[Any] | None = None) -> None:
+        self._scripted_facts = list(scripted_facts or [])
+        self.calls: list[dict[str, Any]] = []
+
+    def extract(self, *, turns: list[dict[str, Any]], window_hint: dict[str, Any] | None = None) -> list[Any]:
+        self.calls.append({"turns": list(turns), "window_hint": window_hint})
+        return list(self._scripted_facts)
+
+
+class FakeFactStore:
+    """Dict-backed in-memory FactStore — pins add/search/find_conflicts/supersede.
+
+    Search scoring is naive substring overlap on ``value`` — enough
+    to exercise the Protocol round-trip without a real BM25/vector
+    backend. ``namespace`` filtering is honoured because the
+    SearchPipeline federation uses it for engagement-scoped recall.
+    """
+
+    def __init__(self) -> None:
+        self._facts: dict[str, Any] = {}
+
+    def add(self, fact: Any) -> None:
+        # Idempotent on the fact's deterministic id (Protocol contract).
+        if fact.id not in self._facts:
+            self._facts[fact.id] = fact
+
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[Any]:
+        q_words = set(query.lower().split())
+        scored: list[tuple[float, FakeFactHit]] = []
+        for fact in self._facts.values():
+            if fact.superseded_by is not None:
+                continue
+            if namespace is not None and fact.namespace != namespace:
+                continue
+            haystack_words = set((fact.entity + " " + fact.attribute + " " + fact.value).lower().split())
+            overlap = len(q_words & haystack_words)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(q_words), 1)
+            scored.append((score, FakeFactHit(record=fact, score=score)))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [hit for _, hit in scored[:top_k]]
+
+    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[Any]:
+        return [
+            fact
+            for fact in self._facts.values()
+            if fact.superseded_by is None
+            and fact.entity == entity
+            and fact.attribute == attribute
+            and (namespace is None or fact.namespace == namespace)
+        ]
+
+    def supersede(self, *, old_id: str, new_id: str) -> None:
+        if old_id not in self._facts:
+            raise KeyError(f"FakeFactStore: no fact with id {old_id!r}")
+        if new_id not in self._facts:
+            raise KeyError(f"FakeFactStore: no fact with id {new_id!r}")
+        old = self._facts[old_id]
+        # Re-mint a record carrying the superseded_by link.
+        self._facts[old_id] = FakeFactRecord(
+            id=old.id,
+            entity=old.entity,
+            attribute=old.attribute,
+            value=old.value,
+            confidence=old.confidence,
+            source_turn_ids=old.source_turn_ids,
+            extracted_at=old.extracted_at,
+            superseded_by=new_id,
+            namespace=old.namespace,
+        )
