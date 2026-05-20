@@ -124,6 +124,9 @@ pytest_plugins = [
     # Collected unconditionally; runtime-gated on KAIRIX_SOAK=1 inside the
     # step bodies so normal CI sees the scenarios but skips at first Given.
     "tests.bdd.steps.soak_fact_extractor_steps",
+    # Plan B-parity Week 5 Stream A — MCP ingest + recall tools.
+    "tests.bdd.steps.mcp_ingest_chat_steps",
+    "tests.bdd.steps.mcp_facts_about_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

@@ -128,6 +128,9 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "embed",
         "store_crawl",
         "embed_rebuild_fts",
+        # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
+        "ingest_chat",
+        "facts_about",
     } == names
 
 

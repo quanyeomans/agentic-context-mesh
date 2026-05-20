@@ -56,6 +56,12 @@ GATED_TOOLS: list[tuple[str, dict[str, Any]]] = [
     ("bootstrap", {"agent": "anyone"}),
     ("entity_suggest", {"text": "anything"}),
     ("entity_validate", {"name": "anything"}),
+    # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
+    (
+        "ingest_chat",
+        {"jsonl_content": "{}\n", "conversation_id": "anything", "namespace": "anything"},
+    ),
+    ("facts_about", {"entity": "anything"}),
 ]
 
 # Tools that must STILL serve real responses while cold — they exist to

@@ -967,6 +967,19 @@ def tool_capabilities() -> dict[str, Any]:
                 category=CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY,
                 escalate_via="probe_config",
             ),
+            # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
+            _cap(
+                name="ingest_chat",
+                mcp_tool="ingest_chat",
+                cli="kairix ingest-chat",
+                category=CAP_CATEGORY_KNOWLEDGE_WRITE,
+            ),
+            _cap(
+                name="facts_about",
+                mcp_tool="facts_about",
+                cli="kairix facts about",
+                category=CAP_CATEGORY_RETRIEVAL,
+            ),
             # Knowledge-write operator-only
             _cap(
                 name="embed",
@@ -1318,5 +1331,64 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
     def embed_rebuild_fts() -> dict[str, Any]:
         """Operator-only FTS recovery. Returns escalation envelope."""
         return tool_embed_rebuild_fts()
+
+    # ---- Plan B-parity Week 5 Stream A — agent-driven ingest + recall ----
+    # ingest_chat lets the agent push JSONL transcripts into the conversation
+    # store; facts_about gives the agent a direct introspection surface over
+    # the fact store. Both are warm-gated because they touch persistence and
+    # the LLM extractor — neither makes sense against a cold pipeline.
+
+    @server.tool(
+        description=(
+            "Ingest a JSONL chat transcript supplied inline. Use this to push a recently-completed "
+            "conversation into the knowledge store so future search/prep/recall can see it. "
+            "Pass the agent's own engagement namespace — cross-engagement calls are rejected."
+        )
+    )
+    @async_tool_handler
+    @warm_gate
+    def ingest_chat(
+        jsonl_content: str,
+        conversation_id: str,
+        namespace: str,
+        window_turns: int = 5,
+        no_extract: bool = False,
+    ) -> dict[str, Any]:
+        """Push a JSONL chat transcript into the knowledge store."""
+        from kairix.agents.mcp.tools.ingest_chat import tool_ingest_chat
+
+        # ``allowed_namespace`` mirrors ``namespace`` at the FastMCP wire — the
+        # agent's session is pinned upstream to a single engagement scope and
+        # the bootstrap-derived namespace is the same value the agent passes
+        # here. Tests bypass this surface and call ``tool_ingest_chat``
+        # directly with both values to exercise the reject branch.
+        return tool_ingest_chat(
+            jsonl_content=jsonl_content,
+            conversation_id=conversation_id,
+            namespace=namespace,
+            allowed_namespace=namespace,
+            window_turns=window_turns,
+            no_extract=no_extract,
+        )
+
+    @server.tool(
+        description=(
+            "Look up what kairix knows about an entity from the fact store. Returns the "
+            "current (non-superseded) entity-attribute-value records with confidence and "
+            "source provenance. Pass a namespace to restrict the lookup to a single "
+            "engagement scope; pass null/None to search across all namespaces."
+        )
+    )
+    @async_tool_handler
+    @warm_gate
+    def facts_about(
+        entity: str,
+        namespace: str | None = None,
+        top_k: int = 20,
+    ) -> dict[str, Any]:
+        """Return fact records about an entity from the fact store."""
+        from kairix.agents.mcp.tools.facts_about import tool_facts_about
+
+        return tool_facts_about(entity=entity, namespace=namespace, top_k=top_k)
 
     return server
