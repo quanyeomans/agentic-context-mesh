@@ -1,0 +1,50 @@
+[
+  {
+    "question": "What is agent-beta's current role?",
+    "answer": "senior engineer (promoted 2026-02-26)",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-delta-s003-t006"]
+  },
+  {
+    "question": "What role did agent-beta start the quarter in?",
+    "answer": "junior engineer",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-delta-s001-t001"]
+  },
+  {
+    "question": "What is the current status of project-rho?",
+    "answer": "active",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-delta-s003-t001", "eng-delta-s004-t009"]
+  },
+  {
+    "question": "Why did the project-rho budget change?",
+    "answer": "exec-sigma agreed an additional $80k after the strategic review concluded that the partner-export module should be bundled into project-rho rather than spun out separately. Budget moved from $320k to $400k on 2026-02-26.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-delta-s001-t006", "eng-delta-s003-t003"]
+  },
+  {
+    "question": "When was project-rho on hold?",
+    "answer": "From 2026-02-04 to 2026-02-26, during a strategic review at the parent-org level.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-delta-s002-t001", "eng-delta-s002-t003", "eng-delta-s003-t001"]
+  },
+  {
+    "question": "What contributed to agent-beta's role step?",
+    "answer": "agent-beta wrote the contingency note that exec-sigma referenced in the strategic review brief during the on-hold period. The work plus how they handled the disruption was senior-level, and the role step was effective 2026-02-26.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-delta-s002-t007", "eng-delta-s002-t008", "eng-delta-s003-t006"]
+  },
+  {
+    "question": "What was project-rho's original budget before any revisions?",
+    "answer": "you didn't tell me the original-original figure beyond the $320k approved figure that started Q1 — the conversation has no pre-$320k value.",
+    "category": "adversarial",
+    "evidence_turn_ids": ["eng-delta-s001-t002"]
+  },
+  {
+    "question": "Summarise how project-rho's plan has evolved over the quarter.",
+    "answer": "project-rho began Q1 active with a $320k budget and a 2026-04-15 completion estimate. It went on-hold 2026-02-04 to 2026-02-26 for a parent-org strategic review. On resumption, scope expanded to bundle the partner-export module, budget moved to $400k, and the estimate shifted to 2026-05-04. A second estimate revision on 2026-03-30 — driven by partner-export turning out more complex than the contingency note captured — moved completion to 2026-05-18 while budget held at $400k.",
+    "category": "open-domain",
+    "evidence_turn_ids": ["eng-delta-s001-t002", "eng-delta-s002-t001", "eng-delta-s003-t001", "eng-delta-s003-t003", "eng-delta-s003-t004", "eng-delta-s004-t002", "eng-delta-s004-t005"]
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "question": "When did the last sprint end relative to the first conversation (2026-01-15)?",
+    "answer": "2026-01-09 — six days before the 2026-01-15 conversation, the two-week sprint ending on that date.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-epsilon-s001-t004"]
+  },
+  {
+    "question": "When did the fraud check go live?",
+    "answer": "Around 2026-02-05, which was '5 weeks before' the 2026-03-12 conversation.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-epsilon-s002-t010"]
+  },
+  {
+    "question": "How many live partners did the engagement go from to between mid-January and late April 2026?",
+    "answer": "From 38 (2026-01-15) to 131 (2026-04-30) — roughly a 3.4x increase over 3.5 months.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-epsilon-s001-t002", "eng-epsilon-s004-t006"]
+  },
+  {
+    "question": "What was the time-to-first-transaction median in early January 2026, and what is it now (as of 2026-04-30)?",
+    "answer": "6 days in early January 2026; 5 days as of 2026-04-30. A net improvement of 1 day, achieved by moving tax-doc upload post-onboarding while keeping the fraud check in place.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-epsilon-s002-t006", "eng-epsilon-s004-t002", "eng-epsilon-s004-t004"]
+  },
+  {
+    "question": "What two changes contributed to the time-to-first-transaction slip discussed in March?",
+    "answer": "The fraud check (turned on ~5 weeks before the 2026-03-12 conversation) added ~2 days, and the tax-doc upload requirement (added ~6 weeks before that conversation) added ~1 day.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-epsilon-s002-t010", "eng-epsilon-s003-t001"]
+  },
+  {
+    "question": "Summarise the partner-rollout story over the period the conversations span.",
+    "answer": "Across roughly four months (mid-January 2026 to end of April 2026), live partner count grew from 38 to 131. Conversion rose from 41% the prior sprint to 71% by mid-March driven by a simplified onboarding form and an in-app walkthrough. Time-to-first-transaction first slipped from a 6-day January median to 9 days in March (caused by the new fraud check at ~5 weeks earlier and a tax-doc upload requirement at ~6 weeks earlier), then was recovered to 5 days by end-April by moving tax-doc upload post-onboarding on 2026-03-26 while keeping the non-negotiable fraud check. The partner-tier-4 launch is scheduled for Q3 2026, first wave early July.",
+    "category": "open-domain",
+    "evidence_turn_ids": ["eng-epsilon-s001-t002", "eng-epsilon-s001-t004", "eng-epsilon-s002-t001", "eng-epsilon-s002-t006", "eng-epsilon-s003-t001", "eng-epsilon-s004-t002", "eng-epsilon-s004-t006", "eng-epsilon-s004-t008"]
+  },
+  {
+    "question": "How long ago did exec-sigma first ask about the partner count, relative to 2026-04-30?",
+    "answer": "Approximately 15 months ago, when the live partner count was 6.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-epsilon-s004-t009"]
+  },
+  {
+    "question": "What was the partner-rollout's revenue last quarter?",
+    "answer": "you didn't tell me that",
+    "category": "adversarial",
+    "evidence_turn_ids": []
+  }
+]

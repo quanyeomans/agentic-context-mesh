@@ -1,0 +1,89 @@
+[
+  {
+    "entity": "agent-beta",
+    "attribute": "role",
+    "value": "senior engineer",
+    "evidence_turn_ids": ["eng-delta-s003-t006", "eng-delta-s003-t007", "eng-delta-s004-t009"],
+    "supersedes": [
+      {
+        "previous_value": "junior engineer",
+        "evidence_turn_ids": ["eng-delta-s001-t001", "eng-delta-s001-t005"],
+        "superseded_on": "2026-02-26"
+      }
+    ]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "status",
+    "value": "active",
+    "evidence_turn_ids": ["eng-delta-s003-t001", "eng-delta-s004-t009"],
+    "supersedes": [
+      {
+        "previous_value": "on-hold",
+        "evidence_turn_ids": ["eng-delta-s002-t001", "eng-delta-s002-t006"],
+        "superseded_on": "2026-02-26"
+      },
+      {
+        "previous_value": "active",
+        "evidence_turn_ids": ["eng-delta-s001-t002"],
+        "superseded_on": "2026-02-04"
+      }
+    ]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "budget",
+    "value": "$400k",
+    "evidence_turn_ids": ["eng-delta-s003-t003", "eng-delta-s004-t005"],
+    "supersedes": [
+      {
+        "previous_value": "$320k",
+        "evidence_turn_ids": ["eng-delta-s001-t002", "eng-delta-s001-t006"],
+        "superseded_on": "2026-02-26"
+      }
+    ]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "estimated-completion",
+    "value": "2026-05-18",
+    "evidence_turn_ids": ["eng-delta-s004-t002", "eng-delta-s004-t009"],
+    "supersedes": [
+      {
+        "previous_value": "2026-05-04",
+        "evidence_turn_ids": ["eng-delta-s003-t004"],
+        "superseded_on": "2026-03-30"
+      },
+      {
+        "previous_value": "2026-04-15",
+        "evidence_turn_ids": ["eng-delta-s001-t002", "eng-delta-s001-t008"],
+        "superseded_on": "2026-02-26"
+      }
+    ]
+  },
+  {
+    "entity": "agent-beta",
+    "attribute": "current-workstream",
+    "value": "partner-export (leading)",
+    "evidence_turn_ids": ["eng-delta-s003-t007", "eng-delta-s004-t009"],
+    "supersedes": [
+      {
+        "previous_value": "pricing-shim (pairing)",
+        "evidence_turn_ids": ["eng-delta-s001-t004"],
+        "superseded_on": "2026-02-26"
+      }
+    ]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "scope-additions",
+    "value": "partner-export module bundled in",
+    "evidence_turn_ids": ["eng-delta-s003-t003", "eng-delta-s003-t005"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "executive-sponsor",
+    "value": "exec-sigma",
+    "evidence_turn_ids": ["eng-delta-s001-t006", "eng-delta-s002-t001"]
+  }
+]
