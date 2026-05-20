@@ -406,3 +406,101 @@ def test_add_persists_across_store_instances(tmp_path: Path) -> None:
     store2 = SQLiteFactStore(db_path=db)
     hits = store2.search("persistent")
     assert {h.record.id for h in hits} == {"f1"}
+
+
+# ---------------------------------------------------------------------------
+# FTS5 query sanitisation — caught by the LoCoMo benchmark, not the
+# original capability tests. Realistic natural-language queries with
+# punctuation + multi-word tokens must NOT raise + must NOT silently
+# return zero hits when the fact store has matching content.
+# ---------------------------------------------------------------------------
+
+
+def test_search_question_mark_does_not_raise(tmp_path: Path) -> None:
+    """Questions ending in ``?`` must not trigger fts5 syntax error.
+
+    Sabotage-proof: remove ``?`` from the specials list in
+    ``_build_fts_match_expr`` and this test fails because FTS5
+    raises ``sqlite3.OperationalError: fts5: syntax error near "?"``.
+    """
+    db = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db)
+    store.add(_make_record(fact_id="f1", entity="caroline", attribute="role", value="VP"))
+    # Must not raise. Empty result is fine (no fact contains "What" etc.)
+    hits = store.search("What is Caroline's role?")
+    # Should actually find the f1 fact via OR-join on "caroline" / "role"
+    assert any(h.record.id == "f1" for h in hits), (
+        "OR-joined query 'What/is/Caroline/role' must surface the matching fact"
+    )
+
+
+def test_search_or_joins_multi_word_query_not_and(tmp_path: Path) -> None:
+    """Multi-word queries OR-join tokens; one token match is sufficient.
+
+    Sabotage-proof: change ``OR`` to ``AND`` in ``_build_fts_match_expr``
+    and this assertion fails because no fact contains every benchmark-style
+    question's tokens.
+    """
+    db = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db)
+    store.add(_make_record(fact_id="f-lgbtq", entity="caroline", attribute="event", value="LGBTQ support group"))
+    store.add(_make_record(fact_id="f-other", entity="john", attribute="hobby", value="cooking"))
+
+    hits = store.search("When did Caroline go to the LGBTQ support group")
+    ids = {h.record.id for h in hits}
+    assert "f-lgbtq" in ids, (
+        f"OR-joined token search must surface the matching fact; got {ids!r}. "
+        f"Sabotage check: if AND-joined, no row contains every query token → ids would be empty."
+    )
+
+
+def test_search_strips_fts5_specials(tmp_path: Path) -> None:
+    """FTS5 special chars (``"`` ``(`` ``)`` ``*`` etc.) get stripped not escaped.
+
+    Sabotage-proof: strip the for-loop in ``_build_fts_match_expr`` so
+    specials reach FTS5 raw and this test fails on OperationalError.
+    """
+    db = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db)
+    store.add(_make_record(fact_id="f1", entity="alice", attribute="book", value="The Lean Startup"))
+
+    # All these contain FTS5 specials that would raise without sanitisation
+    for query in [
+        'When did Alice read "The Lean Startup"?',
+        "What does Alice (the founder) read?",
+        "Alice's *favourite* book?",
+    ]:
+        hits = store.search(query)
+        assert any(h.record.id == "f1" for h in hits), f"sanitised query {query!r} should find the f1 fact"
+
+
+def test_search_all_specials_no_real_tokens_returns_empty(tmp_path: Path) -> None:
+    """A query that collapses to no usable tokens after sanitisation
+    returns ``[]`` rather than raising or matching everything.
+
+    Sabotage-proof: make ``_fts_query`` skip the empty-token guard and
+    pass an empty string to FTS5 — operational error or matches all rows.
+    """
+    db = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db)
+    store.add(_make_record(fact_id="f1", entity="x", attribute="y", value="z"))
+
+    # Query is just punctuation + reserved words; nothing usable
+    assert store.search("?? AND OR NOT") == []
+    assert store.search("?") == []
+
+
+def test_search_reserved_fts5_words_dropped(tmp_path: Path) -> None:
+    """``and`` / ``or`` / ``not`` / ``near`` as bare query words are dropped,
+    not passed through (they'd be parsed as FTS5 operators).
+
+    Sabotage-proof: remove the ``reserved`` filter and the query
+    ``and Caroline`` passes ``and OR Caroline`` to FTS5 which raises.
+    """
+    db = tmp_path / "facts.sqlite"
+    store = SQLiteFactStore(db_path=db)
+    store.add(_make_record(fact_id="f1", entity="caroline", attribute="role", value="VP"))
+
+    # 'and' is a reserved FTS5 operator; if passed through unfiltered FTS5 raises
+    hits = store.search("and Caroline")
+    assert any(h.record.id == "f1" for h in hits)

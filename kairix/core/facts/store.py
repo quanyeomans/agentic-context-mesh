@@ -324,9 +324,30 @@ class SQLiteFactStore:
     ) -> list[sqlite3.Row]:
         """Run the BM25 query against ``facts_fts`` and join the live row.
 
+        Query handling:
+
+        - **FTS5 specials are stripped, not escaped.** Punctuation
+          characters that FTS5 treats as syntax (``?``, ``"``, ``(``,
+          ``)``, ``*``, ``:``, ``-``, ``+``, ``^``) cause
+          ``sqlite3.OperationalError: fts5: syntax error`` when passed
+          raw. Sanitisation turns them into spaces before tokenisation.
+        - **Tokens OR-joined, not AND-joined.** Default FTS5 MATCH on a
+          multi-word query treats it as an implicit AND — every token
+          must appear in the indexed row. Natural-language benchmark
+          questions ("When did Caroline go to the LGBTQ support group?")
+          tokenise into 9+ tokens; no single fact row contains all of
+          them. OR-joining lets BM25 rank by partial overlap, which is
+          the behaviour the caller actually wants.
+
         BM25 score is returned via ``bm25(facts_fts)`` (lower is better);
         the caller normalises into ``[0.0, 1.0]``.
         """
+        fts_match = SQLiteFactStore._build_fts_match_expr(query)
+        if not fts_match:
+            # Query collapsed to no usable tokens — return empty rather
+            # than letting FTS5 raise on an empty/invalid MATCH.
+            return []
+
         sql = (
             "SELECT facts.*, bm25(facts_fts) AS bm25 "
             "FROM facts_fts "
@@ -334,13 +355,44 @@ class SQLiteFactStore:
             "WHERE facts_fts MATCH ? "
             "AND facts.superseded_by IS NULL"
         )
-        params: list[object] = [query]
+        params: list[object] = [fts_match]
         if namespace is not None:
             sql += " AND facts.namespace = ?"
             params.append(namespace)
         sql += " ORDER BY bm25 ASC LIMIT ?"
         params.append(top_k)
         return list(conn.execute(sql, params).fetchall())
+
+    @staticmethod
+    def _build_fts_match_expr(query: str) -> str:
+        """Convert a free-text query into an FTS5-safe OR-joined MATCH expression.
+
+        Strips FTS5 syntax characters, lowercases, tokenises on whitespace,
+        drops empty tokens and tokens that are pure FTS5 reserved words,
+        then joins survivors with ``OR``. Returns ``""`` when nothing
+        survives — caller treats empty as "no facts match".
+        """
+        # FTS5 special characters that must be removed (NOT escaped — escaping
+        # produces phrase queries which we don't want here). Includes both
+        # FTS5 syntax chars and natural-language punctuation (apostrophe,
+        # comma, period, semicolon) that FTS5's tokeniser leaves attached
+        # to tokens and trips up bare-token MATCH expressions.
+        specials = "?\"'()*:-+^!~,.;/"
+        cleaned = query
+        for ch in specials:
+            cleaned = cleaned.replace(ch, " ")
+
+        # Tokenise + drop FTS5 reserved words (NOT/AND/OR uppercased would
+        # produce operator parses; lowercased they're fine, but safer to drop).
+        reserved = {"and", "or", "not", "near"}
+        tokens = [tok for tok in cleaned.lower().split() if tok and tok not in reserved]
+        if not tokens:
+            return ""
+
+        # OR-join so BM25 can rank by partial overlap. Each token wrapped in
+        # double-quotes would make it a phrase query — we want bare tokens
+        # so FTS5's tokeniser applies its own stemming + prefix rules.
+        return " OR ".join(tokens)
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> StoredFactRecord:
