@@ -91,12 +91,22 @@ _PROCEDURAL_PATTERNS: list[re.Pattern[str]] = [
 # ---------------------------------------------------------------------------
 _ATTRIBUTE_FACT_PATTERNS: list[re.Pattern[str]] = [
     # "what is X's Y?" / "what's X's Y?" — possessive form, requires apostrophe-s.
-    re.compile(r"\bwhat(?:'s|\s+is|\s+are)\s+\S+'s\s+\w+", re.IGNORECASE),
+    re.compile(r"\bwhat(?:'s|\s+is|\s+are|\s+was|\s+were)\s+\S+'s\s+\w+", re.IGNORECASE),
     # "Y of X?" — short attribute query, ≤6 words, no procedural/multi-hop
     # signals (gated downstream by ``_is_short_attribute_of_query``).
     re.compile(r"^\s*\w+(?:\s+\w+){0,2}\s+of\s+[A-Za-z][\w'.\-]+\s*\??\s*$", re.IGNORECASE),
     # "X's Y?" — bare possessive attribute lookup, ≤4 words.
     re.compile(r"^\s*\S+'s\s+\w+\s*\??\s*$", re.IGNORECASE),
+    # "what did X verb?" — single-verb factoid lookup (e.g. "what did Caroline research?").
+    # Plan B-parity D2 remediation: LoCoMo single-hop questions of this
+    # shape were falling all the way to SEMANTIC. The existing TEMPORAL
+    # pattern requires a "do last/this/in" suffix, so this won't shadow it.
+    re.compile(r"^\s*what\s+did\s+\S+\s+\w+\s*\??\s*$", re.IGNORECASE),
+    # "who is/was X's Y?" — possessive identity lookup (e.g. "who was Caroline's friend?").
+    # Plan B-parity D2 remediation: the ENTITY block matches bare "who is"
+    # earlier in priority order, so this lookahead must fire BEFORE ENTITY
+    # — which it already does (ATTRIBUTE_FACT runs before ENTITY in classify).
+    re.compile(r"\bwho(?:'s|\s+is|\s+was|\s+are|\s+were)\s+\S+'s\s+\w+", re.IGNORECASE),
 ]
 
 
