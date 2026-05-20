@@ -7,6 +7,31 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### Conversational memory (Plan B-parity)
+
+Kairix now ingests chat-shaped data — meeting transcripts, agent coordination channels, interview notes — and distils it into structured, evidence-cited facts your agents can query directly. This adds a second retrieval surface alongside the existing chunk + entity layers; both surfaces compose through the same `SearchPipeline`, so agents call one tool and get a blended result.
+
+**New for operators:**
+
+- **`kairix ingest-chat <jsonl>`** — read a JSONL transcript (one turn per line), group by conversation, write one markdown chunk per conversation, and (optionally) feed windowed turns through the LLM fact extractor. `--namespace` stamps every fact with the engagement scope; `--no-extract` skips the LLM pass for chunks-only ingest; `--window-turns` (default 5) sizes the extraction window. Idempotent: re-ingesting the same JSONL is a no-op for the filesystem and for the fact store.
+- **`kairix eval <suite>`** — score retrieval + fact-extraction quality against a ground-truth corpus. `--metric query-pass-rate` / `extractor-f1` / `both`; `--backend kairix-native` (default) or `mem0` for cross-backend benchmarks; `--regression-against <dir>` fails the run when the mean score drops more than 2pp below the pinned baseline. Suitable for per-PR CI gating.
+- **End-to-end operator workflow** in [`docs/operations/consultancy-in-a-box.md`](docs/operations/consultancy-in-a-box.md): spin up an engagement container, ingest the knowledge store, ingest meeting transcripts, query through agents, validate retrieval, tear down. One container per engagement; teardown removes every trace.
+
+**New for agents:**
+
+- **Facts federate into `kairix prep` / `tool_search`** — Capability #5. The search pipeline now blends fact-store hits with chunk + entity hits behind the existing API. Agents get a structured answer for "what is agent-alpha's current engagement?" in a single tool call, with citations back to the source turns.
+- **Contradiction detection on ingest.** When a new conversation revises a prior claim, the consolidation pass marks the old fact superseded rather than leaving both in the index. Superseded facts stay retrievable for audit; default queries exclude them.
+- **Namespace-scoped fact reads + writes** through the planned `ingest_chat` / `facts_about` MCP tools. An agent operating in `engagement-alpha` cannot read or write facts in `engagement-beta`. The server treats the connection-config namespace as authoritative.
+
+**Internal:**
+
+- **Five capabilities** land in numbered order — `ingest-chat` use case (#1), `LLMFactExtractor` with bundled prompt at `kairix/core/facts/prompts/fact_extractor_v1.txt` (#2), `SQLiteFactStore` (#3), `ConsolidationPass` + eval suite runner (#4), fact federation in `SearchPipeline` (#5). Each capability targets a Protocol in `kairix/core/protocols.py`; tests inject fakes from `tests/fakes.py` (F1 clean throughout).
+- **Five seeded reference corpora** at `reference-library/conversations/engagement-{alpha,beta,gamma,delta,epsilon}/` covering single-hop, multi-hop, multi-session, contradiction-rich, and temporal-heavy scenarios. Per-PR conversation-eval CI gate runs every corpus against the pinned baseline.
+- **LoCoMo nightly workflow** runs both backends across the full corpus suite so we can spot cross-backend regressions before a release.
+- **Performance budgets** for the federated retrieval pipeline live in `kairix/quality/probe/` and surface through `kairix probe-config --perf`; per-capability budgets are documented in the probe schema.
+
+**Design context:** [`docs/architecture/fact-layer.md`](docs/architecture/fact-layer.md) — ADR covering Surfaces A/B/C/D, the five capabilities, and the federation pattern.
+
 ### Security
 
 - **Warm-state flag moved out of `/tmp` into the kairix data directory.** The cross-process readiness flag added in v2026.5.17 lived at `/tmp/kairix-warm.flag` — a world-writable, predictable path. Two failure modes that fixes: a local user could spoof the docker healthcheck to "ready" by creating that file (causing `docker compose up --wait` to return while kairix was still cold), and a pre-placed symlink at that path would be followed by the flag-write (touching a sensitive file's mtime if kairix ran as root). The flag now lives at `<KAIRIX_DATA_DIR>/warm.flag` — owned by the kairix process user and not world-writable. The MCP server clears any stale flag at startup so a restarted container still correctly reports not-ready until it has actually re-warmed.

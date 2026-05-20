@@ -4,6 +4,21 @@ Step-by-step deployment and operations guide for Kairix on a server. This docume
 
 For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 
+## Operations docs index
+
+| Topic | Where |
+|-------|-------|
+| Base config, secrets, install, upgrade | this document |
+| End-to-end per-engagement workflow (spin up → ingest → query → validate → teardown) | [consultancy-in-a-box.md](consultancy-in-a-box.md) |
+| Fact extractor — how it works, cost model, prompt customisation | [fact-extractor.md](fact-extractor.md) |
+| `kairix eval` suite + regression-gate CI pattern | [eval-suite.md](eval-suite.md) |
+| Agent-callable MCP fact tools (`ingest_chat`, `facts_about`) | [MCP-ingest-tools.md](MCP-ingest-tools.md) |
+| MCP server deployment | [MCP-DEPLOYMENT.md](MCP-DEPLOYMENT.md) |
+| MCP client migration (`/sse` → `/mcp`) | [MCP-CLIENT-MIGRATION.md](MCP-CLIENT-MIGRATION.md) |
+| Running multiple engagements on one host | [SHARED-HOSTS.md](SHARED-HOSTS.md) |
+| Incident runbooks + how-to procedures | [runbooks/INDEX.md](runbooks/INDEX.md) |
+| Fact-layer architecture ADR | [`../architecture/fact-layer.md`](../architecture/fact-layer.md) |
+
 ---
 
 ## Configuration vs Secrets
