@@ -259,6 +259,13 @@ include = ["kairix*"]
     "memory-prompt/plugin.json",
     "memory-prompt/README.md",
 ]
+# Plan B-parity Capability #2 ships the LLM-fact-extractor prompt
+# template as package data so ``kairix.core.facts.LLMFactExtractor``
+# can load it via ``importlib.resources`` from both source checkouts
+# and installed wheels.
+"kairix.core.facts.prompts" = [
+    "*.txt",
+]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.
 # E2E test gate: set KAIRIX_E2E=1 to enable live Azure API tests.

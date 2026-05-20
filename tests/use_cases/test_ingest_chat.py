@@ -521,15 +521,22 @@ def test_window_turns_zero_collapses_to_one_window(tmp_path: Path) -> None:
     assert len(extractor.calls) == 1
 
 
-def test_null_extractor_used_by_cli_default_returns_no_facts(tmp_path: Path) -> None:
-    """Sabotage-proof: make ``_NullFactExtractor.extract`` raise and the
-    test fails because the default-deps path can't ingest."""
+def test_null_extractor_used_under_no_extract_flag(tmp_path: Path) -> None:
+    """Sabotage-proof: make ``_NullFactExtractor.extract`` raise and
+    the test fails because the ``--no-extract`` default-deps path
+    can't ingest.
+
+    Capability #2 made the production default the LLM-backed
+    extractor (resolved via :func:`kairix.platform.llm.get_default_backend`).
+    The null extractor only fires when ``--no-extract`` is passed —
+    the operator's documented "chunks-only" mode.
+    """
     transcript = tmp_path / "t.jsonl"
     _write_jsonl(transcript, [_turn("c1", 0), _turn("c1", 1)])
 
     out = io.StringIO()
     exit_code = main(
-        [str(transcript)],
+        [str(transcript), "--no-extract"],
         out=out,
         err=io.StringIO(),
         paths=_paths(tmp_path),

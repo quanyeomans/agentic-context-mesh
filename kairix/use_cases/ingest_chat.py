@@ -407,6 +407,22 @@ def _resolve_production_fact_store(db_path: Path) -> FactStore:
     return store
 
 
+def _resolve_production_fact_extractor() -> FactExtractor:
+    """Return a production FactExtractor wired to the configured LLM backend.
+
+    Capability #2 lands :class:`LLMFactExtractor` — the production path
+    that drives the operator's configured provider plug-in via
+    :func:`kairix.platform.llm.get_default_backend`. Until that import
+    succeeds, callers fall back to the null extractor so chunks-only
+    ingest still works.
+    """
+    from kairix.core.facts import LLMFactExtractor
+    from kairix.platform.llm import get_default_backend
+
+    extractor: FactExtractor = LLMFactExtractor(llm=get_default_backend())
+    return extractor
+
+
 def _format_human(result: IngestChatResult) -> str:
     """Human-readable summary for the default (non-``--json``) CLI output."""
     return (
@@ -449,7 +465,15 @@ def main(
             err_sink.write(f"kairix ingest-chat: {exc}\n")
             return 2
 
-    resolved_extractor: FactExtractor = fact_extractor if fact_extractor is not None else _NullFactExtractor()
+    if fact_extractor is not None:
+        resolved_extractor: FactExtractor = fact_extractor
+    elif args.no_extract:
+        # ``--no-extract`` short-circuits before any extractor call,
+        # but we still need *some* Protocol-compliant object on the
+        # parameter. The null extractor stays the cheapest stand-in.
+        resolved_extractor = _NullFactExtractor()
+    else:
+        resolved_extractor = _resolve_production_fact_extractor()
 
     result = ingest_chat(
         args.jsonl_path,

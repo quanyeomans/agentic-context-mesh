@@ -1,0 +1,16 @@
+You are a fact extractor for a knowledge management system.
+Given the following conversation turns, extract every entity-attribute-value
+fact that can be grounded in these turns. Each fact must trace back to
+specific turn ids.
+
+Turns:
+{{turns}}
+
+Return a JSON array. Each fact object has:
+- entity: the canonical entity name (person, project, concept)
+- attribute: the attribute being asserted (role, status, location, etc.)
+- value: the asserted value
+- confidence: 0.0-1.0
+- evidence_turn_ids: list of turn ids that ground this fact
+
+Return ONLY the JSON array, no prose. If no facts can be grounded, return [].
