@@ -81,6 +81,18 @@ def main(*, commands: dict[str, tuple[str, str, bool]] | None = None) -> None:
     """
     table = commands if commands is not None else COMMANDS
 
+    # KAIRIX_TRACE=1 opts the operator into structured diagnostic logging
+    # (D4 — Plan B-parity remediation). The trace lines emit at INFO via
+    # ``logger.info``, so the CLI needs a handler installed; without this
+    # block ``kairix prep`` runs silently and the documented diagnostic
+    # path is a no-op for end users.
+    from kairix.paths import trace_enabled as _trace_enabled
+
+    if _trace_enabled():
+        import logging as _logging
+
+        _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)
         sys.exit(0 if len(sys.argv) >= 2 else 1)
