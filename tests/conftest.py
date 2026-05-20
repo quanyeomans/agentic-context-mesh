@@ -114,6 +114,8 @@ pytest_plugins = [
     "tests.bdd.steps.probe_config_health_steps",
     # Layered config loader — image-bundled base + sparse operator overlay.
     "tests.bdd.steps.config_layering_steps",
+    # Plan B-parity Week 1 — conversation ingest CLI/use-case.
+    "tests.bdd.steps.ingest_chat_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
