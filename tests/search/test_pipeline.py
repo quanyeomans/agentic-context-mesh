@@ -9,12 +9,15 @@ import pytest
 
 from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
 from kairix.core.search.config import RetrievalConfig
+from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.pipeline import SearchPipeline, SearchResult
 from tests.fakes import (
     FakeClassifier,
     FakeDocumentRepository,
     FakeEmbeddingService,
+    FakeFactRecord,
+    FakeFactStore,
     FakeFusion,
     FakeGraphRepository,
     FakeSearchLogger,
@@ -390,3 +393,289 @@ def test_vector_backend_search_writes_timings_when_dict_provided():
     assert "vector_ann" in timings
     assert timings["embed_http"] >= 0.0
     assert timings["vector_ann"] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# Federation — Plan B-parity Capability #5
+#
+# Pipeline gains an optional fact_retriever. When None, today's
+# chunk-only behaviour is preserved bit-for-bit; when wired, attribute-fact
+# queries weight fact hits ~2x their chunk counterparts in fusion.
+# ---------------------------------------------------------------------------
+
+
+def _fact(
+    fid: str,
+    entity: str,
+    attribute: str,
+    value: str,
+    *,
+    namespace: str = "shared",
+    superseded_by: str | None = None,
+) -> FakeFactRecord:
+    """Build a FakeFactRecord for federation tests."""
+    return FakeFactRecord(
+        id=fid,
+        entity=entity,
+        attribute=attribute,
+        value=value,
+        namespace=namespace,
+        superseded_by=superseded_by,
+    )
+
+
+@pytest.mark.unit
+def test_pipeline_without_fact_retriever_unchanged():
+    """No fact_retriever wired → identical behaviour vs. today (regression gate).
+
+    The federation stage must be a no-op when fact_retriever is None.
+    fact_count stays 0; fused_count is unchanged from a pre-Cap5 build.
+
+    Sabotage-proof: hard-code ``self.fact_retriever = FakeFactStore(...)``
+    inside ``__post_init__`` and this assertion flips (fact_count > 0)
+    even with the default constructor — vault-only deployments would
+    silently start seeing fact contamination in chunk-only queries.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "match", "collection": "c"}]
+    pipeline = _test_pipeline(
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+    )
+    assert pipeline.fact_retriever is None
+    result = pipeline.search("match")
+    assert result.fact_count == 0
+    # Chunk fusion still produced the BM25 row.
+    assert result.bm25_count == 1
+
+
+@pytest.mark.unit
+def test_pipeline_dispatches_fact_retriever_when_wired():
+    """A wired fact_retriever is consulted; fact_count surfaces the hit count.
+
+    Sabotage-proof: drop the ``_dispatch_facts`` call in ``search`` and
+    fact_count stays 0 even though the retriever has matching records.
+    """
+    store = FakeFactStore()
+    store.add(_fact("f1", "acme", "address", "1 Pier Lane Sydney"))
+    pipeline = _test_pipeline(fact_retriever=store)
+    result = pipeline.search("acme address")
+    assert result.fact_count == 1
+
+
+@pytest.mark.unit
+def test_pipeline_attribute_fact_intent_makes_facts_dominate():
+    """ATTRIBUTE_FACT intent → fact hits dominate the fused top-K.
+
+    Uses ``RRFFusion`` so chunk rows arrive at the federation stage as
+    ``FusedResult`` dataclasses — matches the production fusion shape
+    so the downstream budget stage actually emits content.
+
+    Sabotage-proof: swap the ``(0.6, 0.3, 0.1)`` entry in
+    ``_FUSION_WEIGHTS`` to ``(0.1, 0.6, 0.3)`` and the chunk row
+    overtakes the fact row in fused order — pinning fact-dominates is
+    the live intent contract.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "acme address", "collection": "c"}]
+    store = FakeFactStore()
+    store.add(_fact("f1", "acme", "address", "1 Pier Lane Sydney"))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=store,
+    )
+    result = pipeline.search("acme address")
+    assert result.fact_count == 1
+    # The top fused result is the fact (path prefix ``facts://``).
+    assert result.results, "expected fused results"
+    top = result.results[0]
+    top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
+    assert top_path.startswith("facts://")
+
+
+@pytest.mark.unit
+def test_pipeline_multi_hop_intent_chunk_dominates_fused_top():
+    """MULTI_HOP intent → chunks lead the fused top-K (post-normalisation).
+
+    The federation layer normalises chunk RRF scores and fact-store
+    overlap scores to the same [0, 1] scale before applying the
+    per-intent weights. Under MULTI_HOP (chunk_w=0.7, fact_w=0.2) the
+    chunk side wins on weighted score; without normalisation raw fact
+    overlap scores (1.0) overwhelmed raw RRF scores (~0.033) regardless
+    of weight.
+
+    Sabotage-proof: swap MULTI_HOP weights to (fact=0.7, chunk=0.2) and
+    the fact leapfrogs the chunk under the same normalised scale —
+    pinned by the top-1 assertion below.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "acme address billing", "collection": "c"}]
+    vec_results = [{"path": "a.md", "distance": 0.1, "collection": "c"}]
+    store = FakeFactStore()
+    store.add(_fact("f1", "acme", "address", "1 Pier Lane Sydney"))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.MULTI_HOP),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository(results=vec_results)),
+        fusion=RRFFusion(),
+        fact_retriever=store,
+    )
+    result = pipeline.search("acme address")
+    assert result.fact_count == 1
+    assert result.results, "expected fused results"
+    top = result.results[0]
+    top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
+    assert not top_path.startswith("facts://"), f"Expected chunk to lead MULTI_HOP top-K, got {top_path}"
+
+
+@pytest.mark.unit
+def test_pipeline_threads_namespace_to_fact_retriever():
+    """``namespace`` kwarg threads through to FactStore.search.
+
+    The retriever filters by namespace, so when the caller scopes a
+    query to ``engagement-alpha`` only that namespace's facts surface
+    even if other namespaces hold matching records.
+
+    Sabotage-proof: hard-code ``namespace=None`` in ``_dispatch_facts``
+    and this test sees BOTH facts come back (the alpha + the bravo row),
+    breaking the engagement-scoped recall guarantee.
+    """
+    store = FakeFactStore()
+    store.add(_fact("a1", "acme", "address", "Sydney HQ", namespace="engagement-alpha"))
+    store.add(_fact("b1", "acme", "address", "Melbourne HQ", namespace="engagement-bravo"))
+    pipeline = _test_pipeline(fact_retriever=store)
+    result = pipeline.search("acme address", namespace="engagement-alpha")
+    assert result.fact_count == 1
+
+
+@pytest.mark.unit
+def test_pipeline_excludes_superseded_facts():
+    """Superseded facts MUST NOT appear in the fused result.
+
+    Federation must not undo FakeFactStore/SQLiteFactStore's superseded
+    filter. The fact layer's whole consolidation contract relies on
+    superseded rows staying invisible to default search.
+
+    Sabotage-proof: add ``include_superseded=True`` (or remove the
+    filter inside FakeFactStore.search) and the test flips to seeing
+    the superseded row — papering over the consolidation guarantee.
+    """
+    store = FakeFactStore()
+    store.add(_fact("old", "acme", "address", "Sydney"))
+    store.add(_fact("new", "acme", "address", "Melbourne"))
+    store.supersede(old_id="old", new_id="new")
+    pipeline = _test_pipeline(fact_retriever=store)
+    result = pipeline.search("acme address")
+    # Only the live record surfaces — superseded record is invisible.
+    assert result.fact_count == 1
+
+
+class _RaisingFactStore:
+    """FactStore that always raises — pins graceful degradation."""
+
+    def add(self, fact):
+        raise RuntimeError("not used in test")
+
+    def search(self, query, *, top_k=10, namespace=None):
+        raise RuntimeError("fact retriever offline")
+
+    def find_conflicts(self, *, entity, attribute, namespace=None):
+        raise RuntimeError("not used in test")
+
+    def supersede(self, *, old_id, new_id):
+        raise RuntimeError("not used in test")
+
+
+@pytest.mark.unit
+def test_pipeline_degrades_when_fact_retriever_raises():
+    """Fact retriever raising → pipeline returns chunk-only results.
+
+    Cap #5 contract: a broken fact layer must NOT poison the chunk
+    pipeline. The query still completes; fact_count is 0; chunks flow
+    through unaffected.
+
+    Sabotage-proof: drop the ``try/except`` in ``_dispatch_facts`` and
+    the search raises (or returns SearchResult(error=...)). The
+    assertion below pins the graceful-degradation contract.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "match", "collection": "c"}]
+    pipeline = _test_pipeline(
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fact_retriever=_RaisingFactStore(),
+    )
+    result = pipeline.search("match")
+    assert result.fact_count == 0
+    assert result.bm25_count == 1
+    assert result.error == ""
+
+
+@pytest.mark.unit
+def test_pipeline_passes_top_k_facts_to_retriever():
+    """The configured ``top_k_facts`` flows through to FactStore.search.
+
+    Lossier records → roomier candidate pool. Wiring this knob through
+    the retriever surface keeps the federation tuneable per deployment.
+
+    Sabotage-proof: drop the ``top_k=self.top_k_facts`` kwarg in
+    ``_dispatch_facts`` (so FactStore uses its default top_k=10) and
+    the test below sees fact_count clamped at 10 instead of all 12.
+    """
+    store = FakeFactStore()
+    # 12 facts whose values overlap with the query so all match.
+    for i in range(12):
+        store.add(_fact(f"f{i}", f"entity-{i}", "field", "match-token"))
+    pipeline = _test_pipeline(fact_retriever=store)
+    pipeline.top_k_facts = 12
+    result = pipeline.search("match-token")
+    assert result.fact_count == 12
+
+
+class _EmptyFactStore:
+    """FactStore that satisfies the Protocol but always returns no hits.
+
+    Used by the dominance-sabotage test to prove that under
+    ATTRIBUTE_FACT the dispatched fact path is what surfaces facts —
+    with this store wired, the federation has nothing to push into
+    fusion, so chunks must win on rank-fused score alone.
+    """
+
+    def add(self, fact):
+        """Intentionally empty — sabotage store ignores writes."""
+
+    def search(self, query, *, top_k=10, namespace=None):
+        return []
+
+    def find_conflicts(self, *, entity, attribute, namespace=None):
+        return []
+
+    def supersede(self, *, old_id, new_id):
+        """Intentionally empty — sabotage store has no records to supersede."""
+
+
+@pytest.mark.unit
+def test_pipeline_attribute_fact_dominance_requires_non_empty_fact_hits():
+    """When the FactStore returns no hits, ATTRIBUTE_FACT cannot dominate.
+
+    Drives the public ``search`` surface (no private helper imports).
+    Wires an empty-by-design FactStore; under ATTRIBUTE_FACT the
+    pipeline still classifies + dispatches, but with zero hits the
+    fusion stage degenerates to the chunk-only ordering (today's
+    pre-Cap5 behaviour). This pins that fact dominance is gated by
+    actual retrieval, not just intent.
+
+    Sabotage-proof: hard-code ``return chunk_fused`` to skip the
+    ``if not fact_hits`` early-return in ``_fuse_with_intent`` and
+    inject a phantom fact into the merge regardless of dispatch
+    output. The assertion below flips (top_path starts with facts://).
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "acme address", "collection": "c"}]
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=_EmptyFactStore(),
+    )
+    result = pipeline.search("acme address")
+    assert result.fact_count == 0
+    assert result.results, "expected fused results"
+    top = result.results[0]
+    top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
+    assert not top_path.startswith("facts://")

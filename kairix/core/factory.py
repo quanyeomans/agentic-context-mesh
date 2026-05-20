@@ -374,6 +374,7 @@ def build_search_pipeline(
     config: RetrievalConfig | None = None,
     *,
     registry: ProviderRegistry | None = None,
+    fact_retriever: Any = None,
 ) -> SearchPipeline:
     """Construct the production search pipeline.
 
@@ -404,6 +405,14 @@ def build_search_pipeline(
                    Production passes ``None``; the default
                    ``EntryPointRegistry`` is constructed inside
                    :func:`kairix.providers.get_provider`.
+        fact_retriever:
+                   Optional :class:`kairix.core.protocols.FactStore` for
+                   Plan B-parity Capability #5 federation. When ``None``
+                   the pipeline runs today's chunk-only behaviour
+                   (regression-pinned). Callers wiring the fact layer
+                   (ingest-chat → SQLiteFactStore) pass the same store
+                   instance here so the SearchPipeline can federate
+                   retrieval across chunks + facts.
 
     Returns:
         A fully wired SearchPipeline ready for search() calls.
@@ -455,6 +464,9 @@ def build_search_pipeline(
         # #281 — wire the process-shared LRU so repeat queries from
         # teaming agents skip the Azure embed roundtrip.
         query_cache=_get_or_create_query_cache(),
+        # Plan B-parity Capability #5 — opt-in fact federation. ``None``
+        # preserves today's chunk-only behaviour for vault-only deployments.
+        fact_retriever=fact_retriever,
     )
     _PIPELINE_CACHE[cfg] = pipeline
     return pipeline

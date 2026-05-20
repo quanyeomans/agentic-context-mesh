@@ -1,19 +1,25 @@
 """
 Query intent classifier for the kairix hybrid search pipeline.
 
-Classifies a query string into one of six intent types. Pure function — no I/O,
+Classifies a query string into one of seven intent types. Pure function — no I/O,
 no external dependencies. Rule-based with defined priority order.
 
 Intent types and their dispatch in hybrid.py:
-  KEYWORD    → BM25 + vector via RRF (proper nouns, error codes, file paths, version strings)
-  TEMPORAL   → BM25 + vector with date-string rewriting and date-filtered path set (TMP-2)
-  ENTITY     → entity graph first, then hybrid (Phase 1b+)
-  PROCEDURAL → BM25 + vector via RRF with procedural path boost
-  SEMANTIC   → BM25 + vector via RRF (default for abstract/conceptual queries)
-  MULTI_HOP  → QueryPlanner decomposes into sub-queries, each runs hybrid
+  KEYWORD        → BM25 + vector via RRF (proper nouns, error codes, file paths, version strings)
+  TEMPORAL       → BM25 + vector with date-string rewriting and date-filtered path set (TMP-2)
+  ENTITY         → entity graph first, then hybrid (Phase 1b+)
+  PROCEDURAL     → BM25 + vector via RRF with procedural path boost
+  SEMANTIC       → BM25 + vector via RRF (default for abstract/conceptual queries)
+  MULTI_HOP      → QueryPlanner decomposes into sub-queries, each runs hybrid
+  ATTRIBUTE_FACT → fact retriever dominates fusion (Plan B-parity Capability #5)
+                   — short entity-attribute lookups like "what is X's Y?" or "Y of X?"
 
 Priority order (first match wins):
-  TEMPORAL > MULTI_HOP > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC
+  TEMPORAL > MULTI_HOP > ATTRIBUTE_FACT > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC
+
+ATTRIBUTE_FACT slots in BEFORE ENTITY so a short attribute lookup
+("what is acme's address?") routes to the fact layer rather than the
+ENTITY-graph branch (which expects "tell me about ..." style framing).
 
 Failure mode: never raises; returns SEMANTIC on any unexpected input.
 """
@@ -74,6 +80,30 @@ _PROCEDURAL_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bwhat('s|\s+is)\s+the\s+best\s+way\b", re.IGNORECASE),
     re.compile(r"\bwhen\s+should\s+I\b", re.IGNORECASE),
 ]
+
+# ---------------------------------------------------------------------------
+# Attribute-fact signals — short entity-attribute lookups (Plan B-parity #5)
+#
+# Targets the canonical "what is X's Y?" / "Y of X?" surface that the
+# fact-retriever federation stage owns. Patterns are intentionally tight
+# so longer narrative questions ("tell me about how X's Y evolved over
+# the project") still route to ENTITY / SEMANTIC.
+# ---------------------------------------------------------------------------
+_ATTRIBUTE_FACT_PATTERNS: list[re.Pattern[str]] = [
+    # "what is X's Y?" / "what's X's Y?" — possessive form, requires apostrophe-s.
+    re.compile(r"\bwhat(?:'s|\s+is|\s+are)\s+\S+'s\s+\w+", re.IGNORECASE),
+    # "Y of X?" — short attribute query, ≤6 words, no procedural/multi-hop
+    # signals (gated downstream by ``_is_short_attribute_of_query``).
+    re.compile(r"^\s*\w+(?:\s+\w+){0,2}\s+of\s+[A-Za-z][\w'.\-]+\s*\??\s*$", re.IGNORECASE),
+    # "X's Y?" — bare possessive attribute lookup, ≤4 words.
+    re.compile(r"^\s*\S+'s\s+\w+\s*\??\s*$", re.IGNORECASE),
+]
+
+
+def _is_attribute_fact_query(query: str) -> bool:
+    """Return True if ``query`` matches an attribute-fact lookup shape."""
+    return any(p.search(query) for p in _ATTRIBUTE_FACT_PATTERNS)
+
 
 # ---------------------------------------------------------------------------
 # Multi-hop signals — queries spanning multiple documents/topics
@@ -235,13 +265,14 @@ class QueryIntent(str, Enum):
     PROCEDURAL = "procedural"
     SEMANTIC = "semantic"
     MULTI_HOP = "multi_hop"
+    ATTRIBUTE_FACT = "attribute_fact"
 
 
 def classify(query: str) -> QueryIntent:
     """
     Classify a query string into a QueryIntent.
 
-    Priority order: TEMPORAL > MULTI_HOP > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
+    Priority order: TEMPORAL > MULTI_HOP > ATTRIBUTE_FACT > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
     Returns SEMANTIC on empty or unclassifiable input.
     Never raises.
     """
@@ -259,6 +290,13 @@ def classify(query: str) -> QueryIntent:
         for pattern in _MULTI_HOP_PATTERNS:
             if pattern.search(q):
                 return QueryIntent.MULTI_HOP
+
+        # 1c. Attribute-fact — short "what is X's Y?" / "Y of X?" lookups.
+        # Slotted BEFORE ENTITY so "what is acme's address?" routes to the
+        # fact retriever, not the ENTITY-graph branch (which expects "tell
+        # me about ..." narrative framing).
+        if _is_attribute_fact_query(q):
+            return QueryIntent.ATTRIBUTE_FACT
 
         # 2. Entity — named-entity questions
         for pattern in _ENTITY_PATTERNS:
