@@ -173,11 +173,19 @@ def test_malformed_line_logs_warning_and_continues(tmp_path: Path, caplog: pytes
 
 
 def test_missing_required_field_skips_turn(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    """Sabotage-proof: remove the missing-field guard from ``_parse_turn``
-    and a KeyError fires deeper in the pipeline."""
+    """Turns missing ``role`` or ``content`` skip with a warning.
+
+    Note: ``conversation_id`` is NO LONGER a required field — it falls
+    back to the JSONL filename stem (operator-friendly: one file = one
+    conversation is a natural convention). Only ``role`` and ``content``
+    are still mandatory.
+
+    Sabotage-proof: remove the missing-field guard from ``_parse_turn``
+    and a KeyError fires deeper in the pipeline.
+    """
     transcript = tmp_path / "t.jsonl"
     transcript.write_text(
-        json.dumps({"role": "user", "content": "no cid"}) + "\n" + json.dumps(_turn("c1", 0)) + "\n",
+        json.dumps({"conversation_id": "c1", "content": "no role"}) + "\n" + json.dumps(_turn("c1", 0)) + "\n",
         encoding="utf-8",
     )
 
@@ -191,6 +199,35 @@ def test_missing_required_field_skips_turn(tmp_path: Path, caplog: pytest.LogCap
 
     assert result.turns_ingested == 1
     assert any("missing" in record.message for record in caplog.records)
+
+
+def test_missing_conversation_id_falls_back_to_filename_stem(tmp_path: Path) -> None:
+    """Turns without explicit ``conversation_id`` inherit the JSONL filename stem.
+
+    Supports the reference-library/conversations convention where one
+    session-NNN.jsonl file is one conversation; per-turn conversation_id
+    would be redundant. Sabotage-proof: change the fallback to skip
+    instead of inherit and the markdown file under ``session-001/`` won't
+    exist.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    # Turn missing conversation_id but with required role + content.
+    transcript.write_text(
+        json.dumps({"role": "user", "content": "hello there"}) + "\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+    )
+
+    assert result.turns_ingested == 1
+    assert result.conversations_processed == 1
+    # File written under the filename-stem conversation id
+    assert (tmp_path / "vault" / "conversations" / "session-001.md").exists()
 
 
 # ---------------------------------------------------------------------------
