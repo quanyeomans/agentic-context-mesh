@@ -74,6 +74,10 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         "prep",
         "search",
         "entity",
+        # ingest-chat mutates the document store + fact store from a JSONL
+        # transcript supplied by the operator; not safe to expose to agents
+        # even as an escalation stub (the operator runs it from the host).
+        "ingest-chat",
     }
 )
 

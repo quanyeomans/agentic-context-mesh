@@ -143,6 +143,7 @@ DOCUMENTED_SUBCOMMANDS = (
     "store",
     "wikilinks",
     "curator",
+    "ingest-chat",
     # MCP transport
     "mcp",
     # Operator diagnostics (this set includes the surfaces that

@@ -29,6 +29,7 @@ Subcommands:
   setup       First-time onboarding wizard for credentials and paths
   worker      Background worker: run loop, pause/resume operator controls
   config      Validate kairix.config.yaml against the schema and print errors
+  ingest-chat Ingest JSONL chat transcripts into the document + fact stores
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -66,6 +67,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "setup": ("kairix.platform.setup.cli", "main", True),
     "worker": ("kairix.worker_cli", "main", True),
     "config": ("kairix.core.search.config_validator", "main", True),
+    "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
 }
 
 
