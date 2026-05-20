@@ -127,6 +127,12 @@ this tree.
 
 ## Status
 
-Scaffold + format documented (this README). Synthetic corpora
-land alongside Capability #2 (the LLM fact extractor) so the
-extractor and its eval gate can be iterated together.
+Five synthetic corpora seeded for Plan B-parity Week 2 Stream B:
+
+- `engagement-alpha/` — onboarding-shape, single-hop heavy
+- `engagement-beta/` — architecture-decision, multi-hop heavy
+- `engagement-gamma/` — multi-session strategy planning, mixed
+- `engagement-delta/` — contradiction / supersession-rich
+- `engagement-epsilon/` — temporal-reasoning heavy
+
+Capability #2 (the LLM fact extractor) iterates against these.

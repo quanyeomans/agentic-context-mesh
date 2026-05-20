@@ -1,0 +1,50 @@
+[
+  {
+    "question": "Who sponsors project-tau?",
+    "answer": "exec-delta",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-gamma-s001-t004"]
+  },
+  {
+    "question": "Why is agent-epsilon acting lead on project-tau?",
+    "answer": "agent-beta (the original lead) went on parental leave from 2026-03-09 for 14 weeks; agent-epsilon covers the leave window.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-gamma-s002-t004", "eng-gamma-s004-t009", "eng-gamma-s005-t004"]
+  },
+  {
+    "question": "How did the team resolve the clickhouse deletion question on project-tau?",
+    "answer": "They chose option-one — a soft-delete column with a daily purge job — after agent-beta validated it against the GDPR requirement and compliance signed off.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-gamma-s002-t006", "eng-gamma-s002-t008", "eng-gamma-s004-t005"]
+  },
+  {
+    "question": "Summarise the portfolio status at end-of-Q1 and what's queued for Q2.",
+    "answer": "End of Q1: all three projects landed their Q1 commitments. project-rho closed milestone-2 on schedule (2026-03-23). project-tau hit its analytics-ready milestone on 2026-03-30 and transitions into maintenance mode for Q2. project-upsilon is 2 weeks ahead with TestFlight already live. Q2 priorities are: project-rho milestone-3 closeout (P0), project-upsilon v2 with Android plus edit capability (P1), and the new project-phi partner-API exploration (P2).",
+    "category": "open-domain",
+    "evidence_turn_ids": ["eng-gamma-s005-t002", "eng-gamma-s005-t004", "eng-gamma-s005-t006", "eng-gamma-s005-t008", "eng-gamma-s005-t011"]
+  },
+  {
+    "question": "When did project-rho's milestone-2 land?",
+    "answer": "2026-03-23, on schedule.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-gamma-s005-t002"]
+  },
+  {
+    "question": "Why was project-rho yellow at the start of Q1?",
+    "answer": "It was running 1.5 weeks behind plan because the legacy pricing module was more entangled with order-flow than originally estimated, requiring a pricing-shim refactor.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-gamma-s001-t005", "eng-gamma-s001-t007"]
+  },
+  {
+    "question": "How long ago was the project-upsilon kickoff at the time of the mid-quarter check?",
+    "answer": "About four weeks — project-upsilon kicked off 2026-01-19 and the mid-quarter check happened 2026-02-16.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-gamma-s003-t002", "eng-gamma-s004-t001"]
+  },
+  {
+    "question": "Who is the engineering lead on project-rho?",
+    "answer": "you didn't tell me that",
+    "category": "adversarial",
+    "evidence_turn_ids": []
+  }
+]
