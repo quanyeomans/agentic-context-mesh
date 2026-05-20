@@ -316,6 +316,17 @@ def maintenance_skip_noop_threshold() -> int:
         return 10
 
 
+def trace_enabled() -> bool:
+    """Return True when ``KAIRIX_TRACE=1`` opts into structured pipeline diagnostics.
+
+    Off by default; production stays quiet. Operators investigating a
+    retrieval-vs-synthesis regression set the env var, re-run, and read
+    the per-stage counter logs. Centralised here per F4 so KAIRIX_*
+    reads stay at the paths.py boundary.
+    """
+    return os.environ.get("KAIRIX_TRACE") == "1"
+
+
 def db_path() -> Path:
     """Get the database path."""
     return KairixPaths.resolve().db_path
