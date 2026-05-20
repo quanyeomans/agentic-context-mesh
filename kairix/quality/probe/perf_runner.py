@@ -212,7 +212,10 @@ def _make_prep_vault_only_op(
 def _make_skip_op(reason: str) -> OperationCallable:
     """Build an operation runner that always reports the same skip reason."""
 
-    def runner(iterations: int) -> str:  # noqa: ARG001 — signature mandated by OperationCallable
+    # ``_iterations`` is the F19-compliant name — the parameter is required
+    # by the ``OperationCallable`` Protocol position but unused by this
+    # skip-only runner.
+    def runner(_iterations: int) -> str:
         return reason
 
     return runner
@@ -291,17 +294,11 @@ def build_default_operations(
     """
     skip = _make_skip_op(_SKIP_REASON_CAP5)
     return {
-        OP_PREP_VAULT_ONLY: (
-            _make_prep_vault_only_op(prep_vault_only) if prep_vault_only is not None else skip
-        ),
+        OP_PREP_VAULT_ONLY: (_make_prep_vault_only_op(prep_vault_only) if prep_vault_only is not None else skip),
         # Cap #5 — facts federation in SearchPipeline not yet wired.
         OP_PREP_FACTS_FEDERATED: skip,
-        OP_INGEST_CHAT_PER_TURN: (
-            _make_ingest_per_turn_op(ingest_one_turn) if ingest_one_turn is not None else skip
-        ),
-        OP_INGEST_CHAT_100_TURN: (
-            _make_ingest_100_turn_op(ingest_100_turn) if ingest_100_turn is not None else skip
-        ),
+        OP_INGEST_CHAT_PER_TURN: (_make_ingest_per_turn_op(ingest_one_turn) if ingest_one_turn is not None else skip),
+        OP_INGEST_CHAT_100_TURN: (_make_ingest_100_turn_op(ingest_100_turn) if ingest_100_turn is not None else skip),
         OP_FACT_FIND_CONFLICTS: (
             _make_fact_find_conflicts_op(fact_find_conflicts) if fact_find_conflicts is not None else skip
         ),

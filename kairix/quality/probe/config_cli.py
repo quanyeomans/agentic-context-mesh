@@ -57,6 +57,7 @@ from kairix.quality.probe.config_runner import (
 from kairix.quality.probe.perf_runner import (
     DEFAULT_PERF_ITERATIONS,
     OperationCallable,
+    OperationResult,
     PerfReport,
     build_default_operations,
     load_budgets,
@@ -312,6 +313,26 @@ def _emit_report(report: ProbeConfigReport, output_path: str | None) -> None:
         print(payload)
 
 
+def _format_over_budget_suffix(r: OperationResult) -> str:
+    """Format the ``(p50 +Xms over, p99 +Yms over)`` suffix for a failed op.
+
+    Extracted from ``_render_perf_human`` to keep that function's
+    cognitive-complexity (F16) below the 15 threshold.
+    """
+    if r.within_budget:
+        return ""
+    over_p99 = max(0.0, r.p99_ms - r.budget_p99_ms)
+    over_p50 = max(0.0, r.p50_ms - r.budget_p50_ms)
+    details = []
+    if over_p50 > 0:
+        details.append(f"p50 +{over_p50:.0f}ms over")
+    if over_p99 > 0:
+        details.append(f"p99 +{over_p99:.0f}ms over")
+    if not details:
+        return ""
+    return " (" + ", ".join(details) + ")"
+
+
 def _render_perf_human(report: PerfReport) -> str:
     """Human-readable per-capability perf table.
 
@@ -328,20 +349,8 @@ def _render_perf_human(report: PerfReport) -> str:
             lines.append(f"  {op}  {budget}  - {r.skip_reason}")
             continue
         verdict = "PASS" if r.within_budget else "FAIL"
-        suffix = ""
-        if not r.within_budget:
-            over_p99 = max(0.0, r.p99_ms - r.budget_p99_ms)
-            over_p50 = max(0.0, r.p50_ms - r.budget_p50_ms)
-            details = []
-            if over_p50 > 0:
-                details.append(f"p50 +{over_p50:.0f}ms over")
-            if over_p99 > 0:
-                details.append(f"p99 +{over_p99:.0f}ms over")
-            if details:
-                suffix = " (" + ", ".join(details) + ")"
-        lines.append(
-            f"  {op}  p50={r.p50_ms:.1f}ms  p99={r.p99_ms:.1f}ms  {budget}  {verdict}{suffix}"
-        )
+        suffix = _format_over_budget_suffix(r)
+        lines.append(f"  {op}  p50={r.p50_ms:.1f}ms  p99={r.p99_ms:.1f}ms  {budget}  {verdict}{suffix}")
     return "\n".join(lines) + "\n"
 
 
