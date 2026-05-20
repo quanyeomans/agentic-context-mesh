@@ -160,7 +160,7 @@ class _SubcommandOutcomeProbe(ast.NodeVisitor):
     def __init__(self, subcommand_names: set[str]) -> None:
         self.subcommand_names = subcommand_names
         self.subcommands_invoked: set[str] = set()
-        self.has_stdout_or_stderr_assert: bool = False
+        self.has_output_assert: bool = False
 
     def visit_Call(self, node: ast.Call) -> None:
         # subprocess.run(...) or subprocess.Popen(...) — both shapes
@@ -181,8 +181,14 @@ class _SubcommandOutcomeProbe(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Assert(self, node: ast.Assert) -> None:
-        if _references_stdout_or_stderr(node.test):
-            self.has_stdout_or_stderr_assert = True
+        if _references_output(node.test):
+            self.has_output_assert = True
+        elif node.msg is not None and _references_output(node.msg):
+            # F-string assertion messages that interpolate captured stdout
+            # count too — they're a strong signal the test cares about the
+            # output content, even when the test expression itself only
+            # checks returncode.
+            self.has_output_assert = True
         self.generic_visit(node)
 
 
@@ -199,11 +205,32 @@ def _collect_string_literals(node: ast.expr) -> set[str]:
     return out
 
 
-def _references_stdout_or_stderr(node: ast.expr) -> bool:
-    """Return True if any ``Attribute`` in the expression has attr in {stdout, stderr}."""
+_OUTPUT_TOKENS = ("stdout", "stderr", "output")
+
+
+def _references_output(node: ast.expr) -> bool:
+    """Return True when the expression mentions captured-output content.
+
+    Two recognised shapes:
+      * ``Attribute`` with attr in ``{stdout, stderr}`` — e.g.
+        ``assert "X" in proc.stdout.decode()``
+      * ``Name`` whose identifier contains ``stdout``/``stderr``/``output``
+        (case-insensitive) — e.g. ``assert "X" in prep_stdout``,
+        ``assert prep_output == ...``. Covers the common pattern of
+        decoding ``proc.stdout`` into a named variable and asserting on
+        the variable.
+
+    Conservative enough that an unrelated variable like ``count`` or
+    ``parsed`` doesn't trigger; broad enough that natural test shapes
+    qualify without contortion.
+    """
     for sub in ast.walk(node):
         if isinstance(sub, ast.Attribute) and sub.attr in {"stdout", "stderr"}:
             return True
+        if isinstance(sub, ast.Name):
+            lower = sub.id.lower()
+            if any(tok in lower for tok in _OUTPUT_TOKENS):
+                return True
     return False
 
 
@@ -263,7 +290,7 @@ def _scan_tests_for_outcome_coverage(
 
         sub_probe = _SubcommandOutcomeProbe(subcommand_names)
         sub_probe.visit(tree)
-        if sub_probe.subcommands_invoked and sub_probe.has_stdout_or_stderr_assert:
+        if sub_probe.subcommands_invoked and sub_probe.has_output_assert:
             subcommands_covered |= sub_probe.subcommands_invoked
 
         mcp_probe = _McpOutcomeProbe(mcp_tool_names)
