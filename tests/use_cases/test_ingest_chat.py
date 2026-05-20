@@ -148,7 +148,7 @@ def test_empty_jsonl_returns_zero_counts(tmp_path: Path) -> None:
         fact_extractor=FakeFactExtractor(),
     )
 
-    assert result == IngestChatResult(0, 0, 0, 0)
+    assert result == IngestChatResult(0, 0, 0, 0, 0)
 
 
 def test_malformed_line_logs_warning_and_continues(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -306,11 +306,16 @@ def test_default_mode_calls_extractor_once_per_window(tmp_path: Path) -> None:
 
 def test_each_emitted_fact_added_to_store(tmp_path: Path) -> None:
     """Sabotage-proof: drop ``fact_store.add(fact)`` from the loop and
-    the persisted-id set is empty."""
+    the persisted-id set is empty.
+
+    Each fact uses a distinct ``attribute`` so the ingest-time
+    consolidation pass (Capability #4) doesn't classify them as
+    conflicting and supersede the earlier ones.
+    """
     transcript = tmp_path / "t.jsonl"
     _write_jsonl(transcript, [_turn("c1", i) for i in range(5)])
 
-    facts = [FakeFactRecord(id=f"f-{i}", entity="X", attribute="y", value=f"v{i}") for i in range(3)]
+    facts = [FakeFactRecord(id=f"f-{i}", entity="X", attribute=f"attr-{i}", value=f"v{i}") for i in range(3)]
     extractor = FakeFactExtractor(scripted_facts=facts)
     store = FakeFactStore()
 
@@ -322,7 +327,9 @@ def test_each_emitted_fact_added_to_store(tmp_path: Path) -> None:
     )
 
     assert result.facts_added == 3
-    persisted_ids = {f.id for f in store.find_conflicts(entity="X", attribute="y")}
+    persisted_ids: set[str] = set()
+    for i in range(3):
+        persisted_ids.update(f.id for f in store.find_conflicts(entity="X", attribute=f"attr-{i}"))
     assert persisted_ids == {"f-0", "f-1", "f-2"}
 
 
@@ -446,6 +453,7 @@ def test_cli_main_emits_json_when_flag_set(tmp_path: Path) -> None:
         "conversations_processed": 1,
         "facts_added": 0,
         "windows_extracted": 0,
+        "facts_superseded": 0,
     }
 
 
@@ -689,3 +697,136 @@ def test_namespace_defaults_to_shared(tmp_path: Path) -> None:
 
     persisted = store.find_conflicts(entity="X", attribute="y", namespace="shared")
     assert len(persisted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Capability #4 — ingest-time consolidation
+# ---------------------------------------------------------------------------
+
+
+def test_two_ingests_supersede_prior_fact_on_conflict(tmp_path: Path) -> None:
+    """Two consecutive ingests of the same entity+attribute with different
+    values → one live fact + one superseded.
+
+    Sabotage-proof: drop the ``resolved_consolidation.process(fact_to_add)``
+    call from ``ingest_chat`` and both facts stay live — this assertion
+    on live-count fails.
+    """
+    transcript_a = tmp_path / "a.jsonl"
+    transcript_b = tmp_path / "b.jsonl"
+    _write_jsonl(transcript_a, [_turn("c1", 0)])
+    _write_jsonl(transcript_b, [_turn("c2", 0)])
+
+    store = FakeFactStore()
+    # First ingest: Caroline=single
+    extractor_a = FakeFactExtractor(
+        scripted_facts=[FakeFactRecord(id="f-a", entity="Caroline", attribute="status", value="single")]
+    )
+    ingest_chat(
+        transcript_a,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor_a,
+    )
+    # Second ingest: Caroline=married — should supersede f-a.
+    extractor_b = FakeFactExtractor(
+        scripted_facts=[FakeFactRecord(id="f-b", entity="Caroline", attribute="status", value="married")]
+    )
+    result = ingest_chat(
+        transcript_b,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor_b,
+    )
+
+    live = store.find_conflicts(entity="Caroline", attribute="status")
+    live_ids = {f.id for f in live}
+    assert live_ids == {"f-b"}  # f-a no longer live
+    assert result.facts_superseded == 1
+
+
+def test_two_ingests_same_value_coexist(tmp_path: Path) -> None:
+    """Two consecutive ingests of the same entity+attribute with the
+    *same* value → both live, no supersession.
+
+    Sabotage-proof: change the ``"same"`` branch of ``default_contradict``
+    to return ``"update"`` and the supersession count rises above zero.
+    """
+    transcript_a = tmp_path / "a.jsonl"
+    transcript_b = tmp_path / "b.jsonl"
+    _write_jsonl(transcript_a, [_turn("c1", 0)])
+    _write_jsonl(transcript_b, [_turn("c2", 0)])
+
+    store = FakeFactStore()
+    extractor_a = FakeFactExtractor(
+        scripted_facts=[FakeFactRecord(id="f-a", entity="Caroline", attribute="status", value="single")]
+    )
+    ingest_chat(
+        transcript_a,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor_a,
+    )
+    extractor_b = FakeFactExtractor(
+        scripted_facts=[FakeFactRecord(id="f-b", entity="Caroline", attribute="status", value="single")]
+    )
+    result = ingest_chat(
+        transcript_b,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor_b,
+    )
+
+    live = store.find_conflicts(entity="Caroline", attribute="status")
+    live_ids = {f.id for f in live}
+    assert live_ids == {"f-a", "f-b"}
+    assert result.facts_superseded == 0
+
+
+def test_injected_consolidation_pass_is_used(tmp_path: Path) -> None:
+    """A caller-injected :class:`ConsolidationPass` replaces the default.
+
+    Sabotage-proof: hard-code the default pass instead of honouring the
+    ``consolidation`` kwarg and this test's scripted callable (always
+    ``"contradiction"``) is bypassed — the same-valued prior would
+    coexist instead of being superseded.
+    """
+    from kairix.core.facts import ConsolidationPass  # public surface
+
+    transcript_a = tmp_path / "a.jsonl"
+    transcript_b = tmp_path / "b.jsonl"
+    _write_jsonl(transcript_a, [_turn("c1", 0)])
+    _write_jsonl(transcript_b, [_turn("c2", 0)])
+
+    store = FakeFactStore()
+    extractor_a = FakeFactExtractor(
+        scripted_facts=[FakeFactRecord(id="f-a", entity="X", attribute="status", value="same-value")]
+    )
+    ingest_chat(
+        transcript_a,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor_a,
+    )
+
+    # Inject a pass whose callable always supersedes — even when values match.
+    def always_contradict(_prior: object, _new: object) -> str:
+        return "contradiction"
+
+    aggressive_pass = ConsolidationPass(fact_store=store, contradict=always_contradict)
+
+    extractor_b = FakeFactExtractor(
+        scripted_facts=[FakeFactRecord(id="f-b", entity="X", attribute="status", value="same-value")]
+    )
+    result = ingest_chat(
+        transcript_b,
+        paths=_paths(tmp_path),
+        fact_store=store,
+        fact_extractor=extractor_b,
+        consolidation=aggressive_pass,
+    )
+
+    live = store.find_conflicts(entity="X", attribute="status")
+    live_ids = {f.id for f in live}
+    assert live_ids == {"f-b"}
+    assert result.facts_superseded == 1
