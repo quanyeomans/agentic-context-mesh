@@ -384,3 +384,162 @@ class Memory(Protocol):
     def score(self) -> float: ...
     @property
     def metadata(self) -> dict[str, Any]: ...
+
+
+# ---------------------------------------------------------------------------
+# Plan B-parity (mem0-vs-kairix-uplift) — fact-extraction Protocols.
+#
+# Companion to the chunk-shaped retrieval already in SearchPipeline.
+# Conversation corpora are ingested turn-by-turn; an LLM fact extractor
+# converts windowed turns into canonical entity-attribute-value records
+# (``FactRecord``); a fact-shaped store keeps these alongside chunks; the
+# SearchPipeline federates retrieval across both.
+#
+# Single-hop LoCoMo evidence: chunks alone score 9%; mem0's fact pattern
+# scores 21% on the same questions. Adding the fact layer inside kairix-native
+# closes that gap while keeping the multi-hop win chunks already provide
+# (kairix 12% vs mem0 5%). Federation is the strategic moat.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class FactRecord(Protocol):
+    """A canonical entity-attribute-value record extracted from conversation turns.
+
+    Lingua franca between :class:`FactExtractor` (emits) and
+    :class:`FactStore` (persists + recalls). Implementations are
+    typically frozen dataclasses; the Protocol pins the read surface
+    that everything downstream consumes (retrieval, consolidation,
+    Surface-B hydration, Surface-C learning).
+
+    Identity contract:
+
+    - ``id`` is deterministic — derived from ``(entity, attribute,
+      source_turn_ids)``. Same triple from same turns → same id. This
+      makes idempotent re-ingest safe and lets ``FactStore.add`` do a
+      cheap UPSERT.
+
+    Provenance contract:
+
+    - ``source_turn_ids`` MUST trace back to raw turns the extractor
+      consumed. Empty tuples are invalid (callers will raise).
+
+    Versioning / consolidation contract:
+
+    - ``superseded_by`` is ``None`` for live facts; set to another
+      fact's id once a conflict-detection pass identifies a newer
+      record about the same (entity, attribute). The full history
+      stays queryable (audit + Surface-C signal); production search
+      filters to ``superseded_by IS NULL`` by default.
+    """
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def entity(self) -> str: ...
+    @property
+    def attribute(self) -> str: ...
+    @property
+    def value(self) -> str: ...
+    @property
+    def confidence(self) -> float: ...
+    @property
+    def source_turn_ids(self) -> tuple[str, ...]: ...
+    @property
+    def extracted_at(self) -> str: ...
+    @property
+    def superseded_by(self) -> str | None: ...
+    @property
+    def namespace(self) -> str: ...
+
+
+@runtime_checkable
+class FactHit(Protocol):
+    """A FactRecord plus a recall score, returned by :meth:`FactStore.search`.
+
+    The minimum read surface downstream code needs from a search hit:
+    the underlying ``record`` + the ``score`` retrieval assigned to it.
+    Implementations may carry additional diagnostic fields (which
+    sub-retriever produced the hit, raw BM25/vector contribution, etc.)
+    but downstream code only depends on these two.
+    """
+
+    @property
+    def record(self) -> FactRecord: ...
+    @property
+    def score(self) -> float: ...
+
+
+@runtime_checkable
+class FactExtractor(Protocol):
+    """Convert a window of conversation turns into canonical fact records.
+
+    Production implementation is an LLM-driven extractor that runs
+    against the configured provider (azure_foundry / openai /
+    anthropic / bedrock / ...). The prompt asks the LLM to surface
+    every entity-attribute-value triple that can be grounded in the
+    given turns. Confidence is the LLM's own per-record rating; the
+    eval gate calibrates it against ground truth.
+
+    Test fakes (``FakeFactExtractor``) return scripted records so
+    contract tests can pin the consumer-side behaviour without an
+    LLM call.
+
+    Idempotency: re-extracting the same windowed turns SHOULD produce
+    facts with the same ids (because ``FactRecord.id`` is deterministic
+    from ``(entity, attribute, source_turn_ids)``). Implementations
+    that pass turns through an LLM with non-zero temperature won't
+    achieve strict idempotency — that's why the production wire-up
+    runs the extractor with temperature=0.0 in CI.
+    """
+
+    # extract(turns, window_hint): zero or more FactRecords grounded in turns.
+    # turns: list of turn dicts with at least id, speaker/role, content/text
+    # keys (LoCoMo / chat-message shape). window_hint reserved for future
+    # prompt-engineering knobs; production extractors may ignore it.
+    # Empty-list return is a valid "no facts groundable" signal — callers
+    # MUST tolerate it without raising.
+    def extract(
+        self, *, turns: list[dict[str, Any]], window_hint: dict[str, Any] | None = None
+    ) -> list[FactRecord]: ...
+
+
+@runtime_checkable
+class FactStore(Protocol):
+    """Persist + recall ``FactRecord`` data; back-compat companion to chunks.
+
+    The fact-shaped sibling of the SearchPipeline's chunk store.
+    Production implementation wraps SQLite (FTS5 + an index on
+    ``entity, attribute``) plus a usearch vector index over the
+    concatenated ``(entity, attribute, value)`` strings. Test fakes
+    are dict-backed.
+
+    Backwards compatibility: deployments that never call ``add``
+    have an empty fact store. ``search`` against empty returns ``[]``.
+    The SearchPipeline tolerates ``fact_retriever=None`` and runs
+    the chunk-only pipeline (today's behaviour).
+    """
+
+    # add(fact): persist a fact. Idempotent on the fact's deterministic id.
+    # Adding a fact whose id already exists is a no-op — the existing record
+    # stays. Contract that makes ingest pipelines safely re-runnable.
+    def add(self, fact: FactRecord) -> None: ...
+
+    # search(query, *, top_k, namespace): up to top_k facts matching query,
+    # best first. namespace=non-None restricts to that namespace (engagement-
+    # scoped recall for consultancy-in-a-box); None means "all namespaces".
+    # Empty list is a valid "no facts" signal; by default excludes superseded.
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[FactHit]: ...
+
+    # find_conflicts(*, entity, attribute, namespace): live (non-superseded)
+    # facts for the (entity, attribute) key. Used by the consolidation pass:
+    # on every new fact, the ingest pipeline finds existing facts about the
+    # same entity-attribute pair, then runs the contradict use case to decide
+    # whether the new fact supersedes them.
+    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[FactRecord]: ...
+
+    # supersede(*, old_id, new_id): mark old_id as superseded by new_id.
+    # After this, old_id no longer appears in default search but stays
+    # retrievable for audit (future include_superseded=True kwarg).
+    # Raises KeyError if either id is absent.
+    def supersede(self, *, old_id: str, new_id: str) -> None: ...
