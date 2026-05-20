@@ -41,6 +41,13 @@ from kairix.core.protocols import EmbeddingService, FactRecord
 logger = logging.getLogger(__name__)
 
 
+# Error-message prefix for ``KeyError`` raised by ``supersede`` when the
+# referenced id does not exist. Extracted to a module-level constant
+# (F17 — no string literal of ≥10 chars duplicated ≥3 times) so the
+# three raise-sites in ``supersede`` reference one source of truth.
+_ERROR_NO_FACT_WITH_ID = "SQLiteFactStore: no fact with id"
+
+
 # ---------------------------------------------------------------------------
 # Schema DDL — single source of truth for the SQLite layout.
 # ---------------------------------------------------------------------------
@@ -237,10 +244,7 @@ class SQLiteFactStore:
         finally:
             conn.close()
 
-        return [
-            StoredFactHit(record=self._row_to_record(row), score=self._normalise_bm25(row["bm25"]))
-            for row in rows
-        ]
+        return [StoredFactHit(record=self._row_to_record(row), score=self._normalise_bm25(row["bm25"])) for row in rows]
 
     def find_conflicts(
         self,
@@ -259,11 +263,7 @@ class SQLiteFactStore:
         try:
             if not self._table_exists(conn, "facts"):
                 return []
-            sql = (
-                "SELECT * FROM facts "
-                "WHERE entity = ? AND attribute = ? "
-                "AND superseded_by IS NULL"
-            )
+            sql = "SELECT * FROM facts WHERE entity = ? AND attribute = ? AND superseded_by IS NULL"
             params: list[object] = [entity, attribute]
             if namespace is not None:
                 sql += " AND namespace = ?"
@@ -284,11 +284,11 @@ class SQLiteFactStore:
         conn = self._connect()
         try:
             if not self._table_exists(conn, "facts"):
-                raise KeyError(f"SQLiteFactStore: no fact with id {old_id!r}")
+                raise KeyError(f"{_ERROR_NO_FACT_WITH_ID} {old_id!r}")
             if not self._row_exists(conn, old_id):
-                raise KeyError(f"SQLiteFactStore: no fact with id {old_id!r}")
+                raise KeyError(f"{_ERROR_NO_FACT_WITH_ID} {old_id!r}")
             if not self._row_exists(conn, new_id):
-                raise KeyError(f"SQLiteFactStore: no fact with id {new_id!r}")
+                raise KeyError(f"{_ERROR_NO_FACT_WITH_ID} {new_id!r}")
             conn.execute(
                 "UPDATE facts SET superseded_by = ? WHERE id = ?",
                 (new_id, old_id),
