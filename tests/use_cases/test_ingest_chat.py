@@ -412,9 +412,18 @@ def test_cli_main_emits_json_when_flag_set(tmp_path: Path) -> None:
     }
 
 
-def test_cli_main_imports_error_when_production_store_missing(tmp_path: Path) -> None:
-    """Sabotage-proof: define a real SQLiteFactStore module and this
-    test fails because the ImportError branch is never taken."""
+def test_cli_main_resolves_production_sqlite_fact_store(tmp_path: Path) -> None:
+    """Production path: ``fact_store=None`` resolves to a real SQLiteFactStore.
+
+    Capability #3 (SQLiteFactStore) landed before Capability #1; the
+    production-resolution path now wires the real store. This test
+    pins that wiring — the CLI succeeds end-to-end against a real
+    SQLite-backed store with ``--no-extract``.
+
+    Sabotage-proof: rename ``SQLiteFactStore`` in ``kairix.core.facts``
+    and the production-resolution import raises ImportError → exit
+    code becomes 2 → this assertion fails.
+    """
     transcript = tmp_path / "t.jsonl"
     _write_jsonl(transcript, [_turn("c1", 0)])
 
@@ -424,13 +433,12 @@ def test_cli_main_imports_error_when_production_store_missing(tmp_path: Path) ->
         out=io.StringIO(),
         err=err,
         paths=_paths(tmp_path),
-        fact_store=None,  # forces production-resolution path
+        fact_store=None,  # forces production-resolution path → real SQLiteFactStore
         fact_extractor=FakeFactExtractor(),
     )
 
-    assert exit_code == 2
-    assert "SQLiteFactStore" in err.getvalue()
-    assert "fix:" in err.getvalue()
+    assert exit_code == 0, f"production resolution should succeed; stderr={err.getvalue()!r}"
+    assert (tmp_path / "vault" / "conversations" / "c1.md").exists(), "ingest must write the conversation file"
 
 
 def test_cli_main_argparse_window_turns_default(tmp_path: Path) -> None:
