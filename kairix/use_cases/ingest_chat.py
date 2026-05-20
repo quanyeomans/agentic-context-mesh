@@ -71,16 +71,26 @@ class IngestChatResult:
     windows_extracted: int
 
 
+# Field-name constants — F17 (no string literal of ≥10 chars duplicated ≥3
+# times). Used by _parse_turn and downstream parsers to keep the schema
+# field names in one place.
+_KEY_CONVERSATION_ID = "conversation_id"
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers — pure, no I/O state
 # ---------------------------------------------------------------------------
 
 
-def _parse_turn(raw_line: str) -> dict[str, Any] | None:
+def _parse_turn(raw_line: str, *, default_conversation_id: str | None = None) -> dict[str, Any] | None:
     """Parse one JSONL line into a turn dict; return None if malformed.
 
-    Required fields: ``role``, ``content``, ``conversation_id``. Any of:
-    blank line, non-JSON, missing required keys → ``None`` + warning.
+    Required fields: ``role``, ``content``. ``conversation_id`` is required
+    BUT defaults to ``default_conversation_id`` (typically the JSONL filename
+    stem) when absent — supports the reference-library convention where one
+    session-NNN.jsonl file is exactly one conversation and per-turn
+    ``conversation_id`` is redundant. Blank lines, non-JSON, or missing
+    role/content all produce ``None`` + warning.
     """
     line = raw_line.strip()
     if not line:
@@ -93,19 +103,31 @@ def _parse_turn(raw_line: str) -> dict[str, Any] | None:
     if not isinstance(obj, dict):
         logger.warning("ingest-chat: skipping non-object jsonl line: %r", obj)
         return None
-    for key in ("role", "content", "conversation_id"):
+    for key in ("role", "content"):
         if key not in obj or obj[key] is None:
             logger.warning("ingest-chat: skipping turn missing %r: %r", key, obj)
             return None
+    if obj.get(_KEY_CONVERSATION_ID) is None:
+        if default_conversation_id is None:
+            logger.warning("ingest-chat: skipping turn missing %r (no default): %r", _KEY_CONVERSATION_ID, obj)
+            return None
+        obj[_KEY_CONVERSATION_ID] = default_conversation_id
     return obj
 
 
 def _read_turns(jsonl_path: Path) -> list[dict[str, Any]]:
-    """Read + parse every turn from the JSONL file, skipping malformed lines."""
+    """Read + parse every turn from the JSONL file, skipping malformed lines.
+
+    Turns without explicit ``conversation_id`` inherit the JSONL filename
+    stem (e.g. ``session-001.jsonl`` → ``conversation_id=session-001``) so
+    the operator-friendly convention "one file = one conversation" works
+    without forcing every turn to carry redundant metadata.
+    """
+    default_cid = jsonl_path.stem
     turns: list[dict[str, Any]] = []
     with open(jsonl_path, encoding="utf-8") as fh:
         for raw in fh:
-            turn = _parse_turn(raw)
+            turn = _parse_turn(raw, default_conversation_id=default_cid)
             if turn is not None:
                 turns.append(turn)
     return turns
