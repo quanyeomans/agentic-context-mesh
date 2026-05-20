@@ -7,10 +7,22 @@ Turns:
 {{turns}}
 
 Return a JSON array. Each fact object has:
-- entity: the canonical entity name (person, project, concept)
-- attribute: the attribute being asserted (role, status, location, etc.)
-- value: the asserted value
-- confidence: 0.0-1.0
+- entity: the canonical entity name (person, project, concept) — kebab-case
+  identifiers (agent-alpha, client-omega, project-rho) where they appear,
+  otherwise the proper noun as written. Avoid descriptive phrases like
+  "anything built for the engagement" or "the new console" — bind the fact
+  to the named entity instead (e.g. "engagement-alpha", "dispatcher-console").
+- attribute: the attribute being asserted, as a SHORT canonical noun.
+  Prefer single words: "role", "status", "budget", "deadline", "location",
+  "sponsor", "duration", "model", "deployment". Avoid compounds like
+  "headquarters_location" (use "location"), "estimated_completion" (use
+  "deadline"), "executive_sponsor" (use "sponsor"). If two distinct
+  attributes overlap (e.g. "role" + "title"), pick the most semantic one.
+- value: the asserted value, kept terse and factual. Strip filler words
+  like "around", "approximately", "I think" — record the asserted value
+  itself, not the speaker's hedging.
+- confidence: 0.0-1.0 — your honest confidence the fact is well-grounded
+  in the turns. Lower confidence for inferential / paraphrastic facts.
 - evidence_turn_ids: list of turn ids that ground this fact
 
 Return ONLY the JSON array, no prose. If no facts can be grounded, return [].
