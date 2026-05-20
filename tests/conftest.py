@@ -120,6 +120,10 @@ pytest_plugins = [
     "tests.bdd.steps.eval_suite_steps",
     # Plan B-parity Week 4 Stream A — CI workflow extensions for eval gates.
     "tests.bdd.steps.eval_ci_gates_steps",
+    # Plan B-parity Week 4 Stream C — soak BDD for fact-extractor pipeline.
+    # Collected unconditionally; runtime-gated on KAIRIX_SOAK=1 inside the
+    # step bodies so normal CI sees the scenarios but skips at first Given.
+    "tests.bdd.steps.soak_fact_extractor_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
