@@ -36,7 +36,7 @@ import sqlite3
 from pathlib import Path
 
 from kairix.core.facts.records import StoredFactRecord
-from kairix.core.protocols import EmbeddingService, FactRecord
+from kairix.core.protocols import EmbeddingService, FactHit, FactRecord
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +217,7 @@ class SQLiteFactStore:
         *,
         top_k: int = 10,
         namespace: str | None = None,
-    ) -> list[StoredFactHit]:
+    ) -> list[FactHit]:
         """Recall live (non-superseded) facts matching ``query``.
 
         Uses ``facts_fts MATCH ?`` (BM25 ranking). Honours ``namespace``
@@ -252,7 +252,7 @@ class SQLiteFactStore:
         entity: str,
         attribute: str,
         namespace: str | None = None,
-    ) -> list[StoredFactRecord]:
+    ) -> list[FactRecord]:
         """Live (non-superseded) facts matching ``(entity, attribute)``.
 
         Used by the consolidation pass: every new fact looks up
