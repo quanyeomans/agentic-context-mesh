@@ -31,10 +31,31 @@ opt-out for chunks-only or facts-only modes.
   collaborators perform.
 - `__init__.py` — exports the public symbols.
 
-Production wire-ups (Phase 2+: `MarkdownDocumentWriter`,
-`EmbedPipelineEmbedder`, the `_resolve_production_*` helpers) will
-land in `wiring.py` as the three call sites get migrated. P1 is the
-foundation phase — only the new module + its unit tests land here.
+Production wire-ups live in `wiring.py` — the single composition
+root every use case calls when its caller passes no
+`fact_extractor` / `document_writer` / `embedder` / `consolidation`
+override:
+
+```python
+from kairix.corpus.wiring import (
+    make_production_fact_extractor,    # ACTIVE: wraps LLMFactExtractor
+    make_production_document_writer,   # Phase 2 deferral (raises F21-formatted NotImplementedError)
+    make_production_embedder,          # Phase 2 deferral
+    make_production_consolidation,     # Phase 3 deferral
+)
+```
+
+`make_production_fact_extractor(llm)` closed the LoCoMo verification
+gap (`kairix eval` returned 0/N facts on conversational corpora
+because the default fell to `_NullFactExtractor`). The other three
+factories raise `NotImplementedError` with `fix:` / `next:` / `run:`
+markers until their upstream implementations land — they exist so a
+premature caller gets an actionable error rather than a Null fallback.
+
+`wiring.py` is the F26 composition-root carve-out: it MAY import
+concrete provider/transport implementations (the F26 prohibition
+applies to `kairix/core/**`, not to `kairix/corpus/**`). Domain code
+still talks to the Protocols.
 
 ## Where each test lives
 

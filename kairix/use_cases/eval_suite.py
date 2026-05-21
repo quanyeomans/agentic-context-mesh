@@ -31,6 +31,7 @@ import argparse
 import dataclasses
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -227,14 +228,22 @@ def _resolve_deps(
             err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
             return 2
 
-    resolved_extractor: FactExtractor = fact_extractor if fact_extractor is not None else _NullFactExtractor()
-
     if llm is None:
         try:
             llm = _resolve_production_llm()
         except ImportError as exc:
             err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
             return 2
+
+    # Production-default FactExtractor — the LoCoMo verification gap fix.
+    # Before this wiring, ``kairix eval`` defaulted to ``_NullFactExtractor``
+    # which returns ``[]`` regardless of input, so the suite runner
+    # extracted 0/N facts on every conversational corpus. The composition
+    # root in :mod:`kairix.corpus.wiring` builds the real
+    # :class:`LLMFactExtractor` wired to the resolved LLM backend.
+    resolved_extractor: FactExtractor = (
+        fact_extractor if fact_extractor is not None else _resolve_production_fact_extractor(llm, err_sink=err_sink)
+    )
 
     resolved_pipeline = _resolve_search_pipeline(
         override=search_pipeline,
@@ -261,11 +270,26 @@ def _resolve_deps(
     )
 
 
+def _import_search_pipeline_builder() -> Callable[[], SearchPipeline]:
+    """Import :func:`kairix.core.factory.build_search_pipeline`.
+
+    Extracted so the import is a single seam tests can swap by passing
+    a ``builder_loader`` to :func:`_resolve_search_pipeline`. Raises
+    :class:`ImportError` straight through; the caller handles the
+    operator-visible warning.
+    """
+    from kairix.core.factory import build_search_pipeline
+
+    builder: Callable[[], SearchPipeline] = build_search_pipeline
+    return builder
+
+
 def _resolve_search_pipeline(
     *,
     override: SearchPipeline | None,
     via_prep: bool,
     err_sink: TextIO,
+    builder_loader: Callable[[], Callable[[], SearchPipeline]] | None = None,
 ) -> SearchPipeline | None | int:
     """Resolve the SearchPipeline given the CLI mode + caller-supplied override.
 
@@ -278,13 +302,18 @@ def _resolve_search_pipeline(
     3. Default (``via_prep=True``) constructs the production pipeline
        via :func:`build_search_pipeline`. Returns exit code 2 with an
        actionable error on ImportError.
+
+    ``builder_loader`` is the documented composition seam — tests inject
+    a raising loader to drive the ImportError branch. NOT test-only
+    (F6 clean): same swap-point shape as ``_resolve_production_fact_extractor``.
     """
     if override is not None:
         return override
     if not via_prep:
         return None
+    loader = builder_loader if builder_loader is not None else _import_search_pipeline_builder
     try:
-        from kairix.core.factory import build_search_pipeline
+        builder = loader()
     except ImportError as exc:
         err_sink.write(
             f"{_ERROR_PREFIX}cannot import build_search_pipeline — {exc}. "
@@ -292,7 +321,7 @@ def _resolve_search_pipeline(
             f"next: re-run with --legacy-direct to bypass the pipeline.\n"
         )
         return 2
-    return build_search_pipeline()
+    return builder()
 
 
 def _execute_suite(
@@ -517,6 +546,85 @@ def _resolve_production_fact_store(db_path: Path) -> FactStore:
         ) from exc
     store: FactStore = SQLiteFactStore(db_path=db_path)
     return store
+
+
+def _import_production_extractor_factory() -> Callable[[LLMBackend], FactExtractor]:
+    """Import :func:`kairix.corpus.wiring.make_production_fact_extractor`.
+
+    Extracted so the import + lookup is a single atomic step the caller
+    can wrap in one ``try/except``. Re-raised ImportError carries no
+    extra message because the caller adds F21-shaped guidance.
+    """
+    from kairix.corpus.wiring import make_production_fact_extractor
+
+    factory: Callable[[LLMBackend], FactExtractor] = make_production_fact_extractor
+    return factory
+
+
+def _resolve_production_fact_extractor(
+    llm: LLMBackend,
+    *,
+    err_sink: TextIO,
+    factory_loader: Callable[[], Callable[[LLMBackend], FactExtractor]] | None = None,
+) -> FactExtractor:
+    """Return the production :class:`FactExtractor` or the Null fallback.
+
+    Production path: resolve
+    :func:`kairix.corpus.wiring.make_production_fact_extractor` and let
+    it wire :class:`~kairix.core.facts.extractor.LLMFactExtractor`
+    against ``llm``. Fallback path: when the import or factory call
+    raises, emit an F21-shaped warning on ``err_sink`` and return
+    :class:`_NullFactExtractor` so the suite runner still completes —
+    just with zero facts (today's regression-debugging behaviour, but
+    now visible to the operator rather than silent).
+
+    Why a fallback at all? The Plan B-parity post-mortem (#208) cared
+    about closing the SILENT degradation: 0 facts with no signal. With
+    this helper, an operator who sees zero facts AND a stderr warning
+    knows the wiring is broken; an operator who sees zero facts and no
+    warning knows the wiring is fine and the corpus actually carries
+    no extractable content.
+
+    Parameters
+    ----------
+    llm:
+        The resolved :class:`LLMBackend` to thread through the wiring.
+    err_sink:
+        Writable text sink — operator-visible warnings land here.
+    factory_loader:
+        Composition seam — when ``None``, production resolves via
+        :func:`_import_production_extractor_factory`. Tests inject a
+        raising loader to drive the ImportError fallback OR a loader
+        that returns a raising factory to drive the broad-except
+        fallback. This kwarg is NOT test-only (F6 clean): it is the
+        documented swap point between the ``_resolve_deps`` orchestrator
+        and the wiring layer, used by any future caller wanting to
+        pin a non-default factory resolution strategy.
+    """
+    loader = factory_loader if factory_loader is not None else _import_production_extractor_factory
+    try:
+        factory = loader()
+    except ImportError as exc:
+        err_sink.write(
+            f"{_ERROR_PREFIX}cannot import kairix.corpus.wiring — {exc}. "
+            f"fix: ensure your kairix install includes kairix.corpus.wiring. "
+            f"next: re-run after installing the current build. "
+            f"run: pip install -e . from the repo root.\n"
+        )
+        return _NullFactExtractor()
+    try:
+        return factory(llm)
+    except Exception as exc:  # Wiring failures degrade to Null + warning, never crash eval.
+        err_sink.write(
+            f"{_ERROR_PREFIX}make_production_fact_extractor raised — {exc}. "
+            f"fix: check the LLM backend resolves correctly via "
+            f"kairix.platform.llm.get_default_backend. "
+            f"next: re-run with --legacy-direct to bypass the pipeline OR "
+            f"inject a FactExtractor explicitly via the use_cases.eval_suite.main "
+            f"kwarg. "
+            f"run: kairix probe-config to verify provider wiring.\n"
+        )
+        return _NullFactExtractor()
 
 
 def _resolve_production_llm() -> LLMBackend:
