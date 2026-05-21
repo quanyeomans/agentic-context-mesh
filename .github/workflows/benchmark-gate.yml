@@ -31,6 +31,9 @@ on:
       - "suites/contract-suite.yaml"
       - "benchmark-results/contract-baseline.json"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   benchmark-gate:
     name: Benchmark gate (contract suite)

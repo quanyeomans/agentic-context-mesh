@@ -40,6 +40,7 @@ on:
         type: string
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   REGISTRY: ghcr.io
   # Repo is at three-cubes/kairix; GITHUB_TOKEN can only push to the repo's own org.
   # Old images at ghcr.io/quanyeomans/kairix remain in place but are no longer the publish target.

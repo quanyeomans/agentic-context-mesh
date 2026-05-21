@@ -29,6 +29,7 @@ permissions:
   issues: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   SUITE_PATH: suites/locomo
   CONVERSATION_COUNT: ${{ github.event.inputs.conversation_count || '3' }}
 
