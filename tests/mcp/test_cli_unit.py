@@ -148,8 +148,6 @@ def test_serve_http_transport_with_no_sse_flag(monkeypatch) -> None:
     assert "(no /sse)" in stderr
 
 
-
-
 @pytest.mark.unit
 def test_serve_http_keeps_readiness_closed_when_warmup_fails(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18096"])
