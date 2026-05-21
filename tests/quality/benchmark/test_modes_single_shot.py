@@ -58,13 +58,15 @@ def _executor_returning(
     score_map = scores or {}
 
     def _exec(sampled: SampledQuery) -> QueryRunResult:
+        # ``score_map`` retained for legacy parametrisation but not
+        # surfaced on the canonical QueryRunResult; scorers (P2) compute
+        # scores from ranked_doc_ids / synthesised_answer post-hoc.
+        _ = score_map.get(sampled.case_id, 1.0)
         return QueryRunResult(
-            case_id=sampled.case_id,
+            query_id=sampled.case_id,
             category=sampled.category,
-            query=sampled.query,
+            query_text=sampled.query,
             latency_ms=latency_ms,
-            succeeded=True,
-            score=score_map.get(sampled.case_id, 1.0),
         )
 
     return _exec
@@ -89,7 +91,7 @@ def test_single_case_run_returns_one_result() -> None:
 
     assert isinstance(result, ModeRunResult)
     assert len(result.per_query_runs) == 1
-    assert result.per_query_runs[0].case_id == "R01"
+    assert result.per_query_runs[0].query_id == "R01"
     assert result.per_query_runs[0].latency_ms >= 0.0
     assert result.errors == ()
 
@@ -135,11 +137,10 @@ def test_exception_in_one_query_is_captured_others_continue() -> None:
         if sampled.case_id == "BAD":
             raise RuntimeError("boom")
         return QueryRunResult(
-            case_id=sampled.case_id,
+            query_id=sampled.case_id,
             category=sampled.category,
-            query=sampled.query,
+            query_text=sampled.query,
             latency_ms=0.5,
-            succeeded=True,
         )
 
     suite = _StubSuite(
@@ -154,12 +155,12 @@ def test_exception_in_one_query_is_captured_others_continue() -> None:
     result = run_single_shot(req)
 
     assert len(result.per_query_runs) == 3
-    by_id = {r.case_id: r for r in result.per_query_runs}
-    assert by_id["OK1"].succeeded is True
-    assert by_id["BAD"].succeeded is False
+    by_id = {r.query_id: r for r in result.per_query_runs}
+    assert by_id["OK1"].error is None
+    assert by_id["BAD"].error is not None
     assert "RuntimeError" in by_id["BAD"].error
     assert "boom" in by_id["BAD"].error
-    assert by_id["OK2"].succeeded is True
+    assert by_id["OK2"].error is None
     assert any("BAD" in e for e in result.errors)
 
 
@@ -179,11 +180,10 @@ def test_executor_returning_failure_is_recorded_as_error() -> None:
 
     def _exec(sampled: SampledQuery) -> QueryRunResult:
         return QueryRunResult(
-            case_id=sampled.case_id,
+            query_id=sampled.case_id,
             category=sampled.category,
-            query=sampled.query,
+            query_text=sampled.query,
             latency_ms=0.1,
-            succeeded=False,
             error="planned failure",
         )
 
@@ -193,7 +193,7 @@ def test_executor_returning_failure_is_recorded_as_error() -> None:
     result = run_single_shot(req)
 
     assert len(result.per_query_runs) == 1
-    assert result.per_query_runs[0].succeeded is False
+    assert result.per_query_runs[0].error is not None
     assert result.errors == ("[F01] planned failure",)
     assert result.mode_metrics["errors"] == 1.0
 
@@ -249,11 +249,10 @@ def test_slow_query_latency_does_not_leak_into_neighbours() -> None:
         else:
             reported = 0.5
         return QueryRunResult(
-            case_id=sampled.case_id,
+            query_id=sampled.case_id,
             category=sampled.category,
-            query=sampled.query,
+            query_text=sampled.query,
             latency_ms=reported,
-            succeeded=True,
         )
 
     suite = _StubSuite(
@@ -267,7 +266,7 @@ def test_slow_query_latency_does_not_leak_into_neighbours() -> None:
 
     result = run_single_shot(req)
 
-    by_id = {r.case_id: r for r in result.per_query_runs}
+    by_id = {r.query_id: r for r in result.per_query_runs}
     assert by_id["FAST1"].latency_ms < 10.0
     assert by_id["FAST2"].latency_ms < 10.0
     assert by_id["SLOW"].latency_ms >= 25.0
@@ -361,11 +360,10 @@ def test_per_case_agent_is_propagated_to_executor() -> None:
     def _exec(sampled: SampledQuery) -> QueryRunResult:
         seen.append(sampled.agent)
         return QueryRunResult(
-            case_id=sampled.case_id,
+            query_id=sampled.case_id,
             category=sampled.category,
-            query=sampled.query,
+            query_text=sampled.query,
             latency_ms=0.1,
-            succeeded=True,
         )
 
     suite = _StubSuite(
