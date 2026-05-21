@@ -10,6 +10,7 @@ Follows the same pattern as kairix.platform.llm.protocol.LLMBackend.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from kairix.core.search.intent import QueryIntent
@@ -566,3 +567,72 @@ class FactStore(Protocol):
     # retrievable for audit (future include_superseded=True kwarg).
     # Raises KeyError if either id is absent.
     def supersede(self, *, old_id: str, new_id: str) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Corpus-ingest Protocols — Spike C1 unified ingest contract.
+#
+# ``DocumentWriter`` and ``CorpusEmbedder`` are the two optional
+# collaborators ``kairix.corpus.ingest.ingest_corpus`` composes alongside
+# ``FactStore`` + ``FactExtractor``. Both are Protocols (not callables)
+# so production wire-ups can hold cached state (DB handles, body-hash
+# caches) and tests can inject capture-only fakes. Both are nullable:
+# passing ``None`` on either is the documented opt-out for chunks-only
+# or facts-only modes.
+#
+# Locked here in ``kairix.core.protocols`` so domain code references
+# them via Protocol only — F26: ``kairix.core.**`` must not import
+# providers/transport. The production implementations live in
+# ``kairix.corpus.wiring`` (Phase 2/3).
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class DocumentWriter(Protocol):
+    """Persist one rendered conversation document to the document store.
+
+    Boundary between corpus-ingest (knows session shape, frontmatter
+    conventions) and the document store (knows on-disk layout, FTS
+    reindexing). Production wraps
+    :class:`SQLiteDocumentRepository.insert_or_update` plus a markdown
+    materialiser; tests use a capture-only fake.
+
+    The returned :class:`Path` is what callers populate
+    ``IngestResult.document_paths`` from. Implementations MUST be
+    idempotent on body content — re-ingesting the same
+    ``(corpus_id, session_id, rendered_body)`` is a no-op for both
+    filesystem and DB writes.
+
+    F26 note: keep concrete implementations OUT of ``kairix/core/**``.
+    Wire production writers from ``kairix.corpus.wiring`` so the domain
+    layer talks to writers via this Protocol only.
+    """
+
+    def write(
+        self,
+        *,
+        corpus_id: str,
+        session_id: str,
+        rendered_body: str,
+        frontmatter: dict[str, Any],
+    ) -> Path: ...
+
+
+@runtime_checkable
+class CorpusEmbedder(Protocol):
+    """Embed the documents this ingest pass just wrote into the vector index.
+
+    Boundary between corpus-ingest and ``kairix embed``'s chunk-and-
+    vectorise pipeline. Production wraps the in-process
+    ``run_incremental_embed_pipeline`` and surfaces the chunks-indexed
+    count; tests use a counter-only fake.
+
+    ``paths_to_embed`` is the document subset — typically the Paths
+    just returned from a ``DocumentWriter.write`` round-trip. Empty
+    tuple is a legal no-op signal (e.g. embedder is wired but
+    ``document_writer`` was None and no markdown was created). Returns
+    the count of chunks actually indexed this call so
+    :class:`IngestResult` can carry an honest ``chunks_indexed``.
+    """
+
+    def embed(self, paths_to_embed: tuple[Path, ...]) -> int: ...
