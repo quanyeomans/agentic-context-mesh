@@ -109,6 +109,9 @@ python3 "${SCRIPT_DIR}/check_perf_singleton.py" || overall=1
 # F30 — every CLI subcommand + MCP tool has an outcome test
 python3 "${SCRIPT_DIR}/check_f30_operator_outcome_tests.py" || overall=1
 
+# F31 — no hardcoded /Users/<dev>/ or /home/<dev>/ paths in committed code
+python3 "${SCRIPT_DIR}/check_no_hardcoded_user_paths.py" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
