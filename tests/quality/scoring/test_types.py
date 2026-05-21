@@ -87,7 +87,7 @@ class TestQueryRunResult:
         # the invariant.
         run = QueryRunResult(query_id="x", category="recall", query_text="q")
         with pytest.raises(dataclasses.FrozenInstanceError):
-            run.query_id = "y"  # type: ignore[misc]
+            run.query_id = "y"  # type: ignore[misc] — frozen-dataclass mutation; mypy flags the assignment, but the assignment IS what we assert raises at runtime
 
 
 class TestScorerResult:

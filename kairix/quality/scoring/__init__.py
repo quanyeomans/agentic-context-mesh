@@ -5,18 +5,34 @@ queries via mode dispatchers and emits one ``QueryRunResult`` per query.
 This package converts those into per-scorer verdicts: NDCG, Hit@K, MRR,
 LLM-judge, and Latency.
 
-Foundation commit (P2 commit 1) exports the shared types only:
-
 ```python
-from kairix.quality.scoring import QueryRunResult, Scorer, ScorerResult
+from kairix.quality.scoring import (
+    QueryRunResult,
+    Scorer,
+    ScorerResult,
+    NDCGScorer,
+    HitAtKScorer,
+    MRRScorer,
+    aggregate_by_category,
+    aggregate_overall,
+)
 ```
 
-Subsequent P2 commits add ``NDCGScorer`` / ``HitAtKScorer`` / ``MRRScorer``
-/ ``LLMJudgeScorer`` / ``LatencyScorer`` and the ``ScorerRegistry``.
-See ``README.md`` for the architectural map. F26-clean: no provider,
-no transport imports anywhere in this package.
+Subsequent commits add ``LLMJudgeScorer``, ``LatencyScorer``,
+``ScorerRegistry`` + ``auto_select_scorers``. See ``README.md`` for the
+architectural map. F26-clean: no provider, no transport imports anywhere
+in this package.
 """
 
+from kairix.quality.scoring.aggregator import (
+    CategoryAggregate,
+    OverallAggregate,
+    aggregate_by_category,
+    aggregate_overall,
+)
+from kairix.quality.scoring.hit_at_k import HitAtKScorer
+from kairix.quality.scoring.mrr import MRRScorer
+from kairix.quality.scoring.ndcg import NDCGScorer
 from kairix.quality.scoring.types import (
     LatencyPhase,
     QueryRunResult,
@@ -25,8 +41,15 @@ from kairix.quality.scoring.types import (
 )
 
 __all__ = [
+    "CategoryAggregate",
+    "HitAtKScorer",
     "LatencyPhase",
+    "MRRScorer",
+    "NDCGScorer",
+    "OverallAggregate",
     "QueryRunResult",
     "Scorer",
     "ScorerResult",
+    "aggregate_by_category",
+    "aggregate_overall",
 ]
