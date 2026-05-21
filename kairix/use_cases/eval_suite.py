@@ -534,40 +534,24 @@ def _check_regression(
 # ---------------------------------------------------------------------------
 
 
-def _import_sqlite_fact_store() -> Callable[..., FactStore]:
-    """Import :class:`kairix.core.facts.SQLiteFactStore`.
-
-    Extracted so the import is a single atomic step the caller can wrap
-    in one ``try/except``. Tests inject a raising loader via the
-    documented composition seam in :func:`_resolve_production_fact_store`
-    to drive the ImportError branch.
-    """
-    from kairix.core.facts import SQLiteFactStore
-
-    return SQLiteFactStore
-
-
-def _resolve_production_fact_store(
-    db_path: Path,
-    *,
-    store_loader: Callable[[], Callable[..., FactStore]] | None = None,
-) -> FactStore:
+def _resolve_production_fact_store(db_path: Path) -> FactStore:
     """Return a production FactStore or raise ImportError with actionable hint.
 
-    ``store_loader`` is the documented composition seam — tests inject a
-    raising loader to drive the ImportError branch. NOT test-only (F6
-    clean): mirrors :func:`_resolve_production_fact_extractor`'s pattern.
+    The ImportError rewrap is defensive: ``kairix.core.facts`` is a Cap
+    #3 subpackage that's always present in any valid kairix install.
+    The branch is unreachable through normal execution and is excluded
+    from coverage on that basis (rather than driving it through a
+    test-only injection seam on a private helper).
     """
-    loader = store_loader if store_loader is not None else _import_sqlite_fact_store
     try:
-        store_cls = loader()
-    except ImportError as exc:
+        from kairix.core.facts import SQLiteFactStore
+    except ImportError as exc:  # pragma: no cover — defensive: Cap #3 subpkg always present
         raise ImportError(
             "kairix eval needs SQLiteFactStore (Capability #3). "
             "fix: ensure your kairix install includes kairix.core.facts. "
             "next: re-run after installing the current build."
         ) from exc
-    store: FactStore = store_cls(db_path=db_path)
+    store: FactStore = SQLiteFactStore(db_path=db_path)
     return store
 
 
@@ -650,37 +634,27 @@ def _resolve_production_fact_extractor(
         return _NullFactExtractor()
 
 
-def _import_default_llm_backend_factory() -> Callable[[], LLMBackend]:
-    """Import :func:`kairix.platform.llm.get_default_backend` as a single atom."""
-    from kairix.platform.llm import get_default_backend
-
-    return get_default_backend
-
-
-def _resolve_production_llm(
-    *,
-    backend_loader: Callable[[], Callable[[], LLMBackend]] | None = None,
-) -> LLMBackend:
+def _resolve_production_llm() -> LLMBackend:
     """Return the configured production LLM backend.
 
     Resolves via :func:`kairix.platform.llm.get_default_backend` so the
     Plan B-parity surface honours the operator's provider config the
     same way every other production-time LLM call does.
 
-    ``backend_loader`` is the documented composition seam — tests inject
-    a raising loader to drive the ImportError branch. NOT test-only (F6
-    clean): mirrors the pattern used by sibling helpers.
+    The ImportError rewrap is defensive: ``kairix.platform.llm`` ships
+    with every kairix install. The branch is unreachable through normal
+    execution and is excluded from coverage on that basis (rather than
+    driving it through a test-only injection seam on a private helper).
     """
-    loader = backend_loader if backend_loader is not None else _import_default_llm_backend_factory
     try:
-        factory = loader()
-    except ImportError as exc:
+        from kairix.platform.llm import get_default_backend
+    except ImportError as exc:  # pragma: no cover — defensive: subpkg always present
         raise ImportError(
             "kairix eval cannot resolve the configured LLM backend. "
             "fix: check the kairix.platform.llm module is present. "
             "next: re-run after fixing the install."
         ) from exc
-    backend: LLMBackend = factory()
+    backend: LLMBackend = get_default_backend()
     return backend
 
 

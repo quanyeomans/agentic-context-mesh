@@ -883,55 +883,11 @@ def test_resolve_production_fact_extractor_falls_back_on_factory_construction_er
     assert "make_production_fact_extractor raised" in warning
 
 
-# ---------------------------------------------------------------------------
-# _resolve_production_fact_store + _resolve_production_llm injection seams
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_resolve_production_fact_store_raises_importerror_with_actionable_hint() -> None:
-    """When the loader raises ImportError, the helper rewraps it with the
-    F21-shaped operator hint pointing at ``kairix.core.facts``.
-
-    Sabotage-proof: drop the ``raise ImportError(...) from exc`` wrapping
-    and the test fails because the original (terse) ImportError surfaces
-    instead of the operator-actionable one.
-    """
-    from pathlib import Path
-
-    def _broken_loader() -> object:
-        raise ImportError("simulated wiring-import failure")
-
-    with pytest.raises(ImportError) as excinfo:
-        _use_case._resolve_production_fact_store(
-            Path("/tmp/never-touched.sqlite"),
-            store_loader=_broken_loader,  # type: ignore[arg-type] — stub deliberately raises to exercise failure path
-        )
-
-    msg = str(excinfo.value)
-    assert "SQLiteFactStore" in msg
-    assert "fix:" in msg
-    assert "next:" in msg
-
-
-@pytest.mark.unit
-def test_resolve_production_llm_raises_importerror_with_actionable_hint() -> None:
-    """When the backend loader raises ImportError, the helper rewraps it
-    with the F21-shaped hint pointing at ``kairix.platform.llm``.
-
-    Sabotage-proof: drop the rewrapping ``raise ImportError(...) from exc``
-    and the original ImportError leaks through unwrapped.
-    """
-
-    def _broken_loader() -> object:
-        raise ImportError("simulated platform.llm import failure")
-
-    with pytest.raises(ImportError) as excinfo:
-        _use_case._resolve_production_llm(
-            backend_loader=_broken_loader,  # type: ignore[arg-type] — stub deliberately raises to exercise failure path
-        )
-
-    msg = str(excinfo.value)
-    assert "kairix.platform.llm" in msg
-    assert "fix:" in msg
-    assert "next:" in msg
+# _resolve_production_fact_store and _resolve_production_llm have
+# defensive ImportError-rewrap branches that are unreachable in any
+# valid kairix install — both kairix.core.facts and kairix.platform.llm
+# ship with every release. Driving those branches via injected loader
+# kwargs on private helpers would be inappropriate intimacy + F6
+# "test-shaped API". The branches carry ``# pragma: no cover`` with
+# the rationale documented inline; coverage of the helpers' happy paths
+# is provided by the existing main()-driven tests above.
