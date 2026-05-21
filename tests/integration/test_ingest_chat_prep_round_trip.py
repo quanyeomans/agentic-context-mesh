@@ -250,3 +250,95 @@ def test_ingest_chat_then_prep_surfaces_caroline_fact(tmp_path: Path) -> None:
     assert "caroline" in out_lower, (
         f"prep response should reference Caroline. Got:\n{prep_stdout}\nstderr:\n{prep_stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Stream A Lever A — F30 outcome for session-date injection
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_chat_with_session_date_persists_evidence_at(tmp_path: Path) -> None:
+    """End-to-end: ingest-chat with --metadata pins evidence_at on facts.
+
+    Stream A Lever A F30 surface: ``kairix ingest-chat --metadata`` →
+    LLM extractor sees session ``date_time`` → emitted FactRecords carry
+    ``evidence_at`` → SQLite persists it → reading the row back surfaces
+    the date.
+
+    The assertion reads the persisted SQLite directly (rather than via
+    ``kairix prep``) so we pin the field-level wiring, not the
+    retrieval+synthesis path. The earlier round-trip test pins the
+    full retrieval chain.
+
+    Sabotage-proof: drop the ``session_metadata=resolved_metadata``
+    kwarg from the ``fact_extractor.extract`` call in ``ingest_chat``
+    and this test fails because the persisted ``evidence_at`` is
+    ``None`` instead of the session date.
+
+    Run gates match the earlier round-trip test (KAIRIX_E2E=1,
+    KAIRIX_KV_NAME, az CLI). Skips cleanly when any are absent.
+    """
+    skip_reason = _missing_prereqs()
+    if skip_reason is not None:
+        pytest.skip(reason=skip_reason)
+
+    (tmp_path / "data").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "workspace").mkdir()
+    transcript = _write_transcript(tmp_path)
+    cfg = _write_kairix_config(tmp_path)
+    env = _kairix_subprocess_env(tmp_path, cfg)
+
+    # Stream A Lever A — write a --metadata sidecar carrying the
+    # session date_time the extractor should pin onto every emitted
+    # fact's ``evidence_at`` field.
+    metadata_path = tmp_path / "session.metadata.json"
+    metadata_path.write_text(
+        json.dumps({"date_time": "2026-05-04 14:30", "session_id": "s-12"}),
+        encoding="utf-8",
+    )
+
+    ingest = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "ingest-chat",
+            str(transcript),
+            "--metadata",
+            str(metadata_path),
+        ],
+        capture_output=True,
+        timeout=180,
+        check=False,
+        env=env,
+    )
+    assert ingest.returncode == 0, (
+        f"ingest-chat exited {ingest.returncode}\nstdout:\n{ingest.stdout!r}\nstderr:\n{ingest.stderr!r}"
+    )
+
+    # Read the SQLite directly so this assertion pins the storage
+    # contract independently of retrieval-side wiring.
+    import sqlite3
+
+    db_path = tmp_path / "data" / "kairix.db"
+    # The CLI may also create a different filename via KAIRIX_DB_PATH;
+    # probe both locations.
+    if not db_path.exists():
+        alt = list((tmp_path / "data").glob("*.sqlite*")) + list((tmp_path / "data").glob("*.db"))
+        assert alt, f"no sqlite found in {tmp_path / 'data'!s}; CLI may have failed silently"
+        db_path = alt[0]
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT entity, attribute, evidence_at FROM facts WHERE superseded_by IS NULL").fetchall()
+    finally:
+        conn.close()
+
+    assert rows, "ingest-chat produced no facts — Cap #2 extractor may have drifted"
+    # At least one extracted fact carries the session-date anchor.
+    detail_rows = "\n".join(f"  {r['entity']} / {r['attribute']} / {r['evidence_at']}" for r in rows)
+    assert any(r["evidence_at"] == "2026-05-04 14:30" for r in rows), (
+        f"no fact pinned evidence_at to session date. Rows:\n{detail_rows}"
+    )
