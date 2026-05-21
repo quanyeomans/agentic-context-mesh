@@ -79,7 +79,10 @@ def _drive(args: list[str], deps: McpCliDeps) -> tuple[str, str, int]:
 
 
 def _build_deps(
-    *, fake_server: _FakeMcpServer | None = None, fake_runner: _RunRecorder | None = None
+    *,
+    fake_server: _FakeMcpServer | None = None,
+    fake_runner: _RunRecorder | None = None,
+    warm_result: dict[str, Any] | None = None,
 ) -> tuple[McpCliDeps, list[dict], _RunRecorder]:
     fake_server = fake_server or _FakeMcpServer()
     fake_runner = fake_runner or _RunRecorder()
@@ -92,6 +95,7 @@ def _build_deps(
     deps = McpCliDeps(
         build_server_factory=lambda: _fake_build_server,
         uvicorn_runner_factory=lambda: fake_runner,
+        warm_retrieval_stack_fn=lambda: warm_result or {"ready": True, "elapsed_ms": 1},
     )
     return deps, build_calls, fake_runner
 
@@ -120,13 +124,17 @@ def test_serve_http_transport_runs_uvicorn_with_resolved_app(monkeypatch) -> Non
     _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18099"], deps)
 
     assert code == 0
-    assert build_calls == [{"host": "127.0.0.1", "port": 18099}]
+    assert len(build_calls) == 1
+    assert build_calls[0]["host"] == "127.0.0.1"
+    assert build_calls[0]["port"] == 18099
+    assert callable(build_calls[0]["readiness_check"])
     assert len(runner.calls) == 1
     pos, kwargs = runner.calls[0]
     assert pos[0] is not None  # the app object
     assert kwargs == {"host": "127.0.0.1", "port": 18099, "log_level": "info"}
     assert "Starting kairix MCP server on http://127.0.0.1:18099/mcp" in stderr
     assert "+ /sse legacy" in stderr
+    assert "warm-up complete" in stderr
 
 
 @pytest.mark.unit
@@ -138,6 +146,20 @@ def test_serve_http_transport_with_no_sse_flag(monkeypatch) -> None:
     assert code == 0
     assert runner.calls
     assert "(no /sse)" in stderr
+
+
+@pytest.mark.unit
+def test_serve_http_keeps_readiness_closed_when_warmup_fails(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18096"])
+    deps, build_calls, runner = _build_deps(warm_result={"ready": False, "status": "error"})
+
+    _stdout, stderr, code = _drive(["serve", "--transport", "http", "--port", "18096"], deps)
+
+    assert code == 0
+    assert runner.calls
+    assert callable(build_calls[0]["readiness_check"])
+    assert build_calls[0]["readiness_check"]() is False
+    assert "warm-up incomplete" in stderr
 
 
 @pytest.mark.unit
@@ -213,7 +235,10 @@ def test_resolve_port_auto_detect_when_default_available(monkeypatch, _no_mcp_po
     deps.find_available_port_fn = lambda *, preferred: preferred
     _stdout, _stderr, code = _drive(["serve", "--transport", "http"], deps)
     assert code == 0
-    assert build_calls == [{"host": "127.0.0.1", "port": 8080}]
+    assert len(build_calls) == 1
+    assert build_calls[0]["host"] == "127.0.0.1"
+    assert build_calls[0]["port"] == 8080
+    assert callable(build_calls[0]["readiness_check"])
 
 
 @pytest.mark.unit
@@ -231,6 +256,9 @@ def test_resolve_port_auto_detect_falls_back_when_default_in_use(monkeypatch, _n
     deps.find_available_port_fn = lambda *, preferred: 19100
     _stdout, stderr, code = _drive(["serve", "--transport", "http"], deps)
     assert code == 0
-    assert build_calls == [{"host": "127.0.0.1", "port": 19100}]
+    assert len(build_calls) == 1
+    assert build_calls[0]["host"] == "127.0.0.1"
+    assert build_calls[0]["port"] == 19100
+    assert callable(build_calls[0]["readiness_check"])
     assert "Port 8080 is in use" in stderr
     assert "KAIRIX_MCP_PORT=19100" in stderr

@@ -29,6 +29,7 @@ kairix/quality/benchmark/suite.py
 kairix/quality/eval/generate.py
 kairix/quality/eval/gold_builder.py
 kairix/quality/eval/monitor.py
+kairix/quality/probe/config_cli.py
 kairix/secrets.py
 kairix/use_cases/search.py
 kairix/use_cases/timeline.py

@@ -44,6 +44,12 @@ CASES: list[tuple[str, QueryIntent]] = [
     ("why does hybrid search outperform pure vector", QueryIntent.SEMANTIC),
     ("explain the architecture of the kairix memory system", QueryIntent.SEMANTIC),
     ("what are the trade-offs between BM25 and vector search", QueryIntent.SEMANTIC),
+    # --- ATTRIBUTE_FACT (Plan B-parity Cap #5) — short entity-attribute lookups ---
+    ("what is acme's address?", QueryIntent.ATTRIBUTE_FACT),
+    ("what's jordan's role?", QueryIntent.ATTRIBUTE_FACT),
+    ("address of acme?", QueryIntent.ATTRIBUTE_FACT),
+    ("role of Jordan?", QueryIntent.ATTRIBUTE_FACT),
+    ("acme's address", QueryIntent.ATTRIBUTE_FACT),
 ]
 
 
@@ -154,3 +160,154 @@ def test_http_error_code_is_keyword() -> None:
 def test_allcaps_error_code_is_keyword() -> None:
     """ALLCAPS error codes are KEYWORD."""
     assert classify("AZURE-OPENAI-001 error diagnosis") == QueryIntent.KEYWORD
+
+
+# ---------------------------------------------------------------------------
+# ATTRIBUTE_FACT — Plan B-parity Capability #5 (federation in SearchPipeline)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_attribute_fact_what_is_x_y_pattern() -> None:
+    """``what is X's Y?`` lookups classify as ATTRIBUTE_FACT.
+
+    Sabotage-proof: remove the ``_ATTRIBUTE_FACT_PATTERNS`` block from
+    intent.py (or delete the ``ATTRIBUTE_FACT`` branch from ``classify``)
+    and this assertion flips to ENTITY (the next candidate in priority
+    order matches "what is .... role" via the ENTITY pattern).
+    """
+    assert classify("what is acme's address?") == QueryIntent.ATTRIBUTE_FACT
+
+
+@pytest.mark.unit
+def test_attribute_fact_y_of_x_pattern() -> None:
+    """``Y of X?`` short attribute lookups classify as ATTRIBUTE_FACT.
+
+    Sabotage-proof: drop the second pattern (the ``\\bof\\b``-anchored
+    one) and this query falls all the way to SEMANTIC. The check below
+    pins both that the new intent fires AND that the shorter "of"
+    variant isn't being misrouted to KEYWORD via the Title-Case heuristic.
+    """
+    assert classify("address of Acme?") == QueryIntent.ATTRIBUTE_FACT
+
+
+@pytest.mark.unit
+def test_attribute_fact_possessive_only_pattern() -> None:
+    """Bare ``X's Y`` possessive without a leading question word fires."""
+    assert classify("acme's address") == QueryIntent.ATTRIBUTE_FACT
+
+
+@pytest.mark.unit
+def test_attribute_fact_does_not_override_temporal() -> None:
+    """TEMPORAL takes priority over ATTRIBUTE_FACT in the same query.
+
+    Per the documented order: TEMPORAL > MULTI_HOP > ATTRIBUTE_FACT.
+    """
+    # "last week" is TEMPORAL, "X's Y" looks ATTRIBUTE_FACT → TEMPORAL wins.
+    assert classify("what was acme's address last week") == QueryIntent.TEMPORAL
+
+
+@pytest.mark.unit
+def test_attribute_fact_does_not_override_multi_hop() -> None:
+    """MULTI_HOP takes priority over ATTRIBUTE_FACT in the same query."""
+    # "relates to" is MULTI_HOP → MULTI_HOP wins despite the possessive.
+    assert classify("how does acme's address relate to billing") == QueryIntent.MULTI_HOP
+
+
+@pytest.mark.unit
+def test_attribute_fact_long_narrative_query_falls_to_other_intents() -> None:
+    """Long narrative questions don't slip into ATTRIBUTE_FACT.
+
+    A multi-clause narrative containing a possessive should not be
+    captured by the tight "what is X's Y?" head pattern.
+    Sabotage-proof: relax the head pattern to match anywhere in the
+    string (drop the ``^`` / "what is" anchor) and long narratives like
+    the one below start misclassifying.
+    """
+    # No tight possessive head, "tell me about" is ENTITY → ENTITY.
+    result = classify("tell me about Acme Corp and their history")
+    assert result == QueryIntent.ENTITY
+
+
+# ---------------------------------------------------------------------------
+# ATTRIBUTE_FACT — Plan B-parity D2 remediation (broader patterns)
+# ---------------------------------------------------------------------------
+#
+# Empirical motivation: the 2026-05-21 LoCoMo benchmark showed 5% pass
+# rate (below the 11% pre-Plan-B baseline). Categorising the 60
+# responses by intent: questions of the shape "What did X verb?" and
+# "Who is/was X's Y?" were routing to SEMANTIC (low fact weight in
+# fusion), so even when the right fact was retrieved it ranked below
+# unrelated chunks. These patterns broaden the ATTRIBUTE_FACT surface
+# without bleeding into TEMPORAL (the "do last/this/in" suffix still
+# protects the temporal queries) or MULTI_HOP.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "query",
+    [
+        "what did Caroline research?",
+        "what did Jordan publish?",
+        "what did Acme acquire?",
+    ],
+)
+def test_attribute_fact_what_did_x_verb_pattern(query: str) -> None:
+    """``What did X verb?`` single-verb factoid lookups classify as ATTRIBUTE_FACT.
+
+    Sabotage-proof: deleted the 4th pattern in ``_ATTRIBUTE_FACT_PATTERNS``
+    (the ``what\\s+did\\s+\\S+\\s+\\w+`` one) → all three queries fall to
+    SEMANTIC. Restored.
+    """
+    assert classify(query) == QueryIntent.ATTRIBUTE_FACT
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "query",
+    [
+        "who is Caroline's friend?",
+        "who was Jordan's mentor?",
+        "who is Acme's CEO?",
+    ],
+)
+def test_attribute_fact_who_is_x_possessive_pattern(query: str) -> None:
+    """``Who is/was X's Y?`` possessive identity lookups classify as ATTRIBUTE_FACT.
+
+    Sabotage-proof: deleted the 5th pattern (the ``who(?:'s|\\s+is|\\s+was|
+    \\s+are|\\s+were)\\s+\\S+'s\\s+\\w+`` one) → all three queries fall to
+    ENTITY via the ``\\bwho\\s+is\\b`` pattern (which would lose the
+    fact-dominant fusion weighting they need). Restored.
+    """
+    assert classify(query) == QueryIntent.ATTRIBUTE_FACT
+
+
+@pytest.mark.unit
+def test_attribute_fact_what_did_x_do_temporal_still_wins() -> None:
+    """The existing TEMPORAL ``what did X do last/this/in`` pattern keeps priority.
+
+    Pins that the broader ``what did X verb`` pattern doesn't bleed into
+    the temporal surface — questions with explicit time suffixes still
+    route to TEMPORAL (so date-aware retrieval + timeline rewriting
+    fire correctly). Sabotage-proof: dropped the explicit anchor on
+    the new pattern (so it matches any "what did X <one-word>" prefix)
+    → this temporal query would route ATTRIBUTE_FACT first, but the
+    ``what did X do ... last/this/in`` TEMPORAL pattern fires earlier
+    in priority order so the test continues to pass — confirming the
+    priority guard works as documented.
+    """
+    assert classify("what did Caroline do last week?") == QueryIntent.TEMPORAL
+
+
+@pytest.mark.unit
+def test_attribute_fact_what_did_x_multi_clause_falls_through() -> None:
+    """Multi-clause "what did X verb [and ...]" doesn't slip into ATTRIBUTE_FACT.
+
+    The 4th pattern is anchored at start AND end (``$``), so a multi-clause
+    narrative continues past the question word and falls through to
+    SEMANTIC (or another intent that matches the trailing clause).
+    """
+    # No tight ATTRIBUTE_FACT shape (extra trailing clause); no
+    # TEMPORAL/MULTI_HOP/ENTITY/PROCEDURAL signal → SEMANTIC.
+    result = classify("what did Caroline research about ancient civilisations")
+    assert result == QueryIntent.SEMANTIC

@@ -103,6 +103,8 @@ pytest_plugins = [
     "tests.bdd.steps.provider_ollama_steps",
     "tests.bdd.steps.provider_openai_steps",
     "tests.bdd.steps.provider_wire_common_steps",
+    # Provider chat parameter-routing (gpt-5/o1/o3 max_completion_tokens translation).
+    "tests.bdd.steps.provider_chat_max_completion_tokens_steps",
     # E2E provider journey step modules.
     "tests.bdd.steps.e2e_provider_chat_steps",
     "tests.bdd.steps.e2e_provider_embed_steps",
@@ -112,6 +114,24 @@ pytest_plugins = [
     "tests.bdd.steps.probe_config_health_steps",
     # Layered config loader — image-bundled base + sparse operator overlay.
     "tests.bdd.steps.config_layering_steps",
+    # Plan B-parity Week 1 — conversation ingest CLI/use-case.
+    "tests.bdd.steps.ingest_chat_steps",
+    # Plan B-parity Week 2 — eval suite CLI/use-case.
+    "tests.bdd.steps.eval_suite_steps",
+    # Plan B-parity Week 4 Stream A — CI workflow extensions for eval gates.
+    "tests.bdd.steps.eval_ci_gates_steps",
+    # Plan B-parity Week 4 Stream C — soak BDD for fact-extractor pipeline.
+    # Collected unconditionally; runtime-gated on KAIRIX_SOAK=1 inside the
+    # step bodies so normal CI sees the scenarios but skips at first Given.
+    "tests.bdd.steps.soak_fact_extractor_steps",
+    # Plan B-parity Week 5 Stream A — MCP ingest + recall tools.
+    "tests.bdd.steps.mcp_ingest_chat_steps",
+    "tests.bdd.steps.mcp_facts_about_steps",
+    # P5 unified benchmark contract — quality + perf + stability lenses
+    # wired through the canonical kairix benchmark run surface. Soak +
+    # concurrent scenarios are tagged @pytest.mark.skip in the loader
+    # until P3.b / P3.c land.
+    "tests.bdd.steps.benchmark_unified_contract_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

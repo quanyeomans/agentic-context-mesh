@@ -1,0 +1,50 @@
+[
+  {
+    "question": "Why did the team choose the hybrid transport over the event-bus for project-rho?",
+    "answer": "Hybrid bounds the margin leak to pricing-outage windows (5-minute staleness cap) whereas event-bus has permanent eventual-consistency leak even when pricing is healthy. Hybrid is also cheaper ($90/month vs $2.2k/month) and faster to build (3 weeks vs 5 weeks). There were no async consumers planned that would have justified the event-bus decoupling.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-beta-s002-t002", "eng-beta-s002-t004", "eng-beta-s002-t007", "eng-beta-s002-t009", "eng-beta-s003-t007", "eng-beta-s003-t008"]
+  },
+  {
+    "question": "What is the latency budget for project-rho's quote generation?",
+    "answer": "800ms p95 end-to-end",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-beta-s001-t003"]
+  },
+  {
+    "question": "Under what conditions would the team revisit the project-rho transport decision?",
+    "answer": "If an async-consumer requirement emerges — for example an analytics or downstream-streaming consumer — the math shifts back toward the event-bus.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-beta-s002-t011", "eng-beta-s002-t012"]
+  },
+  {
+    "question": "How much margin leak per outage does the hybrid option carry in the worst case?",
+    "answer": "Approximately $6,100 per typical 18-minute pricing outage (~$340 per minute of outage).",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-beta-s003-t004"]
+  },
+  {
+    "question": "How many pricing SLO breaches happened in the quarter before the decision was made?",
+    "answer": "Three breaches, averaging 18 minutes each.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-beta-s001-t007"]
+  },
+  {
+    "question": "Did the team consider any async consumers when sizing the decoupling benefit?",
+    "answer": "Yes — the renewal engine (Q3) and partner-quote API were named, but both are synchronous consumers. No planned async consumer would benefit from event-bus, so the decoupling argument did not carry.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-beta-s002-t006", "eng-beta-s002-t007", "eng-beta-s002-t008"]
+  },
+  {
+    "question": "Summarise the project-rho transport decision and the tradeoffs that drove it.",
+    "answer": "The team chose a hybrid transport (synchronous gRPC primary with a 5-minute pricing-snapshot fallback) for project-rho's pricing-to-quote-generator path. The decision is recorded as ADR-007. Hybrid won over pure gRPC because it bounds the downstream blast radius of pricing outages (5-minute staleness cap vs full outage propagation), and won over an event-bus option because it avoids permanent eventual-consistency margin leak while costing less to build (3 weeks vs 5) and less to run ($90/month vs $2.2k/month). The decision is to be revisited if an async-consumer requirement emerges.",
+    "category": "open-domain",
+    "evidence_turn_ids": ["eng-beta-s002-t010", "eng-beta-s003-t007", "eng-beta-s003-t009", "eng-beta-s002-t012"]
+  },
+  {
+    "question": "Which team member raised the hybrid option originally?",
+    "answer": "you didn't tell me that — the hybrid option appeared in cost-analyst's turn but the conversation does not say it was their original idea.",
+    "category": "adversarial",
+    "evidence_turn_ids": ["eng-beta-s001-t011"]
+  }
+]

@@ -41,7 +41,13 @@ case "$MODE" in
         echo "Starting background worker (embed hourly, entity seed nightly)..."
         exec python -m kairix.worker
         ;;
-    eval)
+    benchmark-reflib)
+        # Legacy operator shortcut for the reference-library quality benchmark.
+        # Renamed from "eval" so the new ``kairix eval`` suite-runner CLI
+        # (Plan B-parity Capability #4, dispatched via the ``*)`` passthrough
+        # below) reaches its handler unmodified — see
+        # docs/operations/MCP-DEPLOYMENT.md "Running eval from the deployed
+        # container".
         echo "Indexing reference library..."
         kairix embed
         echo "Running reference library benchmark (200 cases, RRF k=10)..."

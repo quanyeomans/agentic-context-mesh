@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from kairix.core.search.scope import Scope
+from kairix.paths import trace_enabled
 from kairix.text import estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -148,36 +149,98 @@ def _build_messages(query: str, tier: str, context: str) -> list[dict[str, str]]
     ]
 
 
-# Without this floor, a top-5 hit with a 12-character snippet ("see ref-001")
-# gets fed to the LLM as "context" — the model treats it as authoritative and
-# hallucinates to fill the gap (#254 dogfood). 40 chars is empirical: an actual
-# sentence-worth of grounding; anything shorter is title-equivalent.
+# Without this floor, a top-5 chunk hit with a 12-character snippet ("see
+# ref-001") gets fed to the LLM as "context" — the model treats it as
+# authoritative and hallucinates to fill the gap (#254 dogfood). 40 chars
+# is empirical: a sentence-worth of grounding; anything shorter is
+# title-equivalent. The floor is CHUNK-tier only — fact rows are
+# structured triplets ("Caroline role: VP of People" ~ 27 chars) whose
+# compactness is the feature, not a bug, and they get a dedicated
+# minimum below (#327 Plan-B remediation D1).
 _MIN_USEFUL_SNIPPET_CHARS = 40
+_MIN_FACT_SNIPPET_CHARS = 1
+
+
+@dataclass
+class _ContextCounters:
+    """Per-row counters accumulated by ``_classify_row`` for the trace log."""
+
+    chunks_total: int = 0
+    chunks_kept: int = 0
+    facts_total: int = 0
+    facts_kept: int = 0
+
+
+def _classify_row(budgeted: Any, counters: _ContextCounters) -> tuple[str, str] | None:
+    """Apply the per-tier snippet floor; return ``(title, formatted_snippet)``
+    or ``None`` when the row should be dropped from LLM context.
+
+    Bumps the right counter on ``counters`` for both totals and kept rows
+    — keeping the trace log accurate even when ``_format_context`` is
+    extracted into helpers.
+    """
+    inner = getattr(budgeted, "result", None)
+    if inner is None:
+        return None
+    title = getattr(inner, "title", "") or getattr(inner, "path", "")
+    snippet = (getattr(budgeted, "content", "") or "").strip()
+    is_fact = str(getattr(inner, "path", "")).startswith("facts://")
+    if is_fact:
+        counters.facts_total += 1
+        floor = _MIN_FACT_SNIPPET_CHARS
+    else:
+        counters.chunks_total += 1
+        floor = _MIN_USEFUL_SNIPPET_CHARS
+    if len(snippet) < floor:
+        return None
+    if is_fact:
+        counters.facts_kept += 1
+    else:
+        counters.chunks_kept += 1
+    return str(title), f"[{title}]\n{snippet[:500]}"
 
 
 def _format_context(search_result: Any) -> tuple[str, list[str]]:
     """Project a SearchResult's top 5 hits into a context string + source titles.
 
-    Only hits with non-trivial snippet content (≥ ``_MIN_USEFUL_SNIPPET_CHARS``)
-    are included in the LLM context. Hits with empty/title-only content are
-    still returned in ``sources`` if at least one usable hit exists, so the
-    operator can see what the retrieval found even when its content was thin.
-    Returns ``("", [])`` when no hit has usable snippet content — the caller
-    treats this as "no relevant documents" rather than calling the LLM.
+    Chunk hits need ``_MIN_USEFUL_SNIPPET_CHARS`` of snippet content to
+    earn LLM context inclusion — anything shorter is title-equivalent
+    and feeds hallucination. Fact rows (synthesised under the
+    ``facts://`` path by SearchPipeline's fact federation) carry
+    intentionally compact entity-attribute-value triplets and are
+    exempt from the chunk floor; they only need to be non-empty.
+
+    Returns ``("", [])`` when no hit has usable snippet content — the
+    caller treats this as "no relevant documents" rather than calling
+    the LLM.
+
+    Emits a single ``KAIRIX_TRACE``-gated INFO log capturing how many
+    chunk vs fact hits were considered vs kept and the resulting LLM
+    context size. Plan B-parity post-mortem (D4 remediation): this is
+    the diagnostic that would have made D1 (fact snippets filtered by
+    the chunk floor) obvious in seconds rather than two days.
     """
     parts: list[str] = []
     sources: list[str] = []
+    counters = _ContextCounters()
     for budgeted in getattr(search_result, "results", [])[:5]:
-        inner = getattr(budgeted, "result", None)
-        if inner is None:
+        classified = _classify_row(budgeted, counters)
+        if classified is None:
             continue
-        title = getattr(inner, "title", "") or getattr(inner, "path", "")
-        snippet = (getattr(budgeted, "content", "") or "").strip()
-        if len(snippet) < _MIN_USEFUL_SNIPPET_CHARS:
-            continue
-        parts.append(f"[{title}]\n{snippet[:500]}")
-        sources.append(str(title))
-    return ("\n\n---\n\n".join(parts) if parts else ""), sources
+        title, formatted = classified
+        sources.append(title)
+        parts.append(formatted)
+    context = "\n\n---\n\n".join(parts) if parts else ""
+    if trace_enabled():
+        logger.info(
+            "prep.context: chunks %d/%d kept, facts %d/%d kept, %d ctx chars",
+            counters.chunks_kept,
+            counters.chunks_total,
+            counters.facts_kept,
+            counters.facts_total,
+            len(context),
+        )
+    return context, sources
 
 
 def run_prep(

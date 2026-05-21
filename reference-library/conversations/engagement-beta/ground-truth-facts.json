@@ -1,0 +1,68 @@
+[
+  {
+    "entity": "project-rho",
+    "attribute": "transport-decision",
+    "value": "hybrid (gRPC primary with 5-minute pricing-snapshot fallback)",
+    "evidence_turn_ids": ["eng-beta-s002-t010", "eng-beta-s003-t009"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "latency-budget-p95",
+    "value": "800ms end-to-end",
+    "evidence_turn_ids": ["eng-beta-s001-t003"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "estimated-effort-hybrid",
+    "value": "3 weeks",
+    "evidence_turn_ids": ["eng-beta-s002-t004", "eng-beta-s003-t009"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "estimated-effort-event-bus",
+    "value": "5 weeks",
+    "evidence_turn_ids": ["eng-beta-s002-t004"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "event-bus-carry-cost",
+    "value": "$2.2k/month",
+    "evidence_turn_ids": ["eng-beta-s001-t004"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "hybrid-carry-cost",
+    "value": "$90/month",
+    "evidence_turn_ids": ["eng-beta-s002-t002", "eng-beta-s003-t009"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "worst-case-margin-leak-per-outage",
+    "value": "$6,100 (over a typical 18-minute pricing outage)",
+    "evidence_turn_ids": ["eng-beta-s003-t004"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "adr-id",
+    "value": "ADR-007",
+    "evidence_turn_ids": ["eng-beta-s003-t009"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "pricing-slo-breaches-last-quarter",
+    "value": "3 breaches, average 18 minutes",
+    "evidence_turn_ids": ["eng-beta-s001-t007"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "revisit-trigger",
+    "value": "an async consumer requirement emerges",
+    "evidence_turn_ids": ["eng-beta-s002-t011", "eng-beta-s002-t012"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "quote-volume",
+    "value": "4 million quotes/day projected",
+    "evidence_turn_ids": ["eng-beta-s001-t004"]
+  }
+]

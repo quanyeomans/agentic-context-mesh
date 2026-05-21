@@ -622,6 +622,38 @@ def aggregate_ndcg_metrics(
 # ---------------------------------------------------------------------------
 
 
+def _build_single_shot_runs(case_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project the legacy case_results list onto the unified per-query shape.
+
+    Returns a list of dicts matching ``QueryRunResult`` field names so the
+    diagnostics envelope stays JSON-serialisable (the dataclass would
+    require ``dataclasses.asdict`` or a custom encoder otherwise). First
+    case is labelled ``cold``; the rest are ``warm`` — matching the
+    convention encoded by :func:`kairix.quality.benchmark.modes.run_single_shot`.
+
+    Pure projection — no retrieval, no scoring, no clock work. The legacy
+    case loop has already produced everything we need; this just relabels.
+    """
+    rows: list[dict[str, Any]] = []
+    for idx, row in enumerate(case_results):
+        phase = "cold" if idx == 0 else "warm"
+        succeeded = "error" not in row
+        rows.append(
+            {
+                "case_id": row.get("id", ""),
+                "category": row.get("category", ""),
+                "query": row.get("query", ""),
+                "latency_ms": row.get("elapsed_ms", 0.0),
+                "succeeded": succeeded,
+                "score": row.get("score"),
+                "stage_latency_ms": {},
+                "error": row.get("error", "") or "",
+                "latency_phase": phase,
+            }
+        )
+    return rows
+
+
 def _validate_suite_prerequisites(suite: BenchmarkSuite) -> None:
     """Validate suite has usable gold references before scoring.
 
@@ -664,6 +696,7 @@ def run_benchmark(
     collection: str | None = None,
     fusion_override: str | None = None,
     deps: BenchmarkDeps | None = None,
+    mode: str | None = None,
 ) -> BenchmarkResult:
     """
     Run all benchmark cases and return a BenchmarkResult.
@@ -678,6 +711,12 @@ def run_benchmark(
         deps:       Injectable boundary collaborators (classifier, chat backend,
                     retrieve). ``None`` means construct production defaults; tests
                     pass ``BenchmarkDeps(retrieve=fake_retrieve, classifier=...)``.
+        mode:       Optional unified-runner mode tag. ``None`` (default) preserves the
+                    legacy NDCG-aggregate-only path. ``"single-shot"`` additionally
+                    surfaces per-query ``QueryRunResult`` rows on
+                    ``result.diagnostics["per_query_runs"]`` via
+                    :func:`kairix.quality.benchmark.modes.run_single_shot`. Concurrent
+                    and soak modes are deferred (P3.b / P3.c slices).
 
     Returns:
         BenchmarkResult with summary, category scores, and per-case results.
@@ -754,6 +793,13 @@ def run_benchmark(
     gates = {gate: weighted_total >= threshold for gate, threshold in PHASE_GATES.items()}
     ndcg_at_10, hit_rate_at_5, mrr_at_10 = aggregate_ndcg_metrics(case_results)
 
+    diagnostics: dict[str, Any] = {
+        "category_counts": {cat: len(scores) for cat, scores in category_scores.items()},
+    }
+    if mode == "single-shot":
+        diagnostics["mode"] = "single-shot"
+        diagnostics["per_query_runs"] = _build_single_shot_runs(case_results)
+
     result = BenchmarkResult(
         meta={
             "suite_name": suite.meta.get("name", "unknown"),
@@ -764,6 +810,7 @@ def run_benchmark(
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "n_cases": len(suite.cases),
             "weighted_total": weighted_total,
+            "mode": mode,
         },
         summary={
             "weighted_total": weighted_total,
@@ -773,9 +820,7 @@ def run_benchmark(
             "hit_rate_at_5": hit_rate_at_5,
             "mrr_at_10": mrr_at_10,
         },
-        diagnostics={
-            "category_counts": {cat: len(scores) for cat, scores in category_scores.items()},
-        },
+        diagnostics=diagnostics,
         cases=case_results,
     )
 

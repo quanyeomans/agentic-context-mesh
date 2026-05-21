@@ -10,6 +10,7 @@ Follows the same pattern as kairix.platform.llm.protocol.LLMBackend.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from kairix.core.search.intent import QueryIntent
@@ -272,3 +273,366 @@ class Retriever(Protocol):
         collections: list[str] | None = None,
         cfg: Any = None,
     ) -> Any: ...
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 of mem0-vs-kairix-uplift plan — pluggable memory-backend Protocol.
+#
+# MemoryStore is the boundary between kairix's use cases (prep, search,
+# brief, ...) and the configured memory backend. Two production
+# implementations are planned: KairixNativeMemoryStore (wraps the existing
+# SearchPipeline / chunk store, vault paradigm) and Mem0MemoryStore (wraps
+# mem0.Memory, conversation paradigm). The Protocol is intentionally
+# backend-agnostic: chunk-shaped and fact-shaped stores both satisfy it;
+# the consumer-side code in use cases doesn't know which is configured.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class MemoryStore(Protocol):
+    """Memory backend boundary — vault-shaped or conversation-shaped.
+
+    The lingua-franca surface for "store and recall a memory" across
+    all backends. Implementations translate their native record shape
+    (kairix chunks, mem0 facts, ...) into the common ``Memory`` value
+    object returned by ``search``.
+
+    Implementations must be safe to construct repeatedly (idempotent
+    init) and tolerate concurrent ``search`` calls from the MCP layer.
+    Persistence semantics are backend-specific; the Protocol does not
+    pin durability guarantees beyond "writes from ``add`` are visible
+    to subsequent ``search`` calls in the same process".
+    """
+
+    # add(content, *, metadata): backend-assigned id. metadata carries
+    # backend-agnostic fields (source path, agent, timestamp, entity hints);
+    # backends ignore unknown keys and round-trip the rest on search.
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str: ...
+
+    # search(query, *, top_k): up to top_k Memory-shaped objects, best
+    # first. Empty list is a valid "no relevant content" signal — callers
+    # MUST tolerate it. Implementations may return fewer than top_k.
+    def search(self, query: str, *, top_k: int = 10) -> list[Any]: ...
+
+    # update(memory_id, content): replace content of an existing memory.
+    # Raises KeyError (or backend equivalent) if id absent. Backends with
+    # append-only semantics (mem0 consolidation) may supersede rather than
+    # replace — the Protocol does not pin the strategy.
+    def update(self, memory_id: str, content: str) -> None: ...
+
+    # delete(memory_id): remove. No-op if id is already absent.
+    def delete(self, memory_id: str) -> None: ...
+
+
+@runtime_checkable
+class ConversationStore(Protocol):
+    """Chat-paradigm memory store — adds turn-level ingestion.
+
+    Specialisation of ``MemoryStore`` for backends that ingest
+    individual conversation turns (mem0, future LLM-fact-extractor
+    layer in kairix-native uplift). Backends typically run an
+    LLM-extraction pass per turn or sliding window; ``add_turn``
+    returns the id of the most recently-produced memory record.
+
+    Composition note: implementations of ``ConversationStore`` MUST
+    also satisfy ``MemoryStore`` (the ``add``/``search``/``update``/
+    ``delete`` surface) — the duplication here keeps the
+    ``runtime_checkable`` isinstance() probe simple while documenting
+    the chat-specific entry point.
+    """
+
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str: ...
+    def search(self, query: str, *, top_k: int = 10) -> list[Any]: ...
+    def update(self, memory_id: str, content: str) -> None: ...
+    def delete(self, memory_id: str) -> None: ...
+
+    # add_turn(*, message, role, conversation_id, timestamp): adds a single
+    # turn; returns the id of the most-recently-produced memory record.
+    # Distinct from add(): backends like mem0 run an LLM-extraction pass
+    # per turn or batch to emit canonical records. timestamp is ISO-8601
+    # (RFC3339 subset); benchmarks against historical corpora MUST pass
+    # the in-corpus timestamp so temporal queries resolve.
+    def add_turn(
+        self,
+        *,
+        message: str,
+        role: str,
+        conversation_id: str,
+        timestamp: str | None = None,
+    ) -> str: ...
+
+
+@runtime_checkable
+class Memory(Protocol):
+    """A recalled memory across any ``MemoryStore`` backend.
+
+    Lingua-franca shape for what ``MemoryStore.search`` returns. The
+    Protocol pins the four attributes use-case code reads
+    (``id``/``content``/``score``/``metadata``). Implementations are
+    typically frozen dataclasses; concrete backends may carry
+    additional fields beyond these four.
+
+    ``score`` is rescaled to ``[0.0, 1.0]`` (1.0 = best match).
+    Backends translate their native ranking into this scale so
+    cross-backend fusion at the use-case layer is meaningful.
+    """
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def content(self) -> str: ...
+    @property
+    def score(self) -> float: ...
+    @property
+    def metadata(self) -> dict[str, Any]: ...
+
+
+# ---------------------------------------------------------------------------
+# Plan B-parity (mem0-vs-kairix-uplift) — fact-extraction Protocols.
+#
+# Companion to the chunk-shaped retrieval already in SearchPipeline.
+# Conversation corpora are ingested turn-by-turn; an LLM fact extractor
+# converts windowed turns into canonical entity-attribute-value records
+# (``FactRecord``); a fact-shaped store keeps these alongside chunks; the
+# SearchPipeline federates retrieval across both.
+#
+# Single-hop LoCoMo evidence: chunks alone score 9%; mem0's fact pattern
+# scores 21% on the same questions. Adding the fact layer inside kairix-native
+# closes that gap while keeping the multi-hop win chunks already provide
+# (kairix 12% vs mem0 5%). Federation is the strategic moat.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class FactRecord(Protocol):
+    """A canonical entity-attribute-value record extracted from conversation turns.
+
+    Lingua franca between :class:`FactExtractor` (emits) and
+    :class:`FactStore` (persists + recalls). Implementations are
+    typically frozen dataclasses; the Protocol pins the read surface
+    that everything downstream consumes (retrieval, consolidation,
+    Surface-B hydration, Surface-C learning).
+
+    Identity contract:
+
+    - ``id`` is deterministic — derived from ``(entity, attribute,
+      source_turn_ids)``. Same triple from same turns → same id. This
+      makes idempotent re-ingest safe and lets ``FactStore.add`` do a
+      cheap UPSERT.
+
+    Provenance contract:
+
+    - ``source_turn_ids`` MUST trace back to raw turns the extractor
+      consumed. Empty tuples are invalid (callers will raise).
+
+    Versioning / consolidation contract:
+
+    - ``superseded_by`` is ``None`` for live facts; set to another
+      fact's id once a conflict-detection pass identifies a newer
+      record about the same (entity, attribute). The full history
+      stays queryable (audit + Surface-C signal); production search
+      filters to ``superseded_by IS NULL`` by default.
+
+    Temporal-anchor contract (Stream A, Lever A):
+
+    - ``evidence_at`` is an optional ISO-8601 string carrying the
+      *event-time* the fact occurred in the world — distinct from
+      ``extracted_at`` which is wall-clock at extraction time. For
+      session-windowed extraction the default is the session's
+      ``date_time``; the LLM MAY resolve relative references in the
+      turn ("last night", "the week before") to a specific date and
+      emit a different value. ``None`` means the corpus had no
+      temporal anchor for the fact (legacy rows from pre-Lever-A
+      ingests, or sessions ingested without session_metadata).
+    """
+
+    @property
+    def id(self) -> str: ...
+    @property
+    def entity(self) -> str: ...
+    @property
+    def attribute(self) -> str: ...
+    @property
+    def value(self) -> str: ...
+    @property
+    def confidence(self) -> float: ...
+    @property
+    def source_turn_ids(self) -> tuple[str, ...]: ...
+    @property
+    def extracted_at(self) -> str: ...
+    @property
+    def superseded_by(self) -> str | None: ...
+    @property
+    def namespace(self) -> str: ...
+    @property
+    def evidence_at(self) -> str | None: ...
+
+
+@runtime_checkable
+class FactHit(Protocol):
+    """A FactRecord plus a recall score, returned by :meth:`FactStore.search`.
+
+    The minimum read surface downstream code needs from a search hit:
+    the underlying ``record`` + the ``score`` retrieval assigned to it.
+    Implementations may carry additional diagnostic fields (which
+    sub-retriever produced the hit, raw BM25/vector contribution, etc.)
+    but downstream code only depends on these two.
+    """
+
+    @property
+    def record(self) -> FactRecord: ...
+    @property
+    def score(self) -> float: ...
+
+
+@runtime_checkable
+class FactExtractor(Protocol):
+    """Convert a window of conversation turns into canonical fact records.
+
+    Production implementation is an LLM-driven extractor that runs
+    against the configured provider (azure_foundry / openai /
+    anthropic / bedrock / ...). The prompt asks the LLM to surface
+    every entity-attribute-value triple that can be grounded in the
+    given turns. Confidence is the LLM's own per-record rating; the
+    eval gate calibrates it against ground truth.
+
+    Test fakes (``FakeFactExtractor``) return scripted records so
+    contract tests can pin the consumer-side behaviour without an
+    LLM call.
+
+    Idempotency: re-extracting the same windowed turns SHOULD produce
+    facts with the same ids (because ``FactRecord.id`` is deterministic
+    from ``(entity, attribute, source_turn_ids)``). Implementations
+    that pass turns through an LLM with non-zero temperature won't
+    achieve strict idempotency — that's why the production wire-up
+    runs the extractor with temperature=0.0 in CI.
+    """
+
+    # extract(turns, window_hint, session_metadata): zero or more FactRecords
+    # grounded in turns.
+    # turns: list of turn dicts with at least id, speaker/role, content/text
+    # keys (LoCoMo / chat-message shape). window_hint reserved for future
+    # prompt-engineering knobs; production extractors may ignore it.
+    # session_metadata (Stream A Lever A): optional dict carrying the
+    # session ``date_time`` + ``session_id`` etc. The extractor pins
+    # ``FactRecord.evidence_at`` to the session's default anchor when
+    # the LLM omits a per-fact override.
+    # Empty-list return is a valid "no facts groundable" signal — callers
+    # MUST tolerate it without raising.
+    def extract(
+        self,
+        *,
+        turns: list[dict[str, Any]],
+        window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> list[FactRecord]: ...
+
+
+@runtime_checkable
+class FactStore(Protocol):
+    """Persist + recall ``FactRecord`` data; back-compat companion to chunks.
+
+    The fact-shaped sibling of the SearchPipeline's chunk store.
+    Production implementation wraps SQLite (FTS5 + an index on
+    ``entity, attribute``) plus a usearch vector index over the
+    concatenated ``(entity, attribute, value)`` strings. Test fakes
+    are dict-backed.
+
+    Backwards compatibility: deployments that never call ``add``
+    have an empty fact store. ``search`` against empty returns ``[]``.
+    The SearchPipeline tolerates ``fact_retriever=None`` and runs
+    the chunk-only pipeline (today's behaviour).
+    """
+
+    # add(fact): persist a fact. Idempotent on the fact's deterministic id.
+    # Adding a fact whose id already exists is a no-op — the existing record
+    # stays. Contract that makes ingest pipelines safely re-runnable.
+    def add(self, fact: FactRecord) -> None: ...
+
+    # search(query, *, top_k, namespace): up to top_k facts matching query,
+    # best first. namespace=non-None restricts to that namespace (engagement-
+    # scoped recall for consultancy-in-a-box); None means "all namespaces".
+    # Empty list is a valid "no facts" signal; by default excludes superseded.
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[FactHit]: ...
+
+    # find_conflicts(*, entity, attribute, namespace): live (non-superseded)
+    # facts for the (entity, attribute) key. Used by the consolidation pass:
+    # on every new fact, the ingest pipeline finds existing facts about the
+    # same entity-attribute pair, then runs the contradict use case to decide
+    # whether the new fact supersedes them.
+    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[FactRecord]: ...
+
+    # supersede(*, old_id, new_id): mark old_id as superseded by new_id.
+    # After this, old_id no longer appears in default search but stays
+    # retrievable for audit (future include_superseded=True kwarg).
+    # Raises KeyError if either id is absent.
+    def supersede(self, *, old_id: str, new_id: str) -> None: ...
+
+
+# ---------------------------------------------------------------------------
+# Corpus-ingest Protocols — Spike C1 unified ingest contract.
+#
+# ``DocumentWriter`` and ``CorpusEmbedder`` are the two optional
+# collaborators ``kairix.corpus.ingest.ingest_corpus`` composes alongside
+# ``FactStore`` + ``FactExtractor``. Both are Protocols (not callables)
+# so production wire-ups can hold cached state (DB handles, body-hash
+# caches) and tests can inject capture-only fakes. Both are nullable:
+# passing ``None`` on either is the documented opt-out for chunks-only
+# or facts-only modes.
+#
+# Locked here in ``kairix.core.protocols`` so domain code references
+# them via Protocol only — F26: ``kairix.core.**`` must not import
+# providers/transport. The production implementations live in
+# ``kairix.corpus.wiring`` (Phase 2/3).
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class DocumentWriter(Protocol):
+    """Persist one rendered conversation document to the document store.
+
+    Boundary between corpus-ingest (knows session shape, frontmatter
+    conventions) and the document store (knows on-disk layout, FTS
+    reindexing). Production wraps
+    :class:`SQLiteDocumentRepository.insert_or_update` plus a markdown
+    materialiser; tests use a capture-only fake.
+
+    The returned :class:`Path` is what callers populate
+    ``IngestResult.document_paths`` from. Implementations MUST be
+    idempotent on body content — re-ingesting the same
+    ``(corpus_id, session_id, rendered_body)`` is a no-op for both
+    filesystem and DB writes.
+
+    F26 note: keep concrete implementations OUT of ``kairix/core/**``.
+    Wire production writers from ``kairix.corpus.wiring`` so the domain
+    layer talks to writers via this Protocol only.
+    """
+
+    def write(
+        self,
+        *,
+        corpus_id: str,
+        session_id: str,
+        rendered_body: str,
+        frontmatter: dict[str, Any],
+    ) -> Path: ...
+
+
+@runtime_checkable
+class CorpusEmbedder(Protocol):
+    """Embed the documents this ingest pass just wrote into the vector index.
+
+    Boundary between corpus-ingest and ``kairix embed``'s chunk-and-
+    vectorise pipeline. Production wraps the in-process
+    ``run_incremental_embed_pipeline`` and surfaces the chunks-indexed
+    count; tests use a counter-only fake.
+
+    ``paths_to_embed`` is the document subset — typically the Paths
+    just returned from a ``DocumentWriter.write`` round-trip. Empty
+    tuple is a legal no-op signal (e.g. embedder is wired but
+    ``document_writer`` was None and no markdown was created). Returns
+    the count of chunks actually indexed this call so
+    :class:`IngestResult` can carry an honest ``chunks_indexed``.
+    """
+
+    def embed(self, paths_to_embed: tuple[Path, ...]) -> int: ...

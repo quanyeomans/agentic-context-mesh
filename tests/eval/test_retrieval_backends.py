@@ -100,6 +100,86 @@ class TestRetrieveHybridAgentKwargs:
         assert "agent" not in captured[0], f"agent key leaked into searcher kwargs when not provided: {captured[0]!r}"
         assert "scope" not in captured[0]
 
+    @pytest.mark.unit
+    def test_explicit_scope_overrides_default_shared_agent(self) -> None:
+        """Gap 6 fix: when ``scope`` is passed explicitly alongside ``agent``,
+        the searcher receives the caller's scope — NOT the historical
+        hard-coded ``"shared+agent"``.
+
+        Sabotage-proof: executed on 2026-05-21. Re-introducing the original
+        ``search_kwargs["scope"] = "shared+agent"`` line (without the
+        ``scope if scope is not None else ...`` branch) flips the captured
+        scope back to ``"shared+agent"`` and this assert fires. Restored.
+        """
+        captured: list[dict[str, Any]] = []
+
+        def _spy_searcher(**kwargs: Any) -> _CapturedSearchResult:
+            captured.append(kwargs)
+            return _CapturedSearchResult()
+
+        retrieve(
+            query="anything",
+            system="hybrid",
+            agent="alice",
+            scope="everything",
+            deps=RetrievalDeps(searcher=_spy_searcher),
+        )
+
+        assert captured[0]["agent"] == "alice"
+        assert captured[0]["scope"] == "everything", (
+            f"Gap 6 regression — explicit scope was overridden by the hard-coded default: {captured[0]!r}"
+        )
+
+    @pytest.mark.unit
+    def test_default_scope_when_none_falls_back_to_shared_agent(self) -> None:
+        """When ``scope`` is omitted, the historical default ``"shared+agent"``
+        still applies whenever ``agent`` is set — preserves backwards compat
+        for every caller that doesn't yet thread per-case scope.
+
+        Sabotage-proof: executed on 2026-05-21. Flipping the fallback to
+        ``scope="agent"`` breaks this assert. Restored.
+        """
+        captured: list[dict[str, Any]] = []
+
+        def _spy_searcher(**kwargs: Any) -> _CapturedSearchResult:
+            captured.append(kwargs)
+            return _CapturedSearchResult()
+
+        retrieve(
+            query="anything",
+            system="hybrid",
+            agent="alice",
+            deps=RetrievalDeps(searcher=_spy_searcher),
+        )
+
+        assert captured[0]["scope"] == "shared+agent"
+
+    @pytest.mark.unit
+    def test_explicit_scope_without_agent_threads_through(self) -> None:
+        """A caller may supply ``scope`` even without an ``agent`` (e.g. an
+        eval probe that wants ``"everything"`` to cross agent boundaries).
+        The scope reaches the searcher; ``agent`` stays absent.
+
+        Sabotage-proof: executed on 2026-05-21. Dropping the ``elif scope is
+        not None`` branch silently swallows the scope and this assert fires.
+        Restored.
+        """
+        captured: list[dict[str, Any]] = []
+
+        def _spy_searcher(**kwargs: Any) -> _CapturedSearchResult:
+            captured.append(kwargs)
+            return _CapturedSearchResult()
+
+        retrieve(
+            query="anything",
+            system="hybrid",
+            scope="everything",
+            deps=RetrievalDeps(searcher=_spy_searcher),
+        )
+
+        assert "agent" not in captured[0]
+        assert captured[0]["scope"] == "everything"
+
 
 # ---------------------------------------------------------------------------
 # system="mock" → mock_retrieve delegation

@@ -25,10 +25,11 @@ Subcommands:
   warm        Pre-load caches + pay factory-init costs (run at container start, before /healthz/ready=200)
   wikilinks   Inject [[wikilinks]] on first mention in agent-written document store files
   reference-library  Reference library: install entities, check status, run extraction
-  eval        Evaluation harness: gold suite build, judge, sweep, monitor, gate
+  eval        Evaluation harness: gold suite build, judge, sweep, monitor, gate (Plan B-parity D3: scores route through the same SearchPipeline kairix prep uses; --legacy-direct bypasses the pipeline)
   setup       First-time onboarding wizard for credentials and paths
   worker      Background worker: run loop, pause/resume operator controls
   config      Validate kairix.config.yaml against the schema and print errors
+  ingest-chat Ingest JSONL chat transcripts into the document + fact stores
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -61,11 +62,12 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "vault": ("kairix.knowledge.store.cli", "main", True),  # backwards-compat alias
     "mcp": ("kairix.agents.mcp.cli", "main", True),
     "onboard": ("kairix.platform.onboard.cli", "main", True),
-    "eval": ("kairix.quality.eval.cli", "main", True),
+    "eval": ("kairix.use_cases.eval_suite", "main", True),
     "reference-library": ("kairix.knowledge.reflib.cli", "main", True),
     "setup": ("kairix.platform.setup.cli", "main", True),
     "worker": ("kairix.worker_cli", "main", True),
     "config": ("kairix.core.search.config_validator", "main", True),
+    "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
 }
 
 
@@ -78,6 +80,18 @@ def main(*, commands: dict[str, tuple[str, str, bool]] | None = None) -> None:
     without monkey-patching the module attribute.
     """
     table = commands if commands is not None else COMMANDS
+
+    # KAIRIX_TRACE=1 opts the operator into structured diagnostic logging
+    # (D4 — Plan B-parity remediation). The trace lines emit at INFO via
+    # ``logger.info``, so the CLI needs a handler installed; without this
+    # block ``kairix prep`` runs silently and the documented diagnostic
+    # path is a no-op for end users.
+    from kairix.paths import trace_enabled as _trace_enabled
+
+    if _trace_enabled():
+        import logging as _logging
+
+        _logging.basicConfig(level=_logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
     if len(sys.argv) < 2 or sys.argv[1] in ("--help", "-h"):
         print(__doc__)

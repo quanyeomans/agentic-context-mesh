@@ -68,6 +68,29 @@ DEFAULT_EMBED_DIMENSION = 1536
 #: Default chat ``max_tokens`` honoured by the Protocol surface.
 DEFAULT_CHAT_MAX_TOKENS = 800
 
+#: Deployment-name prefixes for reasoning-class models that require
+#: ``max_completion_tokens`` on the wire instead of ``max_tokens``.
+#:
+#: OpenAI introduced this constraint with the o1 series and continued
+#: it for the gpt-5 family; Azure inherits it for the same deployments.
+#: kairix's public chat surface keeps ``max_tokens=`` as the kwarg name
+#: callers pass; this list decides whether to translate to the alternate
+#: parameter at the wire layer. Add new prefixes when reasoning-class
+#: models join the Foundry catalogue (gpt-6.x, o-anything, etc.).
+_REASONING_MODEL_PREFIXES: tuple[str, ...] = ("gpt-5", "o1", "o3")
+
+
+def _uses_max_completion_tokens(model_name: str) -> bool:
+    """Return True when ``model_name`` belongs to the reasoning-class
+    family that requires ``max_completion_tokens`` on the wire.
+
+    Case-insensitive prefix match — operators sometimes use
+    inconsistent casing in deployment names ("GPT-5.4-mini") and the
+    detection must work regardless.
+    """
+    return any(model_name.lower().startswith(p) for p in _REASONING_MODEL_PREFIXES)
+
+
 #: The Foundry-specific openai-compat alias. Apppended to the configured
 #: endpoint when the operator didn't already include it. Kept here too
 #: (in addition to ``kairix.credentials._FOUNDRY_OPENAI_COMPAT_SUFFIX``)
@@ -211,8 +234,18 @@ class AzureFoundryProvider:
         self,
         credentials: Credentials,
         transport_client: Any | None = None,
+        *,
+        llm_credentials: Credentials | None = None,
     ) -> None:
         self._credentials = credentials
+        # New Foundry "project"-scoped deployments expose chat-completions
+        # on a *different* base URL than embeddings on the same Azure
+        # resource (e.g. embed at /openai/v1 on the resource root, chat
+        # at /api/projects/<proj>/openai/v1). When ``llm_credentials`` is
+        # provided, ``chat()`` uses those; ``embed_batch()`` keeps using
+        # ``credentials``. Falls back to ``credentials`` for back-compat
+        # with single-endpoint installs and existing tests.
+        self._llm_credentials = llm_credentials if llm_credentials is not None else credentials
         self._transport_client = transport_client
         # Last-known embed dimension; populated from the first successful
         # embed response so ``dimension()`` reflects what the deployed
@@ -224,23 +257,31 @@ class AzureFoundryProvider:
     # Internal: transport client resolution
     # ------------------------------------------------------------------
 
-    def _client(self) -> Any:
+    def _client(self, *, purpose: str = "embed") -> Any:
         """Return the configured transport client, lazily building one.
+
+        ``purpose`` selects which credential bundle backs the client:
+        ``"embed"`` (default) uses the embed credentials passed to the
+        constructor; ``"llm"`` uses :attr:`_llm_credentials` (split
+        endpoint/model for project-scoped Foundry deployments).
 
         Production callers don't pass ``transport_client``; the plugin
         builds an openai-compat client via
         :func:`kairix.credentials.make_openai_client` which already
         encodes the Foundry URL-suffix detection and pool configuration.
         Tests pass an explicit fake recording client and this lazy
-        construction is skipped entirely.
+        construction is skipped entirely — the test fake is shared
+        across both embed and chat paths because tests inject one
+        recording transport for both.
         """
         if self._transport_client is not None:
             return self._transport_client
         from kairix.credentials import make_openai_client
 
+        creds = self._llm_credentials if purpose == "llm" else self._credentials
         return make_openai_client(
-            self._credentials.api_key,
-            self._credentials.endpoint,
+            creds.api_key,
+            creds.endpoint,
         )
 
     # ------------------------------------------------------------------
@@ -293,19 +334,31 @@ class AzureFoundryProvider:
         """Run a single chat completion against Foundry.
 
         Translates the Protocol's ``messages=[...]`` shape into the
-        SDK's ``chat.completions.create(model=, messages=, max_tokens=)``
-        call. ``model=`` carries the configured deployment, ``temperature``
-        defaults to ``0.3`` for deterministic-ish synthesis. Maps
-        transport failures via :func:`_map_transport_error`.
+        SDK's ``chat.completions.create(model=, messages=, …)`` call.
+        ``model=`` carries the configured deployment, ``temperature``
+        defaults to ``0.3`` for deterministic-ish synthesis.
+
+        The public kwarg name is always ``max_tokens``; for reasoning-
+        class deployments (gpt-5.x / o1-x / o3-x) the parameter is sent
+        on the wire as ``max_completion_tokens`` instead — these models
+        reject the legacy name with ``400 Unsupported parameter``. The
+        translation is internal so callers never have to know which
+        underlying model is wired.
+
+        Maps transport failures via :func:`_map_transport_error`.
         """
-        client = self._client()
+        client = self._client(purpose="llm")
+        kwargs: dict[str, Any] = {
+            "model": self._llm_credentials.model,
+            "messages": list(messages),
+            "temperature": 0.3,
+        }
+        if _uses_max_completion_tokens(self._llm_credentials.model):
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
         try:
-            response = client.chat.completions.create(
-                model=self._credentials.model,
-                messages=list(messages),
-                max_tokens=max_tokens,
-                temperature=0.3,
-            )
+            response = client.chat.completions.create(**kwargs)
         except Exception as err:
             raise _map_transport_error(err, provider_name=self.name) from err
         content = response.choices[0].message.content

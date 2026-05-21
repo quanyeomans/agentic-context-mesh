@@ -1,0 +1,86 @@
+[
+  {
+    "entity": "project-rho",
+    "attribute": "q1-priority",
+    "value": "P0",
+    "evidence_turn_ids": ["eng-gamma-s001-t002"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "executive-sponsor",
+    "value": "exec-sigma",
+    "evidence_turn_ids": ["eng-gamma-s001-t004"]
+  },
+  {
+    "entity": "project-tau",
+    "attribute": "executive-sponsor",
+    "value": "exec-delta",
+    "evidence_turn_ids": ["eng-gamma-s001-t004"]
+  },
+  {
+    "entity": "project-upsilon",
+    "attribute": "executive-sponsor",
+    "value": "exec-theta",
+    "evidence_turn_ids": ["eng-gamma-s001-t004"]
+  },
+  {
+    "entity": "project-rho",
+    "attribute": "q1-end-status",
+    "value": "on plan, milestone-2 landed 2026-03-23",
+    "evidence_turn_ids": ["eng-gamma-s005-t002"]
+  },
+  {
+    "entity": "project-tau",
+    "attribute": "engineering-lead",
+    "value": "agent-beta",
+    "evidence_turn_ids": ["eng-gamma-s002-t004"]
+  },
+  {
+    "entity": "project-upsilon",
+    "attribute": "engineering-lead",
+    "value": "agent-gamma",
+    "evidence_turn_ids": ["eng-gamma-s003-t002"]
+  },
+  {
+    "entity": "project-upsilon",
+    "attribute": "launch-target-date",
+    "value": "2026-04-13",
+    "evidence_turn_ids": ["eng-gamma-s003-t011"]
+  },
+  {
+    "entity": "project-tau",
+    "attribute": "gdpr-deletion-resolution",
+    "value": "soft-delete column with daily purge job",
+    "evidence_turn_ids": ["eng-gamma-s004-t005"]
+  },
+  {
+    "entity": "agent-beta",
+    "attribute": "parental-leave-start",
+    "value": "2026-03-09 (14 weeks)",
+    "evidence_turn_ids": ["eng-gamma-s004-t009"]
+  },
+  {
+    "entity": "project-tau",
+    "attribute": "acting-lead-during-leave",
+    "value": "agent-epsilon",
+    "evidence_turn_ids": ["eng-gamma-s005-t004", "eng-gamma-s005-t011"]
+  },
+  {
+    "entity": "project-phi",
+    "attribute": "executive-sponsor",
+    "value": "exec-theta",
+    "evidence_turn_ids": ["eng-gamma-s005-t010"]
+  },
+  {
+    "entity": "project-phi",
+    "attribute": "q2-priority",
+    "value": "P2",
+    "evidence_turn_ids": ["eng-gamma-s005-t008"]
+  },
+  {
+    "entity": "project-tau",
+    "attribute": "q2-status",
+    "value": "maintenance mode",
+    "evidence_turn_ids": ["eng-gamma-s005-t011"]
+  }
+]

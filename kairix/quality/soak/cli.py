@@ -132,7 +132,23 @@ def _format_text(result: SoakResult) -> str:
     return "\n".join(lines)
 
 
+_DEPRECATION_WARNING = (
+    "DEPRECATION: `kairix soak` is folded into `kairix benchmark run --mode "
+    "soak` in the unified quality CLI. Slated for removal in v2026.6.x — one "
+    "release of warnings before the legacy surface is dropped.\n"
+    "  fix: migrate to `kairix benchmark run --suite <suite> --mode soak "
+    "[--gates]`.\n"
+    "  next: P3.c ships the unified soak dispatcher; until then "
+    "`kairix soak run` remains functional.\n"
+    "  run: kairix benchmark run --help\n"
+)
+
+
 def main(argv: list[str] | None = None) -> int:
+    # P5 unification: emit a deprecation warning on every invocation; the
+    # legacy soak behaviour stays unchanged through v2026.6.x.
+    sys.stderr.write(_DEPRECATION_WARNING)
+
     args = _build_parser().parse_args(argv)
     if args.repeat < 2:
         print(

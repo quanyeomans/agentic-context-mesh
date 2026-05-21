@@ -2,17 +2,27 @@
 CLI entry point for `kairix search`.
 
 Usage:
-  kairix search "query" [--agent AGENT] [--scope SCOPE] [--budget N] [--limit N] [--json]
+  kairix search "query" [--agent AGENT] [--scope SCOPE] [--collection COLLECTION]
+                        [--budget N] [--limit N] [--json]
 
 Options:
-  --agent AGENT       Agent name for collection scoping (shape, builder, etc.)
-  --scope SCOPE       Collection scope: shared | agent | shared+agent | all-agents | everything
-  --budget N          Token budget cap (default: 3000)
-  --limit N           Max results to display (default: 10)
-  --json              Output raw JSON instead of formatted text
-  --no-entity-card    Skip the entity-graph augmentation when the query is an entity lookup
+  --agent AGENT             Agent name for collection scoping (shape, builder, etc.)
+  --scope SCOPE             Collection scope: shared | agent | shared+agent |
+                            all-agents | everything
+  --collection COLLECTION   Restrict retrieval to a single collection. Short-circuits
+                            scope-based collection resolution.
+  --budget N                Token budget cap (default: 3000)
+  --limit N                 Max results to display (default: 10)
+  --json                    Output raw JSON instead of formatted text
+  --no-entity-card          Skip the entity-graph augmentation when the query is an
+                            entity lookup
 
 Adapter only — business logic lives in ``kairix.use_cases.search.run_search``.
+
+``--collection`` is plumbed at this adapter layer rather than through
+``run_search`` — the CLI binds a ``collections`` list onto the search
+callable inside ``SearchDeps`` so the use-case public signature stays
+single-collection-agnostic. Closes C3 Gap 3.
 """
 
 from __future__ import annotations
@@ -20,9 +30,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import Any
 
 from kairix.core.search.scope import Scope
-from kairix.use_cases.search import SearchOutput, run_search
+from kairix.use_cases.search import SearchDeps, SearchOutput, run_search
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +49,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["shared", "agent", "shared+agent", "all-agents", "everything"],
         help="Collection scope (default: shared+agent)",
     )
+    parser.add_argument(
+        "--collection",
+        default=None,
+        help=(
+            "Restrict retrieval to a single collection (e.g. reference-library). "
+            "Short-circuits scope-based collection resolution. The CLI threads "
+            "the flag through SearchDeps.search_fn; the use case signature is "
+            "unchanged."
+        ),
+    )
     parser.add_argument("--budget", type=int, default=3000, help="Token budget (default: 3000)")
     parser.add_argument("--limit", type=int, default=10, help="Max results to display")
     parser.add_argument("--json", dest="as_json", action="store_true", help="Output raw JSON")
@@ -49,6 +70,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the entity-graph augmentation",
     )
     return parser
+
+
+def _bind_collection_to_deps(deps: SearchDeps | None, collection: str | None) -> SearchDeps | None:
+    """Return a ``SearchDeps`` whose ``search_fn`` injects ``collections=[collection]``.
+
+    Mirrors ``kairix.agents.prep.cli._bind_collection_to_deps``. When
+    ``collection`` is None the input deps pass through; otherwise the
+    existing ``search_fn`` is wrapped so every call carries the
+    collections list. The use case never sees the flag.
+    """
+    if collection is None:
+        return deps
+    base = deps if deps is not None else SearchDeps()
+    inner = base.search_fn
+
+    def _search_with_collection(**kwargs: Any) -> Any:
+        kwargs.setdefault("collections", [collection])
+        return inner(**kwargs)
+
+    # SearchDeps is frozen — rebuild with the wrapped search_fn while
+    # carrying every other field forward. Any new field on SearchDeps must
+    # be mirrored here (loud failure preferred over silent default-fallback).
+    return SearchDeps(
+        search_fn=_search_with_collection,
+        entity_card_fn=base.entity_card_fn,
+        classify_fn=base.classify_fn,
+        health_deps=base.health_deps,
+    )
 
 
 def format_text(out: SearchOutput) -> str:
@@ -114,8 +163,9 @@ def to_json_envelope(out: SearchOutput) -> dict:
     return envelope
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, deps: SearchDeps | None = None) -> None:
     args = build_parser().parse_args(argv)
+    effective_deps = _bind_collection_to_deps(deps, args.collection)
 
     out = run_search(
         args.query,
@@ -124,6 +174,7 @@ def main(argv: list[str] | None = None) -> None:
         budget=args.budget,
         limit=args.limit,
         include_entity_card=args.include_entity_card,
+        deps=effective_deps,
     )
 
     if args.as_json:
