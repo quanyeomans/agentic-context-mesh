@@ -79,11 +79,10 @@ def _bind_collection_to_deps(deps: PrepDeps | None, collection: str | None) -> P
         kwargs.setdefault("collections", [collection])
         return inner(**kwargs)
 
-    # PrepDeps is frozen — use dataclasses.replace to preserve every
-    # field we don't touch (chat_fn today; future deps tomorrow).
-    from dataclasses import replace as _replace
-
-    return _replace(base, search_fn=_search_with_collection)
+    # PrepDeps is frozen — rebuild with the wrapped search_fn while
+    # carrying every other field forward. Any new field on PrepDeps must
+    # be mirrored here (loud failure preferred over silent default-fallback).
+    return PrepDeps(search_fn=_search_with_collection, chat_fn=base.chat_fn)
 
 
 def format_text(out: PrepOutput) -> str:

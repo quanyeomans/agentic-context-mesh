@@ -1021,47 +1021,13 @@ def tool_capabilities() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_server(
-    host: str = "127.0.0.1",
-    port: int = 8080,
-    *,
-    readiness_check: Callable[[], bool] | None = None,
-    mark_ready: Callable[[], None] | None = None,
-) -> Any:
+def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] | None) -> None:
+    """Register the cold-start-aware retrieval surface.
+
+    Every tool here is warm-gated AND returns the ColdStart envelope when the
+    readiness check is unsatisfied. Tools that only need @warm_gate (and not
+    require_ready) live in ``_register_synthesis_and_diagnostic_tools``.
     """
-    Construct and return the FastMCP server with all tools registered.
-
-    Args:
-        host: Bind address for SSE transport.
-        port: Port for SSE transport.
-        readiness_check: Optional gate used by long-running HTTP deployments.
-                         If it returns False, retrieval tools return a
-                         canonical retryable cold-start envelope instead of
-                         executing a lower-quality or partially-initialised path.
-        mark_ready: Optional callback used by the warm tool to open the HTTP
-                    readiness gate after a successful manual warm-up.
-
-    Raises ImportError when the ``mcp`` package is not installed.
-    Install via: pip install kairix[agents]
-    """
-    try:
-        from mcp.server.fastmcp import FastMCP
-    # The ImportError branch is reachable only when the optional ``mcp`` extra
-    # is not installed; the test suite always installs it via ``kairix[agents]``.
-    except ImportError as exc:  # pragma: no cover — optional 'mcp' extra; tests always install kairix[agents]
-        raise ImportError(
-            "The 'mcp' package is required to run the MCP server. Install it with: pip install 'kairix[agents]'"
-        ) from exc
-
-    server = FastMCP("kairix", host=host, port=port)
-
-    # --- Agent-facing retrieval/synthesis tools (gated on warm) ---
-    #
-    # Every tool below uses ``@warm_gate`` so a cold container returns the
-    # ColdStart envelope instead of letting the upstream fetch fail. Diagnostic
-    # tools further down (usage_guide, onboard_check, worker_status, warm,
-    # probes, operator escalations, capabilities) are intentionally NOT gated
-    # — they exist to diagnose the cold state itself.
 
     @server.tool(
         description=(
@@ -1183,6 +1149,19 @@ def build_server(
             top_claims=top_claims,
             scope=scope,
         )
+
+
+def _register_synthesis_and_diagnostic_tools(
+    server: Any,
+    readiness_check: Callable[[], bool] | None,
+    mark_ready: Callable[[], None] | None,
+) -> None:
+    """Register synthesis (brief/bootstrap) + diagnostic (warm/probe) tools.
+
+    These tools are *not* the cold-aware retrieval surface — they include the
+    warm() entry-point itself plus health/diagnostic envelopes that must remain
+    callable during a cold state so operators can diagnose the cold state.
+    """
 
     @server.tool()
     @async_tool_handler
@@ -1313,6 +1292,16 @@ def build_server(
     def capabilities() -> dict[str, Any]:
         """Full kairix capability catalogue. Read-only. Identical to tool_capabilities()."""
         return tool_capabilities()
+
+
+def _register_operator_and_ingest_tools(server: Any) -> None:
+    """Register operator-only escalation stubs + Plan B-parity ingest surface.
+
+    Operator stubs return ``OperatorOnlyCapability`` envelopes that point the
+    calling agent at the exact CLI command to surface to its admin. The ingest
+    tools (``ingest_chat`` / ``facts_about``) sit alongside because they share
+    the same out-of-band-write hygiene (warm-gated, namespace-scoped).
+    """
 
     # ---- Operator-only escalation stubs ----
     # These capabilities take minutes, mutate state, or are destructive
@@ -1461,4 +1450,40 @@ def build_server(
 
         return tool_facts_about(entity=entity, namespace=namespace, top_k=top_k)
 
+
+def build_server(
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    *,
+    readiness_check: Callable[[], bool] | None = None,
+    mark_ready: Callable[[], None] | None = None,
+) -> Any:
+    """Construct the FastMCP server with every kairix tool registered.
+
+    Args:
+        host: Bind address for SSE transport.
+        port: Port for SSE transport.
+        readiness_check: Optional gate used by long-running HTTP deployments.
+                         If it returns False, retrieval tools return a
+                         canonical retryable cold-start envelope instead of
+                         executing a lower-quality or partially-initialised path.
+        mark_ready: Optional callback used by the warm tool to open the HTTP
+                    readiness gate after a successful manual warm-up.
+
+    Raises ImportError when the ``mcp`` package is not installed.
+    Install via: pip install kairix[agents]
+    """
+    try:
+        from mcp.server.fastmcp import FastMCP
+    # The ImportError branch is reachable only when the optional ``mcp`` extra
+    # is not installed; the test suite always installs it via ``kairix[agents]``.
+    except ImportError as exc:  # pragma: no cover — optional 'mcp' extra; tests always install kairix[agents]
+        raise ImportError(
+            "The 'mcp' package is required to run the MCP server. Install it with: pip install 'kairix[agents]'"
+        ) from exc
+
+    server = FastMCP("kairix", host=host, port=port)
+    _register_retrieval_tools(server, readiness_check)
+    _register_synthesis_and_diagnostic_tools(server, readiness_check, mark_ready)
+    _register_operator_and_ingest_tools(server)
     return server
