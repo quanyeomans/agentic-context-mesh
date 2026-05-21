@@ -28,6 +28,9 @@ permissions:
   contents: write  # required to create tags + releases
   actions: write   # required to dispatch downstream publish workflows (#230)
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   check-alpha-gate:
     # #272 Phase 5: refuse to tag stable unless (a) an alpha tag exists
