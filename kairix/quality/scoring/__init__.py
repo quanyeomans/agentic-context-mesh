@@ -35,6 +35,7 @@ from kairix.quality.scoring.latency import LatencyScorer
 from kairix.quality.scoring.llm_judge import LLMJudgeScorer
 from kairix.quality.scoring.mrr import MRRScorer
 from kairix.quality.scoring.ndcg import NDCGScorer
+from kairix.quality.scoring.registry import ScorerRegistry, auto_select_scorers
 from kairix.quality.scoring.types import (
     LatencyPhase,
     QueryRunResult,
@@ -53,7 +54,9 @@ __all__ = [
     "OverallAggregate",
     "QueryRunResult",
     "Scorer",
+    "ScorerRegistry",
     "ScorerResult",
     "aggregate_by_category",
     "aggregate_overall",
+    "auto_select_scorers",
 ]
