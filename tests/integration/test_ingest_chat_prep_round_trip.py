@@ -158,10 +158,16 @@ def _kairix_subprocess_env(tmp_path: Path, cfg: Path) -> dict[str, str]:
         # KV name carries through to ``kairix.secrets._read_secret_from_keyvault``.
         "KAIRIX_KV_NAME": os.environ["KAIRIX_KV_NAME"],
         # Pin everything to ``tmp_path`` — no operator state leakage.
+        # ``KAIRIX_DB_PATH`` is pinned explicitly because kairix's default
+        # ``cache_dir`` resolves to ``~/.cache/kairix/`` on macOS / Linux —
+        # outside ``tmp_path``. Without this, the new evidence_at probe
+        # test (which reads the SQLite directly) walks the wrong directory
+        # and fails its "no sqlite found" assertion.
         "KAIRIX_CONFIG_PATH": str(cfg),
         "KAIRIX_DATA_DIR": str(tmp_path / "data"),
         "KAIRIX_DOCUMENT_ROOT": str(tmp_path / "docs"),
         "KAIRIX_WORKSPACE_ROOT": str(tmp_path / "workspace"),
+        "KAIRIX_DB_PATH": str(tmp_path / "data" / "index.sqlite"),
         # Trace on — D4's diagnostic log line proves fact survival.
         "KAIRIX_TRACE": "1",
         # E2E flag — surfaces in the subprocess for any downstream gate.
