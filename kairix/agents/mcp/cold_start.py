@@ -3,6 +3,10 @@
 The MCP server can be alive before the retrieval stack is warm. LLM agents are
 not reliable retry engines, so cold-start must be encoded as a mechanical,
 retryable state rather than prose hidden in a generic error string.
+
+Operator-facing documentation for the readiness-gate flow lives in
+``docs/operations/MCP-DEPLOYMENT.md`` and the v2026.5.18 upgrade notes at
+``docs/upgrades/v2026.5.18.md``.
 """
 
 from __future__ import annotations
