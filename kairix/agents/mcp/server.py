@@ -9,6 +9,7 @@ Provides the following tools:
   timeline     Temporal query rewriting + date-aware retrieval
   contradict   Check new content against existing knowledge for contradictions
   usage_guide  Return the kairix agent usage guide (self-documentation)
+  warm         Pay retrieval initialisation costs and mark the readiness gate ready
 
 The server uses FastMCP (from the ``mcp`` package). Install via:
     pip install kairix[agents]
@@ -30,6 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from kairix.agents.mcp.cold_start import require_ready, warm_retrieval_stack
 from kairix.agents.mcp.errors import async_tool_handler
 from kairix.core.search.scope import Scope
 
@@ -1013,13 +1015,25 @@ def tool_capabilities() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
+def build_server(
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    *,
+    readiness_check: Callable[[], bool] | None = None,
+    mark_ready: Callable[[], None] | None = None,
+) -> Any:
     """
     Construct and return the FastMCP server with all tools registered.
 
     Args:
         host: Bind address for SSE transport.
         port: Port for SSE transport.
+        readiness_check: Optional gate used by long-running HTTP deployments.
+                         If it returns False, retrieval tools return a
+                         canonical retryable cold-start envelope instead of
+                         executing a lower-quality or partially-initialised path.
+        mark_ready: Optional callback used by the warm tool to open the HTTP
+                    readiness gate after a successful manual warm-up.
 
     Raises ImportError when the ``mcp`` package is not installed.
     Install via: pip install kairix[agents]
@@ -1047,7 +1061,9 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         description=(
             "Call before answering any factual question about prior work, decisions, or context — "
             "kairix indexes the team's knowledge store and finds relevant prior material. "
-            "Use this proactively at session start and whenever a question touches the team's history."
+            "Use this proactively at session start and whenever a question touches the team's history. "
+            "If the result has error_code=KAIRIX_COLD_START, do not answer from memory or fallback; "
+            "wait retry_after_ms and retry the same call once."
         )
     )
     @async_tool_handler
@@ -1060,6 +1076,8 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         limit: int = 10,
     ) -> dict[str, Any]:
         """Search your knowledge store — finds the best answers to any question."""
+        if cold := require_ready("search", readiness_check):
+            return cold
         return tool_search(query=query, agent=agent, scope=scope, budget=budget, limit=limit)
 
     @server.tool(
@@ -1074,7 +1092,13 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         """Entity lookup from Neo4j."""
         return tool_entity(name=name)
 
-    @server.tool()
+    @server.tool(
+        description=(
+            "Call when you need lightweight context preparation before deeper work. "
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry; "
+            "do not substitute memory-only context."
+        )
+    )
     @async_tool_handler
     @warm_gate
     def prep(
@@ -1084,9 +1108,16 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         scope: Scope = DEFAULT_SCOPE,
     ) -> dict[str, Any]:
         """Context preparation: tiered L0/L1 summary generation."""
+        if cold := require_ready("prep", readiness_check):
+            return cold
         return tool_prep(query=query, agent=agent, tier=tier, scope=scope)
 
-    @server.tool()
+    @server.tool(
+        description=(
+            "Call for date-aware retrieval when a question depends on timing. "
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry the same call."
+        )
+    )
     @async_tool_handler
     @warm_gate
     def timeline(
@@ -1096,6 +1127,8 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         scope: Scope = DEFAULT_SCOPE,
     ) -> dict[str, Any]:
         """Temporal query rewriting + date-aware retrieval."""
+        if cold := require_ready("timeline", readiness_check):
+            return cold
         return tool_timeline(
             query=query,
             anchor_date=anchor_date,
@@ -1103,14 +1136,26 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
             scope=scope,
         )
 
-    @server.tool()
+    @server.tool(
+        description=(
+            "Call for complex research questions that need iterative retrieval. "
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry before answering."
+        )
+    )
     @async_tool_handler
     @warm_gate
     def research(query: str, agent: str | None = None, max_turns: int = 4) -> dict[str, Any]:
         """Research a complex question. Searches iteratively until it finds a good answer."""
+        if cold := require_ready("research", readiness_check):
+            return cold
         return tool_research(query=query, agent=agent, max_turns=max_turns)
 
-    @server.tool()
+    @server.tool(
+        description=(
+            "Call before writing new facts to check for contradictions against existing knowledge. "
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry before proceeding."
+        )
+    )
     @async_tool_handler
     @warm_gate
     def contradict(
@@ -1122,6 +1167,8 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         scope: Scope = DEFAULT_SCOPE,
     ) -> dict[str, Any]:
         """Check new content against existing knowledge for contradictions."""
+        if cold := require_ready("contradict", readiness_check):
+            return cold
         return tool_contradict(
             content=content,
             agent=agent,
@@ -1141,13 +1188,17 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
         description=(
             "Call when you want a synthesised view of a topic — kairix runs a small research loop "
             "across the knowledge store and returns a structured briefing. "
-            "Use it when you'd otherwise be tempted to summarise from memory."
+            "Use it when you'd otherwise be tempted to summarise from memory. "
+            "If the result has error_code=KAIRIX_COLD_START, do not summarise from memory; "
+            "wait retry_after_ms and retry the same call."
         )
     )
     @async_tool_handler
     @warm_gate
     def brief(agent: str) -> dict[str, Any]:
         """Generate a session briefing for an agent. Returns content + on-disk path."""
+        if cold := require_ready("brief", readiness_check):
+            return cold
         return tool_brief(agent=agent)
 
     @server.tool(
@@ -1155,13 +1206,17 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
             "Call at session start or whenever you switch topics. "
             "Returns your agent role, current board, recent memory, and active goals — "
             "orients you in the team's current state. "
-            "If health.vector_search != 'ok', surface that to your human."
+            "If health.vector_search != 'ok', surface that to your human. "
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry; "
+            "do not begin the task context-blind."
         )
     )
     @async_tool_handler
     @warm_gate
     def bootstrap(agent: str, max_memory_days: int = 3) -> dict[str, Any]:
         """Return the agent orientation envelope: role, board, recent memory, goals, health."""
+        if cold := require_ready("bootstrap", readiness_check):
+            return cold
         return tool_bootstrap(agent=agent, max_memory_days=max_memory_days)
 
     @server.tool()
@@ -1203,15 +1258,24 @@ def build_server(host: str = "127.0.0.1", port: int = 8080) -> Any:
 
     @server.tool(
         description=(
-            "Warm kairix caches + pay factory-init costs. Idempotent — first call costs ~200 MB and "
-            "a few hundred ms; every subsequent call is sub-ms. Agents call this as a 'is kairix warm?' "
-            "probe; container entrypoints call it before /healthz/ready flips to 200."
+            "Warm kairix retrieval caches + pay factory-init costs. Retryable cold-start "
+            "affordance: first call constructs the SearchPipeline and runs a tiny read-only "
+            "probe; agents and entrypoint scripts call this at session start and retry if "
+            "cold-start is reported (ready=False). Idempotent — subsequent calls are sub-ms."
         )
     )
     @async_tool_handler
     def warm() -> dict[str, Any]:
-        """Warm kairix caches. Identical to `kairix warm`."""
-        return tool_warm()
+        """Warm kairix retrieval caches via the cold-start affordance.
+
+        On ready=True the readiness gate is flipped so /healthz/ready returns 200.
+        See ``kairix.agents.mcp.cold_start.warm_retrieval_stack`` for the
+        production warm semantics this tool exposes.
+        """
+        result = warm_retrieval_stack()
+        if result.get("ready") is True and mark_ready is not None:
+            mark_ready()
+        return result
 
     @server.tool(
         description=(

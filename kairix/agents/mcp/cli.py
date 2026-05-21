@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from kairix.agents.mcp.cold_start import warm_retrieval_stack
 from kairix.platform.onboard.ports import find_available_port, is_port_available
 
 
@@ -58,6 +59,7 @@ class McpCliDeps:
     uvicorn_runner_factory: Callable[[], Callable[..., Any]] = field(default_factory=lambda: _default_uvicorn_run)
     is_port_available_fn: Callable[[int], bool] = field(default_factory=lambda: is_port_available)
     find_available_port_fn: Callable[..., int] = field(default_factory=lambda: find_available_port)
+    warm_retrieval_stack_fn: Callable[[], dict[str, Any]] = warm_retrieval_stack
 
 
 def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> None:
@@ -171,17 +173,16 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
 
     # http transport — streamable HTTP at /mcp via uvicorn, optional /sse legacy
     port = _resolve_port(args, deps=deps)
-    server = build_server(host=args.host, port=port)
 
     from kairix.agents.mcp.capability_probe import build_capability_probe
     from kairix.agents.mcp.readiness import EventReadinessGate
     from kairix.agents.mcp.transport import build_mcp_app
 
-    # The http transport's lazy-init paths (Neo4j, vector index, LLM clients)
-    # are exercised on first tool call rather than at startup, so the gate
-    # is marked ready immediately after the app is built. When we add a real
-    # warm-up phase, mark_ready() moves to the end of that phase.
+    # HTTP deployments are long-running shared services. Pay the expensive
+    # retrieval initialisation cost before advertising readiness so the first
+    # user-facing tool call does not receive a cold-start surprise.
     gate = EventReadinessGate()
+    server = build_server(host=args.host, port=port, readiness_check=gate.is_ready, mark_ready=gate.mark_ready)
     capability_probe = build_capability_probe()
     app = build_mcp_app(
         server,
@@ -189,7 +190,18 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
         readiness_check=gate.is_ready,
         capability_probe=capability_probe,
     )
-    gate.mark_ready()
+    warm_result = deps.warm_retrieval_stack_fn()
+    if warm_result.get("ready") is True:
+        gate.mark_ready()
+        print(
+            f"warm-up complete — elapsed_ms={warm_result.get('elapsed_ms', 'unknown')}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"WARNING: kairix warm-up incomplete; tools will return KAIRIX_COLD_START until ready: {warm_result}",
+            file=sys.stderr,
+        )
 
     sse_status = "+ /sse legacy" if not args.no_sse else "(no /sse)"
     print(
