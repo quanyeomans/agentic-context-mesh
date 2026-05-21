@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -24,6 +25,28 @@ VALID_SCORE_METHODS = frozenset({"exact", "fuzzy", "llm", "classification", "ndc
 
 @dataclass
 class BenchmarkCase:
+    """One row in a benchmark suite YAML.
+
+    Routing-boundary fields (``scope``, ``collection``, ``agent``)
+    constrain WHERE retrieval looks for evidence. They are NOT
+    permission enforcement — kairix's benchmark suite validates routing
+    behaviour, not RBAC. See Gap 7 in
+    ``/tmp/spike-C3-scope-rbac-flow.md`` for the gap to real RBAC.
+    Operators wiring access-control semantics into a deployment must
+    layer those at the transport/auth boundary; the suite YAML cannot
+    assert them.
+
+    LLM-judge scoring fields (``expected_answer``,
+    ``expected_answer_keywords``) declare what a correct answer looks
+    like. The scorer registry (P3) consumes them when ``score_method``
+    selects an LLM-judged path; suites with only ``gold_titles`` /
+    ``gold_paths`` continue to score on retrieval-correctness alone.
+
+    Per-case overrides win over the suite-level ``default_*`` keys in
+    ``meta`` whenever both are present; this lets a single suite mix
+    multi-agent routing assertions with per-query exceptions.
+    """
+
     id: str
     category: str  # recall|temporal|entity|conceptual|multi_hop|procedural|classification
     query: str
@@ -35,10 +58,60 @@ class BenchmarkCase:
     gold_title: str | None = None  # stable note title for exact/fuzzy cases (path-agnostic)
     gold_titles: list[dict] | None = None  # for ndcg: [{title, relevance}] graded relevance 0-2 (title-based)
     agent: str | None = None  # per-case agent override (builder|shape|consultant|…)
+    # ------------------------------------------------------------------
+    # P4 extensions — LLM-judge scoring + routing-boundary overrides
+    # ------------------------------------------------------------------
+    expected_answer: str | None = None
+    """Reference answer text for LLM-judge scoring (P3 scorer registry
+    will consume). Used alongside or instead of ``gold_titles`` when
+    the scoring path is ``score_method: llm`` and the judge wants a
+    full-answer match. Optional — when None, the judge falls back to
+    keyword / retrieval-only signal."""
+    expected_answer_keywords: list[str] | None = None
+    """Looser keyword list for LLM-judge scoring. Compatible with
+    ``expected_answer`` — when both are present, the judge may use
+    keywords as a fallback signal when full-text matching is too strict.
+    Optional."""
+    scope: str | None = None
+    """Per-query scope override parsed downstream via
+    ``Scope.parse(...)``. Valid values: ``shared``, ``agent``,
+    ``shared+agent``, ``all-agents``, ``everything``. None means
+    'inherit the suite-level default and ultimately the retrieval-time
+    fallback (shared+agent)'. Routing-boundary control — NOT a permission
+    check; see class docstring."""
+    collection: str | None = None
+    """Per-query collection filter. When set, short-circuits
+    ``CollectionResolver`` per spike-C3 §2 — retrieval reaches only this
+    collection regardless of ``scope``/``agent``. Routing-boundary
+    control — NOT a permission check."""
+    expected_zero_results: bool | None = None
+    """When True, the case asserts the retrieval pipeline must return
+    zero matches (routing-boundary probe, e.g. 'this query against
+    agent-X's scope must not surface shared-Y's note'). Reserved for
+    P5/P6 scorer wiring; declarative-only in P4."""
 
 
 @dataclass
 class BenchmarkSuite:
+    """Loaded suite — meta dict plus typed cases.
+
+    The ``meta`` dict is intentionally permissive. Suite-level
+    declarative keys consumed today and by P3+ scorers:
+
+    * ``default_collection`` — auto-scope target for ``kairix benchmark
+      run`` (already wired in ``kairix/quality/benchmark/cli.py``).
+    * ``default_scope`` (P4) — fallback scope when a case omits its
+      own. Routing-boundary control; see ``BenchmarkCase`` docstring.
+    * ``default_agent`` (P4) — fallback agent identity used when a
+      case omits its own ``agent``.
+    * ``focus_areas`` (P4) — list of free-form labels recording which
+      capabilities the suite covers (e.g. ``[recall, entity, scope]``).
+      Declarative only; used by reporters to colour-code summaries.
+
+    Unknown keys round-trip untouched so suites can encode runner-side
+    metadata (description, version, created) without schema churn.
+    """
+
     meta: dict
     cases: list[BenchmarkCase] = field(default_factory=list)
 
@@ -208,6 +281,64 @@ def validate_gold_titles_structure(
             errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2")
 
 
+_VALID_SCOPE_VALUES = frozenset({"shared", "agent", "shared+agent", "all-agents", "everything"})
+
+
+def validate_p4_field_types(raw_case: dict, case_id: str | None, i: int, errors: list[str]) -> None:
+    """Validate the P4 optional fields have the right shape when set.
+
+    All P4 fields are optional; this validator only fires when a key is
+    present and its value type is wrong. Backwards compat: a suite that
+    omits every P4 key produces zero errors.
+
+    Checked fields:
+      * ``expected_answer`` — must be a string when set.
+      * ``expected_answer_keywords`` — must be a list of strings when set.
+      * ``scope`` — must be one of the valid Scope strings when set.
+      * ``collection`` — must be a string when set.
+      * ``expected_zero_results`` — must be a bool when set.
+    """
+    if "expected_answer" in raw_case and raw_case["expected_answer"] is not None:
+        if not isinstance(raw_case["expected_answer"], str):
+            errors.append(
+                f"Case [{i}] ({case_id}): 'expected_answer' must be a string when set; "
+                f'fix: quote the value in YAML, e.g. expected_answer: "..."'
+            )
+
+    kw = raw_case.get("expected_answer_keywords")
+    if kw is not None and not isinstance(kw, list):
+        errors.append(
+            f"Case [{i}] ({case_id}): 'expected_answer_keywords' must be a list when set; "
+            f"fix: use YAML list syntax, e.g. expected_answer_keywords: [foo, bar]"
+        )
+
+    scope = raw_case.get("scope")
+    if scope is not None:
+        if not isinstance(scope, str):
+            errors.append(
+                f"Case [{i}] ({case_id}): 'scope' must be a string when set; "
+                f"fix: use one of {sorted(_VALID_SCOPE_VALUES)}"
+            )
+        elif scope not in _VALID_SCOPE_VALUES:
+            errors.append(
+                f"Case [{i}] ({case_id}): 'scope' must be one of {sorted(_VALID_SCOPE_VALUES)}; "
+                f"got {scope!r}. fix: update the suite YAML to a valid scope."
+            )
+
+    if "collection" in raw_case and raw_case["collection"] is not None:
+        if not isinstance(raw_case["collection"], str):
+            errors.append(
+                f"Case [{i}] ({case_id}): 'collection' must be a string when set; "
+                f'fix: quote the value, e.g. collection: "reference-library"'
+            )
+
+    if "expected_zero_results" in raw_case and raw_case["expected_zero_results"] is not None:
+        if not isinstance(raw_case["expected_zero_results"], bool):
+            errors.append(
+                f"Case [{i}] ({case_id}): 'expected_zero_results' must be true|false when set; fix: use a YAML boolean."
+            )
+
+
 def validate_recall_gold_requirement(
     category: str | None,
     gold_path: str | None,
@@ -278,33 +409,70 @@ def _coerce_gold_list(items: list[dict] | None, ref_field: str) -> list[dict] | 
     return coerced
 
 
-def build_benchmark_case(
-    i: int,
-    case_id: str | None,
-    category: str | None,
-    query: str | None,
-    gold_path: str | None,
-    score_method: str | None,
-    notes: str | None,
-    expected_type: str | None,
-    gold_paths: list[dict] | None,
-    gold_title: str | None,
-    gold_titles: list[dict] | None,
-    case_agent: str | None,
-) -> BenchmarkCase:
-    """Construct a BenchmarkCase from validated fields."""
+@dataclass
+class _CaseFields:
+    """Bag of raw parsed fields for one suite case.
+
+    Exists only to keep ``build_benchmark_case`` under F16's
+    cognitive-complexity ceiling — twelve positional args was already
+    over the readability cliff and the P4 additions push it further.
+    Loader populates the bag from the raw YAML mapping; the builder
+    consumes it. The dataclass is internal (leading underscore) and
+    NOT part of the suite-loading public surface.
+    """
+
+    case_id: str | None
+    category: str | None
+    query: str | None
+    gold_path: str | None
+    score_method: str | None
+    notes: str | None
+    expected_type: str | None
+    gold_paths: list[dict] | None
+    gold_title: str | None
+    gold_titles: list[dict] | None
+    case_agent: str | None
+    expected_answer: str | None = None
+    expected_answer_keywords: list[str] | None = None
+    scope: str | None = None
+    collection: str | None = None
+    expected_zero_results: bool | None = None
+
+
+def _coerce_str_list(items: Any) -> list[str] | None:
+    """Coerce a YAML-list-of-anything to ``list[str] | None``.
+
+    Returns None when ``items`` is not a list; otherwise stringifies
+    each element. Keeps the keyword list resilient against YAML
+    quirks (unquoted ISO dates, ints) without forcing operators to
+    quote every string in a long list.
+    """
+    if not isinstance(items, list):
+        return None
+    return [str(x) for x in items]
+
+
+def build_benchmark_case(i: int, fields: _CaseFields) -> BenchmarkCase:
+    """Construct a BenchmarkCase from validated raw fields."""
     return BenchmarkCase(
-        id=str(case_id) if case_id else f"case_{i}",
-        category=str(category) if category else "",
-        query=str(query) if query else "",
-        gold_path=str(gold_path) if gold_path else None,
-        score_method=str(score_method) if score_method else "",
-        notes=str(notes) if notes else None,
-        expected_type=str(expected_type) if expected_type else None,
-        gold_paths=_coerce_gold_list(gold_paths, "path"),
-        gold_title=str(gold_title) if gold_title else None,
-        gold_titles=_coerce_gold_list(gold_titles, "title"),
-        agent=str(case_agent) if case_agent else None,
+        id=str(fields.case_id) if fields.case_id else f"case_{i}",
+        category=str(fields.category) if fields.category else "",
+        query=str(fields.query) if fields.query else "",
+        gold_path=str(fields.gold_path) if fields.gold_path else None,
+        score_method=str(fields.score_method) if fields.score_method else "",
+        notes=str(fields.notes) if fields.notes else None,
+        expected_type=str(fields.expected_type) if fields.expected_type else None,
+        gold_paths=_coerce_gold_list(fields.gold_paths, "path"),
+        gold_title=str(fields.gold_title) if fields.gold_title else None,
+        gold_titles=_coerce_gold_list(fields.gold_titles, "title"),
+        agent=str(fields.case_agent) if fields.case_agent else None,
+        expected_answer=str(fields.expected_answer) if fields.expected_answer else None,
+        expected_answer_keywords=_coerce_str_list(fields.expected_answer_keywords),
+        scope=str(fields.scope) if fields.scope else None,
+        collection=str(fields.collection) if fields.collection else None,
+        expected_zero_results=(
+            bool(fields.expected_zero_results) if fields.expected_zero_results is not None else None
+        ),
     )
 
 
@@ -352,26 +520,30 @@ def load_suite(path: str) -> BenchmarkSuite:
         validate_required_fields(case_id, raw_case, i, errors)
         validate_gold_titles_structure(gold_titles, case_id, i, errors)
         validate_recall_gold_requirement(category, gold_path, gold_paths, gold_title, gold_titles, case_id, i, errors)
+        validate_p4_field_types(raw_case, case_id, i, errors)
 
         gold_path = derive_gold_path_from_gold_lists(gold_path, gold_paths, gold_title, gold_titles)
 
         if not errors or (case_id and category and query and score_method):
-            cases.append(
-                build_benchmark_case(
-                    i,
-                    case_id,
-                    category,
-                    query,
-                    gold_path,
-                    score_method,
-                    notes,
-                    expected_type,
-                    gold_paths,
-                    gold_title,
-                    gold_titles,
-                    case_agent,
-                )
+            fields = _CaseFields(
+                case_id=case_id,
+                category=category,
+                query=query,
+                gold_path=gold_path,
+                score_method=score_method,
+                notes=notes,
+                expected_type=expected_type,
+                gold_paths=gold_paths,
+                gold_title=gold_title,
+                gold_titles=gold_titles,
+                case_agent=case_agent,
+                expected_answer=raw_case.get("expected_answer"),
+                expected_answer_keywords=raw_case.get("expected_answer_keywords"),
+                scope=raw_case.get("scope"),
+                collection=raw_case.get("collection"),
+                expected_zero_results=raw_case.get("expected_zero_results"),
             )
+            cases.append(build_benchmark_case(i, fields))
 
     if errors:
         raise ValueError(f"Suite schema errors in {path}:\n" + "\n".join(f"  - {e}" for e in errors))

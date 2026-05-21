@@ -1160,3 +1160,219 @@ def test_validate_suite_matches_gold_paths_via_progressive_suffix_shortening() -
     assert len(errors) == 1
     assert "R01" in errors[0]
     assert "completely/unrelated.md" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# P4 — expected_answer / scope / collection / agent overrides + meta defaults
+#
+# These tests pin the SUITE-LOADING behaviour for the new fields. Consumption
+# of the fields by BenchmarkRunner / scorers lives in P2/P3 — here we only
+# assert the YAML round-trips and produces a typed BenchmarkCase the
+# downstream phases can read.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_p4_new_fields_roundtrip_through_yaml(tmp_path: Path) -> None:
+    """expected_answer + expected_answer_keywords + per-case scope/collection/agent
+    + expected_zero_results all round-trip cleanly through load_suite.
+
+    Sabotage-proof executed 2026-05-21: replaced the build_benchmark_case
+    ``expected_answer=...`` argument with a comment. Test failed with
+    ``assert by_id["A"].expected_answer == "..."`` because the field
+    defaulted to None. Restored.
+    """
+    yaml_text = textwrap.dedent("""\
+        meta:
+          name: p4-roundtrip
+          default_scope: shared+agent
+          default_collection: vault
+          default_agent: builder
+          focus_areas: [recall, scope, llm_judge]
+
+        cases:
+          - id: J01
+            category: conceptual
+            query: "what did agent-alpha decide about retries?"
+            score_method: llm
+            expected_answer: "Agent-alpha decided to retry on 5xx only."
+            expected_answer_keywords: [retry, 5xx]
+            scope: agent
+            collection: project-x
+            agent: agent-alpha
+            expected_zero_results: false
+        """)
+    p = tmp_path / "p4-suite.yaml"
+    p.write_text(yaml_text)
+
+    suite = load_suite(str(p))
+    assert len(suite.cases) == 1
+    c = suite.cases[0]
+    assert c.expected_answer == "Agent-alpha decided to retry on 5xx only."
+    assert c.expected_answer_keywords == ["retry", "5xx"]
+    assert c.scope == "agent"
+    assert c.collection == "project-x"
+    assert c.agent == "agent-alpha"
+    assert c.expected_zero_results is False
+    # Meta defaults stay in the meta dict — permissive schema.
+    assert suite.meta["default_scope"] == "shared+agent"
+    assert suite.meta["default_collection"] == "vault"
+    assert suite.meta["default_agent"] == "builder"
+    assert suite.meta["focus_areas"] == ["recall", "scope", "llm_judge"]
+
+
+@pytest.mark.unit
+def test_p4_backwards_compat_old_suite_without_new_fields_still_loads(
+    minimal_suite_yaml: Path,
+) -> None:
+    """A pre-P4 suite (no expected_answer / scope / collection / agent /
+    focus_areas keys) loads identically to before — every new field is
+    ``None`` / unset, no errors raised.
+
+    Sabotage-proof executed 2026-05-21: removed the ``= None`` default
+    from ``BenchmarkCase.expected_answer``. Dataclass construction raised
+    ``TypeError: non-default argument 'expected_answer' follows default
+    argument 'agent'`` — load_suite crashed before this test even reached
+    its assertions. Restored.
+    """
+    suite = load_suite(str(minimal_suite_yaml))
+    for case in suite.cases:
+        assert case.expected_answer is None
+        assert case.expected_answer_keywords is None
+        assert case.scope is None
+        assert case.collection is None
+        assert case.expected_zero_results is None
+    # Meta does NOT auto-populate the new default_* keys — permissive.
+    assert "default_scope" not in suite.meta
+    assert "focus_areas" not in suite.meta
+
+
+@pytest.mark.unit
+def test_p4_expected_answer_and_keywords_are_independently_optional(
+    tmp_path: Path,
+) -> None:
+    """Both ``expected_answer`` and ``expected_answer_keywords`` are
+    optional. A case may declare only one, the other, both, or neither.
+
+    Sabotage-proof executed 2026-05-21: changed validator to require BOTH
+    when either was present — the only-answer case raised a schema error
+    and this test failed. Restored.
+    """
+    yaml_text = textwrap.dedent("""\
+        meta:
+          name: p4-optional
+        cases:
+          - id: A
+            category: conceptual
+            query: "answer only"
+            score_method: llm
+            expected_answer: "yep"
+          - id: B
+            category: conceptual
+            query: "keywords only"
+            score_method: llm
+            expected_answer_keywords: ["yep", "ok"]
+          - id: C
+            category: conceptual
+            query: "both"
+            score_method: llm
+            expected_answer: "yep"
+            expected_answer_keywords: ["yep"]
+          - id: D
+            category: conceptual
+            query: "neither"
+            score_method: llm
+        """)
+    p = tmp_path / "optional.yaml"
+    p.write_text(yaml_text)
+
+    suite = load_suite(str(p))
+    assert {c.id for c in suite.cases} == {"A", "B", "C", "D"}
+    by_id = {c.id: c for c in suite.cases}
+    assert by_id["A"].expected_answer == "yep"
+    assert by_id["A"].expected_answer_keywords is None
+    assert by_id["B"].expected_answer is None
+    assert by_id["B"].expected_answer_keywords == ["yep", "ok"]
+    assert by_id["C"].expected_answer == "yep"
+    assert by_id["C"].expected_answer_keywords == ["yep"]
+    assert by_id["D"].expected_answer is None
+    assert by_id["D"].expected_answer_keywords is None
+
+
+@pytest.mark.unit
+def test_p4_invalid_scope_string_raises_schema_error(tmp_path: Path) -> None:
+    """A ``scope`` value that isn't one of the accepted Scope strings
+    raises ValueError at load time with an actionable ``fix:`` hint
+    (F21 affordance).
+
+    Sabotage-proof executed 2026-05-21: replaced ``scope = raw_case.get("scope")``
+    with ``scope = None`` to skip the validation. The invalid case loaded
+    silently and pytest.raises did NOT trigger — test failed with
+    ``DID NOT RAISE``. Restored.
+    """
+    yaml_text = textwrap.dedent("""\
+        meta:
+          name: p4-bad-scope
+        cases:
+          - id: X
+            category: recall
+            query: "q"
+            score_method: exact
+            gold_title: "x"
+            scope: shared-only
+        """)
+    p = tmp_path / "bad-scope.yaml"
+    p.write_text(yaml_text)
+
+    with pytest.raises(ValueError) as exc:
+        load_suite(str(p))
+    assert "scope" in str(exc.value)
+    assert "shared-only" in str(exc.value)
+    assert "fix:" in str(exc.value)
+
+
+@pytest.mark.unit
+def test_p4_invalid_expected_zero_results_type_raises(tmp_path: Path) -> None:
+    """``expected_zero_results`` must be a boolean; a string raises a
+    schema error with a ``fix:`` hint."""
+    yaml_text = textwrap.dedent("""\
+        meta:
+          name: p4-bad-bool
+        cases:
+          - id: X
+            category: recall
+            query: "q"
+            score_method: exact
+            gold_title: "x"
+            expected_zero_results: "yes"
+        """)
+    p = tmp_path / "bad-bool.yaml"
+    p.write_text(yaml_text)
+
+    with pytest.raises(ValueError) as exc:
+        load_suite(str(p))
+    assert "expected_zero_results" in str(exc.value)
+    assert "fix:" in str(exc.value)
+
+
+@pytest.mark.unit
+def test_p4_invalid_keywords_type_raises(tmp_path: Path) -> None:
+    """``expected_answer_keywords`` must be a list — a string fails the
+    schema check rather than silently coercing."""
+    yaml_text = textwrap.dedent("""\
+        meta:
+          name: p4-bad-keywords
+        cases:
+          - id: X
+            category: conceptual
+            query: "q"
+            score_method: llm
+            expected_answer_keywords: "just-a-string"
+        """)
+    p = tmp_path / "bad-kw.yaml"
+    p.write_text(yaml_text)
+
+    with pytest.raises(ValueError) as exc:
+        load_suite(str(p))
+    assert "expected_answer_keywords" in str(exc.value)
+    assert "list" in str(exc.value)
