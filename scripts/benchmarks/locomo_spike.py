@@ -121,16 +121,21 @@ def load_locomo(num_conversations: int, local_path: Path | None = None) -> list[
     return data[:n]
 
 
-def _extract_sessions(conversation: dict[str, Any]) -> list[list[dict[str, Any]]]:
-    """Extract sessions (each a list of turns) from a LoCoMo record.
+def _extract_sessions(conversation: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract sessions (each a turn list + its date_time) from a LoCoMo record.
 
     LoCoMo's shape: ``conversation`` is a dict with keys like ``session_1``,
     ``session_2``, … (each a list of turn-dicts with ``speaker``, ``text``,
     ``dia_id``) interleaved with ``session_N_date_time`` strings. We pull
-    out the session lists in numeric order.
+    out the (turns, date_time) pairs in numeric order.
+
+    Returns a list of ``{"turns": [...], "date_time": "<str>|None"}``
+    dicts so downstream consumers can inject the session date into both
+    the rendered markdown and the production metadata sidecar (Stream A
+    Lever A — closes 54% of LoCoMo cat=2 misses).
     """
     conv = conversation.get("conversation") or {}
-    sessions: list[tuple[int, list[dict[str, Any]]]] = []
+    sessions: list[tuple[int, list[dict[str, Any]], str | None]] = []
     for key, value in conv.items():
         if not key.startswith("session_") or key.endswith("date_time"):
             continue
@@ -139,11 +144,14 @@ def _extract_sessions(conversation: dict[str, Any]) -> list[list[dict[str, Any]]
             continue
         if not isinstance(value, list):
             continue
-        sessions.append((int(suffix), value))
+        date_time_key = f"{key}_date_time"
+        raw_dt = conv.get(date_time_key)
+        date_time = str(raw_dt).strip() if isinstance(raw_dt, str) and raw_dt.strip() else None
+        sessions.append((int(suffix), value, date_time))
     sessions.sort(key=lambda t: t[0])
     if not sessions:
         raise ValueError(f"Could not find sessions in LoCoMo record. conversation keys: {sorted(conv.keys())}")
-    return [s for _, s in sessions]
+    return [{"turns": turns, "date_time": dt} for _, turns, dt in sessions]
 
 
 def _extract_questions(conversation: dict[str, Any]) -> list[dict[str, str]]:
@@ -172,7 +180,7 @@ def _extract_questions(conversation: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def write_sessions_to_vault(
-    sessions: list[list[dict[str, Any]]],
+    sessions: list[dict[str, Any]],
     vault_path: Path,
     conv_id: str,
 ) -> int:
@@ -185,28 +193,47 @@ def write_sessions_to_vault(
     written = 0
     for i, session in enumerate(sessions, start=1):
         path = conv_dir / f"session-{i:03d}.md"
-        path.write_text(_format_session_as_markdown(session, conv_id, i), encoding="utf-8")
+        turns = session["turns"]
+        date_time = session.get("date_time")
+        path.write_text(_format_session_as_markdown(turns, conv_id, i, date_time), encoding="utf-8")
         written += 1
     return written
 
 
-def _format_session_as_markdown(session: list[dict[str, Any]], conv_id: str, session_num: int) -> str:
+def _format_session_as_markdown(
+    session: list[dict[str, Any]],
+    conv_id: str,
+    session_num: int,
+    date_time: str | None = None,
+) -> str:
     """Render a list of turns as a single markdown file.
 
     Convention: each turn becomes ``**Speaker**: content`` followed by a
-    blank line. The frontmatter records conv_id + session_num so kairix's
-    retrieval can use them as metadata if needed later.
+    blank line. The frontmatter records conv_id + session_num + the
+    session's ``date_time`` so kairix's retrieval can use them as
+    metadata. The body opens with a ``**Session date:** ...`` pin so
+    the LLM context contains the calendar reference even if the
+    chunker drops the frontmatter (Stream A Lever A — closes 54% of
+    LoCoMo cat=2 temporal misses from spike A1).
     """
-    lines: list[str] = [
+    frontmatter_lines = [
         "---",
         f"conv_id: {conv_id}",
         f"session_num: {session_num}",
         "source: locomo",
-        "---",
+    ]
+    if date_time:
+        frontmatter_lines.append(f"date_time: {date_time}")
+    frontmatter_lines.append("---")
+
+    body_lines: list[str] = [
         "",
         f"# Conversation {conv_id} — Session {session_num}",
         "",
     ]
+    if date_time:
+        body_lines.append(f"**Session date:** {date_time}")
+        body_lines.append("")
     for turn in session:
         if not isinstance(turn, dict):
             continue
@@ -214,9 +241,43 @@ def _format_session_as_markdown(session: list[dict[str, Any]], conv_id: str, ses
         content = turn.get("text") or turn.get("content") or turn.get("utterance") or ""
         if not content:
             continue
-        lines.append(f"**{speaker}**: {content}")
-        lines.append("")
-    return "\n".join(lines)
+        body_lines.append(f"**{speaker}**: {content}")
+        body_lines.append("")
+    return "\n".join(frontmatter_lines + body_lines)
+
+
+def _write_session_metadata_sidecars(
+    sessions: list[dict[str, Any]],
+    vault_path: Path,
+    conv_id: str,
+) -> int:
+    """Write a ``<session>.md.metadata.json`` sidecar per session.
+
+    Stream A Lever A — production code path: when the spike eventually
+    routes through ``kairix ingest-chat`` (instead of ``kairix embed``
+    over markdown), the sidecars carry the same ``date_time`` the
+    markdown body already pins. Today's ``kairix embed`` path ignores
+    sidecars; the markdown body's ``**Session date:**`` line is the
+    load-bearing pin. Sidecars stay so the same vault works on either
+    code path with no extra wiring.
+
+    Returns the number of sidecars written.
+    """
+    conv_dir = vault_path / f"conv-{conv_id}"
+    written = 0
+    for i, session in enumerate(sessions, start=1):
+        date_time = session.get("date_time")
+        if not date_time:
+            continue
+        sidecar = conv_dir / f"session-{i:03d}.md.metadata.json"
+        payload = {
+            "conv_id": conv_id,
+            "session_num": i,
+            "date_time": date_time,
+        }
+        sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        written += 1
+    return written
 
 
 # ----------------------------------------------------------------------------
@@ -397,27 +458,41 @@ def _run_kairix_cli_backend(
     """Existing subprocess path: write sessions → kairix embed → kairix prep.
 
     Per-conversation isolation: each invocation resets the vault directory
-    to contain ONLY this conversation's sessions before embedding. Without
-    the reset, kairix indexes all prior conversations cumulatively and
-    retrieval cross-contaminates (e.g. conv-47 questions about John surface
-    chunks from conv-43 where another John lives). mem0's backend isolates
-    via user_id; kairix-cli needs vault reset for the same isolation.
+    AND the kairix data directory (SQLite + vectors) to contain ONLY this
+    conversation's data before embedding. Without the reset, kairix indexes
+    all prior conversations cumulatively and retrieval cross-contaminates
+    (e.g. conv-47 questions about John surface chunks from conv-43 where
+    another John lives). mem0's backend isolates via user_id; kairix-cli
+    needs vault reset for the same isolation.
+
+    Stream A fix: the previous implementation read ``KAIRIX_DATA_DIR``
+    from ``os.environ`` to locate the data dir, but ``_spike_env`` only
+    sets that variable inside the *subprocess* env (not the harness
+    process's env). Spike A1 confirmed all three conversations'
+    facts/chunks accumulated in a single SQLite — the rmtree on the
+    data dir was a silent no-op. Compute the data-dir path the same
+    way ``_spike_env`` does, directly from ``vault_path``, so isolation
+    actually happens.
     """
     import shutil
 
     if vault_path.exists():
         shutil.rmtree(vault_path)
     vault_path.mkdir(parents=True, exist_ok=True)
-    # Also drop the kairix data directory's index files so the embed starts
-    # from a clean SQLite + vector index. The KAIRIX_DATA_DIR env var must
-    # point at a sibling of vault_path for this to work — _spike_env enforces.
-    data_dir_str = os.environ.get("KAIRIX_DATA_DIR")
-    if data_dir_str:
-        data_dir = Path(data_dir_str)
+    # Compute the data dir the way _spike_env does — directly from
+    # vault_path. The os.environ.get() fallback path stays in place
+    # for callers that DO export KAIRIX_DATA_DIR into the harness env,
+    # so we union both candidates and rmtree any that exist.
+    candidates: list[Path] = [vault_path.parent / f"{vault_path.name}-data"]
+    env_data_dir = os.environ.get("KAIRIX_DATA_DIR")
+    if env_data_dir:
+        candidates.append(Path(env_data_dir))
+    for data_dir in candidates:
         if data_dir.exists():
             shutil.rmtree(data_dir)
         data_dir.mkdir(parents=True, exist_ok=True)
     write_sessions_to_vault(sessions, vault_path, conv_id)
+    _write_session_metadata_sidecars(sessions, vault_path, conv_id)
     run_kairix_embed(vault_path)
 
     rows: list[dict[str, Any]] = []
@@ -586,10 +661,16 @@ def _run_mem0_backend(
     # Ingest sessions turn-by-turn so mem0 runs its LLM-extraction pass
     # on each turn (the distinctive mem0 design — facts emerge from
     # turn-level extraction, not corpus-level chunking).
-    # ``sessions`` is a list of session-lists; each session-list is a list
-    # of turn-dicts with ``speaker`` + ``text`` keys (LoCoMo schema).
+    # ``sessions`` is a list of ``{"turns": [...], "date_time": "..."}``
+    # dicts (Lever A change to _extract_sessions). We thread the date
+    # into mem0's per-turn metadata so its extraction sees the temporal
+    # anchor too — keeps the comparison apples-to-apples with kairix.
     turn_count = 0
-    for session_turns in sessions:
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        session_turns = session.get("turns") or []
+        session_dt = session.get("date_time")
         if not isinstance(session_turns, list):
             continue
         for turn in session_turns:
@@ -599,8 +680,11 @@ def _run_mem0_backend(
             text = turn.get("text") or turn.get("content") or ""
             if not text:
                 continue
+            metadata: dict[str, Any] = {"speaker": speaker}
+            if session_dt:
+                metadata["date_time"] = session_dt
             try:
-                memory.add(text, user_id=user_id, metadata={"speaker": speaker})
+                memory.add(text, user_id=user_id, metadata=metadata)
                 turn_count += 1
             except Exception as exc:
                 LOGGER.warning("mem0 add failed for turn (speaker=%s): %s", speaker, exc)
