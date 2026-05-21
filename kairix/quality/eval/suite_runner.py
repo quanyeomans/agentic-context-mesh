@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from kairix.core.protocols import FactExtractor, FactStore
+from kairix.core.search.pipeline import SearchPipeline
 from kairix.paths import KairixPaths
 from kairix.platform.llm.protocol import LLMBackend
 
@@ -132,11 +133,18 @@ class SuiteRunner:
         fact_extractor: FactExtractor,
         llm: LLMBackend,
         paths: KairixPaths,
+        search_pipeline: SearchPipeline | None = None,
     ) -> None:
         self._fact_store = fact_store
         self._fact_extractor = fact_extractor
         self._llm = llm
         self._paths = paths
+        # Plan B-parity D3 remediation — when wired, queries route through
+        # the full SearchPipeline (intent classifier + fact federation +
+        # fusion + budget). When ``None``, the runner uses the legacy
+        # direct ``fact_store.search`` path (regression-debugging escape
+        # hatch only — slated for removal in v2026.5.19).
+        self._search_pipeline = search_pipeline
 
     # -----------------------------------------------------------------
     # Discovery
@@ -266,8 +274,7 @@ class SuiteRunner:
             if category not in _KNOWN_CATEGORIES:
                 category = "uncategorised"
 
-            hits = self._fact_store.search(question, top_k=5)
-            context = _hits_to_context(hits)
+            context = self._retrieve_context(question)
             score = self._judge(question=question, expected=answer, context=context)
             passed = score >= _PASS_THRESHOLD
 
@@ -291,6 +298,21 @@ class SuiteRunner:
             for cat, scores in per_cat_raw.items()
         }
         return rows, per_cat
+
+    def _retrieve_context(self, question: str) -> str:
+        """Route ``question`` to either the SearchPipeline or the legacy fact_store.
+
+        Plan B-parity D3 remediation: when ``self._search_pipeline`` is
+        wired, the eval CLI uses the same retrieval surface as ``kairix
+        prep`` — intent classifier + fact federation + fusion + budget.
+        When ``None``, falls back to today's direct fact_store.search
+        path (preserved as ``--legacy-direct`` for regression debugging).
+        """
+        if self._search_pipeline is not None:
+            result = self._search_pipeline.search(question)
+            return _search_result_to_context(result)
+        hits = self._fact_store.search(question, top_k=5)
+        return _hits_to_context(hits)
 
     def _judge(self, *, question: str, expected: str, context: str) -> float:
         """LLM-judge prompt - returns a graded 0.0-1.0 score.
@@ -415,6 +437,44 @@ def _hits_to_context(hits: list[Any]) -> str:
             content = getattr(hit, "content", None)
             if content:
                 lines.append(f"- {content}")
+    return "\n".join(lines) if lines else "(no relevant facts retrieved)"
+
+
+# Maximum chunk-snippet length passed into the LLM-judge context. Fact
+# rows are short triplets and arrive whole; chunk rows can be 1-2 kB
+# each, which blows the judge prompt past its 8-token answer budget.
+_CHUNK_SNIPPET_CHARS: int = 300
+
+
+def _search_result_to_context(result: Any) -> str:
+    """Adapt a SearchPipeline result to the LLM-judge context format.
+
+    Mirrors what :func:`_hits_to_context` produces for FactHits, but
+    handles the BudgetedResult wrapper from SearchPipeline (which carries
+    both chunk and fact rows after fusion). Fact rows arrive with
+    triplet-formatted snippets already (via ``_fused_from_fact_hit``);
+    chunk rows arrive with full chunk text — truncate to keep the judge
+    context tractable.
+
+    Plan B-parity D3 remediation. Empty results map to the same
+    ``(no relevant facts retrieved)`` sentinel that :func:`_hits_to_context`
+    emits, so the judge prompt shape is invariant across both retrieval
+    paths and the score is comparable.
+    """
+    lines: list[str] = []
+    for budgeted in getattr(result, "results", [])[:5]:
+        inner = getattr(budgeted, "result", None)
+        if inner is None:
+            continue
+        snippet = (getattr(budgeted, "content", "") or "").strip()
+        if not snippet:
+            continue
+        is_fact = str(getattr(inner, "path", "")).startswith("facts://")
+        if is_fact:
+            lines.append(f"- {snippet}")
+        else:
+            title = getattr(inner, "title", "") or getattr(inner, "path", "")
+            lines.append(f"- [{title}] {snippet[:_CHUNK_SNIPPET_CHARS]}")
     return "\n".join(lines) if lines else "(no relevant facts retrieved)"
 
 
