@@ -4,7 +4,7 @@ A structured approach to evaluating and maintaining the quality of the kairix pl
 
 ## How to use this document
 
-1. **Pre-release audit**: Run all sections before merging develop → main
+1. **Pre-release audit**: Run all sections before cutting from `main`
 2. **Regular review**: Run monthly or after major feature sprints
 3. **CI integration**: Automate the checks marked [automatable] in your pipeline
 4. **Roadmap input**: Items scored "needs work" feed into the engineering backlog
