@@ -2296,6 +2296,81 @@ Replace the hardcoded path with one of:
 
 ---
 
+### F32 — No real first names or organisation/client names in fixtures + docs
+
+Cross-pollinated from tc-agent-zone's `no_real_names_in_fixtures.py`.
+The mechanical version of the `feedback_no_confidential_in_public_artefacts`
+memory: public repo artefacts must use generic placeholders
+(`agent-alpha`, `Acme`, `your-team`) rather than identifiers tied to a
+specific human or client.
+
+#### Motivation
+
+kairix is a public, dogfooded knowledge-store project. Test fixtures,
+BDD scenarios, reference-library corpora, and user-facing docs that
+seed examples with a specific contributor's friends, family, or clients
+leak that context into every public commit, issue thread, and release
+note. Reviewer vigilance is not enough — the slip is locally plausible
+("just a fixture name") and gets reproduced across new fixtures by
+copy-paste. F32 converts the ad-hoc rule into a mechanical gate.
+
+#### Mechanism
+
+`scripts/checks/check_no_real_names_in_fixtures.py` walks every tracked
+file (`git ls-files`) and scans the ones in scope:
+
+- `tests/**/*.py` — pytest fixtures + assertions
+- `tests/bdd/**/*.feature` — Gherkin scenarios
+- `reference-library/**/*.{md,jsonl}` — corpus prose + transcripts
+- `docs/**/*.md` — user-facing documentation
+
+The `REAL_NAMES` tuple in the detector is the curated word-list. It
+is intentionally narrow — only identifiers actually leaked into kairix
+artefacts or explicitly flagged by the user for leak-prevention — to
+avoid false-positives on common English names that legitimately appear
+as citations in third-party reference-library content (e.g. "Dan North"
+in BDD literature, "Daniel Kahneman" in behavioural-economics
+references).
+
+Generic placeholders that are explicitly NOT in `REAL_NAMES` (and so
+pass trivially):
+
+- Persons:   `agent-alpha`, `agent-beta`, `agent-gamma`, `agent-delta`, `agent-epsilon`, `Alice`, `Bob`, `Carol`
+- Orgs:      `Acme`, `Example Corp`, `your-team`, `your-org`
+
+The baseline at `.architecture/baseline/no-real-names-in-fixtures-files.txt`
+grandfathers pre-existing offenders so the rule lands without forcing a
+sweep. The baseline shrinks file-by-file as fixtures get migrated to
+generic placeholders; net-new violations block at safe-commit and CI.
+
+#### Fix pattern
+
+Replace the real identifier with a generic placeholder:
+
+- For person names: `agent-alpha` / `agent-beta` (kairix convention) or
+  `Alice` / `Bob` / `Carol` (cryptography/CS canon).
+- For organisations: `Acme` / `Example Corp` / `your-team` / `your-org`.
+
+Then remove the file's entry from
+`.architecture/baseline/no-real-names-in-fixtures-files.txt` in the
+same commit.
+
+**Pass**:
+
+```python
+record = FakeFactRecord(entity="agent-alpha", attribute="role", value="VP")
+transcript = "agent-beta works at Acme."
+```
+
+**Forbidden**:
+
+```python
+record = FakeFactRecord(entity="<real-first-name>", attribute="role", value="VP")
+transcript = "<real-full-name> works at <real-org>."
+```
+
+---
+
 ## SDLC integration map
 
 Each fitness function fires at multiple lifecycle stages. The same
