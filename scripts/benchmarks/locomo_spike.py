@@ -1,561 +1,596 @@
-"""LoCoMo recall spike for kairix — minimum viable benchmark harness.
+"""LoCoMo benchmark harness — thin adapter that delegates to ``kairix eval``.
 
-Measures whether kairix can recall facts from prior multi-session dialogue when
-asked a question later. Same task shape as mem0's memory-benchmarks LoCoMo
-suite, but standalone (no mem0 harness coupling) and using kairix's existing
-LLM backend for the judge call (no separate API key).
+Phase P6 of the unified eval/benchmark plan. Today's LoCoMo harness used to
+reimplement ingestion (its own markdown formatter, its own ``kairix embed``
+chain, its own data-dir lifecycle). That diverged from the production
+``kairix ingest-chat`` / ``kairix eval`` pipeline.
 
-This is a *spike*, not production: defensive schema handling, no parallelism,
-serial question execution, single-conversation default. The goal is end-to-end
-signal in <1 hour and <$5 of judge calls before deciding whether to scale up.
+After Wave 2/3 the unified architecture exposes:
 
-Usage (smallest run — 1 conversation, 10 questions):
+* ``kairix/quality/eval/suite_runner.py:SuiteRunner`` — discovers and runs
+  a conversation-suite directory (``session-*.jsonl`` + ground-truth files).
+* ``kairix eval <suite-path>`` (entry: ``kairix.use_cases.eval_suite``) —
+  the operator CLI on top of ``SuiteRunner``.
+* ``kairix benchmark run <suite.yaml>`` — the unified YAML-driven runner
+  (P5 lands the unified mode/scope/metrics flags; P-Ingest3 wires it
+  through ``SuiteRunner`` in parallel with this commit).
 
-    python scripts/benchmarks/locomo_spike.py \\
-        --vault-root /tmp/kairix-locomo-vault \\
-        --num-conversations 1 \\
-        --max-questions 10 \\
-        --output-csv /tmp/locomo-spike-results.csv \\
-        --reset-vault
+This module is now a thin orchestrator:
 
-Requirements:
+1. Load LoCoMo JSON (``/tmp/locomo10.json`` or
+   ``reference-library/conversations/locomo/locomo10.json``).
+2. For each conversation, convert it into a kairix-compatible suite layout
+   under a per-conversation directory:
 
-    pip install datasets
+   ```
+   <out>/<conv-id>/
+       session-001.jsonl
+       session-001.jsonl.metadata.json      # { date_time, session_id }
+       ...
+       ground-truth-queries.json            # questions + expected_answer
+       ground-truth-facts.json              # optional (LoCoMo doesn't ship facts)
+       suite.yaml                           # unified benchmark suite descriptor
+   ```
 
-    Plus kairix installed (``pip install -e .`` from the kairix repo root) and
-    a working kairix LLM backend (``provider:`` set in ``kairix.config.yaml``).
-    The script reuses whatever provider is configured for the judge call.
+3. Invoke ``kairix eval <suite-dir>`` (canonical CLI today) or
+   ``kairix benchmark run <suite.yaml>`` (preferred once SuiteRunner wiring
+   lands) via subprocess. Capture stdout+stderr to log files.
+4. Aggregate per-conversation results and print a single summary.
 
-Output:
+The harness keeps the ``mem0`` backend as a peer for apples-to-apples
+comparison — unchanged ingest path on that side.
 
-    A CSV with one row per question: conv_id, question, ground_truth,
-    kairix_response, judge_correct, judge_score, judge_reasoning.
-    Plus a summary printed to stdout: total questions, pass rate, mean score.
+Constraints obeyed:
+
+* No reimplemented embed / ingest path on the kairix side.
+* No production-code touches under ``kairix/``.
+* F21 actionable markers on every operator-facing error.
+* F22 path conventions for the test directory.
+
+Usage (3-question smoke on conv-26):
+
+    python scripts/benchmarks/locomo_spike.py \
+        --locomo-path /tmp/locomo10.json \
+        --conversations conv-26 \
+        --questions-per-conv 3 \
+        --output-dir /tmp/locomo-p6-smoke \
+        --backend kairix-cli
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 LOGGER = logging.getLogger("locomo_spike")
 
-# Judge prompt — adapted from mem0/memory-benchmarks judge semantics. Kept
-# inline so the spike is self-contained; if we adopt the harness long-term
-# we'll vendor mem0's exact prompt under attribution for apples-to-apples
-# comparison.
-JUDGE_PROMPT = """\
-You are evaluating whether a memory system's response correctly
-answers a question based on prior conversation context.
-
-Question:
-{question}
-
-Ground truth answer:
-{ground_truth}
-
-System response:
-{response}
-
-Score the system's response:
-- Does it correctly answer the question?
-- Is it factually consistent with the ground truth?
-- Partial credit is appropriate for partially correct answers.
-
-Respond with a single JSON object ONLY (no prose around it):
-{{"correct": true|false, "score": 0.0-1.0, "reasoning": "one-sentence rationale"}}
-"""
-
-# kairix prep command — using L0 tier for fastest synthesised answer. L1 would
-# do deeper retrieval at higher cost; not needed for spike-level signal.
-_PREP_TIER = "l0"
-
-# Per-question timeout for the kairix prep call. 60s is generous; production
-# pipeline is sub-5s warm.
-_PREP_TIMEOUT_S = 60
-
-# Embed timeout — needs to be larger because the worker processes every file
-# in the vault. 10 min handles ~10 conversations x 30 sessions each.
-_EMBED_TIMEOUT_S = 600
-
-
-# ----------------------------------------------------------------------------
-# Dataset loading
-# ----------------------------------------------------------------------------
-
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
 LOCOMO_DATA_URL = "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json"
 
+_KAIRIX_CLI_BACKEND = "kairix-cli"
+_MEM0_BACKEND = "mem0"
+_SUPPORTED_BACKENDS = (_KAIRIX_CLI_BACKEND, _MEM0_BACKEND)
 
-def load_locomo(num_conversations: int, local_path: Path | None = None) -> list[dict[str, Any]]:
-    """Load the first N LoCoMo conversations.
+# LoCoMo encodes category as an integer 1-5. Two target taxonomies need
+# the mapping — the SuiteRunner-shape ``ground-truth-queries.json`` uses
+# string category names from ``_KNOWN_CATEGORIES``, and the unified
+# benchmark ``suite.yaml`` uses kairix's CATEGORY_WEIGHTS keys. Keep
+# both maps here so the conversion adapter is the single source of truth.
+_LOCOMO_CAT_TO_SUITE_RUNNER: dict[int, str] = {
+    1: "single-hop",
+    2: "temporal",
+    3: "multi-hop",
+    4: "open-domain",
+    5: "adversarial",
+}
+_LOCOMO_CAT_TO_BENCHMARK: dict[int, str] = {
+    1: "recall",
+    2: "temporal",
+    3: "multi_hop",
+    4: "conceptual",
+    5: "conceptual",
+}
 
-    LoCoMo is shipped as a JSON file in the snap-research/locomo GitHub repo
-    (10 records, each with `sample_id`, `conversation`, `qa`, etc.). When
-    ``local_path`` is given we read from disk; otherwise we fetch the raw
-    JSON from GitHub.
+# Subprocess timeout for the kairix subprocess invocation. LoCoMo
+# conversations can have 30+ sessions and 30+ questions; the LLM-judge
+# round trip dominates. 20 min is generous and matches the prior
+# ``kairix embed`` timeout budget.
+_RUN_TIMEOUT_S = 1200
+
+# Pass-threshold for the per-question score (mirrors SuiteRunner's own
+# threshold; kept here so aggregate.pass_rate is comparable when the harness
+# falls back to a JSON-only result file).
+_PASS_THRESHOLD: float = 0.5
+
+
+# ---------------------------------------------------------------------------
+# Dataset loading
+# ---------------------------------------------------------------------------
+
+
+def load_locomo_json(locomo_path: Path | None) -> list[dict[str, Any]]:
+    """Load LoCoMo conversations from disk or the canonical GitHub URL.
+
+    Raises:
+        ValueError: with ``fix:`` / ``next:`` markers when the file is
+            unreadable or does not carry a JSON list.
     """
-    import json
-    import urllib.request
-
-    if local_path and local_path.exists():
-        LOGGER.info("Loading LoCoMo from local file %s", local_path)
-        data = json.loads(local_path.read_text(encoding="utf-8"))
+    if locomo_path is not None and locomo_path.exists():
+        LOGGER.info("Loading LoCoMo from local file %s", locomo_path)
+        data = json.loads(locomo_path.read_text(encoding="utf-8"))
     else:
         LOGGER.info("Fetching LoCoMo JSON from %s", LOCOMO_DATA_URL)
         with urllib.request.urlopen(LOCOMO_DATA_URL, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
 
     if not isinstance(data, list):
-        raise ValueError(f"Expected LoCoMo to be a JSON list of records; got {type(data).__name__}")
-    n = min(num_conversations, len(data))
-    LOGGER.info("Got %d conversations; using first %d.", len(data), n)
-    return data[:n]
+        raise ValueError(
+            f"LoCoMo data must be a JSON list; got {type(data).__name__}. "
+            f"fix: pass a valid locomo10.json. "
+            f"next: download from {LOCOMO_DATA_URL}"
+        )
+    return data
 
 
-def _extract_sessions(conversation: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract sessions (each a turn list + its date_time) from a LoCoMo record.
+def _filter_conversations(
+    data: list[dict[str, Any]],
+    selected: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Filter ``data`` to the conversations named in ``selected``."""
+    if not selected:
+        return data
+    wanted = set(selected)
+    out = [c for c in data if str(c.get("sample_id", "")) in wanted]
+    missing = wanted - {str(c.get("sample_id", "")) for c in out}
+    if missing:
+        raise ValueError(
+            f"Conversation id(s) {sorted(missing)} not found in LoCoMo data. "
+            f"fix: pass ids that exist in the loaded JSON. "
+            f"next: omit --conversations to run all of them."
+        )
+    return out
 
-    LoCoMo's shape: ``conversation`` is a dict with keys like ``session_1``,
-    ``session_2``, … (each a list of turn-dicts with ``speaker``, ``text``,
-    ``dia_id``) interleaved with ``session_N_date_time`` strings. We pull
-    out the (turns, date_time) pairs in numeric order.
 
-    Returns a list of ``{"turns": [...], "date_time": "<str>|None"}``
-    dicts so downstream consumers can inject the session date into both
-    the rendered markdown and the production metadata sidecar (Stream A
-    Lever A — closes 54% of LoCoMo cat=2 misses).
-    """
-    conv = conversation.get("conversation") or {}
-    sessions: list[tuple[int, list[dict[str, Any]], str | None]] = []
+# ---------------------------------------------------------------------------
+# LoCoMo -> suite-layout adapter
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _ParsedSession:
+    """Internal helper — one extracted LoCoMo session ready for emit."""
+
+    session_num: int
+    date_time: str | None
+    turns: tuple[dict[str, Any], ...]
+
+
+def _parse_sessions(locomo_conv: dict[str, Any]) -> list[_ParsedSession]:
+    """Pull every ``session_N`` + ``session_N_date_time`` pair from a LoCoMo record."""
+    conv = locomo_conv.get("conversation") or {}
+    out: list[_ParsedSession] = []
     for key, value in conv.items():
         if not key.startswith("session_") or key.endswith("date_time"):
             continue
         suffix = key.removeprefix("session_")
-        if not suffix.isdigit():
+        if not suffix.isdigit() or not isinstance(value, list):
             continue
-        if not isinstance(value, list):
-            continue
-        date_time_key = f"{key}_date_time"
-        raw_dt = conv.get(date_time_key)
+        raw_dt = conv.get(f"{key}_date_time")
         date_time = str(raw_dt).strip() if isinstance(raw_dt, str) and raw_dt.strip() else None
-        sessions.append((int(suffix), value, date_time))
-    sessions.sort(key=lambda t: t[0])
-    if not sessions:
-        raise ValueError(f"Could not find sessions in LoCoMo record. conversation keys: {sorted(conv.keys())}")
-    return [{"turns": turns, "date_time": dt} for _, turns, dt in sessions]
-
-
-def _extract_questions(conversation: dict[str, Any]) -> list[dict[str, str]]:
-    """Extract (question, ground_truth) pairs from a LoCoMo record's ``qa`` list."""
-    raw = conversation.get("qa") or []
-    out: list[dict[str, str]] = []
-    for q in raw:
-        if not isinstance(q, dict):
-            continue
-        question = q.get("question")
-        # LoCoMo answers are stored under "answer"; a small number of category-5
-        # adversarial questions use "adversarial_answer". Either is acceptable
-        # as ground truth for the recall task.
-        ground_truth = q.get("answer") or q.get("adversarial_answer")
-        if not question or not ground_truth:
-            continue
-        out.append({"question": str(question), "ground_truth": str(ground_truth)})
-    if not out:
-        raise ValueError(f"Could not find QA pairs in LoCoMo record. Available keys: {sorted(conversation.keys())}")
+        turns = tuple(t for t in value if isinstance(t, dict))
+        out.append(_ParsedSession(session_num=int(suffix), date_time=date_time, turns=turns))
+    out.sort(key=lambda s: s.session_num)
     return out
 
 
-# ----------------------------------------------------------------------------
-# Vault writing
-# ----------------------------------------------------------------------------
-
-
-def write_sessions_to_vault(
-    sessions: list[dict[str, Any]],
-    vault_path: Path,
-    conv_id: str,
-) -> int:
-    """Write each session as a separate markdown file under ``vault_path``.
-
-    Returns the number of session files written.
-    """
-    conv_dir = vault_path / f"conv-{conv_id}"
-    conv_dir.mkdir(parents=True, exist_ok=True)
-    written = 0
-    for i, session in enumerate(sessions, start=1):
-        path = conv_dir / f"session-{i:03d}.md"
-        turns = session["turns"]
-        date_time = session.get("date_time")
-        path.write_text(_format_session_as_markdown(turns, conv_id, i, date_time), encoding="utf-8")
-        written += 1
-    return written
-
-
-def _format_session_as_markdown(
-    session: list[dict[str, Any]],
+def _turn_to_jsonl_record(
+    turn: dict[str, Any],
+    *,
     conv_id: str,
     session_num: int,
-    date_time: str | None = None,
-) -> str:
-    """Render a list of turns as a single markdown file.
-
-    Convention: each turn becomes ``**Speaker**: content`` followed by a
-    blank line. The frontmatter records conv_id + session_num + the
-    session's ``date_time`` so kairix's retrieval can use them as
-    metadata. The body opens with a ``**Session date:** ...`` pin so
-    the LLM context contains the calendar reference even if the
-    chunker drops the frontmatter (Stream A Lever A — closes 54% of
-    LoCoMo cat=2 temporal misses from spike A1).
-    """
-    frontmatter_lines = [
-        "---",
-        f"conv_id: {conv_id}",
-        f"session_num: {session_num}",
-        "source: locomo",
-    ]
+    turn_idx: int,
+    date_time: str | None,
+) -> dict[str, Any] | None:
+    """Convert one LoCoMo turn into the canonical session-jsonl shape."""
+    speaker = turn.get("speaker") or turn.get("speaker_id") or turn.get("role") or "unknown"
+    content = turn.get("text") or turn.get("content") or turn.get("utterance") or ""
+    if not content:
+        return None
+    turn_id = turn.get("dia_id") or f"{conv_id}-s{session_num:03d}-t{turn_idx:03d}"
+    record: dict[str, Any] = {
+        "id": str(turn_id),
+        "speaker": str(speaker),
+        "content": str(content),
+    }
     if date_time:
-        frontmatter_lines.append(f"date_time: {date_time}")
-    frontmatter_lines.append("---")
-
-    body_lines: list[str] = [
-        "",
-        f"# Conversation {conv_id} — Session {session_num}",
-        "",
-    ]
-    if date_time:
-        body_lines.append(f"**Session date:** {date_time}")
-        body_lines.append("")
-    for turn in session:
-        if not isinstance(turn, dict):
-            continue
-        speaker = turn.get("speaker") or turn.get("speaker_id") or turn.get("role") or "unknown"
-        content = turn.get("text") or turn.get("content") or turn.get("utterance") or ""
-        if not content:
-            continue
-        body_lines.append(f"**{speaker}**: {content}")
-        body_lines.append("")
-    return "\n".join(frontmatter_lines + body_lines)
+        record["timestamp"] = date_time
+    return record
 
 
-def _write_session_metadata_sidecars(
-    sessions: list[dict[str, Any]],
-    vault_path: Path,
+def _emit_session_files(
+    sessions: list[_ParsedSession],
+    *,
+    suite_dir: Path,
     conv_id: str,
 ) -> int:
-    """Write a ``<session>.md.metadata.json`` sidecar per session.
-
-    Stream A Lever A — production code path: when the spike eventually
-    routes through ``kairix ingest-chat`` (instead of ``kairix embed``
-    over markdown), the sidecars carry the same ``date_time`` the
-    markdown body already pins. Today's ``kairix embed`` path ignores
-    sidecars; the markdown body's ``**Session date:**`` line is the
-    load-bearing pin. Sidecars stay so the same vault works on either
-    code path with no extra wiring.
-
-    Returns the number of sidecars written.
-    """
-    conv_dir = vault_path / f"conv-{conv_id}"
+    """Write each session as ``session-NNN.jsonl`` + ``.metadata.json`` sidecar."""
     written = 0
-    for i, session in enumerate(sessions, start=1):
-        date_time = session.get("date_time")
-        if not date_time:
+    for session in sessions:
+        session_path = suite_dir / f"session-{session.session_num:03d}.jsonl"
+        records: list[dict[str, Any]] = []
+        for idx, turn in enumerate(session.turns, start=1):
+            rec = _turn_to_jsonl_record(
+                turn,
+                conv_id=conv_id,
+                session_num=session.session_num,
+                turn_idx=idx,
+                date_time=session.date_time,
+            )
+            if rec is not None:
+                records.append(rec)
+        if not records:
             continue
-        sidecar = conv_dir / f"session-{i:03d}.md.metadata.json"
-        payload = {
-            "conv_id": conv_id,
-            "session_num": i,
-            "date_time": date_time,
-        }
-        sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        with session_path.open("w", encoding="utf-8") as fh:
+            for rec in records:
+                fh.write(json.dumps(rec) + "\n")
+        if session.date_time:
+            sidecar = suite_dir / f"session-{session.session_num:03d}.jsonl.metadata.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "session_id": f"{conv_id}-s{session.session_num:03d}",
+                        "date_time": session.date_time,
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
         written += 1
     return written
 
 
-# ----------------------------------------------------------------------------
-# Kairix calls
-# ----------------------------------------------------------------------------
-
-
-def _spike_env(vault_path: Path) -> dict[str, str]:
-    """Build the per-spike subprocess env with the FULL path set overridden.
-
-    Overriding only ``KAIRIX_DOCUMENT_ROOT`` is unsafe in environments where
-    ``KAIRIX_DB_PATH`` / ``KAIRIX_DATA_DIR`` / ``KAIRIX_WORKSPACE_ROOT`` are
-    set in the inherited env (e.g. the deployed container has these baked
-    into the Dockerfile). Embed would walk the spike vault but write its
-    SQLite + vectors into the production index, and prep would read the
-    production index back — so answers come from the wrong corpus even
-    though the doc root looks isolated. This helper pins the whole path
-    set under ``vault_path``'s sibling directories so the spike run is
-    fully isolated from any inherited deployment config.
-    """
-    spike_data = vault_path.parent / f"{vault_path.name}-data"
-    spike_data.mkdir(parents=True, exist_ok=True)
-    overrides: dict[str, str] = {
-        "KAIRIX_DOCUMENT_ROOT": str(vault_path),
-        "KAIRIX_DATA_DIR": str(spike_data),
-        "KAIRIX_DB_PATH": str(spike_data / "index.sqlite"),
-        "KAIRIX_WORKSPACE_ROOT": str(spike_data / "workspaces"),
-    }
-    return {**os.environ, **overrides}
-
-
-def run_kairix_embed(vault_path: Path) -> None:
-    """Embed the vault by running ``kairix embed`` with the full path set isolated."""
-    LOGGER.info("Running kairix embed against %s ...", vault_path)
-    env = _spike_env(vault_path)
-    result = subprocess.run(
-        ["kairix", "embed"],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=_EMBED_TIMEOUT_S,
-        check=False,
+def _emit_queries(
+    locomo_conv: dict[str, Any],
+    *,
+    suite_dir: Path,
+    questions_per_conv: int,
+) -> list[dict[str, Any]]:
+    """Write ``ground-truth-queries.json`` for ``SuiteRunner`` consumption."""
+    raw_qa = locomo_conv.get("qa") or []
+    queries: list[dict[str, Any]] = []
+    for q in raw_qa:
+        if not isinstance(q, dict):
+            continue
+        question = q.get("question")
+        answer = q.get("answer") or q.get("adversarial_answer")
+        if not question or not answer:
+            continue
+        cat_int = q.get("category")
+        suite_category = _LOCOMO_CAT_TO_SUITE_RUNNER.get(
+            cat_int if isinstance(cat_int, int) else 0,
+            "open-domain",
+        )
+        queries.append(
+            {
+                "question": str(question),
+                "answer": str(answer),
+                "category": suite_category,
+                "locomo_category": cat_int,
+                "evidence_turn_ids": list(q.get("evidence", []) or []),
+            }
+        )
+    queries = queries[:questions_per_conv]
+    (suite_dir / "ground-truth-queries.json").write_text(
+        json.dumps(queries, indent=2),
+        encoding="utf-8",
     )
-    if result.returncode != 0:
-        raise RuntimeError(f"kairix embed failed (rc={result.returncode}): {result.stderr[-500:]}")
-    LOGGER.info("kairix embed completed.")
+    return queries
 
 
-def run_kairix_prep(question: str, vault_path: Path) -> str:
-    """Call ``kairix prep`` for a single question and return the rendered output.
+def _emit_suite_yaml(
+    *,
+    suite_dir: Path,
+    suite_name: str,
+    queries: list[dict[str, Any]],
+) -> Path:
+    """Write the unified ``suite.yaml`` benchmark descriptor."""
+    yaml_path = suite_dir / "suite.yaml"
+    cases: list[dict[str, Any]] = []
+    for i, q in enumerate(queries, start=1):
+        cat_int = q.get("locomo_category")
+        bm_category = _LOCOMO_CAT_TO_BENCHMARK.get(
+            cat_int if isinstance(cat_int, int) else 0,
+            "conceptual",
+        )
+        case: dict[str, Any] = {
+            "id": f"L-q{i:02d}",
+            "category": bm_category,
+            "query": q["question"],
+            "score_method": "llm",
+            "expected_answer": q["answer"],
+        }
+        cases.append(case)
+    suite_doc = {
+        "meta": {
+            "name": suite_name,
+            "version": "2026-05-21",
+            "collections": ["conversational"],
+            "default_scope": "shared+agent",
+            "default_agent": "locomo-agent",
+            "focus_areas": ["conversational-multi-session", "locomo"],
+            "description": ("LoCoMo conversation corpus - generated by scripts/benchmarks/locomo_spike.py"),
+        },
+        "cases": cases,
+    }
+    with yaml_path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(suite_doc, fh, sort_keys=False, default_flow_style=False)
+    return yaml_path
 
-    Errors (timeout, non-zero exit) are caught and returned as the response
-    string so the judge can score them as failures rather than crashing the
-    whole run.
+
+def convert_locomo_conversation_to_suite(
+    locomo_conv: dict[str, Any],
+    *,
+    suite_dir: Path,
+    suite_name: str,
+    questions_per_conv: int = 30,
+) -> Path:
+    """Convert one LoCoMo conversation into a kairix suite directory.
+
+    Writes:
+
+      ``<suite_dir>/session-NNN.jsonl``           — one per session
+      ``<suite_dir>/session-NNN.jsonl.metadata.json`` — { date_time, session_id }
+      ``<suite_dir>/ground-truth-queries.json``  — SuiteRunner consumes
+      ``<suite_dir>/suite.yaml``                 — BenchmarkSuite consumes
+
+    Returns the path to ``suite.yaml`` so the caller can either invoke
+    ``kairix benchmark run <suite.yaml>`` (preferred once P-Ingest3 routes
+    it through SuiteRunner) or fall back to ``kairix eval <suite_dir>``
+    (canonical today).
+
+    Per Spike A1, the highest-leverage data point is the session-level
+    ``date_time`` (closes 54% of LoCoMo cat=temporal misses); it's written
+    in three places: the per-turn ``timestamp`` field, the session
+    sidecar JSON, and (implicitly via the test fixture's session ids)
+    the SearchPipeline's recency-weighted retrieval signal.
+
+    Raises:
+        ValueError: with actionable markers when the LoCoMo conversation
+            has no sessions or no usable QA pairs.
     """
-    env = _spike_env(vault_path)
-    try:
-        result = subprocess.run(
-            ["kairix", "prep", question, "--tier", _PREP_TIER],
+    if not isinstance(locomo_conv, dict):
+        raise ValueError(
+            f"LoCoMo conversation must be a dict; got {type(locomo_conv).__name__}. "
+            f"fix: pass a record loaded from locomo10.json. "
+            f"next: see scripts/benchmarks/locomo_spike.py:load_locomo_json."
+        )
+
+    suite_dir.mkdir(parents=True, exist_ok=True)
+
+    sessions = _parse_sessions(locomo_conv)
+    if not sessions:
+        raise ValueError(
+            f"LoCoMo conversation {locomo_conv.get('sample_id')!r} has no sessions. "
+            f"fix: check the conversation.session_<N> keys in the source JSON. "
+            f"next: re-export with the canonical LoCoMo schema."
+        )
+
+    n_sessions = _emit_session_files(sessions, suite_dir=suite_dir, conv_id=suite_name)
+    if n_sessions == 0:
+        raise ValueError(
+            f"LoCoMo conversation {locomo_conv.get('sample_id')!r} parsed but "
+            f"emitted zero session files (all turns lacked usable text). "
+            f"fix: verify the speaker/text fields on each turn. "
+            f"next: skip this conversation via --conversations."
+        )
+
+    queries = _emit_queries(
+        locomo_conv,
+        suite_dir=suite_dir,
+        questions_per_conv=questions_per_conv,
+    )
+    if not queries:
+        raise ValueError(
+            f"LoCoMo conversation {locomo_conv.get('sample_id')!r} has no QA pairs. "
+            f"fix: confirm the 'qa' field is a non-empty list. "
+            f"next: pick a different conversation."
+        )
+
+    return _emit_suite_yaml(
+        suite_dir=suite_dir,
+        suite_name=suite_name,
+        queries=queries,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Subprocess orchestration — kairix CLI
+# ---------------------------------------------------------------------------
+
+
+def _build_subprocess_env(*, data_dir: Path) -> dict[str, str]:
+    """Build the env the kairix subprocess sees.
+
+    Spike A1 finding: overriding only ``KAIRIX_DOCUMENT_ROOT`` is unsafe
+    in environments where ``KAIRIX_DB_PATH`` / ``KAIRIX_DATA_DIR`` are
+    baked into the deployment env. This helper pins the whole path set
+    under ``data_dir`` so the run is hermetic.
+    """
+    env = dict(os.environ)
+    env["KAIRIX_DATA_DIR"] = str(data_dir)
+    env["KAIRIX_DB_PATH"] = str(data_dir / "index.sqlite")
+    env["KAIRIX_WORKSPACE_ROOT"] = str(data_dir / "workspaces")
+    env.setdefault("KAIRIX_TRACE", "1")
+    return env
+
+
+def _run_kairix_subprocess(
+    *,
+    args: list[str],
+    env: dict[str, str],
+    stdout_log: Path,
+    stderr_log: Path,
+) -> int:
+    """Run ``args`` as a subprocess, streaming stdout+stderr to log files.
+
+    Spike A1 finding: ``capture_output=True`` swallows stderr behind a
+    successful return — operators lose the KAIRIX_TRACE breadcrumbs.
+    Stream both streams to separate logs so the trace survives.
+    """
+    LOGGER.info("Running: %s", " ".join(args))
+    with stdout_log.open("w", encoding="utf-8") as out_fh, stderr_log.open("w", encoding="utf-8") as err_fh:
+        proc = subprocess.run(
+            args,
             env=env,
-            capture_output=True,
-            text=True,
-            timeout=_PREP_TIMEOUT_S,
+            stdout=out_fh,
+            stderr=err_fh,
+            timeout=_RUN_TIMEOUT_S,
             check=False,
         )
-    except subprocess.TimeoutExpired:
-        return f"ERROR: kairix prep timed out after {_PREP_TIMEOUT_S}s"
-
-    if result.returncode != 0:
-        return f"ERROR: kairix prep rc={result.returncode}: {result.stderr[-200:]}"
-    return result.stdout.strip()
+    return proc.returncode
 
 
-# ----------------------------------------------------------------------------
-# Judge
-# ----------------------------------------------------------------------------
+def _invoke_suite_run(
+    *,
+    suite_dir: Path,
+    data_dir: Path,
+    output_json: Path,
+) -> dict[str, Any] | None:
+    """Invoke ``kairix eval <suite_dir> --json`` and return the parsed result.
 
-
-def judge_response(question: str, ground_truth: str, response: str) -> dict[str, Any]:
-    """Use kairix's configured LLM backend to score a single response.
-
-    Returns ``{correct: bool, score: float, reasoning: str}``. Falls back to
-    a structured failure record on any error so one bad judge call doesn't
-    abort the run.
+    Returns ``None`` when the subprocess crashed or emitted invalid JSON;
+    the harness still aggregates the rest of the conversations.
     """
-    from kairix.platform.llm import get_default_backend
-
-    backend = get_default_backend()
-    prompt = JUDGE_PROMPT.format(question=question, ground_truth=ground_truth, response=response)
+    stdout_log = suite_dir / "stdout.log"
+    stderr_log = suite_dir / "stderr.log"
+    cli_args = [
+        sys.executable,
+        "-m",
+        "kairix.cli",
+        "eval",
+        str(suite_dir),
+        "--json",
+    ]
+    rc = _run_kairix_subprocess(
+        args=cli_args,
+        env=_build_subprocess_env(data_dir=data_dir),
+        stdout_log=stdout_log,
+        stderr_log=stderr_log,
+    )
+    if rc != 0:
+        LOGGER.warning(
+            "kairix subprocess exited rc=%d on %s. "
+            "fix: inspect %s and %s for the trace. "
+            "next: re-run with KAIRIX_TRACE=1 for verbose breadcrumbs.",
+            rc,
+            suite_dir.name,
+            stdout_log,
+            stderr_log,
+        )
     try:
-        raw = backend.chat([{"role": "user", "content": prompt}], max_tokens=300)
-    except Exception as exc:
-        return {
-            "correct": False,
-            "score": 0.0,
-            "reasoning": f"judge call failed: {type(exc).__name__}: {exc!s}",
-        }
-
-    return _parse_judge_output(raw)
-
-
-def _parse_judge_output(raw: str) -> dict[str, Any]:
-    """Extract the JSON object from the judge's response.
-
-    LLMs sometimes wrap the JSON in prose or markdown fences; do a tolerant
-    extraction before falling back to a structured failure record.
-    """
-    raw = raw.strip()
-    # Strip common markdown fences
-    if raw.startswith("```"):
-        raw = raw.split("```")[1] if "```" in raw[3:] else raw
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip("`").strip()
-
-    # Try the obvious whole-string parse first
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return {
-                "correct": bool(parsed.get("correct", False)),
-                "score": float(parsed.get("score", 0.0)),
-                "reasoning": str(parsed.get("reasoning", ""))[:300],
-            }
-    except (json.JSONDecodeError, TypeError, ValueError):
-        pass
-
-    # Try extracting the first {...} substring
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if 0 <= start < end:
-        try:
-            parsed = json.loads(raw[start : end + 1])
+        raw_stdout = stdout_log.read_text(encoding="utf-8")
+        start = raw_stdout.find("{")
+        end = raw_stdout.rfind("}")
+        if 0 <= start < end:
+            parsed = json.loads(raw_stdout[start : end + 1])
             if isinstance(parsed, dict):
-                return {
-                    "correct": bool(parsed.get("correct", False)),
-                    "score": float(parsed.get("score", 0.0)),
-                    "reasoning": str(parsed.get("reasoning", ""))[:300],
-                }
-        except (json.JSONDecodeError, TypeError, ValueError):
-            pass
-
-    return {
-        "correct": False,
-        "score": 0.0,
-        "reasoning": f"judge returned non-JSON: {raw[:200]}",
-    }
+                payload: dict[str, Any] = parsed
+                output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                return payload
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("Could not parse kairix JSON output for %s: %s", suite_dir.name, exc)
+    return None
 
 
-# ----------------------------------------------------------------------------
-# Main runner
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Backend dispatch
+# ---------------------------------------------------------------------------
 
 
-# ----------------------------------------------------------------------------
-# Backend dispatch — Phase 0.3 of the mem0-vs-kairix-uplift plan.
-#
-# Each backend implements (ingest, answer): given a conversation's sessions
-# and a question, return a synthesised answer string. The benchmark wraps
-# both behind the same shape so the same 10 LoCoMo questions run through
-# either kairix-cli (existing CLI subprocess) or mem0 (Phase 1) with one
-# flag flip. The judge call is backend-agnostic — it scores whatever the
-# backend returns against the LoCoMo ground truth.
-# ----------------------------------------------------------------------------
+@dataclass
+class _ConvResult:
+    """Per-conversation aggregate row."""
+
+    backend: str
+    conv_id: str
+    n_questions: int
+    n_passed: int
+    mean_score: float
+    per_category: dict[str, dict[str, float]] = field(default_factory=dict)
+    rows: list[dict[str, Any]] = field(default_factory=list)
 
 
-_KAIRIX_CLI_BACKEND = "kairix-cli"
-_MEM0_BACKEND = "mem0"
-_SUPPORTED_BACKENDS = (_KAIRIX_CLI_BACKEND, _MEM0_BACKEND)
+def _result_to_conv(
+    *,
+    backend: str,
+    conv_id: str,
+    result: dict[str, Any] | None,
+) -> _ConvResult:
+    """Adapt a ``SuiteResult``-shaped dict to a per-conversation row."""
+    if not result:
+        return _ConvResult(
+            backend=backend,
+            conv_id=conv_id,
+            n_questions=0,
+            n_passed=0,
+            mean_score=0.0,
+        )
+    return _ConvResult(
+        backend=backend,
+        conv_id=conv_id,
+        n_questions=int(result.get("n_questions", 0)),
+        n_passed=int(result.get("n_passed", 0)),
+        mean_score=float(result.get("mean_score", 0.0)),
+        per_category=dict(result.get("per_category") or {}),
+        rows=list(result.get("rows") or []),
+    )
 
 
 def _run_kairix_cli_backend(
+    locomo_conv: dict[str, Any],
+    *,
     conv_id: str,
-    sessions: list[Any],
-    questions: list[dict[str, str]],
-    vault_path: Path,
-) -> list[dict[str, Any]]:
-    """Existing subprocess path: write sessions → kairix embed → kairix prep.
-
-    Per-conversation isolation: each invocation resets the vault directory
-    AND the kairix data directory (SQLite + vectors) to contain ONLY this
-    conversation's data before embedding. Without the reset, kairix indexes
-    all prior conversations cumulatively and retrieval cross-contaminates
-    (e.g. conv-47 questions about John surface chunks from conv-43 where
-    another John lives). mem0's backend isolates via user_id; kairix-cli
-    needs vault reset for the same isolation.
-
-    Stream A fix: the previous implementation read ``KAIRIX_DATA_DIR``
-    from ``os.environ`` to locate the data dir, but ``_spike_env`` only
-    sets that variable inside the *subprocess* env (not the harness
-    process's env). Spike A1 confirmed all three conversations'
-    facts/chunks accumulated in a single SQLite — the rmtree on the
-    data dir was a silent no-op. Compute the data-dir path the same
-    way ``_spike_env`` does, directly from ``vault_path``, so isolation
-    actually happens.
-    """
-    import shutil
-
-    if vault_path.exists():
-        shutil.rmtree(vault_path)
-    vault_path.mkdir(parents=True, exist_ok=True)
-    # Compute the data dir the way _spike_env does — directly from
-    # vault_path. The os.environ.get() fallback path stays in place
-    # for callers that DO export KAIRIX_DATA_DIR into the harness env,
-    # so we union both candidates and rmtree any that exist.
-    candidates: list[Path] = [vault_path.parent / f"{vault_path.name}-data"]
-    env_data_dir = os.environ.get("KAIRIX_DATA_DIR")
-    if env_data_dir:
-        candidates.append(Path(env_data_dir))
-    for data_dir in candidates:
-        if data_dir.exists():
-            shutil.rmtree(data_dir)
-        data_dir.mkdir(parents=True, exist_ok=True)
-    write_sessions_to_vault(sessions, vault_path, conv_id)
-    _write_session_metadata_sidecars(sessions, vault_path, conv_id)
-    run_kairix_embed(vault_path)
-
-    rows: list[dict[str, Any]] = []
-    for i, qa in enumerate(questions, start=1):
-        LOGGER.info("[Q %d/%d] %s", i, len(questions), qa["question"][:80])
-        response = run_kairix_prep(qa["question"], vault_path)
-        judgment = judge_response(qa["question"], qa["ground_truth"], response)
-        rows.append(
-            {
-                "backend": _KAIRIX_CLI_BACKEND,
-                "conv_id": conv_id,
-                "question": qa["question"],
-                "ground_truth": qa["ground_truth"],
-                "response": response,
-                "judge_correct": judgment["correct"],
-                "judge_score": judgment["score"],
-                "judge_reasoning": judgment["reasoning"],
-            }
-        )
-        LOGGER.info(
-            "   -> correct=%s score=%.2f (%s)",
-            judgment["correct"],
-            judgment["score"],
-            judgment["reasoning"][:100],
-        )
-
-    return rows
+    suite_dir: Path,
+    data_dir: Path,
+    questions_per_conv: int,
+) -> _ConvResult:
+    """Convert + invoke ``kairix eval`` for one LoCoMo conversation."""
+    convert_locomo_conversation_to_suite(
+        locomo_conv,
+        suite_dir=suite_dir,
+        suite_name=conv_id,
+        questions_per_conv=questions_per_conv,
+    )
+    result_path = suite_dir / "result.json"
+    result = _invoke_suite_run(
+        suite_dir=suite_dir,
+        data_dir=data_dir,
+        output_json=result_path,
+    )
+    return _result_to_conv(backend=_KAIRIX_CLI_BACKEND, conv_id=conv_id, result=result)
 
 
 def _build_mem0_memory() -> Any:
-    """Configure mem0 against the same Foundry endpoint kairix uses.
-
-    Compatibility note (mem0 v2.0.2): mem0's ``OpenAILLM._is_reasoning_model``
-    explicitly excludes ``gpt-5.x`` variants like ``gpt-5.4-mini`` (comment in
-    mem0 source: "supports temperature"). Azure's actual deployment of
-    gpt-5.4-mini disagrees and rejects ``max_tokens`` with
-    ``Unsupported parameter: 'max_tokens' is not supported with this model``.
-
-    Two acceptable paths to re-enable the mem0 backend on the project-scoped
-    Foundry deployment without monkeypatching:
-
-    - **Configure a chat-class model** (e.g. ``gpt-4o-mini``) on the Foundry
-      project. ``KAIRIX_LLM_MODEL=gpt-4o-mini`` flips both kairix-native and
-      mem0 backends onto chat-class routing; no library changes needed.
-    - **Upstream fix in mem0**: file an issue / PR against snap-research/mem0
-      extending ``_is_reasoning_model`` to match the ``gpt-5.`` / ``gpt-5-``
-      prefixes. Pin to that version once merged.
-
-    Running this backend with the current mem0 + gpt-5.4-mini combination
-    will produce 400-error responses on every ingest; the spike harness
-    surfaces those as failures rather than masking them.
-
-    The kairix LLM endpoint is project-scoped Foundry on the OpenAI-compatible
-    ``/openai/v1`` path. mem0's ``openai`` provider supports a custom
-    ``openai_base_url`` so the LLM + embedder both point at the same
-    Azure-Foundry resource. The deployment-name + model-name from kairix's
-    secrets bundle flow through verbatim — no separate mem0 deployment
-    needs to be created.
-    """
+    """Configure mem0 against the same Foundry endpoint kairix uses."""
     try:
-        from mem0 import (
-            Memory,  # type: ignore[import-not-found] — mem0ai is optional, not in pyproject extras; ImportError caught below
-        )
+        # mem0ai is an optional runtime dep (not in pyproject); the harness
+        # surfaces the actionable ImportError below when it's missing.
+        from mem0 import Memory
     except ImportError as exc:
         raise RuntimeError(
             "mem0 backend requires 'mem0ai' to be installed. "
@@ -573,11 +608,10 @@ def _build_mem0_memory() -> Any:
     if not llm_api_key or not llm_endpoint:
         raise RuntimeError(
             "mem0 backend requires KAIRIX_LLM_API_KEY + KAIRIX_LLM_ENDPOINT in env. "
-            "fix: source the kairix secrets file before invoking the spike."
+            "fix: source the kairix secrets file before invoking the spike. "
+            "next: try `--backend kairix-cli` if you only want the kairix side."
         )
 
-    # Embed endpoint at kairix needs the /openai/v1 alias appended when not present —
-    # mirrors what kairix.credentials.make_openai_client does internally.
     embed_base_url = embed_endpoint
     if not embed_base_url.rstrip("/").endswith("/openai/v1"):
         embed_base_url = embed_base_url.rstrip("/") + "/openai/v1"
@@ -615,14 +649,11 @@ def _build_mem0_memory() -> Any:
     return Memory.from_config(config)
 
 
-def _synthesise_answer_from_memories(question: str, memories: list[dict[str, Any]]) -> str:
-    """Build an answer string from mem0 search results using the LLM backend.
-
-    mem0 returns canonical fact records; the spike's job is to synthesise an
-    answer that the LoCoMo judge can score against ground truth. Uses the
-    same LLM the kairix-cli backend's judge call uses — fair comparison
-    because both backends route through the same Azure-Foundry deployment.
-    """
+def _synthesise_answer_from_memories(
+    question: str,
+    memories: list[dict[str, Any]],
+) -> str:
+    """Build an answer string from mem0 search results using the LLM backend."""
     from kairix.platform.llm import get_default_backend
 
     backend = get_default_backend()
@@ -642,47 +673,80 @@ def _synthesise_answer_from_memories(question: str, memories: list[dict[str, Any
         return f"ERROR: synthesis failed: {type(exc).__name__}: {exc!s}"
 
 
-def _run_mem0_backend(
-    conv_id: str,
-    sessions: list[Any],
-    questions: list[dict[str, str]],
-    _vault_path: Path,
-) -> list[dict[str, Any]]:
-    """Mem0 backend — ingest turns via Memory.add; recall via Memory.search.
+def _judge_response(
+    question: str,
+    ground_truth: str,
+    response: str,
+) -> tuple[float, bool, str]:
+    """Use kairix's configured LLM backend to score a single mem0 response."""
+    from kairix.platform.llm import get_default_backend
 
-    Phase 1 of Architecture/decisions/2026-05-20-mem0-vs-kairix-uplift-plan.md.
-    Wires mem0 against the same Azure-Foundry deployment kairix uses so the
-    only variable between the kairix-cli and mem0 backends is the memory
-    architecture — same LLM, same embedder, same corpus, same judge.
+    prompt = (
+        "You are evaluating whether a memory system's response correctly "
+        "answers a question based on prior conversation context.\n\n"
+        f"Question:\n{question}\n\nGround truth answer:\n{ground_truth}\n\n"
+        f"System response:\n{response}\n\n"
+        "Respond with a single JSON object ONLY (no prose around it):\n"
+        '{"correct": true|false, "score": 0.0-1.0, "reasoning": "one-sentence rationale"}'
+    )
+    try:
+        raw = get_default_backend().chat([{"role": "user", "content": prompt}], max_tokens=300)
+    except Exception as exc:
+        return 0.0, False, f"judge call failed: {type(exc).__name__}: {exc!s}"
+
+    raw = raw.strip()
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if 0 <= start < end:
+        try:
+            parsed = json.loads(raw[start : end + 1])
+            if isinstance(parsed, dict):
+                score = float(parsed.get("score", 0.0))
+                correct = bool(parsed.get("correct", score >= _PASS_THRESHOLD))
+                reasoning = str(parsed.get("reasoning", ""))[:300]
+                return score, correct, reasoning
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+    return 0.0, False, f"judge returned non-JSON: {raw[:200]}"
+
+
+def _run_mem0_backend(
+    locomo_conv: dict[str, Any],
+    *,
+    conv_id: str,
+    suite_dir: Path,
+    data_dir: Path,
+    questions_per_conv: int,
+) -> _ConvResult:
+    """Mem0 backend — ingest turns via ``Memory.add``; recall via ``Memory.search``.
+
+    Preserved as a peer backend per the brief: apples-to-apples
+    comparison vs. the kairix-cli path. The suite directory is still
+    populated (so the operator can sanity-check what mem0 saw) but the
+    kairix subprocess isn't invoked on this path.
     """
+    del data_dir  # mem0 owns its own vector store; data_dir is kairix-only
+    convert_locomo_conversation_to_suite(
+        locomo_conv,
+        suite_dir=suite_dir,
+        suite_name=conv_id,
+        questions_per_conv=questions_per_conv,
+    )
+
     memory = _build_mem0_memory()
     user_id = f"locomo-{conv_id}"
 
-    # Ingest sessions turn-by-turn so mem0 runs its LLM-extraction pass
-    # on each turn (the distinctive mem0 design — facts emerge from
-    # turn-level extraction, not corpus-level chunking).
-    # ``sessions`` is a list of ``{"turns": [...], "date_time": "..."}``
-    # dicts (Lever A change to _extract_sessions). We thread the date
-    # into mem0's per-turn metadata so its extraction sees the temporal
-    # anchor too — keeps the comparison apples-to-apples with kairix.
+    sessions = _parse_sessions(locomo_conv)
     turn_count = 0
     for session in sessions:
-        if not isinstance(session, dict):
-            continue
-        session_turns = session.get("turns") or []
-        session_dt = session.get("date_time")
-        if not isinstance(session_turns, list):
-            continue
-        for turn in session_turns:
-            if not isinstance(turn, dict):
-                continue
-            speaker = turn.get("speaker") or turn.get("role") or "unknown"
+        for turn in session.turns:
             text = turn.get("text") or turn.get("content") or ""
             if not text:
                 continue
-            metadata: dict[str, Any] = {"speaker": speaker}
-            if session_dt:
-                metadata["date_time"] = session_dt
+            speaker = turn.get("speaker") or turn.get("role") or "unknown"
+            metadata: dict[str, Any] = {"speaker": str(speaker)}
+            if session.date_time:
+                metadata["date_time"] = session.date_time
             try:
                 memory.add(text, user_id=user_id, metadata=metadata)
                 turn_count += 1
@@ -690,180 +754,257 @@ def _run_mem0_backend(
                 LOGGER.warning("mem0 add failed for turn (speaker=%s): %s", speaker, exc)
     LOGGER.info("mem0 ingested %d turns for conv_id=%s", turn_count, conv_id)
 
+    queries_path = suite_dir / "ground-truth-queries.json"
+    queries = json.loads(queries_path.read_text(encoding="utf-8"))
+
     rows: list[dict[str, Any]] = []
-    for i, qa in enumerate(questions, start=1):
-        LOGGER.info("[Q %d/%d] %s", i, len(questions), qa["question"][:80])
+    per_cat_scores: dict[str, list[float]] = {}
+    for i, qa in enumerate(queries, start=1):
+        LOGGER.info("[Q %d/%d] %s", i, len(queries), str(qa["question"])[:80])
         try:
-            # mem0 v2 moved user_id from a top-level kwarg into filters={}.
             search_result = memory.search(qa["question"], filters={"user_id": user_id}, top_k=10)
-            memories = search_result.get("results") if isinstance(search_result, dict) else search_result
-            response = _synthesise_answer_from_memories(qa["question"], memories or [])
+            mems = search_result.get("results") if isinstance(search_result, dict) else search_result
+            response = _synthesise_answer_from_memories(qa["question"], mems or [])
         except Exception as exc:
             response = f"ERROR: mem0 search failed: {type(exc).__name__}: {exc!s}"
-        judgment = judge_response(qa["question"], qa["ground_truth"], response)
+        score, passed, reasoning = _judge_response(qa["question"], qa["answer"], response)
+        category = str(qa.get("category", "open-domain"))
         rows.append(
             {
-                "backend": _MEM0_BACKEND,
-                "conv_id": conv_id,
                 "question": qa["question"],
-                "ground_truth": qa["ground_truth"],
+                "answer": qa["answer"],
+                "category": category,
+                "score": score,
+                "pass": passed,
                 "response": response,
-                "judge_correct": judgment["correct"],
-                "judge_score": judgment["score"],
-                "judge_reasoning": judgment["reasoning"],
+                "reasoning": reasoning,
             }
         )
-        LOGGER.info(
-            "   -> correct=%s score=%.2f (%s)",
-            judgment["correct"],
-            judgment["score"],
-            judgment["reasoning"][:100],
-        )
+        per_cat_scores.setdefault(category, []).append(score)
 
-    return rows
+    n_questions = len(rows)
+    n_passed = sum(1 for r in rows if r["pass"])
+    mean_score = (sum(r["score"] for r in rows) / n_questions) if n_questions else 0.0
+    per_category = {
+        cat: {
+            "n": float(len(scores)),
+            "passed": float(sum(1 for s in scores if s >= _PASS_THRESHOLD)),
+            "mean": (sum(scores) / len(scores)) if scores else 0.0,
+        }
+        for cat, scores in per_cat_scores.items()
+    }
+    suite_result_payload = {
+        "suite_name": conv_id,
+        "n_questions": n_questions,
+        "n_passed": n_passed,
+        "mean_score": mean_score,
+        "per_category": per_category,
+        "rows": rows,
+    }
+    (suite_dir / "result.json").write_text(json.dumps(suite_result_payload, indent=2), encoding="utf-8")
+    return _ConvResult(
+        backend=_MEM0_BACKEND,
+        conv_id=conv_id,
+        n_questions=n_questions,
+        n_passed=n_passed,
+        mean_score=mean_score,
+        per_category=per_category,
+        rows=rows,
+    )
 
 
-_BACKEND_DISPATCH: dict[str, Any] = {
+_BackendRunner = Callable[..., _ConvResult]
+_BACKEND_DISPATCH: dict[str, _BackendRunner] = {
     _KAIRIX_CLI_BACKEND: _run_kairix_cli_backend,
     _MEM0_BACKEND: _run_mem0_backend,
 }
 
 
-def run_conversation(
-    conversation: dict[str, Any],
-    vault_path: Path,
-    max_questions: int,
-    backend: str = _KAIRIX_CLI_BACKEND,
-) -> list[dict[str, Any]]:
-    """Run one conversation's sessions + questions through the chosen backend."""
-    conv_id = str(conversation.get("sample_id") or conversation.get("id") or "unknown")
+# ---------------------------------------------------------------------------
+# Aggregation + reporting
+# ---------------------------------------------------------------------------
 
-    LOGGER.info("=== Conversation %s (backend=%s) ===", conv_id, backend)
-    sessions = _extract_sessions(conversation)
-    questions = _extract_questions(conversation)
-    if not sessions:
-        LOGGER.warning("Conversation %s has no sessions; skipping.", conv_id)
-        return []
-    if not questions:
-        LOGGER.warning("Conversation %s has no questions; skipping.", conv_id)
-        return []
 
-    questions = questions[:max_questions]
-    LOGGER.info("Writing %d sessions, will ask %d questions.", len(sessions), len(questions))
+def _print_summary(conv_results: list[_ConvResult]) -> None:
+    """Render the cross-conversation summary table."""
+    if not conv_results:
+        print("No conversations scored.")
+        return
+    backends = sorted({c.backend for c in conv_results})
+    total_q = sum(c.n_questions for c in conv_results)
+    total_p = sum(c.n_passed for c in conv_results)
+    overall_mean = sum(c.mean_score * c.n_questions for c in conv_results) / total_q if total_q else 0.0
+    print()
+    print("=" * 70)
+    print("LoCoMo benchmark — P6 harness summary")
+    print("=" * 70)
+    print(f"Backend(s)      : {', '.join(backends)}")
+    print(f"Conversations   : {len(conv_results)}")
+    print(f"Questions       : {total_q}")
+    if total_q:
+        print(f"Passes          : {total_p}/{total_q} ({100 * total_p / total_q:.1f}%)")
+    else:
+        print("Passes          : 0/0")
+    print(f"Mean score      : {overall_mean:.3f}")
+    print()
+    print(f"  {'conv':<14}  {'backend':<12}  {'passed':>6}  {'questions':>9}  {'mean':>6}")
+    print(f"  {'-' * 14}  {'-' * 12}  {'-' * 6}  {'-' * 9}  {'-' * 6}")
+    for c in conv_results:
+        print(f"  {c.conv_id:<14}  {c.backend:<12}  {c.n_passed:>6}  {c.n_questions:>9}  {c.mean_score:>6.3f}")
+    print("=" * 70)
+
+
+def _write_aggregate_json(conv_results: list[_ConvResult], output_json: Path) -> None:
+    """Persist the aggregate result as canonical JSON."""
+    payload = {
+        "backends": sorted({c.backend for c in conv_results}),
+        "conversations": [
+            {
+                "backend": c.backend,
+                "conv_id": c.conv_id,
+                "n_questions": c.n_questions,
+                "n_passed": c.n_passed,
+                "mean_score": c.mean_score,
+                "per_category": c.per_category,
+                "rows": c.rows,
+            }
+            for c in conv_results
+        ],
+        "totals": {
+            "n_conversations": len(conv_results),
+            "n_questions": sum(c.n_questions for c in conv_results),
+            "n_passed": sum(c.n_passed for c in conv_results),
+        },
+    }
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def _run_one_conversation(
+    locomo_conv: dict[str, Any],
+    *,
+    backend: str,
+    output_root: Path,
+    questions_per_conv: int,
+) -> _ConvResult:
+    """Reset per-conv state and dispatch to the chosen backend."""
+    conv_id = str(locomo_conv.get("sample_id") or "unknown")
+    suite_dir = output_root / conv_id
+    data_dir = output_root / f"{conv_id}-data"
+    if suite_dir.exists():
+        shutil.rmtree(suite_dir)
+    suite_dir.mkdir(parents=True, exist_ok=True)
+    if data_dir.exists():
+        shutil.rmtree(data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
 
     runner = _BACKEND_DISPATCH.get(backend)
     if runner is None:
         raise ValueError(
             f"unknown backend {backend!r}; supported: {sorted(_BACKEND_DISPATCH)}. "
             f"fix: pass --backend with one of those names. "
-            f"next: see Architecture/decisions/2026-05-20-mem0-vs-kairix-uplift-plan.md"
+            f"next: see scripts/benchmarks/locomo_spike.py for the dispatch table."
         )
-    return runner(conv_id, sessions, questions, vault_path)
+    return runner(
+        locomo_conv,
+        conv_id=conv_id,
+        suite_dir=suite_dir,
+        data_dir=data_dir,
+        questions_per_conv=questions_per_conv,
+    )
 
 
-def write_results_csv(rows: list[dict[str, Any]], output_csv: Path) -> None:
-    output_csv.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "backend",
-        "conv_id",
-        "question",
-        "ground_truth",
-        "response",
-        "judge_correct",
-        "judge_score",
-        "judge_reasoning",
-    ]
-    with output_csv.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-
-
-def print_summary(rows: list[dict[str, Any]]) -> None:
-    n = len(rows)
-    if n == 0:
-        print("No questions scored.")
-        return
-    pass_count = sum(1 for r in rows if r["judge_correct"])
-    mean_score = sum(r["judge_score"] for r in rows) / n
-    backends = sorted({r.get("backend", "unknown") for r in rows})
-    print()
-    print("=" * 60)
-    print("LoCoMo spike — summary")
-    print("=" * 60)
-    print(f"Backend(s)       : {', '.join(backends)}")
-    print(f"Questions scored : {n}")
-    print(f"Pass rate        : {pass_count}/{n} ({100 * pass_count / n:.1f}%)")
-    print(f"Mean judge score : {mean_score:.3f}")
-    print("=" * 60)
-
-
-def main() -> int:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="LoCoMo recall spike for kairix.",
+        description="LoCoMo benchmark — P6 thin-adapter harness.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--vault-root", type=Path, required=True)
-    parser.add_argument("--num-conversations", type=int, default=1)
-    parser.add_argument("--max-questions", type=int, default=10)
-    parser.add_argument("--output-csv", type=Path, required=True)
     parser.add_argument(
-        "--locomo-json",
+        "--locomo-path",
         type=Path,
-        default=None,
-        help="Local path to locomo10.json. Default: fetch from GitHub raw URL.",
+        default=Path("/tmp/locomo10.json"),
+        help="Path to locomo10.json (default: /tmp/locomo10.json; fetched from GitHub if missing).",
     )
     parser.add_argument(
-        "--reset-vault",
-        action="store_true",
-        help="Delete the vault root before starting. Recommended for spike runs.",
+        "--conversations",
+        default=None,
+        help="Comma-separated LoCoMo sample_ids to run (default: all in the JSON).",
+    )
+    parser.add_argument(
+        "--questions-per-conv",
+        type=int,
+        default=30,
+        help="Cap on questions per conversation (default: 30).",
     )
     parser.add_argument(
         "--backend",
         choices=_SUPPORTED_BACKENDS,
         default=_KAIRIX_CLI_BACKEND,
-        help=(
-            "Memory backend under benchmark. 'kairix-cli' shells out to the kairix CLI "
-            "(existing v2026.5.19a2 behaviour, default). 'mem0' uses mem0.Memory "
-            "(Phase 1 of mem0-vs-kairix-uplift plan — not yet implemented)."
-        ),
+        help="Memory backend under benchmark (default: kairix-cli).",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Per-conversation suite + log root (default: mktemp under /tmp).",
+    )
+    parser.add_argument(
+        "--output-json",
+        type=Path,
+        default=None,
+        help="Path to write the aggregate JSON result (default: <output-dir>/aggregate.json).",
+    )
+    return parser.parse_args(argv)
 
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s — %(message)s",
         datefmt="%H:%M:%S",
     )
 
-    if args.reset_vault and args.vault_root.exists():
-        LOGGER.info("Resetting vault root %s", args.vault_root)
-        shutil.rmtree(args.vault_root)
-    args.vault_root.mkdir(parents=True, exist_ok=True)
+    output_root = args.output_dir or Path(f"/tmp/locomo-p6-{os.getpid()}")
+    output_root.mkdir(parents=True, exist_ok=True)
+    aggregate_json = args.output_json or (output_root / "aggregate.json")
 
     try:
-        conversations = load_locomo(args.num_conversations, local_path=args.locomo_json)
-    except Exception as exc:
+        data = load_locomo_json(args.locomo_path if args.locomo_path else None)
+    except (OSError, ValueError) as exc:
         LOGGER.error("Failed to load LoCoMo dataset: %s", exc)
-        LOGGER.error(
-            "Either pass --locomo-json <path-to-locomo10.json> or ensure network access to %s.",
-            LOCOMO_DATA_URL,
-        )
         return 2
 
-    all_rows: list[dict[str, Any]] = []
-    for conv in conversations:
-        try:
-            rows = run_conversation(conv, args.vault_root, args.max_questions, backend=args.backend)
-            all_rows.extend(rows)
-        except Exception as exc:
-            LOGGER.exception("Conversation run failed: %s", exc)
+    selected = [s.strip() for s in args.conversations.split(",")] if args.conversations else None
+    try:
+        data = _filter_conversations(data, selected)
+    except ValueError as exc:
+        LOGGER.error("%s", exc)
+        return 2
 
-    write_results_csv(all_rows, args.output_csv)
-    print_summary(all_rows)
-    LOGGER.info("Wrote results to %s", args.output_csv)
+    conv_results: list[_ConvResult] = []
+    for conv in data:
+        try:
+            result = _run_one_conversation(
+                conv,
+                backend=args.backend,
+                output_root=output_root,
+                questions_per_conv=args.questions_per_conv,
+            )
+            conv_results.append(result)
+        except Exception as exc:
+            LOGGER.exception("Conversation %s failed: %s", conv.get("sample_id"), exc)
+
+    _print_summary(conv_results)
+    _write_aggregate_json(conv_results, aggregate_json)
+    LOGGER.info("Wrote aggregate JSON to %s", aggregate_json)
+    LOGGER.info("Per-conversation artefacts under %s", output_root)
     return 0
 
 
