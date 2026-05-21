@@ -103,6 +103,28 @@ class _ResolvedDeps:
     consolidation: ConsolidationPass | None = None
 
 
+_DEPRECATION_WARNING = (
+    "DEPRECATION: `kairix eval` is folded into `kairix benchmark run` in the "
+    "unified quality CLI. Slated for removal in v2026.6.x — one release of "
+    "warnings before the legacy surface is dropped.\n"
+    "  fix: migrate to `kairix benchmark run --suite <suite> [--metrics judge] "
+    "[--gates] [--baseline <prev.json>]`.\n"
+    "  next: see docs/architecture/fitness-functions.md and the unified "
+    "benchmarking architecture brief for the canonical flag surface.\n"
+    "  run: kairix benchmark run --help\n"
+)
+
+
+def _emit_deprecation_warning(err_sink: TextIO) -> None:
+    """Write the F21-formatted migration warning to ``err_sink``.
+
+    Stays separate from the legacy dispatcher so callers can suppress the
+    warning in tests (by passing a discarding TextIO) without disabling
+    the legacy behaviour itself.
+    """
+    err_sink.write(_DEPRECATION_WARNING)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -130,14 +152,20 @@ def main(
     :class:`SearchPipeline` ``kairix prep`` uses (``--via-prep``, the
     new default). The legacy direct ``fact_store.search`` path remains
     accessible via ``--legacy-direct`` for regression-debugging only.
+
+    P5 unification: every invocation emits a deprecation warning pointing
+    at ``kairix benchmark run``; the legacy behaviour stays unchanged
+    through v2026.6.x.
     """
     argv_list = list(argv if argv is not None else [])
+
+    err_sink = err if err is not None else sys.stderr
+    _emit_deprecation_warning(err_sink)
 
     if _is_legacy_subcommand(argv_list):
         return _dispatch_legacy(argv_list)
 
     out_sink = out if out is not None else sys.stdout
-    err_sink = err if err is not None else sys.stderr
 
     args = _build_parser().parse_args(argv_list)
     suite_path = Path(args.suite_path)
