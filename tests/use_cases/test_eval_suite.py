@@ -65,11 +65,22 @@ def _invoke(
     tmp_path: Path,
     chat_response: str = "1.0",
 ) -> tuple[int, str, str]:
-    """Run the use case main and return (exit_code, stdout, stderr)."""
+    """Run the use case main and return (exit_code, stdout, stderr).
+
+    Defaults to ``--legacy-direct`` mode so the legacy fact_store-only
+    tests below stay focused on argparse/regression-gate/legacy passthrough
+    behaviour. The via-prep mode has dedicated tests further down that
+    inject a FakeSearchPipeline via the ``search_pipeline=`` kwarg.
+    """
     out = io.StringIO()
     err = io.StringIO()
+    # Skip the legacy-direct flag injection for argv that already carries
+    # an explicit pipeline-mode flag (the via-prep tests further down).
+    argv_with_default = (
+        argv if any(flag in argv for flag in ("--via-prep", "--legacy-direct")) else [*argv, "--legacy-direct"]
+    )
     code = _use_case.main(
-        argv,
+        argv_with_default,
         out=out,
         err=err,
         paths=_paths(tmp_path),

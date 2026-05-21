@@ -99,10 +99,23 @@ def _write_baseline(state: _State, mean: float) -> None:
 
 
 def _invoke_main(state: _State, argv: list[str]) -> None:
-    """Invoke the use case main with the assembled fakes."""
+    """Invoke the use case main with the assembled fakes.
+
+    Plan B-parity D3 — these legacy BDD scenarios exercise the
+    fact_store-direct path (the only path the BDD suite knew about
+    before D3). Append ``--legacy-direct`` so the new ``--via-prep``
+    default doesn't try to construct a real ``build_search_pipeline()``
+    against the test's ephemeral fake-only environment. The via-prep
+    code path has dedicated unit + integration coverage in
+    ``tests/quality/eval/test_suite_runner_pipeline_path.py`` and
+    ``tests/integration/test_eval_via_prep_round_trip.py``.
+    """
     assert state.paths is not None
+    argv_with_default = (
+        argv if any(flag in argv for flag in ("--via-prep", "--legacy-direct")) else [*argv, "--legacy-direct"]
+    )
     code = _eval_suite.main(
-        argv,
+        argv_with_default,
         out=state.stdout,
         err=state.stderr,
         paths=state.paths,

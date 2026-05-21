@@ -25,7 +25,7 @@ Subcommands:
   warm        Pre-load caches + pay factory-init costs (run at container start, before /healthz/ready=200)
   wikilinks   Inject [[wikilinks]] on first mention in agent-written document store files
   reference-library  Reference library: install entities, check status, run extraction
-  eval        Evaluation harness: gold suite build, judge, sweep, monitor, gate
+  eval        Evaluation harness: gold suite build, judge, sweep, monitor, gate (Plan B-parity D3: scores route through the same SearchPipeline kairix prep uses; --legacy-direct bypasses the pipeline)
   setup       First-time onboarding wizard for credentials and paths
   worker      Background worker: run loop, pause/resume operator controls
   config      Validate kairix.config.yaml against the schema and print errors
