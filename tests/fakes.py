@@ -1556,3 +1556,74 @@ class _FakeSearchResult:
 
     def __init__(self, *, results: list[Any]) -> None:
         self.results = results
+
+
+# ---------------------------------------------------------------------------
+# Spike C1 unified corpus-ingest Protocol fakes.
+#
+# FakeDocumentWriter satisfies the DocumentWriter Protocol — captures
+# every write call in ``writes`` and returns a synthetic Path so the
+# ingest_corpus result can populate ``document_paths`` without touching
+# the filesystem. FakeCorpusEmbedder satisfies the CorpusEmbedder
+# Protocol — captures every embed call in ``calls`` and returns a
+# scripted chunk count (or default 0).
+# ---------------------------------------------------------------------------
+
+
+class FakeDocumentWriter:
+    """Capture-only DocumentWriter — records writes, no filesystem I/O.
+
+    Pass ``base_path=Path(...)`` to control the parent directory the
+    fake's returned Paths sit under. Defaults to ``/fake/documents``
+    so the sentinel surfaces if tests accidentally try to read what
+    they wrote.
+
+    Every ``write(...)`` call lands in ``writes`` as a dict carrying
+    the four kwargs; the returned Path is
+    ``<base_path> / <corpus_id> / <session_id>.md``.
+    """
+
+    def __init__(self, base_path: Path | str = "/fake/documents") -> None:
+        self._base_path = Path(base_path)
+        self.writes: list[dict[str, Any]] = []
+
+    def write(
+        self,
+        *,
+        corpus_id: str,
+        session_id: str,
+        rendered_body: str,
+        frontmatter: dict[str, Any],
+    ) -> Path:
+        self.writes.append(
+            {
+                "corpus_id": corpus_id,
+                "session_id": session_id,
+                "rendered_body": rendered_body,
+                "frontmatter": dict(frontmatter),
+            }
+        )
+        return self._base_path / corpus_id / f"{session_id}.md"
+
+
+class FakeCorpusEmbedder:
+    """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
+
+    Pass ``scripted_chunks_per_call=[3, 1, 0]`` to make consecutive
+    ``embed(...)`` calls return 3, 1, 0 chunks. When the script runs
+    out, the fake returns the final value (default 0). Every call's
+    paths argument lands in ``calls`` so tests can verify the
+    embedder saw the documents the writer just produced.
+    """
+
+    def __init__(self, scripted_chunks_per_call: list[int] | None = None) -> None:
+        self._scripted = list(scripted_chunks_per_call or [])
+        self.calls: list[tuple[Path, ...]] = []
+
+    def embed(self, paths_to_embed: tuple[Path, ...]) -> int:
+        self.calls.append(tuple(paths_to_embed))
+        if not self._scripted:
+            return 0
+        if len(self.calls) <= len(self._scripted):
+            return self._scripted[len(self.calls) - 1]
+        return self._scripted[-1]
