@@ -34,7 +34,13 @@ import sys
 from pathlib import Path
 from typing import Any, TextIO
 
-from kairix.core.protocols import FactExtractor, FactStore
+from kairix.core.facts.consolidation import ConsolidationPass
+from kairix.core.protocols import (
+    CorpusEmbedder,
+    DocumentWriter,
+    FactExtractor,
+    FactStore,
+)
 from kairix.core.search.pipeline import SearchPipeline
 from kairix.paths import KairixPaths
 from kairix.platform.llm.protocol import LLMBackend
@@ -88,6 +94,13 @@ class _ResolvedDeps:
     # this pipeline instead of calling ``fact_store.search`` directly.
     # ``None`` means legacy direct mode (regression-debugging escape).
     search_pipeline: SearchPipeline | None = None
+    # Spike C1 Phase 3 — corpus-ingest collaborators. ``None``
+    # preserves today's facts-only ingest behaviour; callers can
+    # inject production wire-ups via the ``main()`` kwargs once
+    # ``kairix.corpus.wiring`` lands its factories.
+    document_writer: DocumentWriter | None = None
+    embedder: CorpusEmbedder | None = None
+    consolidation: ConsolidationPass | None = None
 
 
 def main(
@@ -100,6 +113,9 @@ def main(
     fact_extractor: FactExtractor | None = None,
     llm: LLMBackend | None = None,
     search_pipeline: SearchPipeline | None = None,
+    document_writer: DocumentWriter | None = None,
+    embedder: CorpusEmbedder | None = None,
+    consolidation: ConsolidationPass | None = None,
 ) -> int:
     """CLI entry point for ``kairix eval``.
 
@@ -132,6 +148,9 @@ def main(
         fact_extractor=fact_extractor,
         llm=llm,
         search_pipeline=search_pipeline,
+        document_writer=document_writer,
+        embedder=embedder,
+        consolidation=consolidation,
         via_prep=args.via_prep,
         err_sink=err_sink,
     )
@@ -164,6 +183,9 @@ def _resolve_deps(
     fact_extractor: FactExtractor | None,
     llm: LLMBackend | None,
     search_pipeline: SearchPipeline | None,
+    document_writer: DocumentWriter | None,
+    embedder: CorpusEmbedder | None,
+    consolidation: ConsolidationPass | None,
     via_prep: bool,
     err_sink: TextIO,
 ) -> _ResolvedDeps | int:
@@ -194,12 +216,20 @@ def _resolve_deps(
     if isinstance(resolved_pipeline, int):
         return resolved_pipeline
 
+    # Spike C1 Phase 3 — DocumentWriter / CorpusEmbedder /
+    # ConsolidationPass are passed through unchanged. Production
+    # defaults are deferred until ``kairix.corpus.wiring`` lands its
+    # factory functions; callers (tests + future opt-in operators)
+    # inject explicit implementations via the ``main()`` kwargs.
     return _ResolvedDeps(
         paths=resolved_paths,
         fact_store=fact_store,
         fact_extractor=resolved_extractor,
         llm=llm,
         search_pipeline=resolved_pipeline,
+        document_writer=document_writer,
+        embedder=embedder,
+        consolidation=consolidation,
     )
 
 
@@ -252,6 +282,9 @@ def _execute_suite(
         llm=deps.llm,
         paths=deps.paths,
         search_pipeline=deps.search_pipeline,
+        document_writer=deps.document_writer,
+        embedder=deps.embedder,
+        consolidation=deps.consolidation,
     )
 
     try:

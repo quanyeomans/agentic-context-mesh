@@ -40,8 +40,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kairix.core.protocols import FactExtractor, FactStore
+from kairix.core.facts.consolidation import ConsolidationPass
+from kairix.core.protocols import (
+    CorpusEmbedder,
+    DocumentWriter,
+    FactExtractor,
+    FactStore,
+)
 from kairix.core.search.pipeline import SearchPipeline
+from kairix.corpus.ingest import IngestRequest, SessionPayload, ingest_corpus
 from kairix.paths import KairixPaths
 from kairix.platform.llm.protocol import LLMBackend
 
@@ -134,6 +141,9 @@ class SuiteRunner:
         llm: LLMBackend,
         paths: KairixPaths,
         search_pipeline: SearchPipeline | None = None,
+        document_writer: DocumentWriter | None = None,
+        embedder: CorpusEmbedder | None = None,
+        consolidation: ConsolidationPass | None = None,
     ) -> None:
         self._fact_store = fact_store
         self._fact_extractor = fact_extractor
@@ -145,6 +155,17 @@ class SuiteRunner:
         # direct ``fact_store.search`` path (regression-debugging escape
         # hatch only — slated for removal in v2026.5.19).
         self._search_pipeline = search_pipeline
+        # Spike C1 Phase 3 — corpus-ingest collaborators. When all three
+        # are ``None`` (today's default for reference-library invocations),
+        # the runner stays on the facts-only ingest path that mirrors
+        # legacy ``_ingest_sessions`` behaviour. When any are set, the
+        # runner routes through :func:`kairix.corpus.ingest.ingest_corpus`
+        # so SuiteRunner shares the Lever A session_metadata wiring,
+        # consolidation, and chunk-index update with ``kairix ingest-chat``
+        # and the LoCoMo harness.
+        self._document_writer = document_writer
+        self._embedder = embedder
+        self._consolidation = consolidation
 
     # -----------------------------------------------------------------
     # Discovery
@@ -217,7 +238,7 @@ class SuiteRunner:
         3. If ``ground-truth-facts.json`` is present, compute F1 of
            the extractor's output against ground truth.
         """
-        extracted_facts = self._ingest_sessions(suite.session_paths)
+        extracted_facts = self._ingest_sessions(suite)
 
         rows, per_cat = self._score_queries(suite.queries)
         n_questions = len(rows)
@@ -242,23 +263,63 @@ class SuiteRunner:
     # Internal helpers
     # -----------------------------------------------------------------
 
-    def _ingest_sessions(self, session_paths: Iterable[Path]) -> list[Any]:
-        """Read every session JSONL, extract facts, persist via FactStore.
+    def _ingest_sessions(self, suite: SuiteSpec) -> list[Any]:
+        """Route ingest through :func:`kairix.corpus.ingest.ingest_corpus`.
 
-        Returns the flat list of extracted facts so the extractor F1
-        score path can compare them against ground truth without a
-        second round-trip through the store.
+        Reads every ``session-*.jsonl`` under ``suite.session_paths``,
+        loads any sidecar ``.metadata.json`` (Lever A — session
+        ``date_time`` etc.), then hands the batch to ``ingest_corpus``
+        with the runner's configured collaborators.
+
+        Returns the flat list of extracted facts so the extractor-F1
+        scoring path can compare them against ground truth without a
+        second round-trip through the store. Facts are captured by
+        wrapping ``self._fact_store`` in a per-call recorder — the
+        underlying store still receives every ``add`` call, but the
+        captured list keeps the scorer independent of the store's
+        search-shape (idempotency / namespace filtering).
+
+        Spike C1 Phase 3 — closes the Lever A regression where
+        ``self._fact_extractor.extract(turns=turns)`` was being called
+        without ``session_metadata``, silently dropping the session
+        ``date_time`` anchor on every reference-library conversational
+        eval.
         """
-        extracted: list[Any] = []
+        sessions = self._build_session_payloads(suite.session_paths)
+        recorder = _CapturingFactStore(self._fact_store)
+        request = IngestRequest(sessions=tuple(sessions), corpus_id=suite.name)
+        ingest_corpus(
+            request,
+            paths=self._paths,
+            fact_store=recorder,
+            fact_extractor=self._fact_extractor,
+            document_writer=self._document_writer,
+            embedder=self._embedder,
+            consolidation=self._consolidation,
+        )
+        return recorder.captured
+
+    def _build_session_payloads(self, session_paths: Iterable[Path]) -> list[SessionPayload]:
+        """Read every session JSONL into a :class:`SessionPayload`.
+
+        Skips empty session files so the orchestrator never sees a
+        zero-turn payload (matches the legacy ``if not turns: continue``
+        guard).
+        """
+        payloads: list[SessionPayload] = []
         for sp in session_paths:
             turns = _read_session(sp)
             if not turns:
                 continue
-            facts = self._fact_extractor.extract(turns=turns)
-            for fact in facts:
-                self._fact_store.add(fact)
-                extracted.append(fact)
-        return extracted
+            metadata = _load_session_metadata(sp)
+            payloads.append(
+                SessionPayload(
+                    turns=tuple(turns),
+                    session_id=sp.stem,
+                    metadata=metadata,
+                )
+            )
+        return payloads
 
     def _score_queries(
         self, queries: Iterable[dict[str, Any]]
@@ -401,6 +462,88 @@ def _load_json_list(path: Path) -> tuple[dict[str, Any], ...]:
             f"next: see reference-library/conversations/README.md."
         )
     return tuple(item for item in raw if isinstance(item, dict))
+
+
+def _load_session_metadata(session_path: Path) -> dict[str, Any] | None:
+    """Load the sidecar metadata JSON for ``session_path`` if present.
+
+    Resolution order (first hit wins):
+
+    1. ``<session_path>.metadata.json`` — e.g.
+       ``session-001.jsonl.metadata.json``. The reference-library
+       convention used by Stream A / Spike C1.
+    2. ``<session_path.stem>.md.metadata.json`` — e.g.
+       ``session-001.md.metadata.json``. The LoCoMo harness convention
+       (P6) — accepted here so a corpus that mirrors both shapes
+       lights up regardless of which sidecar the operator wrote.
+
+    Returns ``None`` when neither sidecar exists or the file is
+    malformed / not a JSON object. Malformed sidecars are logged at
+    warning level and the session continues with no metadata — same
+    fail-soft posture as :func:`_read_session`.
+    """
+    candidates = (
+        session_path.with_suffix(session_path.suffix + ".metadata.json"),
+        session_path.with_suffix(".md.metadata.json"),
+    )
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            raw = json.loads(candidate.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "eval-suite: skipping malformed sidecar metadata at %s: %s",
+                candidate,
+                exc,
+            )
+            continue
+        if isinstance(raw, dict):
+            return raw
+        logger.warning(
+            "eval-suite: sidecar metadata at %s is not a JSON object (got %s); ignoring.",
+            candidate,
+            type(raw).__name__,
+        )
+    return None
+
+
+class _CapturingFactStore:
+    """Per-call FactStore wrapper that records every ``add`` call.
+
+    Forwards every Protocol method to the wrapped store unchanged
+    (``add`` / ``search`` / ``find_conflicts`` / ``supersede``) so
+    consolidation passes and downstream lookups see the real backing
+    store. The wrapper exists purely so the SuiteRunner can recover
+    the list of facts that one ``ingest_corpus`` call emitted —
+    independent of the store's namespace / superseded-filter behaviour.
+
+    F1 note: this is NOT monkeypatching the production fact store.
+    It's a composition seam — the runner constructs a recorder per
+    call, hands the recorder (not the underlying store) to
+    ``ingest_corpus``, and the underlying store stays unmodified.
+    """
+
+    def __init__(self, inner: FactStore) -> None:
+        self._inner = inner
+        self.captured: list[Any] = []
+
+    def add(self, fact: Any) -> None:
+        """Forward ``fact`` to the wrapped store and capture it locally."""
+        self._inner.add(fact)
+        self.captured.append(fact)
+
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[Any]:
+        """Forward search to the inner store unchanged."""
+        return self._inner.search(query, top_k=top_k, namespace=namespace)
+
+    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[Any]:
+        """Forward find_conflicts to the inner store unchanged."""
+        return self._inner.find_conflicts(entity=entity, attribute=attribute, namespace=namespace)
+
+    def supersede(self, *, old_id: str, new_id: str) -> None:
+        """Forward supersede to the inner store unchanged."""
+        self._inner.supersede(old_id=old_id, new_id=new_id)
 
 
 def _read_session(path: Path) -> list[dict[str, Any]]:
