@@ -152,11 +152,4 @@ class Scorer(Protocol):
         ...
 
     def score(self, run: QueryRunResult | Sequence[QueryRunResult], /) -> ScorerResult:
-        """Score the run(s) and return the verdict.
-
-        Per-query scorers accept ``QueryRunResult``; aggregate scorers
-        accept ``Sequence[QueryRunResult]``. The Protocol uses a union
-        so both shapes type-check; each concrete scorer's runtime check
-        validates the actual input.
-        """
-        ...
+        """Score the run(s) and return the verdict — Protocol stub."""
