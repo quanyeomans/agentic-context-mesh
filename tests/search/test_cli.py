@@ -10,6 +10,8 @@ that turn a ``SearchOutput`` into stdout and the JSON envelope.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass as _dataclass
+from dataclasses import field as _field
 
 import pytest
 
@@ -62,6 +64,22 @@ def test_build_parser_accepts_all_flags() -> None:
 def test_build_parser_rejects_unknown_scope() -> None:
     with pytest.raises(SystemExit):
         build_parser().parse_args(["q", "--scope", "bogus"])
+
+
+def test_build_parser_accepts_collection_flag() -> None:
+    """--collection plumbs through argparse as ``args.collection``.
+
+    Sabotage-proof executed 2026-05-21: removed the
+    ``parser.add_argument("--collection", ...)`` call; argparse failed
+    with ``unrecognized arguments`` and the test errored. Restored.
+    """
+    args = build_parser().parse_args(["q", "--collection", "reference-library"])
+    assert args.collection == "reference-library"
+
+
+def test_build_parser_collection_defaults_to_none() -> None:
+    args = build_parser().parse_args(["q"])
+    assert args.collection is None
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +311,90 @@ def test_main_module_guard_invokes_main(
         _sys.argv = saved_argv
     captured = capsys.readouterr()
     assert "Query: guarded module run" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# P4 — --collection flag plumbed via SearchDeps wrapping inside main()
+#
+# Driven through the public ``main(deps=...)`` surface — no imports of
+# the underscore-prefixed helper (F5). We inject a SearchDeps whose
+# search_fn is a spy and watch what kwargs the CLI threads through.
+# ---------------------------------------------------------------------------
+
+
+@_dataclass
+class _FakeSR:
+    """Minimal SearchResult stand-in — only the fields run_search reads."""
+
+    results: list[object] = _field(default_factory=list)
+    intent: object = _field(default_factory=lambda: type("I", (), {"value": "semantic"})())
+    bm25_count: int = 0
+    vec_count: int = 0
+    fused_count: int = 0
+    vec_failed: bool = False
+    latency_ms: float = 0.0
+    total_tokens: int = 0
+    error: str = ""
+    collections: list[str] = _field(default_factory=list)
+    tiers_used: list[str] = _field(default_factory=list)
+    fallback_used: bool = False
+
+
+@pytest.mark.unit
+def test_main_with_collection_flag_injects_collections_into_search_call(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When ``--collection reference-library`` is passed, the search_fn
+    inside SearchDeps receives ``collections=["reference-library"]`` on
+    every invocation. The CLI threads the flag through the deps
+    wrapper, not through ``run_search``'s public signature.
+
+    Sabotage-proof executed 2026-05-21: removed the
+    ``kwargs.setdefault("collections", [collection])`` line in the CLI's
+    deps wrapper. The captured kwargs no longer carried ``collections``
+    and this assert raised KeyError. Restored.
+    """
+    captured: dict = {}
+
+    def _spy_search(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return _FakeSR()
+
+    from kairix.use_cases.search import SearchDeps
+
+    main_module = __import__("kairix.core.search.cli", fromlist=["main"])
+    main_module.main(
+        ["q", "--collection", "reference-library", "--no-entity-card"],
+        deps=SearchDeps(search_fn=_spy_search),
+    )
+    _ = capsys.readouterr()  # drain stdout; content not asserted here
+
+    assert captured["collections"] == ["reference-library"]
+
+
+@pytest.mark.unit
+def test_main_without_collection_flag_does_not_inject_collections(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Omitting --collection leaves the search_fn call untouched — no
+    ``collections`` kwarg appears. Preserves the historical
+    CollectionResolver routing for callers who haven't opted in.
+
+    Sabotage-proof executed 2026-05-21: changed ``if collection is None:
+    return deps`` to ``collection = "_default"`` so a None flag still
+    injected. The captured kwargs grew a ``collections=["_default"]``
+    key and this assert failed. Restored.
+    """
+    captured: dict = {}
+
+    def _spy_search(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return _FakeSR()
+
+    from kairix.use_cases.search import SearchDeps
+
+    main_module = __import__("kairix.core.search.cli", fromlist=["main"])
+    main_module.main(["q", "--no-entity-card"], deps=SearchDeps(search_fn=_spy_search))
+    _ = capsys.readouterr()
+
+    assert "collections" not in captured
