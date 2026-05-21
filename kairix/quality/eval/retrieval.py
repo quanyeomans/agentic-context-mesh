@@ -75,6 +75,7 @@ def retrieve(
     collections: list[str] | None = None,
     fusion_override: str | None = None,
     config: Any | None = None,
+    scope: str | None = None,
     deps: RetrievalDeps | None = None,
 ) -> RetrievalResult:
     """
@@ -90,6 +91,12 @@ def retrieve(
         collections:      Explicit collections list (takes precedence over collection).
         fusion_override:  Override fusion strategy (hybrid only).
         config:           Pre-built RetrievalConfig (hybrid only; overrides fusion_override).
+        scope:            Optional scope override (``"shared"``, ``"agent"``,
+                          ``"shared+agent"``, ``"all-agents"``, ``"everything"``).
+                          When ``None`` and ``agent`` is set, falls back to the
+                          historical default ``"shared+agent"``. Per-case suite
+                          overrides ride this kwarg — see Gap 6 in
+                          ``docs/architecture/`` / spike-C3-scope-rbac-flow.
         deps:             Injectable dependencies. Tests construct
                           ``RetrievalDeps(searcher=fake)`` or
                           ``RetrievalDeps(pipeline_builder=spy)``; production omits the
@@ -112,6 +119,7 @@ def retrieve(
             collections=collections,
             fusion_override=fusion_override,
             config=config,
+            scope=scope,
             deps=deps,
         )
     elif system == "bm25":
@@ -137,6 +145,7 @@ def _retrieve_hybrid(
     collections: list[str] | None = None,
     fusion_override: str | None = None,
     config: Any | None = None,
+    scope: str | None = None,
     deps: RetrievalDeps | None = None,
 ) -> RetrievalResult:
     """Hybrid search backend.
@@ -147,6 +156,14 @@ def _retrieve_hybrid(
     ``fusion_override`` is then layered on top. This closes #112 for the
     eval/benchmark path so ``--collection reference-library`` actually
     receives reflib's tuned overrides.
+
+    Scope semantics (Gap 6 fix per /tmp/spike-C3-scope-rbac-flow.md):
+    when ``agent`` is set, the historical implementation hard-coded
+    ``scope="shared+agent"`` and silently overrode any caller intent.
+    The fix: a caller-provided ``scope`` is now passed through verbatim
+    and only the ``scope is None`` branch falls back to the historical
+    ``"shared+agent"`` default. Per-suite-case scope declarations now
+    actually reach ``SearchPipeline.search``.
     """
     deps = deps if deps is not None else RetrievalDeps()
     # Resolve config BEFORE building the pipeline. The historical bug
@@ -177,7 +194,13 @@ def _retrieve_hybrid(
     }
     if agent:
         search_kwargs["agent"] = agent
-        search_kwargs["scope"] = "shared+agent"
+        # Gap 6: respect a caller-provided scope; only fall back to the
+        # historical default when scope is None.
+        search_kwargs["scope"] = scope if scope is not None else "shared+agent"
+    elif scope is not None:
+        # Scope can be meaningful even without an agent (e.g. ``"everything"``
+        # for cross-agent eval probes). Pass it through when explicitly set.
+        search_kwargs["scope"] = scope
 
     sr = searcher(**search_kwargs)
     paths = [b.result.path for b in sr.results]
