@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # required for the conversation-eval job to federate to Azure via OIDC
 
 jobs:
   reflib-benchmark-gate:
@@ -63,7 +64,24 @@ jobs:
       - name: Install kairix
         run: pip install -e ".[dev]"
 
+      # Azure OIDC login + Key Vault secret loading. The federated App
+      # Registration holds the "Key Vault Secrets User" role on the
+      # configured KV. With KAIRIX_KV_NAME set, kairix.secrets fetches
+      # the provider creds at runtime — same code path the VM uses, no
+      # long-lived GH secret to rotate.
+      - name: Azure login (federated OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Materialise kairix.config.yaml from example
+        run: cp kairix.example.config.yaml kairix.config.yaml
+
       - name: Eval conversation corpora
+        env:
+          KAIRIX_KV_NAME: ${{ vars.KAIRIX_KV_NAME }}
         run: bash scripts/ci/eval-conversation-corpora.sh
 
       - name: Upload per-corpus results
