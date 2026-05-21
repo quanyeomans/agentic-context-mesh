@@ -11,7 +11,7 @@ name: "Go quality"
 
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
     paths:
       - "services/**"
       - "tools/**"

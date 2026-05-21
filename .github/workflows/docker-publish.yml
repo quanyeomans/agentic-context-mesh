@@ -3,9 +3,9 @@ name: "3 · Docker publish (release)"
 # Publishes Docker image to GitHub Container Registry (ghcr.io).
 # - Stable release: pushes :latest and :vX.Y.Z tags
 # - Alpha pre-release (is_alpha=true OR GitHub prerelease): pushes :vX.Y.ZaN ONLY (no :latest)
-# - Develop push: pushes :develop tag (pre-release for VM testing)
+# - Develop push: pushes :main tag (pre-release for VM testing)
 
-# Only one build at a time per ref. Cancel in-progress on develop
+# Only one build at a time per ref. Cancel in-progress on main
 # (saves minutes on rapid pushes), but never cancel a release build
 # mid-tag-push.
 concurrency:
@@ -16,7 +16,7 @@ on:
   release:
     types: [created]
   push:
-    branches: [develop]
+    branches: [main]
     paths:
       - "Dockerfile"
       - "docker/**"
@@ -60,9 +60,9 @@ jobs:
           # tagged commit, not the default branch tip.
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
           # Full history required so setuptools-scm can compute the
-          # develop-push dev version (e.g. 2026.5.15.dev3+gabc1234). For
+          # main-push dev version (e.g. 2026.5.15.dev3+gabc1234). For
           # release/workflow_dispatch we use the tag directly, but a
-          # shallow clone would still break the develop path (#267).
+          # shallow clone would still break the main path (#267).
           fetch-depth: 0
 
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
@@ -106,7 +106,7 @@ jobs:
             # can't compute it itself — see #267).
             pip install --quiet "setuptools-scm>=8"
             VERSION="$(python -m setuptools_scm 2>/dev/null || echo "0.0.0")"
-            echo "tags=${IMAGE}:develop" >> "$GITHUB_OUTPUT"
+            echo "tags=${IMAGE}:main" >> "$GITHUB_OUTPUT"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 

@@ -340,7 +340,7 @@ if intent == QueryIntent.TEMPORAL:
 
 ```yaml
 # kairix.config.yaml — retrieval configuration
-# See: https://github.com/three-cubes/kairix/blob/develop/docs/architecture/retrieval-boost-configuration.md
+# See: https://github.com/three-cubes/kairix/blob/main/docs/architecture/retrieval-boost-configuration.md
 
 retrieval:
   boosts:

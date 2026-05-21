@@ -6,7 +6,7 @@ name: "1d · Eval LoCoMo nightly"
 # conversations by default) on a nightly cron. Uploads the resulting
 # JSON/CSV to GitHub artifacts, then compares against the prior run's
 # artifact: if the pass rate drops by more than 2pp, comments on the
-# develop-branch tip commit so the regression surfaces in dev review.
+# main-branch tip commit so the regression surfaces in dev review.
 #
 # Why nightly + cron, not per-PR: LoCoMo is multi-conversation and
 # burns LLM quota; the per-PR gate (1c) handles engagement-* corpora
@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: develop
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
@@ -77,7 +77,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Compare against prior nightly + comment on develop
+      - name: Compare against prior nightly + comment on main
         if: steps.suite_check.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}

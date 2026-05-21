@@ -261,7 +261,7 @@ From the code survey (sub-agent `a0a453815356cd66b`):
 ## Migration plan
 
 Phased, each phase a separate worktree-dispatched wave landing as
-green-on-`develop` cherry-picks.
+green-on-`main` cherry-picks.
 
 | Wave | Work items | Parallel? | Depends on |
 |---|---|---|---|
