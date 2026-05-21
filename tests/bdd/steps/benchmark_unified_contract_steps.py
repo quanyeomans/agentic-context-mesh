@@ -1,38 +1,33 @@
-"""Step skeleton for ``benchmark_unified_contract.feature``.
+"""Step bodies for ``benchmark_unified_contract.feature``.
 
-This module is the forward-declared step surface for the P0 unified
-benchmarking behaviour contract. Implementation phases P1-P8 fill the
-bodies; this file documents the contract, names each step phrase, and
-records the per-step sabotage-proof plan.
+Phase status:
 
-**Wiring status (P3.a).** Performance and scoping When/Then step
-bodies are now wired to the unified single-shot mode dispatcher
-(:func:`kairix.quality.benchmark.modes.run_single_shot`). The module
-remains absent from ``tests/conftest.py`` ``pytest_plugins`` until the
-companion ``tests/bdd/test_benchmark_unified_contract.py`` loader
-lands in P1 alongside the FakeBenchmarkSuite fakes. Until then:
-
-* The feature file is dormant — pytest-bdd does not collect it.
-* Quality-lens bodies (NDCG / Hit / MRR / judge) remain forward-
-  declared — :mod:`kairix.quality.scoring` lands in P2.
-* Stability-lens bodies remain forward-declared — soak-mode
-  dispatcher lands in P3.c.
-* Givens that seed the suite + corpus + gates remain forward-declared
-  — FakeBenchmarkSuite lands in P1.
-
-**Wiring instructions (P1).** When the FakeBenchmarkSuite / FakeScorer
-fakes land in ``tests/fakes.py`` (P2), the orchestrator wires:
-
-1. Add ``"tests.bdd.steps.benchmark_unified_contract_steps"`` to the
-   ``pytest_plugins`` list in ``tests/conftest.py``.
-2. Create ``tests/bdd/test_benchmark_unified_contract.py`` with one
-   ``@pytest.mark.bdd`` + ``@scenario(...)`` declaration per Scenario
-   / Scenario Outline in the feature file (see ``test_benchmark_run.py``
-   for the pattern).
+* **P0 (landed)** — feature file + this step skeleton (all bodies raised
+  :class:`NotImplementedError`).
+* **P1 (landed)** — corpus + ingest fakes.
+* **P2 (landed)** — Quality lens step bodies (NDCG / Hit@K / MRR / Judge /
+  combined) wired to :class:`kairix.quality.scoring.ScorerRegistry`.
+  Per-query gold + expected_answer are read from ``_state``; the latest
+  ``QueryRunResult`` from the When step is also read from ``_state``.
+* **P3.a (landed)** — Performance + Scoping When/Then bodies wired to the
+  unified single-shot mode dispatcher
+  (:func:`kairix.quality.benchmark.modes.run_single_shot`).
+* **P3.c (pending)** — Stability lens bodies + soak-mode dispatcher.
+* **P5 (pending)** — Wires the loader: adds
+  ``"tests.bdd.steps.benchmark_unified_contract_steps"`` to
+  ``tests/conftest.py`` ``pytest_plugins`` AND creates
+  ``tests/bdd/test_benchmark_unified_contract.py`` with one
+  ``@scenario(...)`` declaration per Scenario / Scenario Outline (see
+  ``test_benchmark_run.py`` for the pattern). Until P5 lands, the feature
+  file is dormant — pytest-bdd does not collect it.
 
 Sabotage-proof convention. Each step carries a ``# sabotage:`` note
-describing the mutation that must produce a failing assertion when the
-P1-P8 body lands.
+describing the mutation that produces a failing assertion. P2's Quality-
+lens bodies have those sabotage paths exercised by ``tests/quality/
+scoring/test_*.py`` unit tests (mutation patterns are documented +
+executed there). P3.a's Performance + Scoping bodies have parallel
+sabotage paths exercised by ``tests/quality/benchmark/test_modes_single_
+shot.py``.
 
 **Routing-boundary framing.** The scoping scenarios (Scenario Outline
 "Scope and collection filtering respect RBAC boundaries") assert on
@@ -41,6 +36,13 @@ under a given ``Scope`` / ``agent`` combination. Per spike C3 §4 this
 is NOT permission enforcement: kairix's benchmark validates routing
 shape, not RBAC. Operators wiring real access control layer those at
 the transport / auth boundary; the suite YAML cannot assert them.
+
+**Module imports.** The Quality-lens steps reach into
+``kairix.quality.scoring`` and ``tests.fakes`` (FakeLLMBackend). Tests
+in ``tests/`` may import ``kairix.*`` and ``tests.fakes.*`` directly;
+the F24 prohibition is on ``kairix/**`` importing ``tests.*``, not the
+other way around. The eval CLI's existing legacy steps file is the
+prior-art pattern.
 """
 
 from __future__ import annotations
@@ -51,6 +53,15 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
+from kairix.quality.scoring import (
+    HitAtKScorer,
+    LLMJudgeScorer,
+    MRRScorer,
+    NDCGScorer,
+    QueryRunResult,
+)
+from tests.fakes import FakeLLMBackend
+
 pytestmark = pytest.mark.bdd
 
 # ---------------------------------------------------------------------------
@@ -60,6 +71,87 @@ pytestmark = pytest.mark.bdd
 # ---------------------------------------------------------------------------
 
 _state: dict[str, Any] = {}
+
+
+# Floors mirror the Examples tables in the feature file. Used by the
+# combined-scenario steps which derive the floor from the query_type
+# captured by the Given step rather than from a parser-extracted literal.
+_NDCG_FLOORS: dict[str, float] = {
+    "keyword": 0.75,
+    "entity": 0.80,
+    "procedural": 0.85,
+    "temporal": 0.75,
+    "multi-hop": 0.70,
+    "semantic": 0.80,
+}
+
+_JUDGE_FLOORS: dict[str, float] = {
+    "keyword": 0.70,
+    "entity": 0.70,
+    "procedural": 0.75,
+    "temporal": 0.60,
+    "multi-hop": 0.50,
+    "semantic": 0.65,
+    "conversational-multi-session": 0.50,
+}
+
+
+def _floor_for(query_type: str, lens: str) -> float:
+    """Look up the Examples-table floor for a (query_type, lens) pair."""
+    table = _NDCG_FLOORS if lens == "ndcg" else _JUDGE_FLOORS
+    return table.get(query_type, 0.0)
+
+
+def _expect_run() -> QueryRunResult:
+    """Return the most-recent QueryRunResult or fail with a P3 affordance.
+
+    The When step (P3 — mode dispatcher) populates ``_state["last_run"]``.
+    Until P3 lands the When body still raises NotImplementedError, so
+    this helper is only reached once P3 wiring is in place. Raising
+    with a clear marker makes mis-ordered scenarios fail loudly.
+    """
+    run = _state.get("last_run")
+    if run is None:
+        raise AssertionError(
+            "no QueryRunResult captured. "
+            "fix: ensure the When step ran successfully (P3 mode-dispatcher wiring). "
+            "next: see tests/bdd/steps/benchmark_unified_contract_steps.py — "
+            'the When step body must set _state["last_run"]. '
+            "run: bash scripts/safe-commit.sh — P3 is the mode-dispatcher commit."
+        )
+    if not isinstance(run, QueryRunResult):
+        raise AssertionError(
+            f"_state['last_run'] has wrong type: {type(run).__name__}. "
+            "fix: ensure the When step stores a QueryRunResult, not a dict or other shape."
+        )
+    return run
+
+
+def _expect_gold() -> list[dict[str, Any]]:
+    """Return the gold_titles for the current query or fail with a P1 affordance."""
+    gold = _state.get("gold_titles")
+    if gold is None:
+        raise AssertionError(
+            "no gold_titles captured for the current scenario. "
+            'fix: ensure the Given step set _state["gold_titles"] from the suite. '
+            "next: P1 corpus + P3 dispatcher wiring populate this. "
+            "run: see kairix/quality/benchmark/suite.py for the gold_titles schema."
+        )
+    return list(gold)
+
+
+def _expect_expected_answer() -> str:
+    """Return the expected_answer for the current query or fail with a P1 affordance."""
+    expected = _state.get("expected_answer")
+    if not expected:
+        raise AssertionError(
+            "no expected_answer captured for the current scenario. "
+            'fix: ensure the Given step set _state["expected_answer"] from the suite. '
+            "next: P1 corpus + P3 dispatcher wiring populate this. "
+            "run: see kairix/quality/benchmark/suite.py — BenchmarkCase.expected_answer."
+        )
+    return str(expected)
+
 
 _TODO_P1 = "TODO P1: wire FakeBenchmarkSuite once P2 lands the fake in tests/fakes.py"
 _TODO_P2 = "TODO P2: wire FakeScorer + scorer-protocol assertions"
@@ -139,21 +231,30 @@ def run_single_shot() -> None:
 @then(parsers.parse("NDCG at 10 is at least {floor:g}"))
 def ndcg_at_least(floor: float) -> None:
     # sabotage: clamp the NDCG scorer output to 0.0 — assertion must fail.
-    _not_implemented(_TODO_P2)
+    run = _expect_run()
+    gold = _expect_gold()
+    result = NDCGScorer(gold_titles=gold, k=10).score(run)
+    assert result.score >= floor, f"NDCG@10 = {result.score:.3f} < floor {floor}"
 
 
 @then(parsers.parse("Hit at 5 is at least {floor:g}"))
 def hit_at_least(floor: float) -> None:
     # sabotage: return a result-set with the gold document at position 6 —
     # Hit@5 must drop below the floor.
-    _not_implemented(_TODO_P2)
+    run = _expect_run()
+    gold = _expect_gold()
+    result = HitAtKScorer(gold_titles=gold, k=5).score(run)
+    assert result.score >= floor, f"Hit@5 = {result.score:.3f} < floor {floor}"
 
 
 @then(parsers.parse("MRR at 10 is at least {floor:g}"))
 def mrr_at_least(floor: float) -> None:
     # sabotage: shuffle the result set so the gold document lands at
     # position 10 — MRR must drop below the floor.
-    _not_implemented(_TODO_P2)
+    run = _expect_run()
+    gold = _expect_gold()
+    result = MRRScorer(gold_titles=gold, k=10).score(run)
+    assert result.score >= floor, f"MRR@10 = {result.score:.3f} < floor {floor}"
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +274,11 @@ def query_with_expected_answer(query_type: str) -> None:
 def judge_score_at_least(floor: float) -> None:
     # sabotage: force the judge to return 0.0 for every query — every
     # row of the Examples table must fail.
-    _not_implemented(_TODO_P2)
+    run = _expect_run()
+    expected = _expect_expected_answer()
+    llm = _state.get("llm") or FakeLLMBackend(chat_response="1.0")
+    result = LLMJudgeScorer(llm=llm, expected_answer=expected).score(run)
+    assert result.score >= floor, f"judge = {result.score:.3f} < floor {floor}"
 
 
 # ---------------------------------------------------------------------------
@@ -191,20 +296,40 @@ def query_with_gold_and_answer() -> None:
 @then("NDCG at 10 meets its floor for the query type")
 def combined_ndcg_meets_floor() -> None:
     # sabotage: as for the ndcg-only step — clamp the scorer to 0.0.
-    _not_implemented(_TODO_P2)
+    floor = _floor_for(_state.get("query_type", "keyword"), "ndcg")
+    ndcg_at_least(floor)
 
 
 @then("the LLM judge score meets its floor for the query type")
 def combined_judge_meets_floor() -> None:
     # sabotage: as for the judge-only step — clamp the judge to 0.0.
-    _not_implemented(_TODO_P2)
+    floor = _floor_for(_state.get("query_type", "keyword"), "judge")
+    judge_score_at_least(floor)
 
 
 @then("the top-ranked documents materially contribute to the synthesised answer")
 def top_ranked_contribute_to_answer() -> None:
     # sabotage: synthesise the answer from a fixed prompt that ignores
     # the retrieved documents — the contribution check must fail.
-    _not_implemented(_TODO_P2)
+    #
+    # Implementation: at least one top-3 retrieved title appears as a
+    # substring of the synthesised answer. Conservative — strong models
+    # often paraphrase, so this catches the "answer ignored retrieval"
+    # failure mode (synthesised answer mentions NO retrieved title) but
+    # not subtler attribution drift.
+    run = _expect_run()
+    if not run.synthesised_answer:
+        raise AssertionError("synthesised_answer is empty — cannot evaluate contribution")
+    answer_lc = run.synthesised_answer.lower()
+    top_3 = run.ranked_doc_titles[:3]
+    if not top_3:
+        raise AssertionError("ranked_doc_titles is empty — retrieval produced no signal")
+    mentioned = [t for t in top_3 if t.lower() in answer_lc]
+    assert mentioned, (
+        f"none of the top-3 retrieved docs {list(top_3)!r} appear in the "
+        f"synthesised answer (len={len(answer_lc)}); retrieval did not "
+        f"materially contribute"
+    )
 
 
 # ---------------------------------------------------------------------------
