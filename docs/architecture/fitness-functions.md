@@ -2371,6 +2371,70 @@ transcript = "<real-full-name> works at <real-org>."
 
 ---
 
+### F33 — `# shellcheck disable=<rule>` directives require rationale
+
+Cross-pollinated from tc-agent-zone's `shellcheck_disable_with_reason.py`.
+Shell counterpart to F3 — every `# shellcheck disable=<rule>` line must
+carry an inline rationale (after the directive on the same line) OR the
+immediately preceding line must be a substantive `#` comment that
+justifies the disable.
+
+#### Motivation
+
+A bare `# shellcheck disable=SC2034` is a silent override. Six months
+later nobody can tell whether the disable is still load-bearing or
+whether the underlying warning has become a real bug. F3 catches the
+same shape for Python (`# noqa`, `# type: ignore`, `# nosec`,
+`# NOSONAR`, `# pragma: no cover`); F33 closes the equivalent hole in
+shell.
+
+#### Mechanism
+
+`scripts/checks/check_shellcheck_disable_with_reason.py` walks every
+tracked file whose name ends in `.sh` OR whose first line is a `#!`
+shebang naming `bash` / `sh`. For each line that matches
+`# shellcheck disable=<rules>`, the detector accepts the disable if any
+of these holds:
+
+- The same line carries an inline `#`-comment rationale (e.g.
+  `# shellcheck disable=SC2034  # exported via process substitution`).
+- The immediately preceding non-blank line is a `#`-comment with a
+  substantive body (≥ ~10 chars, not a shebang, not a copy of the
+  directive).
+- The rationale uses one of the canonical marker prefixes: `fix:`,
+  `next:`, `run:`, `why:`, `rationale:`, `reason:`, `because:`.
+
+Files in `.architecture/baseline/`, `reference-library/`, and
+`benchmark-results/` are exempt. The detector and its test self-exempt
+because their docstrings embed example disable lines. The baseline at
+`.architecture/baseline/shellcheck-disable-with-reason-files.txt`
+grandfathers pre-existing offenders (one file at landing:
+`scripts/install/permissions-preflight.sh` carries two undocumented
+`# shellcheck disable=SC1090` lines that pre-date the rule). Net-new
+violations block at safe-commit and CI.
+
+#### Fix pattern
+
+Add an inline rationale after the directive, OR a substantive `#`
+comment on the line above:
+
+```bash
+# safe -- sourced path is computed from a vetted config var
+# shellcheck disable=SC1090
+. "$SECRETS_FILE"
+
+# shellcheck disable=SC2034  # exported via process substitution below
+```
+
+Forbidden:
+
+```bash
+# shellcheck disable=SC1090
+. "$SECRETS_FILE"
+```
+
+---
+
 ## SDLC integration map
 
 Each fitness function fires at multiple lifecycle stages. The same

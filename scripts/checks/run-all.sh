@@ -115,6 +115,9 @@ python3 "${SCRIPT_DIR}/check_no_hardcoded_user_paths.py" || overall=1
 # F32 — no real first names or organisation/client names in fixtures + docs
 python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
 
+# F33 — shellcheck disable directives require rationale
+python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
