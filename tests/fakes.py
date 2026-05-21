@@ -1450,3 +1450,87 @@ class FakeFactStore:
             superseded_by=new_id,
             namespace=old.namespace,
         )
+
+
+class _FakeBudgetedResult:
+    """Minimal stand-in for :class:`kairix.core.search.budget.BudgetedResult`.
+
+    Exposes the ``.result`` (inner FusedResult-ish object), ``.content``
+    (the text that ``_search_result_to_context`` consumes), ``.tier``,
+    and ``.token_estimate`` fields the adapter reads. Built from
+    ``FakeSearchPipeline`` so eval tests can pin the SearchPipeline-mode
+    branch without spinning up a full pipeline.
+    """
+
+    def __init__(self, *, result: Any, content: str, tier: str = "L2", token_estimate: int = 0) -> None:
+        self.result = result
+        self.content = content
+        self.tier = tier
+        self.token_estimate = token_estimate
+
+
+class _FakeFusedRow:
+    """Minimal FusedResult-shaped row carrying ``path`` + ``title``.
+
+    Used by FakeSearchPipeline to compose synthetic SearchResult.results
+    lists. Adapter distinguishes fact rows from chunk rows by the
+    ``facts://`` path prefix, so the two flavours just differ on
+    ``path``.
+    """
+
+    def __init__(self, *, path: str, title: str = "") -> None:
+        self.path = path
+        self.title = title
+
+
+class FakeSearchPipeline:
+    """Protocol-compliant stand-in for :class:`SearchPipeline`.
+
+    Records every ``search(...)`` call in ``calls`` for assertion. The
+    response is scripted: pass ``scripted_results`` to control the
+    returned ``SearchResult.results`` list. Each entry is a
+    ``_FakeBudgetedResult`` so the adapter under test sees the same
+    shape it would in production.
+
+    The fake exposes the minimum surface eval needs:
+      * ``search(query, ...)`` → object with ``.results`` attribute.
+    No real intent classification, fusion, or budget — the unit tests
+    in ``tests/quality/eval/test_suite_runner_pipeline_path.py`` pin
+    the runner's *use* of the pipeline, not the pipeline itself.
+    """
+
+    def __init__(self, scripted_results: list[Any] | None = None) -> None:
+        self._scripted_results = list(scripted_results or [])
+        self.calls: list[dict[str, Any]] = []
+
+    def search(self, query: str, **kwargs: Any) -> Any:
+        self.calls.append({"query": query, "kwargs": kwargs})
+        return _FakeSearchResult(results=list(self._scripted_results))
+
+    @staticmethod
+    def make_fact_row(*, fact_id: str, entity: str, attribute: str, value: str) -> _FakeBudgetedResult:
+        """Build a fact-row BudgetedResult matching production's _fused_from_fact_hit shape."""
+        snippet = f"{entity} {attribute}: {value}"
+        return _FakeBudgetedResult(
+            result=_FakeFusedRow(path=f"facts://{fact_id}", title=f"{entity} — {attribute}"),
+            content=snippet,
+            tier="L2",
+            token_estimate=len(snippet) // 4,
+        )
+
+    @staticmethod
+    def make_chunk_row(*, path: str, title: str, content: str) -> _FakeBudgetedResult:
+        """Build a chunk-row BudgetedResult — non-facts path, full content text."""
+        return _FakeBudgetedResult(
+            result=_FakeFusedRow(path=path, title=title),
+            content=content,
+            tier="L2",
+            token_estimate=len(content) // 4,
+        )
+
+
+class _FakeSearchResult:
+    """Minimal SearchResult shape — just the ``.results`` field the adapter reads."""
+
+    def __init__(self, *, results: list[Any]) -> None:
+        self.results = results
