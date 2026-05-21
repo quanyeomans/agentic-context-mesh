@@ -31,6 +31,7 @@ from kairix.quality.scoring.aggregator import (
     aggregate_overall,
 )
 from kairix.quality.scoring.hit_at_k import HitAtKScorer
+from kairix.quality.scoring.llm_judge import LLMJudgeScorer
 from kairix.quality.scoring.mrr import MRRScorer
 from kairix.quality.scoring.ndcg import NDCGScorer
 from kairix.quality.scoring.types import (
@@ -43,6 +44,7 @@ from kairix.quality.scoring.types import (
 __all__ = [
     "CategoryAggregate",
     "HitAtKScorer",
+    "LLMJudgeScorer",
     "LatencyPhase",
     "MRRScorer",
     "NDCGScorer",
