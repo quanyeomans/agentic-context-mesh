@@ -8,6 +8,10 @@ Pins the contract the agent sees:
   - Unknown entity returns an empty hits list — not an error.
   - Namespace filtering is honoured (engagement isolation).
   - Superseded facts are filtered out (Protocol default).
+  - No-fact_store-injected path resolves a real SQLiteFactStore against
+    the supplied KairixPaths (covers the production-wiring branch).
+  - Store-search exceptions are caught and surfaced via ``LookupFailed``
+    (covers the defensive failure-envelope path).
 
 Every test carries a ``# Sabotage:`` note describing a concrete change
 to the production code that would falsify the test.
@@ -18,12 +22,17 @@ on tool_facts_about — no monkeypatching.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from kairix.agents.mcp.tools.facts_about import (
     ERROR_INVALID_INPUT,
+    ERROR_LOOKUP_FAILED,
     tool_facts_about,
 )
+from kairix.paths import KairixPaths
 from tests.fakes import FakeFactRecord, FakeFactStore
 
 pytestmark = pytest.mark.unit
@@ -170,3 +179,80 @@ def test_top_k_bounds_result_count() -> None:
 
     assert out["error"] == ""
     assert len(out["hits"]) <= 2
+
+
+def _paths(tmp_path: Path) -> KairixPaths:
+    """Per-test KairixPaths pinned under ``tmp_path`` (hermetic)."""
+    return KairixPaths(
+        document_root=tmp_path / "vault",
+        db_path=tmp_path / "kairix.db",
+        log_dir=tmp_path / "logs",
+        workspace_root=tmp_path / "workspaces",
+    )
+
+
+def test_no_fact_store_injected_resolves_production_sqlite_store(tmp_path: Path) -> None:
+    """When ``fact_store`` is None, the tool builds a SQLiteFactStore.
+
+    Drives the production-wiring branch — when an operator omits
+    the DI kwargs, the tool resolves ``KairixPaths`` and constructs a
+    real SQLite-backed store. Against a fresh tmp db_path the store has
+    no facts, so the lookup returns an empty hits list with no error.
+
+    Sabotage: remove the ``if fact_store is None:`` block in
+    ``tool_facts_about`` (lines 106-113) — the call reaches
+    ``fact_store.search(...)`` on ``None`` and raises AttributeError,
+    failing this test with the unhandled exception. Mutate-confirmed
+    against lines 110-113.
+    """
+    paths = _paths(tmp_path)
+
+    out = tool_facts_about(entity="Alice", paths=paths)
+
+    assert out["error"] == ""
+    assert out["entity"] == "Alice"
+    assert out["hits"] == []
+    # The SQLite db file may not be touched until a write happens (the
+    # store defers schema creation to first ``add``); we don't assert on
+    # its presence — only that the call returned a clean envelope.
+
+
+class _RaisingFactStore(FakeFactStore):
+    """FakeFactStore subclass whose ``search`` raises RuntimeError.
+
+    Sub-classing the canonical FakeFactStore preserves the full Protocol
+    shape without needing per-line coverage pragmas on methods the tool
+    doesn't exercise. Only ``search`` is overridden — the inherited
+    ``add`` / ``find_conflicts`` / ``supersede`` are never called by
+    ``tool_facts_about`` so they incur no coverage cost on this stub.
+    """
+
+    def __init__(self, message: str = "simulated store outage") -> None:
+        super().__init__()
+        self._message = message
+
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[Any]:
+        del query, top_k, namespace
+        raise RuntimeError(self._message)
+
+
+def test_lookup_failure_is_wrapped_in_lookupfailed_envelope() -> None:
+    """A RuntimeError out of ``FactStore.search`` is caught and surfaced.
+
+    Drives the except branch — lines 117-126 — which builds the
+    canonical ``LookupFailed`` envelope so the agent reads ``error`` and
+    branches without seeing a traceback.
+
+    Sabotage: remove the ``try/except`` around the ``fact_store.search``
+    call in tool_facts_about → the RuntimeError propagates out of the
+    tool, this test fails with the bare RuntimeError instead of the
+    LookupFailed assertion. Mutate-confirmed against lines 117-119.
+    """
+    store = _RaisingFactStore(message="db is missing")
+
+    out = tool_facts_about(entity="Alice", fact_store=store)
+
+    assert out["error"] == ERROR_LOOKUP_FAILED
+    assert "db is missing" in out["detail"]
+    assert out["hits"] == []
+    assert out["entity"] == "Alice"
