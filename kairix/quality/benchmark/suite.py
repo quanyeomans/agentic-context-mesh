@@ -284,6 +284,49 @@ def validate_gold_titles_structure(
 _VALID_SCOPE_VALUES = frozenset({"shared", "agent", "shared+agent", "all-agents", "everything"})
 
 
+_P4_SIMPLE_TYPE_FIELDS: tuple[tuple[str, type, str, str], ...] = (
+    (
+        "expected_answer",
+        str,
+        "a string",
+        'fix: quote the value in YAML, e.g. expected_answer: "..."',
+    ),
+    (
+        "expected_answer_keywords",
+        list,
+        "a list",
+        "fix: use YAML list syntax, e.g. expected_answer_keywords: [foo, bar]",
+    ),
+    (
+        "collection",
+        str,
+        "a string",
+        'fix: quote the value, e.g. collection: "reference-library"',
+    ),
+    (
+        "expected_zero_results",
+        bool,
+        "true|false",
+        "fix: use a YAML boolean.",
+    ),
+)
+
+
+def _validate_p4_scope(raw_case: dict, case_id: str | None, i: int, errors: list[str]) -> None:
+    scope = raw_case.get("scope")
+    if scope is None:
+        return
+    if not isinstance(scope, str):
+        errors.append(
+            f"Case [{i}] ({case_id}): 'scope' must be a string when set; fix: use one of {sorted(_VALID_SCOPE_VALUES)}"
+        )
+    elif scope not in _VALID_SCOPE_VALUES:
+        errors.append(
+            f"Case [{i}] ({case_id}): 'scope' must be one of {sorted(_VALID_SCOPE_VALUES)}; "
+            f"got {scope!r}. fix: update the suite YAML to a valid scope."
+        )
+
+
 def validate_p4_field_types(raw_case: dict, case_id: str | None, i: int, errors: list[str]) -> None:
     """Validate the P4 optional fields have the right shape when set.
 
@@ -298,45 +341,12 @@ def validate_p4_field_types(raw_case: dict, case_id: str | None, i: int, errors:
       * ``collection`` — must be a string when set.
       * ``expected_zero_results`` — must be a bool when set.
     """
-    if "expected_answer" in raw_case and raw_case["expected_answer"] is not None:
-        if not isinstance(raw_case["expected_answer"], str):
-            errors.append(
-                f"Case [{i}] ({case_id}): 'expected_answer' must be a string when set; "
-                f'fix: quote the value in YAML, e.g. expected_answer: "..."'
-            )
-
-    kw = raw_case.get("expected_answer_keywords")
-    if kw is not None and not isinstance(kw, list):
-        errors.append(
-            f"Case [{i}] ({case_id}): 'expected_answer_keywords' must be a list when set; "
-            f"fix: use YAML list syntax, e.g. expected_answer_keywords: [foo, bar]"
-        )
-
-    scope = raw_case.get("scope")
-    if scope is not None:
-        if not isinstance(scope, str):
-            errors.append(
-                f"Case [{i}] ({case_id}): 'scope' must be a string when set; "
-                f"fix: use one of {sorted(_VALID_SCOPE_VALUES)}"
-            )
-        elif scope not in _VALID_SCOPE_VALUES:
-            errors.append(
-                f"Case [{i}] ({case_id}): 'scope' must be one of {sorted(_VALID_SCOPE_VALUES)}; "
-                f"got {scope!r}. fix: update the suite YAML to a valid scope."
-            )
-
-    if "collection" in raw_case and raw_case["collection"] is not None:
-        if not isinstance(raw_case["collection"], str):
-            errors.append(
-                f"Case [{i}] ({case_id}): 'collection' must be a string when set; "
-                f'fix: quote the value, e.g. collection: "reference-library"'
-            )
-
-    if "expected_zero_results" in raw_case and raw_case["expected_zero_results"] is not None:
-        if not isinstance(raw_case["expected_zero_results"], bool):
-            errors.append(
-                f"Case [{i}] ({case_id}): 'expected_zero_results' must be true|false when set; fix: use a YAML boolean."
-            )
+    for key, expected_type, type_label, fix_hint in _P4_SIMPLE_TYPE_FIELDS:
+        value = raw_case.get(key)
+        if value is None or isinstance(value, expected_type):
+            continue
+        errors.append(f"Case [{i}] ({case_id}): {key!r} must be {type_label} when set; {fix_hint}")
+    _validate_p4_scope(raw_case, case_id, i, errors)
 
 
 def validate_recall_gold_requirement(

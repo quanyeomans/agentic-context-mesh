@@ -332,7 +332,12 @@ def _emit_baseline_compare(result: Any, baseline_path: str) -> None:
     a = baseline.get("summary", {}).get("weighted_total", 0.0)
     b = result.summary.get("weighted_total", 0.0)
     delta = b - a
-    marker = "▲" if delta > 0 else ("▼" if delta < 0 else "=")
+    if delta > 0:
+        marker = "▲"
+    elif delta < 0:
+        marker = "▼"
+    else:
+        marker = "="
     print(f"  baseline compare: {a:.3f} → {b:.3f}  {marker} {abs(delta):.3f}  (baseline: {baseline_path})")
 
 

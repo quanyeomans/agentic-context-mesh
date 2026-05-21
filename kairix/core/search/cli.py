@@ -89,11 +89,15 @@ def _bind_collection_to_deps(deps: SearchDeps | None, collection: str | None) ->
         kwargs.setdefault("collections", [collection])
         return inner(**kwargs)
 
-    # SearchDeps is frozen — rebuild via dataclasses.replace to keep
-    # every other field (classify_fn, entity_card_fn, health_deps) intact.
-    from dataclasses import replace as _replace
-
-    return _replace(base, search_fn=_search_with_collection)
+    # SearchDeps is frozen — rebuild with the wrapped search_fn while
+    # carrying every other field forward. Any new field on SearchDeps must
+    # be mirrored here (loud failure preferred over silent default-fallback).
+    return SearchDeps(
+        search_fn=_search_with_collection,
+        entity_card_fn=base.entity_card_fn,
+        classify_fn=base.classify_fn,
+        health_deps=base.health_deps,
+    )
 
 
 def format_text(out: SearchOutput) -> str:

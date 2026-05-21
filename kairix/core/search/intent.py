@@ -94,7 +94,7 @@ _ATTRIBUTE_FACT_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bwhat(?:'s|\s+is|\s+are|\s+was|\s+were)\s+\S+'s\s+\w+", re.IGNORECASE),
     # "Y of X?" — short attribute query, ≤6 words, no procedural/multi-hop
     # signals (gated downstream by ``_is_short_attribute_of_query``).
-    re.compile(r"^\s*\w+(?:\s+\w+){0,2}\s+of\s+[A-Za-z][\w'.\-]+\s*\??\s*$", re.IGNORECASE),
+    re.compile(r"^\s*\w+(?:\s+\w+){0,2}\s+of\s+[A-Z][\w'.-]+\s*\??\s*$", re.IGNORECASE),
     # "X's Y?" — bare possessive attribute lookup, ≤4 words.
     re.compile(r"^\s*\S+'s\s+\w+\s*\??\s*$", re.IGNORECASE),
     # "what did X verb?" — single-verb factoid lookup (e.g. "what did Caroline research?").
@@ -278,6 +278,10 @@ class QueryIntent(str, Enum):
     ATTRIBUTE_FACT = "attribute_fact"
 
 
+def _matches_any(patterns: list[re.Pattern[str]], q: str) -> bool:
+    return any(p.search(q) for p in patterns)
+
+
 def classify(query: str) -> QueryIntent:
     """
     Classify a query string into a QueryIntent.
@@ -290,40 +294,21 @@ def classify(query: str) -> QueryIntent:
         q = query.strip()
         if not q:
             return QueryIntent.SEMANTIC
-
-        # 1. Temporal — date/time language takes highest priority
-        for pattern in _TEMPORAL_PATTERNS:
-            if pattern.search(q):
-                return QueryIntent.TEMPORAL
-
-        # 1b. Multi-hop — connective signals spanning multiple topics (before entity to catch complex queries)
-        for pattern in _MULTI_HOP_PATTERNS:
-            if pattern.search(q):
-                return QueryIntent.MULTI_HOP
-
-        # 1c. Attribute-fact — short "what is X's Y?" / "Y of X?" lookups.
-        # Slotted BEFORE ENTITY so "what is acme's address?" routes to the
-        # fact retriever, not the ENTITY-graph branch (which expects "tell
-        # me about ..." narrative framing).
+        if _matches_any(_TEMPORAL_PATTERNS, q):
+            return QueryIntent.TEMPORAL
+        if _matches_any(_MULTI_HOP_PATTERNS, q):
+            return QueryIntent.MULTI_HOP
+        # Attribute-fact slotted BEFORE ENTITY so "what is acme's address?"
+        # routes to the fact retriever, not the ENTITY-graph branch (which
+        # expects "tell me about ..." narrative framing).
         if _is_attribute_fact_query(q):
             return QueryIntent.ATTRIBUTE_FACT
-
-        # 2. Entity — named-entity questions
-        for pattern in _ENTITY_PATTERNS:
-            if pattern.search(q):
-                return QueryIntent.ENTITY
-
-        # 3. Procedural — how-to / rule queries
-        for pattern in _PROCEDURAL_PATTERNS:
-            if pattern.search(q):
-                return QueryIntent.PROCEDURAL
-
-        # 4. Keyword — proper nouns, error codes, paths, versions
+        if _matches_any(_ENTITY_PATTERNS, q):
+            return QueryIntent.ENTITY
+        if _matches_any(_PROCEDURAL_PATTERNS, q):
+            return QueryIntent.PROCEDURAL
         if _is_keyword_query(q):
             return QueryIntent.KEYWORD
-
-        # 5. Default
         return QueryIntent.SEMANTIC
-
     except Exception:
         return QueryIntent.SEMANTIC
