@@ -362,3 +362,38 @@ def test_tool_warm_returns_envelope_dict_in_test_env() -> None:
     out = tool_warm()
     assert isinstance(out, dict)
     assert "ok" in out
+
+
+@pytest.mark.unit
+def test_build_server_retrieval_tools_return_cold_start_envelope_when_not_ready() -> None:
+    """HTTP deployments can inject a readiness gate; retrieval tools must not run while cold."""
+    server = build_server(host="127.0.0.1", port=18094, readiness_check=lambda: False)
+
+    for tool_name, args in [
+        ("search", {"query": "x"}),
+        ("prep", {"query": "x"}),
+        ("timeline", {"query": "x"}),
+        ("research", {"query": "x"}),
+        ("contradict", {"content": "x"}),
+        ("brief", {"agent": "shape"}),
+        ("bootstrap", {"agent": "builder"}),
+    ]:
+        payload = _call_tool(server, tool_name, args)
+        assert payload["error_code"] == "KAIRIX_COLD_START"
+        assert payload["status"] == "retryable_not_ready"
+        assert "Do not answer from memory" in payload["agent_instruction"]
+
+
+# Follow-up: the warm-tool readiness behaviour (mark_ready on ready=True,
+# no-mark on ready=False) needs F1-clean coverage. The cold-start branch
+# (0d89d218 + d308b23e) authored 2 tests for this using
+# ``monkeypatch.setattr(mcp_server, "warm_retrieval_stack", ...)`` — that's
+# the F1 internal-attribute-patching shape. Dropped at cherry-pick. Proper
+# coverage requires either:
+#   - a build_server kwarg accepting warm_retrieval_stack as a Deps-style
+#     injection seam (F6-clean: public function with documented seam shape)
+#   - OR a fake that subclasses warm_retrieval_stack's protocol from
+#     tests/fakes.py
+# Filed as follow-up; the warm-tool body is exercised end-to-end by the
+# integration tests under tests/integration/ when those run with real KV
+# credentials.
