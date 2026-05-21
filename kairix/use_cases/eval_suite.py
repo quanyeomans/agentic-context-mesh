@@ -534,17 +534,40 @@ def _check_regression(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_production_fact_store(db_path: Path) -> FactStore:
-    """Return a production FactStore or raise ImportError with actionable hint."""
+def _import_sqlite_fact_store() -> Callable[..., FactStore]:
+    """Import :class:`kairix.core.facts.SQLiteFactStore`.
+
+    Extracted so the import is a single atomic step the caller can wrap
+    in one ``try/except``. Tests inject a raising loader via the
+    documented composition seam in :func:`_resolve_production_fact_store`
+    to drive the ImportError branch.
+    """
+    from kairix.core.facts import SQLiteFactStore
+
+    return SQLiteFactStore
+
+
+def _resolve_production_fact_store(
+    db_path: Path,
+    *,
+    store_loader: Callable[[], Callable[..., FactStore]] | None = None,
+) -> FactStore:
+    """Return a production FactStore or raise ImportError with actionable hint.
+
+    ``store_loader`` is the documented composition seam — tests inject a
+    raising loader to drive the ImportError branch. NOT test-only (F6
+    clean): mirrors :func:`_resolve_production_fact_extractor`'s pattern.
+    """
+    loader = store_loader if store_loader is not None else _import_sqlite_fact_store
     try:
-        from kairix.core.facts import SQLiteFactStore
+        store_cls = loader()
     except ImportError as exc:
         raise ImportError(
             "kairix eval needs SQLiteFactStore (Capability #3). "
             "fix: ensure your kairix install includes kairix.core.facts. "
             "next: re-run after installing the current build."
         ) from exc
-    store: FactStore = SQLiteFactStore(db_path=db_path)
+    store: FactStore = store_cls(db_path=db_path)
     return store
 
 
@@ -627,22 +650,37 @@ def _resolve_production_fact_extractor(
         return _NullFactExtractor()
 
 
-def _resolve_production_llm() -> LLMBackend:
+def _import_default_llm_backend_factory() -> Callable[[], LLMBackend]:
+    """Import :func:`kairix.platform.llm.get_default_backend` as a single atom."""
+    from kairix.platform.llm import get_default_backend
+
+    return get_default_backend
+
+
+def _resolve_production_llm(
+    *,
+    backend_loader: Callable[[], Callable[[], LLMBackend]] | None = None,
+) -> LLMBackend:
     """Return the configured production LLM backend.
 
     Resolves via :func:`kairix.platform.llm.get_default_backend` so the
     Plan B-parity surface honours the operator's provider config the
     same way every other production-time LLM call does.
+
+    ``backend_loader`` is the documented composition seam — tests inject
+    a raising loader to drive the ImportError branch. NOT test-only (F6
+    clean): mirrors the pattern used by sibling helpers.
     """
+    loader = backend_loader if backend_loader is not None else _import_default_llm_backend_factory
     try:
-        from kairix.platform.llm import get_default_backend
+        factory = loader()
     except ImportError as exc:
         raise ImportError(
             "kairix eval cannot resolve the configured LLM backend. "
             "fix: check the kairix.platform.llm module is present. "
             "next: re-run after fixing the install."
         ) from exc
-    backend: LLMBackend = get_default_backend()
+    backend: LLMBackend = factory()
     return backend
 
 
