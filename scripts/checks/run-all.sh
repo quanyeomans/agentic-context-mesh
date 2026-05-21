@@ -112,6 +112,9 @@ python3 "${SCRIPT_DIR}/check_f30_operator_outcome_tests.py" || overall=1
 # F31 — no hardcoded /Users/<dev>/ or /home/<dev>/ paths in committed code
 python3 "${SCRIPT_DIR}/check_no_hardcoded_user_paths.py" || overall=1
 
+# F32 — no real first names or organisation/client names in fixtures + docs
+python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
