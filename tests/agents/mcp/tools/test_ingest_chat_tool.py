@@ -8,6 +8,12 @@ These tests pin the contract from the agent's point of view:
     envelope (no facts written, no markdown written, no exception).
   - Empty inputs are rejected before any I/O.
   - Failures inside the use case are caught and surfaced via ``error``.
+  - Default ``fact_store`` / ``fact_extractor`` resolution paths fire
+    when callers omit the DI seams (production wiring branches).
+  - tmp-file write failures surface ``IngestFailed`` (covers the OSError
+    catch around staging on disk).
+  - Use-case errors during ingest are wrapped in ``IngestFailed``
+    (covers the broad except around ``ingest_chat(...)``).
 
 Every test carries a ``# Sabotage:`` note describing a concrete change
 to the production code that would falsify the test.
@@ -21,11 +27,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from kairix.agents.mcp.tools.ingest_chat import (
     ERROR_CROSS_ENGAGEMENT,
+    ERROR_INGEST_FAILED,
     ERROR_INVALID_INPUT,
     tool_ingest_chat,
 )
@@ -232,3 +240,148 @@ def test_no_extract_mode_skips_facts(tmp_path: Path) -> None:
     assert out["windows_extracted"] == 0
     # Chunk still written even without extraction.
     assert (paths.document_root / "conversations" / "conv-03.md").exists()
+
+
+def test_default_fact_store_and_extractor_are_resolved_when_omitted(tmp_path: Path) -> None:
+    """When DI kwargs are omitted, the tool resolves production defaults.
+
+    Drives the production-wiring branches:
+
+      - Lines 178-180 — default SQLiteFactStore is constructed when
+        ``fact_store=None``.
+      - Lines 182-185 — default LLMFactExtractor + AzureOpenAIBackend are
+        constructed when ``fact_extractor=None``.
+
+    We pass ``no_extract=True`` so the extractor is constructed (covering
+    the import + AzureOpenAIBackend init lines) but never actually
+    called — the ingest_chat use case skips ``extract`` when
+    ``no_extract`` is set. SQLiteFactStore is also never queried for
+    facts in no-extract mode (only chunks are written), so this test
+    runs hermetically against the tmp paths without any external
+    service.
+
+    Sabotage: remove the ``if fact_store is None:`` block in
+    tool_ingest_chat → the call reaches ``ingest_chat(...,
+    fact_store=None, ...)`` and the use case raises AttributeError on
+    the missing ``add`` method, breaking this test with an unhandled
+    exception. Mutate-confirmed against lines 178-180.
+    """
+    paths = _paths(tmp_path)
+
+    out = tool_ingest_chat(
+        jsonl_content=_jsonl("conv-default", n_turns=3),
+        conversation_id="conv-default",
+        namespace="engagement-alpha",
+        allowed_namespace="engagement-alpha",
+        paths=paths,
+        no_extract=True,
+        # fact_store and fact_extractor intentionally omitted — DI defaults must fire.
+    )
+
+    assert out["error"] == ""
+    assert out["facts_added"] == 0  # no_extract=True
+    assert out["turns_ingested"] == 3
+    assert (paths.document_root / "conversations" / "conv-default.md").exists()
+
+
+def test_tmp_jsonl_write_failure_returns_ingestfailed_envelope(tmp_path: Path) -> None:
+    """An OSError staging the JSONL on disk is surfaced as IngestFailed.
+
+    Drives lines 189-191 — the OSError catch around ``_write_tmp_jsonl``.
+    We force the OSError by making ``workspace_root`` an existing FILE
+    rather than a directory; ``tmp_dir.mkdir(parents=True, ...)`` then
+    raises NotADirectoryError (an OSError subclass) when it walks into
+    the file-as-dir.
+
+    Sabotage: remove the ``try/except OSError`` around
+    ``_write_tmp_jsonl(...)`` in tool_ingest_chat → the NotADirectoryError
+    propagates out of the tool, this test fails with the unhandled
+    exception. Mutate-confirmed against lines 189-191.
+    """
+    # Create a tmp_path/workspaces FILE (not directory) so mkdir hits an OSError.
+    workspaces_as_file = tmp_path / "workspaces"
+    workspaces_as_file.write_text("blocking-file", encoding="utf-8")
+
+    paths = KairixPaths(
+        document_root=tmp_path / "vault",
+        db_path=tmp_path / "kairix.db",
+        log_dir=tmp_path / "logs",
+        workspace_root=workspaces_as_file,
+    )
+
+    out = tool_ingest_chat(
+        jsonl_content=_jsonl("conv-fail", n_turns=2),
+        conversation_id="conv-fail",
+        namespace="engagement-alpha",
+        allowed_namespace="engagement-alpha",
+        paths=paths,
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+    )
+
+    assert out["error"] == ERROR_INGEST_FAILED
+    assert "stage transcript on disk" in out["detail"]
+    assert out["turns_ingested"] == 0
+    assert out["facts_added"] == 0
+
+
+class _RaisingFactExtractor:
+    """FactExtractor stub whose ``extract`` raises RuntimeError.
+
+    Drives the broad-except inside ``tool_ingest_chat`` around the
+    ``ingest_chat(...)`` use-case call. Defined locally (not in
+    tests/fakes.py) to avoid stepping on sibling agents' file scope.
+    """
+
+    def __init__(self, message: str = "extractor exploded") -> None:
+        self._message = message
+        self.calls: list[dict[str, Any]] = []
+
+    def extract(
+        self,
+        *,
+        turns: list[dict[str, Any]],
+        window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> list[Any]:
+        self.calls.append(
+            {
+                "turns": list(turns),
+                "window_hint": window_hint,
+                "session_metadata": session_metadata,
+            }
+        )
+        raise RuntimeError(self._message)
+
+
+def test_use_case_failure_is_wrapped_in_ingestfailed_envelope(tmp_path: Path) -> None:
+    """A RuntimeError out of the ingest_chat use case is caught and surfaced.
+
+    Drives lines 208-215 — the outer ``try/except`` around the
+    ``ingest_chat(...)`` call wraps any OSError/ValueError/RuntimeError
+    in the IngestFailed envelope so the agent reads ``error`` without
+    seeing a traceback.
+
+    Sabotage: remove the ``try/except`` around the ingest_chat use-case
+    call in tool_ingest_chat → the RuntimeError propagates out of the
+    tool, this test fails with the unhandled exception. Mutate-confirmed
+    against lines 208-210.
+    """
+    paths = _paths(tmp_path)
+    store = FakeFactStore()
+    extractor = _RaisingFactExtractor(message="LLM call failed")
+
+    out = tool_ingest_chat(
+        jsonl_content=_jsonl("conv-explode", n_turns=5),
+        conversation_id="conv-explode",
+        namespace="engagement-alpha",
+        allowed_namespace="engagement-alpha",
+        paths=paths,
+        fact_store=store,
+        fact_extractor=extractor,
+    )
+
+    assert out["error"] == ERROR_INGEST_FAILED
+    assert "LLM call failed" in out["detail"]
+    assert out["namespace"] == "engagement-alpha"
+    assert out["conversation_id"] == "conv-explode"
