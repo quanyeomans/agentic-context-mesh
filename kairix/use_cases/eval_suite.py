@@ -491,13 +491,14 @@ class _NullFactExtractor:
         *,
         turns: list[dict[str, Any]],
         window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
     ) -> list[Any]:
         """Return ``[]`` — production placeholder, tests inject FakeFactExtractor."""
         # Reference the parameter names so F19 sees a Load-context use of
-        # ``turns`` / ``window_hint`` (the names are mandated by the
-        # FactExtractor Protocol — renaming with ``_`` prefix would
-        # break the runtime contract).
-        _ = (turns, window_hint)
+        # ``turns`` / ``window_hint`` / ``session_metadata`` (the names are
+        # mandated by the FactExtractor Protocol — renaming with ``_``
+        # prefix would break the runtime contract).
+        _ = (turns, window_hint, session_metadata)
         return []
 
 

@@ -86,6 +86,11 @@ class IngestChatResult:
 # times). Used by _parse_turn and downstream parsers to keep the schema
 # field names in one place.
 _KEY_CONVERSATION_ID = "conversation_id"
+# Stream A Lever A — temporal-anchor field name on the FactRecord
+# Protocol. Extracted because the same key appears in three sites
+# (session-metadata lookup, fact attribute probe, kwarg rebuild)
+# and F17 forbids duplicate ≥10-char string literals.
+_KEY_EVIDENCE_AT = "evidence_at"
 
 
 # ---------------------------------------------------------------------------
@@ -153,13 +158,51 @@ def _group_by_conversation(turns: Iterable[dict[str, Any]]) -> dict[str, list[di
     return grouped
 
 
-def _render_markdown(conversation_id: str, turns: Sequence[dict[str, Any]], ingested_at: str) -> str:
-    """Render a conversation as markdown with YAML frontmatter."""
-    body_lines = [f"**{turn['role']}**: {turn['content']}" for turn in turns]
-    frontmatter = (
-        f"---\nconversation_id: {conversation_id}\nturn_count: {len(turns)}\ningested_at: {ingested_at}\n---\n\n"
-    )
+def _render_markdown(
+    conversation_id: str,
+    turns: Sequence[dict[str, Any]],
+    ingested_at: str,
+    session_metadata: dict[str, Any] | None = None,
+) -> str:
+    """Render a conversation as markdown with YAML frontmatter.
+
+    When ``session_metadata`` carries a ``date_time``, the markdown:
+
+    * embeds it in the YAML frontmatter as ``date_time:`` so the chunker
+      carries it as metadata; and
+    * prepends a ``**Session date:** <date_time>`` body line so the
+      retrieval-side LLM context contains the date even if the chunker
+      drops the frontmatter (Stream A Lever A — closes the 54% of
+      LoCoMo misses categorised as cat=2 temporal in spike A1).
+    """
+    body_lines: list[str] = []
+    date_time = _extract_session_date_time(session_metadata)
+    if date_time:
+        body_lines.append(f"**Session date:** {date_time}")
+        body_lines.append("")  # blank line separating date pin from turns
+    body_lines.extend(f"**{turn['role']}**: {turn['content']}" for turn in turns)
+    frontmatter_lines = [
+        "---",
+        f"conversation_id: {conversation_id}",
+        f"turn_count: {len(turns)}",
+        f"ingested_at: {ingested_at}",
+    ]
+    if date_time:
+        frontmatter_lines.append(f"date_time: {date_time}")
+    frontmatter_lines.append("---")
+    frontmatter = "\n".join(frontmatter_lines) + "\n\n"
     return frontmatter + "\n\n".join(body_lines) + "\n"
+
+
+def _extract_session_date_time(session_metadata: dict[str, Any] | None) -> str | None:
+    """Return the session's ``date_time`` (or equivalent) string when present."""
+    if not session_metadata:
+        return None
+    for key in ("date_time", _KEY_EVIDENCE_AT, "session_date"):
+        raw = session_metadata.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
 
 
 def _content_hash(text: str) -> str:
@@ -227,21 +270,23 @@ class _NullFactExtractor:
         *,
         turns: list[dict[str, Any]],
         window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
     ) -> list[Any]:
         """Return the empty list — no facts emitted in Week 1.
 
-        The ``turns`` + ``window_hint`` parameter names are mandated by
-        the :class:`FactExtractor` Protocol; callers invoke this method
-        as ``extract(turns=..., window_hint=...)``, so a ``_``-prefix
-        rename would break the runtime contract. We surface their
-        receipt as a DEBUG log so the F19 unused-params gate sees a
+        The ``turns`` + ``window_hint`` + ``session_metadata`` parameter
+        names are mandated by the :class:`FactExtractor` Protocol;
+        callers invoke this method by keyword. We surface their receipt
+        as a DEBUG log so the F19 unused-params gate sees a
         Load-context reference and the operator can verify in trace
-        logs that the null extractor is what's wired in Week 1.
+        logs that the null extractor is what's wired.
         """
         logger.debug(
-            "ingest-chat: null extractor received %d turn(s); window_hint=%r — Capability #2 will replace this",
+            "ingest-chat: null extractor received %d turn(s); "
+            "window_hint=%r session_metadata=%r — Capability #2 will replace this",
             len(turns),
             window_hint,
+            session_metadata,
         )
         return []
 
@@ -261,6 +306,7 @@ def ingest_chat(
     namespace: str = "shared",
     window_turns: int = 5,
     no_extract: bool = False,
+    session_metadata: dict[str, Any] | None = None,
 ) -> IngestChatResult:
     """Ingest a JSONL conversation transcript into the document store + fact store.
 
@@ -300,9 +346,18 @@ def ingest_chat(
         Sliding-window size for fact extraction. Defaults to 5.
     no_extract:
         If True, skip fact extraction entirely (chunks-only mode).
+    session_metadata:
+        Stream A Lever A — optional dict carrying session-level context
+        (e.g. ``{"date_time": "2023-05-04 14:30", "session_id": "s-12"}``).
+        When provided it flows through to ``fact_extractor.extract`` so
+        emitted facts inherit a default ``evidence_at`` temporal anchor.
+        Honours an alternate ingest-side lookup: when ``None``, the
+        function looks for a sidecar ``<jsonl_path>.metadata.json`` and
+        loads it if present.
     """
     turns = _read_turns(jsonl_path)
     grouped = _group_by_conversation(turns)
+    resolved_metadata = session_metadata if session_metadata is not None else _read_sidecar_metadata(jsonl_path)
 
     conversations_dir = paths.document_root / "conversations"
     conversations_dir.mkdir(parents=True, exist_ok=True)
@@ -314,44 +369,121 @@ def ingest_chat(
         else ConsolidationPass(fact_store=fact_store, contradict=default_contradict)
     )
 
-    facts_added = 0
-    windows_extracted = 0
-    facts_superseded = 0
+    totals = _ExtractionTotals()
 
     for cid, conv_turns in grouped.items():
-        markdown = _render_markdown(cid, conv_turns, ingested_at)
-        body = _strip_frontmatter(markdown)
-        target = conversations_dir / f"{cid}.md"
-        if not _existing_body_matches(target, body):
-            target.write_text(markdown, encoding="utf-8")
-
+        _write_conversation_markdown(
+            conversations_dir=conversations_dir,
+            conversation_id=cid,
+            turns=conv_turns,
+            ingested_at=ingested_at,
+            session_metadata=resolved_metadata,
+        )
         if no_extract:
             continue
-
-        for window in _window(conv_turns, window_turns):
-            windows_extracted += 1
-            for fact in fact_extractor.extract(turns=window):
-                fact_to_add = _apply_namespace(fact, namespace)
-                fact_store.add(fact_to_add)
-                facts_added += 1
-                # Defensive: a duck-typed fact may not expose the full
-                # FactRecord Protocol (e.g. ``namespace``). ``_apply_namespace``
-                # already tolerates that branch; consolidation skips it too
-                # rather than crashing the ingest pipeline on a Protocol-
-                # incomplete fact. The Protocol contract still requires
-                # ``namespace`` for production extractors.
-                if not hasattr(fact_to_add, "namespace"):
-                    continue
-                outcome: ConsolidationOutcome = resolved_consolidation.process(fact_to_add)
-                facts_superseded += len(outcome.superseded_ids)
+        _extract_facts_for_conversation(
+            conv_turns=conv_turns,
+            window_turns=window_turns,
+            namespace=namespace,
+            session_metadata=resolved_metadata,
+            fact_extractor=fact_extractor,
+            fact_store=fact_store,
+            consolidation=resolved_consolidation,
+            totals=totals,
+        )
 
     return IngestChatResult(
         turns_ingested=len(turns),
         conversations_processed=len(grouped),
-        facts_added=facts_added,
-        windows_extracted=windows_extracted,
-        facts_superseded=facts_superseded,
+        facts_added=totals.facts_added,
+        windows_extracted=totals.windows_extracted,
+        facts_superseded=totals.facts_superseded,
     )
+
+
+@dataclass
+class _ExtractionTotals:
+    """Running counters threaded through the per-conversation extract helper."""
+
+    facts_added: int = 0
+    windows_extracted: int = 0
+    facts_superseded: int = 0
+
+
+def _write_conversation_markdown(
+    *,
+    conversations_dir: Path,
+    conversation_id: str,
+    turns: Sequence[dict[str, Any]],
+    ingested_at: str,
+    session_metadata: dict[str, Any] | None,
+) -> None:
+    """Render + write one conversation's markdown file, idempotent on body hash."""
+    markdown = _render_markdown(conversation_id, turns, ingested_at, session_metadata)
+    body = _strip_frontmatter(markdown)
+    target = conversations_dir / f"{conversation_id}.md"
+    if not _existing_body_matches(target, body):
+        target.write_text(markdown, encoding="utf-8")
+
+
+def _extract_facts_for_conversation(
+    *,
+    conv_turns: list[dict[str, Any]],
+    window_turns: int,
+    namespace: str,
+    session_metadata: dict[str, Any] | None,
+    fact_extractor: FactExtractor,
+    fact_store: FactStore,
+    consolidation: ConsolidationPass,
+    totals: _ExtractionTotals,
+) -> None:
+    """Slide through windows + run extractor / store / consolidation per fact.
+
+    Side-effects: ``fact_store.add`` and ``consolidation.process`` are
+    called per fact; ``totals`` is mutated in place. Extracted so the
+    parent ``ingest_chat`` orchestrator stays under F16 cognitive
+    complexity (Sonar S3776).
+    """
+    for window in _window(conv_turns, window_turns):
+        totals.windows_extracted += 1
+        for fact in fact_extractor.extract(turns=window, session_metadata=session_metadata):
+            fact_to_add = _apply_namespace(fact, namespace)
+            fact_store.add(fact_to_add)
+            totals.facts_added += 1
+            # Defensive: a duck-typed fact may not expose the full
+            # FactRecord Protocol (e.g. ``namespace``). ``_apply_namespace``
+            # already tolerates that branch; consolidation skips it too
+            # rather than crashing the ingest pipeline on a Protocol-
+            # incomplete fact. The Protocol contract still requires
+            # ``namespace`` for production extractors.
+            if not hasattr(fact_to_add, "namespace"):
+                continue
+            outcome: ConsolidationOutcome = consolidation.process(fact_to_add)
+            totals.facts_superseded += len(outcome.superseded_ids)
+
+
+def _read_sidecar_metadata(jsonl_path: Path) -> dict[str, Any] | None:
+    """Return ``<jsonl_path>.metadata.json`` contents when present, else ``None``.
+
+    Stream A Lever A convention: an operator can drop a sidecar JSON file
+    next to the transcript carrying session-level context (``date_time``,
+    ``session_id``, etc.). Absent / malformed sidecar is silent — the
+    use case falls back to ``session_metadata=None`` and behaviour
+    matches the pre-Lever-A path.
+    """
+    sidecar = jsonl_path.with_suffix(jsonl_path.suffix + ".metadata.json")
+    if not sidecar.exists():
+        return None
+    try:
+        raw = sidecar.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("ingest-chat: skipping malformed metadata sidecar %s: %s", sidecar, exc)
+        return None
+    if not isinstance(parsed, dict):
+        logger.warning("ingest-chat: metadata sidecar %s was not a JSON object: %r", sidecar, type(parsed).__name__)
+        return None
+    return parsed
 
 
 def _apply_namespace(fact: Any, namespace: str) -> Any:
@@ -390,7 +522,7 @@ def _try_fake_record_kwargs(fact: Any) -> dict[str, Any] | None:
     path free of attribute-reassignment, which would be an F1 violation.
     """
     try:
-        return {
+        kwargs: dict[str, Any] = {
             "id": fact.id,
             "entity": fact.entity,
             "attribute": fact.attribute,
@@ -402,6 +534,12 @@ def _try_fake_record_kwargs(fact: Any) -> dict[str, Any] | None:
         }
     except AttributeError:
         return None
+    # ``evidence_at`` is the Lever-A addition. Some test fakes pre-date
+    # it; tolerate the absence by skipping the kwarg rather than failing
+    # the reconstruction.
+    if hasattr(fact, _KEY_EVIDENCE_AT):
+        kwargs[_KEY_EVIDENCE_AT] = fact.evidence_at
+    return kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +575,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-extract",
         action="store_true",
         help="Skip fact extraction; write markdown chunks only.",
+    )
+    parser.add_argument(
+        "--metadata",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a JSON sidecar carrying session-level metadata "
+            '(e.g. {"date_time": "2023-05-04", "session_id": "s-12"}). '
+            "When omitted, the use case also probes for <jsonl>.metadata.json "
+            "automatically."
+        ),
     )
     parser.add_argument(
         "--json",
@@ -480,6 +629,33 @@ def _resolve_production_fact_extractor() -> FactExtractor:
 
     extractor: FactExtractor = LLMFactExtractor(llm=get_default_backend())
     return extractor
+
+
+def _load_metadata_arg(metadata_path: Path | None, err_sink: TextIO) -> dict[str, Any] | None:
+    """Load the optional ``--metadata`` JSON file, warning + returning None on failure.
+
+    Decoupled from ``_read_sidecar_metadata`` because the CLI's
+    ``--metadata`` flag is explicit operator intent: if they passed a
+    bad path or a malformed file, the use case should surface that on
+    stderr rather than silently fall back to sidecar probing.
+    """
+    if metadata_path is None:
+        return None
+    if not metadata_path.exists():
+        err_sink.write(f"kairix ingest-chat: --metadata path does not exist: {metadata_path}\n")
+        return None
+    try:
+        parsed = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        err_sink.write(f"kairix ingest-chat: failed to parse --metadata file {metadata_path}: {exc}\n")
+        return None
+    if not isinstance(parsed, dict):
+        err_sink.write(
+            f"kairix ingest-chat: --metadata file {metadata_path} must contain a JSON object, "
+            f"got {type(parsed).__name__}\n"
+        )
+        return None
+    return parsed
 
 
 def _format_human(result: IngestChatResult) -> str:
@@ -538,6 +714,8 @@ def main(
     else:
         resolved_extractor = _resolve_production_fact_extractor()
 
+    session_metadata = _load_metadata_arg(args.metadata, err_sink)
+
     result = ingest_chat(
         args.jsonl_path,
         paths=resolved_paths,
@@ -547,6 +725,7 @@ def main(
         namespace=args.namespace,
         window_turns=args.window_turns,
         no_extract=args.no_extract,
+        session_metadata=session_metadata,
     )
 
     if args.as_json:

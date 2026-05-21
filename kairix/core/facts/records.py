@@ -38,9 +38,13 @@ class StoredFactRecord:
     value: str
     confidence: float
     source_turn_ids: tuple[str, ...]
-    extracted_at: str  # ISO-8601 timestamp
+    extracted_at: str  # ISO-8601 timestamp — wall-clock at extraction time
     superseded_by: str | None
     namespace: str
+    # Stream A, Lever A — event-time temporal anchor (distinct from
+    # ``extracted_at``). ``None`` for legacy rows or sessions ingested
+    # without ``session_metadata`` carrying ``date_time``.
+    evidence_at: str | None = None
 
     @classmethod
     def mint_id(

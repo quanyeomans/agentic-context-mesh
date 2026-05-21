@@ -504,3 +504,115 @@ def test_search_reserved_fts5_words_dropped(tmp_path: Path) -> None:
     # 'and' is a reserved FTS5 operator; if passed through unfiltered FTS5 raises
     hits = store.search("and Caroline")
     assert any(h.record.id == "f1" for h in hits)
+
+
+# ---------------------------------------------------------------------------
+# Stream A Lever A — evidence_at round-trip + legacy migration
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_at_persists_and_recalls_on_round_trip(tmp_path: Path) -> None:
+    """``evidence_at`` round-trips through SQLite without truncation.
+
+    Sabotage-proof: drop ``evidence_at`` from the INSERT in ``add`` and
+    this test fails because the recalled record has ``evidence_at=None``
+    rather than the ISO date stored.
+    """
+    store = _make_store(tmp_path)
+    record = StoredFactRecord(
+        id="f-evidence",
+        entity="Caroline",
+        attribute="moved_from",
+        value="Sweden",
+        confidence=0.85,
+        source_turn_ids=("t1",),
+        extracted_at="2026-01-01T00:00:00Z",
+        superseded_by=None,
+        namespace="shared",
+        evidence_at="2019-04-15",
+    )
+    store.add(record)
+
+    hits = store.search("Sweden")
+    assert hits, "expected to recall the just-added record by FTS value"
+    assert hits[0].record.evidence_at == "2019-04-15"
+
+
+def test_evidence_at_none_round_trip(tmp_path: Path) -> None:
+    """A record with ``evidence_at=None`` round-trips as ``None``.
+
+    Sabotage-proof: change ``_row_to_record`` to always populate
+    ``evidence_at`` from a sentinel string and this test fails because
+    the legacy path leaks a non-None value.
+    """
+    store = _make_store(tmp_path)
+    store.add(_make_record(fact_id="f-legacy"))
+
+    hits = store.search("single")
+    assert hits
+    assert hits[0].record.evidence_at is None
+
+
+def test_legacy_schema_without_evidence_at_column_migrates_on_add(tmp_path: Path) -> None:
+    """A pre-existing facts table without ``evidence_at`` gets the column added.
+
+    Simulates upgrading from a pre-Lever-A SQLite file. The schema
+    initialiser must ALTER TABLE to add the column; we then verify
+    that a new add() succeeds and the record round-trips.
+
+    Sabotage-proof: drop the ``_apply_column_migrations`` call from
+    ``_ensure_schema`` and this test fails because the second add
+    raises ``sqlite3.OperationalError: table facts has no column
+    named evidence_at``.
+    """
+    db_path = tmp_path / "legacy-facts.sqlite"
+    # Build a pre-Lever-A schema by hand (no evidence_at column).
+    legacy_conn = sqlite3.connect(str(db_path))
+    legacy_conn.execute(
+        """
+        CREATE TABLE facts (
+            id TEXT PRIMARY KEY,
+            entity TEXT NOT NULL,
+            attribute TEXT NOT NULL,
+            value TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            source_turn_ids TEXT NOT NULL,
+            extracted_at TEXT NOT NULL,
+            superseded_by TEXT,
+            namespace TEXT NOT NULL,
+            FOREIGN KEY(superseded_by) REFERENCES facts(id)
+        )
+        """
+    )
+    legacy_conn.execute(
+        """
+        CREATE VIRTUAL TABLE facts_fts USING fts5(
+            entity, attribute, value,
+            content='facts',
+            content_rowid='rowid'
+        )
+        """
+    )
+    legacy_conn.commit()
+    legacy_conn.close()
+
+    # Now open the same path through the production store — should
+    # auto-migrate on first add().
+    store = SQLiteFactStore(db_path=db_path)
+    record = StoredFactRecord(
+        id="f-migrated",
+        entity="X",
+        attribute="y",
+        value="z-distinct",
+        confidence=0.9,
+        source_turn_ids=("t1",),
+        extracted_at="2026-01-01T00:00:00Z",
+        superseded_by=None,
+        namespace="shared",
+        evidence_at="2024-12-01",
+    )
+    store.add(record)
+
+    hits = store.search("z-distinct")
+    assert hits
+    assert hits[0].record.evidence_at == "2024-12-01"

@@ -47,6 +47,9 @@ logger = logging.getLogger(__name__)
 # three raise-sites in ``supersede`` reference one source of truth.
 _ERROR_NO_FACT_WITH_ID = "SQLiteFactStore: no fact with id"
 
+# Column name for the Stream A Lever A temporal anchor (F17).
+_COL_EVIDENCE_AT = "evidence_at"
+
 
 # ---------------------------------------------------------------------------
 # Schema DDL — single source of truth for the SQLite layout.
@@ -64,6 +67,7 @@ _SCHEMA_DDL = (
         extracted_at TEXT NOT NULL,
         superseded_by TEXT,
         namespace TEXT NOT NULL,
+        evidence_at TEXT,
         FOREIGN KEY(superseded_by) REFERENCES facts(id)
     )
     """,
@@ -83,6 +87,15 @@ _SCHEMA_DDL = (
     )
     """,
 )
+
+
+# Lightweight forward-migration DDL — applied after the IF NOT EXISTS
+# create above so a pre-existing facts table (created before the
+# evidence_at column shipped) gets the new column without losing rows.
+# ``ALTER TABLE ... ADD COLUMN`` is idempotent only via the OperationalError
+# we catch in ``_ensure_schema``; SQLite has no native ``IF NOT EXISTS``
+# clause for ``ADD COLUMN`` before 3.35 (we target older versions too).
+_MIGRATIONS = ((_COL_EVIDENCE_AT, f"ALTER TABLE facts ADD COLUMN {_COL_EVIDENCE_AT} TEXT"),)
 
 
 class StoredFactHit:
@@ -162,8 +175,25 @@ class SQLiteFactStore:
             return
         for ddl in _SCHEMA_DDL:
             conn.execute(ddl)
+        self._apply_column_migrations(conn)
         conn.commit()
         self._schema_initialised = True
+
+    @staticmethod
+    def _apply_column_migrations(conn: sqlite3.Connection) -> None:
+        """Apply idempotent forward migrations to the ``facts`` table.
+
+        Each migration in ``_MIGRATIONS`` is (column_name, ALTER-DDL).
+        We probe ``PRAGMA table_info(facts)`` once and only execute
+        ALTERs for columns that are missing — keeps the call idempotent
+        across SQLite versions that pre-date ``IF NOT EXISTS`` on
+        ``ADD COLUMN`` (3.35+).
+        """
+        cursor = conn.execute("PRAGMA table_info(facts)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        for column_name, ddl in _MIGRATIONS:
+            if column_name not in existing_columns:
+                conn.execute(ddl)
 
     # -- FactStore Protocol ---------------------------------------------------
 
@@ -181,8 +211,9 @@ class SQLiteFactStore:
                 """
                 INSERT OR IGNORE INTO facts (
                     id, entity, attribute, value, confidence,
-                    source_turn_ids, extracted_at, superseded_by, namespace
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source_turn_ids, extracted_at, superseded_by, namespace,
+                    evidence_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     fact.id,
@@ -194,6 +225,11 @@ class SQLiteFactStore:
                     fact.extracted_at,
                     fact.superseded_by,
                     fact.namespace,
+                    # Tolerate FactRecord-shaped duck types that pre-date
+                    # the ``evidence_at`` field — they expose neither the
+                    # property nor a ``None`` default. ``getattr`` keeps
+                    # ``FactStore.add`` callable from older test fakes.
+                    getattr(fact, _COL_EVIDENCE_AT, None),
                 ),
             )
             # Keep the FTS index in sync. ``INSERT OR IGNORE`` above
@@ -398,6 +434,15 @@ class SQLiteFactStore:
     def _row_to_record(row: sqlite3.Row) -> StoredFactRecord:
         """Translate one SQLite row into a ``StoredFactRecord``."""
         raw_turns = json.loads(row["source_turn_ids"])
+        # ``evidence_at`` was added in Stream A Lever A; rows from a
+        # pre-migration database may not expose the column key. Probe
+        # the row.keys() tuple before indexing so legacy SQLite files
+        # don't raise ``IndexError`` here.
+        evidence_at: str | None
+        if _COL_EVIDENCE_AT in row.keys():
+            evidence_at = row[_COL_EVIDENCE_AT]
+        else:
+            evidence_at = None
         return StoredFactRecord(
             id=row["id"],
             entity=row["entity"],
@@ -408,6 +453,7 @@ class SQLiteFactStore:
             extracted_at=row["extracted_at"],
             superseded_by=row["superseded_by"],
             namespace=row["namespace"],
+            evidence_at=evidence_at,
         )
 
     @staticmethod

@@ -662,3 +662,277 @@ def test_extract_returns_factrecord_protocol_objects() -> None:
     records = extractor.extract(turns=_two_turns())
 
     assert all(isinstance(r, FactRecord) for r in records)
+
+
+# ---------------------------------------------------------------------------
+# Stream A Lever A — evidence_at injection from session_metadata
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_at_defaults_to_session_metadata_date_time() -> None:
+    """When session_metadata carries date_time, facts inherit it as evidence_at.
+
+    Sabotage-proof: delete the ``if evidence_at is None: evidence_at =
+    default_evidence_at`` line in ``_record_from_payload`` and this
+    test fails because the extracted fact's ``evidence_at`` is None
+    instead of the session date.
+
+    Manual sabotage run (2026-05-21): commented out the fallback
+    assignment; pytest exit=1, AssertionError on the equality check.
+    Restored; pytest exit=0.
+    """
+    # LLM omits ``evidence_at`` — the use case must inject session default.
+    llm_response = json.dumps(
+        [
+            {
+                "entity": "Caroline",
+                "attribute": "role",
+                "value": "Head of Product",
+                "confidence": 0.9,
+                "evidence_turn_ids": ["t1"],
+            }
+        ]
+    )
+    llm = FakeLLMBackend(chat_response=llm_response)
+    extractor = LLMFactExtractor(llm=llm)
+
+    records = extractor.extract(
+        turns=_two_turns(),
+        session_metadata={"date_time": "2023-05-04 14:30", "session_id": "s-12"},
+    )
+
+    assert len(records) == 1
+    assert records[0].evidence_at == "2023-05-04 14:30"
+
+
+def test_evidence_at_from_llm_payload_overrides_session_default() -> None:
+    """LLM-supplied evidence_at (resolved relative reference) wins.
+
+    Sabotage-proof: change ``if evidence_at is None`` to
+    ``if True`` in ``_record_from_payload`` (always overwrite with the
+    session default) and this test fails because the LLM's resolved
+    "2023-05-03" gets clobbered back to the session default.
+    """
+    llm_response = json.dumps(
+        [
+            {
+                "entity": "Maria",
+                "attribute": "had_dinner_with",
+                "value": "mom",
+                "confidence": 0.9,
+                "evidence_turn_ids": ["t1"],
+                "evidence_at": "2023-05-03",  # LLM resolved "last night"
+            }
+        ]
+    )
+    llm = FakeLLMBackend(chat_response=llm_response)
+    extractor = LLMFactExtractor(llm=llm)
+
+    records = extractor.extract(
+        turns=_two_turns(),
+        session_metadata={"date_time": "2023-05-04 14:30"},
+    )
+
+    assert records[0].evidence_at == "2023-05-03"
+
+
+def test_evidence_at_is_none_when_no_session_metadata() -> None:
+    """Without session_metadata, evidence_at stays None (legacy path).
+
+    Sabotage-proof: hardcode a sentinel string default (e.g. ``"unknown"``)
+    for ``default_evidence_at`` and this test fails because the legacy
+    behaviour (``None``) breaks for callers that haven't migrated yet.
+    """
+    llm = FakeLLMBackend(chat_response=_HAPPY_PATH_RESPONSE)
+    extractor = LLMFactExtractor(llm=llm)
+
+    records = extractor.extract(turns=_two_turns())
+
+    assert records[0].evidence_at is None
+
+
+def test_session_metadata_block_renders_into_prompt() -> None:
+    """session_metadata is interpolated into the prompt template.
+
+    Sabotage-proof: drop the ``.replace(_SESSION_METADATA_PLACEHOLDER, ...)``
+    call from ``_render_prompt`` and this test fails because the
+    placeholder string survives unchanged into the LLM payload.
+    """
+    template = "Prompt:\n{{session_metadata}}\n\nTurns:\n{{turns}}\n"
+    llm = FakeLLMBackend(chat_response="[]")
+    extractor = LLMFactExtractor(llm=llm, prompt_template=template)
+
+    extractor.extract(
+        turns=_two_turns(),
+        session_metadata={"date_time": "2023-05-04", "session_id": "s-12"},
+    )
+
+    sent = llm.chat_calls[0]["messages"][0]["content"]
+    assert "{{session_metadata}}" not in sent
+    assert "date_time: 2023-05-04" in sent
+    assert "session_id: s-12" in sent
+
+
+def test_empty_session_metadata_renders_empty_block() -> None:
+    """Empty session_metadata drops the block from the prompt cleanly.
+
+    Sabotage-proof: have ``_format_session_metadata_block`` always emit
+    the "Session metadata:" header and this test fails because the
+    bare-prompt path now leaks that header into the LLM context.
+    """
+    template = "{{session_metadata}}TURNS:{{turns}}"
+    llm = FakeLLMBackend(chat_response="[]")
+    extractor = LLMFactExtractor(llm=llm, prompt_template=template)
+
+    extractor.extract(turns=_two_turns(), session_metadata=None)
+
+    sent = llm.chat_calls[0]["messages"][0]["content"]
+    assert "Session metadata:" not in sent
+
+
+# ---------------------------------------------------------------------------
+# Stream A Lever B — canonical attribute taxonomy + drop list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw_attribute,expected_attribute",
+    [
+        ("move-time", "moved_at"),
+        ("origin-country", "moved_from"),
+        ("career-interest", "researched"),
+        ("has-done-pottery", "practices"),
+        ("store-type", "owns"),
+    ],
+)
+def test_attribute_rewrites_snap_drift_to_canonical(raw_attribute: str, expected_attribute: str) -> None:
+    """Freeform attribute drift gets rewritten onto the canonical key.
+
+    Sabotage-proof: empty the ``_ATTRIBUTE_REWRITES`` dict in
+    ``extractor.py`` and the parametrised case for ``move-time`` flips
+    because the rewrite-to-``moved_at`` no longer fires.
+
+    Closes the 43% of LoCoMo misses Spike A1 attributed to attribute
+    drift (Cases 4-6 of the failure-mode notes).
+    """
+    llm_response = json.dumps(
+        [
+            {
+                "entity": "Caroline",
+                "attribute": raw_attribute,
+                "value": "Sweden" if "country" in raw_attribute else "thing",
+                "confidence": 0.9,
+                "evidence_turn_ids": ["t1"],
+            }
+        ]
+    )
+    llm = FakeLLMBackend(chat_response=llm_response)
+    extractor = LLMFactExtractor(llm=llm)
+
+    records = extractor.extract(turns=_two_turns())
+
+    assert len(records) == 1
+    assert records[0].attribute == expected_attribute
+
+
+@pytest.mark.parametrize(
+    "drop_attribute",
+    ["audience-reaction", "advice", "encounter", "appreciation", "path"],
+)
+def test_attribute_drops_filter_non_factual_keys(drop_attribute: str) -> None:
+    """Non-factual freeform attributes (opinion / reaction) are dropped.
+
+    Sabotage-proof: empty ``_ATTRIBUTE_DROPS`` and this test fails for
+    every parametrised case because the extractor stops filtering
+    them — see spike A1's "ranked instead" column for the 5 attributes
+    that polluted top-5 retrieval on Cases 4-6.
+    """
+    llm_response = json.dumps(
+        [
+            {
+                "entity": "Caroline",
+                "attribute": drop_attribute,
+                "value": "some noise",
+                "confidence": 0.9,
+                "evidence_turn_ids": ["t1"],
+            }
+        ]
+    )
+    llm = FakeLLMBackend(chat_response=llm_response)
+    extractor = LLMFactExtractor(llm=llm)
+
+    records = extractor.extract(turns=_two_turns())
+
+    assert records == []
+
+
+def test_canonical_attribute_passthrough_untouched() -> None:
+    """An already-canonical attribute survives normalisation unchanged.
+
+    Sabotage-proof: make ``_normalise_attribute`` always return the
+    lowercased key and this test fails on the ``moved_from`` equality
+    check (it would become ``moved_from`` lowercased — actually still
+    matches, so try the case-preservation test on a CamelCase entity
+    if that doesn't fail; the rewrite map's miss path is the load-
+    bearing branch).
+    """
+    llm_response = json.dumps(
+        [
+            {
+                "entity": "Caroline",
+                "attribute": "moved_from",  # canonical from prompt list
+                "value": "Sweden",
+                "confidence": 0.9,
+                "evidence_turn_ids": ["t1"],
+            }
+        ]
+    )
+    llm = FakeLLMBackend(chat_response=llm_response)
+    extractor = LLMFactExtractor(llm=llm)
+
+    records = extractor.extract(turns=_two_turns())
+
+    assert records[0].attribute == "moved_from"
+
+
+# ---------------------------------------------------------------------------
+# Stream A — prompt asset carries the canonical taxonomy + few-shots
+# ---------------------------------------------------------------------------
+
+
+def test_default_prompt_lists_canonical_attribute_taxonomy() -> None:
+    """The bundled prompt asset names the canonical attribute vocabulary.
+
+    Sabotage-proof: delete the canonical-vocab block from
+    ``kairix/core/facts/prompts/fact_extractor_v1.txt`` and this test
+    fails because the prompt no longer mentions enough of the closed
+    vocabulary to anchor the LLM. Spike A1 §"Why (b) is the rest"
+    documented the freeform-key explosion this taxonomy closes.
+    """
+    llm = FakeLLMBackend(chat_response="[]")
+    extractor = LLMFactExtractor(llm=llm)
+    extractor.extract(turns=_two_turns())
+    sent = llm.chat_calls[0]["messages"][0]["content"]
+    # Spot-check 5 canonical attributes drawn from spike A1 cases 4-6.
+    assert "moved_from" in sent
+    assert "practices" in sent
+    assert "researched" in sent
+    assert "visited" in sent
+    assert "has_item" in sent
+
+
+def test_default_prompt_anchors_facts_to_subject_not_object() -> None:
+    """The prompt's subject-anchoring instruction is present verbatim.
+
+    Sabotage-proof: drop the "ANCHOR FACTS TO THE SUBJECT" block from
+    the prompt asset and this test fails because the substring guard
+    flips. Closes spike A1 Case 5 (necklace / origin-country / Sweden
+    entity drift).
+    """
+    llm = FakeLLMBackend(chat_response="[]")
+    extractor = LLMFactExtractor(llm=llm)
+    extractor.extract(turns=_two_turns())
+    sent = llm.chat_calls[0]["messages"][0]["content"]
+    assert "SUBJECT OF THE SENTENCE" in sent
+    # Specific Case-5 example present so the LLM sees the negative example.
+    assert "moved_from" in sent and "necklace" in sent
