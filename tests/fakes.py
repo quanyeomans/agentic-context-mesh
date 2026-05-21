@@ -1304,6 +1304,7 @@ class FakeFactRecord:
         extracted_at: str = "1970-01-01T00:00:00Z",
         superseded_by: str | None = None,
         namespace: str = "shared",
+        evidence_at: str | None = None,
     ) -> None:
         self._id = id
         self._entity = entity
@@ -1314,6 +1315,7 @@ class FakeFactRecord:
         self._extracted_at = extracted_at
         self._superseded_by = superseded_by
         self._namespace = namespace
+        self._evidence_at = evidence_at
 
     @property
     def id(self) -> str:
@@ -1351,6 +1353,10 @@ class FakeFactRecord:
     def namespace(self) -> str:
         return self._namespace
 
+    @property
+    def evidence_at(self) -> str | None:
+        return self._evidence_at
+
 
 class FakeFactHit:
     """Minimal FactHit Protocol satisfier — ``record`` + ``score`` properties."""
@@ -1383,8 +1389,20 @@ class FakeFactExtractor:
         self._scripted_facts = list(scripted_facts or [])
         self.calls: list[dict[str, Any]] = []
 
-    def extract(self, *, turns: list[dict[str, Any]], window_hint: dict[str, Any] | None = None) -> list[Any]:
-        self.calls.append({"turns": list(turns), "window_hint": window_hint})
+    def extract(
+        self,
+        *,
+        turns: list[dict[str, Any]],
+        window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> list[Any]:
+        self.calls.append(
+            {
+                "turns": list(turns),
+                "window_hint": window_hint,
+                "session_metadata": session_metadata,
+            }
+        )
         return list(self._scripted_facts)
 
 
@@ -1438,7 +1456,10 @@ class FakeFactStore:
         if new_id not in self._facts:
             raise KeyError(f"FakeFactStore: no fact with id {new_id!r}")
         old = self._facts[old_id]
-        # Re-mint a record carrying the superseded_by link.
+        # Re-mint a record carrying the superseded_by link. Preserve
+        # the temporal anchor (``evidence_at``) too — supersession
+        # marks a *newer* fact about the same (entity, attribute);
+        # the old fact's event-time anchor stays valid for audit.
         self._facts[old_id] = FakeFactRecord(
             id=old.id,
             entity=old.entity,
@@ -1449,6 +1470,7 @@ class FakeFactStore:
             extracted_at=old.extracted_at,
             superseded_by=new_id,
             namespace=old.namespace,
+            evidence_at=getattr(old, "evidence_at", None),
         )
 
 

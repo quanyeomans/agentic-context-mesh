@@ -3,26 +3,124 @@ Given the following conversation turns, extract every entity-attribute-value
 fact that can be grounded in these turns. Each fact must trace back to
 specific turn ids.
 
+{{session_metadata}}
+
 Turns:
 {{turns}}
 
 Return a JSON array. Each fact object has:
-- entity: the canonical entity name (person, project, concept) — kebab-case
-  identifiers (agent-alpha, client-omega, project-rho) where they appear,
-  otherwise the proper noun as written. Avoid descriptive phrases like
-  "anything built for the engagement" or "the new console" — bind the fact
-  to the named entity instead (e.g. "engagement-alpha", "dispatcher-console").
-- attribute: the attribute being asserted, as a SHORT canonical noun.
-  Prefer single words: "role", "status", "budget", "deadline", "location",
-  "sponsor", "duration", "model", "deployment". Avoid compounds like
+
+- entity: the canonical entity name (person, project, concept). Use
+  kebab-case identifiers (agent-alpha, client-omega, project-rho) where
+  they appear, otherwise the proper noun as written. Avoid descriptive
+  phrases like "anything built for the engagement" or "the new console"
+  — bind the fact to the named entity instead (e.g. "engagement-alpha",
+  "dispatcher-console").
+
+  ANCHOR FACTS TO THE SUBJECT OF THE SENTENCE, NOT THE OBJECT. Critical:
+    * "John visited Rome" → entity=John, attribute=visited, value=Rome.
+      NEVER entity=Rome, attribute=visit, value="visited once".
+    * "Caroline moved from Sweden 4 years ago" → entity=Caroline,
+      attribute=moved_from, value=Sweden. NEVER entity=necklace,
+      attribute=origin-country, value=Sweden (the necklace is an
+      object, the person is the subject of "moved from").
+    * "Maria had dinner with her mom" → entity=Maria,
+      attribute=had_dinner_with, value=mom. NEVER entity=mom,
+      attribute=dinner-partner, value=Maria.
+
+- attribute: the attribute being asserted. Pick from this CLOSED canonical
+  vocabulary whenever the meaning fits — consistency on attribute keys
+  is what makes downstream retrieval rank these facts:
+
+    activity, location, practices, moved_from, studied,
+    visited, has_item, event_date, role, employer, age,
+    owns, said, attended, supports, manager, friend,
+    family_member, status, hobby, researched, opinion,
+    plan, goal, dislikes, likes, experienced, achieved,
+    started, finished, sponsor, deadline, budget,
+    duration, model, deployment
+
+  If none of the canonical attributes fits, fall back to a SHORT single
+  noun (e.g. "title", "phone", "address"). Avoid compounds like
   "headquarters_location" (use "location"), "estimated_completion" (use
-  "deadline"), "executive_sponsor" (use "sponsor"). If two distinct
-  attributes overlap (e.g. "role" + "title"), pick the most semantic one.
+  "deadline"), "audience-reaction" (drop — not factual), "advice"
+  (drop — opinion, not a fact about the subject), "support-system-
+  duration" (use "duration"). If two distinct attributes overlap (e.g.
+  "role" + "title"), pick the most semantic one.
+
 - value: the asserted value, kept terse and factual. Strip filler words
   like "around", "approximately", "I think" — record the asserted value
-  itself, not the speaker's hedging.
+  itself, not the speaker's hedging. Make the value semantically
+  self-contained: prefer "Rome" over "visited once", "kickboxing" over
+  "yes", "Sweden" over "her home country" when you have the proper noun.
+
 - confidence: 0.0-1.0 — your honest confidence the fact is well-grounded
   in the turns. Lower confidence for inferential / paraphrastic facts.
-- evidence_turn_ids: list of turn ids that ground this fact
+
+- evidence_turn_ids: list of turn ids that ground this fact.
+
+- evidence_at: OPTIONAL ISO-8601 event-time the fact occurred in the
+  world. When session metadata above provides a ``date_time``, use it as
+  the default. If a turn explicitly references a different date ("last
+  night", "the week before", "2 April 2023"), resolve it relative to the
+  session date and emit the resolved ISO-8601 date. Omit the field if
+  there is genuinely no temporal anchor.
+
+Few-shot examples covering the common shapes:
+
+Example 1 — research / activity (canonical attribute "researched"):
+  Turn: "I've been researching adoption agencies — it's been a dream."
+  Fact: {"entity": "Caroline", "attribute": "researched",
+         "value": "adoption agencies", "confidence": 0.9,
+         "evidence_turn_ids": ["t8"]}
+
+Example 2 — origin / moved_from (subject is the person, NOT the object):
+  Turn: "I've known these friends for 4 years, since I moved from my
+         home country, Sweden."
+  Fact: {"entity": "Caroline", "attribute": "moved_from",
+         "value": "Sweden", "confidence": 0.85,
+         "evidence_turn_ids": ["t3"]}
+
+Example 3 — martial arts / practices (multiple values get multiple facts):
+  Turn: "I've done kickboxing and taekwondo over the years."
+  Facts:
+    {"entity": "John", "attribute": "practices",
+     "value": "kickboxing", "confidence": 0.9,
+     "evidence_turn_ids": ["t5"]}
+    {"entity": "John", "attribute": "practices",
+     "value": "taekwondo", "confidence": 0.9,
+     "evidence_turn_ids": ["t5"]}
+
+Example 4 — has_item (childhood possessions; subject is the owner):
+  Turn: "I had a little doll like this and it always made me feel better."
+  Fact: {"entity": "John", "attribute": "has_item",
+         "value": "doll", "confidence": 0.85,
+         "evidence_turn_ids": ["t12"]}
+
+Example 5 — visited (subject is the visitor, NOT the place):
+  Turn: "Jean and I both made it to Rome last summer."
+  Facts:
+    {"entity": "Jean", "attribute": "visited",
+     "value": "Rome", "confidence": 0.9,
+     "evidence_turn_ids": ["t7"]}
+    {"entity": "John", "attribute": "visited",
+     "value": "Rome", "confidence": 0.9,
+     "evidence_turn_ids": ["t7"]}
+
+Example 6 — event_date with relative reference resolved (Lever A):
+  Session metadata says ``date_time: 2023-05-04``.
+  Turn: "I had dinner with my mom last night."
+  Fact: {"entity": "Maria", "attribute": "had_dinner_with",
+         "value": "mom", "confidence": 0.9,
+         "evidence_turn_ids": ["t2"],
+         "evidence_at": "2023-05-03"}
+
+Example 7 — owns / business:
+  Turn: "I opened my online clothing store last March."
+  Session metadata says ``date_time: 2024-09-01``.
+  Fact: {"entity": "Gina", "attribute": "owns",
+         "value": "online clothing store", "confidence": 0.9,
+         "evidence_turn_ids": ["t4"],
+         "evidence_at": "2023-03"}
 
 Return ONLY the JSON array, no prose. If no facts can be grounded, return [].

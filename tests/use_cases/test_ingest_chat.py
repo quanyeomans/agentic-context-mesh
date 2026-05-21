@@ -830,3 +830,296 @@ def test_injected_consolidation_pass_is_used(tmp_path: Path) -> None:
     live_ids = {f.id for f in live}
     assert live_ids == {"f-b"}
     assert result.facts_superseded == 1
+
+
+# ---------------------------------------------------------------------------
+# Stream A Lever A — session_metadata propagation
+# ---------------------------------------------------------------------------
+
+
+def test_session_metadata_kwarg_flows_to_extractor(tmp_path: Path) -> None:
+    """session_metadata passed to ingest_chat reaches the extractor.
+
+    Sabotage-proof: drop the ``session_metadata=resolved_metadata`` kwarg
+    from the ``fact_extractor.extract`` call in ``ingest_chat`` and this
+    test fails because the extractor's recorded call no longer carries
+    the dict the test passed in.
+
+    Manual sabotage run (2026-05-21): removed the kwarg; the
+    ``FakeFactExtractor.calls[0]["session_metadata"]`` value flipped to
+    ``None``, the equality check failed, pytest exit=1. Restored.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1), _turn("c1", 2)])
+    extractor = FakeFactExtractor()
+    metadata = {"date_time": "2023-05-04 14:30", "session_id": "s-12"}
+
+    ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=extractor,
+        session_metadata=metadata,
+    )
+
+    # extract() is called once per window; the metadata must flow on
+    # every call.
+    assert len(extractor.calls) == 1
+    assert extractor.calls[0]["session_metadata"] == metadata
+
+
+def test_session_metadata_sidecar_is_picked_up(tmp_path: Path) -> None:
+    """A ``<transcript>.metadata.json`` sidecar is auto-loaded.
+
+    Sabotage-proof: remove the ``_read_sidecar_metadata`` fallback in
+    ``ingest_chat`` and this test fails because the extractor receives
+    ``session_metadata=None``.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    sidecar = tmp_path / "session-001.jsonl.metadata.json"
+    sidecar.write_text(json.dumps({"date_time": "2023-05-04"}), encoding="utf-8")
+    extractor = FakeFactExtractor()
+
+    ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=extractor,
+    )
+
+    assert extractor.calls[0]["session_metadata"] == {"date_time": "2023-05-04"}
+
+
+def test_session_date_appears_in_markdown_body_and_frontmatter(tmp_path: Path) -> None:
+    """Session date is embedded in both the YAML frontmatter and body.
+
+    Sabotage-proof: drop the ``**Session date:** ...`` line from
+    ``_render_markdown`` and this test fails because the body assertion
+    flips. Same for the frontmatter ``date_time:`` line.
+
+    Closes the 54% of LoCoMo cat=2 (temporal) misses spike A1
+    categorised as "(c) Date missing" — the chunker emits markdown
+    with a session-date anchor so retrieval reaches LLM context with
+    a calendar reference.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1, content="we shipped the feature")])
+
+    ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+        session_metadata={"date_time": "2023-05-04 14:30"},
+    )
+
+    written = (tmp_path / "vault" / "conversations" / "c1.md").read_text(encoding="utf-8")
+    assert "date_time: 2023-05-04 14:30" in written  # frontmatter
+    assert "**Session date:** 2023-05-04 14:30" in written  # body anchor
+
+
+def test_no_metadata_omits_date_lines(tmp_path: Path) -> None:
+    """When session_metadata is absent, no date line leaks into output.
+
+    Sabotage-proof: hardcode ``date_time = "1970-01-01"`` in
+    ``_extract_session_date_time`` and this test fails because the
+    bare-no-metadata path leaks a sentinel date.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+
+    ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+    )
+
+    written = (tmp_path / "vault" / "conversations" / "c1.md").read_text(encoding="utf-8")
+    assert "Session date:" not in written
+    assert "date_time:" not in written
+
+
+def test_cli_metadata_flag_loads_json_sidecar(tmp_path: Path) -> None:
+    """The CLI ``--metadata`` flag loads a JSON dict and threads it through.
+
+    Sabotage-proof: drop ``session_metadata=session_metadata`` from the
+    ``ingest_chat`` call in ``main`` and the extractor sees
+    ``session_metadata=None`` — this test then fails on the
+    ``FakeFactExtractor.calls[0]["session_metadata"]`` equality.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(json.dumps({"date_time": "2023-05-04"}), encoding="utf-8")
+    extractor = FakeFactExtractor()
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = main(
+        [str(transcript), "--metadata", str(metadata_path)],
+        out=out,
+        err=err,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=extractor,
+    )
+
+    assert rc == 0
+    assert extractor.calls[0]["session_metadata"] == {"date_time": "2023-05-04"}
+
+
+def test_cli_metadata_flag_missing_path_warns_and_continues(tmp_path: Path) -> None:
+    """``--metadata`` pointing at a missing file warns on stderr but proceeds.
+
+    Sabotage-proof: change ``return None`` in ``_load_metadata_arg`` to
+    ``raise FileNotFoundError`` and this test fails because the CLI
+    exits non-zero instead of completing the ingest.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    missing = tmp_path / "nope.json"
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = main(
+        [str(transcript), "--metadata", str(missing)],
+        out=out,
+        err=err,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+    )
+
+    assert rc == 0
+    assert "does not exist" in err.getvalue()
+
+
+def test_cli_metadata_flag_malformed_json_warns_and_continues(tmp_path: Path) -> None:
+    """``--metadata`` pointing at malformed JSON warns and falls back.
+
+    Sabotage-proof: drop the ``except json.JSONDecodeError`` branch in
+    ``_load_metadata_arg`` and this test fails because the CLI raises
+    instead of completing.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json{", encoding="utf-8")
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = main(
+        [str(transcript), "--metadata", str(bad)],
+        out=out,
+        err=err,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+    )
+
+    assert rc == 0
+    assert "failed to parse --metadata" in err.getvalue()
+
+
+def test_cli_metadata_flag_non_object_warns_and_continues(tmp_path: Path) -> None:
+    """``--metadata`` JSON that isn't a dict warns and falls back.
+
+    Sabotage-proof: drop the ``isinstance(parsed, dict)`` check in
+    ``_load_metadata_arg`` and this test fails because the array gets
+    threaded through to the extractor as ``session_metadata=[...]``
+    and the extractor's downstream attribute access raises.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    arr = tmp_path / "arr.json"
+    arr.write_text(json.dumps(["not a dict"]), encoding="utf-8")
+    out = io.StringIO()
+    err = io.StringIO()
+
+    rc = main(
+        [str(transcript), "--metadata", str(arr)],
+        out=out,
+        err=err,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=FakeFactExtractor(),
+    )
+
+    assert rc == 0
+    assert "must contain a JSON object" in err.getvalue()
+
+
+def test_session_metadata_kwarg_overrides_sidecar(tmp_path: Path) -> None:
+    """Explicit ``session_metadata=`` kwarg wins over sidecar auto-discovery.
+
+    Sabotage-proof: change ``if session_metadata is not None`` to
+    ``if False`` in ``ingest_chat`` and this test fails because the
+    sidecar's date wins and the assertion flips.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    sidecar = tmp_path / "session-001.jsonl.metadata.json"
+    sidecar.write_text(json.dumps({"date_time": "1970-01-01"}), encoding="utf-8")
+    extractor = FakeFactExtractor()
+
+    ingest_chat(
+        transcript,
+        paths=_paths(tmp_path),
+        fact_store=FakeFactStore(),
+        fact_extractor=extractor,
+        session_metadata={"date_time": "2023-05-04"},
+    )
+
+    assert extractor.calls[0]["session_metadata"] == {"date_time": "2023-05-04"}
+
+
+def test_malformed_sidecar_metadata_warns_and_continues(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Malformed sidecar JSON is logged + ingest proceeds with no metadata.
+
+    Sabotage-proof: drop the ``except (OSError, json.JSONDecodeError)``
+    branch in ``_read_sidecar_metadata`` and this test fails because
+    ingest raises instead of logging + returning None.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    sidecar = tmp_path / "session-001.jsonl.metadata.json"
+    sidecar.write_text("not json", encoding="utf-8")
+    extractor = FakeFactExtractor()
+
+    with caplog.at_level(logging.WARNING, logger="kairix.use_cases.ingest_chat"):
+        ingest_chat(
+            transcript,
+            paths=_paths(tmp_path),
+            fact_store=FakeFactStore(),
+            fact_extractor=extractor,
+        )
+
+    assert any("malformed metadata sidecar" in rec.message for rec in caplog.records)
+    assert extractor.calls[0]["session_metadata"] is None
+
+
+def test_non_object_sidecar_metadata_warns_and_continues(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Sidecar JSON that isn't a dict is rejected with a warning.
+
+    Sabotage-proof: drop the ``isinstance(parsed, dict)`` guard in
+    ``_read_sidecar_metadata`` and this test fails because the array
+    gets threaded through as ``session_metadata=[...]``.
+    """
+    transcript = tmp_path / "session-001.jsonl"
+    _write_jsonl(transcript, [_turn("c1", 1)])
+    sidecar = tmp_path / "session-001.jsonl.metadata.json"
+    sidecar.write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
+    extractor = FakeFactExtractor()
+
+    with caplog.at_level(logging.WARNING, logger="kairix.use_cases.ingest_chat"):
+        ingest_chat(
+            transcript,
+            paths=_paths(tmp_path),
+            fact_store=FakeFactStore(),
+            fact_extractor=extractor,
+        )
+
+    assert any("not a JSON object" in rec.message for rec in caplog.records)
+    assert extractor.calls[0]["session_metadata"] is None

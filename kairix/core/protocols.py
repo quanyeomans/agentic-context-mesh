@@ -431,6 +431,18 @@ class FactRecord(Protocol):
       record about the same (entity, attribute). The full history
       stays queryable (audit + Surface-C signal); production search
       filters to ``superseded_by IS NULL`` by default.
+
+    Temporal-anchor contract (Stream A, Lever A):
+
+    - ``evidence_at`` is an optional ISO-8601 string carrying the
+      *event-time* the fact occurred in the world — distinct from
+      ``extracted_at`` which is wall-clock at extraction time. For
+      session-windowed extraction the default is the session's
+      ``date_time``; the LLM MAY resolve relative references in the
+      turn ("last night", "the week before") to a specific date and
+      emit a different value. ``None`` means the corpus had no
+      temporal anchor for the fact (legacy rows from pre-Lever-A
+      ingests, or sessions ingested without session_metadata).
     """
 
     @property
@@ -451,6 +463,8 @@ class FactRecord(Protocol):
     def superseded_by(self) -> str | None: ...
     @property
     def namespace(self) -> str: ...
+    @property
+    def evidence_at(self) -> str | None: ...
 
 
 @runtime_checkable
@@ -493,14 +507,23 @@ class FactExtractor(Protocol):
     runs the extractor with temperature=0.0 in CI.
     """
 
-    # extract(turns, window_hint): zero or more FactRecords grounded in turns.
+    # extract(turns, window_hint, session_metadata): zero or more FactRecords
+    # grounded in turns.
     # turns: list of turn dicts with at least id, speaker/role, content/text
     # keys (LoCoMo / chat-message shape). window_hint reserved for future
     # prompt-engineering knobs; production extractors may ignore it.
+    # session_metadata (Stream A Lever A): optional dict carrying the
+    # session ``date_time`` + ``session_id`` etc. The extractor pins
+    # ``FactRecord.evidence_at`` to the session's default anchor when
+    # the LLM omits a per-fact override.
     # Empty-list return is a valid "no facts groundable" signal — callers
     # MUST tolerate it without raising.
     def extract(
-        self, *, turns: list[dict[str, Any]], window_hint: dict[str, Any] | None = None
+        self,
+        *,
+        turns: list[dict[str, Any]],
+        window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
     ) -> list[FactRecord]: ...
 
 
