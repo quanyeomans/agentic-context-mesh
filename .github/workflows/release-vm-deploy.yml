@@ -29,6 +29,7 @@ permissions:
   statuses: read  # poll commit-status for the alpha SHA
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   STATUS_CONTEXT: vm-reflib-regression
   # Webhook deploy timeout is 10min; add headroom for API roundtrip.
   POLL_TIMEOUT_SECONDS: 900

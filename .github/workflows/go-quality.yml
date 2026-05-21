@@ -11,7 +11,7 @@ name: "Go quality"
 
 on:
   push:
-    branches: [develop, main]
+    branches: [main]
     paths:
       - "services/**"
       - "tools/**"
@@ -34,6 +34,9 @@ permissions:
 concurrency:
   group: go-quality-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   discover:

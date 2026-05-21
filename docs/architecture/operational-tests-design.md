@@ -25,7 +25,7 @@ The previous draft of #276 made Rule 1 explicit but stopped short on Rule 2 — 
 - `ruff check` / `ruff format` — style correctness
 - `detect-secrets`, confidential-pattern check — supply-chain correctness
 
-These never run in production, never need to be invoked by the SRE worker, never give meaningful signal at runtime. They gate code into develop. That's their entire job.
+These never run in production, never need to be invoked by the SRE worker, never give meaningful signal at runtime. They gate code into main. That's their entire job.
 
 **Becomes a kairix capability** (Python API + bindings):
 - Health probes (`onboard check`)

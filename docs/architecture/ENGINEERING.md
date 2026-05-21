@@ -428,16 +428,16 @@ chore/deps-bump-requests       # dependency updates
 
 ### 7.2 Version discipline
 
-kairix uses CalVer: `YYYY.M.D` for stable releases on `main`, `YYYY.M.Da<N>` for alpha releases on `develop`.
+kairix uses CalVer: `YYYY.M.D` for stable releases on `main`, `YYYY.M.Da<N>` for alpha releases on `main`.
 
 **Rule: the version in `pyproject.toml` must be incremented before deploying to any environment.** This is what allows `pip install --upgrade` to work correctly — pip compares version numbers, not commit SHAs. Deploying without a version bump means pip sees the existing version as current and installs nothing.
 
 | Branch | Version example | Increment rule |
 |--------|----------------|----------------|
-| `develop` | `2026.4.18a3` | Increment `aN` before each deploy to a test/staging host |
+| `main` | `2026.4.18a3` | Increment `aN` before each deploy to a test/staging host |
 | `main` | `2026.4.18` | Increment date component on each stable release |
 
-Installing from a branch ref (`@develop`, `@main`) rather than a pinned tag does not override this — pip still resolves by version number. Pinned tags are the correct install target for reproducible environments.
+Installing from a branch ref (`@main`, `@main`) rather than a pinned tag does not override this — pip still resolves by version number. Pinned tags are the correct install target for reproducible environments.
 
 ### 7.3 PR requirements
 

@@ -196,9 +196,9 @@ backfill, one rule per refactor — and the CI/CD pipeline as it stands
 today gives us strong, automated guarantees that misbehaving parallel
 work cannot land:
 
-- `develop` is the integration branch; HITL on `main` and release tags.
+- `main` is the trunk; HITL on `main` and release tags.
 - Branch protection denies rebase/squash; merge commits only — agent
-  commits arrive on develop as discrete merges, history stays legible.
+  commits arrive on main as discrete merges, history stays legible.
 - Auto-merge is on; head branches are deleted on merge — no manual
   shepherding once a PR is green.
 - F7 (per-file 85%) and F9 (union 85%) only fail on **net-new**
@@ -227,11 +227,11 @@ both sides** — both adds belong (per Ralph default in `CLAUDE.md`).
 
 ### Wave plan
 
-**Wave 0 — Foundation (sequential, one PR on develop, no isolation).**
+**Wave 0 — Foundation (sequential, one PR on main, no isolation).**
 Add any Fake* classes the upcoming waves will share — at minimum
 `FakeCredentials` for recall_check and embed work, and `FakeEmbedProviderFactory`
 if multiple agents need it. Single agent on the main checkout, direct
-push to develop. Eliminates the most common Wave-1 conflict before it
+push to main. Eliminates the most common Wave-1 conflict before it
 starts. ~30-60 min.
 
 **Wave 1 — Coverage backfill + F6 conversions in parallel (worktrees, 4-6 agents).**
@@ -242,23 +242,23 @@ all in parallel, all in the same Agent message. Each agent runs
 
 **Worktree base (verified 2026-05-10 from real Wave-1 dispatch):** the
 `Agent` tool's `isolation="worktree"` branches off **main** (latest
-tagged release), not develop. This is different from a manual shell
+tagged release), not main. This is different from a manual shell
 `git worktree add` which uses the parent's HEAD. The default-branch
 change does not affect the `Agent` tool's behaviour.
 
 Implications:
-- Each agent must `git fetch origin && git rebase origin/develop` in
+- Each agent must `git fetch origin && git rebase origin/main` in
   its worktree before doing work, or it runs against stale fakes /
   baselines.
 - For **file-localised work** (agent only modifies files no recent
-  develop commit touched), `gh pr merge --merge` produces a clean
-  merge into develop — GitHub computes a merge commit whose tree is
-  develop's HEAD plus the agent's diffs; develop work is not reverted.
+  main commit touched), `gh pr merge --merge` produces a clean
+  merge into main — GitHub computes a merge commit whose tree is
+  main's HEAD plus the agent's diffs; main work is not reverted.
   Wave-1 PRs #205, #206, #207 are the existence proof.
-- For **work that overlaps with recent develop changes** (e.g. another
+- For **work that overlaps with recent main changes** (e.g. another
   agent already added the same fake to `tests/fakes.py`), rebase the
-  agent branch onto `origin/develop` first, OR cherry-pick the agent
-  SHA onto develop. Reading the PR diff before merging is mandatory —
+  agent branch onto `origin/main` first, OR cherry-pick the agent
+  SHA onto main. Reading the PR diff before merging is mandatory —
   the diff is the merge plan.
 
 Recommended Wave-1 batch (one issue ↔ one agent):

@@ -1,7 +1,7 @@
 name: "6 · Reflib benchmark history capture (per-release archive)"
 
 # Captures one reflib benchmark run per release and opens a PR back into
-# develop archiving the result under benchmark-results/history/. Closes #271.
+# main archiving the result under benchmark-results/history/. Closes #271.
 #
 # Trigger: a GitHub Release is created (matches docker-publish.yml /
 # publish-pypi.yml, so this fires on the same artefact moment).
@@ -15,7 +15,7 @@ name: "6 · Reflib benchmark history capture (per-release archive)"
 #
 # Output: one JSON under benchmark-results/history/<tag>-<date>.json plus
 # one row appended to benchmark-results/history/INDEX.md, opened as a PR
-# against develop (no auto-merge — the human gate at PR creation is
+# against main (no auto-merge — the human gate at PR creation is
 # preserved per feedback_release_hitl).
 #
 # Workflow inputs (github.ref_name, inputs.ref) are routed through env:
@@ -37,6 +37,9 @@ on:
 permissions:
   contents: write       # required to push the PR branch
   pull-requests: write  # required to open the PR
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   capture:
@@ -96,21 +99,21 @@ jobs:
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          # Switch to develop so the archive lands on a branch we can PR
+          # Switch to main so the archive lands on a branch we can PR
           # back. Checkout of the tag's commit was only for the benchmark
-          # binary itself; the archive update is a develop-tracked change.
-          git fetch origin develop
-          git checkout develop
-          git reset --hard origin/develop
+          # binary itself; the archive update is a trunk-tracked change.
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
           python3 scripts/update_reflib_history.py "$RESULT_JSON" --tag "$TAG"
 
-      - name: Open PR against develop
+      - name: Open PR against main
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         uses: peter-evans/create-pull-request@v6
         with:
           branch: bot/reflib-history-${{ env.TAG }}
-          base: develop
+          base: main
           commit-message: "chore(eval): archive reflib benchmark for release tag (#271)"
           title: "chore(eval): archive reflib benchmark for release tag"
           body: |

@@ -55,7 +55,7 @@ pinned in `tests/contracts/test_cli_mcp_parity_invariants.py`.
 
 ## Phasing
 
-Each phase ships independently on `develop`. Each Phase-1+ deliverable
+Each phase ships independently on `main`. Each Phase-1+ deliverable
 includes a contract test pinning CLI ↔ MCP equivalence for the operation
 it touches.
 

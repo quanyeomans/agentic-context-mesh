@@ -4,7 +4,7 @@ name: "5 · Release (tag + GitHub release from CHANGELOG)"
 # manual sequence (tag main, push tag, create GitHub Release with notes
 # copy-pasted from CHANGELOG) and bundles it into one step.
 #
-# Pre-requisite: develop -> main has already been merged through a
+# Pre-requisite: main has already been merged through a
 # normal PR (which gates on CI + Sonar). This workflow only does the
 # tagging + release-creation + CHANGELOG-extraction part.
 #
@@ -27,6 +27,9 @@ on:
 permissions:
   contents: write  # required to create tags + releases
   actions: write   # required to dispatch downstream publish workflows (#230)
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   check-alpha-gate:
@@ -60,9 +63,9 @@ jobs:
           if [ -z "$matches" ]; then
             echo "::error::No alpha tag found for $VERSION. Run release-alpha.yml first."
             echo ""
-            echo "fix: dispatch the '2a · Release (alpha tag from develop)' workflow with date_version=${stripped} and alpha_n=1."
+            echo "fix: dispatch the '2a · Release (alpha tag from main)' workflow with date_version=${stripped} and alpha_n=1."
             echo "  next: once the alpha lands, release-vm-deploy.yml runs automatically; re-run this workflow when its commit-status goes green."
-            echo "  run:  gh workflow run release-alpha.yml --ref develop -f date_version=${stripped} -f alpha_n=1"
+            echo "  run:  gh workflow run release-alpha.yml --ref main -f date_version=${stripped} -f alpha_n=1"
             exit 1
           fi
           latest_alpha=$(echo "$matches" | tail -1)
@@ -84,7 +87,7 @@ jobs:
             echo "::error::No vm-reflib-regression status on $latest_alpha ($alpha_sha)."
             echo ""
             echo "fix: dispatch release-vm-deploy.yml for the alpha. The webhook will post-back the status."
-            echo "  run:  gh workflow run release-vm-deploy.yml --ref develop -f tag=${latest_alpha}"
+            echo "  run:  gh workflow run release-vm-deploy.yml --ref main -f tag=${latest_alpha}"
             echo "  next: once the status is success, re-run this workflow."
             exit 1
           fi
