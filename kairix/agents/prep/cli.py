@@ -2,10 +2,16 @@
 kairix prep — tiered L0/L1 context summary.
 
 Usage:
-  kairix prep <query> [--tier l0|l1] [--agent AGENT] [--scope SCOPE] [--json]
+  kairix prep <query> [--tier l0|l1] [--agent AGENT] [--scope SCOPE]
+                      [--collection COLLECTION] [--json]
 
 Adapter only — business logic lives in
 ``kairix.use_cases.prep.run_prep``.
+
+``--collection`` is plumbed at this adapter layer rather than through
+``run_prep`` — the CLI binds a ``collections`` list onto the search
+callable inside ``PrepDeps`` so the use-case public signature stays
+single-collection-agnostic.
 """
 
 from __future__ import annotations
@@ -13,7 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Literal
+from typing import Any, Literal
 
 from kairix.core.search.scope import Scope
 from kairix.use_cases.prep import PrepDeps, PrepOutput, prep_output_to_envelope, run_prep
@@ -38,8 +44,46 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["shared", "agent", "shared+agent", "all-agents", "everything"],
         help="Collection scope (default: shared+agent)",
     )
+    parser.add_argument(
+        "--collection",
+        default=None,
+        help=(
+            "Restrict retrieval to a single collection (e.g. reference-library). "
+            "Short-circuits scope-based collection resolution. Closes the C3 "
+            "spike's Gap 3 — the underlying SearchPipeline already accepted "
+            "collections, the CLI just didn't expose it."
+        ),
+    )
     parser.add_argument("--json", dest="as_json", action="store_true", help="Output JSON envelope")
     return parser
+
+
+def _bind_collection_to_deps(deps: PrepDeps | None, collection: str | None) -> PrepDeps | None:
+    """Return a ``PrepDeps`` whose ``search_fn`` injects ``collections=[collection]``.
+
+    When ``collection`` is None, the input ``deps`` passes through
+    unchanged — keeping the no-flag path identical to before this commit.
+    When set, wraps the existing ``search_fn`` (production default or
+    test-injected) so every call carries the collections list. The use
+    case never sees the flag; the CLI adapter owns it.
+    """
+    if collection is None:
+        return deps
+    base = deps if deps is not None else PrepDeps()
+    inner = base.search_fn
+
+    def _search_with_collection(**kwargs: Any) -> Any:
+        # Caller may already pass collections; respect that and only inject
+        # when absent. Keeps the adapter idempotent even when callers wire
+        # collections themselves.
+        kwargs.setdefault("collections", [collection])
+        return inner(**kwargs)
+
+    # PrepDeps is frozen — use dataclasses.replace to preserve every
+    # field we don't touch (chat_fn today; future deps tomorrow).
+    from dataclasses import replace as _replace
+
+    return _replace(base, search_fn=_search_with_collection)
 
 
 def format_text(out: PrepOutput) -> str:
@@ -63,12 +107,13 @@ def format_text(out: PrepOutput) -> str:
 def main(argv: list[str] | None = None, *, deps: PrepDeps | None = None) -> int:
     """Entry point for ``kairix prep``."""
     args = build_parser().parse_args(argv)
+    effective_deps = _bind_collection_to_deps(deps, args.collection)
     out = run_prep(
         args.query,
         agent=args.agent,
         scope=Scope.parse(args.scope),
         tier=_as_tier(args.tier),
-        deps=deps,
+        deps=effective_deps,
     )
 
     if args.as_json:

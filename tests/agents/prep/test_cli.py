@@ -164,3 +164,71 @@ def test_main_passes_tier_and_scope_to_use_case() -> None:
     from kairix.core.search.scope import Scope
 
     assert captured["scope"] is Scope.AGENT
+
+
+# ---------------------------------------------------------------------------
+# P4 — --collection flag plumbed to SearchPipeline.search via deps wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_build_parser_accepts_collection_flag() -> None:
+    """--collection plumbs through argparse as ``args.collection``.
+
+    Sabotage-proof executed 2026-05-21: removed the
+    ``parser.add_argument("--collection", ...)`` call; argparse raised
+    ``unrecognized arguments: --collection reference-library`` and the
+    test failed. Restored.
+    """
+    args = build_parser().parse_args(["q", "--collection", "reference-library"])
+    assert args.collection == "reference-library"
+
+
+def test_build_parser_collection_defaults_to_none() -> None:
+    """Omitting --collection produces ``args.collection is None`` — the
+    no-flag path is unchanged and ``_bind_collection_to_deps`` becomes
+    a pass-through."""
+    args = build_parser().parse_args(["q"])
+    assert args.collection is None
+
+
+def test_main_collection_flag_injects_collections_into_search_kwargs() -> None:
+    """When ``--collection reference-library`` is passed, the wrapped
+    ``search_fn`` receives ``collections=["reference-library"]`` —
+    short-circuiting the SearchPipeline CollectionResolver.
+
+    Sabotage-proof executed 2026-05-21: dropped the ``kwargs.setdefault``
+    line in ``_bind_collection_to_deps``. The captured kwargs no longer
+    carried ``collections`` and this assert failed with KeyError. Restored.
+    """
+    captured: dict = {}
+
+    def _search(**kwargs: Any) -> _FakeSearchResult:
+        captured.update(kwargs)
+        return _FakeSearchResult()
+
+    deps = PrepDeps(search_fn=_search, chat_fn=lambda **kw: "")
+    _capture(["q", "--collection", "reference-library"], deps)
+
+    assert captured["collections"] == ["reference-library"]
+
+
+def test_main_without_collection_flag_does_not_inject_collections() -> None:
+    """When --collection is omitted, the search_fn is called WITHOUT a
+    collections kwarg — preserving the historical use-case behaviour
+    where CollectionResolver handles routing.
+
+    Sabotage-proof executed 2026-05-21: changed ``if collection is None:
+    return deps`` to ``if collection is None: collection = "_default"``
+    in ``_bind_collection_to_deps``. The wrapper then injected
+    ``["_default"]`` and this assert failed. Restored.
+    """
+    captured: dict = {}
+
+    def _search(**kwargs: Any) -> _FakeSearchResult:
+        captured.update(kwargs)
+        return _FakeSearchResult()
+
+    deps = PrepDeps(search_fn=_search, chat_fn=lambda **kw: "")
+    _capture(["q"], deps)
+
+    assert "collections" not in captured
