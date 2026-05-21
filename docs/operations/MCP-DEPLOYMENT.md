@@ -41,7 +41,23 @@ Kairix exposes two health endpoints. Use `/healthz` for liveness, `/healthz/read
 curl http://127.0.0.1:8182/healthz
 ```
 
-Returns `{"ready": true, "uptime_s": N}` once kairix has finished cold-starting (Neo4j driver, vector index, LLM clients). Tool calls before ready return a structured `{"error": "kairix-initializing", "retry_after_ms": 1500}` rather than crashing — clients can retry with backoff.
+Returns `{"ready": true, "uptime_s": N}` once kairix has finished cold-starting (search pipeline construction plus a cheap probe search). HTTP deployments run this warm-up before marking the readiness gate ready, so normal agents should not see cold-start on the first user-facing tool call.
+
+If a tool call does arrive before the gate is ready, retrieval tools return the canonical retryable envelope rather than executing a partially-warmed path:
+
+```json
+{
+  "status": "retryable_not_ready",
+  "error": "ColdStart",
+  "error_code": "KAIRIX_COLD_START",
+  "tool": "search",
+  "retry_after_ms": 8000,
+  "estimated_seconds_remaining": 8.0,
+  "agent_instruction": "Do not answer from memory, do not use a lower-quality fallback, and do not treat this as a completed retrieval. Wait retry_after_ms, retry the same 'search' call once, then surface the cold-start blocker if it is still not ready."
+}
+```
+
+Clients and agent runtimes should treat `error_code=KAIRIX_COLD_START` as a wait-and-retry state, not as a completed search failure.
 
 ### `/healthz/ready` — layered readiness
 
@@ -74,7 +90,7 @@ Resolves the #167 gap where `/healthz` reported `ready=true` while vector search
 
 ## Error envelope
 
-Every tool handler is wrapped with `wrap_tool_errors`. Any exception escaping a handler becomes a structured response:
+Every tool handler is wrapped with `wrap_tool_errors`. Retrieval tools also have a readiness guard: when the HTTP readiness gate is closed, they return `KAIRIX_COLD_START` and do not enter the underlying search/bootstrap/research path. Any exception escaping a handler becomes a structured response:
 
 ```json
 {"error": "<ExceptionClass>: <message>"}
