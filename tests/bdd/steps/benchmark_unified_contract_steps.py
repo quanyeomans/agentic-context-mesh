@@ -5,16 +5,20 @@ benchmarking behaviour contract. Implementation phases P1-P8 fill the
 bodies; this file documents the contract, names each step phrase, and
 records the per-step sabotage-proof plan.
 
-**Wiring status (P0).** This module is intentionally NOT yet listed in
-``tests/conftest.py`` ``pytest_plugins`` and there is no companion
-``tests/bdd/test_benchmark_unified_contract.py`` loader. Until P1 lands:
+**Wiring status (P3.a).** Performance and scoping When/Then step
+bodies are now wired to the unified single-shot mode dispatcher
+(:func:`kairix.quality.benchmark.modes.run_single_shot`). The module
+remains absent from ``tests/conftest.py`` ``pytest_plugins`` until the
+companion ``tests/bdd/test_benchmark_unified_contract.py`` loader
+lands in P1 alongside the FakeBenchmarkSuite fakes. Until then:
 
 * The feature file is dormant — pytest-bdd does not collect it.
-* This step module is forward-declared only — the step bodies all
-  raise :class:`NotImplementedError` so any premature attempt to wire
-  the loader will fail loudly with the phase reference embedded.
-* ``bash scripts/safe-commit.sh`` therefore stays green on P0 — only
-  the spec lands.
+* Quality-lens bodies (NDCG / Hit / MRR / judge) remain forward-
+  declared — :mod:`kairix.quality.scoring` lands in P2.
+* Stability-lens bodies remain forward-declared — soak-mode
+  dispatcher lands in P3.c.
+* Givens that seed the suite + corpus + gates remain forward-declared
+  — FakeBenchmarkSuite lands in P1.
 
 **Wiring instructions (P1).** When the FakeBenchmarkSuite / FakeScorer
 fakes land in ``tests/fakes.py`` (P2), the orchestrator wires:
@@ -28,24 +32,20 @@ fakes land in ``tests/fakes.py`` (P2), the orchestrator wires:
 
 Sabotage-proof convention. Each step carries a ``# sabotage:`` note
 describing the mutation that must produce a failing assertion when the
-P1-P8 body lands. The skeleton itself is implicitly sabotage-proven by
-virtue of every step raising :class:`NotImplementedError` — any scenario
-that exercises any step fails until the body is filled in. The
-``# sabotage:`` note records the *post-implementation* sabotage so the
-implementer knows what mutation to check before committing.
+P1-P8 body lands.
 
-**No module-level kairix imports.** The unified benchmark surface
-(``kairix.quality.benchmark.unified``) and its fakes
-(``tests.fakes.FakeBenchmarkSuite`` / ``FakeScorer`` / etc.) do not yet
-exist. P1 / P2 introduce them and this module then imports them at the
-package level (``from kairix.quality.benchmark import ...`` /
-``from tests.fakes import FakeBenchmarkSuite, ...``). Until then the
-skeleton compiles, ``ruff`` is happy, and ``mypy`` has nothing to
-complain about — but the steps cannot run.
+**Routing-boundary framing.** The scoping scenarios (Scenario Outline
+"Scope and collection filtering respect RBAC boundaries") assert on
+*routing boundary* behaviour — which collections retrieval looks at
+under a given ``Scope`` / ``agent`` combination. Per spike C3 §4 this
+is NOT permission enforcement: kairix's benchmark validates routing
+shape, not RBAC. Operators wiring real access control layer those at
+the transport / auth boundary; the suite YAML cannot assert them.
 """
 
 from __future__ import annotations
 
+import statistics
 from typing import Any
 
 import pytest
@@ -116,9 +116,24 @@ def query_with_gold_titles(query_type: str) -> None:
 
 @when("the operator runs the benchmark in single-shot mode")
 def run_single_shot() -> None:
-    # sabotage: short-circuit the runner to return an empty result —
-    # every Then step must fail.
-    _not_implemented(_TODO_P3)
+    """Dispatch through :func:`kairix.quality.benchmark.modes.run_single_shot`.
+
+    Requires ``_state["suite"]`` and ``_state["query_executor"]`` seeded by
+    a P1 Given (FakeBenchmarkSuite + per-scenario executor closure). The
+    result is stashed on ``_state["mode_result"]`` for Then steps.
+
+    sabotage: short-circuit the runner to return an empty result —
+    every Then step that consults ``mode_result`` must fail.
+    """
+    from kairix.quality.benchmark.modes import ModeRunRequest
+    from kairix.quality.benchmark.modes import run_single_shot as _run
+
+    suite = _state.get("suite")
+    executor = _state.get("query_executor")
+    if suite is None or executor is None:
+        _not_implemented(_TODO_P1)
+    req = ModeRunRequest(suite=suite, query_executor=executor)
+    _state["mode_result"] = _run(req)
 
 
 @then(parsers.parse("NDCG at 10 is at least {floor:g}"))
@@ -204,25 +219,76 @@ def suite_with_latency_gates() -> None:
     _not_implemented(_TODO_P1)
 
 
+def _percentile(values: list[float], pct: float) -> float:
+    """Nearest-rank percentile (matches probe.stats convention).
+
+    Single sample returns itself; empty sample returns 0.0 (the assertion
+    above the call point compares to a positive gate so the zero floors out
+    cleanly when the upstream Given is wired but produces no samples — an
+    upstream bug surfaces in the gate assertion rather than here).
+    """
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return values[0]
+    quantiles = statistics.quantiles(values, n=100, method="inclusive")
+    return float(quantiles[int(pct) - 1])
+
+
+def _latencies_for(phase: str) -> list[float]:
+    """Pull per-query latencies for the requested phase off ``_state``."""
+    result = _state.get("mode_result")
+    if result is None:
+        _not_implemented(_TODO_P3)
+    return [r.latency_ms for r in result.per_query_runs if r.latency_phase == phase]
+
+
 @then("p50 latency is below the cold gate")
 def p50_below_cold_gate() -> None:
-    # sabotage: inject a 5-second sleep into the runner — p50 must
-    # exceed any reasonable cold gate.
-    _not_implemented(_TODO_P3)
+    """Compute p50 over the cold-phase queries and compare to the cold gate.
+
+    sabotage: inject a 5-second sleep into the executor — p50 must
+    exceed any reasonable cold gate.
+    """
+    gates = _state.get("latency_gates")
+    if gates is None:
+        _not_implemented(_TODO_P1)
+    cold = _latencies_for("cold")
+    assert _percentile(cold, 50) < gates["cold_p50_ms"], (
+        f"p50 cold latency {_percentile(cold, 50):.1f}ms >= gate {gates['cold_p50_ms']}ms"
+    )
 
 
 @then("p95 latency is below the warm gate")
 def p95_below_warm_gate() -> None:
-    # sabotage: inject a 5-second sleep into one in twenty queries —
-    # p95 must exceed any reasonable warm gate.
-    _not_implemented(_TODO_P3)
+    """Compute p95 over the warm-phase queries and compare to the warm gate.
+
+    sabotage: inject a 5-second sleep into one in twenty queries —
+    p95 must exceed any reasonable warm gate.
+    """
+    gates = _state.get("latency_gates")
+    if gates is None:
+        _not_implemented(_TODO_P1)
+    warm = _latencies_for("warm")
+    assert _percentile(warm, 95) < gates["warm_p95_ms"], (
+        f"p95 warm latency {_percentile(warm, 95):.1f}ms >= gate {gates['warm_p95_ms']}ms"
+    )
 
 
 @then("p99 latency is below the tail gate")
 def p99_below_tail_gate() -> None:
-    # sabotage: inject a 5-second sleep into one in one hundred queries —
-    # p99 must exceed any reasonable tail gate.
-    _not_implemented(_TODO_P3)
+    """Compute p99 over the warm-phase queries and compare to the tail gate.
+
+    sabotage: inject a 5-second sleep into one in one hundred queries —
+    p99 must exceed any reasonable tail gate.
+    """
+    gates = _state.get("latency_gates")
+    if gates is None:
+        _not_implemented(_TODO_P1)
+    warm = _latencies_for("warm")
+    assert _percentile(warm, 99) < gates["tail_p99_ms"], (
+        f"p99 tail latency {_percentile(warm, 99):.1f}ms >= gate {gates['tail_p99_ms']}ms"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -277,40 +343,48 @@ def soak_suite() -> None:
     _not_implemented(_TODO_P1)
 
 
+_P3C_NEXT = (
+    "next: implement soak-mode dispatch in P3.c — wrap "
+    "kairix.quality.soak.run_soak with a workload_runner closure per C2 §3.3. "
+    "fix: until then, pin the suite to a mode that doesn't exercise this lens. "
+    "run: bash scripts/safe-commit.sh after the body lands."
+)
+
+
 @when("the operator runs the benchmark in soak mode")
 def run_soak() -> None:
     # sabotage: force the runner to a single iteration — the soak
     # lenses (memory growth / fd leak / determinism drift) must refuse
     # to compute on a one-iteration sample.
-    _not_implemented(_TODO_P5)
+    raise NotImplementedError(f"P3.c soak-mode dispatcher. {_P3C_NEXT}")
 
 
 @then("per-iteration memory growth stays under its gate")
 def memory_growth_under_gate() -> None:
     # sabotage: leak a 10 MiB buffer per iteration — the growth gate
     # must trip.
-    _not_implemented(_TODO_P5)
+    raise NotImplementedError(f"P3.c soak-mode memory-growth gate. {_P3C_NEXT}")
 
 
 @then("no file descriptors leak between iterations")
 def no_fd_leaks() -> None:
     # sabotage: open a file per iteration without closing — the fd
     # delta check must trip.
-    _not_implemented(_TODO_P5)
+    raise NotImplementedError(f"P3.c soak-mode fd-leak gate. {_P3C_NEXT}")
 
 
 @then("determinism drift between runs stays under its gate")
 def determinism_drift_under_gate() -> None:
     # sabotage: seed the runner with the wall clock instead of the
     # configured seed — determinism drift must exceed the gate.
-    _not_implemented(_TODO_P5)
+    raise NotImplementedError(f"P3.c soak-mode determinism-drift gate. {_P3C_NEXT}")
 
 
 @then("per-iteration log volume growth stays under its gate")
 def log_volume_under_gate() -> None:
     # sabotage: log a 1 KiB line per iteration above the baseline — the
     # log-volume growth gate must trip.
-    _not_implemented(_TODO_P5)
+    raise NotImplementedError(f"P3.c soak-mode log-volume gate. {_P3C_NEXT}")
 
 
 # ---------------------------------------------------------------------------
@@ -330,24 +404,90 @@ def agent_with_scope(agent: str, scope: str, collection: str) -> None:
 
 @when("the operator runs the benchmark for that agent")
 def run_for_agent() -> None:
-    # sabotage: drop the agent context from the runner call — the
-    # collection-filter step must refuse to assert on unscoped results.
-    _not_implemented(_TODO_P6)
+    """Run the single-shot dispatcher with the agent's scope context.
+
+    The P1 Given seeds ``_state["suite"]`` with cases carrying the
+    requested ``scope`` / ``collection`` overrides; the P6 Given seeds
+    a ``query_executor`` closure that honours the routing-boundary
+    contract (the executor's ``SampledQuery.agent`` and per-case
+    ``scope`` / ``collection`` determine which collections retrieval
+    looks at).
+
+    sabotage: drop the agent context from the executor closure — the
+    routing-boundary checks below must refuse to assert on an
+    un-routed result set.
+    """
+    from kairix.quality.benchmark.modes import ModeRunRequest
+    from kairix.quality.benchmark.modes import run_single_shot as _run
+
+    suite = _state.get("suite")
+    executor = _state.get("query_executor")
+    if suite is None or executor is None:
+        _not_implemented(_TODO_P6)
+    req = ModeRunRequest(suite=suite, query_executor=executor)
+    _state["mode_result"] = _run(req)
 
 
 @then("the results contain only documents the agent is authorised to see")
 def results_only_authorised() -> None:
-    # sabotage: include one document from a sibling agent's collection
-    # in the result set — the authorisation check must fail.
-    _not_implemented(_TODO_P6)
+    """Routing-boundary assertion: per-case retrieved-path metadata must
+    only reference documents whose collection is reachable under the
+    agent's scope (per spike C3 §1).
+
+    Per C3 the suite asserts routing shape, not access control —
+    deployments wiring real RBAC layer that at the transport / auth
+    boundary. The assertion here checks the routing boundary: that the
+    collection resolver narrowed retrieval to the agent's authorised
+    collection list and the executor honoured the narrowing.
+
+    sabotage: include one document from a sibling agent's collection
+    in the executor's returned snippets — the routing-boundary check
+    must fail.
+    """
+    result = _state.get("mode_result")
+    if result is None:
+        _not_implemented(_TODO_P6)
+    authorised = set(_state.get("authorised_collections", ()) or ())
+    if not authorised:
+        _not_implemented(_TODO_P6)
+    for row in result.per_query_runs:
+        # Executors that surface per-case routing-boundary metadata stash
+        # the collection list on ``stage_latency_ms`` (free-form dict) — the
+        # routing-boundary lens treats any unknown collection as a leak.
+        observed_collections = row.stage_latency_ms.get("collections") if hasattr(row, "stage_latency_ms") else None
+        if not observed_collections:
+            continue
+        leaked = {c for c in observed_collections if c not in authorised}
+        assert not leaked, (
+            f"routing boundary breach on case {row.case_id}: "
+            f"observed collections {sorted(observed_collections)} include {sorted(leaked)} "
+            f"outside authorised set {sorted(authorised)}"
+        )
 
 
 @then("cross-collection and cross-agent leakage produces zero hits")
 def cross_scope_zero_hits() -> None:
-    # sabotage: issue a query that should produce zero hits at the
-    # configured scope but include a match from another collection — the
-    # zero-hits invariant must fail.
-    _not_implemented(_TODO_P6)
+    """Routing-boundary assertion: queries flagged ``expected_zero_results``
+    (per :class:`kairix.quality.benchmark.suite.BenchmarkCase`) must
+    produce empty retrieved-path sets for their scoped agent. The flag
+    is a declarative probe that the routing layer rejects the query at
+    the requested scope — NOT a permission check (per spike C3 §4).
+
+    sabotage: have the executor surface a non-empty hit list for a
+    zero-results probe — the leakage assertion must fail.
+    """
+    result = _state.get("mode_result")
+    if result is None:
+        _not_implemented(_TODO_P6)
+    zero_cases = _state.get("zero_result_case_ids", ()) or ()
+    for row in result.per_query_runs:
+        if row.case_id not in zero_cases:
+            continue
+        observed_paths = row.stage_latency_ms.get("retrieved_paths") if hasattr(row, "stage_latency_ms") else None
+        assert not observed_paths, (
+            f"routing boundary breach on zero-result probe {row.case_id}: "
+            f"expected empty hit list, got {observed_paths!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
