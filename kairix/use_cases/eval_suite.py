@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from kairix.core.protocols import FactExtractor, FactStore
+from kairix.core.search.pipeline import SearchPipeline
 from kairix.paths import KairixPaths
 from kairix.platform.llm.protocol import LLMBackend
 from kairix.quality.eval.suite_runner import SuiteResult, SuiteRunner
@@ -82,6 +83,11 @@ class _ResolvedDeps:
     fact_store: FactStore
     fact_extractor: FactExtractor
     llm: LLMBackend
+    # Plan B-parity D3 — optional SearchPipeline. When ``via_prep`` mode
+    # is on (the new default), the suite runner routes queries through
+    # this pipeline instead of calling ``fact_store.search`` directly.
+    # ``None`` means legacy direct mode (regression-debugging escape).
+    search_pipeline: SearchPipeline | None = None
 
 
 def main(
@@ -93,6 +99,7 @@ def main(
     fact_store: FactStore | None = None,
     fact_extractor: FactExtractor | None = None,
     llm: LLMBackend | None = None,
+    search_pipeline: SearchPipeline | None = None,
 ) -> int:
     """CLI entry point for ``kairix eval``.
 
@@ -102,6 +109,11 @@ def main(
       is a legacy subcommand.
     - The Plan B-parity suite runner otherwise (positional
       ``suite_path``).
+
+    Plan B-parity D3: by default the runner routes through the same
+    :class:`SearchPipeline` ``kairix prep`` uses (``--via-prep``, the
+    new default). The legacy direct ``fact_store.search`` path remains
+    accessible via ``--legacy-direct`` for regression-debugging only.
     """
     argv_list = list(argv if argv is not None else [])
 
@@ -119,6 +131,8 @@ def main(
         fact_store=fact_store,
         fact_extractor=fact_extractor,
         llm=llm,
+        search_pipeline=search_pipeline,
+        via_prep=args.via_prep,
         err_sink=err_sink,
     )
     if isinstance(deps, int):
@@ -149,6 +163,8 @@ def _resolve_deps(
     fact_store: FactStore | None,
     fact_extractor: FactExtractor | None,
     llm: LLMBackend | None,
+    search_pipeline: SearchPipeline | None,
+    via_prep: bool,
     err_sink: TextIO,
 ) -> _ResolvedDeps | int:
     """Resolve every collaborator the suite path needs, or return an exit code."""
@@ -170,12 +186,55 @@ def _resolve_deps(
             err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
             return 2
 
+    resolved_pipeline = _resolve_search_pipeline(
+        override=search_pipeline,
+        via_prep=via_prep,
+        err_sink=err_sink,
+    )
+    if isinstance(resolved_pipeline, int):
+        return resolved_pipeline
+
     return _ResolvedDeps(
         paths=resolved_paths,
         fact_store=fact_store,
         fact_extractor=resolved_extractor,
         llm=llm,
+        search_pipeline=resolved_pipeline,
     )
+
+
+def _resolve_search_pipeline(
+    *,
+    override: SearchPipeline | None,
+    via_prep: bool,
+    err_sink: TextIO,
+) -> SearchPipeline | None | int:
+    """Resolve the SearchPipeline given the CLI mode + caller-supplied override.
+
+    Priority:
+
+    1. Caller-supplied ``override`` always wins (tests inject fakes via
+       this kwarg; the CLI flag never overrides an explicit override).
+    2. ``--legacy-direct`` (i.e. ``via_prep=False``) returns ``None`` so
+       the SuiteRunner falls back to ``fact_store.search``.
+    3. Default (``via_prep=True``) constructs the production pipeline
+       via :func:`build_search_pipeline`. Returns exit code 2 with an
+       actionable error on ImportError.
+    """
+    if override is not None:
+        return override
+    if not via_prep:
+        return None
+    try:
+        from kairix.core.factory import build_search_pipeline
+    except ImportError as exc:
+        err_sink.write(
+            f"{_ERROR_PREFIX}cannot import build_search_pipeline — {exc}. "
+            f"fix: ensure your kairix install includes kairix.core.factory. "
+            f"next: re-run with --legacy-direct to bypass the pipeline.\n"
+        )
+        return 2
+    return build_search_pipeline()
 
 
 def _execute_suite(
@@ -192,6 +251,7 @@ def _execute_suite(
         fact_extractor=deps.fact_extractor,
         llm=deps.llm,
         paths=deps.paths,
+        search_pipeline=deps.search_pipeline,
     )
 
     try:
@@ -260,6 +320,34 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="as_json",
         help="Emit the SuiteResult as JSON instead of human-readable text.",
+    )
+    # Plan B-parity D3 — eval-vs-prep convergence. ``--via-prep`` is the
+    # new default: score every question through the same SearchPipeline
+    # ``kairix prep`` uses, so eval scores reflect the operator-visible
+    # path. ``--legacy-direct`` keeps the pre-D3 ``fact_store.search``
+    # behaviour around as a regression-debugging escape hatch — slated
+    # for removal in v2026.5.19.
+    pipeline_group = parser.add_mutually_exclusive_group()
+    pipeline_group.add_argument(
+        "--via-prep",
+        action="store_true",
+        dest="via_prep",
+        default=True,
+        help=(
+            "Route every question through the same SearchPipeline kairix prep uses "
+            "(default; intent classifier + fact federation + fusion + L0 synthesis). "
+            "Plan B-parity D3 convergence — eval scores now match the operator-visible "
+            "kairix prep path."
+        ),
+    )
+    pipeline_group.add_argument(
+        "--legacy-direct",
+        action="store_false",
+        dest="via_prep",
+        help=(
+            "Bypass the SearchPipeline; score against fact_store.search hits directly. "
+            "For regression debugging only — slated for removal in v2026.5.19."
+        ),
     )
     return parser
 
