@@ -72,6 +72,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Override fusion strategy for this run",
     )
     run_p.add_argument("--output", default=None, help="Directory to save JSON result")
+    run_p.add_argument(
+        "--mode",
+        default="legacy",
+        choices=["legacy", "single-shot"],
+        help=(
+            "Execution mode (default: legacy). 'single-shot' additionally surfaces "
+            "per-query QueryRunResult rows in the result diagnostics envelope via "
+            "the unified mode dispatcher. Concurrent + soak modes ship in the "
+            "P3.b / P3.c slices — use 'kairix probe search' / 'kairix soak run' "
+            "until then."
+        ),
+    )
 
     # validate
     val_p = sub.add_parser("validate", help="Validate suite YAML against kairix index")
@@ -215,6 +227,11 @@ def cmd_run(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> i
             for e in errors:
                 print(f"   {e}")
 
+    # Translate the CLI's "legacy" sentinel into None so existing callers (and
+    # the runner's no-op default branch) stay byte-identical.
+    mode_arg = getattr(args, "mode", "legacy")
+    mode_param: str | None = None if mode_arg == "legacy" else mode_arg
+
     result = d.run_benchmark(
         suite=suite,
         system=args.system,
@@ -222,6 +239,7 @@ def cmd_run(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> i
         output_dir=args.output,
         collection=collection,
         fusion_override=getattr(args, "fusion", None),
+        mode=mode_param,
     )
 
     print(format_interpretation(result))
