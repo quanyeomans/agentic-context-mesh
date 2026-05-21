@@ -36,6 +36,7 @@ _EXPECTED_TOOLS = {
     "entity_suggest",
     "entity_validate",
     "bootstrap",
+    "warm",
 }
 
 

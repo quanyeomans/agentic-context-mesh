@@ -106,6 +106,7 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "entity_suggest",
         "entity_validate",
         "bootstrap",
+        "warm",
     } == names
 
 
@@ -144,6 +145,66 @@ def test_build_server_each_wrapper_dispatches_to_tool_function_under_unit() -> N
         ("entity_suggest", {"text": "x"}),
         ("entity_validate", {"name": "x"}),
         ("bootstrap", {"agent": "alpha", "max_memory_days": 0}),
+        ("warm", {}),
     ]:
         payload = _call_tool(server, tool_name, args)
         assert isinstance(payload, dict), f"tool {tool_name!r} returned non-dict: {payload!r}"
+
+
+
+@pytest.mark.unit
+def test_warm_tool_marks_ready_after_success(monkeypatch) -> None:
+    """Manual warm-up opens the injected readiness gate after a successful warm result."""
+    import kairix.agents.mcp.server as mcp_server
+
+    marked: list[bool] = []
+    monkeypatch.setattr(
+        mcp_server,
+        "warm_retrieval_stack",
+        lambda: {"status": "ok", "ready": True, "elapsed_ms": 1, "steps": []},
+    )
+    server = build_server(host="127.0.0.1", port=18095, mark_ready=lambda: marked.append(True))
+
+    payload = _call_tool(server, "warm", {})
+
+    assert payload["ready"] is True
+    assert marked == [True]
+
+
+@pytest.mark.unit
+def test_warm_tool_does_not_mark_ready_after_failed_warm(monkeypatch) -> None:
+    """Failed warm-up returns the diagnostic payload and leaves the gate closed."""
+    import kairix.agents.mcp.server as mcp_server
+
+    marked: list[bool] = []
+    monkeypatch.setattr(
+        mcp_server,
+        "warm_retrieval_stack",
+        lambda: {"status": "error", "ready": False, "elapsed_ms": 1, "steps": []},
+    )
+    server = build_server(host="127.0.0.1", port=18096, mark_ready=lambda: marked.append(True))
+
+    payload = _call_tool(server, "warm", {})
+
+    assert payload["ready"] is False
+    assert marked == []
+
+
+@pytest.mark.unit
+def test_build_server_retrieval_tools_return_cold_start_envelope_when_not_ready() -> None:
+    """HTTP deployments can inject a readiness gate; retrieval tools must not run while cold."""
+    server = build_server(host="127.0.0.1", port=18094, readiness_check=lambda: False)
+
+    for tool_name, args in [
+        ("search", {"query": "x"}),
+        ("prep", {"query": "x"}),
+        ("timeline", {"query": "x"}),
+        ("research", {"query": "x"}),
+        ("contradict", {"content": "x"}),
+        ("brief", {"agent": "shape"}),
+        ("bootstrap", {"agent": "builder"}),
+    ]:
+        payload = _call_tool(server, tool_name, args)
+        assert payload["error_code"] == "KAIRIX_COLD_START"
+        assert payload["status"] == "retryable_not_ready"
+        assert "Do not answer from memory" in payload["agent_instruction"]
