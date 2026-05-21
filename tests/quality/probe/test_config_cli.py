@@ -38,6 +38,10 @@ import pytest
 
 from kairix.quality.probe.config_cli import main
 from kairix.quality.probe.config_runner import TransportSnapshot
+from kairix.quality.probe.perf_runner import (
+    OperationCallable,
+    build_default_operations,
+)
 from tests.fakes import FakeProvider, FakeProviderRegistry
 
 
@@ -415,3 +419,376 @@ def test_main_returns_unreachable_exit_code_when_provider_is_unreachable(
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert payload["status"] == "unreachable"
+
+
+# ---------------------------------------------------------------------------
+# --perf path — unit-scope coverage of the perf-dispatch branch in main()
+# and the helpers it calls (_run_perf_path, _render_perf_human,
+# _format_over_budget_suffix, _emit_perf_report).
+#
+# Each test calls main() directly with a tmp_path budgets file and
+# injected operations dict so the suite runs sub-second and exercises
+# every branch deterministically. The CLI is the public surface;
+# F5 (no internal-name imports) is satisfied because we only import
+# main + build_default_operations.
+# ---------------------------------------------------------------------------
+
+
+_PERF_BUDGETS: dict[str, dict[str, float]] = {
+    "kairix_prep_vault_only": {"p50_ms": 100.0, "p99_ms": 200.0},
+    "kairix_prep_facts_federated": {"p50_ms": 100.0, "p99_ms": 200.0},
+    "kairix_ingest_chat_per_turn": {"p50_ms": 100.0, "p99_ms": 200.0},
+    "kairix_ingest_chat_100_turn": {"p50_ms": 100.0, "p99_ms": 200.0},
+    "fact_find_conflicts": {"p50_ms": 100.0, "p99_ms": 200.0},
+    "federated_search_top_k_15": {"p50_ms": 100.0, "p99_ms": 200.0},
+}
+
+
+def _fast_op() -> None:
+    """Sub-millisecond zero-arg op — every iteration sits under 100ms p50."""
+    # Intentionally empty — timing measures the call-overhead floor.
+
+
+def _ingest_one_turn_op(_i: int) -> None:
+    """Per-iteration ingest stub — accepts the iteration index but is sub-ms."""
+    # Intentionally empty — timing measures the call-overhead floor.
+
+
+def _write_budgets(tmp_path: Path, payload: dict[str, dict[str, float]]) -> Path:
+    """Serialise ``payload`` to ``tmp_path/budgets.json`` and return the path."""
+    target = tmp_path / "budgets.json"
+    target.write_text(json.dumps(payload), encoding="utf-8")
+    return target
+
+
+def _wired_perf_operations() -> dict[str, OperationCallable]:
+    """Wire every non-Cap-#5 op to a fast closure for happy-path coverage."""
+    return build_default_operations(
+        prep_vault_only=_fast_op,
+        ingest_one_turn=_ingest_one_turn_op,
+        ingest_100_turn=_fast_op,
+        fact_find_conflicts=_fast_op,
+    )
+
+
+@pytest.mark.unit
+def test_main_perf_happy_path_renders_human_pass_lines(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """All ops within budget → rc 0 + PASS markers in human output.
+
+    Sabotage-proof: changing ``return 1 if report.any_violation else 0``
+    in ``_run_perf_path`` to ``return 1`` collapses the happy path
+    to a failing exit code; the rc=0 assertion fails.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    rc = main(
+        ["--perf", "3", "--perf-budgets", str(budgets_path)],
+        perf_operations=_wired_perf_operations(),
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "kairix probe-config --perf" in captured.out
+    assert "fact_find_conflicts" in captured.out
+    assert "PASS" in captured.out
+
+
+@pytest.mark.unit
+def test_main_perf_violation_renders_fail_marker_and_returns_one(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A slow op flips rc to 1 + the FAIL marker + over-budget suffix.
+
+    Sabotage-proof: removing the over-budget suffix branch in
+    ``_format_over_budget_suffix`` strips ``p50 +Xms over`` from the
+    FAIL line; the "+" substring check fails.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    ops = _wired_perf_operations()
+    slow_latencies = [150.0, 160.0, 170.0, 180.0, 190.0]
+    # Override one op to return canned over-budget latencies.
+    ops["fact_find_conflicts"] = lambda _n: list(slow_latencies)
+    rc = main(
+        ["--perf", "5", "--perf-budgets", str(budgets_path)],
+        perf_operations=ops,
+    )
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "FAIL" in captured.out
+    assert "fact_find_conflicts" in captured.out
+    # The over-budget suffix surfaces the breach quantity.
+    assert "over" in captured.out
+
+
+@pytest.mark.unit
+def test_main_perf_violation_p99_only_renders_p99_suffix(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An op whose p50 is within budget but p99 is over emits only the p99 suffix.
+
+    Sabotage-proof: removing the ``if over_p99 > 0:
+    details.append(...)`` branch in ``_format_over_budget_suffix``
+    drops the "p99 +" marker from output; the substring assertion
+    fails. The p50 budget is set high enough that the p50 stays
+    under it, while the p99 budget is tight enough that the highest
+    latency breaches it.
+    """
+    # Latencies sorted ascending: [10, 20, 30, 40, 250].
+    # nearest-rank p50 = 30, nearest-rank p99 = 250.
+    latencies = [10.0, 20.0, 30.0, 40.0, 250.0]
+    budgets = {"only_op": {"p50_ms": 100.0, "p99_ms": 100.0}}
+    budgets_path = _write_budgets(tmp_path, budgets)
+    rc = main(
+        ["--perf", "5", "--perf-budgets", str(budgets_path)],
+        perf_operations={"only_op": lambda _n: list(latencies)},
+    )
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "FAIL" in captured.out
+    assert "p99 +" in captured.out
+    # p50 (30) is below the budget (100) so the p50 suffix is absent.
+    assert "p50 +" not in captured.out
+
+
+@pytest.mark.unit
+def test_main_perf_json_envelope_emits_structured_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--json`` switches output to a parseable JSON envelope on stdout.
+
+    Sabotage-proof: dropping the ``if as_json:`` branch in
+    ``_emit_perf_report`` always emits human text; ``json.loads(...)``
+    raises JSONDecodeError and the test fails before any field check.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    rc = main(
+        ["--perf", "2", "--perf-budgets", str(budgets_path), "--json"],
+        perf_operations=_wired_perf_operations(),
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["iterations"] == 2
+    assert payload["any_violation"] is False
+    assert isinstance(payload["results"], list)
+    first = payload["results"][0]
+    for key in ("operation", "p50_ms", "p99_ms", "budget_p50", "budget_p99", "within_budget"):
+        assert key in first, f"JSON envelope missing key {key!r}"
+
+
+@pytest.mark.unit
+def test_main_perf_output_path_writes_json_to_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--perf --json --output FILE`` writes JSON to file, not stdout.
+
+    Sabotage-proof: removing the ``if output_path:`` branch in
+    ``_emit_perf_report`` makes the function always write to stdout;
+    the file ends up empty and the JSON parse fails.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    out_path = tmp_path / "perf.json"
+    rc = main(
+        [
+            "--perf",
+            "2",
+            "--perf-budgets",
+            str(budgets_path),
+            "--json",
+            "--output",
+            str(out_path),
+        ],
+        perf_operations=_wired_perf_operations(),
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["iterations"] == 2
+
+
+@pytest.mark.unit
+def test_main_perf_output_path_writes_human_to_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--perf --output FILE`` (no ``--json``) writes the human table to file.
+
+    Sabotage-proof: dropping the human branch of ``_emit_perf_report``
+    leaves the file empty for human mode; the substring assertion
+    on the table header fails.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    out_path = tmp_path / "perf.txt"
+    rc = main(
+        ["--perf", "2", "--perf-budgets", str(budgets_path), "--output", str(out_path)],
+        perf_operations=_wired_perf_operations(),
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    body = out_path.read_text(encoding="utf-8")
+    assert "kairix probe-config --perf" in body
+
+
+@pytest.mark.unit
+def test_main_perf_skipped_ops_render_skip_diagnostic(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Cap #5-skipped ops surface ``capability not yet wired`` in human output.
+
+    Sabotage-proof: dropping the ``if r.skipped: lines.append(...);
+    continue`` branch in ``_render_perf_human`` makes skipped ops
+    render as if they ran with p50=0/p99=0, hiding the operator-
+    facing diagnostic.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    rc = main(
+        ["--perf", "2", "--perf-budgets", str(budgets_path)],
+        perf_operations=build_default_operations(),  # everything skipped
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "capability not yet wired" in captured.out
+    assert "kairix_prep_facts_federated" in captured.out
+
+
+@pytest.mark.unit
+def test_main_perf_rejects_zero_iterations(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--perf 0`` → rc 2 + actionable stderr.
+
+    Sabotage-proof: removing the ``if iterations < 1: return
+    _invalid_args(...)`` guard in ``_run_perf_path`` lets the runner
+    raise ValueError up the stack, breaking the operator-facing
+    error contract.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    rc = main(
+        ["--perf", "0", "--perf-budgets", str(budgets_path)],
+        perf_operations=build_default_operations(),
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "perf iterations must be >= 1" in captured.err
+
+
+@pytest.mark.unit
+def test_main_perf_missing_budgets_file_returns_two(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nonexistent ``--perf-budgets`` → rc 2 + actionable ``fix:`` marker.
+
+    Sabotage-proof: removing the ``if not budgets_path.exists(): return
+    _invalid_args(...)`` guard makes ``load_budgets`` raise OSError
+    further down with a less actionable message.
+    """
+    rc = main(
+        ["--perf", "3", "--perf-budgets", str(tmp_path / "missing.json")],
+        perf_operations=build_default_operations(),
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "perf budgets file not found" in captured.err
+    assert "fix:" in captured.err
+
+
+@pytest.mark.unit
+def test_main_perf_malformed_budgets_file_returns_two(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A budgets file that fails JSON validation → rc 2 + diagnostic.
+
+    Sabotage-proof: removing the ``except (ValueError, json.JSONDecodeError,
+    OSError)`` block in ``_run_perf_path`` lets ``load_budgets`` raise
+    upward; the rc=2 contract breaks.
+    """
+    bad = tmp_path / "bad.json"
+    bad.write_text("not valid json", encoding="utf-8")
+    rc = main(
+        ["--perf", "3", "--perf-budgets", str(bad)],
+        perf_operations=build_default_operations(),
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "perf budgets file malformed" in captured.err
+
+
+@pytest.mark.unit
+def test_main_perf_uses_default_operations_when_none_injected(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No ``perf_operations`` kwarg → main wires ``build_default_operations()``.
+
+    Sabotage-proof: changing the default-fallback to
+    ``perf_operations if perf_operations is not None else {}`` makes
+    every op surface as the "no runner" skip — but the diagnostic
+    still appears, so we instead pin the production behaviour: every
+    budgets-key gets a result with the skip diagnostic shape.
+    Replacing the fallback with ``None`` would crash at
+    ``operations.get(op_name)`` and rc would not be 0.
+    """
+    budgets_path = _write_budgets(tmp_path, _PERF_BUDGETS)
+    rc = main(["--perf", "1", "--perf-budgets", str(budgets_path)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    # Every op is skipped by default → human renderer shows the diagnostic
+    # for every budgets entry.
+    assert captured.out.count("capability not yet wired") >= len(_PERF_BUDGETS)
+
+
+# ---------------------------------------------------------------------------
+# _default_env_provider_lookup — direct unit cover of the default lookup
+# path (covers config_cli.py lines 203 + 205).
+#
+# The default callable is exercised when callers DO NOT pass
+# env_provider_lookup. Production goes through kairix.paths.provider_name
+# which reads the env var. We don't set the env (F2), so the lookup
+# returns None and main() falls through to the "no provider configured"
+# branch. That's the canonical signal that the default lookup was
+# invoked and didn't crash.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_main_uses_default_env_lookup_when_kwarg_omitted(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Omitting ``env_provider_lookup`` exercises the default lookup path.
+
+    Sabotage-proof: deleting the ``if env_provider_lookup is None:
+    env_provider_lookup = _default_env_provider_lookup`` block in
+    main() makes the lookup callable be None, and the subsequent
+    ``env_provider_lookup()`` call raises TypeError. The rc=2 contract
+    breaks (we'd see an uncaught exception or a 1).
+
+    Production reads ``KAIRIX_PROVIDER`` through
+    ``kairix.paths.provider_name`` — without setting the env (F2
+    forbids it in tests) the lookup returns None, the CLI emits the
+    "no provider configured" error, and rc=2. That's the signal
+    that the default lookup was constructed and invoked successfully.
+    """
+    rc = main(
+        _short_argv(),
+        registry=_registry_with("openai"),
+        snapshotter=_StubSnapshotter(),
+        # NOTE: env_provider_lookup omitted on purpose.
+    )
+    # Either:
+    # - the env happens to be unset and we get rc=2 + "no provider configured"
+    # - the env happens to be set and we get rc=2 + "ProviderNotRegistered"
+    # Both confirm the default lookup callable was invoked successfully.
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "fix:" in captured.err

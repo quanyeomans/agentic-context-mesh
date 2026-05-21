@@ -8,8 +8,14 @@
 #   1. ruff lint (includes isort import ordering via I rules)
 #   2. ruff format (black-compatible formatting)
 #   3. mypy --strict type checking
-#   4. pytest (unit + bdd + contract)
-#   5. architecture fitness functions (F1-F6; F7 needs coverage.xml)
+#   4. pytest (unit + bdd + contract) with coverage.xml generation
+#   5. architecture fitness functions (F1-F30, including F7 per-file coverage
+#      floor — mirrors CI's Stage 2 invocation exactly so the historical
+#      safe-commit ↔ CI parity gap on F7 is closed)
+#
+# Escape hatch: KAIRIX_SKIP_COVERAGE=1 reverts to the pre-2026-05-21 behaviour
+# of skipping coverage generation + F7 enforcement. Useful for focused
+# refactors between commits in a series; CI still enforces F7 on push.
 #   6. detect-secrets
 #   7. confidential data check
 
@@ -80,9 +86,29 @@ if echo "$MYPY_OUT" | grep -q "error"; then
 fi
 echo -e "${GREEN}OK${NC}"
 
-# 4. Tests
-echo -n "  tests... "
-TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
+# 4. Tests (with coverage to enable F7 enforcement in the next step)
+#
+# Invocation mirrors CI's Stage 2 exactly (.github/workflows/ci.yml: "Unit +
+# BDD + Contract tests with coverage") so the safe-commit ↔ CI parity gap
+# that historically hid F7 failures from agents (KAIRIX_TRACE memory:
+# feedback_ci_parity_checklist) is closed. The coverage.xml emitted here
+# is consumed by run-all.sh's F7 check below.
+#
+# To temporarily skip the per-file coverage floor during a focused refactor
+# (e.g. between commits in a coverage-lift series), set KAIRIX_SKIP_COVERAGE=1.
+# This is an escape hatch — do NOT push commits whose F7 only passes because
+# coverage was skipped; CI will still enforce it.
+echo -n "  tests + coverage... "
+if [[ "${KAIRIX_SKIP_COVERAGE:-0}" == "1" ]]; then
+    TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
+    COVERAGE_SKIPPED=1
+else
+    TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 \
+        -m "unit or bdd or contract" \
+        --cov=kairix --cov-report=xml:coverage.xml \
+        --cov-fail-under=80 2>&1)
+    COVERAGE_SKIPPED=0
+fi
 if echo "$TEST_OUT" | grep -qE "[0-9]+ failed"; then
     echo -e "${RED}FAIL${NC}"
     echo "$TEST_OUT" | grep -E "FAILED|passed|failed" | tail -10
@@ -93,17 +119,33 @@ if ! echo "$TEST_OUT" | grep -qE "[0-9]+ passed"; then
     exit 1
 fi
 PASSED=$(echo "$TEST_OUT" | grep -oE '[0-9]+ passed')
-echo -e "${GREEN}OK${NC} ($PASSED)"
+if [[ "$COVERAGE_SKIPPED" == "1" ]]; then
+    echo -e "${GREEN}OK${NC} ($PASSED, coverage skipped via KAIRIX_SKIP_COVERAGE=1)"
+else
+    TOTAL_COV=$(echo "$TEST_OUT" | grep -oE 'Total coverage: [0-9.]+%' | head -1)
+    echo -e "${GREEN}OK${NC} ($PASSED, $TOTAL_COV)"
+fi
 
-# 5. Architecture fitness functions (F1-F6 — F7 runs in CI on the coverage.xml
-# emitted by the unit-and-type job).
+# 5. Architecture fitness functions (F1-F30)
+# F7 (per-file coverage floor) runs against the coverage.xml produced in step 4,
+# closing the historical safe-commit ↔ CI parity gap. Falls back to skip-mode
+# when KAIRIX_SKIP_COVERAGE=1 was set in step 4.
 echo -n "  arch fitness... "
-ARCH_OUT=$(bash scripts/checks/run-all.sh --skip-coverage 2>&1) || {
-    echo -e "${RED}FAIL${NC}"
-    echo "$ARCH_OUT" | tail -30
-    echo "See docs/architecture/fitness-functions.md for remediation."
-    exit 1
-}
+if [[ "${COVERAGE_SKIPPED:-0}" == "1" ]]; then
+    ARCH_OUT=$(bash scripts/checks/run-all.sh --skip-coverage 2>&1) || {
+        echo -e "${RED}FAIL${NC}"
+        echo "$ARCH_OUT" | tail -30
+        echo "See docs/architecture/fitness-functions.md for remediation."
+        exit 1
+    }
+else
+    ARCH_OUT=$(bash scripts/checks/run-all.sh 2>&1) || {
+        echo -e "${RED}FAIL${NC}"
+        echo "$ARCH_OUT" | tail -30
+        echo "See docs/architecture/fitness-functions.md for remediation."
+        exit 1
+    }
+fi
 echo -e "${GREEN}OK${NC}"
 
 # 6. Secret detection — pre-commit hook mirrors CI; do not invoke `detect-secrets scan`

@@ -1,0 +1,92 @@
+[
+  {
+    "entity": "client-omega",
+    "attribute": "industry",
+    "value": "last-mile delivery / logistics platform",
+    "evidence_turn_ids": ["eng-alpha-s001-t003"]
+  },
+  {
+    "entity": "client-omega",
+    "attribute": "headquarters",
+    "value": "Wellington",
+    "evidence_turn_ids": ["eng-alpha-s001-t003"]
+  },
+  {
+    "entity": "client-omega",
+    "attribute": "staff-count",
+    "value": "approximately 180",
+    "evidence_turn_ids": ["eng-alpha-s001-t003"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "executive-sponsor",
+    "value": "exec-sigma",
+    "evidence_turn_ids": ["eng-alpha-s001-t005"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "day-to-day-contact",
+    "value": "pm-tau",
+    "evidence_turn_ids": ["eng-alpha-s001-t005"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "budget",
+    "value": "$480k fixed-scope",
+    "evidence_turn_ids": ["eng-alpha-s001-t007"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "duration",
+    "value": "12 weeks",
+    "evidence_turn_ids": ["eng-alpha-s001-t007"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "kickoff-date",
+    "value": "2026-02-09",
+    "evidence_turn_ids": ["eng-alpha-s001-t013"]
+  },
+  {
+    "entity": "client-omega",
+    "attribute": "primary-cloud",
+    "value": "cloud-zeta",
+    "evidence_turn_ids": ["eng-alpha-s002-t007", "eng-alpha-s001-t011"]
+  },
+  {
+    "entity": "client-omega",
+    "attribute": "routes-api-language",
+    "value": "Go",
+    "evidence_turn_ids": ["eng-alpha-s002-t001"]
+  },
+  {
+    "entity": "client-omega",
+    "attribute": "primary-database",
+    "value": "postgres 15",
+    "evidence_turn_ids": ["eng-alpha-s002-t003"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "milestone-1-date",
+    "value": "2026-02-23",
+    "evidence_turn_ids": ["eng-alpha-s003-t003"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "milestone-3-date",
+    "value": "2026-04-27",
+    "evidence_turn_ids": ["eng-alpha-s003-t003"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "top-quality-concern",
+    "value": "reliability",
+    "evidence_turn_ids": ["eng-alpha-s003-t011"]
+  },
+  {
+    "entity": "engagement-alpha",
+    "attribute": "team-size-ours",
+    "value": "four (agent-alpha lead, agent-beta backend, agent-gamma frontend, growth-coach manager)",
+    "evidence_turn_ids": ["eng-alpha-s004-t001"]
+  }
+]

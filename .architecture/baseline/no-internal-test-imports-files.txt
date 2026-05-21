@@ -1,0 +1,29 @@
+# F5 — pre-existing tests reaching into kairix.* private (_-prefixed) names
+# via attribute access on imported modules. Grandfathered at the broadening
+# point (2026-05-21): the narrow ImportFrom-only F5 missed these patterns;
+# the broadened detector catches attribute access on aliased kairix modules
+# too. Net direction is monotonic — each entry should be lifted by adding
+# a public-surface test that drives the same branch, OR by marking the
+# underlying defensive branch ``# pragma: no cover`` with rationale.
+#
+# Follow-up: tests/use_cases/test_eval_suite.py is the largest single
+# offender (14 violations) and tied to P-Wiring's legitimate-but-imperfect
+# factory_loader pattern; refactor under a focused worktree.
+tests/bdd/steps/vec_index_batched_metadata_steps.py
+tests/benchmark/test_cli_helpers.py
+tests/contracts/test_cli_mcp_parity_timeline.py
+tests/embed/test_cli_unit.py
+tests/embed/test_deps.py
+tests/embed/test_use_cases_defaults.py
+tests/integration/test_client_pool_e2e.py
+tests/knowledge/store/test_cli_unit.py
+tests/onboard/test_check.py
+tests/onboard/test_cli.py
+tests/platform/warm/test_cli.py
+tests/quality/soak/test_cli.py
+tests/search/test_vec_index.py
+tests/setup/test_wizard.py
+tests/summaries/test_cli_unit.py
+tests/use_cases/test_eval_suite.py
+tests/wikilinks/test_audit_unit.py
+tests/wikilinks/test_cli_unit.py

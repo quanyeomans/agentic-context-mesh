@@ -1,0 +1,68 @@
+[
+  {
+    "entity": "partner-rollout",
+    "attribute": "live-partner-count-2026-01-15",
+    "value": "38",
+    "evidence_turn_ids": ["eng-epsilon-s001-t002"]
+  },
+  {
+    "entity": "partner-rollout",
+    "attribute": "live-partner-count-2026-03-12",
+    "value": "70",
+    "evidence_turn_ids": ["eng-epsilon-s002-t001"]
+  },
+  {
+    "entity": "partner-rollout",
+    "attribute": "live-partner-count-2026-04-30",
+    "value": "131",
+    "evidence_turn_ids": ["eng-epsilon-s004-t006"]
+  },
+  {
+    "entity": "partner-rollout",
+    "attribute": "q2-target",
+    "value": "180 live partners by end of June 2026",
+    "evidence_turn_ids": ["eng-epsilon-s004-t008"]
+  },
+  {
+    "entity": "fraud-check",
+    "attribute": "rollout-date",
+    "value": "approximately 2026-02-05 (5 weeks before 2026-03-12)",
+    "evidence_turn_ids": ["eng-epsilon-s002-t010"]
+  },
+  {
+    "entity": "tax-doc-upload",
+    "attribute": "post-onboarding-move-date",
+    "value": "2026-03-26",
+    "evidence_turn_ids": ["eng-epsilon-s004-t002"]
+  },
+  {
+    "entity": "q1-review",
+    "attribute": "date",
+    "value": "2026-01-22",
+    "evidence_turn_ids": ["eng-epsilon-s001-t011"]
+  },
+  {
+    "entity": "mid-quarter-exec-review",
+    "attribute": "date",
+    "value": "2026-03-24",
+    "evidence_turn_ids": ["eng-epsilon-s002-t012"]
+  },
+  {
+    "entity": "time-to-first-transaction-median",
+    "attribute": "value-2026-01",
+    "value": "6 days",
+    "evidence_turn_ids": ["eng-epsilon-s002-t006"]
+  },
+  {
+    "entity": "time-to-first-transaction-median",
+    "attribute": "value-2026-04-30",
+    "value": "5 days",
+    "evidence_turn_ids": ["eng-epsilon-s004-t002"]
+  },
+  {
+    "entity": "partner-tier-4-launch",
+    "attribute": "scheduled-quarter",
+    "value": "Q3 2026 (first wave early July)",
+    "evidence_turn_ids": ["eng-epsilon-s004-t008"]
+  }
+]

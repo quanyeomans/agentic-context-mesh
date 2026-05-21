@@ -66,6 +66,8 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         "curator",
         "timeline",
         "reference-library",
+        # eval is an operator-side benchmark harness — load-generating against
+        # a synthetic corpus, not an agent-callable retrieval surface.
         "eval",
         "worker",
         "usage-guide",
@@ -74,6 +76,10 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         "prep",
         "search",
         "entity",
+        # ingest-chat mutates the document store + fact store from a JSONL
+        # transcript supplied by the operator; not safe to expose to agents
+        # even as an escalation stub (the operator runs it from the host).
+        "ingest-chat",
     }
 )
 

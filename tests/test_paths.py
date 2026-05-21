@@ -748,3 +748,37 @@ class TestEmbedCoalesceMaxBatch:
 
         monkeypatch.setenv("KAIRIX_EMBED_COALESCE_MAX_BATCH", "nope")
         assert embed_coalesce_max_batch() == 16
+
+
+class TestTraceEnabled:
+    """Round-trip tests for ``trace_enabled`` (Plan B-parity D4)."""
+
+    @pytest.mark.unit
+    def test_default_off(self, monkeypatch) -> None:
+        """Unset env → trace stays off."""
+        from kairix.paths import trace_enabled
+
+        monkeypatch.delenv("KAIRIX_TRACE", raising=False)
+        assert trace_enabled() is False
+
+    @pytest.mark.unit
+    def test_one_turns_on(self, monkeypatch) -> None:
+        """``KAIRIX_TRACE=1`` opts in."""
+        from kairix.paths import trace_enabled
+
+        monkeypatch.setenv("KAIRIX_TRACE", "1")
+        assert trace_enabled() is True
+
+    @pytest.mark.unit
+    def test_other_values_stay_off(self, monkeypatch) -> None:
+        """Only the literal ``1`` opts in — ``true``/``yes`` etc. stay off.
+
+        Sabotage: relax to ``bool(value)`` and ``KAIRIX_TRACE=0`` would
+        turn tracing ON. Pinning the literal-1 contract here.
+        """
+        from kairix.paths import trace_enabled
+
+        monkeypatch.setenv("KAIRIX_TRACE", "true")
+        assert trace_enabled() is False
+        monkeypatch.setenv("KAIRIX_TRACE", "0")
+        assert trace_enabled() is False

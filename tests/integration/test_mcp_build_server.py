@@ -54,6 +54,9 @@ _EXPECTED_TOOLS = {
     "embed",
     "store_crawl",
     "embed_rebuild_fts",
+    # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
+    "ingest_chat",
+    "facts_about",
 }
 
 

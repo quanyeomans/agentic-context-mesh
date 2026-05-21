@@ -1149,3 +1149,481 @@ class FakeProviderRegistry:
 
     def available(self) -> list[str]:
         return sorted(self._providers)
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 — memory-backend Protocol fakes.
+#
+# FakeMemory satisfies the Memory Protocol (id/content/score/metadata).
+# FakeMemoryStore implements the MemoryStore surface as a dict-backed
+# in-memory store with naive substring scoring — enough to exercise
+# Protocol conformance and round-trip semantics without dragging in a
+# real backend. FakeConversationStore extends with add_turn for the
+# chat-paradigm protocol probe.
+# ---------------------------------------------------------------------------
+
+
+class FakeMemory:
+    """Minimal Memory satisfying the runtime-checkable Memory Protocol."""
+
+    def __init__(
+        self,
+        *,
+        id: str,
+        content: str,
+        score: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self._id = id
+        self._content = content
+        self._score = score
+        self._metadata = dict(metadata or {})
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def content(self) -> str:
+        return self._content
+
+    @property
+    def score(self) -> float:
+        return self._score
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return dict(self._metadata)
+
+
+class FakeMemoryStore:
+    """In-memory MemoryStore — dict-backed, naive substring scoring.
+
+    Satisfies the runtime-checkable ``MemoryStore`` Protocol. Used by
+    contract tests to pin the add/search/update/delete round-trip
+    semantics without standing up a real backend.
+
+    Search scoring: returns memories whose content shares any word
+    with the query, sorted by overlap ratio. Crude on purpose — the
+    point of the fake is Protocol conformance, not retrieval quality.
+    """
+
+    def __init__(self) -> None:
+        self._memories: dict[str, FakeMemory] = {}
+        self._next_id = 0
+
+    def _mint_id(self) -> str:
+        self._next_id += 1
+        return f"fake-mem-{self._next_id:04d}"
+
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str:
+        mem_id = self._mint_id()
+        self._memories[mem_id] = FakeMemory(id=mem_id, content=content, score=1.0, metadata=metadata)
+        return mem_id
+
+    def search(self, query: str, *, top_k: int = 10) -> list[FakeMemory]:
+        q_words = set(query.lower().split())
+        scored: list[tuple[float, FakeMemory]] = []
+        for mem in self._memories.values():
+            c_words = set(mem.content.lower().split())
+            overlap = len(q_words & c_words)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(q_words), 1)
+            scored.append((score, FakeMemory(id=mem.id, content=mem.content, score=score, metadata=mem.metadata)))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [m for _, m in scored[:top_k]]
+
+    def update(self, memory_id: str, content: str) -> None:
+        if memory_id not in self._memories:
+            raise KeyError(f"FakeMemoryStore: no memory with id {memory_id!r}")
+        existing = self._memories[memory_id]
+        self._memories[memory_id] = FakeMemory(
+            id=existing.id,
+            content=content,
+            score=existing.score,
+            metadata=existing.metadata,
+        )
+
+    def delete(self, memory_id: str) -> None:
+        self._memories.pop(memory_id, None)
+
+
+class FakeConversationStore(FakeMemoryStore):
+    """FakeMemoryStore + turn ingestion for the ConversationStore Protocol probe.
+
+    ``add_turn`` records the turn metadata alongside the content so
+    benchmark tests can verify that timestamp/role/conversation_id
+    round-trip through the search surface.
+    """
+
+    def add_turn(
+        self,
+        *,
+        message: str,
+        role: str,
+        conversation_id: str,
+        timestamp: str | None = None,
+    ) -> str:
+        metadata = {
+            "role": role,
+            "conversation_id": conversation_id,
+            "timestamp": timestamp or "1970-01-01T00:00:00Z",
+        }
+        return self.add(message, metadata=metadata)
+
+
+# ---------------------------------------------------------------------------
+# Plan B-parity — fact-extraction Protocol fakes.
+#
+# FakeFactRecord satisfies the FactRecord Protocol (read-only view of
+# the canonical entity-attribute-value shape). FakeFactExtractor returns
+# scripted records so contract tests can pin consumer behaviour without
+# an LLM call. FakeFactStore is a dict-backed in-memory implementation
+# of the FactStore Protocol — exercises add/search/find_conflicts/
+# supersede round-trip semantics without standing up SQLite.
+# ---------------------------------------------------------------------------
+
+
+class FakeFactRecord:
+    """Minimal FactRecord satisfying the runtime-checkable Protocol.
+
+    Properties mirror the Protocol's read surface; backing store is
+    plain instance state so test code can construct records inline.
+    """
+
+    def __init__(
+        self,
+        *,
+        id: str,
+        entity: str,
+        attribute: str,
+        value: str,
+        confidence: float = 0.9,
+        source_turn_ids: tuple[str, ...] = (),
+        extracted_at: str = "1970-01-01T00:00:00Z",
+        superseded_by: str | None = None,
+        namespace: str = "shared",
+        evidence_at: str | None = None,
+    ) -> None:
+        self._id = id
+        self._entity = entity
+        self._attribute = attribute
+        self._value = value
+        self._confidence = confidence
+        self._source_turn_ids = source_turn_ids
+        self._extracted_at = extracted_at
+        self._superseded_by = superseded_by
+        self._namespace = namespace
+        self._evidence_at = evidence_at
+
+    @property
+    def id(self) -> str:
+        return self._id
+
+    @property
+    def entity(self) -> str:
+        return self._entity
+
+    @property
+    def attribute(self) -> str:
+        return self._attribute
+
+    @property
+    def value(self) -> str:
+        return self._value
+
+    @property
+    def confidence(self) -> float:
+        return self._confidence
+
+    @property
+    def source_turn_ids(self) -> tuple[str, ...]:
+        return self._source_turn_ids
+
+    @property
+    def extracted_at(self) -> str:
+        return self._extracted_at
+
+    @property
+    def superseded_by(self) -> str | None:
+        return self._superseded_by
+
+    @property
+    def namespace(self) -> str:
+        return self._namespace
+
+    @property
+    def evidence_at(self) -> str | None:
+        return self._evidence_at
+
+
+class FakeFactHit:
+    """Minimal FactHit Protocol satisfier — ``record`` + ``score`` properties."""
+
+    def __init__(self, *, record: Any, score: float) -> None:
+        self._record = record
+        self._score = score
+
+    @property
+    def record(self) -> Any:
+        return self._record
+
+    @property
+    def score(self) -> float:
+        return self._score
+
+
+class FakeFactExtractor:
+    """Scripted FactExtractor — returns a preconfigured list of facts.
+
+    Production-shape: an LLM-driven extractor. The fake skips the LLM
+    call entirely so contract tests run sub-millisecond. Pass
+    ``scripted_facts=[FakeFactRecord(...)]`` to configure what
+    ``extract`` returns regardless of ``turns``.
+
+    Records every ``extract`` invocation in ``calls`` for assertion.
+    """
+
+    def __init__(self, scripted_facts: list[Any] | None = None) -> None:
+        self._scripted_facts = list(scripted_facts or [])
+        self.calls: list[dict[str, Any]] = []
+
+    def extract(
+        self,
+        *,
+        turns: list[dict[str, Any]],
+        window_hint: dict[str, Any] | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> list[Any]:
+        self.calls.append(
+            {
+                "turns": list(turns),
+                "window_hint": window_hint,
+                "session_metadata": session_metadata,
+            }
+        )
+        return list(self._scripted_facts)
+
+
+class FakeFactStore:
+    """Dict-backed in-memory FactStore — pins add/search/find_conflicts/supersede.
+
+    Search scoring is naive substring overlap on ``value`` — enough
+    to exercise the Protocol round-trip without a real BM25/vector
+    backend. ``namespace`` filtering is honoured because the
+    SearchPipeline federation uses it for engagement-scoped recall.
+    """
+
+    def __init__(self) -> None:
+        self._facts: dict[str, Any] = {}
+
+    def add(self, fact: Any) -> None:
+        # Idempotent on the fact's deterministic id (Protocol contract).
+        if fact.id not in self._facts:
+            self._facts[fact.id] = fact
+
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[Any]:
+        q_words = set(query.lower().split())
+        scored: list[tuple[float, FakeFactHit]] = []
+        for fact in self._facts.values():
+            if fact.superseded_by is not None:
+                continue
+            if namespace is not None and fact.namespace != namespace:
+                continue
+            haystack_words = set((fact.entity + " " + fact.attribute + " " + fact.value).lower().split())
+            overlap = len(q_words & haystack_words)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(q_words), 1)
+            scored.append((score, FakeFactHit(record=fact, score=score)))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [hit for _, hit in scored[:top_k]]
+
+    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[Any]:
+        return [
+            fact
+            for fact in self._facts.values()
+            if fact.superseded_by is None
+            and fact.entity == entity
+            and fact.attribute == attribute
+            and (namespace is None or fact.namespace == namespace)
+        ]
+
+    def supersede(self, *, old_id: str, new_id: str) -> None:
+        if old_id not in self._facts:
+            raise KeyError(f"FakeFactStore: no fact with id {old_id!r}")
+        if new_id not in self._facts:
+            raise KeyError(f"FakeFactStore: no fact with id {new_id!r}")
+        old = self._facts[old_id]
+        # Re-mint a record carrying the superseded_by link. Preserve
+        # the temporal anchor (``evidence_at``) too — supersession
+        # marks a *newer* fact about the same (entity, attribute);
+        # the old fact's event-time anchor stays valid for audit.
+        self._facts[old_id] = FakeFactRecord(
+            id=old.id,
+            entity=old.entity,
+            attribute=old.attribute,
+            value=old.value,
+            confidence=old.confidence,
+            source_turn_ids=old.source_turn_ids,
+            extracted_at=old.extracted_at,
+            superseded_by=new_id,
+            namespace=old.namespace,
+            evidence_at=getattr(old, "evidence_at", None),
+        )
+
+
+class _FakeBudgetedResult:
+    """Minimal stand-in for :class:`kairix.core.search.budget.BudgetedResult`.
+
+    Exposes the ``.result`` (inner FusedResult-ish object), ``.content``
+    (the text that ``_search_result_to_context`` consumes), ``.tier``,
+    and ``.token_estimate`` fields the adapter reads. Built from
+    ``FakeSearchPipeline`` so eval tests can pin the SearchPipeline-mode
+    branch without spinning up a full pipeline.
+    """
+
+    def __init__(self, *, result: Any, content: str, tier: str = "L2", token_estimate: int = 0) -> None:
+        self.result = result
+        self.content = content
+        self.tier = tier
+        self.token_estimate = token_estimate
+
+
+class _FakeFusedRow:
+    """Minimal FusedResult-shaped row carrying ``path`` + ``title``.
+
+    Used by FakeSearchPipeline to compose synthetic SearchResult.results
+    lists. Adapter distinguishes fact rows from chunk rows by the
+    ``facts://`` path prefix, so the two flavours just differ on
+    ``path``.
+    """
+
+    def __init__(self, *, path: str, title: str = "") -> None:
+        self.path = path
+        self.title = title
+
+
+class FakeSearchPipeline:
+    """Protocol-compliant stand-in for :class:`SearchPipeline`.
+
+    Records every ``search(...)`` call in ``calls`` for assertion. The
+    response is scripted: pass ``scripted_results`` to control the
+    returned ``SearchResult.results`` list. Each entry is a
+    ``_FakeBudgetedResult`` so the adapter under test sees the same
+    shape it would in production.
+
+    The fake exposes the minimum surface eval needs:
+      * ``search(query, ...)`` → object with ``.results`` attribute.
+    No real intent classification, fusion, or budget — the unit tests
+    in ``tests/quality/eval/test_suite_runner_pipeline_path.py`` pin
+    the runner's *use* of the pipeline, not the pipeline itself.
+    """
+
+    def __init__(self, scripted_results: list[Any] | None = None) -> None:
+        self._scripted_results = list(scripted_results or [])
+        self.calls: list[dict[str, Any]] = []
+
+    def search(self, query: str, **kwargs: Any) -> Any:
+        self.calls.append({"query": query, "kwargs": kwargs})
+        return _FakeSearchResult(results=list(self._scripted_results))
+
+    @staticmethod
+    def make_fact_row(*, fact_id: str, entity: str, attribute: str, value: str) -> _FakeBudgetedResult:
+        """Build a fact-row BudgetedResult matching production's _fused_from_fact_hit shape."""
+        snippet = f"{entity} {attribute}: {value}"
+        return _FakeBudgetedResult(
+            result=_FakeFusedRow(path=f"facts://{fact_id}", title=f"{entity} — {attribute}"),
+            content=snippet,
+            tier="L2",
+            token_estimate=len(snippet) // 4,
+        )
+
+    @staticmethod
+    def make_chunk_row(*, path: str, title: str, content: str) -> _FakeBudgetedResult:
+        """Build a chunk-row BudgetedResult — non-facts path, full content text."""
+        return _FakeBudgetedResult(
+            result=_FakeFusedRow(path=path, title=title),
+            content=content,
+            tier="L2",
+            token_estimate=len(content) // 4,
+        )
+
+
+class _FakeSearchResult:
+    """Minimal SearchResult shape — just the ``.results`` field the adapter reads."""
+
+    def __init__(self, *, results: list[Any]) -> None:
+        self.results = results
+
+
+# ---------------------------------------------------------------------------
+# Spike C1 unified corpus-ingest Protocol fakes.
+#
+# FakeDocumentWriter satisfies the DocumentWriter Protocol — captures
+# every write call in ``writes`` and returns a synthetic Path so the
+# ingest_corpus result can populate ``document_paths`` without touching
+# the filesystem. FakeCorpusEmbedder satisfies the CorpusEmbedder
+# Protocol — captures every embed call in ``calls`` and returns a
+# scripted chunk count (or default 0).
+# ---------------------------------------------------------------------------
+
+
+class FakeDocumentWriter:
+    """Capture-only DocumentWriter — records writes, no filesystem I/O.
+
+    Pass ``base_path=Path(...)`` to control the parent directory the
+    fake's returned Paths sit under. Defaults to ``/fake/documents``
+    so the sentinel surfaces if tests accidentally try to read what
+    they wrote.
+
+    Every ``write(...)`` call lands in ``writes`` as a dict carrying
+    the four kwargs; the returned Path is
+    ``<base_path> / <corpus_id> / <session_id>.md``.
+    """
+
+    def __init__(self, base_path: Path | str = "/fake/documents") -> None:
+        self._base_path = Path(base_path)
+        self.writes: list[dict[str, Any]] = []
+
+    def write(
+        self,
+        *,
+        corpus_id: str,
+        session_id: str,
+        rendered_body: str,
+        frontmatter: dict[str, Any],
+    ) -> Path:
+        self.writes.append(
+            {
+                "corpus_id": corpus_id,
+                "session_id": session_id,
+                "rendered_body": rendered_body,
+                "frontmatter": dict(frontmatter),
+            }
+        )
+        return self._base_path / corpus_id / f"{session_id}.md"
+
+
+class FakeCorpusEmbedder:
+    """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
+
+    Pass ``scripted_chunks_per_call=[3, 1, 0]`` to make consecutive
+    ``embed(...)`` calls return 3, 1, 0 chunks. When the script runs
+    out, the fake returns the final value (default 0). Every call's
+    paths argument lands in ``calls`` so tests can verify the
+    embedder saw the documents the writer just produced.
+    """
+
+    def __init__(self, scripted_chunks_per_call: list[int] | None = None) -> None:
+        self._scripted = list(scripted_chunks_per_call or [])
+        self.calls: list[tuple[Path, ...]] = []
+
+    def embed(self, paths_to_embed: tuple[Path, ...]) -> int:
+        self.calls.append(tuple(paths_to_embed))
+        if not self._scripted:
+            return 0
+        if len(self.calls) <= len(self._scripted):
+            return self._scripted[len(self.calls) - 1]
+        return self._scripted[-1]

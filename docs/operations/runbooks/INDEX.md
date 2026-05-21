@@ -45,6 +45,11 @@ Operational procedures and incident runbooks for kairix deployments.
 | [how-to-configure-pypi-trusted-publisher](how-to-configure-pypi-trusted-publisher.md) | One-time PyPI Trusted Publisher setup so GitHub Releases auto-publish without long-lived tokens |
 | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) | Choose a transport (stdio/http/sse), wire `/mcp` and `/sse` mounts, configure agent registry, verify with `/healthz` |
 | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) | Migrate Claude Desktop / Claude Code / OpenClaw / custom Python or Node clients from `/sse` to `/mcp` |
+| [plan-b-parity-runbook](../plan-b-parity-runbook.md) | Consolidated single-page operator workflow — pre-flight → hydrate → ingest → query → validate → cost model → teardown, with cross-links into the deep docs below |
+| [consultancy-in-a-box](../consultancy-in-a-box.md) | Per-engagement workflow — spin up container, ingest knowledge store + transcripts, query, validate, teardown |
+| [fact-extractor](../fact-extractor.md) | How the LLM fact extractor works, when to enable, cost model, prompt customisation |
+| [eval-suite](../eval-suite.md) | Running `kairix eval`, picking metrics + backends, the regression-gate CI pattern |
+| [MCP-ingest-tools](../MCP-ingest-tools.md) | Agent-callable `ingest_chat` and `facts_about` — namespace fence, safety boundaries, calling patterns |
 
 ---
 

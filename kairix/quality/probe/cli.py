@@ -425,7 +425,23 @@ def _run_burst(args: argparse.Namespace) -> int:
     return _emit_burst(args)
 
 
+_DEPRECATION_WARNING = (
+    "DEPRECATION: `kairix probe` is folded into `kairix benchmark run --mode "
+    "concurrent` in the unified quality CLI. Slated for removal in v2026.6.x "
+    "— one release of warnings before the legacy surface is dropped.\n"
+    "  fix: migrate to `kairix benchmark run --suite <suite> --mode concurrent "
+    "[--metrics latency] [--gates]`.\n"
+    "  next: P3.b ships the unified concurrent dispatcher; until then "
+    "`kairix probe search` / `kairix probe burst` remain functional.\n"
+    "  run: kairix benchmark run --help\n"
+)
+
+
 def main(argv: list[str] | None = None) -> int:
+    # P5 unification: emit a deprecation warning on every invocation; the
+    # legacy probe/burst behaviour stays unchanged through v2026.6.x.
+    sys.stderr.write(_DEPRECATION_WARNING)
+
     args = _build_parser().parse_args(argv)
 
     if args.subcommand == "search":

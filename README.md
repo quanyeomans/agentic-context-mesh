@@ -256,6 +256,25 @@ See the [full quick-start guide](docs/getting-started/quick-start.md) for the de
 
 **Ships with:** 5,800+ reference library documents and a 200-case gold suite for immediate quality verification.
 
+### Conversational memory
+
+Kairix also ingests chat-shaped data (meeting transcripts, agent coordination channels, interview notes) and distils it into structured, evidence-cited facts your agents can query directly.
+
+```bash
+# Ingest a JSONL transcript; one window of turns at a time goes through the LLM fact extractor
+kairix ingest-chat ./session-001.jsonl --namespace engagement-alpha
+```
+
+The fact extractor surfaces claims like `(agent-alpha, current-engagement, engagement-alpha)` with citations back to the source turns; the consolidation pass flags contradictions when a new conversation overrides a prior decision; and `kairix eval` scores retrieval + extraction quality against a ground-truth corpus so you can spot regressions before they reach a live agent.
+
+| Topic | Where to look |
+|-------|---------------|
+| End-to-end engagement workflow | [docs/operations/consultancy-in-a-box.md](docs/operations/consultancy-in-a-box.md) |
+| How the fact extractor works (cost, prompt, when to enable) | [docs/operations/fact-extractor.md](docs/operations/fact-extractor.md) |
+| `kairix eval` suite + regression-gate | [docs/operations/eval-suite.md](docs/operations/eval-suite.md) |
+| Agent-callable MCP tools (`ingest_chat`, `facts_about`) | [docs/operations/MCP-ingest-tools.md](docs/operations/MCP-ingest-tools.md) |
+| Design ADR — why the fact layer exists | [docs/architecture/fact-layer.md](docs/architecture/fact-layer.md) |
+
 ---
 
 ## How your data is handled

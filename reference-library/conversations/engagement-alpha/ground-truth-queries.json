@@ -1,0 +1,50 @@
+[
+  {
+    "question": "Who is the executive sponsor on engagement-alpha?",
+    "answer": "exec-sigma",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-alpha-s001-t005"]
+  },
+  {
+    "question": "What cloud does client-omega run on?",
+    "answer": "cloud-zeta",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-alpha-s001-t011"]
+  },
+  {
+    "question": "What is the budget for engagement-alpha?",
+    "answer": "$480k, fixed-scope, twelve weeks",
+    "category": "single-hop",
+    "evidence_turn_ids": ["eng-alpha-s001-t007"]
+  },
+  {
+    "question": "Which region cuts over first and why?",
+    "answer": "Hawke's Bay — it has the smallest route volume (~400 routes/day) so it serves as the canary before Wellington and Auckland.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-alpha-s003-t005", "eng-alpha-s003-t007"]
+  },
+  {
+    "question": "What does pm-tau do on the client side?",
+    "answer": "pm-tau leads the platform engineering team (day-to-day contact) and also wears the product owner hat for engagement-alpha — there is no separate PM.",
+    "category": "multi-hop",
+    "evidence_turn_ids": ["eng-alpha-s001-t005", "eng-alpha-s004-t009"]
+  },
+  {
+    "question": "When does milestone-1 land?",
+    "answer": "2026-02-23, three weeks after kickoff.",
+    "category": "temporal",
+    "evidence_turn_ids": ["eng-alpha-s003-t003"]
+  },
+  {
+    "question": "Summarise what engagement-alpha is delivering and how risky the team thinks the cutover is.",
+    "answer": "Engagement-alpha is replacing client-omega's legacy JSP dispatcher console with a new console capable of 40k routes/day at sub-200ms p95 latency. The cutover risk profile is high because dispatcher work runs 24/7 with no maintenance window, so the team plans a two-week shadow-traffic dark-launch followed by a per-region cutover that starts with the smallest region (Hawke's Bay) as a canary.",
+    "category": "open-domain",
+    "evidence_turn_ids": ["eng-alpha-s001-t009", "eng-alpha-s003-t005", "eng-alpha-s003-t007"]
+  },
+  {
+    "question": "What is client-omega's annual revenue?",
+    "answer": "you didn't tell me that",
+    "category": "adversarial",
+    "evidence_turn_ids": []
+  }
+]

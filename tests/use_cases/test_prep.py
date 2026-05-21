@@ -398,6 +398,72 @@ def test_run_prep_skips_results_with_none_inner_result_object() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _format_context — fact-row floor exemption (Plan B-parity remediation D1)
+# ---------------------------------------------------------------------------
+
+
+def test_fact_row_short_snippet_is_not_filtered_by_chunk_floor() -> None:
+    """A fact row whose snippet is below the 40-char chunk floor still
+    reaches the LLM context.
+
+    Plan B-parity post-mortem (2026-05-21) identified this as the D1
+    defect: ``_fused_from_fact_hit`` produces snippets of the form
+    ``"<entity> <attribute>: <value>"`` (typically 20-30 chars) which
+    were being filtered out by the chunk-protection floor designed for
+    sparse chunk text. The LoCoMo benchmark fell to 5% (below the 11%
+    pre-Plan-B baseline) because relevant facts were retrieved but
+    silently dropped before reaching the synthesiser.
+
+    Sabotage-proof (executed locally 2026-05-21):
+      1. Reverted the ``is_fact`` exemption in ``_format_context`` so
+         all rows go through the 40-char floor.
+      2. Re-ran this test → AssertionError on the sources assertion
+         (the fact row was filtered out, sources came back empty).
+      3. Restored the exemption → test passes again.
+    """
+    fact_inner = _FakeInner(title="Caroline — role", path="facts://fact-001")
+    fact_snippet = "Caroline role: VP of People"  # 27 chars, below the 40-char chunk floor
+    assert len(fact_snippet) < 40, "Snippet must be below the chunk floor for this test to be meaningful"
+
+    sr = _FakeSearchResult(results=[_FakeBudgeted(result=fact_inner, content=fact_snippet)])
+    deps, captured = _build_deps(sr=sr, summary="Caroline is VP of People.")
+    out = run_prep("What is Caroline's role?", deps=deps)
+
+    assert out.error == ""
+    assert out.sources == ["Caroline — role"], (
+        "fact row should survive the chunk floor exemption — if this assertion fails, "
+        "the D1 regression has returned and short fact snippets are being filtered again"
+    )
+    user_msg = captured["chat"]["messages"][1]["content"]
+    assert "Caroline role: VP of People" in user_msg, (
+        "fact snippet content must reach the LLM message body, not just the sources list"
+    )
+
+
+def test_chunk_row_short_snippet_is_still_filtered() -> None:
+    """The chunk floor remains active for non-fact rows.
+
+    D1's fix exempts fact-tier rows (``path`` starts with ``facts://``)
+    but the original #254 protection — short chunk snippets cause LLM
+    hallucination — must continue to work for everything else. This test
+    pins the chunk-side behaviour so the fact exemption doesn't drift
+    into a blanket floor removal.
+
+    Sabotage-proof: lowered ``_MIN_USEFUL_SNIPPET_CHARS`` to 5 → this
+    test fails because the short chunk now reaches the LLM. Restored.
+    """
+    chunk_inner = _FakeInner(title="doc-thin", path="/notes/thin.md")
+    sr = _FakeSearchResult(results=[_FakeBudgeted(result=chunk_inner, content="see ref-001")])
+    deps, _ = _build_deps(sr=sr, summary="should-not-be-called")
+    out = run_prep("topic", deps=deps)
+
+    assert out.error == ""
+    assert out.sources == []
+    # Below-floor chunk → empty context → early-return path, LLM never invoked.
+    assert out.summary == "No relevant documents found for this topic."
+
+
+# ---------------------------------------------------------------------------
 # PrepDeps defaults — wire-up smoke test
 # ---------------------------------------------------------------------------
 

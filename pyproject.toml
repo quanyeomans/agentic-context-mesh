@@ -114,6 +114,8 @@ markers = [
     "bdd: behaviour-driven acceptance tests (pytest-bdd feature files)",
     "pvt: production-verification scenarios against a live MCP server (requires KAIRIX_PVT=1; see docs/architecture/performance-testing-approach.md)",
     "slow: tests taking >5s",
+    "soak: long-running soak scenarios (requires KAIRIX_SOAK=1; nightly workflow only — see tests/bdd/features/soak_fact_extractor.feature)",
+    "docker: tests that shell out to the docker CLI against a pre-built kairix image (requires KAIRIX_DOCKER_TEST_IMAGE or a local `docker build`; skips when docker is unavailable)",
 ]
 timeout = 60  # Per-test timeout default (seconds)
 
@@ -258,6 +260,13 @@ include = ["kairix*"]
     "memory-prompt/plugin.py",
     "memory-prompt/plugin.json",
     "memory-prompt/README.md",
+]
+# Plan B-parity Capability #2 ships the LLM-fact-extractor prompt
+# template as package data so ``kairix.core.facts.LLMFactExtractor``
+# can load it via ``importlib.resources`` from both source checkouts
+# and installed wheels.
+"kairix.core.facts.prompts" = [
+    "*.txt",
 ]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.

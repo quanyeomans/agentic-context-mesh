@@ -7,6 +7,37 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.18] - 2026-05-21 — Conversational memory shipping + one benchmark CLI + machine-actionable cold-start
+
+> **Upgrading?** Nothing required. Legacy CLIs (`kairix eval`, `kairix probe`, `kairix soak`) keep working with a deprecation notice pointing at the new consolidated `kairix benchmark run`. Full upgrade notes: [`docs/upgrades/v2026.5.18.md`](docs/upgrades/v2026.5.18.md).
+
+### New for agents
+
+- **Conversational recall surfaces facts the way you'd expect.** When a question depends on a fact extracted from a conversation (e.g. "What is agent-alpha's role?"), the synthesiser keeps the structured fact triplet in context and the answer comes through with its citation. Short fact rows previously got dropped by a snippet-length filter aimed at sparse chunk text; that filter now applies to chunk-tier results only.
+- **`warm` MCP tool** returns a machine-actionable cold-start envelope (`status: retryable_not_ready`, `error_code: KAIRIX_COLD_START`, `retry_after_ms`, `agent_instruction`) when retrieval isn't ready, so the agent knows to wait and retry rather than answer from memory. Call it at session start; subsequent retrieval tools return real results once warm-up succeeds.
+- **Attribute-fact intent classifier covers two more question shapes**: `"what did X verb?"` and `"who is/was X's Y?"`. Both previously routed to a generic semantic intent and lost the fact-retriever weight they needed.
+- **Facts carry session date metadata** via a new `evidence_at` field. Temporal questions resolve to absolute dates rather than relative phrases echoed from the source turns.
+
+### New for operators
+
+- **`kairix benchmark run`** is the consolidated entry point for retrieval-quality and answer-correctness measurement. One CLI; pluggable scorers (NDCG, Hit@K, MRR, LLM-judge, latency); `--mode` for single-shot now, concurrent and soak shipping in the next release; `--scope` / `--collection` / `--categories` / `--gates` / `--baseline` flags. Suite YAML extends backward-compatibly with `expected_answer:` for LLM-judge scoring alongside `gold_titles:` for NDCG.
+- **`kairix eval` against a conversational corpus extracts facts by default** via the new `kairix.corpus.wiring` factory. Previously the eval CLI ran against a no-op fact extractor; conversational suites now produce real SQLite state. Reference-library NDCG suites are unaffected.
+- **`KAIRIX_TRACE=1`** now configures a logging handler at CLI start, so the per-query diagnostic lines (`prep.context: chunks K/N kept, facts K/N kept, M ctx chars`) appear on stderr. Off by default; production stays quiet.
+- **Eval scoring mirrors `kairix prep`.** `kairix eval` routes through the same `SearchPipeline` (`--via-prep`, default on). A scope-routing bug where `--scope` was silently overridden to `shared+agent` whenever `--agent` was set is also fixed.
+
+### Internal
+
+- **`kairix.corpus.ingest.ingest_corpus`** is now the shared ingest primitive. `kairix ingest-chat`, the eval CLI's `SuiteRunner`, and the LoCoMo benchmark harness all route through it. One ingest path, one set of behaviours; production and benchmark code paths can't diverge.
+- **F30 fitness function** (new) — every CLI subcommand and MCP tool has at least one outcome test that exercises the subprocess path and asserts on captured output. Pre-existing surfaces grandfathered; baseline only shrinks.
+- **F5 and F6 broadened.** F5 also catches attribute access to underscore-prefixed kairix names on imported modules. F6 also catches `*_loader`, `*_factory`, `*_builder`, `*_provider`, `*_resolver` test-injection seams in addition to `*_fn`. Methods on `ClassDef` (canonical Deps pattern) are exempted.
+- **`safe-commit.sh`** generates `coverage.xml` and enforces the F7 per-file coverage floor locally, closing a parity gap with CI. Agents working on kairix get F7 feedback in seconds rather than minutes.
+
+**Design context:** [`docs/architecture/fact-layer.md`](docs/architecture/fact-layer.md) — ADR covering the conversational memory architecture, the five capabilities, and the federation pattern. [`docs/upgrades/v2026.5.18.md`](docs/upgrades/v2026.5.18.md) — operator and agent upgrade guide.
+
+### Security
+
+- **Warm-state flag moved out of `/tmp` into the kairix data directory.** The cross-process readiness flag added in v2026.5.17 lived at `/tmp/kairix-warm.flag` — a world-writable, predictable path. The flag now lives at `<KAIRIX_DATA_DIR>/warm.flag`, owned by the kairix process user and not world-writable. The MCP server clears any stale flag at startup so a restarted container correctly reports not-ready until it has actually re-warmed.
+
 ## [2026.5.17] - 2026-05-18 — Faster searches under concurrent load + plug-in support for any LLM provider
 
 > **Upgrading?** **One required config change**: add `provider: <name>` to the top of your `kairix.config.yaml` before pulling this version. Kairix won't start without it and will list the installed plug-in names so you can pick. See [`docs/operations/runbooks/how-to-upgrade-kairix.md`](docs/operations/runbooks/how-to-upgrade-kairix.md) for the one-line edit. **Operators with a custom `kairix.config.yaml` mounted into the container** should move to the new overlay pattern before pulling — it stops future required-setting bumps from quietly breaking your deploy. See [`docs/operations/runbooks/config-overlay-upgrade.md`](docs/operations/runbooks/config-overlay-upgrade.md). **New for agents**: searches feel faster when several agents work at the same time, and a cold container no longer returns "fetch failed" — kairix tells you it's warming and how long it needs. **New for operators**: the new `kairix probe-config` command checks your endpoint after setup and recommends concrete tuning; seven first-party plug-ins ship today (Azure Foundry, Azure Legacy, OpenAI direct, Bedrock, Ollama, LiteLLM proxy, Anthropic).
