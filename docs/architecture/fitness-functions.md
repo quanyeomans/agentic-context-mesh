@@ -2260,6 +2260,42 @@ record: see `docs/architecture/decisions/2026-05-21-plan-b-parity-remediation.md
 
 ---
 
+### F31 — No hardcoded user/machine paths in committed code
+
+Cross-pollinated from tc-agent-zone's `no_hardcoded_repo_paths.py`.
+Detects literal `/Users/<dev>/` and `/home/<dev>/` patterns in tracked
+files, with `/Users/runner/` and `/home/runner/` exempt (GitHub Actions
+hosted-runner workspace).
+
+#### Motivation
+
+A path like `/Users/developer/Development/kairix/scripts/...` only
+resolves on one human's laptop. The release session that introduced
+this rule surfaced an instance of worktree-path leakage into a
+subagent's report — the rule converts that ad-hoc smell into a
+mechanical gate so the next leak gets caught at safe-commit, not at
+cherry-pick time.
+
+#### Mechanism
+
+`scripts/checks/check_no_hardcoded_user_paths.py` walks every tracked
+file (`git ls-files`) and scans for either pattern. Files in
+`.architecture/baseline/`, `reference-library/`, `benchmark-results/`,
+and any markdown documentation are exempt. The baseline at
+`.architecture/baseline/no-hardcoded-user-paths-files.txt`
+grandfathers pre-existing offenders (empty at landing — the repo is
+clean today). Net-new violations block at safe-commit and CI.
+
+#### Fix pattern
+
+Replace the hardcoded path with one of:
+
+- A relative resolution: `ROOT = Path(__file__).resolve().parents[N]`
+- An environment variable: `os.environ.get("KAIRIX_DATA_DIR", "/opt/kairix/data")`
+- A pytest fixture path scoped to the test: `tmp_path`
+
+---
+
 ## SDLC integration map
 
 Each fitness function fires at multiple lifecycle stages. The same
