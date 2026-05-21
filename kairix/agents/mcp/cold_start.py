@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+_KEY_ELAPSED_MS = "elapsed_ms"
+
 DEFAULT_RETRY_AFTER_MS = 8000
 DEFAULT_ESTIMATED_SECONDS = 8.0
 
@@ -108,14 +110,14 @@ def warm_retrieval_stack() -> dict[str, Any]:
             {
                 "name": "build_search_pipeline",
                 "ok": True,
-                "elapsed_ms": int((time.perf_counter() - step_started) * 1000),
+                _KEY_ELAPSED_MS: int((time.perf_counter() - step_started) * 1000),
             }
         )
     except Exception as exc:
         return {
             "status": "error",
             "ready": False,
-            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            _KEY_ELAPSED_MS: int((time.perf_counter() - started) * 1000),
             "steps": [
                 *steps,
                 {
@@ -133,14 +135,14 @@ def warm_retrieval_stack() -> dict[str, Any]:
             {
                 "name": "probe_search",
                 "ok": True,
-                "elapsed_ms": int((time.perf_counter() - step_started) * 1000),
+                _KEY_ELAPSED_MS: int((time.perf_counter() - step_started) * 1000),
             }
         )
     except Exception as exc:
         return {
             "status": "error",
             "ready": False,
-            "elapsed_ms": int((time.perf_counter() - started) * 1000),
+            _KEY_ELAPSED_MS: int((time.perf_counter() - started) * 1000),
             "steps": [
                 *steps,
                 {
@@ -154,6 +156,6 @@ def warm_retrieval_stack() -> dict[str, Any]:
     return {
         "status": "ok",
         "ready": True,
-        "elapsed_ms": int((time.perf_counter() - started) * 1000),
+        _KEY_ELAPSED_MS: int((time.perf_counter() - started) * 1000),
         "steps": steps,
     }

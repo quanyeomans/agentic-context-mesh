@@ -823,6 +823,12 @@ def tool_embed_rebuild_fts() -> dict[str, Any]:
 # `mcp_tool` fields stay in sync without literal duplication.
 CAPABILITIES_TOOL_NAME = "capabilities"
 
+# Tool-name constants — pinned to keep the catalogue's `name` / `mcp_tool`
+# fields, the `require_ready` lookups, and any other references in sync
+# without literal duplication. Add new entries here when a tool's name is
+# referenced 3+ times (F17 threshold).
+CONTRADICT_TOOL_NAME = "contradict"
+
 # Capability category labels — used by tool_capabilities and the usage-guide
 # capabilities table. F25 cross-checks these for sync.
 CAP_CATEGORY_RETRIEVAL = "retrieval"
@@ -883,8 +889,8 @@ def tool_capabilities() -> dict[str, Any]:
             _cap(name="prep", mcp_tool="prep", cli="kairix prep", category=CAP_CATEGORY_SYNTHESIS),
             _cap(name="research", mcp_tool="research", cli="kairix research", category=CAP_CATEGORY_SYNTHESIS),
             _cap(
-                name="contradict",
-                mcp_tool="contradict",
+                name=CONTRADICT_TOOL_NAME,
+                mcp_tool=CONTRADICT_TOOL_NAME,
                 cli="kairix contradict",
                 category=CAP_CATEGORY_SYNTHESIS,
             ),
@@ -1167,7 +1173,7 @@ def build_server(
         scope: Scope = DEFAULT_SCOPE,
     ) -> dict[str, Any]:
         """Check new content against existing knowledge for contradictions."""
-        if cold := require_ready("contradict", readiness_check):
+        if cold := require_ready(CONTRADICT_TOOL_NAME, readiness_check):
             return cold
         return tool_contradict(
             content=content,
