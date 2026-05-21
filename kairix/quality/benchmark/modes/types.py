@@ -13,13 +13,6 @@ The per-query record ``QueryRunResult`` lives under
 import it here so dispatchers can build the per-query list directly —
 no second copy of the dataclass.
 
-If the scoring module hasn't landed yet (P2 is in flight), a thin
-fallback dataclass with the same field shape is provided so this
-module stays importable on its own. The fallback is intentionally
-identical in field layout to the P2 canonical; once P2 lands, the
-fallback path is dead and callers transparently pick up the canonical
-definition.
-
 Layering. This file lives in ``kairix/quality/benchmark/modes/`` and
 imports from ``kairix.quality.scoring`` (peer quality package) — no
 ``kairix/core/**`` ↔ ``providers/`` cross-traffic (F26).
@@ -35,28 +28,7 @@ if TYPE_CHECKING:
     from kairix.quality.benchmark.suite import BenchmarkSuite
     from kairix.quality.probe.runner import SampledQuery
 
-try:
-    from kairix.quality.scoring.types import QueryRunResult
-except ImportError:  # pragma: no cover — fallback for pre-P2-cherry-pick state
-
-    @dataclass(frozen=True)
-    class QueryRunResult:  # type: ignore[no-redef] -- fallback class definition matches the canonical scoring.types shape, removed once P2 lands
-        """Fallback shape — matches P2's canonical ``QueryRunResult`` field-for-field.
-
-        Removed once P2 lands; the canonical definition lives under
-        ``kairix.quality.scoring.types``.
-        """
-
-        case_id: str
-        category: str
-        query: str
-        latency_ms: float
-        succeeded: bool
-        score: float | None = None
-        stage_latency_ms: dict[str, float] = field(default_factory=dict)
-        error: str = ""
-        latency_phase: str = "warm"
-
+from kairix.quality.scoring.types import QueryRunResult
 
 __all__ = [
     "ModeRunRequest",

@@ -60,9 +60,9 @@ def _run_one(
 ) -> tuple[QueryRunResult, str]:
     """Execute one case end-to-end and capture latency + phase tag.
 
-    The executor's contract is "MUST NOT raise" but defence-in-depth
-    here keeps the runner honest: any escaped exception is captured as
-    a ``succeeded=False`` record with the type+message in ``error``.
+    The executor's contract is "MUST NOT raise"; defence-in-depth here
+    captures any escaped exception as a ``QueryRunResult`` with
+    populated ``error``. Success is implied when ``error is None``.
     Returns ``(query_result, error_string_or_empty)`` so the caller can
     build the aggregate error tuple without re-scanning the result list.
     """
@@ -74,17 +74,16 @@ def _run_one(
         elapsed_ms = (time.perf_counter() - t_start) * 1000.0
         err_text = f"{type(exc).__name__}: {exc}"
         labelled = QueryRunResult(
-            case_id=sampled.case_id,
+            query_id=sampled.case_id,
             category=sampled.category,
-            query=sampled.query,
+            query_text=sampled.query,
             latency_ms=elapsed_ms,
-            succeeded=False,
             error=err_text,
             latency_phase=("cold" if is_first else "warm"),
         )
         return labelled, err_text
     labelled = _label_phase(outcome, is_first=is_first)
-    return labelled, ("" if labelled.succeeded else (labelled.error or "unknown"))
+    return labelled, ("" if labelled.error is None else labelled.error)
 
 
 def run_single_shot(request: ModeRunRequest) -> ModeRunResult:
@@ -105,7 +104,7 @@ def run_single_shot(request: ModeRunRequest) -> ModeRunResult:
         outcome, err = _run_one(case, request, is_first=(idx == 0))
         per_query.append(outcome)
         if err:
-            errors.append(f"[{outcome.case_id}] {err}")
+            errors.append(f"[{outcome.query_id}] {err}")
     wallclock_s = time.perf_counter() - wall_start
     n = len(per_query)
     mean_latency_ms = (sum(r.latency_ms for r in per_query) / n) if n else 0.0
