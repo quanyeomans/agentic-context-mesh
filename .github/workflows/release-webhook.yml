@@ -8,10 +8,10 @@ name: "6 · Release (alpha-deploy-webhook binary publish)"
 #
 #   https://github.com/<owner>/<repo>/releases/download/<tag>/alpha-deploy-webhook-linux-<arch>
 #
-# Before #286 the binary on `vm-openclaw` was shipped manually via scp
+# Before #286 the binary on the alpha VM was shipped manually via scp
 # + az run-command; every webhook code change required a human ops
 # touch and webhook-side fixes (e.g. the docker-compose --wait fix in
-# a0272d6e) sat unused in develop. This workflow closes that loop.
+# a0272d6e) sat unused in main. This workflow closes that loop.
 #
 # Asset venue: GitHub Release. Matches the existing publish pattern
 # (Docker image -> GHCR, Python wheel -> PyPI). Zero new infra; the
@@ -50,6 +50,9 @@ concurrency:
   # own release object) but never two for the same ref simultaneously.
   group: release-webhook-${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
   cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build-and-attach:

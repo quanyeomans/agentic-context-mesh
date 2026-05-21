@@ -2512,7 +2512,7 @@ gate. Branch protection rejects the merge.
 
 ### Branch protection
 
-The repo's branch protection on `main` and `develop` requires the
+The repo's branch protection on `main` and `main` requires the
 `CI gate` job to pass. No additional configuration is needed for
 fitness functions — they're transitively enforced via the gate.
 
