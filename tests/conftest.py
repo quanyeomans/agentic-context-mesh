@@ -127,6 +127,11 @@ pytest_plugins = [
     # Plan B-parity Week 5 Stream A — MCP ingest + recall tools.
     "tests.bdd.steps.mcp_ingest_chat_steps",
     "tests.bdd.steps.mcp_facts_about_steps",
+    # P5 unified benchmark contract — quality + perf + stability lenses
+    # wired through the canonical kairix benchmark run surface. Soak +
+    # concurrent scenarios are tagged @pytest.mark.skip in the loader
+    # until P3.b / P3.c land.
+    "tests.bdd.steps.benchmark_unified_contract_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
