@@ -1,9 +1,20 @@
-"""Integration tests for :class:`kairix.core.facts.SQLiteFactStore`.
+"""Unit tests for :class:`kairix.core.facts.SQLiteFactStore`.
 
 Each test touches a real on-disk SQLite database in a ``tmp_path``-scoped
 file and drives behaviour through the public ``kairix.core.facts``
 surface only. No internal imports (F5). No monkeypatching (F1). No
 test-only kwargs in production (F6).
+
+Marker rationale (``unit``): these tests exercise ONE component (the
+SQLite fact-store) against stdlib SQLite via ``tmp_path``. There is no
+external service, no usearch index, and no cross-component wiring —
+the kairix taxonomy reserves ``integration`` for "multi-component with
+real database and usearch index". A single component against stdlib
+SQLite is unit-shaped (the SQLite file is a deterministic local fixture,
+analogous to a Fake). Sibling tests in ``tests/core/facts/``
+(``test_consolidation``, ``test_llm_fact_extractor``) follow the same
+``unit`` convention. Re-marking is what brings these sabotage-proven
+behaviours into the F7 per-file coverage floor's view.
 
 Every test below was sabotage-proven during authoring: a concrete
 mutation in production was identified, the test was confirmed to fail
@@ -21,7 +32,7 @@ import pytest
 from kairix.core.facts import SQLiteFactStore, StoredFactHit, StoredFactRecord
 from kairix.core.protocols import FactHit, FactRecord, FactStore
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
