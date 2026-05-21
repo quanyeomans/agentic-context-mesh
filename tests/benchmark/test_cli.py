@@ -228,6 +228,37 @@ def test_cmd_run_unknown_suite_exits_one_with_hint(tmp_path: Path, monkeypatch: 
 
 
 @pytest.mark.unit
+def test_cmd_run_legacy_mode_passes_none_to_runner(bundled_suites: Path) -> None:
+    """When --mode is the default 'legacy' sentinel (or absent), the CLI must
+    pass ``mode=None`` so the runner takes the byte-identical legacy path.
+
+    sabotage: change ``None if mode_arg == "legacy" else mode_arg`` to
+    ``mode_arg`` unconditionally - the assertion below sees the string
+    "legacy" instead of ``None`` and fails.
+    """
+    runner = _CapturingRunner()
+    args = _make_run_args(str(bundled_suites / "reflib-gold-v3.yaml"))
+    # No mode attribute on args - exercises the getattr default.
+    cmd_run(args, deps=BenchmarkCLIDeps(run_benchmark=runner))
+    assert runner.calls[0]["mode"] is None
+
+
+@pytest.mark.unit
+def test_cmd_run_single_shot_mode_passes_through_to_runner(bundled_suites: Path) -> None:
+    """When --mode single-shot is set, the CLI must forward the string to
+    the runner so the dispatcher engages.
+
+    sabotage: drop the ``mode=mode_param`` kwarg from the ``d.run_benchmark``
+    call - the assertion fails (KeyError or missing mode).
+    """
+    runner = _CapturingRunner()
+    args = _make_run_args(str(bundled_suites / "reflib-gold-v3.yaml"))
+    args.mode = "single-shot"
+    cmd_run(args, deps=BenchmarkCLIDeps(run_benchmark=runner))
+    assert runner.calls[0]["mode"] == "single-shot"
+
+
+@pytest.mark.unit
 def test_cmd_run_passes_system_and_agent_through(bundled_suites: Path) -> None:
     """All operator-supplied flags must reach the runner unchanged."""
     runner = _CapturingRunner()

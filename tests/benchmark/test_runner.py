@@ -1661,3 +1661,74 @@ def test_run_benchmark_modern_agent_config_emits_no_deprecation(
         f"modern (paths:) config should not trigger deprecation warning; got: "
         f"{[r.getMessage() for r in deprecation_records]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Mode dispatch — additive single-shot path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_run_benchmark_legacy_mode_omits_per_query_runs() -> None:
+    """``mode=None`` (legacy default) keeps the diagnostics envelope byte-
+    identical to the pre-P3 shape — no ``per_query_runs`` key, no ``mode``
+    key on diagnostics.
+
+    sabotage: drop the ``if mode == "single-shot"`` guard so per_query_runs
+    leaks into the legacy envelope — the assertion fails.
+    """
+    from kairix.quality.benchmark.runner import BenchmarkDeps, run_benchmark
+    from kairix.quality.benchmark.suite import BenchmarkSuite
+
+    suite = BenchmarkSuite(
+        meta={"name": "legacy-shape", "version": "1.0", "agent": "t"},
+        cases=[_bench_case("R01", "recall", "vault/x.md")],
+    )
+    result = run_benchmark(
+        suite,
+        system="hybrid",
+        agent="t",
+        deps=BenchmarkDeps(retrieve=_retrieve_returning(["vault/x.md"])),
+    )
+
+    assert "per_query_runs" not in result.diagnostics
+    assert "mode" not in result.diagnostics
+    assert result.meta.get("mode") is None
+
+
+@pytest.mark.unit
+def test_run_benchmark_single_shot_mode_emits_per_query_runs() -> None:
+    """``mode='single-shot'`` adds a ``per_query_runs`` list to the
+    diagnostics envelope, with one entry per case, carrying the
+    ``QueryRunResult`` field shape.
+
+    sabotage: drop the ``per_query_runs`` line from the helper - the
+    length assertion fails.
+    """
+    from kairix.quality.benchmark.runner import BenchmarkDeps, run_benchmark
+    from kairix.quality.benchmark.suite import BenchmarkSuite
+
+    suite = BenchmarkSuite(
+        meta={"name": "single-shot", "version": "1.0", "agent": "t"},
+        cases=[
+            _bench_case("R01", "recall", "vault/a.md"),
+            _bench_case("R02", "recall", "vault/b.md"),
+        ],
+    )
+    result = run_benchmark(
+        suite,
+        system="hybrid",
+        agent="t",
+        deps=BenchmarkDeps(retrieve=_retrieve_returning(["vault/a.md", "vault/b.md"])),
+        mode="single-shot",
+    )
+
+    assert result.diagnostics["mode"] == "single-shot"
+    rows = result.diagnostics["per_query_runs"]
+    assert len(rows) == 2
+    assert {row["case_id"] for row in rows} == {"R01", "R02"}
+    assert rows[0]["latency_phase"] == "cold"
+    assert rows[1]["latency_phase"] == "warm"
+    # The legacy summary still matches — mode is additive only.
+    assert "weighted_total" in result.summary
+    assert result.meta["mode"] == "single-shot"
