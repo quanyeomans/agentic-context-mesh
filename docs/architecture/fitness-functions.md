@@ -2557,6 +2557,58 @@ Canonical reference for F45–F49 mechanics + paydown patterns:
 
 ---
 
+### F50 — net-new files cannot accrete F-rule baseline debt
+
+Closes the per-file-shrink-only loophole identified by the 2026-05-22
+tc-agent-zone cross-repo audit. Every F-rule baseline under
+`.architecture/baseline/*-files.txt` is per-file shrink-only — pre-existing
+violators are grandfathered until F49 forces them out at release time.
+The loophole: a brand-new file under `kairix/**` (or `tests/**`) can
+land with arbitrary violations because the baseline doesn't yet know it
+exists, so the shrink-diff sees nothing.
+
+F50 closes that. Net-new files (added in the staged diff at commit-time,
+or added since the previous release tag at CI-time) may not appear in
+any per-file F-rule baseline. Pre-existing entries are unaffected —
+this rule only blocks fresh accretion.
+
+#### Mechanism
+
+`scripts/checks/check_f50_net_new_file_violations.py` runs in two modes:
+
+- **Staged mode** (default; pre-commit hook + `safe-commit.sh`):
+  `git diff --cached --name-only --diff-filter=A` returns the set of
+  files added in the current staged commit. The check asserts none
+  appear in any baseline.
+- **Full-tree mode** (CI Stage 0): `git diff --name-only --diff-filter=A
+  <prev-tag>..HEAD` returns every file added since the last release
+  tag. Catches the case where pre-commit was skipped locally and the
+  violation only surfaces in CI for a release PR.
+
+For every match, the failure text names the violating baseline file
+and the offending added paths, plus the F21 `fix:`/`next:`/`run:`
+trailer pointing at the canonical paydown patterns.
+
+#### Why it isn't redundant with F49
+
+F49 enforces *paydown rate* on the existing baselines (each release
+shrinks; never grows). It doesn't catch the case where a baseline
+grows because a fresh file was added to it. F50 covers exactly that
+case at commit time, before the baseline edit ever lands.
+
+A clean interpretation: F49 says "baselines shrink"; F50 says "baselines
+shrink, and they never grow by accretion via new files." Together they
+mean: the only legal motion is downward.
+
+#### Cross-repo provenance
+
+Imported from tc-agent-zone's `net_new_file_finding_cap.py` pattern
+(2026-05-22 audit). The tc-agent-zone version protected against
+SonarCloud findings on new files; kairix's variant generalises to
+*any* per-file F-rule baseline.
+
+---
+
 ## Harness architecture
 
 ### File layout

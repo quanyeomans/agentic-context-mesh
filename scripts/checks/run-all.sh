@@ -130,6 +130,9 @@ python3 "${SCRIPT_DIR}/check_f47_integration_factory.py" || overall=1
 # F48 — composed production path e2e exemplar exists and is e2e-marked
 bash "${SCRIPT_DIR}/check-f48-e2e-present.sh" || overall=1
 
+# F50 — net-new files cannot accrete F-rule baseline debt
+bash "${SCRIPT_DIR}/check-f50-net-new-file-violations.sh" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
