@@ -131,6 +131,18 @@ def _add_search_args(p: argparse.ArgumentParser) -> None:
         action=_STORE_TRUE,
         help="emit JSON envelope on stdout; suppress human-readable output",
     )
+    p.add_argument(
+        "--dry-run",
+        action=_STORE_TRUE,
+        help=(
+            "subprocess testability seam (F30): drive the full run_probe_search "
+            "pipeline (sampler + executor + stats + gate) with a hermetic in-CLI "
+            "suite loader and a zero-latency searcher — no retrieval, no provider, "
+            "no env reads. Returns a deterministic PASS envelope so operators can "
+            "smoke-test the CLI binary surface end-to-end against a tmp working "
+            "directory."
+        ),
+    )
 
 
 def _add_burst_args(p: argparse.ArgumentParser) -> None:
@@ -285,7 +297,64 @@ def _format_text(result: ProbeResult, *, recommend: bool) -> str:
     return "\n".join(lines)
 
 
+def _dry_run_suite_loader(_suite: str) -> list[object]:
+    """Build a hermetic in-memory suite for the ``--dry-run`` seam.
+
+    Returns four synthetic BenchmarkCase rows spread across the four
+    canonical category weights so :func:`sample_weighted` can build a
+    valid sample of any size ``>= 1``. The cases never reach a real
+    retrieval pipeline — the paired ``_dry_run_searcher`` returns a
+    zero-latency stub — so this loader needs no real index, no
+    suite YAML, and no env reads.
+    """
+    from kairix.quality.benchmark.suite import BenchmarkCase
+
+    return [
+        BenchmarkCase(
+            id=f"dry-{i}", category=cat, query=f"dry-run probe query {i}", gold_path=None, score_method="exact"
+        )
+        for i, cat in enumerate(("recall", "temporal", "entity", "conceptual"))
+    ]
+
+
+class _DryRunResult:
+    """Stub search result for the ``--dry-run`` F30 seam.
+
+    Exposes the ``stage_latency_ms`` attribute the executor + stats
+    code paths read; everything else falls through to ``None`` /
+    empty-dict via the stage-map accessor's getattr fallback.
+    """
+
+    def __init__(self) -> None:
+        self.stage_latency_ms: dict[str, float] = {}
+
+
+def _dry_run_searcher(_q: object) -> object:
+    """Zero-latency searcher stub for the ``--dry-run`` F30 seam.
+
+    Returns a minimal object with the attributes the executor + stats
+    code paths read (``stage_latency_ms`` accessor falls through to
+    None → an empty stage dict). No real retrieval, no provider calls.
+    """
+    return _DryRunResult()
+
+
 def _run_single(args: argparse.Namespace, concurrency: int) -> ProbeResult:
+    # ``--dry-run`` is the F30 subprocess seam: drives the full
+    # run_probe_search pipeline (sampler + executor + stats + gate) with
+    # a hermetic in-CLI suite loader and zero-latency searcher. No
+    # retrieval, no env reads, no real provider — useful for smoke-
+    # testing the CLI binary surface end-to-end.
+    if getattr(args, "dry_run", False):
+        return run_probe_search(
+            suite=args.suite,
+            queries=args.queries,
+            concurrency=concurrency,
+            seed=args.seed,
+            p95_threshold_ms=args.p95_threshold_ms,
+            suite_loader=_dry_run_suite_loader,
+            searcher=_dry_run_searcher,
+        )
     return run_probe_search(
         suite=args.suite,
         queries=args.queries,
