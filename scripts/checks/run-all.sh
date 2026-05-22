@@ -136,6 +136,18 @@ bash "${SCRIPT_DIR}/check-f48-e2e-present.sh" || overall=1
 # F50 — net-new files cannot accrete F-rule baseline debt
 bash "${SCRIPT_DIR}/check-f50-net-new-file-violations.sh" || overall=1
 
+# F51 — feature flag target_retire_in deadline
+bash "${SCRIPT_DIR}/check-f51-flag-retirement.sh" || overall=1
+
+# F52 — every flag("<name>") call site references a real registry entry
+bash "${SCRIPT_DIR}/check-f52-flag-call-sites.sh" || overall=1
+
+# F53 — operator surface (features CLI + tool_features_status MCP) exists
+bash "${SCRIPT_DIR}/check-f53-features-status-surface.sh" || overall=1
+
+# F54 — every flag in REGISTRY has both-branch test coverage
+bash "${SCRIPT_DIR}/check-f54-flag-both-branch-tested.sh" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
