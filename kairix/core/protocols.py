@@ -10,8 +10,11 @@ Follows the same pattern as kairix.platform.llm.protocol.LLMBackend.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from kairix.core.search.intent import QueryIntent
 
@@ -636,3 +639,281 @@ class CorpusEmbedder(Protocol):
     """
 
     def embed(self, paths_to_embed: tuple[Path, ...]) -> int: ...
+
+
+# ---------------------------------------------------------------------------
+# Connector framework — Wave 1 SC-1 surface.
+#
+# See ``docs/architecture/connector-ingestion-architecture.md`` §2-§4 for
+# the architecture; ADRs 017-020 in kairix-pro-platform for the
+# two-scope / storage-tiering / language-strategy context.
+#
+# Three-layer split (locked by F26 / F34 / F35):
+#
+#   * ``kairix/core/connectors/`` — orchestration. Owns the per-batch
+#     SQLite transaction: list_changes → fetch → bronze → silver →
+#     index → advance. Knows nothing about specific sources or formats.
+#
+#   * ``kairix/connectors/<name>/`` — one source (Obsidian, SharePoint,
+#     dex_crm, …). Implements :class:`SourceConnector` and registers via
+#     the ``kairix.connectors`` entry-point group.
+#
+#   * ``kairix/extractors/<name>/`` — one format family (markitdown,
+#     pdf_fallback, ocr, …). Implements :class:`Extractor` and registers
+#     via the ``kairix.extractors`` entry-point group.
+#
+# Every value object that crosses the boundary is a ``@dataclass(frozen=True)``
+# per F42 — no ``dict[str, Any]``, no ``list[dict]``, no bare ``Any``.
+# Pydantic stays at the JSON edge (HTTP / MCP / config); inside kairix,
+# frozen dataclasses everywhere.
+# ---------------------------------------------------------------------------
+
+
+# Opaque resumption token a connector uses to checkpoint progress.
+Cursor = str
+
+# MIME type hint, e.g. "application/pdf" or "text/markdown".
+MimeType = str
+
+# Sensitivity tier — populated on every chunk write per F39. Defaults
+# drift to ``"public"``; connectors that handle confidential data must
+# declare a non-public tier in config.
+Sensitivity = Literal["public", "internal", "client-confidential", "personal"]
+
+
+@dataclass(frozen=True)
+class ChangeEvent:
+    """One change the connector observed since the last cursor.
+
+    Streamed from :meth:`SourceConnector.list_changes`. ``op`` follows
+    the create/modify/delete trichotomy every source surfaces in some
+    form (filesystem mtime + tombstone; Graph delta tokens; CRM
+    last_modified_at; …). ``modified_at`` is the source's own
+    timestamp (ISO-8601 UTC), travelled through to
+    :class:`Chunk.source_modified_at` so search can boost recency.
+    """
+
+    op: Literal["created", "modified", "deleted"]
+    item_id: str
+    modified_at: str
+    parent_id: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RawArtefact:
+    """Raw bytes as fetched from the source, plus a mime hint.
+
+    Produced by :meth:`SourceConnector.fetch`. The orchestrator hands
+    the bytes off to Bronze (persistence) AND to the extractor registry
+    (format detection via mime + magic bytes). ``fetched_at`` is the
+    wall-clock at fetch time, distinct from ``ChangeEvent.modified_at``
+    (the source's own modify time).
+    """
+
+    raw: bytes
+    mime: MimeType
+    fetched_at: str
+
+
+@dataclass(frozen=True)
+class Page:
+    """One page / slide / sheet of an extracted document."""
+
+    page_number: int
+    text: str
+    has_images: bool
+
+
+@dataclass(frozen=True)
+class Image:
+    """One image lifted from an extracted document, classified."""
+
+    page_number: int
+    classification: Literal["photo", "diagram", "chart", "decorative"]
+    data: bytes
+
+
+@dataclass(frozen=True)
+class DocMetadata:
+    """Format-derived metadata for an :class:`ExtractedDocument`."""
+
+    title: str | None
+    author: str | None
+    created_date: str | None
+    language: str | None
+    page_count: int | None
+
+
+@dataclass(frozen=True)
+class ExtractedDocument:
+    """Output of an :class:`Extractor`.
+
+    ``markdown`` is the unified rendering (for chunking + indexing).
+    ``pages`` carries per-page extractions so chunks can cite back to
+    a page / slide / sheet. ``images`` are extracted + classified.
+    ``confidence`` is the average across pages; the orchestrator
+    consults :meth:`Extractor.quality_ok` to decide whether to
+    escalate (markitdown → pdf_fallback → ocr → vision).
+    """
+
+    markdown: str
+    pages: tuple[Page, ...]
+    images: tuple[Image, ...]
+    metadata: DocMetadata
+    confidence: float
+
+
+@dataclass(frozen=True)
+class BronzeRef:
+    """Pointer to a Bronze record — raw bytes preserved on disk plus a SQLite row.
+
+    Storage model is filesystem-with-pointer (per kairix-pro-platform
+    ADR-018): ``raw_path`` is the relative-to-``paths.bronze_root()``
+    location of the blob; the SQLite ``bronze_records`` table carries
+    the rest of the metadata for replayability.
+    """
+
+    source_name: str
+    item_id: str
+    raw_path: str
+    mime: MimeType
+    fetched_at: str
+
+
+@dataclass(frozen=True)
+class Chunk:
+    """One chunk written to the retrieval index.
+
+    F39 enforces that every chunk write carries ``source_uri``,
+    ``source_modified_at``, AND ``sensitivity`` explicitly — default-
+    to-public is only valid when the connector config declares the
+    public tier explicitly. ``source_page`` is non-``None`` for PDF /
+    PPTX / XLSX content; it lets retrieval cite a specific page back
+    to the operator.
+    """
+
+    text: str
+    content_hash: str
+    source_name: str
+    source_uri: str
+    source_modified_at: str
+    source_page: int | None
+    sensitivity: Sensitivity
+
+
+@dataclass(frozen=True)
+class EntitySignal:
+    """One entity-graph signal extracted by Silver from a document.
+
+    Staged in SQLite (``entity_signals`` table); a separate worker job
+    (decoupled per the Curator coupling boundary) pushes to Neo4j.
+    Direct-to-Neo4j writes from the connector pipeline are rejected —
+    see :class:`EntityGraphSink` for the staging boundary.
+    """
+
+    kind: Literal["person", "org", "relationship"]
+    value: str
+    source_uri: str
+    modified_at: str
+    confidence: float
+    sensitivity: Sensitivity
+
+
+@dataclass(frozen=True)
+class SilverOutput:
+    """Output of :meth:`SilverProcessor.process` — chunks + entity signals."""
+
+    chunks: tuple[Chunk, ...]
+    entity_signals: tuple[EntitySignal, ...]
+
+
+@runtime_checkable
+class SourceConnector(Protocol):
+    """One external source family.
+
+    Implementations under ``kairix/connectors/<name>/`` register via
+    the ``kairix.connectors`` entry-point group. The Protocol is
+    deliberately narrow — chunking, signal extraction, and Bronze
+    persistence are NOT on this surface, they live in the
+    orchestration tree (see :class:`BronzeStore`, :class:`SilverProcessor`).
+    F38 locks chunking to one canonical home; F35 locks each connector
+    to its own directory tree.
+    """
+
+    name: str
+
+    def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]: ...
+    def fetch(self, item_id: str) -> RawArtefact: ...
+    def source_link(self, item_id: str) -> str: ...
+    def sensitivity_for(self, item_id: str) -> Sensitivity: ...
+
+
+@runtime_checkable
+class Extractor(Protocol):
+    """One format family.
+
+    Implementations under ``kairix/extractors/<name>/`` register via
+    the ``kairix.extractors`` entry-point group. F40 requires every
+    plugin module to declare a ``version: str`` written through to
+    ``documents_media.extractor_version`` so re-extracts on version
+    bump are tractable. ``quality_ok`` drives the escalation chain
+    (markitdown → pdf_fallback → ocr → vision).
+    """
+
+    name: str
+    version: str
+
+    def can_extract(self, mime: MimeType, magic_bytes: bytes) -> bool: ...
+    def extract(self, raw: bytes, mime: MimeType) -> ExtractedDocument: ...
+    def quality_ok(self, doc: ExtractedDocument) -> bool: ...
+
+
+@runtime_checkable
+class BronzeStore(Protocol):
+    """Raw-bytes-as-fetched persistence (filesystem-with-pointer, ADR-018).
+
+    Bronze is replayable: ``replay`` streams every record for a source
+    (optionally since a timestamp) so re-extraction with a newer
+    :class:`Extractor` version can recover from the originals without
+    re-fetching from the source system.
+    """
+
+    def write(self, source_name: str, item_id: str, raw: bytes, mime: MimeType) -> BronzeRef: ...
+    def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]: ...
+    def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]: ...
+
+
+@runtime_checkable
+class SilverProcessor(Protocol):
+    """Chunking + entity-signal extraction (Plain Python, no LLM).
+
+    Per F38 + KFEAT-005, Silver processing lives ONLY in
+    ``kairix/core/connectors/silver.py`` — no per-connector chunker,
+    no per-extractor chunker. The orchestrator hands every Bronze
+    record plus its :class:`ExtractedDocument` to ``process``; Silver
+    returns a :class:`SilverOutput`.
+    """
+
+    def process(
+        self,
+        raw: BronzeRef,
+        extracted: ExtractedDocument,
+        source_uri: str,
+        source_modified_at: str,
+        sensitivity: Sensitivity,
+    ) -> SilverOutput: ...
+
+
+@runtime_checkable
+class EntityGraphSink(Protocol):
+    """Where :class:`EntitySignal` records land.
+
+    DECISION RULING (per spec §6 Decision 1, ratified 2026-05-22):
+    signals are staged in SQLite; a separate worker job (not in
+    Wave 1) pushes to Neo4j. Direct-to-Neo4j writes from the connector
+    pipeline are rejected — the Curator coupling boundary stays
+    asynchronous, batched, and idempotent.
+    """
+
+    def stage(self, signals: Sequence[EntitySignal]) -> int: ...
