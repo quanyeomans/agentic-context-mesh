@@ -1606,6 +1606,131 @@ class FakeDocumentWriter:
         return self._base_path / corpus_id / f"{session_id}.md"
 
 
+class FakePassthroughExtractor:
+    """Canonical fake for the passthrough extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol with
+    the minimum behaviour the spec promises: claim ``text/*`` mime
+    types, decode UTF-8 bytes into ``ExtractedDocument.markdown``,
+    and report ``quality_ok`` based on whether the markdown has any
+    non-whitespace content.
+
+    Used by ``tests/contracts/test_passthrough_protocol.py`` to prove
+    that the real :class:`PassthroughExtractor` satisfies the same
+    Protocol surface a downstream consumer would expect.
+    """
+
+    def __init__(self, *, version: str = "1.0.0") -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+            MimeType,
+        )
+
+        self.name = "passthrough"
+        self.version = version
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._MimeType = MimeType
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        del magic_bytes
+        return isinstance(mime, str) and mime.startswith("text/")
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        text = raw.decode("utf-8", errors="replace")
+        return self._ExtractedDocument(
+            markdown=text,
+            pages=(),
+            images=(),
+            metadata=self._DocMetadata(
+                title=None,
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=None,
+            ),
+            confidence=1.0,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        return bool(doc.markdown.strip())
+
+
+class FakeMarkitdownExtractor:
+    """Canonical fake for the markitdown extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol
+    without invoking the real :mod:`markitdown` library. Returns a
+    scripted markdown string (default: a non-empty paragraph) so the
+    quality-gate assertions pass; sized to clear the production
+    ``>=50 char`` floor.
+
+    Used by ``tests/contracts/test_markitdown_protocol.py`` to prove
+    that the real :class:`MarkitdownExtractor` satisfies the same
+    Protocol surface a downstream consumer would expect.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "0.1.5",
+        scripted_markdown: str | None = None,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+            MimeType,
+        )
+
+        self.name = "markitdown"
+        self.version = version
+        self.scripted_markdown = scripted_markdown or ("# Recovered document\n\n" + ("scripted markdown line\n" * 8))
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._MimeType = MimeType
+        self._supported_mimes = frozenset(
+            {
+                "application/pdf",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "text/html",
+                "application/xhtml+xml",
+            }
+        )
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        if isinstance(mime, str) and mime in self._supported_mimes:
+            return True
+        return magic_bytes.startswith(b"%PDF")
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        markdown = self.scripted_markdown
+        confidence = min(len(markdown) / max(len(raw), 1), 1.0) if raw else 0.0
+        return self._ExtractedDocument(
+            markdown=markdown,
+            pages=(),
+            images=(),
+            metadata=self._DocMetadata(
+                title="fixture",
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=None,
+            ),
+            confidence=confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        text = doc.markdown.strip()
+        if len(text) < 50:
+            return False
+        return bool(doc.confidence >= 0.10)
+
+
 class FakeCorpusEmbedder:
     """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
 

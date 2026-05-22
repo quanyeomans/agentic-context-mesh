@@ -132,6 +132,11 @@ pytest_plugins = [
     # concurrent scenarios are tagged @pytest.mark.skip in the loader
     # until P3.b / P3.c land.
     "tests.bdd.steps.benchmark_unified_contract_steps",
+    # Wave-2 IM-4 connector-framework extractors — passthrough +
+    # markitdown plugins per
+    # docs/architecture/connector-ingestion-architecture.md §2 + §3.
+    "tests.bdd.steps.extractor_passthrough_steps",
+    "tests.bdd.steps.extractor_markitdown_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
