@@ -112,15 +112,14 @@ ocr = [
     "pdfplumber>=0.10,<1",
 ]
 pptx = [
-    # python-pptx (MIT, Steve Canny) — slide-aware extractor for .pptx
-    # decks (Wave 4 OF-1). Markitdown handles PPTX but flattens slide
-    # structure; this plugin preserves per-slide chunking + speaker
-    # notes for the "cite the specific slide" journeys. Floor pinned
-    # at 1.0 (current major; the 1.0 release locked the public API).
-    # python-pptx is transitively pulled by ``markitdown[pdf]`` today,
-    # but we declare it explicitly so operators can install just the
-    # ``pptx`` plugin without dragging in the full markitdown stack.
+    # python-pptx (MIT) — slide-aware extractor for .pptx decks (Wave 4 OF-1).
     "python-pptx>=1.0,<2",
+]
+xlsx = [
+    # openpyxl (MIT) — sheet-as-document extractor for .xlsx (Wave 4 OF-3).
+    # Each non-empty worksheet → Page; merged cells collapse to top-left;
+    # formula cells render via ``data_only=True`` cached display values.
+    "openpyxl>=3.1,<4",
 ]
 dev = [
     # Test runner
@@ -185,6 +184,7 @@ pdf_fallback = "kairix.extractors.pdf_fallback:make_extractor"
 ocr          = "kairix.extractors.ocr:make_extractor"
 pptx         = "kairix.extractors.pptx:make_extractor"
 docx         = "kairix.extractors.docx:make_extractor"
+xlsx         = "kairix.extractors.xlsx:make_extractor"
 
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"
