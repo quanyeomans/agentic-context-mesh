@@ -31,6 +31,36 @@ from kairix.paths import KairixPaths, wikilinks_last_run_path
 _LAST_RUN_PATH = str(wikilinks_last_run_path())
 
 
+def _extract_document_root_flag(argv: list[str]) -> tuple[list[str], str | None]:
+    """Pop ``--document-root PATH`` out of ``argv`` ahead of subcommand dispatch.
+
+    The wikilinks CLI uses hand-rolled argv parsing per subcommand
+    (each ``_*_cmd`` consumes its own flags), so we strip the global
+    ``--document-root`` flag here before the subcommand sees it. Returns
+    ``(argv_without_flag, value_or_None)``.
+    """
+    if "--document-root" not in argv:
+        return argv, None
+    idx = argv.index("--document-root")
+    if idx + 1 >= len(argv):
+        print("--document-root requires a path argument", file=sys.stderr)
+        sys.exit(1)
+    value = argv[idx + 1]
+    return argv[:idx] + argv[idx + 2 :], value
+
+
+def _replace_document_root(paths: KairixPaths, document_root: Path) -> KairixPaths:
+    """Return a copy of ``paths`` with ``document_root`` replaced.
+
+    F30 subprocess seam — keeps the existing in-process ``paths=`` kwarg
+    winning, and only kicks in when no kwarg was supplied (the
+    subprocess test case).
+    """
+    from dataclasses import replace
+
+    return replace(paths, document_root=document_root)
+
+
 def main(argv: list[str] | None = None, *, paths: KairixPaths | None = None) -> None:
     """Entry point for `kairix wikilinks` subcommand.
 
@@ -39,6 +69,11 @@ def main(argv: list[str] | None = None, *, paths: KairixPaths | None = None) -> 
     calls ``KairixPaths.resolve()``. Subcommands receive ``paths`` as a
     parameter, so tests inject a ``FakePaths`` via the ``paths`` keyword
     instead of monkeypatching ``KAIRIX_*`` environment variables.
+
+    ``--document-root PATH`` is the F30 subprocess seam: when supplied
+    (and no explicit ``paths`` kwarg was injected) it overrides the
+    document_root component of the resolved ``KairixPaths``. Matches the
+    canonical pattern in ``kairix store crawl --document-root``.
     """
     if argv is None:
         argv = sys.argv[2:]  # strip "kairix wikilinks"
@@ -47,8 +82,16 @@ def main(argv: list[str] | None = None, *, paths: KairixPaths | None = None) -> 
         print(__doc__)
         sys.exit(0)
 
+    argv, document_root_override_arg = _extract_document_root_flag(list(argv))
+
     if paths is None:
         paths = KairixPaths.resolve()
+        if document_root_override_arg is not None:
+            paths = _replace_document_root(paths, Path(document_root_override_arg))
+
+    if not argv:
+        print(__doc__)
+        sys.exit(0)
 
     subcmd = argv[0]
 
