@@ -203,7 +203,10 @@ def _default_presentation_loader(path: str) -> _PptxPresentation:
             "to opt into the slide-aware extractor. "
             "next: re-run the connector sync; pptx will then resolve."
         ) from exc
-    return Presentation(path)
+    # python-pptx's Presentation factory returns the concrete Presentation
+    # class which satisfies _PptxPresentation structurally; mypy can't see
+    # through the upstream's lack of stubs so we annotate the boundary.
+    return Presentation(path)  # type: ignore[no-any-return]  # reason: python-pptx lacks py.typed; concrete return type matches the structural _PptxPresentation Protocol.
 
 
 def _walk_slides(prs: _PptxPresentation) -> list[_Slide]:
