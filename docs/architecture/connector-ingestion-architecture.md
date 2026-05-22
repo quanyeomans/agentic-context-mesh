@@ -3,7 +3,7 @@
 > **Status**: proposed (awaiting orchestrator-led implementation).
 > Names the connector + extractor + plugin architecture for Wave 1, defines the separation of concerns and Protocol seams between layers, and encodes the engineering patterns + fitness functions that close the gap between "Python by default" (per kairix-pro `ADR-019-implementation-language-strategy`) and the strong-typing / encapsulation properties needed for a wide ingest surface that grows without refactoring.
 >
-> Companion to: `provider-plugin-architecture.md` (the precedent shape this document deliberately mirrors), `fact-layer.md`, `performance-testing-approach.md`, and the kairix-pro repo's `ADR-017` (two-scope architecture), `ADR-018` (storage tiering), `ADR-019` (language strategy), `ADR-020` (engagement-container destruction unit).
+> Companion to: `provider-plugin-architecture.md` (the precedent shape this document deliberately mirrors), `test-discipline-hardening.md` (the Wave 0 lock-in this implementation rides on — F45..F49 + `e2e_db` fixture + CI Stage 4.5), `fact-layer.md`, `performance-testing-approach.md`, and the kairix-pro repo's `ADR-017` (two-scope architecture), `ADR-018` (storage tiering), `ADR-019` (language strategy), `ADR-020` (engagement-container destruction unit).
 
 ## 1. Context and forcing functions
 
@@ -296,6 +296,16 @@ This section is the heart of the document. It names each material Python weaknes
 | **F44** | Engagement-scope code cannot import firm-scope storage clients (`psycopg`, `asyncpg`, …) | (new — pro ADR-017 boundary) |
 
 All follow the F21 action-marked-failure template (`fix:` / `next:` / `run:`), have a per-rule baseline file in `.architecture/baseline/`, and wire into pre-commit + `scripts/safe-commit.sh` + CI Stage 0. Pre-existing violations are grandfathered; net-new violations block.
+
+**Wave 0 dependency (test discipline)**: F34–F44 land on top of the Wave 0 hardening pass (`test-discipline-hardening.md`). The connector framework inherits the discipline by construction:
+
+- **F45** new-capability BDD parity — every new `make_connector` / `make_extractor` symbol must ship with `tests/bdd/features/connector_<name>.feature` / `extractor_<name>.feature` in the same commit.
+- **F46** BDD step impls must go through `factory.build_connector_pipeline` (Wave 1+ adds this factory function); direct `ConnectorPipeline(...)` construction is blocked.
+- **F47** integration tests use the factory; the `e2e_db` fixture in `tests/conftest.py` is the canonical setup.
+- **F48** every new top-level capability gets `tests/e2e/test_composed_<capability>_path.py` — for Wave 1+ that means `test_composed_connector_path.py`, etc.
+- **F49** F30, F46, F47 baselines shrink per release; net-new connector / extractor surfaces cannot grow these baselines.
+
+The Wave 0 F30 baseline reached zero before Wave 1 dispatches; the connector framework starts on a clean composition-tested foundation.
 
 ## 7. Schema additions (Wave 1 migration)
 

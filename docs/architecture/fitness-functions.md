@@ -2461,6 +2461,102 @@ pass.
 
 ---
 
+### F45 — new top-level capability ships with a BDD feature
+
+Forward-only rule landed in Wave 0 (kairix-pro-platform#59). Every commit
+that adds a new CLI subcommand (a new row in `kairix/cli.py:COMMANDS`),
+MCP tool (a new `@server.tool()` decorated function in
+`kairix/agents/mcp/server.py`), or plugin factory (`make_provider` /
+`make_connector` / `make_extractor` symbol in a new
+`kairix/providers/<name>/__init__.py`, `kairix/connectors/<name>/__init__.py`,
+or `kairix/extractors/<name>/__init__.py`) must add a matching
+`tests/bdd/features/*.feature` in the same commit.
+
+Naming convention: `tests/bdd/features/{cli_<name>,mcp_<tool>,provider_<name>,connector_<name>,extractor_<name>}.feature`.
+The check also accepts an explicit `# F45-feature: <path>` comment in the
+surface file pointing at a non-conventionally-named feature.
+
+Detector: `scripts/checks/check_f45_new_capability_bdd.py`.
+Baseline: `.architecture/baseline/f45-files.txt` (empty; forward-only).
+
+---
+
+### F46 — BDD step impls call factory-composed production code
+
+Wave 0 rule (kairix-pro-platform#59) locking the **composition principle**
+for BDD step files. Step implementations under `tests/bdd/steps/*.py`
+must invoke (call-graph depth ≤ 2) one of:
+
+- A CLI entry point: `kairix.cli.main` OR a per-subcommand `main(...)`
+  function.
+- An MCP tool function: the callable wrapped by `@server.tool()`.
+- A factory constructor: `kairix.core.factory.build_search_pipeline`
+  (and future `build_embed_pipeline` / `build_connector_pipeline` etc).
+
+Direct construction of `SearchPipeline(...)`, `EmbedPipeline(...)`,
+`ConnectorPipeline(...)`, `IngestPipeline(...)` in a step file is
+disallowed.
+
+Detector: `scripts/checks/check_f46_bdd_step_composition.py`.
+Baseline: `.architecture/baseline/f46-files.txt` (seeded at landing;
+shrinks via F49).
+
+---
+
+### F47 — integration tests build through the factory
+
+Wave 0 rule (kairix-pro-platform#59) locking the **composition principle**
+for integration tests. Tests under `tests/integration/` that exercise a
+multi-component pipeline must construct it via `kairix.core.factory.build_*`
+with `paths=FakePaths(...)`. Direct construction of `*Pipeline(...)`
+classes is allowed only in:
+
+- `tests/contracts/` — Protocol shape proofs.
+- `tests/integration/test_<x>_contract.py` — single-layer boundary proofs.
+
+Detector: `scripts/checks/check_f47_integration_factory.py`.
+Baseline: `.architecture/baseline/f47-integration-factory-files.txt`
+(seeded at landing; shrinks via F49).
+
+---
+
+### F48 — composed production path E2E test exists and runs
+
+Wave 0 rule (kairix-pro-platform#59) locking the **real-path principle**.
+`tests/e2e/test_composed_production_path.py` must exist, must carry
+`@pytest.mark.e2e` on at least one test function, must be runnable as
+`pytest -m e2e tests/e2e/test_composed_production_path.py`, and must
+exercise: config load → `factory.build_*` → ingest → query → assertion.
+
+Every new top-level capability (provider, connector, extractor, retrieval
+mode) ships with a sibling `tests/e2e/test_composed_<capability>_path.py`.
+
+Detector: `scripts/checks/check_f48_e2e_present.py`. CI Stage 4.5
+(`e2e-composed-path` job in `.github/workflows/ci.yml`) runs the e2e
+selector. No baseline — binary presence check.
+
+---
+
+### F49 — test-discipline baselines shrink per release
+
+Wave 0 rule (kairix-pro-platform#59) preventing test-debt accretion.
+Each release tag (matching `v[0-9]*.[0-9]*.[0-9]*`) must reduce each of:
+
+- `.architecture/baseline/f30-operator-outcome-tests-files.txt`
+- `.architecture/baseline/f46-files.txt`
+- `.architecture/baseline/f47-integration-factory-files.txt`
+
+by ≥1 entry compared to the previous tagged release, OR keep all three
+at zero. F30 reached zero in Wave 0.
+
+Detector: `scripts/checks/check_baseline_shrinking.py`. Wired into
+`.github/workflows/release.yml` BEFORE tag creation. No per-commit gate.
+
+Canonical reference for F45–F49 mechanics + paydown patterns:
+[`test-discipline-hardening.md`](test-discipline-hardening.md).
+
+---
+
 ## Harness architecture
 
 ### File layout
