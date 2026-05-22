@@ -112,6 +112,9 @@ python3 "${SCRIPT_DIR}/check_perf_singleton.py" || overall=1
 # F37 — change-detection / sync code only under the connector trees
 python3 "${SCRIPT_DIR}/check_f37_singular_sync.py" || overall=1
 
+# F38 — Silver processing only in kairix/core/connectors/silver.py
+python3 "${SCRIPT_DIR}/check_f38_silver_singleton.py" || overall=1
+
 # F30 — every CLI subcommand + MCP tool has an outcome test
 python3 "${SCRIPT_DIR}/check_f30_operator_outcome_tests.py" || overall=1
 
