@@ -800,6 +800,21 @@ def warm_flag_path() -> Path:
     return Path(override) if override else data_dir() / "warm.flag"
 
 
+def connector_sync_disabled() -> bool:
+    """Return True when ``KAIRIX_CONNECTOR_SYNC_DISABLED`` is set to any truthy value.
+
+    Operators set this to short-circuit the worker's connector sync tick
+    without removing the worker dispatch slot — useful on hosts where
+    the connector framework is intentionally inert (legacy scanner
+    deploys, partial rollouts).
+
+    Accepted truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    Anything else — including unset — is False. F4-clean: the env read
+    lives here at the boundary.
+    """
+    return os.environ.get("KAIRIX_CONNECTOR_SYNC_DISABLED", "").strip().lower() in {"1", "true", "yes"}
+
+
 def noninteractive_mode() -> bool:
     """Return True when ``KAIRIX_NONINTERACTIVE=1`` is set in the environment.
 
