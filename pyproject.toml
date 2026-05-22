@@ -89,6 +89,17 @@ pdf_fallback = [
     # commercial-safe. pymupdf (AGPL) is NOT shipped.
     "pdfplumber>=0.11.0,<1",
 ]
+docx = [
+    # python-docx (MIT) — heading-hierarchy-aware Word extractor used
+    # by ``kairix.extractors.docx`` (Wave 4 OF-2). Light dependency
+    # tree (lxml + typing-extensions); markitdown already pulls
+    # python-docx transitively, so operators on the rich-document
+    # extra get the heading-aware path for free. Declared as a
+    # standalone extra so operators on passthrough-only deployments
+    # can opt into the docx extractor without the markitdown
+    # transitive set.
+    "python-docx>=1.0,<2",
+]
 ocr = [
     # OCR extractor (Wave 3 MM-2). Tesseract is the default per Decision 5
     # (Apache 2.0, CPU-only). PaddleOCR is the opt-in follow-up.
@@ -173,6 +184,7 @@ markitdown   = "kairix.extractors.markitdown:make_extractor"
 pdf_fallback = "kairix.extractors.pdf_fallback:make_extractor"
 ocr          = "kairix.extractors.ocr:make_extractor"
 pptx         = "kairix.extractors.pptx:make_extractor"
+docx         = "kairix.extractors.docx:make_extractor"
 
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"

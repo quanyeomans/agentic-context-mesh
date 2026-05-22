@@ -1955,6 +1955,78 @@ class FakePptxExtractor:
         return len(doc.markdown.strip()) >= 100
 
 
+class FakeDocxExtractor:
+    """Canonical fake for the docx extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol
+    without invoking the real :mod:`docx` (python-docx) library.
+    Returns a scripted markdown string carrying at least one
+    ``#``-prefixed heading line so the heading-aware quality gate
+    passes.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "1.2.0",
+        scripted_markdown: str | None = None,
+        scripted_has_tracked_changes: bool = False,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+        )
+
+        self.name = "docx"
+        self.version = version
+        self.scripted_markdown = scripted_markdown or (
+            "# Section One\n\n"
+            + ("Body paragraph from the docx fixture.\n" * 6)
+            + "\n## Subsection\n\n"
+            + "More body text for coverage.\n"
+        )
+        self.last_extract_had_tracked_changes = scripted_has_tracked_changes
+        self._scripted_has_tracked_changes = scripted_has_tracked_changes
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        if isinstance(mime, str) and mime == self._docx_mime:
+            return True
+        if magic_bytes.startswith(b"PK\x03\x04") and isinstance(mime, str) and mime.endswith("document"):
+            return True
+        return False
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        markdown = self.scripted_markdown
+        confidence = min(len(markdown) / max(len(raw), 1), 1.0) if raw else 0.0
+        self.last_extract_had_tracked_changes = self._scripted_has_tracked_changes
+        return self._ExtractedDocument(
+            markdown=markdown,
+            pages=(),
+            images=(),
+            metadata=self._DocMetadata(
+                title="fixture",
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=None,
+            ),
+            confidence=confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        if len(doc.markdown) < 100:
+            return False
+        for line in doc.markdown.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("#") and " " in stripped:
+                return True
+        return False
+
+
 class FakeCorpusEmbedder:
     """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
 
