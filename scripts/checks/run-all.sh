@@ -118,6 +118,9 @@ python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
 # F33 — shellcheck disable directives require rationale
 python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 
+# F34 — kairix/core/connectors/** may not import kairix/connectors/ or kairix/extractors/
+python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
+
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
 
