@@ -103,17 +103,8 @@ python3 "${SCRIPT_DIR}/check_no_cross_provider.py" || overall=1
 # F28 — every provider/<name>/ has matching BDD coverage
 python3 "${SCRIPT_DIR}/check_provider_bdd_completeness.py" || overall=1
 
-# F36 — every connector + extractor plugin has matching BDD coverage
-bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
-
 # F29 — perf-measurement code only under kairix/quality/probe/
 python3 "${SCRIPT_DIR}/check_perf_singleton.py" || overall=1
-
-# F37 — change-detection / sync code only under the connector trees
-python3 "${SCRIPT_DIR}/check_f37_singular_sync.py" || overall=1
-
-# F38 — Silver processing only in kairix/core/connectors/silver.py
-python3 "${SCRIPT_DIR}/check_f38_silver_singleton.py" || overall=1
 
 # F30 — every CLI subcommand + MCP tool has an outcome test
 python3 "${SCRIPT_DIR}/check_f30_operator_outcome_tests.py" || overall=1
@@ -127,11 +118,8 @@ python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
 # F33 — shellcheck disable directives require rationale
 python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 
-# F34 — kairix/core/connectors/** may not import kairix/connectors/ or kairix/extractors/
-python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
-
-# F35 — kairix/connectors/<a>/ may not import another connector or any extractor
-python3 "${SCRIPT_DIR}/check_f35_no_cross_connector.py" || overall=1
+# F39 — every chunk write carries source_uri/source_modified_at/sensitivity
+python3 "${SCRIPT_DIR}/check_f39_chunk_metadata.py" || overall=1
 
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
@@ -147,6 +135,16 @@ bash "${SCRIPT_DIR}/check-f48-e2e-present.sh" || overall=1
 
 # F50 — net-new files cannot accrete F-rule baseline debt
 bash "${SCRIPT_DIR}/check-f50-net-new-file-violations.sh" || overall=1
+
+bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f35_no_cross_connector.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f37_singular_sync.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f38_silver_singleton.py" || overall=1
 
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
