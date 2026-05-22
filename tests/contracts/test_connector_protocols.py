@@ -227,22 +227,11 @@ class TestConnectorSkeletonsRaiseNotImplemented:
         with pytest.raises(NotImplementedError):
             ConnectorPipeline().run_batch(_SyntheticSourceConnector(), _SyntheticExtractor())
 
-    @pytest.mark.contract
-    def test_cursor_store_methods_raise(self) -> None:
-        from kairix.core.connectors.cursor_store import CursorStore
-
-        store = CursorStore()
-        with pytest.raises(NotImplementedError):
-            store.read("src")
-        with pytest.raises(NotImplementedError):
-            store.write("src", "token")
-
-    @pytest.mark.contract
-    def test_dead_letter_store_record_raises(self) -> None:
-        from kairix.core.connectors.dead_letter import DeadLetterStore
-
-        with pytest.raises(NotImplementedError):
-            DeadLetterStore().record("src", "item", "boom")
+    # CursorStore + DeadLetterStore skeletons were replaced by real impls in
+    # IM-1 (Connector-Framework Wave 2). The atomic per-batch contract is
+    # exercised by tests/integration/test_connector_cursor_store.py and
+    # tests/integration/test_connector_deadletter_store.py; no more
+    # NotImplementedError surface on those two stores.
 
     @pytest.mark.contract
     def test_connector_registry_resolve_raises(self) -> None:
