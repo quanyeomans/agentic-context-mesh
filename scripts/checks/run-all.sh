@@ -103,6 +103,9 @@ python3 "${SCRIPT_DIR}/check_no_cross_provider.py" || overall=1
 # F28 — every provider/<name>/ has matching BDD coverage
 python3 "${SCRIPT_DIR}/check_provider_bdd_completeness.py" || overall=1
 
+# F36 — every connector + extractor plugin has matching BDD coverage
+bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
+
 # F29 — perf-measurement code only under kairix/quality/probe/
 python3 "${SCRIPT_DIR}/check_perf_singleton.py" || overall=1
 
