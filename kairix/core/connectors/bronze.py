@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from kairix.core.protocols import BronzeRef, MimeType
@@ -67,7 +67,7 @@ class FilesystemBronzeStore:
         tmp_path = abs_path.with_suffix(abs_path.suffix + ".tmp")
         tmp_path.write_bytes(raw)
         tmp_path.replace(abs_path)
-        fetched_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         self._db.execute(
             "INSERT OR REPLACE INTO bronze_records "
             "(source_name, item_id, raw_path, mime, fetched_at) "

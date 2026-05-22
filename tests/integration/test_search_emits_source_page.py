@@ -31,7 +31,7 @@ F47-compliant: the pipeline is constructed via
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -68,7 +68,7 @@ def _write_paged_chunk(db_path: Path, *, source_page: int) -> None:
     content_hash = "hash_paged_chunk_42"
     source_uri = "src://pdf-source/quarterly.pdf"
     modified_at = "2026-05-22T00:00:00Z"
-    now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     path = f"{source_uri}#0"
 
     db = sqlite3.connect(str(db_path))
