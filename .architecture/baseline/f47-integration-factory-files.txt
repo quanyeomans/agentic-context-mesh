@@ -1,0 +1,35 @@
+# F47 — integration tests must build pipelines through kairix.core.factory.build_*
+# (seeded 2026-05-22, Wave 0 / W0-5 of test-discipline hardening).
+#
+# Each entry is a tests/integration/ file that constructs a *Pipeline
+# class imported from kairix.* directly, rather than via
+# kairix.core.factory.build_<pipeline>(paths=FakePaths(...)). The
+# pre-Wave-0 audit found that only one integration test today uses the
+# factory composition — every other multi-component integration test
+# builds the pipeline ad-hoc, which means the production wiring itself
+# is unexercised. This is the same failure mode the Plan B-parity /
+# LoCoMo post-mortem named.
+#
+# Baseline policy: per-release F49 shrinking; net-new violations are
+# blocked by the F47 gate. To remove an entry, refactor the test to
+# call kairix.core.factory.build_search_pipeline(paths=FakePaths(...))
+# (or the analogous build_<other>_pipeline) in the same commit. See
+# docs/architecture/test-discipline-hardening.md §4.2 for the canonical
+# F47-clean shape and tests/integration/test_vec_index_lifecycle.py
+# for the in-repo reference.
+#
+# Exceptions (not listed because the detector exempts them):
+#   * tests/contracts/ — Protocol shape proofs
+#   * tests/integration/test_<x>_contract.py — single-layer boundary
+#     proofs that intentionally bypass composition
+tests/integration/test_backends_integration.py
+tests/integration/test_boosts_integration.py
+tests/integration/test_budget_integration.py
+tests/integration/test_enrich_cache_e2e.py
+tests/integration/test_federation_end_to_end.py
+tests/integration/test_intent_pipeline_routing.py
+tests/integration/test_logger_integration.py
+tests/integration/test_per_query_stage_telemetry_e2e.py
+tests/integration/test_pipeline_integration.py
+tests/integration/test_query_cache_pipeline_e2e.py
+tests/integration/test_rrf_integration.py
