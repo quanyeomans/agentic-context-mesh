@@ -46,6 +46,18 @@ EMBED_INTERVAL = 3600  # 1 hour
 ENTITY_SEED_INTERVAL = 86400  # 24 hours
 HEALTH_CHECK_INTERVAL = 21600  # 6 hours
 WIKILINKS_INTERVAL = 3600  # 1 hour — runs after embed; --changed mtime-filters
+# SC-6 connector-framework seam — the worker tick that drives every
+# registered SourceConnector through list_changes → fetch → bronze →
+# silver → cursor.advance. 900s (15 min) is the Wave-1 default: short
+# enough to feel responsive on a webhook-less source (Notion polling),
+# long enough not to thrash Graph delta-tokens on quieter sources.
+# Wave 2 fills in the body inside kairix/core/connectors/; Wave 1 only
+# wires the dispatch slot. See docs/architecture/connector-ingestion-architecture.md §6.
+CONNECTOR_SYNC_INTERVAL = 900  # 15 minutes
+# Dispatch-table key for the connector-sync slot. Held as a constant
+# rather than inline so the maintenance-cycle dispatch list, the per-task
+# timestamp dict, and the return tuple stay in lock-step (F17).
+_CONNECTOR_SYNC_KEY = "connector_sync"
 
 # Idle backoff (#224): when embed runs find no work to do, the next-embed
 # wait extends exponentially. Cap at 4 hours so we don't go totally silent
@@ -111,6 +123,49 @@ def _default_health_check() -> list[Any]:
     return run_all_checks()
 
 
+@dataclass(frozen=True)
+class ConnectorSyncResult:
+    """Structured outcome of one connector-framework sync tick.
+
+    Wave-1 placeholder shape. The worker logs these counters at INFO so
+    operators can see end-to-end progress without grep-ing per-connector
+    logs. Wave 2 (orchestration under ``kairix/core/connectors/``) will
+    populate the fields from the real per-batch transaction.
+
+    Fields:
+        synced: items successfully written to Bronze and processed through
+            Silver in this tick (cursor advanced past each).
+        failed: items where ``fetch`` raised after the configured retry
+            count — counted toward dead-letter on the next tick.
+        dead_letter_added: items moved into the dead-letter table this
+            tick (so operators can alert on a non-zero delta).
+    """
+
+    synced: int = 0
+    failed: int = 0
+    dead_letter_added: int = 0
+
+
+def _default_connector_sync() -> ConnectorSyncResult:
+    """Default connector-framework sync — Wave 2 implements the body.
+
+    Wave 1 (SC-6) wires the worker-side seam: ``WorkerDeps.connector_sync_fn``
+    is callable, the worker loop dispatches it on its own interval, and
+    the structured result is logged. The real per-source list_changes /
+    fetch / Bronze / Silver / cursor-advance loop lands in Wave 2 under
+    ``kairix/core/connectors/``. Per F37 this function MUST NOT import
+    change-detection libraries directly — it dispatches into
+    ``kairix.core.connectors`` which owns the sync mechanism.
+
+    Raises ``NotImplementedError`` so a misconfigured ``CONNECTOR_SYNC_INTERVAL``
+    on a pre-Wave-2 deploy surfaces clearly in the worker log — the
+    ``run_connector_sync`` wrapper catches it and treats as a no-op.
+
+    See docs/architecture/connector-ingestion-architecture.md §6.
+    """
+    raise NotImplementedError("Wave 2 implements; see docs/architecture/connector-ingestion-architecture.md §6")
+
+
 @dataclass
 class WorkerDeps:
     """Injectable dependencies for the worker loop and its task helpers.
@@ -133,6 +188,12 @@ class WorkerDeps:
     entity_seed: Callable[[], None] = field(default_factory=lambda: _default_entity_seed)
     health_check: Callable[[], list[Any]] = field(default_factory=lambda: _default_health_check)
     wikilinks: Callable[[], None] = field(default_factory=lambda: _default_wikilinks_inject)
+    # SC-6 — connector-framework seam (Wave 1 wires; Wave 2 implements).
+    # Same F6-clean default_factory pattern as the four task callables
+    # above. Tests pass a Fake; production omits and gets the
+    # NotImplementedError-raising default until Wave 2 swaps it for the
+    # real ``kairix.core.connectors`` dispatcher.
+    connector_sync_fn: Callable[[], ConnectorSyncResult] = field(default_factory=lambda: _default_connector_sync)
     sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     # #224 phase 4-5 combined — observable state + pause flag.
     # ``state`` is the in-memory dataclass the loop mutates on phase changes.
@@ -345,19 +406,66 @@ def run_health_check(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: health check raised — %s", exc)
 
 
+def run_connector_sync(deps: WorkerDeps | None = None) -> None:
+    """Drive one connector-framework sync tick (SC-6 seam).
+
+    Wave 1 wires this as a no-op-friendly dispatch slot: the default
+    ``deps.connector_sync_fn`` raises ``NotImplementedError`` and we
+    catch it here so a pre-Wave-2 deploy does not crash the worker.
+    Wave 2 plugs in the real ``kairix.core.connectors`` dispatcher and
+    the same call path becomes the production sync surface (per F37
+    this function MUST NOT import change-detection libraries directly —
+    those live under ``kairix/connectors/<name>/`` and are reached via
+    ``kairix/core/connectors/``).
+
+    Treats every other outcome as non-fatal — same ``(Exception, SystemExit)``
+    discipline as the other ``run_*`` helpers. A failing connector
+    must not bring the worker process down; failures are logged and
+    surfaced via the structured ``ConnectorSyncResult`` on the next
+    successful tick.
+
+    Args:
+        deps: Injectable worker dependencies. Tests construct
+              ``WorkerDeps(connector_sync_fn=fake)``; production omits
+              the kwarg and the default factory wires
+              ``_default_connector_sync`` (Wave-2-implemented).
+    """
+    deps = deps if deps is not None else WorkerDeps()
+    try:
+        logger.info("worker: starting connector sync")
+        result = deps.connector_sync_fn()
+        logger.info(
+            "worker: connector sync complete — synced=%d failed=%d dead_letter_added=%d",
+            result.synced,
+            result.failed,
+            result.dead_letter_added,
+        )
+    except NotImplementedError:
+        # Wave 1: the default raises this. The slot is wired but the
+        # body is not yet implemented. Log once-per-tick so operators
+        # can see the worker reached the dispatch slot without it
+        # crashing the loop. Wave 2 removes the default raise and this
+        # branch becomes dead-but-harmless.
+        logger.warning("worker: connector sync not yet implemented (Wave 2)")
+    except (Exception, SystemExit) as exc:
+        logger.warning("worker: connector sync raised — %s", exc)
+
+
 @dataclass
 class _Schedule:
-    """Worker task interval config — bundles the four `int` cadences.
+    """Worker task interval config — bundles the cadence ints.
 
     Scalar config (not a test-injection seam); main() builds this once
     from kwargs + module defaults so the inner loop helpers can pass a
-    single value around rather than four discrete `_embed_interval` ints.
+    single value around rather than discrete ``_embed_interval`` ints.
+    SC-6 added ``connector_sync`` alongside the four maintenance cadences.
     """
 
     embed: int
     entity: int
     health: int
     wikilinks: int
+    connector_sync: int
 
 
 def _resolve_schedule(
@@ -365,6 +473,7 @@ def _resolve_schedule(
     entity_seed_interval: int | None,
     health_check_interval: int | None,
     wikilinks_interval: int | None,
+    connector_sync_interval: int | None,
 ) -> _Schedule:
     """Fold kwargs + module defaults into a single ``_Schedule``."""
     return _Schedule(
@@ -372,6 +481,7 @@ def _resolve_schedule(
         entity=entity_seed_interval if entity_seed_interval is not None else ENTITY_SEED_INTERVAL,
         health=health_check_interval if health_check_interval is not None else HEALTH_CHECK_INTERVAL,
         wikilinks=wikilinks_interval if wikilinks_interval is not None else WIKILINKS_INTERVAL,
+        connector_sync=connector_sync_interval if connector_sync_interval is not None else CONNECTOR_SYNC_INTERVAL,
     )
 
 
@@ -471,28 +581,37 @@ def _maybe_run_maintenance_cycle(
     last_entity: float,
     last_health: float,
     last_wikilinks: float,
+    last_connector_sync: float,
     schedule: _Schedule,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
-    Three near-identical "if interval elapsed → run task → record timestamp"
+    Several near-identical "if interval elapsed → run task → record timestamp"
     blocks collapsed into a dispatch loop to keep ``main``'s cognitive
-    complexity under the F16 / S3776 limit (#250 follow-up).
+    complexity under the F16 / S3776 limit (#250 follow-up). SC-6 added
+    the ``connector_sync`` slot — it inherits the same maintenance-skip
+    gating because a long-idle vault implies quiet upstream sources too.
     """
     if not maintenance_active:
-        return (last_entity, last_health, last_wikilinks)
+        return (last_entity, last_health, last_wikilinks, last_connector_sync)
 
     tasks = (
         ("entity", schedule.entity, last_entity, run_entity_seed),
         ("health", schedule.health, last_health, run_health_check),
         ("wikilinks", schedule.wikilinks, last_wikilinks, run_wikilinks_inject),
+        (_CONNECTOR_SYNC_KEY, schedule.connector_sync, last_connector_sync, run_connector_sync),
     )
-    new_times: dict[str, float] = {"entity": last_entity, "health": last_health, "wikilinks": last_wikilinks}
+    new_times: dict[str, float] = {
+        "entity": last_entity,
+        "health": last_health,
+        "wikilinks": last_wikilinks,
+        _CONNECTOR_SYNC_KEY: last_connector_sync,
+    }
     for name, interval, last_run, task in tasks:
         if now - last_run >= interval:
             _run_maintenance_task(deps, transition, task)
             new_times[name] = now
-    return (new_times["entity"], new_times["health"], new_times["wikilinks"])
+    return (new_times["entity"], new_times["health"], new_times["wikilinks"], new_times[_CONNECTOR_SYNC_KEY])
 
 
 def main(
@@ -502,6 +621,7 @@ def main(
     entity_seed_interval: int | None = None,
     health_check_interval: int | None = None,
     wikilinks_interval: int | None = None,
+    connector_sync_interval: int | None = None,
 ) -> None:
     """Run the worker loop.
 
@@ -516,7 +636,13 @@ def main(
     )
 
     deps = deps if deps is not None else WorkerDeps()
-    schedule = _resolve_schedule(embed_interval, entity_seed_interval, health_check_interval, wikilinks_interval)
+    schedule = _resolve_schedule(
+        embed_interval,
+        entity_seed_interval,
+        health_check_interval,
+        wikilinks_interval,
+        connector_sync_interval,
+    )
 
     logger.info(
         "kairix worker starting — embed every %ds, entity seed every %ds, wikilinks every %ds",
@@ -547,6 +673,7 @@ def main(
     last_entity = 0.0
     last_health = 0.0
     last_wikilinks = 0.0
+    last_connector_sync = 0.0
 
     # #224 idle backoff: extend the embed interval after consecutive
     # no-op runs to avoid steady CPU/I/O pressure on idle vaults.
@@ -600,7 +727,7 @@ def main(
             maintenance_active, previously_skipping_maint, consecutive_embed_noops
         )
 
-        last_entity, last_health, last_wikilinks = _maybe_run_maintenance_cycle(
+        last_entity, last_health, last_wikilinks, last_connector_sync = _maybe_run_maintenance_cycle(
             deps=deps,
             transition=_transition,
             now=now,
@@ -608,6 +735,7 @@ def main(
             last_entity=last_entity,
             last_health=last_health,
             last_wikilinks=last_wikilinks,
+            last_connector_sync=last_connector_sync,
             schedule=schedule,
         )
 

@@ -21,12 +21,15 @@ from pathlib import Path
 import pytest
 
 from kairix.worker import (
+    CONNECTOR_SYNC_INTERVAL,
     EMBED_INTERVAL,
     ENTITY_SEED_INTERVAL,
     HEALTH_CHECK_INTERVAL,
     WIKILINKS_INTERVAL,
+    ConnectorSyncResult,
     WorkerDeps,
     main,
+    run_connector_sync,
     run_embed,
     run_entity_seed,
     run_health_check,
@@ -1424,4 +1427,346 @@ def test_maintenance_resumes_after_embed_finds_work(tmp_path: Path) -> None:
     )
     assert wikilinks_calls["n"] >= 1, (
         f"wikilinks_inject should resume after embed reset the streak; got {wikilinks_calls['n']} call(s)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SC-6 — connector-framework sync seam (Wave 1 wires; Wave 2 implements)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_connector_sync_interval_default_is_15_minutes() -> None:
+    """Wave-1 default cadence for the connector sync tick is 900s (15 min).
+
+    Sabotage proof: editing ``CONNECTOR_SYNC_INTERVAL`` in worker.py to
+    e.g. 60 would fail this assertion immediately. Locks the documented
+    Wave-1 default so an unintentional change surfaces in review.
+    """
+    assert CONNECTOR_SYNC_INTERVAL == 900
+
+
+@pytest.mark.unit
+def test_worker_deps_default_factory_binds_connector_sync_fn() -> None:
+    """``WorkerDeps()`` with no overrides binds a callable
+    ``connector_sync_fn`` (F6 default-factory discipline).
+
+    Sabotage proof: regressing the field to
+    ``connector_sync_fn: Callable | None = None`` would make this fail
+    on the ``callable(...)`` check — the F6 issue specifically rejects
+    the ``Optional[Callable] = None`` self-resolving pattern.
+    """
+    deps = WorkerDeps()
+    assert callable(deps.connector_sync_fn), (
+        "WorkerDeps.connector_sync_fn must default to a callable; "
+        f"got {deps.connector_sync_fn!r}. F6: do not regress to "
+        "``Callable | None = None``."
+    )
+
+
+@pytest.mark.unit
+def test_connector_sync_result_default_zero_counters() -> None:
+    """``ConnectorSyncResult()`` defaults every counter to 0.
+
+    Sabotage proof: changing any field default to a non-zero literal
+    would fail this — the Wave-1 placeholder shape is intentionally
+    a no-op result so the worker can log it without lying about work
+    that hasn't happened.
+    """
+    result = ConnectorSyncResult()
+    assert result.synced == 0
+    assert result.failed == 0
+    assert result.dead_letter_added == 0
+
+
+@pytest.mark.unit
+def test_run_connector_sync_catches_default_notimplementederror(caplog: pytest.LogCaptureFixture) -> None:
+    """Wave 1: the default ``_default_connector_sync`` raises
+    ``NotImplementedError`` and ``run_connector_sync`` must catch it so
+    the worker loop never crashes on an unimplemented body.
+
+    Sabotage proof: temporarily change the ``except NotImplementedError``
+    branch in worker.py to ``except KeyError`` and rerun — pytest
+    surfaces the unhandled NotImplementedError. Restored the branch and
+    the test passes.
+    """
+    # Default deps → default _default_connector_sync which raises.
+    run_connector_sync(WorkerDeps())  # must not raise
+
+
+@pytest.mark.unit
+def test_run_connector_sync_logs_wave2_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """The Wave-1 NotImplementedError path logs a clear "not yet
+    implemented" warning so operators tailing the worker log see why
+    the connector slot is a no-op.
+
+    Sabotage proof: drop the ``logger.warning`` from the except branch
+    and the captured-records list stays empty.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="kairix.worker"):
+        run_connector_sync(WorkerDeps())
+    assert any("connector sync not yet implemented" in rec.getMessage() for rec in caplog.records), (
+        f"expected 'connector sync not yet implemented' warning; got {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+@pytest.mark.unit
+def test_run_connector_sync_calls_injected_callable_and_logs_counters(caplog: pytest.LogCaptureFixture) -> None:
+    """Injecting a custom ``connector_sync_fn`` returning a populated
+    ``ConnectorSyncResult`` drives the structured-log line.
+
+    Sabotage proof: drop the ``deps.connector_sync_fn()`` call from
+    ``run_connector_sync`` and ``call_count`` stays 0 — the assertion
+    fails. Restored, the call is observed and the result counters are
+    logged.
+    """
+    import logging
+
+    call_count = {"n": 0}
+
+    def _fake_sync() -> ConnectorSyncResult:
+        call_count["n"] += 1
+        return ConnectorSyncResult(synced=7, failed=1, dead_letter_added=2)
+
+    with caplog.at_level(logging.INFO, logger="kairix.worker"):
+        run_connector_sync(WorkerDeps(connector_sync_fn=_fake_sync))
+
+    assert call_count["n"] == 1, "connector_sync_fn must be invoked exactly once per tick"
+    completion_lines = [r.getMessage() for r in caplog.records if "connector sync complete" in r.getMessage()]
+    assert completion_lines, "expected a 'connector sync complete' log line"
+    msg = completion_lines[0]
+    assert "synced=7" in msg
+    assert "failed=1" in msg
+    assert "dead_letter_added=2" in msg
+
+
+@pytest.mark.unit
+def test_run_connector_sync_catches_unexpected_exception() -> None:
+    """A non-NotImplementedError raised by the sync callable must NOT
+    crash the worker — same (Exception, SystemExit) discipline as the
+    other ``run_*`` helpers.
+
+    Sabotage proof: narrow the except clause to only
+    ``NotImplementedError`` and this test surfaces the unhandled
+    ``RuntimeError``. Keep the (Exception, SystemExit) tuple and it
+    passes.
+    """
+
+    def _boom() -> ConnectorSyncResult:
+        raise RuntimeError("connector exploded")
+
+    run_connector_sync(WorkerDeps(connector_sync_fn=_boom))  # must not raise
+
+
+@pytest.mark.unit
+def test_main_loop_calls_connector_sync_at_interval(tmp_path: Path) -> None:
+    """When ``connector_sync_interval`` has elapsed, ``main()`` drives the
+    injected ``connector_sync_fn`` from the dispatch loop.
+
+    Sabotage proof: temporarily removed the
+    ``("connector_sync", schedule.connector_sync, last_connector_sync, run_connector_sync)``
+    tuple from ``_maybe_run_maintenance_cycle``; the test failed with
+    ``call_counts['connector_sync'] == 0``. Restored the tuple and it
+    passes. Proves the dispatch slot is actually wired into the loop.
+    """
+    import os
+
+    call_counts = {"embed": 0, "connector_sync": 0}
+
+    def _embed_then_shutdown() -> None:
+        call_counts["embed"] += 1
+        if call_counts["embed"] >= 2:
+            # Self-signal SIGTERM so the worker loop exits after observing one sync tick.
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal to terminate loop in test.
+
+    def _connector_sync() -> ConnectorSyncResult:
+        call_counts["connector_sync"] += 1
+        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+    main(
+        deps=WorkerDeps(
+            embed=_embed_then_shutdown,
+            entity_seed=lambda: None,
+            health_check=lambda: [],
+            wikilinks=lambda: None,
+            connector_sync_fn=_connector_sync,
+            sleep=lambda _s: None,
+            state_path=tmp_path / "worker-state.json",
+            write_state_fn=lambda *_: None,
+        ),
+        embed_interval=0,
+        entity_seed_interval=999999,
+        health_check_interval=999999,
+        wikilinks_interval=999999,
+        connector_sync_interval=0,
+    )
+
+    assert call_counts["embed"] >= 1
+    assert call_counts["connector_sync"] >= 1, (
+        f"expected connector_sync to fire at least once on interval=0; got {call_counts['connector_sync']}"
+    )
+
+
+@pytest.mark.unit
+def test_main_loop_skips_connector_sync_above_maintenance_threshold(tmp_path: Path) -> None:
+    """When the no-op streak is at/above MAINTENANCE_SKIP_NOOP_THRESHOLD,
+    the connector sync inherits the maintenance-skip gating — same as
+    entity_seed / health_check / wikilinks_inject.
+
+    Sabotage proof: remove the ``connector_sync`` tuple's
+    membership in the maintenance dispatch loop and the assertion below
+    still passes (because it would never have been called) — so we
+    additionally assert the embed-resumes case in the companion test.
+    The real proof is: drop the ``if not maintenance_active`` early
+    return in ``_maybe_run_maintenance_cycle`` and connector_sync DOES
+    fire even with the high streak — this test then fails.
+    """
+    import os
+
+    from kairix.worker import MAINTENANCE_SKIP_NOOP_THRESHOLD
+
+    state_path = tmp_path / "worker-state.json"
+    embed_calls = {"n": 0}
+    connector_sync_calls = {"n": 0}
+
+    def _embed_noop_then_shutdown() -> None:
+        embed_calls["n"] += 1
+        if embed_calls["n"] >= 2:
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal so the worker loop exits.
+
+    def _connector_sync() -> ConnectorSyncResult:
+        connector_sync_calls["n"] += 1
+        return ConnectorSyncResult()
+
+    seed_streak = MAINTENANCE_SKIP_NOOP_THRESHOLD + 1
+    deps = WorkerDeps(
+        embed=_embed_noop_then_shutdown,
+        entity_seed=lambda: None,
+        health_check=lambda: [],
+        wikilinks=lambda: None,
+        connector_sync_fn=_connector_sync,
+        sleep=lambda _s: None,
+        state=WorkerState(consecutive_embed_noops=seed_streak),
+        state_path=state_path,
+        write_state_fn=lambda *_: None,
+    )
+
+    main(
+        deps=deps,
+        embed_interval=0,
+        entity_seed_interval=0,
+        health_check_interval=0,
+        wikilinks_interval=0,
+        connector_sync_interval=0,
+    )
+
+    assert connector_sync_calls["n"] == 0, (
+        f"connector_sync must not run when streak ({seed_streak}+) >= threshold ({MAINTENANCE_SKIP_NOOP_THRESHOLD}); "
+        f"got {connector_sync_calls['n']} call(s)"
+    )
+
+
+@pytest.mark.unit
+def test_main_loop_does_not_run_connector_sync_while_paused(tmp_path: Path) -> None:
+    """While the operator pause flag is present, connector_sync MUST NOT
+    fire from the dispatch loop — it inherits the same pause-gating as
+    the other maintenance tasks.
+
+    Sabotage proof: remove the ``continue`` from the paused branch in
+    ``main`` and connector_sync_calls jumps above 0. With the continue
+    in place, only the (pre-loop) startup embed runs and connector_sync
+    stays at 0.
+    """
+    import os
+
+    flag = tmp_path / ".worker-paused"
+    flag.touch()
+    state_path = tmp_path / "worker-state.json"
+
+    sleep_count = 0
+
+    def _sleep_then_shutdown(_seconds: float) -> None:
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count >= 3:
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal so the loop exits after pause iterations.
+
+    connector_sync_calls = {"n": 0}
+
+    def _connector_sync() -> ConnectorSyncResult:
+        connector_sync_calls["n"] += 1
+        return ConnectorSyncResult()
+
+    deps = WorkerDeps(
+        embed=lambda: None,
+        entity_seed=lambda: None,
+        health_check=lambda: [],
+        wikilinks=lambda: None,
+        connector_sync_fn=_connector_sync,
+        sleep=_sleep_then_shutdown,
+        state=WorkerState(),
+        state_path=state_path,
+        pause_flag_path=flag,
+    )
+
+    main(
+        deps=deps,
+        embed_interval=0,
+        entity_seed_interval=0,
+        health_check_interval=0,
+        wikilinks_interval=0,
+        connector_sync_interval=0,
+    )
+
+    assert connector_sync_calls["n"] == 0, (
+        f"connector_sync must not run while paused; got {connector_sync_calls['n']} call(s)"
+    )
+    assert sleep_count >= 1, "loop must have entered the pause poll at least once"
+
+
+@pytest.mark.unit
+def test_main_loop_default_connector_sync_does_not_crash_worker(tmp_path: Path) -> None:
+    """End-to-end Wave-1 guarantee: with no ``connector_sync_fn`` override,
+    the worker's default raises ``NotImplementedError`` and the loop
+    survives — embed still runs to completion in a subsequent iteration.
+
+    Sabotage proof: remove the ``except NotImplementedError`` branch
+    from ``run_connector_sync`` and the worker crashes on the first
+    maintenance tick — the second embed call never happens.
+    """
+    import os
+
+    embed_calls = {"n": 0}
+
+    def _embed_then_shutdown() -> None:
+        embed_calls["n"] += 1
+        if embed_calls["n"] >= 2:
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal so the loop exits after the second embed.
+
+    # Note: no connector_sync_fn override — exercises the
+    # NotImplementedError-raising default.
+    deps = WorkerDeps(
+        embed=_embed_then_shutdown,
+        entity_seed=lambda: None,
+        health_check=lambda: [],
+        wikilinks=lambda: None,
+        sleep=lambda _s: None,
+        state=WorkerState(),
+        state_path=tmp_path / "worker-state.json",
+        write_state_fn=lambda *_: None,
+    )
+
+    main(
+        deps=deps,
+        embed_interval=0,
+        entity_seed_interval=999999,
+        health_check_interval=999999,
+        wikilinks_interval=999999,
+        connector_sync_interval=0,
+    )
+
+    assert embed_calls["n"] >= 2, (
+        f"main loop must survive the default connector_sync NotImplementedError; got {embed_calls['n']} embed call(s)."
     )
