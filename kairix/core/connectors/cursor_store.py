@@ -19,7 +19,7 @@ next tick replays the same range.
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from kairix.core.protocols import Cursor
 
@@ -56,7 +56,7 @@ class CursorStore:
         Does NOT commit — the caller's per-batch transaction owns the
         commit. ``updated_at`` is ISO-8601 UTC.
         """
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         self._db.execute(
             "INSERT OR REPLACE INTO connector_cursors (source_name, cursor_token, updated_at) VALUES (?, ?, ?)",
             (source_name, token, now),

@@ -18,7 +18,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -184,7 +184,7 @@ class _SqliteChunkWriter:
         chunk sequence. Does NOT commit.
         """
         written = 0
-        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         for seq, chunk in enumerate(chunks):
             path = f"{chunk.source_uri}#{seq}"
             self._db.execute(

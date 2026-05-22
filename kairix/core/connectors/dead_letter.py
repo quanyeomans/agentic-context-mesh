@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ class DeadLetterStore:
         Does NOT commit — the caller's per-batch transaction owns the
         commit.
         """
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         existing = self._db.execute(
             "SELECT failure_count FROM connector_deadletter WHERE source_name = ? AND item_id = ?",
             (source_name, item_id),
