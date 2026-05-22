@@ -24,7 +24,6 @@
 kairix/knowledge/contradict/cli.py
 kairix/knowledge/entities/cli.py
 kairix/knowledge/reflib/cli.py
-kairix/knowledge/store/cli.py
 kairix/knowledge/summaries/cli.py
 kairix/knowledge/wikilinks/cli.py
 kairix/platform/onboard/cli.py
