@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import TextIO
 
 from kairix.use_cases.bootstrap import (
@@ -53,6 +54,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Number of newest daily memory files to include (default: 3, 0 for none).",
     )
+    parser.add_argument(
+        "--document-root",
+        default=None,
+        help=(
+            "Override the document root for this invocation. When omitted, "
+            "the default resolution chain (KAIRIX_DOCUMENT_ROOT env / "
+            "kairix.config.yaml / platform default) runs. Matches the "
+            "canonical pattern in ``kairix store crawl --document-root``; "
+            "enables F30 subprocess outcome tests to drive a tmp vault "
+            "without touching the process environment (F2-clean)."
+        ),
+    )
     return parser
 
 
@@ -78,7 +91,18 @@ def main(
     out_sink = out if out is not None else sys.stdout
     err_sink = err if err is not None else sys.stderr
 
-    result = run_bootstrap(args.agent, deps=deps, max_memory_days=args.max_memory_days)
+    # ``--document-root`` is the F30 subprocess seam: when supplied (and no
+    # explicit ``deps`` was injected by an in-process caller) we build a
+    # ``BootstrapDeps`` whose ``document_root_fn`` points at the arg, so the
+    # downstream resolution skips ``kairix.paths.document_root()`` and its
+    # env-var read. In-process callers (``deps`` non-None) win — same
+    # precedence as the existing ``deps`` seam.
+    effective_deps = deps
+    if effective_deps is None and args.document_root:
+        root = Path(args.document_root)
+        effective_deps = BootstrapDeps(document_root_fn=lambda: root)
+
+    result = run_bootstrap(args.agent, deps=effective_deps, max_memory_days=args.max_memory_days)
 
     if args.as_json:
         out_sink.write(json.dumps(bootstrap_output_to_envelope(result), indent=2) + "\n")
