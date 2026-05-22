@@ -95,6 +95,7 @@ Mechanical, blocking checks encode rejected patterns into automation:
 - **F47** tests under `tests/integration/` that exercise a multi-component pipeline must construct it via `kairix.core.factory.build_*` with `paths=FakePaths(...)`. Direct construction is allowed only in `tests/contracts/` and `tests/integration/test_<x>_contract.py`.
 - **F48** `tests/e2e/test_composed_production_path.py` must exist, must carry `@pytest.mark.e2e`, must run in CI Stage 4.5 under `pytest -m e2e`, and must exercise config → factory.build → ingest → query → assertion against the composed production code. Every new top-level capability gets a sibling `tests/e2e/test_composed_<capability>_path.py`.
 - **F49** each release tag (matching `v[0-9]*.[0-9]*.[0-9]*`) must reduce each of `f30-operator-outcome-tests-files.txt`, `f46-files.txt`, `f47-integration-factory-files.txt` by ≥1 entry compared to the previous tag — or keep all three at zero. Runs in `release.yml` before the tag is cut.
+- **F50** net-new files (added in the staged diff at commit-time, or net-new vs the previous release tag at CI-time) may not appear in any per-file F-rule baseline. Closes the per-file-shrink-only loophole that lets a brand-new file land with arbitrary violations because the baseline doesn't yet know it exists. Pre-existing files in baselines are unaffected — F49 governs their paydown schedule. F50 only blocks fresh additions. Cross-pollinated from tc-agent-zone's `net_new_file_finding_cap.py` (2026-05-22 cross-repo audit).
 
 **Go side (active when `services/<name>/go.mod` exists; see [`docs/architecture/go-integration-plan.md`](docs/architecture/go-integration-plan.md) for full text):**
 
@@ -152,7 +153,7 @@ is the source-of-truth; the others fill in detail.
 | To do this | Read |
 |---|---|
 | See what blocks a commit (the mechanical contract) | **[`CONSTRAINTS.md`](CONSTRAINTS.md)** — short list of hard blocks |
-| Understand the architecture fitness functions F1–F49 + G1–G10 | **[`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md)** — canonical reference; read before adding any silencer, skip, suppression, or internal import |
+| Understand the architecture fitness functions F1–F50 + G1–G10 | **[`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md)** — canonical reference; read before adding any silencer, skip, suppression, or internal import |
 | Land a new top-level capability with its discipline carrying | **[`docs/architecture/test-discipline-hardening.md`](docs/architecture/test-discipline-hardening.md)** — F45..F49, the three principles (composition / real-path / new-capability), canonical test shapes |
 | Avoid known code-smell patterns | [`docs/architecture/ENGINEERING.md#code-smells`](docs/architecture/ENGINEERING.md) — inappropriate intimacy, feature envy, test-shaped APIs |
 | Understand security posture | [`SECURITY.md`](SECURITY.md) + F15 (no logging of secret-named variables in plaintext) |
