@@ -325,13 +325,22 @@ kairix/quality/probe/config_cli.py
 kairix/quality/soak/cli.py
 ```
 
-### Group G — Top-level CLIs (2 CLIs)
+### Group G — Top-level CLIs (1 CLI; `bootstrap_cli.py` paid down 2026-05-22, commit `2334a49d`)
 ```
-kairix/bootstrap_cli.py
 kairix/worker_cli.py
 ```
 
-Each group dispatches as one worktree. Per F30's existing contract: each new outcome test invokes via `subprocess.run(["kairix", "<sub>", ...])` (CLI) or calls the MCP tool handler directly (MCP), and asserts on `.stdout` / `.stderr` / returned-envelope content — not on `returncode == 0` alone, not on internal fake call-counts.
+Each group dispatches as one worktree. Per F30's existing contract: each new outcome test invokes via `subprocess.run([sys.executable, "-m", "kairix.cli", "<sub>", ...])` (CLI) or calls the MCP tool handler directly (MCP), and asserts on `.stdout` / `.stderr` / returned-envelope content — not on `returncode == 0` alone, not on internal fake call-counts.
+
+**Probe-validated pattern** (from `kairix/bootstrap_cli.py` paydown, commit `2334a49d`):
+
+1. **Inspect the CLI's existing seams.** Most use-case-backed CLIs already have a `Deps` dataclass (`BootstrapDeps`, `BriefDeps`, `UsageGuideDeps` — the pattern is widespread). The seam is usually there; only the CLI-flag is missing.
+2. **Add `--document-root PATH` (and `--db-path PATH` / `--config PATH` where the use case demands them)** as additive argparse args. Match the canonical pattern from `kairix/knowledge/store/cli.py` — `--document-root` wins when supplied; otherwise the existing env / config / default chain runs unchanged.
+3. **Plumb the flag into the existing `Deps` seam** inside `main()`. When the flag is supplied AND no explicit `deps=` was injected by an in-process caller, build `<Deps>(document_root_fn=lambda: Path(args.document_root), ...)`. In-process callers (existing unit tests) keep winning; the new flag is the subprocess seam.
+4. **Use `sys.executable -m kairix.cli <sub>`** in `subprocess.run` (NOT `-m kairix`; `kairix.__main__` doesn't exist as a separate module — `kairix = "kairix.cli:main"` is the console-script entry).
+5. **Two tests per surface**: one happy-path envelope assertion (returncode + stdout JSON parse + content keys), one error-path assertion (returncode non-zero + stderr error prefix).
+6. **Sabotage-proof both tests** before commit: mutate the production code path the test is supposed to cover, confirm both tests fail, restore.
+7. **Remove the entry from `.architecture/baseline/f30-operator-outcome-tests-files.txt`** in the same commit. Baseline shrinks only.
 
 Canonical CLI outcome-test shape:
 
