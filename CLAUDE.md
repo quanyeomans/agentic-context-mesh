@@ -28,6 +28,20 @@ Key files:
 - `kairix/core/search/pipeline.py` — SearchPipeline orchestrator
 - `tests/fakes.py` — fake implementations for testing
 
+## Cutover patterns
+
+Every change that swaps production behaviour goes through a feature flag. The pattern is mandatory for connector swaps, ranker swaps, schema migrations, ingest-pipeline changes, and any cutover that's reversible-until-validated.
+
+See [`docs/architecture/feature-flag-architecture.md`](docs/architecture/feature-flag-architecture.md) for the canonical spec. Three principles:
+
+- **Default-safe (§2.1)** — every flag defaults to the validated behaviour. Merging flag-gated code is structurally a no-op for operators; the cutover is a separate deliberate action.
+- **Both-branch tested (F54)** — every flag has BDD scenarios for OFF and ON, integration tests exercising both branches, and (for top-level capability flags) an E2E composed-path test. F54 enforces this mechanically.
+- **Mechanical retirement (F51)** — every flag has a `target_retire_in` version; F51 fires past that deadline unless explicitly extended with rationale. Stops "flag becomes permanent fixture".
+
+Cutover protocol per flag flip: capture pre-flip baseline (state digest + eval scores + probe latency + sample-journey results) → flip the flag → soak (24h min) → capture post-flip same set → diff and gate on hard thresholds (state delta within ±2%, eval within ±2pp, latency within ±20%, sample-journey ≥80% parity) → promote stage or rollback.
+
+Cutover tooling: `scripts/cutover/capture_baseline.py` + `scripts/cutover/diff_baseline.py`. Operator surface: `kairix features status` (CLI) + `tool_features_status` (MCP) — both required by F53.
+
 ## How to delegate work
 
 Ralph pattern: fine-grained file-scoped work, parallel agents with embedded backpressure loops, `safe-commit.sh` in each loop. 10-15 loops/hour target. See [engineering hub](https://github.com/three-cubes/engineering-hub/tree/main/ralph).
@@ -107,6 +121,10 @@ Mechanical, blocking checks encode rejected patterns into automation:
 - **F48** `tests/e2e/test_composed_production_path.py` must exist, must carry `@pytest.mark.e2e`, must run in CI Stage 4.5 under `pytest -m e2e`, and must exercise config → factory.build → ingest → query → assertion against the composed production code. Every new top-level capability gets a sibling `tests/e2e/test_composed_<capability>_path.py`.
 - **F49** each release tag (matching `v[0-9]*.[0-9]*.[0-9]*`) must reduce each of `f30-operator-outcome-tests-files.txt`, `f46-files.txt`, `f47-integration-factory-files.txt` by ≥1 entry compared to the previous tag — or keep all three at zero. Runs in `release.yml` before the tag is cut.
 - **F50** net-new files (added in the staged diff at commit-time, or net-new vs the previous release tag at CI-time) may not appear in any per-file F-rule baseline. Closes the per-file-shrink-only loophole that lets a brand-new file land with arbitrary violations because the baseline doesn't yet know it exists. Pre-existing files in baselines are unaffected — F49 governs their paydown schedule. F50 only blocks fresh additions. Cross-pollinated from tc-agent-zone's `net_new_file_finding_cap.py` (2026-05-22 cross-repo audit).
+- **F51** every `FeatureFlag` in `kairix/core/features/registry.py:REGISTRY` has a `target_retire_in` version ≤ current `setuptools-scm` version + 6 months. Past that, the gate fires unless the registry entry carries a `# retire-extension: <reason>` rationale comment. Stops flags becoming permanent scaffolding. See `docs/architecture/feature-flag-architecture.md` §6.
+- **F52** every `flag("<name>")` call site in `kairix/**/*.py` references a `name` that exists in the registry. AST scan; catches typos and dead references after retirement.
+- **F53** `kairix features status` CLI subcommand and `tool_features_status` MCP tool both exist with F30-compliant outcome tests. Operations affordance — flags are useless if operators can't see what's enabled.
+- **F54** every flag in the registry has BDD scenarios for OFF and ON branches (`tests/bdd/features/feature_flag_<name>.feature` with ≥2 scenarios), integration tests exercising both branches (`tests/integration/test_feature_flag_<name>.py`), and — for flags whose `related_spec` references a top-level capability spec — an E2E composed-path test (`tests/e2e/test_composed_<name>_path.py`). Mechanically prevents the rollback-becomes-fiction failure mode.
 
 **Go side (active when `services/<name>/go.mod` exists; see [`docs/architecture/go-integration-plan.md`](docs/architecture/go-integration-plan.md) for full text):**
 
@@ -164,8 +182,9 @@ is the source-of-truth; the others fill in detail.
 | To do this | Read |
 |---|---|
 | See what blocks a commit (the mechanical contract) | **[`CONSTRAINTS.md`](CONSTRAINTS.md)** — short list of hard blocks |
-| Understand the architecture fitness functions F1–F50 + G1–G10 (current canon: F1–F50, all wired) | **[`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md)** — canonical reference; read before adding any silencer, skip, suppression, or internal import |
+| Understand the architecture fitness functions F1–F54 + G1–G10 | **[`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md)** — canonical reference; read before adding any silencer, skip, suppression, or internal import |
 | Land a new top-level capability with its discipline carrying | **[`docs/architecture/test-discipline-hardening.md`](docs/architecture/test-discipline-hardening.md)** — F45..F49, the three principles (composition / real-path / new-capability), canonical test shapes |
+| Cut over from old behaviour to new without breaking operators (connector swap, ranker swap, schema migration, etc.) | **[`docs/architecture/feature-flag-architecture.md`](docs/architecture/feature-flag-architecture.md)** — F51..F54, default-safe / both-branch-tested / mechanical-retirement principles, capture-flip-soak-gate cutover protocol |
 | Avoid known code-smell patterns | [`docs/architecture/ENGINEERING.md#code-smells`](docs/architecture/ENGINEERING.md) — inappropriate intimacy, feature envy, test-shaped APIs |
 | Understand security posture | [`SECURITY.md`](SECURITY.md) + F15 (no logging of secret-named variables in plaintext) |
 

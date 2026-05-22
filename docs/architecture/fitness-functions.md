@@ -2586,6 +2586,25 @@ Canonical specs + Bronze/Silver context + plugin discovery shape live in
 
 ---
 
+### F51–F54 — feature flag lifecycle discipline
+
+Landed alongside `kairix/core/features/` (Feature-flag PR-3 per
+`feature-flag-architecture.md` §9). Locks the cutover pattern that
+gates IM-6 + Wave 5+ connector enablement, plus every future ranker /
+chunker / schema-version swap.
+
+| Rule | Locks | Mechanism |
+|---|---|---|
+| **F51** | Every flag in `kairix/core/features/registry.py:REGISTRY` has a `target_retire_in` ≤ current `setuptools-scm` version + 6 months | `scripts/checks/check_f51_flag_retirement.py`; fires past deadline unless registry entry carries a `# retire-extension: <reason>` rationale comment |
+| **F52** | Every `flag("<name>")` call site references a name that exists in REGISTRY | `scripts/checks/check_f52_flag_call_sites.py`; AST scan over `kairix/**/*.py` |
+| **F53** | `kairix features status` CLI subcommand AND `tool_features_status` MCP tool both exist with F30-compliant outcome tests | `scripts/checks/check_f53_features_status_surface.py` |
+| **F54** | Every flag has BDD scenarios for OFF + ON branches, integration tests exercising both branches, and an E2E composed-path test for top-level capability flags | `scripts/checks/check_f54_flag_both_branch_tested.py`; mechanically prevents rollback-becomes-fiction failure mode |
+
+Canonical reference for the pattern + cutover protocol + wave plan
+integration: [`feature-flag-architecture.md`](feature-flag-architecture.md).
+
+---
+
 ### F50 — net-new files cannot accrete F-rule baseline debt
 
 Closes the per-file-shrink-only loophole identified by the 2026-05-22
