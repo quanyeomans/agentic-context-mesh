@@ -224,6 +224,13 @@ repos:
         pass_filenames: false
         files: ^kairix/core/connectors/.*\.py$
 
+      - id: arch-f35-no-cross-connector
+        name: "arch F35: connectors/<a>/ may not import connectors/<b>/ or extractors/"
+        entry: python3 scripts/checks/check_f35_no_cross_connector.py
+        language: system
+        pass_filenames: false
+        files: ^kairix/connectors/.*\.py$
+
       - id: arch-provider-bdd-completeness
         name: "arch F28: every provider/<name>/ has matching BDD coverage"
         entry: python3 scripts/checks/check_provider_bdd_completeness.py

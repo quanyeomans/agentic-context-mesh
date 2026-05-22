@@ -121,6 +121,9 @@ python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 # F34 — kairix/core/connectors/** may not import kairix/connectors/ or kairix/extractors/
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
 
+# F35 — kairix/connectors/<a>/ may not import another connector or any extractor
+python3 "${SCRIPT_DIR}/check_f35_no_cross_connector.py" || overall=1
+
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
 
