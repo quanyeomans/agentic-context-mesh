@@ -1480,36 +1480,22 @@ def test_connector_sync_result_default_zero_counters() -> None:
 
 
 @pytest.mark.unit
-def test_run_connector_sync_catches_default_notimplementederror(caplog: pytest.LogCaptureFixture) -> None:
-    """Wave 1: the default ``_default_connector_sync`` raises
-    ``NotImplementedError`` and ``run_connector_sync`` must catch it so
-    the worker loop never crashes on an unimplemented body.
+def test_run_connector_sync_default_no_config_returns_zero(caplog: pytest.LogCaptureFixture) -> None:
+    """IM-3: ``_default_connector_sync`` with no ``kairix.config.yaml``
+    (or an empty ``connectors:`` list) is a zero-counter no-op and
+    ``run_connector_sync`` logs the structured-completion line.
 
-    Sabotage proof: temporarily change the ``except NotImplementedError``
-    branch in worker.py to ``except KeyError`` and rerun — pytest
-    surfaces the unhandled NotImplementedError. Restored the branch and
-    the test passes.
-    """
-    # Default deps → default _default_connector_sync which raises.
-    run_connector_sync(WorkerDeps())  # must not raise
-
-
-@pytest.mark.unit
-def test_run_connector_sync_logs_wave2_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """The Wave-1 NotImplementedError path logs a clear "not yet
-    implemented" warning so operators tailing the worker log see why
-    the connector slot is a no-op.
-
-    Sabotage proof: drop the ``logger.warning`` from the except branch
-    and the captured-records list stays empty.
+    Sabotage proof: change the early-return in ``_default_connector_sync``
+    to ``return ConnectorSyncResult(synced=99, ...)`` and the
+    ``synced=0`` substring check below fails. Restored, the test passes.
     """
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="kairix.worker"):
-        run_connector_sync(WorkerDeps())
-    assert any("connector sync not yet implemented" in rec.getMessage() for rec in caplog.records), (
-        f"expected 'connector sync not yet implemented' warning; got {[r.getMessage() for r in caplog.records]}"
-    )
+    with caplog.at_level(logging.INFO, logger="kairix.worker"):
+        run_connector_sync(WorkerDeps())  # default deps → real _default_connector_sync
+    completion = [r.getMessage() for r in caplog.records if "connector sync complete" in r.getMessage()]
+    assert completion, "expected a 'connector sync complete' log line"
+    assert "synced=0" in completion[0]
 
 
 @pytest.mark.unit

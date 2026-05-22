@@ -14,13 +14,17 @@ from __future__ import annotations
 
 import logging
 import signal
+import sqlite3
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from kairix.paths import (
+    connector_sync_disabled,
+    data_dir,
     document_root,
     maintenance_skip_noop_threshold,
     worker_pause_flag_path,
@@ -29,7 +33,10 @@ from kairix.paths import (
 from kairix.worker_state import WorkerPhase, WorkerState, read_state, write_state
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from kairix.core.embed.use_cases import EmbedPipelineResult
+    from kairix.core.protocols import Chunk, EntitySignal
 
 logger = logging.getLogger(__name__)
 
@@ -146,24 +153,287 @@ class ConnectorSyncResult:
     dead_letter_added: int = 0
 
 
-def _default_connector_sync() -> ConnectorSyncResult:
-    """Default connector-framework sync — Wave 2 implements the body.
+class _SqliteChunkWriter:
+    """Minimal in-process :class:`~kairix.core.connectors.ChunkWriter`.
 
-    Wave 1 (SC-6) wires the worker-side seam: ``WorkerDeps.connector_sync_fn``
-    is callable, the worker loop dispatches it on its own interval, and
-    the structured result is logged. The real per-source list_changes /
-    fetch / Bronze / Silver / cursor-advance loop lands in Wave 2 under
-    ``kairix/core/connectors/``. Per F37 this function MUST NOT import
-    change-detection libraries directly — it dispatches into
-    ``kairix.core.connectors`` which owns the sync mechanism.
+    Wave-2 IM-3 keeps the worker independent from the legacy
+    ``DocumentScanner`` writer surface — there is no production
+    ``DocumentsTableWriter`` yet. This writer persists each
+    :class:`~kairix.core.protocols.Chunk` against the canonical
+    ``documents`` + ``content`` + ``content_vectors`` tables using the
+    same shared :class:`sqlite3.Connection` the pipeline drives, so the
+    per-batch transaction stays atomic.
 
-    Raises ``NotImplementedError`` so a misconfigured ``CONNECTOR_SYNC_INTERVAL``
-    on a pre-Wave-2 deploy surfaces clearly in the worker log — the
-    ``run_connector_sync`` wrapper catches it and treats as a no-op.
+    The writer never commits — the caller's per-batch transaction owns
+    the commit (matches :class:`FilesystemBronzeStore` discipline).
+    Wave 3+ will swap in a richer writer that updates the FTS5 index;
+    Wave 2's responsibility is "chunks land in the documents table" so
+    operators can prove end-to-end flow on a real vault.
+    """
+
+    def __init__(self, db: sqlite3.Connection, collection: str) -> None:
+        self._db = db
+        self._collection = collection
+
+    def upsert(self, chunks: Sequence[Chunk]) -> int:
+        """Persist ``chunks`` to the documents + content + content_vectors tables.
+
+        Each chunk lands as one ``documents`` row keyed by ``(collection,
+        path=source_uri+seq)``, one ``content`` row keyed by
+        ``content_hash``, and one ``content_vectors`` row carrying the
+        chunk sequence. Does NOT commit.
+        """
+        written = 0
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        for seq, chunk in enumerate(chunks):
+            path = f"{chunk.source_uri}#{seq}"
+            self._db.execute(
+                "INSERT OR REPLACE INTO documents "
+                "(collection, path, hash, source_name, source_uri, "
+                "source_modified_at, source_page, sensitivity, created_at, modified_at, active) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                (
+                    self._collection,
+                    path,
+                    chunk.content_hash,
+                    chunk.source_name,
+                    chunk.source_uri,
+                    chunk.source_modified_at,
+                    chunk.source_page,
+                    chunk.sensitivity,
+                    now,
+                    chunk.source_modified_at,
+                ),
+            )
+            self._db.execute(
+                "INSERT OR REPLACE INTO content (hash, doc, created_at) VALUES (?, ?, ?)",
+                (chunk.content_hash, chunk.text, now),
+            )
+            self._db.execute(
+                "INSERT OR REPLACE INTO content_vectors (hash, seq, pos) VALUES (?, ?, ?)",
+                (chunk.content_hash, seq, 0),
+            )
+            written += 1
+        return written
+
+
+class _SqliteEntityGraphSink:
+    """Minimal in-process :class:`~kairix.core.protocols.EntityGraphSink`.
+
+    Stages :class:`~kairix.core.protocols.EntitySignal` rows into the
+    ``entity_signals`` table on the shared connection. A separate worker
+    job (Curator-coupling boundary, Wave 3+) drains the table and pushes
+    to Neo4j. Wave 2 only needs the staging side wired.
+
+    Does NOT commit — the caller's per-batch transaction owns the commit.
+    """
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+
+    def stage(self, signals: Sequence[EntitySignal]) -> int:
+        """Stage entity signals into the ``entity_signals`` table."""
+        staged = 0
+        for sig in signals:
+            self._db.execute(
+                "INSERT INTO entity_signals "
+                "(kind, value, source_uri, modified_at, confidence, sensitivity, pushed_to_neo4j) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0)",
+                (sig.kind, sig.value, sig.source_uri, sig.modified_at, sig.confidence, sig.sensitivity),
+            )
+            staged += 1
+        return staged
+
+
+def _load_connector_config_entries(config_path: Path | None) -> list[dict[str, Any]]:
+    """Read the ``connectors:`` list from ``config_path`` (if present).
+
+    Returns the raw list of operator entries — each one is a dict with
+    at minimum a ``name`` key. Returns ``[]`` when ``config_path`` is
+    ``None``, the file does not exist, or no connectors are configured;
+    the worker treats every such case as a no-op sync.
+    """
+    if config_path is None or not config_path.exists():
+        return []
+    try:
+        import yaml
+
+        with config_path.open(encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception as exc:  # pragma: no cover — yaml parse errors are rare and logged
+        logger.warning("worker: failed to load connector config from %s — %s", config_path, exc)
+        return []
+    entries = raw.get("connectors")
+    if not isinstance(entries, list):
+        return []
+    return [e for e in entries if isinstance(e, dict) and isinstance(e.get("name"), str)]
+
+
+def _run_one_connector_batch(
+    db: sqlite3.Connection,
+    entry: dict[str, Any],
+    bronze_root: Path,
+) -> tuple[int, int]:
+    """Wire one connector entry through the :class:`ConnectorPipeline`.
+
+    Returns ``(items_indexed, items_dead_lettered)``. Raises on
+    registry / pipeline construction failures so the caller's per-entry
+    try/except logs them and continues to the next connector.
+    """
+    from kairix.core.connectors import (
+        ConnectorPipeline,
+        CursorStore,
+        DeadLetterStore,
+        DefaultSilverProcessor,
+        FilesystemBronzeStore,
+        resolve_connector,
+        resolve_extractor,
+    )
+
+    name = entry["name"]
+    extractor_name = entry.get("extractor", "passthrough")
+    connector_factory = resolve_connector(name)
+    extractor_factory = resolve_extractor(extractor_name)
+    connector = connector_factory(entry.get("config", {}))
+    extractor = (
+        extractor_factory() if not entry.get("extractor_config") else extractor_factory(**entry["extractor_config"])
+    )
+    pipeline = ConnectorPipeline(
+        db=db,
+        bronze=FilesystemBronzeStore(db, bronze_root),
+        silver=DefaultSilverProcessor(),
+        chunk_writer=_SqliteChunkWriter(db, collection=name),
+        entity_graph_sink=_SqliteEntityGraphSink(db),
+        cursor_store=CursorStore(db),
+        dead_letter=DeadLetterStore(db),
+    )
+    result = pipeline.run_batch(connector, extractor)
+    return result.processed, result.dead_lettered
+
+
+def _resolve_config_path_default() -> Path | None:
+    """Default boundary read for the ``kairix.config.yaml`` path.
+
+    Wrapped in a module-private helper so :class:`ConnectorSyncDeps` can
+    bind it via ``default_factory`` (F6: no ``Optional[Callable] = None``
+    self-resolving pattern on the Deps class).
+    """
+    from kairix.core.search.config_loader import resolve_config_path
+
+    return resolve_config_path()
+
+
+def _open_db_default() -> sqlite3.Connection:
+    """Default DB-factory boundary call — wraps :func:`kairix.core.db.open_db`."""
+    from kairix.core.db import open_db
+
+    return open_db()
+
+
+def _bronze_root_default() -> Path:
+    """Default bronze-root resolver — ``data_dir() / "bronze"``."""
+    return data_dir() / "bronze"
+
+
+@dataclass
+class ConnectorSyncDeps:
+    """Injectable dependencies for :func:`run_connector_sync_pipeline`.
+
+    F6-clean: every field has a ``default_factory`` so production callers
+    construct ``ConnectorSyncDeps()`` and get the real boundary calls;
+    tests construct ``ConnectorSyncDeps(disabled_fn=lambda: True, ...)``
+    and pass it as a single argument. Matches :class:`WorkerDeps`'s
+    discipline for the sibling worker callables.
+
+    Fields:
+      * ``disabled_fn`` — short-circuit predicate; default
+        :func:`connector_sync_disabled`.
+      * ``config_path_resolver`` — returns the ``kairix.config.yaml``
+        path or ``None`` when no config exists; default
+        :func:`resolve_config_path` via :func:`_resolve_config_path_default`.
+      * ``db_factory`` — opens a fresh SQLite connection; default
+        :func:`kairix.core.db.open_db`.
+      * ``bronze_root_resolver`` — returns the Bronze blob root; default
+        ``data_dir() / "bronze"``.
+    """
+
+    disabled_fn: Callable[[], bool] = field(default_factory=lambda: connector_sync_disabled)
+    config_path_resolver: Callable[[], Path | None] = field(default_factory=lambda: _resolve_config_path_default)
+    db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
+    bronze_root_resolver: Callable[[], Path] = field(default_factory=lambda: _bronze_root_default)
+
+
+def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> ConnectorSyncResult:
+    """Drive one tick across every configured connector.
+
+    Reads the operator's ``kairix.config.yaml`` ``connectors:`` list,
+    resolves each plugin via the entry-point registry, composes the
+    canonical :class:`~kairix.core.connectors.ConnectorPipeline` against
+    the shared SQLite connection, and runs one batch per connector.
+
+    Returns a :class:`ConnectorSyncResult` aggregating ``items_indexed``
+    and ``items_dead_lettered`` across every connector. Per-connector
+    failures (registry miss, plugin raise, pipeline rollback) are logged
+    and the loop continues — a single misconfigured connector does not
+    halt sibling sync work.
+
+    Short-circuits to a zero-counter result when ``deps.disabled_fn``
+    (default :func:`kairix.paths.connector_sync_disabled`) returns True
+    OR when no connectors are configured (the common case on a vault-
+    only deploy).
+
+    Per F37 this function MUST NOT import change-detection libraries
+    (``watchdog`` / ``msgraph`` / ``notion_client`` / ``dulwich`` /
+    ``slack_sdk.rtm``). Imports route through ``kairix.core.connectors``
+    (orchestration) and ``kairix.core.db`` (transaction); the actual
+    sync libraries land transitively only when a configured connector
+    factory loads its own implementation module.
 
     See docs/architecture/connector-ingestion-architecture.md §6.
     """
-    raise NotImplementedError("Wave 2 implements; see docs/architecture/connector-ingestion-architecture.md §6")
+    deps = deps if deps is not None else ConnectorSyncDeps()
+    if deps.disabled_fn():
+        logger.info("worker: connector sync disabled via KAIRIX_CONNECTOR_SYNC_DISABLED")
+        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+    entries = _load_connector_config_entries(deps.config_path_resolver())
+    if not entries:
+        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+    bronze_root = deps.bronze_root_resolver()
+
+    from kairix.core.db.schema import create_schema
+
+    db = deps.db_factory()
+    try:
+        create_schema(db)
+        synced = 0
+        failed = 0
+        dead_letter_added = 0
+        for entry in entries:
+            try:
+                indexed, dead_lettered = _run_one_connector_batch(db, entry, bronze_root)
+            except Exception as exc:
+                logger.warning("worker: connector %s failed — %s", entry.get("name"), exc)
+                continue
+            synced += indexed
+            failed += dead_lettered
+            dead_letter_added += dead_lettered
+        return ConnectorSyncResult(synced=synced, failed=failed, dead_letter_added=dead_letter_added)
+    finally:
+        db.close()
+
+
+def _default_connector_sync() -> ConnectorSyncResult:
+    """Zero-arg shim wiring :class:`WorkerDeps.connector_sync_fn` to
+    :func:`run_connector_sync_pipeline` with default dependencies.
+
+    The shim exists because :class:`WorkerDeps.connector_sync_fn` has
+    type ``Callable[[], ConnectorSyncResult]``; the Deps-class shape on
+    :func:`run_connector_sync_pipeline` carries the F6-clean seam tests
+    use, and this shim adapts it for the worker-loop dispatch slot.
+    """
+    return run_connector_sync_pipeline()
 
 
 @dataclass
