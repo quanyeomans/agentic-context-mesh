@@ -8,12 +8,18 @@ value stays in place and the next worker tick retries the same range.
 
 Storage is the ``connector_cursors`` table (see schema in spec doc §7).
 
-Method bodies are intentionally single-statement
-``raise NotImplementedError`` calls so the F19 unused-parameter rule
-recognises them as abstract-style skeletons.
+The store accepts a :class:`sqlite3.Connection` — not a path — because the
+**caller owns the transaction**. Read / write issue SQL but never call
+``commit()`` or ``rollback()``; that's the per-batch orchestrator's job
+(`kairix.core.connectors.pipeline`). This way cursor advance and chunk
+writes commit atomically: a crash mid-batch rolls back cleanly and the
+next tick replays the same range.
 """
 
 from __future__ import annotations
+
+import sqlite3
+from datetime import UTC, datetime
 
 from kairix.core.protocols import Cursor
 
@@ -21,21 +27,37 @@ from kairix.core.protocols import Cursor
 class CursorStore:
     """SQLite-backed cursor persistence for the connector pipeline.
 
-    Wave 1 ships the seam-and-shape only; methods raise
-    :class:`NotImplementedError`. Wave 2 (IM-1) lands the real
-    SQLite read / write inside the per-batch transaction.
+    The connection passed in at construction is shared with the rest of
+    the per-batch transaction — Bronze / Silver / index writes. Neither
+    :meth:`read` nor :meth:`write` calls ``commit()`` or ``rollback()``;
+    the caller's transaction owns the commit.
     """
 
-    # read(source_name) -> Cursor | None
-    # Wave 2: SELECT cursor_token FROM connector_cursors WHERE
-    # source_name = ?. ``None`` means "first sync - start from the
-    # beginning of the source's change stream".
-    def read(self, source_name: str) -> Cursor | None:
-        raise NotImplementedError("CursorStore.read - Wave 2 (SC-1 ships the seam only).")
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
 
-    # write(source_name, token) -> None
-    # Wave 2: UPSERT INTO connector_cursors. Called from inside the
-    # per-batch SQLite transaction so cursor advance and chunk writes
-    # commit atomically.
+    def read(self, source_name: str) -> Cursor | None:
+        """Return the stored cursor token for ``source_name`` or ``None``.
+
+        ``None`` means "first sync — start from the beginning of the
+        source's change stream".
+        """
+        row = self._db.execute(
+            "SELECT cursor_token FROM connector_cursors WHERE source_name = ?",
+            (source_name,),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
     def write(self, source_name: str, token: Cursor) -> None:
-        raise NotImplementedError("CursorStore.write - Wave 2 (SC-1 ships the seam only).")
+        """UPSERT the cursor token for ``source_name``.
+
+        Does NOT commit — the caller's per-batch transaction owns the
+        commit. ``updated_at`` is ISO-8601 UTC.
+        """
+        now = datetime.now(UTC).isoformat()
+        self._db.execute(
+            "INSERT OR REPLACE INTO connector_cursors (source_name, cursor_token, updated_at) VALUES (?, ?, ?)",
+            (source_name, token, now),
+        )
