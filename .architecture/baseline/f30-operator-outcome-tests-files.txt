@@ -33,7 +33,6 @@ kairix/agents/mcp/server.py/@tool:probe_config
 kairix/agents/mcp/server.py/@tool:search
 kairix/agents/mcp/server.py/@tool:store_crawl
 kairix/agents/mcp/server.py/@tool:warm
-kairix/agents/research/cli.py
 kairix/core/classify/cli.py
 kairix/core/embed/cli.py
 kairix/core/search/cli.py
