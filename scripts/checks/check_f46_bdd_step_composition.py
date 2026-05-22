@@ -293,9 +293,9 @@ def file_has_violation(
 ) -> bool:
     """True if ``path`` is a step file that:
 
-      - constructs a ``*Pipeline`` class directly, AND
-      - has no step whose depth-≤-2 call graph reaches a sanctioned
-        entry-point name.
+    - constructs a ``*Pipeline`` class directly, AND
+    - has no step whose depth-≤-2 call graph reaches a sanctioned
+      entry-point name.
     """
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
