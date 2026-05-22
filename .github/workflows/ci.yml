@@ -192,6 +192,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
+      - name: Install OCR runtime (tesseract binary)
+        # MM-2 OCR extractor needs tesseract on PATH for tests to run;
+        # skips drop F7 coverage below the 85% floor. apt-installable
+        # Apache-2.0 binary; no untrusted inputs.
+        run: sudo apt-get install -y tesseract-ocr
+
       - name: Install dependencies (with type stubs)
         # The [agents] extras pull in mcp>=1.20 (and starlette transitively) so
         # tests/agents/mcp/test_transport_composition.py — which guards its
