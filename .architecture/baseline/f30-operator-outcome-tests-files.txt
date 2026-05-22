@@ -23,6 +23,5 @@
 #
 kairix/quality/benchmark/cli.py
 kairix/quality/probe/cli.py
-kairix/quality/probe/config_cli.py
 kairix/quality/soak/cli.py
 kairix/worker_cli.py
