@@ -73,12 +73,20 @@ class SQLiteDocumentRepository:
             snippet = parts[2].strip()[:300] if len(parts) >= 3 else doc_text[:300]
         else:
             snippet = doc_text[:300]
+        # MM-3 — surface per-page citation. Defensive on legacy rows that
+        # may pre-date the source_page column.
+        raw_page: Any = None
+        try:
+            raw_page = row["source_page"]
+        except (KeyError, IndexError):
+            raw_page = None
         return {
             "file": str(row["path"]),
             "title": str(row["title"] or ""),
             "snippet": snippet,
             "score": score,
             "collection": str(row["collection"]),
+            "source_page": int(raw_page) if isinstance(raw_page, int) else None,
         }
 
     def search_fts(

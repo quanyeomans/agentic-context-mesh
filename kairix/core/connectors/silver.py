@@ -34,6 +34,7 @@ from kairix.core.protocols import (
     Chunk,
     EntitySignal,
     ExtractedDocument,
+    Page,
     Sensitivity,
     SilverOutput,
 )
@@ -81,6 +82,27 @@ def _chunk_markdown(markdown: str) -> tuple[str, ...]:
     if current:
         chunks.append(current)
     return tuple(chunks)
+
+
+def _chunk_pages(pages: tuple[Page, ...]) -> tuple[tuple[str, int], ...]:
+    """Chunk per-page text and attribute each chunk to a page number.
+
+    Each page's text is chunked independently via :func:`_chunk_markdown`
+    so chunks never straddle page boundaries — the trivial majority
+    attribution rule (a chunk belongs to the page containing the
+    majority of its content) collapses to "the page that produced the
+    chunk" because we cut at page boundaries before paragraph chunking.
+
+    Returns a tuple of ``(chunk_text, page_number)`` pairs in page-order.
+    Pages with empty text produce no chunks. Empty input yields an empty
+    tuple — callers should fall through to markdown-only chunking when
+    ``pages`` is empty.
+    """
+    out: list[tuple[str, int]] = []
+    for page in pages:
+        for chunk_text in _chunk_markdown(page.text):
+            out.append((chunk_text, page.page_number))
+    return tuple(out)
 
 
 def _extract_entity_signals(
@@ -131,8 +153,9 @@ class DefaultSilverProcessor:
     Constructs :class:`~kairix.core.protocols.Chunk` value objects
     carrying ``source_uri``, ``source_modified_at``, and ``sensitivity``
     per F39. ``source_page`` is ``None`` for non-paged formats; paged
-    extractors (PDF / PPTX / XLSX) populate ``extracted.pages``, which
-    Wave 3+ will use to cite back to a specific page.
+    extractors (PDF / PPTX / XLSX) populate ``extracted.pages`` and the
+    chunker emits one or more chunks per page, each tagged with the
+    page number so retrieval (MM-3) can cite back to a specific page.
     """
 
     def process(
@@ -146,24 +169,47 @@ class DefaultSilverProcessor:
         """Split ``extracted.markdown`` into chunks; emit entity signals.
 
         Every chunk carries ``source_uri`` + ``source_modified_at`` +
-        ``sensitivity`` per F39. ``source_page`` is ``None`` for
-        non-paged inputs (markitdown PDF flat-extract, passthrough
-        markdown); paged extractors populate it from
-        ``extracted.pages`` in a later wave.
+        ``sensitivity`` per F39.
+
+        When ``extracted.pages`` is non-empty (PDF / PPTX / XLSX
+        extractions), chunks are produced per-page and each chunk carries
+        its source page number. Chunking cuts at page boundaries before
+        applying the paragraph-aware chunker so a chunk never straddles
+        two pages — the majority-attribution rule degenerates to "the
+        page that produced the chunk" by construction.
+
+        When ``extracted.pages`` is empty (passthrough markdown, flat
+        extract), chunks are produced from ``extracted.markdown`` and
+        every chunk's ``source_page`` is ``None``.
         """
-        chunk_texts = _chunk_markdown(extracted.markdown)
-        chunks = tuple(
-            Chunk(
-                text=chunk_text,
-                content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
-                source_name=raw.source_name,
-                source_uri=source_uri,
-                source_modified_at=source_modified_at,
-                source_page=None,
-                sensitivity=sensitivity,
+        if extracted.pages:
+            page_chunks = _chunk_pages(extracted.pages)
+            chunks = tuple(
+                Chunk(
+                    text=chunk_text,
+                    content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+                    source_name=raw.source_name,
+                    source_uri=source_uri,
+                    source_modified_at=source_modified_at,
+                    source_page=page_number,
+                    sensitivity=sensitivity,
+                )
+                for chunk_text, page_number in page_chunks
             )
-            for chunk_text in chunk_texts
-        )
+        else:
+            chunk_texts = _chunk_markdown(extracted.markdown)
+            chunks = tuple(
+                Chunk(
+                    text=chunk_text,
+                    content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+                    source_name=raw.source_name,
+                    source_uri=source_uri,
+                    source_modified_at=source_modified_at,
+                    source_page=None,
+                    sensitivity=sensitivity,
+                )
+                for chunk_text in chunk_texts
+            )
         signals = _extract_entity_signals(
             extracted.markdown,
             source_uri=source_uri,

@@ -40,7 +40,7 @@ _IN_CLAUSE_BATCH_SIZE: int = 500
 # Single SELECT body for the batched metadata lookup. Lifted to a constant
 # so we don't duplicate the JOIN text per chunk (F17).
 _METADATA_SELECT_SQL: str = (
-    "SELECT d.hash, d.path, d.collection, d.title, COALESCE(c.doc, '') AS snippet "
+    "SELECT d.hash, d.path, d.collection, d.title, d.source_page, COALESCE(c.doc, '') AS snippet "
     "FROM documents d LEFT JOIN content c ON d.hash = c.hash "
     "WHERE d.active = 1 AND d.hash IN ({placeholders})"
 )
@@ -55,6 +55,10 @@ class VecResult(TypedDict):
     collection: str
     title: str
     snippet: str
+    # MM-3 — per-page citation. ``None`` for non-paged documents
+    # (passthrough markdown); populated from ``documents.source_page``
+    # for PDF / PPTX / XLSX chunks via the metadata JOIN.
+    source_page: int | None
 
 
 class VectorIndex:
@@ -245,6 +249,12 @@ class VectorIndex:
                 continue
             snippet_raw = row["snippet"]
             snippet = strip_frontmatter(snippet_raw)[:300] if snippet_raw else ""
+            # MM-3 — surface per-page citation. Defensive on legacy rows.
+            raw_page: Any = None
+            try:
+                raw_page = row["source_page"]
+            except (KeyError, IndexError):
+                raw_page = None
             results.append(
                 {
                     "hash_seq": hash_seq,
@@ -253,6 +263,7 @@ class VectorIndex:
                     "collection": row["collection"],
                     "title": row["title"],
                     "snippet": snippet,
+                    "source_page": int(raw_page) if isinstance(raw_page, int) else None,
                 }
             )
             if len(results) >= k:

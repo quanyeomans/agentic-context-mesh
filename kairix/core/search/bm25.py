@@ -32,6 +32,11 @@ class BM25Result(TypedDict):
     snippet: str
     score: float
     collection: str
+    # MM-3 — per-page citation. ``None`` for non-paged documents
+    # (passthrough markdown, vault notes); the connector pipeline populates
+    # this from ``documents.source_page`` for PDF / PPTX / XLSX rows so
+    # downstream renderers can quote a specific page back to the operator.
+    source_page: int | None
 
 
 FTS_STOP_WORDS: frozenset[str] = frozenset(
@@ -212,6 +217,7 @@ def _build_bm25_query(
             SELECT d.collection,
                    d.path,
                    d.title,
+                   d.source_page,
                    c.doc,
                    bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
             FROM documents_fts
@@ -229,6 +235,7 @@ def _build_bm25_query(
             SELECT d.collection,
                    d.path,
                    d.title,
+                   d.source_page,
                    c.doc,
                    bm25(documents_fts, 1.0, 1.0, 0.5) AS bm25_score
             FROM documents_fts
@@ -278,6 +285,8 @@ def _bm25_via_doc_repo(
         results = []
         for r in raw:
             file_path = r.get("file", r.get("path", ""))
+            raw_page = r.get("source_page")
+            page_value: int | None = int(raw_page) if isinstance(raw_page, int) else None
             results.append(
                 BM25Result(
                     file=file_path,
@@ -285,6 +294,7 @@ def _bm25_via_doc_repo(
                     snippet=r.get("snippet", r.get("content", "")[:300]),
                     score=_coerce_finite_score(r.get("score", 0.0), path=file_path),
                     collection=r.get("collection", ""),
+                    source_page=page_value,
                 )
             )
         if date_filter_paths:
@@ -325,12 +335,19 @@ def _row_to_bm25_result(row: Any) -> BM25Result:
     """Map a single SQLite row from the FTS query into a BM25Result."""
     raw_score = float(row["bm25_score"])
     path = str(row["path"])
+    raw_page: Any = None
+    # Defensive — older test DBs may pre-date the source_page column.
+    try:
+        raw_page = row["source_page"]
+    except (KeyError, IndexError):
+        raw_page = None
     return BM25Result(
         file=path,
         title=str(row["title"] or ""),
         snippet=_extract_snippet(row["doc"] or ""),
         score=_normalise_bm25_score(raw_score, path=path),
         collection=str(row["collection"]),
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
     )
 
 

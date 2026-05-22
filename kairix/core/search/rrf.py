@@ -139,6 +139,11 @@ class FusedResult:
     bm25_rank: int = 0
     vec_rank: int = 0
 
+    # MM-3 per-page citation. ``None`` for non-paged documents.
+    # Carries through to the budgeted result, SearchHit, and the MCP
+    # envelope so agents can quote a specific page back to the operator.
+    source_page: int | None = None
+
 
 # ---------------------------------------------------------------------------
 # RRF fusion
@@ -191,10 +196,15 @@ def _rrf_impl(
                 collection=result["collection"],
                 title=result["title"],
                 snippet=result["snippet"],
+                source_page=_extract_source_page(result),
             )
         fused[path].in_bm25 = True
         fused[path].bm25_rank = rank
         fused[path].rrf_score += 1.0 / (k + rank)
+        # Backfill source_page when the BM25 leg has it but the vector
+        # leg surfaced the row first without it.
+        if fused[path].source_page is None:
+            fused[path].source_page = _extract_source_page(result)
 
     # Process vector results (1-indexed ranks)
     for rank, result in enumerate(vec, start=1):
@@ -205,10 +215,13 @@ def _rrf_impl(
                 collection=result["collection"],
                 title=result["title"],
                 snippet=result["snippet"],
+                source_page=_extract_source_page(result),
             )
         fused[path].in_vec = True
         fused[path].vec_rank = rank
         fused[path].rrf_score += 1.0 / (k + rank)
+        if fused[path].source_page is None:
+            fused[path].source_page = _extract_source_page(result)
 
     # Documents in only one list: they already got their score from that list's rank.
     # The spec says: "Results appearing in only one list get rank = len(other_list) + 1."
@@ -287,6 +300,7 @@ def _bm25_primary_impl(
             bm25_rank=rank,
             # Score: use BM25 position-based score so boosted_score ordering is preserved
             rrf_score=1.0 / rank,
+            source_page=_extract_source_page(result),
         )
         fr.boosted_score = fr.rrf_score
         results.append(fr)
@@ -302,6 +316,8 @@ def _bm25_primary_impl(
                 if fr.path.lower() == path.lower():
                     fr.in_vec = True
                     fr.vec_rank = rank
+                    if fr.source_page is None:
+                        fr.source_page = _extract_source_page(result)
                     break
             continue
         seen.add(path.lower())
@@ -315,11 +331,26 @@ def _bm25_primary_impl(
             vec_rank=rank,
             # Score: below all BM25 results but in vec rank order
             rrf_score=1.0 / (base_rank + rank),
+            source_page=_extract_source_page(result),
         )
         fr.boosted_score = fr.rrf_score
         results.append(fr)
 
     return results
+
+
+def _extract_source_page(result: Any) -> int | None:
+    """Pull ``source_page`` from a raw BM25 or vector result row.
+
+    Both ``BM25Result`` and ``VecResult`` carry the field as part of the
+    MM-3 per-page-citation thread. This helper handles dict-shaped rows
+    that may pre-date the field (older tests, fakes) by returning
+    ``None`` rather than raising ``KeyError``.
+    """
+    if not isinstance(result, dict):
+        return None
+    raw = result.get("source_page")
+    return int(raw) if isinstance(raw, int) else None
 
 
 # ---------------------------------------------------------------------------
