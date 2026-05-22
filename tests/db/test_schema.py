@@ -27,12 +27,38 @@ def test_create_schema_creates_all_tables() -> None:
 
 @pytest.mark.unit
 def test_validate_schema_passes_on_valid_db() -> None:
-    """validate_schema returns empty list on a correctly structured DB."""
+    """validate_schema returns empty list on a correctly structured DB.
+
+    Includes the connector-framework Wave 1 tables added in SCHEMA_VERSION 2
+    (SC-4): documents_media, document_pages, connector_cursors,
+    connector_deadletter, bronze_records, entity_signals.
+    """
     db = sqlite3.connect(":memory:")
     db.executescript("""
-        CREATE TABLE documents (id INTEGER PRIMARY KEY, collection TEXT, path TEXT, hash TEXT, active INTEGER);
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY, collection TEXT, path TEXT, hash TEXT,
+            active INTEGER, sensitivity TEXT NOT NULL DEFAULT 'public'
+        );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         CREATE TABLE content_vectors (hash TEXT, seq INTEGER, pos INTEGER, PRIMARY KEY(hash, seq));
+        CREATE TABLE documents_media (hash TEXT PRIMARY KEY, path TEXT NOT NULL, format TEXT NOT NULL);
+        CREATE TABLE document_pages (hash TEXT, page_number INTEGER, PRIMARY KEY(hash, page_number));
+        CREATE TABLE connector_cursors (
+            source_name TEXT PRIMARY KEY, cursor_token TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE connector_deadletter (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL, failure_count INTEGER NOT NULL, last_attempt TEXT NOT NULL
+        );
+        CREATE TABLE bronze_records (
+            source_name TEXT, item_id TEXT, raw_path TEXT NOT NULL, mime TEXT NOT NULL,
+            fetched_at TEXT NOT NULL, PRIMARY KEY(source_name, item_id)
+        );
+        CREATE TABLE entity_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
+            source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
+            confidence REAL NOT NULL, sensitivity TEXT NOT NULL
+        );
     """)
     errors = validate_schema(db)
     assert errors == []
@@ -49,12 +75,37 @@ def test_validate_schema_detects_missing_table() -> None:
 
 @pytest.mark.unit
 def test_validate_schema_detects_missing_column() -> None:
-    """validate_schema reports missing columns."""
+    """validate_schema reports missing columns.
+
+    The connector tables are present so the function reaches column checks;
+    the legacy ``documents`` table is missing the ``hash`` column.
+    """
     db = sqlite3.connect(":memory:")
     db.executescript("""
-        CREATE TABLE documents (id INTEGER PRIMARY KEY, collection TEXT, path TEXT, active INTEGER);
+        CREATE TABLE documents (
+            id INTEGER PRIMARY KEY, collection TEXT, path TEXT, active INTEGER,
+            sensitivity TEXT NOT NULL DEFAULT 'public'
+        );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         CREATE TABLE content_vectors (hash TEXT, seq INTEGER, pos INTEGER, PRIMARY KEY(hash, seq));
+        CREATE TABLE documents_media (hash TEXT PRIMARY KEY, path TEXT NOT NULL, format TEXT NOT NULL);
+        CREATE TABLE document_pages (hash TEXT, page_number INTEGER, PRIMARY KEY(hash, page_number));
+        CREATE TABLE connector_cursors (
+            source_name TEXT PRIMARY KEY, cursor_token TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE connector_deadletter (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL, failure_count INTEGER NOT NULL, last_attempt TEXT NOT NULL
+        );
+        CREATE TABLE bronze_records (
+            source_name TEXT, item_id TEXT, raw_path TEXT NOT NULL, mime TEXT NOT NULL,
+            fetched_at TEXT NOT NULL, PRIMARY KEY(source_name, item_id)
+        );
+        CREATE TABLE entity_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
+            source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
+            confidence REAL NOT NULL, sensitivity TEXT NOT NULL
+        );
     """)
     errors = validate_schema(db)
     assert any("hash" in e for e in errors)
@@ -85,22 +136,56 @@ def test_migrate_idempotent() -> None:
 
 @pytest.mark.unit
 def test_validate_schema_empty_db_reports_all_missing() -> None:
-    """validate_schema on completely empty DB reports all required tables missing."""
+    """validate_schema on completely empty DB reports all required tables missing.
+
+    SCHEMA_VERSION 2 (SC-4) added six connector-framework tables to the
+    required set: documents_media, document_pages, connector_cursors,
+    connector_deadletter, bronze_records, entity_signals.
+    """
     db = sqlite3.connect(":memory:")
     errors = validate_schema(db)
-    assert len(errors) == 3
+    # 3 legacy core tables + 6 connector-framework tables = 9
+    assert len(errors) == 9
     assert any("documents" in e for e in errors)
     assert any("content" in e for e in errors)
     assert any("content_vectors" in e for e in errors)
+    assert any("documents_media" in e for e in errors)
+    assert any("document_pages" in e for e in errors)
+    assert any("connector_cursors" in e for e in errors)
+    assert any("connector_deadletter" in e for e in errors)
+    assert any("bronze_records" in e for e in errors)
+    assert any("entity_signals" in e for e in errors)
 
 
 @pytest.mark.unit
 def test_validate_schema_missing_content_vectors_only() -> None:
-    """validate_schema reports just the missing table."""
+    """validate_schema reports just the missing table.
+
+    All other required tables (including connector-framework Wave 1) are
+    present so only ``content_vectors`` shows up as missing.
+    """
     db = sqlite3.connect(":memory:")
     db.executescript("""
         CREATE TABLE documents (id INTEGER PRIMARY KEY, collection TEXT, path TEXT, hash TEXT, active INTEGER);
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
+        CREATE TABLE documents_media (hash TEXT PRIMARY KEY, path TEXT NOT NULL, format TEXT NOT NULL);
+        CREATE TABLE document_pages (hash TEXT, page_number INTEGER, PRIMARY KEY(hash, page_number));
+        CREATE TABLE connector_cursors (
+            source_name TEXT PRIMARY KEY, cursor_token TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE connector_deadletter (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL, failure_count INTEGER NOT NULL, last_attempt TEXT NOT NULL
+        );
+        CREATE TABLE bronze_records (
+            source_name TEXT, item_id TEXT, raw_path TEXT NOT NULL, mime TEXT NOT NULL,
+            fetched_at TEXT NOT NULL, PRIMARY KEY(source_name, item_id)
+        );
+        CREATE TABLE entity_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
+            source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
+            confidence REAL NOT NULL, sensitivity TEXT NOT NULL
+        );
     """)
     errors = validate_schema(db)
     assert len(errors) == 1

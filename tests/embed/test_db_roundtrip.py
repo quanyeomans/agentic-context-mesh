@@ -15,7 +15,12 @@ from kairix.core.embed.schema import SchemaVersionError, validate_schema
 
 
 def create_kairix_schema(db: sqlite3.Connection) -> None:
-    """Create the minimum kairix schema needed for our tests."""
+    """Create the minimum kairix schema needed for our tests.
+
+    Includes the connector-framework Wave 1 (SC-4) tables + ``sensitivity``
+    column so ``validate_schema`` accepts the DB. Without them the validator
+    reports missing tables/columns added by SCHEMA_VERSION 2.
+    """
     db.executescript("""
         CREATE TABLE IF NOT EXISTS content (
             hash TEXT PRIMARY KEY,
@@ -31,7 +36,8 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
             hash TEXT NOT NULL,
             created_at TEXT,
             modified_at TEXT,
-            active INTEGER NOT NULL DEFAULT 1
+            active INTEGER NOT NULL DEFAULT 1,
+            sensitivity TEXT NOT NULL DEFAULT 'public'
         );
 
         CREATE TABLE IF NOT EXISTS content_vectors (
@@ -42,6 +48,47 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
             embedded_at TEXT NOT NULL,
             chunk_date DATE,
             PRIMARY KEY (hash, seq)
+        );
+
+        -- Connector-framework Wave 1 (SC-4) tables required by validate_schema
+        CREATE TABLE IF NOT EXISTS documents_media (
+            hash TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            format TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS document_pages (
+            hash TEXT NOT NULL,
+            page_number INTEGER NOT NULL,
+            PRIMARY KEY (hash, page_number)
+        );
+        CREATE TABLE IF NOT EXISTS connector_cursors (
+            source_name TEXT PRIMARY KEY,
+            cursor_token TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS connector_deadletter (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            failure_count INTEGER NOT NULL,
+            last_attempt TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS bronze_records (
+            source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            raw_path TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            PRIMARY KEY (source_name, item_id)
+        );
+        CREATE TABLE IF NOT EXISTS entity_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            value TEXT NOT NULL,
+            source_uri TEXT NOT NULL,
+            modified_at TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            sensitivity TEXT NOT NULL
         );
     """)
     db.commit()
