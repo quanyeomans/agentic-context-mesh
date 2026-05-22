@@ -24,7 +24,6 @@
 kairix/core/classify/cli.py
 kairix/core/embed/cli.py
 kairix/core/search/cli.py
-kairix/core/search/config_validator.py
 kairix/core/temporal/cli.py
 kairix/knowledge/contradict/cli.py
 kairix/knowledge/entities/cli.py
