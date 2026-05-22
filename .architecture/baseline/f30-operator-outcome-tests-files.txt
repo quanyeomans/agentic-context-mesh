@@ -21,7 +21,6 @@
 #   wave 4 (long-tail diagnostic + admin): benchmark, soak, eval, setup,
 #     onboard, worker, store, summarise, classify, wikilinks, etc.
 #
-kairix/platform/warm/cli.py
 kairix/quality/benchmark/cli.py
 kairix/quality/probe/cli.py
 kairix/quality/probe/config_cli.py

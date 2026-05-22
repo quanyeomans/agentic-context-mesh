@@ -97,3 +97,67 @@ def test_top_level_cli_dispatches_warm() -> None:
     assert module_path == "kairix.platform.warm.cli"
     assert fn_name == "main"
     assert accepts_args is True
+
+
+# ---------------------------------------------------------------------------
+# _build_pipeline_builder_for_paths — F30 subprocess seam for --db-path /
+# --document-root. The CLI returns None when no overrides are supplied
+# (production callers leave the flags off; run_warm uses its default
+# _step_build_pipeline) and a callable otherwise. The callable threads an
+# explicit KairixPaths overlay into build_search_pipeline.
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_builder_returns_none_when_no_overrides() -> None:
+    """Without --db-path or --document-root, the builder is None so the
+    default ``_step_build_pipeline`` runs unchanged. Sabotage-proof: if
+    the function ever returned a non-None callable here, production
+    container start-up would invoke build_search_pipeline twice."""
+    assert warm_cli._build_pipeline_builder_for_paths(None, None) is None
+
+
+def test_pipeline_builder_returned_when_db_path_supplied(tmp_path) -> None:
+    """A --db-path override yields a callable that build_search_pipeline
+    can be invoked through."""
+    builder = warm_cli._build_pipeline_builder_for_paths(str(tmp_path / "index.sqlite"), None)
+    assert builder is not None
+    assert callable(builder)
+
+
+def test_pipeline_builder_returned_when_document_root_supplied(tmp_path) -> None:
+    """A --document-root override alone yields a callable too."""
+    builder = warm_cli._build_pipeline_builder_for_paths(None, str(tmp_path))
+    assert builder is not None
+    assert callable(builder)
+
+
+def test_paths_overlay_threads_both_args(tmp_path) -> None:
+    """The pure ``_resolve_paths_overlay`` helper produces a KairixPaths
+    whose db_path + document_root reflect the CLI args. The unset
+    fields fall back to the resolved defaults so the override is
+    additive.
+
+    Sabotage: if the helper dropped one of the args on the floor (e.g.
+    used defaults.db_path instead of the supplied db_path), the
+    returned overlay would not match the tmp_path inputs.
+    """
+    db = tmp_path / "tmp-idx.sqlite"
+    doc = tmp_path / "tmp-vault"
+    doc.mkdir()
+
+    overlay = warm_cli._resolve_paths_overlay(str(db), str(doc))
+    assert overlay.db_path == db, f"db_path not threaded: {overlay.db_path!r} != {db!r}"
+    assert overlay.document_root == doc, f"document_root not threaded: {overlay.document_root!r} != {doc!r}"
+
+
+def test_paths_overlay_falls_back_to_defaults_for_unset_args(tmp_path) -> None:
+    """When only --db-path is supplied, document_root falls back to the
+    resolved default; and vice-versa. Confirms the overlay is additive,
+    not destructive."""
+    from kairix.paths import KairixPaths
+
+    defaults = KairixPaths.resolve()
+    db_only = warm_cli._resolve_paths_overlay(str(tmp_path / "x.sqlite"), None)
+    assert db_only.document_root == defaults.document_root
+    doc_only = warm_cli._resolve_paths_overlay(None, str(tmp_path / "vault"))
+    assert doc_only.db_path == defaults.db_path
