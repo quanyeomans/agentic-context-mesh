@@ -22,7 +22,6 @@
 #     onboard, worker, store, summarise, classify, wikilinks, etc.
 #
 kairix/agents/curator/cli.py
-kairix/agents/mcp/cli.py
 kairix/agents/mcp/server.py/@tool:benchmark_run
 kairix/agents/mcp/server.py/@tool:bootstrap
 kairix/agents/mcp/server.py/@tool:contradict
