@@ -108,6 +108,12 @@ anthropic     = "kairix.providers.anthropic:make_provider"
 # ``sharepoint``, ``dex_crm``, ``m365_email_headers``, ``m365_calendar``.
 [project.entry-points."kairix.connectors"]
 
+# Extractor plugin discovery — same shape as kairix.providers above.
+# Per-format-family plugins live under kairix/extractors/<name>/ and
+# register here. Empty in Wave 1 (SC-3 scaffold only); Wave 2 adds
+# ``markitdown`` + ``passthrough``, Wave 3 adds ``pdf_fallback`` + ``ocr``.
+[project.entry-points."kairix.extractors"]
+
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"
 Issues = "https://github.com/three-cubes/kairix/issues"
