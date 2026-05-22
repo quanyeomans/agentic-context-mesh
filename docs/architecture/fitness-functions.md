@@ -2557,6 +2557,35 @@ Canonical reference for F45–F49 mechanics + paydown patterns:
 
 ---
 
+### F34–F44 — connector framework discipline pre-arm
+
+Landed in connector-framework Wave 0 (2026-05-22, kairix-pro-platform#59
+hardening + this repo's `docs/architecture/connector-ingestion-architecture.md`
+spec). Pre-arms the discipline before Wave 1 creates `kairix/connectors/`
+and `kairix/extractors/` surfaces — all eleven checks pass vacuously
+today (except F41 and F43 which carry seeded baselines on the existing
+provider plugins) and fire mechanically the moment Wave 1 lands a
+non-conforming change.
+
+| Rule | Locks | Mirrors |
+|---|---|---|
+| **F34** | `kairix/core/connectors/**` cannot import `kairix/connectors/**` or `kairix/extractors/**` | F26 |
+| **F35** | `kairix/connectors/<a>/**` cannot import another connector or any extractor | F27 |
+| **F36** | Every plugin under `kairix/{connectors,extractors}/<name>/` has matching BDD coverage | F28 |
+| **F37** | Change-detection / sync code only under `kairix/connectors/<name>/` or `kairix/core/connectors/` | F29 |
+| **F38** | Silver processing (chunking + entity-signal extraction) only in `kairix/core/connectors/silver.py` | (new — singular Silver surface) |
+| **F39** | Every `Chunk(...)` write passes `source_uri`, `source_modified_at`, `sensitivity` explicitly | F15 (boundary at write surface) |
+| **F40** | Every extractor plugin declares `version: str = "..."` written through to `documents_media.extractor_version` | (new — re-extract tractability) |
+| **F41** | Every plugin (`kairix/{connectors,extractors,providers}/<name>/`) has `py.typed` + rationalised `# type: ignore` | (new — strictness at plugin boundary) |
+| **F42** | Connector-surface Protocol returns are frozen dataclasses or tuples of them; never `dict`/`list[dict]` | (new — typed boundary) |
+| **F43** | Every plugin has `tests/contracts/test_<plugin>_protocol.py` exercising canonical fake + real impl | F30 (contract version) |
+| **F44** | Engagement-scope code (every dir under `kairix/`) cannot import firm-scope storage clients (`psycopg`/`asyncpg`/etc) | (new — locks pro ADR-017 two-scope boundary) |
+
+Canonical specs + Bronze/Silver context + plugin discovery shape live in
+[`connector-ingestion-architecture.md`](connector-ingestion-architecture.md).
+
+---
+
 ### F50 — net-new files cannot accrete F-rule baseline debt
 
 Closes the per-file-shrink-only loophole identified by the 2026-05-22
