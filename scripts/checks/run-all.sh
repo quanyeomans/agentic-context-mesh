@@ -121,6 +121,9 @@ python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
 
+# F46 — BDD step impls call factory-composed production code (no direct *Pipeline)
+bash "${SCRIPT_DIR}/check-f46-bdd-step-composition.sh" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
