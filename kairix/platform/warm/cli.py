@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from kairix.platform.warm.runner import run_warm
 
@@ -50,7 +51,76 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit JSON envelope on stdout; suppress human-readable output",
     )
+    p.add_argument(
+        "--db-path",
+        default=None,
+        help=(
+            "Override the search index SQLite path for this invocation. "
+            "When omitted, the default resolution chain (KAIRIX_DB_PATH "
+            "env / kairix.config.yaml / ~/.cache/kairix/index.sqlite) runs. "
+            "Matches the canonical F30 subprocess seam in "
+            "``kairix bootstrap --document-root``; enables outcome tests to "
+            "drive a tmp sqlite without touching the process environment "
+            "(F2-clean)."
+        ),
+    )
+    p.add_argument(
+        "--document-root",
+        default=None,
+        help=(
+            "Override the document root for this invocation. Pairs with "
+            "--db-path so the warm-up subprocess can run against a tmp "
+            "vault without touching the process environment."
+        ),
+    )
     return p
+
+
+def _resolve_paths_overlay(db_path: str | None, document_root: str | None) -> Any:
+    """Build a :class:`kairix.paths.KairixPaths` overlay reflecting CLI args.
+
+    Resolves the unset fields from :meth:`KairixPaths.resolve` so the
+    overlay is additive — operators who only supply ``--db-path`` keep
+    their configured ``document_root``, and vice-versa. Pure function
+    (no I/O beyond the cached resolve()), unit-testable without
+    spinning up build_search_pipeline.
+    """
+    from kairix.paths import KairixPaths
+
+    defaults = KairixPaths.resolve()
+    return KairixPaths(
+        document_root=Path(document_root) if document_root else defaults.document_root,
+        db_path=Path(db_path) if db_path else defaults.db_path,
+        log_dir=defaults.log_dir,
+        workspace_root=defaults.workspace_root,
+    )
+
+
+def _build_pipeline_builder_for_paths(db_path: str | None, document_root: str | None) -> Any:
+    """Construct the ``pipeline_builder`` callable for ``run_warm``.
+
+    When neither override is supplied, returns ``None`` — ``run_warm``
+    then uses its default ``_step_build_pipeline`` which resolves paths
+    from env / config / platform default. When at least one override is
+    supplied, returns a callable that calls
+    :func:`kairix.core.factory.build_search_pipeline` with the overlay
+    from :func:`_resolve_paths_overlay`.
+
+    F30 subprocess seam: outcome tests pass ``--db-path tmp/index.sqlite``
+    and ``--document-root tmp`` to drive the warm-up against a tmp
+    sandbox without setting ``KAIRIX_*`` env vars.
+    """
+    if db_path is None and document_root is None:
+        return None
+
+    overlay = _resolve_paths_overlay(db_path, document_root)
+
+    def _builder() -> Any:
+        from kairix.core.factory import build_search_pipeline
+
+        return build_search_pipeline(paths=overlay)
+
+    return _builder
 
 
 def _format_text(result: WarmResult) -> str:
@@ -75,7 +145,8 @@ def _format_text(result: WarmResult) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    result = run_warm()
+    builder = _build_pipeline_builder_for_paths(args.db_path, args.document_root)
+    result = run_warm(pipeline_builder=builder) if builder is not None else run_warm()
     if args.json:
         print(json.dumps(result.to_envelope(), indent=2))
     else:
