@@ -22,7 +22,6 @@
 #     onboard, worker, store, summarise, classify, wikilinks, etc.
 #
 kairix/core/embed/cli.py
-kairix/core/search/cli.py
 kairix/knowledge/contradict/cli.py
 kairix/knowledge/entities/cli.py
 kairix/knowledge/reflib/cli.py
