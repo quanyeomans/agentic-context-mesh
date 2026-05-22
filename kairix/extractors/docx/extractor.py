@@ -117,7 +117,7 @@ def _default_document_opener() -> DocxOpener:
     def _open_path(path: str) -> _DocxDocument:
         # python-docx returns its concrete ``Document`` type which
         # satisfies the local :class:`_DocxDocument` Protocol structurally.
-        return _docx.Document(path)
+        return _docx.Document(path)  # type: ignore[no-any-return]  # reason: python-docx lacks py.typed; concrete return matches structural _DocxDocument.
 
     return _open_path
 
