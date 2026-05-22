@@ -25,7 +25,6 @@ kairix/agents/mcp/server.py/@tool:bootstrap
 kairix/agents/mcp/server.py/@tool:contradict
 kairix/agents/mcp/server.py/@tool:prep
 kairix/agents/mcp/server.py/@tool:search
-kairix/agents/mcp/server.py/@tool:warm
 kairix/core/classify/cli.py
 kairix/core/embed/cli.py
 kairix/core/search/cli.py
