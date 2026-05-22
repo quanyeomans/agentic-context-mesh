@@ -1658,6 +1658,75 @@ class FakePassthroughExtractor:
         return bool(doc.markdown.strip())
 
 
+class FakePdfFallbackExtractor:
+    """Canonical fake for the pdf_fallback extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol without
+    invoking the real :mod:`pdfplumber` library. Claims
+    ``application/pdf`` (and any bytes starting with ``%PDF``), returns
+    a scripted markdown string with at least one page carrying non-
+    empty text — sized to clear the production ``>=100 char`` floor.
+
+    Used by ``tests/contracts/test_pdf_fallback_protocol.py`` to prove
+    that the real :class:`PdfFallbackExtractor` satisfies the same
+    Protocol surface a downstream consumer would expect.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "0.11.9",
+        scripted_markdown: str | None = None,
+        scripted_page_text: str | None = None,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+            MimeType,
+            Page,
+        )
+
+        self.name = "pdf_fallback"
+        self.version = version
+        self.scripted_markdown = scripted_markdown or (
+            "Recovered PDF content from the fallback extractor.\n" + ("Line of body text from page one.\n" * 6)
+        )
+        self.scripted_page_text = scripted_page_text or "Recovered PDF page text from the fallback extractor."
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._MimeType = MimeType
+        self._Page = Page
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        if isinstance(mime, str) and mime == "application/pdf":
+            return True
+        return magic_bytes[:4] == b"%PDF"
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        markdown = self.scripted_markdown
+        page = self._Page(page_number=1, text=self.scripted_page_text, has_images=False)
+        confidence = min(len(markdown) / max(len(raw), 1), 1.0) if raw else 0.0
+        return self._ExtractedDocument(
+            markdown=markdown,
+            pages=(page,),
+            images=(),
+            metadata=self._DocMetadata(
+                title="fixture",
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=1,
+            ),
+            confidence=confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        if len(doc.markdown) < 100:
+            return False
+        return any(page.text.strip() for page in doc.pages)
+
+
 class FakeMarkitdownExtractor:
     """Canonical fake for the markitdown extractor plugin (F43 contract layer).
 
