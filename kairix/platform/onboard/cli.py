@@ -331,10 +331,29 @@ def _resolve_doc_root(args: argparse.Namespace) -> Path | None:
 def _resolve_guide_src(args: argparse.Namespace) -> Path | None:
     """Locate the bundled agent usage guide markdown.
 
-    Tries the in-tree source layout first, then falls back to the
-    installed-package layout. Returns ``None`` and prints an error
-    when neither candidate exists.
+    Resolution order:
+      1. ``--guide-src PATH`` (explicit CLI override, F30 subprocess seam)
+      2. ``--pkg-root`` (in-process DI seam, set via ``main()``'s kwarg)
+      3. in-tree layout (``<repo>/docs/agent-usage-guide.md``)
+      4. installed-package layout (``<site-packages>/docs/...``)
+
+    Returns ``None`` and prints an error when no candidate exists.
+
+    ``--guide-src`` is the F30 subprocess seam (matches the canonical
+    ``--document-root`` pattern in ``kairix/bootstrap_cli.py``): the
+    outcome test points it at a tmp-path placeholder so the CLI can be
+    driven without monkey-patching ``kairix.__file__`` and without
+    setting any ``KAIRIX_*`` env vars.
     """
+    explicit = getattr(args, "guide_src", None)
+    if explicit:
+        guide_path = Path(explicit)
+        if guide_path.exists():
+            return guide_path
+        print(f"Error: agent usage guide not found at {guide_path}", file=sys.stderr)
+        print("Check the --guide-src argument points at a readable markdown file.", file=sys.stderr)
+        return None
+
     # The in-tree source layout (``<repo>/docs/agent-usage-guide.md``)
     # and the installed-package layout (``<site-packages>/docs/...``)
     # both terminate at ``Path(kairix.__file__).parent.parent``. Threading
@@ -491,6 +510,16 @@ def main(
         "--dry-run",
         action="store_true",
         help="Show what would be installed without writing",
+    )
+    p_guide.add_argument(
+        "--guide-src",
+        default=None,
+        help=(
+            "Override the agent usage guide source path. When omitted, "
+            "the default resolution chain (in-tree / installed-package "
+            "docs/agent-usage-guide.md) runs. Matches the canonical "
+            "F30 subprocess seam in ``kairix bootstrap --document-root``."
+        ),
     )
 
     # verify
