@@ -1881,6 +1881,80 @@ class FakeOcrExtractor:
         return bool(doc.confidence >= 0.6)
 
 
+class FakePptxExtractor:
+    """Canonical fake for the pptx extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol without
+    invoking the real :mod:`pptx` library. Returns a scripted three-slide
+    deck so the per-slide Page assertions and the speaker-notes
+    quality-gate assertions can be parameterised across the fake AND the
+    real impl.
+
+    Used by ``tests/contracts/test_pptx_protocol.py`` to prove that the
+    real :class:`PptxExtractor` satisfies the same Protocol surface a
+    downstream consumer would expect.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "1.0.2",
+        scripted_slide_count: int = 3,
+        include_notes: bool = True,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+            Page,
+        )
+
+        self.name = "pptx"
+        self.version = version
+        self.scripted_slide_count = scripted_slide_count
+        self.include_notes = include_notes
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._Page = Page
+        self._pptx_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        if isinstance(mime, str) and mime == self._pptx_mime:
+            return True
+        return bool(magic_bytes.startswith(b"PK\x03\x04") and isinstance(mime, str) and mime.endswith("presentation"))
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        slides_md: list[str] = []
+        pages: list[Any] = []
+        for i in range(self.scripted_slide_count):
+            n = i + 1
+            slide_md = f"## Slide {n}: Scripted Slide {n}\n\nBody text for slide {n}."
+            if self.include_notes:
+                slide_md += f"\n\n> **Speaker notes**: Notes for slide {n}."
+            slides_md.append(slide_md)
+            pages.append(self._Page(page_number=n, text=slide_md, has_images=False))
+        markdown = "\n\n".join(slides_md)
+        confidence = min(len(markdown) / max(len(raw), 1), 1.0) if raw else 0.0
+        return self._ExtractedDocument(
+            markdown=markdown,
+            pages=tuple(pages),
+            images=(),
+            metadata=self._DocMetadata(
+                title="Scripted Deck",
+                author="agent-alpha",
+                created_date=None,
+                language=None,
+                page_count=self.scripted_slide_count,
+            ),
+            confidence=confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        if len(doc.pages) == 0:
+            return False
+        return len(doc.markdown.strip()) >= 100
+
+
 class FakeCorpusEmbedder:
     """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
 
