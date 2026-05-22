@@ -1,5 +1,26 @@
-.PHONY: lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
+.PHONY: setup lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
         go-modules go-fmt go-vet go-lint go-test go-build go-check
+
+# Developer-environment setup — wires the pre-commit hooks so first-commit
+# enforcement matches CI from the very first push on a fresh clone.
+# Closes the dormant-hook gap a fresh clone otherwise lands in.
+#
+# Pre-commit refuses to install when ``core.hooksPath`` is set, even when
+# the value is the repo default (``.git/hooks``). We detect that exact
+# case and unset it for the install, then leave the rest of the
+# environment alone.
+setup:
+	@command -v pre-commit >/dev/null || { echo "pre-commit not installed — install via 'uv pip install pre-commit' or 'pipx install pre-commit'"; exit 1; }
+	@hp=$$(git config --get core.hooksPath 2>/dev/null); \
+	if [ -n "$$hp" ] && [ "$$hp" = ".git/hooks" -o "$$hp" = "$$(pwd)/.git/hooks" ]; then \
+	    echo "setup: unsetting redundant core.hooksPath=$$hp (== default)"; \
+	    git config --unset-all core.hooksPath; \
+	elif [ -n "$$hp" ]; then \
+	    echo "setup: core.hooksPath=$$hp is non-default; refusing to override. Unset manually if intentional, then re-run."; exit 1; \
+	fi
+	pre-commit install --install-hooks
+	pre-commit install --hook-type commit-msg --install-hooks 2>/dev/null || true
+	@echo "setup: pre-commit hooks installed. Run 'make check' to verify the gate locally."
 
 # Combined quality check — run all linting, formatting, and type checks
 lint: lint-check format-check type-check
