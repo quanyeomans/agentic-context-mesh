@@ -100,6 +100,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit JSON envelope on stdout; suppress human-readable output",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "subprocess testability seam (F30): drive the full run_soak pipeline "
+            "(iteration loop + memory/log/fd/signature checks) with a hermetic "
+            "in-CLI workload runner that returns a deterministic envelope — no "
+            "real benchmark suite, no retrieval, no env reads. Useful for "
+            "smoke-testing the CLI binary surface end-to-end against a tmp "
+            "working directory and verifying gate verdicts on synthetic data."
+        ),
+    )
     return p
 
 
@@ -144,6 +156,17 @@ _DEPRECATION_WARNING = (
 )
 
 
+def _dry_run_workload(_suite: str) -> dict[str, object]:
+    """Hermetic workload for the ``--dry-run`` F30 seam.
+
+    Returns a deterministic envelope shape so ``_signature`` produces
+    the same hash across iterations — exercising the
+    ``_check_signature_drift`` PASS path. The dict is byte-stable;
+    repeats agree, the soak verdict is PASS.
+    """
+    return {"summary": {"weighted_total": 0.0}, "case_count": 0}
+
+
 def main(argv: list[str] | None = None) -> int:
     # P5 unification: emit a deprecation warning on every invocation; the
     # legacy soak behaviour stays unchanged through v2026.6.x.
@@ -158,12 +181,18 @@ def main(argv: list[str] | None = None) -> int:
         print("fix: pass --repeat 2 or higher", file=sys.stderr)
         return 2
 
+    # ``--dry-run`` is the F30 subprocess seam: pass a hermetic
+    # workload_runner that returns a deterministic envelope, so the
+    # soak loop + iteration checks all execute end-to-end without a
+    # real benchmark / retrieval / provider dependency.
+    workload_runner = _dry_run_workload if args.dry_run else None
     result = run_soak(
         suite=args.suite,
         repeat=args.repeat,
         max_memory_growth_mb=args.max_memory_growth_mb,
         max_log_volume_mb=args.max_log_volume_mb,
         max_time_drift_pct=args.max_time_drift_pct,
+        workload_runner=workload_runner,
     )
 
     if args.json:
