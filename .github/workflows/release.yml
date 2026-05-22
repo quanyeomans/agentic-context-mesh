@@ -129,6 +129,15 @@ jobs:
             exit 1
           fi
 
+      - name: F49 — baselines shrink per release
+        # Each release must reduce the F30/F46/F47 test-discipline
+        # baselines by at least one entry vs the previous release
+        # tag, or keep all three at zero. See
+        # docs/architecture/test-discipline-hardening.md §3 (F49).
+        # Runs only here, not per-commit — baselines don't change
+        # between commits within a release window.
+        run: bash scripts/checks/check-baseline-shrinking.sh
+
       - name: Extract release notes from CHANGELOG
         env:
           LABEL: ${{ inputs.changelog_label }}
