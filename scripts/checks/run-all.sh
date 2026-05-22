@@ -127,6 +127,9 @@ bash "${SCRIPT_DIR}/check-f46-bdd-step-composition.sh" || overall=1
 # F47 — integration tests construct pipelines via kairix.core.factory.build_*
 python3 "${SCRIPT_DIR}/check_f47_integration_factory.py" || overall=1
 
+# F48 — composed production path e2e exemplar exists and is e2e-marked
+bash "${SCRIPT_DIR}/check-f48-e2e-present.sh" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
