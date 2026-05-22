@@ -1800,6 +1800,81 @@ class FakeMarkitdownExtractor:
         return bool(doc.confidence >= 0.10)
 
 
+class FakeOcrExtractor:
+    """Canonical fake for the OCR extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol
+    without invoking :mod:`pytesseract`, :mod:`pdfplumber`, or any of
+    the OCR extra's other libraries. Returns a scripted markdown
+    string with a scripted confidence so quality-gate assertions
+    can be parameterised across the fake AND the real impl.
+
+    The fake claims ``application/pdf`` and the common image mimes
+    (matching the production plugin's surface) but refuses
+    ``text/*`` (that's passthrough's job).
+
+    Used by ``tests/contracts/test_ocr_protocol.py`` to prove that
+    the real :class:`OcrExtractor` satisfies the same Protocol
+    surface a downstream consumer would expect.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "1.0.0",
+        scripted_markdown: str | None = None,
+        scripted_confidence: float = 0.85,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+        )
+
+        self.name = "ocr"
+        self.version = version
+        self.scripted_markdown = scripted_markdown or ("## Page 1\n\n" + ("recognised line of text\n" * 8))
+        self.scripted_confidence = scripted_confidence
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._supported_mimes = frozenset(
+            {
+                "application/pdf",
+                "image/png",
+                "image/jpeg",
+                "image/jpg",
+                "image/tiff",
+                "image/bmp",
+            }
+        )
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        if isinstance(mime, str) and mime in self._supported_mimes:
+            return True
+        return magic_bytes.startswith(b"%PDF")
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del raw, mime
+        return self._ExtractedDocument(
+            markdown=self.scripted_markdown,
+            pages=(),
+            images=(),
+            metadata=self._DocMetadata(
+                title=None,
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=1,
+            ),
+            confidence=self.scripted_confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        text = doc.markdown.strip()
+        if len(text) < 50:
+            return False
+        return bool(doc.confidence >= 0.6)
+
+
 class FakeCorpusEmbedder:
     """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
 
