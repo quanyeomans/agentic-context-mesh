@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Iterator, Sequence
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -183,24 +184,36 @@ class TestConnectorProtocolConformance:
 
 
 @pytest.mark.contract
-class TestConnectorSkeletonsRaiseNotImplemented:
-    """Wave 1 ships seams only; calling any skeleton method must raise NotImplementedError."""
+class TestConnectorImplementationsExist:
+    """IM-2 (Connector-Framework Wave 2): Bronze / Silver / Pipeline / Registry
+    have real implementations; the canonical-shape contract tests live in
+    ``tests/integration/test_connector_pipeline.py``. This block proves the
+    classes import and construct so a regression that replaces a real impl
+    with a NotImplementedError stub fails here at the contract gate.
+    """
 
     @pytest.mark.contract
-    def test_filesystem_bronze_store_write_raises(self) -> None:
+    def test_filesystem_bronze_store_constructs(self, tmp_path: Path) -> None:
+        import sqlite3
+
         from kairix.core.connectors.bronze import FilesystemBronzeStore
+        from kairix.core.db.schema import create_schema
 
-        with pytest.raises(NotImplementedError):
-            FilesystemBronzeStore().write("src", "item", b"", "text/plain")
+        db = sqlite3.connect(":memory:")
+        try:
+            create_schema(db)
+            store = FilesystemBronzeStore(db, tmp_path)
+            ref = store.write("src", "item-1", b"hello", "text/plain")
+            assert ref.source_name == "src"
+            assert ref.item_id == "item-1"
+            assert ref.mime == "text/plain"
+        finally:
+            db.close()
 
     @pytest.mark.contract
-    def test_default_silver_processor_process_raises(self) -> None:
+    def test_default_silver_processor_returns_chunks(self) -> None:
         from kairix.core.connectors.silver import DefaultSilverProcessor
 
-        # We can't construct the real BronzeRef / ExtractedDocument here
-        # without going through the same not-yet-implemented surfaces,
-        # but the call-site simply has to raise before touching its
-        # arguments. Pass placeholders that satisfy the type shape.
         ref = BronzeRef(
             source_name="src",
             item_id="item",
@@ -208,41 +221,33 @@ class TestConnectorSkeletonsRaiseNotImplemented:
             mime="text/plain",
             fetched_at="1970-01-01T00:00:00Z",
         )
+        markdown = "Hello world.\n\n" + ("This is a body paragraph. " * 40)
         doc = ExtractedDocument(
-            markdown="",
+            markdown=markdown,
             pages=(),
             images=(),
             metadata=DocMetadata(title=None, author=None, created_date=None, language=None, page_count=None),
-            confidence=0.0,
+            confidence=1.0,
         )
-        with pytest.raises(NotImplementedError):
-            DefaultSilverProcessor().process(ref, doc, "src://x", "1970-01-01T00:00:00Z", "public")
+        out = DefaultSilverProcessor().process(ref, doc, "src://x", "1970-01-01T00:00:00Z", "public")
+        assert len(out.chunks) >= 1
+        for chunk in out.chunks:
+            # F39 guard — every chunk carries the three metadata fields.
+            assert chunk.source_uri == "src://x"
+            assert chunk.source_modified_at == "1970-01-01T00:00:00Z"
+            assert chunk.sensitivity == "public"
 
     @pytest.mark.contract
-    def test_connector_pipeline_run_batch_raises(self) -> None:
-        from kairix.core.connectors.pipeline import ConnectorPipeline
-
-        # The pipeline raises before consuming connector / extractor,
-        # so synthetic stand-ins are sufficient for the seam test.
-        with pytest.raises(NotImplementedError):
-            ConnectorPipeline().run_batch(_SyntheticSourceConnector(), _SyntheticExtractor())
-
-    # CursorStore + DeadLetterStore skeletons were replaced by real impls in
-    # IM-1 (Connector-Framework Wave 2). The atomic per-batch contract is
-    # exercised by tests/integration/test_connector_cursor_store.py and
-    # tests/integration/test_connector_deadletter_store.py; no more
-    # NotImplementedError surface on those two stores.
-
-    @pytest.mark.contract
-    def test_connector_registry_resolve_raises(self) -> None:
+    def test_connector_registry_resolve_raises_keyerror_for_unknown(self) -> None:
         from kairix.core.connectors.registry import ConnectorRegistry
 
-        with pytest.raises(NotImplementedError):
-            ConnectorRegistry().resolve("obsidian")
+        with pytest.raises(KeyError):
+            ConnectorRegistry().resolve("does-not-exist-connector")
 
     @pytest.mark.contract
-    def test_extractor_registry_resolve_raises(self) -> None:
+    def test_extractor_registry_resolve_raises_keyerror_for_unknown(self) -> None:
         from kairix.core.connectors.registry import ExtractorRegistry
 
-        with pytest.raises(NotImplementedError):
-            ExtractorRegistry().resolve("application/pdf", b"%PDF")
+        # Bytes shape no real extractor claims — the registry must raise.
+        with pytest.raises(KeyError):
+            ExtractorRegistry().resolve("application/x-no-such-format-9000", b"\x00\x00\x00\x00")
