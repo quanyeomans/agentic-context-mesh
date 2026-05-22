@@ -127,7 +127,7 @@ jobs:
         # The [agents] extras provide starlette (transitively via mcp>=1.20)
         # so the MCP transport contract test runs here instead of being
         # silently skipped by `pytest.importorskip("starlette")`.
-        run: pip install -e ".[dev,agents]"
+        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
 
       - name: Contract tests (schema validation, interface agreements)
         run: |
@@ -200,7 +200,7 @@ jobs:
         # transport composer's coverage measures as 0% even though the unit
         # tests exist, and F7 fails the per-file floor.
         run: |
-          pip install -e ".[dev,agents]"
+          pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
 
       - name: Type checking -- mypy strict
         # Engineering hub: "mypy -- zero errors". Strict mode from Phase 1.
@@ -341,7 +341,7 @@ jobs:
         # tests/integration/test_mcp_build_server.py — those probes exercise
         # the production build_server() wiring and need the real FastMCP
         # package, not a stub.
-        run: pip install -e ".[dev,agents]"
+        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
 
       - name: Integration tests
         # Coverage collected and uploaded so production-wiring code
@@ -433,7 +433,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev,agents]"
+        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
 
       - name: F48 — composed production path e2e
         run: |
