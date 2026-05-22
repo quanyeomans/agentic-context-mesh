@@ -111,6 +111,34 @@ def _run_generate(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_paths(
+    args: argparse.Namespace,
+    document_root: Path | None,
+    db_path: Path | None,
+) -> tuple[Path, Path]:
+    """Pick the effective ``document_root`` and ``db_path`` for this run.
+
+    Precedence (highest wins): in-process kwarg → ``--document-root`` /
+    ``--summaries-cache`` argparse flag → kairix.paths default chain.
+    Extracted from ``main`` to keep its cognitive complexity below F16's
+    ceiling.
+    """
+    if args.document_root is not None and document_root is None:
+        document_root = Path(args.document_root)
+    if args.summaries_cache is not None and db_path is None:
+        db_path = Path(args.summaries_cache)
+
+    if document_root is None:
+        from kairix.paths import document_root as _resolve_document_root
+
+        document_root = _resolve_document_root()
+    if db_path is None:
+        from kairix.paths import summaries_db_path
+
+        db_path = summaries_db_path()
+    return document_root, db_path
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -144,17 +172,31 @@ def main(
         default="gpt-4o-mini",
         help="Azure OpenAI deployment name (default: gpt-4o-mini)",
     )
+    parser.add_argument(
+        "--document-root",
+        default=None,
+        help=(
+            "Override the document root for this invocation. When omitted, "
+            "the default resolution chain (KAIRIX_DOCUMENT_ROOT env / "
+            "kairix.config.yaml / platform default) runs. Matches the "
+            "canonical pattern in ``kairix store crawl --document-root``; "
+            "enables F30 subprocess outcome tests to drive a tmp document "
+            "root without touching the process environment."
+        ),
+    )
+    parser.add_argument(
+        "--summaries-cache",
+        default=None,
+        help=(
+            "Override the summaries SQLite cache path. When omitted the "
+            "default resolution chain runs. Subprocess seam for F30 "
+            "outcome tests; production callers leave this unset."
+        ),
+    )
 
     args = parser.parse_args(argv if argv is not None else sys.argv[2:])
 
-    if document_root is None:
-        from kairix.paths import document_root as _resolve_document_root
-
-        document_root = _resolve_document_root()
-    if db_path is None:
-        from kairix.paths import summaries_db_path
-
-        db_path = summaries_db_path()
+    document_root, db_path = _resolve_paths(args, document_root, db_path)
 
     db = _open_db(db_path)
 
