@@ -8,7 +8,15 @@ Use `bash scripts/safe-commit.sh "message"` for every commit. It runs lint, form
 
 ## How to test
 
-Test with fakes from `tests/fakes.py`, not monkey-patches. Construct pipelines with fake implementations. See `tests/contracts/test_protocols.py` for protocol compliance patterns.
+Test with fakes from `tests/fakes.py`, not monkey-patches. Construct pipelines through `kairix.core.factory.build_*`, not by direct `SearchPipeline(...)` / `EmbedPipeline(...)` construction.
+
+Three principles, all mechanically enforced:
+
+- **Composition (F46 / F47)** — BDD step impls and multi-component integration tests go through the factory with `paths=FakePaths(...)` and any other injection seams. Direct pipeline construction is reserved for `tests/contracts/` (Protocol shape proofs) and `tests/integration/test_<x>_contract.py` (single-layer boundary proofs).
+- **Real path (F48)** — `tests/e2e/test_composed_production_path.py` exists, carries `@pytest.mark.e2e`, runs in CI Stage 4.5 under `pytest -m e2e`, and exercises config → factory.build → ingest → query → assertion against composed production code. Every new top-level capability gets a sibling `tests/e2e/test_composed_<capability>_path.py` in the same wave.
+- **New capability (F45)** — shipping a new CLI subcommand, MCP tool, provider plugin, connector plugin, or extractor plugin requires a `tests/bdd/features/*.feature` AND an outcome test in the same commit. Pre-commit blocks otherwise.
+
+CLI outcome tests use `subprocess.run([sys.executable, "-m", "kairix.cli", "<sub>", ..., "--document-root", str(tmp_path)])` — no `KAIRIX_*` env vars in the subprocess invocation. MCP tools test by direct handler call with `deps=...` injected. See `tests/contracts/test_protocols.py` for protocol compliance patterns; `tests/integration/test_vec_index_lifecycle.py` for canonical factory shape; `tests/e2e/test_composed_production_path.py` for the E2E exemplar; `docs/architecture/test-discipline-hardening.md` for the full specification.
 
 ## Architecture
 
@@ -81,7 +89,12 @@ Mechanical, blocking checks encode rejected patterns into automation:
 - **F27** `kairix/providers/<a>/**` may not import another provider — plugins must stay independently shippable. Cross-provider concerns go through `kairix/transport/`.
 - **F28** every plugin under `kairix/providers/<name>/` has a matching `tests/bdd/features/provider_<name>.feature` AND appears as an Examples-table row in every `tests/bdd/features/e2e_provider_*.feature` (or carries the `@<name>_no_<journey>` opt-out tag). Stops new providers shipping without behaviour tests.
 - **F29** performance-measurement code (`bench*.py`, `microbench*.py`, `*_latency*.py`, `*_perf*.py`) may only land under `kairix/quality/probe/**` — the single perf surface for PVT and end-user `kairix probe-config`. Stops transport/ and providers/ growing parallel benchmark harnesses.
-- **F30** every subcommand in `kairix/cli.py:COMMANDS` AND every `@server.tool()` in `kairix/agents/mcp/server.py` has at least one outcome test that (a) invokes via `subprocess.run(["kairix", "<sub>", ...])` or calls the MCP tool handler directly, and (b) asserts on `.stdout`/`.stderr`/returned-envelope content (not on `returncode == 0` alone, not on internal fake call-counts). Pre-existing surfaces grandfathered in `.architecture/baseline/f30-operator-outcome-tests-files.txt`; baseline shrinks only. Motivation: Plan B-parity shipped 5233 green tests but the LoCoMo benchmark fell to 5% because no test exercised the composed production path against a real ingested fact.
+- **F30** every subcommand in `kairix/cli.py:COMMANDS` AND every `@server.tool()` in `kairix/agents/mcp/server.py` has at least one outcome test that (a) invokes via `subprocess.run([sys.executable, "-m", "kairix.cli", "<sub>", ...])` or calls the MCP tool handler directly, and (b) asserts on `.stdout`/`.stderr`/returned-envelope content (not on `returncode == 0` alone, not on internal fake call-counts). Baseline paid down to **zero** in Wave 0 (2026-05-22, kairix-pro-platform#59). Motivation: Plan B-parity shipped 5233 green tests but the LoCoMo benchmark fell to 5% because no test exercised the composed production path against a real ingested fact.
+- **F45** every new CLI subcommand, MCP tool, provider plugin, connector plugin, or extractor plugin must add a matching `tests/bdd/features/*.feature` in the same commit (convention: `{cli_<name>,mcp_<tool>,provider_<name>,connector_<name>,extractor_<name>}.feature`, or `# F45-feature: <path>` override comment). Pre-commit blocks otherwise. Forward-only rule.
+- **F46** BDD step implementations under `tests/bdd/steps/*.py` must invoke (call-graph depth ≤ 2) a CLI entry point (`kairix.cli.main` / per-subcommand `main`), an MCP tool function, OR a factory constructor (`kairix.core.factory.build_*`). Direct construction of `*Pipeline(...)` classes is disallowed except in `tests/contracts/`. Locks the composition principle for BDD.
+- **F47** tests under `tests/integration/` that exercise a multi-component pipeline must construct it via `kairix.core.factory.build_*` with `paths=FakePaths(...)`. Direct construction is allowed only in `tests/contracts/` and `tests/integration/test_<x>_contract.py`.
+- **F48** `tests/e2e/test_composed_production_path.py` must exist, must carry `@pytest.mark.e2e`, must run in CI Stage 4.5 under `pytest -m e2e`, and must exercise config → factory.build → ingest → query → assertion against the composed production code. Every new top-level capability gets a sibling `tests/e2e/test_composed_<capability>_path.py`.
+- **F49** each release tag (matching `v[0-9]*.[0-9]*.[0-9]*`) must reduce each of `f30-operator-outcome-tests-files.txt`, `f46-files.txt`, `f47-integration-factory-files.txt` by ≥1 entry compared to the previous tag — or keep all three at zero. Runs in `release.yml` before the tag is cut.
 
 **Go side (active when `services/<name>/go.mod` exists; see [`docs/architecture/go-integration-plan.md`](docs/architecture/go-integration-plan.md) for full text):**
 
@@ -139,7 +152,8 @@ is the source-of-truth; the others fill in detail.
 | To do this | Read |
 |---|---|
 | See what blocks a commit (the mechanical contract) | **[`CONSTRAINTS.md`](CONSTRAINTS.md)** — short list of hard blocks |
-| Understand the architecture fitness functions F1–F33 + G1–G10 | **[`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md)** — canonical reference; read before adding any silencer, skip, suppression, or internal import |
+| Understand the architecture fitness functions F1–F49 + G1–G10 | **[`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md)** — canonical reference; read before adding any silencer, skip, suppression, or internal import |
+| Land a new top-level capability with its discipline carrying | **[`docs/architecture/test-discipline-hardening.md`](docs/architecture/test-discipline-hardening.md)** — F45..F49, the three principles (composition / real-path / new-capability), canonical test shapes |
 | Avoid known code-smell patterns | [`docs/architecture/ENGINEERING.md#code-smells`](docs/architecture/ENGINEERING.md) — inappropriate intimacy, feature envy, test-shaped APIs |
 | Understand security posture | [`SECURITY.md`](SECURITY.md) + F15 (no logging of secret-named variables in plaintext) |
 
