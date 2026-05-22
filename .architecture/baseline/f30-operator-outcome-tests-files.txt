@@ -22,7 +22,6 @@
 #     onboard, worker, store, summarise, classify, wikilinks, etc.
 #
 kairix/agents/mcp/server.py/@tool:contradict
-kairix/agents/mcp/server.py/@tool:prep
 kairix/agents/mcp/server.py/@tool:search
 kairix/core/classify/cli.py
 kairix/core/embed/cli.py
