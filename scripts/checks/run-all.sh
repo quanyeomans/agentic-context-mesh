@@ -118,11 +118,8 @@ python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
 # F33 — shellcheck disable directives require rationale
 python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 
-# F39 — every chunk write carries source_uri/source_modified_at/sensitivity
-python3 "${SCRIPT_DIR}/check_f39_chunk_metadata.py" || overall=1
-
-# F40 — every extractor plugin declares a version: str module attribute
-python3 "${SCRIPT_DIR}/check_f40_extractor_version.py" || overall=1
+# F41 — every plugin tree carries py.typed + no bare type: ignore
+python3 "${SCRIPT_DIR}/check_f41_plugin_typing.py" || overall=1
 
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
@@ -148,6 +145,10 @@ python3 "${SCRIPT_DIR}/check_f35_no_cross_connector.py" || overall=1
 python3 "${SCRIPT_DIR}/check_f37_singular_sync.py" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f38_silver_singleton.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f39_chunk_metadata.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f40_extractor_version.py" || overall=1
 
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
