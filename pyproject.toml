@@ -86,18 +86,19 @@ pdf_fallback = [
     # when markitdown recovers content poorly (complex tables, mixed
     # text+image pages). Wave 3 MM-1. Decision 4 ruling: pdfplumber is
     # shipped because its MIT licence keeps the kairix distribution
-    # commercial-safe. pymupdf (AGPL) is NOT shipped — it would push the
-    # whole distribution into AGPL territory which the operator
-    # deployments in scope cannot accept.
-    # Operators on the ``markitdown[pdf]`` extra get pdfplumber
-    # transitively; this standalone extra exists so ``passthrough``-only
-    # operators can opt into the PDF fallback without dragging in
-    # markitdown's heavy onnxruntime / magika transitive deps.
-    # ``kairix.extractors.pdf_fallback`` lazy-imports the library inside
-    # the plugin's opener factory; module import succeeds without the
-    # extra, only ``extract()`` raises a typed error when the upstream
-    # is absent.
+    # commercial-safe. pymupdf (AGPL) is NOT shipped.
     "pdfplumber>=0.11.0,<1",
+]
+ocr = [
+    # OCR extractor (Wave 3 MM-2). Tesseract is the default per Decision 5
+    # (Apache 2.0, CPU-only). PaddleOCR is the opt-in follow-up.
+    # Runtime dep NOT installable via pip: the Tesseract C++ engine itself.
+    # Operators install via ``brew install tesseract`` (macOS) /
+    # ``apt install tesseract-ocr`` (Debian/Ubuntu).
+    "pytesseract>=0.3.10,<1",
+    "opencv-python-headless>=4.8,<5",
+    "Pillow>=10.0,<12",
+    "pdfplumber>=0.10,<1",
 ]
 dev = [
     # Test runner
@@ -159,6 +160,7 @@ obsidian = "kairix.connectors.obsidian:make_connector"
 passthrough  = "kairix.extractors.passthrough:make_extractor"
 markitdown   = "kairix.extractors.markitdown:make_extractor"
 pdf_fallback = "kairix.extractors.pdf_fallback:make_extractor"
+ocr          = "kairix.extractors.ocr:make_extractor"
 
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"

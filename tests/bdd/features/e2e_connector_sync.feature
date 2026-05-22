@@ -25,3 +25,4 @@ Feature: End-to-end connector sync journey
       | obsidian  | passthrough  |
       | obsidian  | markitdown   |
       | obsidian  | pdf_fallback |
+      | obsidian  | ocr          |
