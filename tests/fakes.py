@@ -180,6 +180,12 @@ class FakeDocumentRepository:
                     row["score"] = 1.0
                 if "snippet" not in row:
                     row["snippet"] = row.get("content", "")[:300]
+                # MM-3 — per-page citation. Default to ``None`` so the
+                # fake satisfies the BM25Result TypedDict shape (paged
+                # documents are a connector-framework concern; the
+                # in-memory doc-repo fake is content-keyed).
+                if "source_page" not in row:
+                    row["source_page"] = None
                 results.append(row)
             if len(results) >= limit:
                 break

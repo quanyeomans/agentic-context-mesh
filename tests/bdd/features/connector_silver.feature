@@ -19,3 +19,12 @@ Feature: Silver processing of extracted documents
     When the silver processor handles the extracted document
     Then every chunk in the silver output carries source uri "note://alpha-source/002"
     And every chunk in the silver output carries sensitivity "internal"
+
+  @per_page_citation
+  Scenario: Silver preserves source_page when extracted document has pages
+    Given a configured connector source named "pdf-source"
+    And an extracted document with three pages "alpha-marker", "bravo-marker", "charlie-marker" and source uri "note://pdf-source/003"
+    When the silver processor handles the extracted document
+    Then every chunk in the silver output carries a non-null source page
+    And the first chunk's source page is 1
+    And the last chunk's source page is 3

@@ -76,6 +76,11 @@ class SearchHit:
     entity-graph card is prepended at the top of the results (intent
     is ENTITY and a card is found). For ordinary search rows they
     remain empty.
+
+    ``source_page`` is the MM-3 per-page citation. ``None`` for non-paged
+    documents (passthrough markdown, vault notes); an integer for PDF /
+    PPTX / XLSX chunks so the agent can quote the specific page back
+    to the operator.
     """
 
     path: str
@@ -87,6 +92,7 @@ class SearchHit:
     collection: str = ""
     source: str = ""
     entity: dict[str, str] = field(default_factory=dict)
+    source_page: int | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,7 @@ def _budgeted_to_hit(b: Any) -> SearchHit:
     if inner is None:
         return SearchHit(path="", title="", snippet="", score=0.0)
     snippet_src = getattr(b, "content", "") or getattr(inner, "snippet", "") or ""
+    raw_page = getattr(inner, "source_page", None)
     return SearchHit(
         path=str(getattr(inner, "path", "")),
         title=str(getattr(inner, "title", "") or ""),
@@ -199,6 +206,7 @@ def _budgeted_to_hit(b: Any) -> SearchHit:
         tier=str(getattr(b, "tier", "")),
         tokens=int(getattr(b, "token_estimate", 0)),
         collection=str(getattr(inner, "collection", "") or ""),
+        source_page=int(raw_page) if isinstance(raw_page, int) else None,
     )
 
 
@@ -222,6 +230,9 @@ def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
                 "tier": h.tier,
                 "tokens": h.tokens,
                 "collection": h.collection,
+                # MM-3 — per-page citation surfaced to MCP / CLI callers.
+                # ``None`` for non-paged documents.
+                "source_page": h.source_page,
                 **({"source": h.source, "entity": h.entity} if h.source else {}),
             }
             for h in out.results

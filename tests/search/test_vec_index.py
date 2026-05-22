@@ -20,6 +20,7 @@ def _make_test_db(tmp_path: Path, n_docs: int = 20) -> sqlite3.Connection:
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
             title TEXT, hash TEXT, active INTEGER DEFAULT 1,
+            source_page INTEGER,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
@@ -272,7 +273,8 @@ def test_search_returns_empty_when_db_has_no_matching_documents(
     db.executescript("""
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
-            title TEXT, hash TEXT, active INTEGER DEFAULT 1
+            title TEXT, hash TEXT, active INTEGER DEFAULT 1,
+            source_page INTEGER
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
     """)
@@ -517,7 +519,8 @@ def _seed_metadata_db(tmp_path: Path, rows: list[dict[str, Any]]) -> Path:
         """
         CREATE TABLE documents (
             id INTEGER PRIMARY KEY, collection TEXT, path TEXT,
-            title TEXT, hash TEXT, active INTEGER DEFAULT 1
+            title TEXT, hash TEXT, active INTEGER DEFAULT 1,
+            source_page INTEGER
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
         """

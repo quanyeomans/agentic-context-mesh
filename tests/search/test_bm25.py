@@ -31,6 +31,7 @@ def _create_test_db(tmp_path: Path) -> Path:
             created_at TEXT,
             modified_at TEXT,
             active INTEGER DEFAULT 1,
+            source_page INTEGER,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT, created_at TEXT);
@@ -203,6 +204,7 @@ def test_bm25_search_handles_hyphenated_query_tokens(tmp_path: Path) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             collection TEXT NOT NULL, path TEXT NOT NULL, title TEXT,
             hash TEXT NOT NULL, active INTEGER DEFAULT 1,
+            source_page INTEGER,
             UNIQUE(collection, path)
         );
         CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
