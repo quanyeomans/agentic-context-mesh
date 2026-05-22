@@ -2027,6 +2027,76 @@ class FakeDocxExtractor:
         return False
 
 
+class FakeXlsxExtractor:
+    """Canonical fake for the xlsx extractor plugin (F43 contract layer).
+
+    Implements the :class:`kairix.extractors.Extractor` Protocol without
+    invoking the real :mod:`openpyxl` library. Returns a scripted set of
+    ``Page`` objects (one per "sheet").
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str = "3.1.5",
+        scripted_sheet_count: int = 2,
+        scripted_sheet_markdown: str | None = None,
+    ) -> None:
+        from kairix.extractors import (
+            DocMetadata,
+            ExtractedDocument,
+            MimeType,
+            Page,
+        )
+
+        self.name = "xlsx"
+        self.version = version
+        self.scripted_sheet_count = scripted_sheet_count
+        self.scripted_sheet_markdown = scripted_sheet_markdown or (
+            "## Sheet: Fixture\n\n| col1 | col2 |\n| --- | --- |\n| a | b |\n| c | d |\n"
+        )
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self._MimeType = MimeType
+        self._Page = Page
+        self._supported_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        if isinstance(mime, str) and mime == self._supported_mime:
+            return True
+        if not magic_bytes.startswith(b"PK\x03\x04"):
+            return False
+        return bool(isinstance(mime, str) and mime.endswith("sheet"))
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        del mime
+        sections = [self.scripted_sheet_markdown for _ in range(self.scripted_sheet_count)]
+        markdown = "\n\n".join(sections)
+        pages = tuple(
+            self._Page(page_number=index, text=section, has_images=False)
+            for index, section in enumerate(sections, start=1)
+        )
+        confidence = min(len(markdown) / max(len(raw), 1), 1.0) if raw else 0.0
+        return self._ExtractedDocument(
+            markdown=markdown,
+            pages=pages,
+            images=(),
+            metadata=self._DocMetadata(
+                title="fixture",
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=self.scripted_sheet_count,
+            ),
+            confidence=confidence,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        if len(doc.pages) < 1:
+            return False
+        return len(doc.markdown) >= 100
+
+
 class FakeCorpusEmbedder:
     """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
 

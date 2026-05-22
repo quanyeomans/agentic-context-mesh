@@ -28,3 +28,4 @@ Feature: End-to-end connector sync journey
       | obsidian  | ocr          |
       | obsidian  | pptx         |
       | obsidian  | docx         |
+      | obsidian  | xlsx         |
