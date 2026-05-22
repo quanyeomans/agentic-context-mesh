@@ -143,9 +143,10 @@ pytest_plugins = [
     "tests.bdd.steps.extractor_pdf_fallback_steps",
     # Wave-3 MM-2 OCR extractor — Tesseract default.
     "tests.bdd.steps.extractor_ocr_steps",
-    # Wave-4 OF-1 slide-aware extractor — python-pptx-backed per
-    # docs/architecture/connector-ingestion-architecture.md §10 (Wave 4).
+    # Wave-4 OF-1 slide-aware extractor — python-pptx-backed.
     "tests.bdd.steps.extractor_pptx_steps",
+    # Wave-4 OF-2 docx extractor — python-docx, heading-hierarchy-aware.
+    "tests.bdd.steps.extractor_docx_steps",
     # Connector plugin BDD step modules — Wave 2 IM-5 lands the first
     # connector (obsidian). Future connectors (sharepoint, dex_crm, ...)
     # append a sibling entry per F36.
