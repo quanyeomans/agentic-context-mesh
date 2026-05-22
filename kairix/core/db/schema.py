@@ -6,11 +6,18 @@ a ``kairix_meta`` table for schema versioning. Column names and types are
 identical to ensure all existing queries work without modification.
 
 Tables:
-  - documents       — document registry (path, collection, hash, active flag)
-  - content         — document text keyed by content hash
-  - content_vectors — chunk metadata (hash, seq, pos, model, embedded_at, chunk_date)
-  - documents_fts   — FTS5 full-text search index
-  - kairix_meta     — schema version tracking
+  - documents            — document registry (path, collection, hash, active flag,
+                            connector provenance columns added in v2)
+  - content              — document text keyed by content hash
+  - content_vectors      — chunk metadata (hash, seq, pos, model, embedded_at, chunk_date)
+  - documents_fts        — FTS5 full-text search index
+  - documents_media      — per-source-media metadata (Wave 1 connector framework)
+  - document_pages       — per-page extracted text + image descriptions
+  - connector_cursors    — per-connector incremental sync cursors
+  - connector_deadletter — per-item failure tracking with backoff
+  - bronze_records       — bronze-tier raw blob registry (atomic with cursor advance)
+  - entity_signals       — extracted entity / relationship signals queued for Neo4j
+  - kairix_meta          — schema version tracking
 
 Vector storage is handled by usearch (HNSW ANN index), not SQLite.
 """
@@ -22,7 +29,7 @@ from . import EMBED_VECTOR_DIMS
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
@@ -50,6 +57,11 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             modified_at TEXT,
             active INTEGER DEFAULT 1,
             agent_owner TEXT,
+            source_name TEXT,
+            source_uri TEXT,
+            source_modified_at TEXT,
+            source_page INTEGER,
+            sensitivity TEXT NOT NULL DEFAULT 'public',
             UNIQUE(collection, path)
         );
 
@@ -67,6 +79,69 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             embedded_at TEXT,
             chunk_date TEXT,
             PRIMARY KEY (hash, seq)
+        );
+
+        CREATE TABLE IF NOT EXISTS documents_media (
+            hash TEXT PRIMARY KEY,
+            path TEXT NOT NULL,
+            format TEXT NOT NULL,
+            size_bytes INTEGER,
+            page_count INTEGER,
+            title TEXT,
+            author TEXT,
+            created_date TEXT,
+            language TEXT,
+            extraction_status TEXT DEFAULT 'pending',
+            extraction_timestamp INTEGER,
+            extractor_name TEXT,
+            extractor_version TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS document_pages (
+            hash TEXT NOT NULL,
+            page_number INTEGER NOT NULL,
+            extracted_text TEXT,
+            has_images INTEGER DEFAULT 0,
+            image_descriptions TEXT,
+            PRIMARY KEY (hash, page_number),
+            FOREIGN KEY (hash) REFERENCES documents_media(hash)
+        );
+
+        CREATE TABLE IF NOT EXISTS connector_cursors (
+            source_name TEXT PRIMARY KEY,
+            cursor_token TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS connector_deadletter (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            failure_count INTEGER NOT NULL,
+            last_error TEXT,
+            last_attempt TEXT NOT NULL,
+            UNIQUE(source_name, item_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS bronze_records (
+            source_name TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            raw_path TEXT NOT NULL,
+            mime TEXT NOT NULL,
+            fetched_at TEXT NOT NULL,
+            PRIMARY KEY (source_name, item_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS entity_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            value TEXT NOT NULL,
+            source_uri TEXT NOT NULL,
+            modified_at TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            sensitivity TEXT NOT NULL,
+            pushed_to_neo4j INTEGER DEFAULT 0,
+            pushed_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS kairix_meta (
@@ -89,6 +164,7 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
     db.executescript("""
         CREATE INDEX IF NOT EXISTS idx_documents_agent_owner ON documents(agent_owner);
         CREATE INDEX IF NOT EXISTS idx_content_vectors_chunk_date ON content_vectors(chunk_date);
+        CREATE INDEX IF NOT EXISTS idx_documents_source_uri ON documents(source_uri);
     """)
 
     # FTS5 — external content mode is not needed; we populate directly.
@@ -97,9 +173,10 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
     if not fts_exists:
         db.execute("CREATE VIRTUAL TABLE documents_fts USING fts5(filepath, title, doc, tokenize='porter unicode61')")
 
-    # Schema version
+    # Schema version — REPLACE so the row tracks the current code's version
+    # after an in-place migration of a legacy DB.
     db.execute(
-        "INSERT OR IGNORE INTO kairix_meta (key, value) VALUES ('schema_version', ?)",
+        "INSERT OR REPLACE INTO kairix_meta (key, value) VALUES ('schema_version', ?)",
         (SCHEMA_VERSION,),
     )
     db.execute(
@@ -124,7 +201,19 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
 
     # Check required tables
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")}
-    for required in ("documents", "content", "content_vectors"):
+    required_tables = (
+        "documents",
+        "content",
+        "content_vectors",
+        # Connector-framework Wave 1 (SC-4)
+        "documents_media",
+        "document_pages",
+        "connector_cursors",
+        "connector_deadletter",
+        "bronze_records",
+        "entity_signals",
+    )
+    for required in required_tables:
         if required not in tables:
             errors.append(f"missing table: {required}")
 
@@ -133,7 +222,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
 
     # Check critical columns
     expected_cols = {
-        "documents": {"id", "collection", "path", "hash", "active"},
+        "documents": {"id", "collection", "path", "hash", "active", "sensitivity"},
         "content": {"hash", "doc"},
         "content_vectors": {"hash", "seq", "pos"},
     }
@@ -147,13 +236,132 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
     return errors
 
 
+def _add_column_if_missing(
+    db: sqlite3.Connection,
+    table: str,
+    column: str,
+    column_def: str,
+) -> bool:
+    """
+    Add ``column`` to ``table`` with ``column_def`` (e.g. "TEXT" or
+    "TEXT NOT NULL DEFAULT 'public'") if not already present.
+
+    Returns True if the column was added, False if it already existed.
+
+    ``table`` and ``column`` are caller-supplied identifiers (not user input)
+    so the f-string interpolation is safe — sqlite3 has no parameter binding
+    for DDL identifiers.
+    """
+    # safe: table/column come from hardcoded callers in this module
+    existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    if column in existing:
+        return False
+    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
+    db.commit()
+    logger.info("db.schema: migration — added %s column to %s", column, table)
+    return True
+
+
+# Connector-framework Wave 1 columns added to the existing documents table.
+# Each tuple is (column_name, column_def). column_def is appended verbatim to
+# `ALTER TABLE documents ADD COLUMN <name> <def>`.
+_DOCUMENTS_CONNECTOR_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("source_name", "TEXT"),
+    ("source_uri", "TEXT"),
+    ("source_modified_at", "TEXT"),
+    ("source_page", "INTEGER"),
+    ("sensitivity", "TEXT NOT NULL DEFAULT 'public'"),
+)
+
+# Connector-framework Wave 1 tables — created idempotently on legacy DBs.
+# Each entry is the full `CREATE TABLE IF NOT EXISTS …` statement.
+_CONNECTOR_TABLES_DDL = """
+CREATE TABLE IF NOT EXISTS documents_media (
+    hash TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    format TEXT NOT NULL,
+    size_bytes INTEGER,
+    page_count INTEGER,
+    title TEXT,
+    author TEXT,
+    created_date TEXT,
+    language TEXT,
+    extraction_status TEXT DEFAULT 'pending',
+    extraction_timestamp INTEGER,
+    extractor_name TEXT,
+    extractor_version TEXT
+);
+
+CREATE TABLE IF NOT EXISTS document_pages (
+    hash TEXT NOT NULL,
+    page_number INTEGER NOT NULL,
+    extracted_text TEXT,
+    has_images INTEGER DEFAULT 0,
+    image_descriptions TEXT,
+    PRIMARY KEY (hash, page_number),
+    FOREIGN KEY (hash) REFERENCES documents_media(hash)
+);
+
+CREATE TABLE IF NOT EXISTS connector_cursors (
+    source_name TEXT PRIMARY KEY,
+    cursor_token TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS connector_deadletter (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_name TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    failure_count INTEGER NOT NULL,
+    last_error TEXT,
+    last_attempt TEXT NOT NULL,
+    UNIQUE(source_name, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS bronze_records (
+    source_name TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    raw_path TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (source_name, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS entity_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    value TEXT NOT NULL,
+    source_uri TEXT NOT NULL,
+    modified_at TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    sensitivity TEXT NOT NULL,
+    pushed_to_neo4j INTEGER DEFAULT 0,
+    pushed_at TEXT
+);
+"""
+
+
+def _migrate_documents_connector_columns(db: sqlite3.Connection, tables: set[str]) -> None:
+    """Add connector-framework Wave 1 columns to legacy documents tables."""
+    if "documents" not in tables:
+        return
+    for column, column_def in _DOCUMENTS_CONNECTOR_COLUMNS:
+        _add_column_if_missing(db, "documents", column, column_def)
+
+
 def migrate(db: sqlite3.Connection) -> None:
     """
     Run all pending migrations. Idempotent — safe to call on every startup.
 
     Currently handles:
-      - Adding chunk_date column to content_vectors (if missing)
       - Creating kairix_meta table (if missing)
+      - Adding chunk_date column to content_vectors (if missing)
+      - Adding agent_owner column to documents (if missing, #114)
+      - Adding connector-framework Wave 1 columns to documents (SC-4):
+        source_name, source_uri, source_modified_at, source_page, sensitivity
+      - Creating connector-framework Wave 1 tables (SC-4):
+        documents_media, document_pages, connector_cursors,
+        connector_deadletter, bronze_records, entity_signals
     """
     # Ensure kairix_meta exists
     db.execute("""
@@ -163,24 +371,23 @@ def migrate(db: sqlite3.Connection) -> None:
         )
     """)
 
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
     # chunk_date migration
-    existing = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
-    if "chunk_date" not in existing:
-        db.execute("ALTER TABLE content_vectors ADD COLUMN chunk_date TEXT")
-        db.commit()
-        logger.info("db.schema: migration — added chunk_date column to content_vectors")
+    if "content_vectors" in tables:
+        _add_column_if_missing(db, "content_vectors", "chunk_date", "TEXT")
 
     # agent_owner migration — per-document agent provenance for #114.
     # Existing rows get NULL (treated as shared / not agent-owned) until a
     # `kairix embed --backfill-agent-owner` pass re-applies the path → agent
     # mapping from the configured AgentRegistry.
-    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "documents" in tables:
-        existing_doc = {row[1] for row in db.execute("PRAGMA table_info(documents)")}
-        if "agent_owner" not in existing_doc:
-            db.execute("ALTER TABLE documents ADD COLUMN agent_owner TEXT")
-            db.commit()
-            logger.info("db.schema: migration — added agent_owner column to documents")
+        _add_column_if_missing(db, "documents", "agent_owner", "TEXT")
+
+    # Connector-framework Wave 1 (SC-4): new columns + new tables.
+    _migrate_documents_connector_columns(db, tables)
+    db.executescript(_CONNECTOR_TABLES_DDL)
+    db.commit()
 
     # Ensure indexes exist (idempotent) — only if the tables exist
     if "documents" in tables:
@@ -189,6 +396,7 @@ def migrate(db: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection);
             CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
             CREATE INDEX IF NOT EXISTS idx_documents_agent_owner ON documents(agent_owner);
+            CREATE INDEX IF NOT EXISTS idx_documents_source_uri ON documents(source_uri);
         """)
     if "content_vectors" in tables:
         db.execute("CREATE INDEX IF NOT EXISTS idx_content_vectors_chunk_date ON content_vectors(chunk_date)")
