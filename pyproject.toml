@@ -110,7 +110,7 @@ markers = [
     "contract: interface agreement tests (fast, <30s total, zero tolerance for failure)",
     "unit: individual component logic (mock externals, fast)",
     "integration: multi-component with real database and usearch index",
-    "e2e: full pipeline against live Azure API (requires KAIRIX_E2E=1)",
+    "e2e: composed production path or live-credential end-to-end tests (set KAIRIX_E2E=1 for credential-gated subset; see docs/architecture/test-discipline-hardening.md §2.2)",
     "bdd: behaviour-driven acceptance tests (pytest-bdd feature files)",
     "pvt: production-verification scenarios against a live MCP server (requires KAIRIX_PVT=1; see docs/architecture/performance-testing-approach.md)",
     "slow: tests taking >5s",

@@ -220,6 +220,43 @@ def neo4j_client_empty():
 
 
 @pytest.fixture
+def e2e_db(tmp_path):
+    """One-line E2E setup: real schema in tmpdir; factory-ready.
+
+    Builds a ``KairixPaths`` via ``FakePaths`` rooted at ``tmp_path``,
+    creates the production SQLite schema (``create_schema``) in the
+    target ``db_path``, and returns the paths object ready for
+    ``factory.build_search_pipeline(paths=...)`` (or any other
+    composed-production-path entry point).
+
+    Used by F48 tests (``tests/e2e/test_composed_production_path.py``)
+    and any other composed-path test that wants the canonical
+    tmpdir+schema+factory wiring in one fixture rather than open-coding
+    the four-line setup chain.
+
+    See ``docs/architecture/test-discipline-hardening.md`` §4.4 for the
+    affordance rationale.
+    """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+    from tests.fakes import FakePaths
+
+    paths = FakePaths(
+        document_root=tmp_path / "vault",
+        db_path=tmp_path / "index.sqlite",
+        log_dir=tmp_path / "logs",
+        workspace_root=tmp_path / "workspaces",
+    )
+    paths.document_root.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(str(paths.db_path), timeout=10.0)
+    db.execute("PRAGMA journal_mode=WAL")
+    create_schema(db)
+    db.close()
+    return paths
+
+
+@pytest.fixture
 def fake_llm_backend():
     """Fake LLMBackend satisfying the Protocol. No Azure calls."""
     import hashlib
