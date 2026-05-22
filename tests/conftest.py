@@ -137,6 +137,10 @@ pytest_plugins = [
     # docs/architecture/connector-ingestion-architecture.md §2 + §3.
     "tests.bdd.steps.extractor_passthrough_steps",
     "tests.bdd.steps.extractor_markitdown_steps",
+    # Wave-3 MM-1 connector-framework extractors — pdf_fallback plugin
+    # (pdfplumber, MIT) per
+    # docs/architecture/connector-ingestion-architecture.md §10 (Wave 3).
+    "tests.bdd.steps.extractor_pdf_fallback_steps",
     # Connector plugin BDD step modules — Wave 2 IM-5 lands the first
     # connector (obsidian). Future connectors (sharepoint, dex_crm, ...)
     # append a sibling entry per F36.

@@ -81,6 +81,24 @@ markitdown = [
     # ``MissingDependencyException`` on PDF input.
     "markitdown[pdf]>=0.1.5,<1",
 ]
+pdf_fallback = [
+    # pdfplumber (MIT, Jeremy Singer-Vine) — fallback PDF extractor used
+    # when markitdown recovers content poorly (complex tables, mixed
+    # text+image pages). Wave 3 MM-1. Decision 4 ruling: pdfplumber is
+    # shipped because its MIT licence keeps the kairix distribution
+    # commercial-safe. pymupdf (AGPL) is NOT shipped — it would push the
+    # whole distribution into AGPL territory which the operator
+    # deployments in scope cannot accept.
+    # Operators on the ``markitdown[pdf]`` extra get pdfplumber
+    # transitively; this standalone extra exists so ``passthrough``-only
+    # operators can opt into the PDF fallback without dragging in
+    # markitdown's heavy onnxruntime / magika transitive deps.
+    # ``kairix.extractors.pdf_fallback`` lazy-imports the library inside
+    # the plugin's opener factory; module import succeeds without the
+    # extra, only ``extract()`` raises a typed error when the upstream
+    # is absent.
+    "pdfplumber>=0.11.0,<1",
+]
 dev = [
     # Test runner
     "pytest>=8.0",
@@ -138,8 +156,9 @@ obsidian = "kairix.connectors.obsidian:make_connector"
 # upstream library; the library is an optional dependency (extra
 # ``markitdown``) so the core wheel stays light.
 [project.entry-points."kairix.extractors"]
-passthrough = "kairix.extractors.passthrough:make_extractor"
-markitdown  = "kairix.extractors.markitdown:make_extractor"
+passthrough  = "kairix.extractors.passthrough:make_extractor"
+markitdown   = "kairix.extractors.markitdown:make_extractor"
+pdf_fallback = "kairix.extractors.pdf_fallback:make_extractor"
 
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"
