@@ -30,6 +30,7 @@ from kairix.core.search.query_cache import (
 )
 
 if TYPE_CHECKING:
+    from kairix.paths import KairixPaths
     from kairix.providers import ProviderRegistry
 
 logger = logging.getLogger(__name__)
@@ -375,6 +376,7 @@ def build_search_pipeline(
     *,
     registry: ProviderRegistry | None = None,
     fact_retriever: Any = None,
+    paths: KairixPaths | None = None,
 ) -> SearchPipeline:
     """Construct the production search pipeline.
 
@@ -413,6 +415,13 @@ def build_search_pipeline(
                    (ingest-chat → SQLiteFactStore) pass the same store
                    instance here so the SearchPipeline can federate
                    retrieval across chunks + facts.
+        paths:     Optional :class:`kairix.paths.KairixPaths` for E2E /
+                   integration tests that need to construct the pipeline
+                   against a tmp-path SQLite database without setting
+                   ``KAIRIX_DB_PATH`` (which F2 prohibits in tests). When
+                   provided, ``paths.db_path`` is used in place of
+                   :func:`kairix.core.db.get_db_path`. Production passes
+                   ``None`` and the default resolution chain runs.
 
     Returns:
         A fully wired SearchPipeline ready for search() calls.
@@ -445,7 +454,11 @@ def build_search_pipeline(
         VectorSearchBackend,
     )
 
-    doc_repo = SQLiteDocumentRepository(db_path=get_db_path())
+    # Explicit ``paths`` (test DI seam) wins over the env-driven default
+    # (F2: keeps tmp_path injection out of monkeypatch.setenv). Production
+    # passes ``paths=None`` and the existing resolution chain runs.
+    resolved_db_path = paths.db_path if paths is not None else get_db_path()
+    doc_repo = SQLiteDocumentRepository(db_path=resolved_db_path)
     bm25 = BM25SearchBackend(doc_repo)
     embed_service = _build_embedding_service(cfg, registry=registry)
     vector = VectorSearchBackend(embed_service, _build_vector_repo())
@@ -465,7 +478,7 @@ def build_search_pipeline(
 
             from kairix.core.facts.store import SQLiteFactStore
 
-            db_path = get_db_path()
+            db_path = resolved_db_path
             if db_path.exists():
                 with _sqlite3.connect(str(db_path)) as conn:
                     has_facts = bool(
