@@ -124,6 +124,9 @@ bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
 # F46 — BDD step impls call factory-composed production code (no direct *Pipeline)
 bash "${SCRIPT_DIR}/check-f46-bdd-step-composition.sh" || overall=1
 
+# F47 — integration tests construct pipelines via kairix.core.factory.build_*
+python3 "${SCRIPT_DIR}/check_f47_integration_factory.py" || overall=1
+
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
 
