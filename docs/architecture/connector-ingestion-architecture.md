@@ -445,7 +445,7 @@ Mirrors the `provider-plugin-architecture.md` Wave 0/1/2/3 cadence; each wave a 
 
 | Wave | Items | Parallel? | Depends on |
 |---|---|---|---|
-| **0 (ADR)** | This document; F34–F44 stubs with empty baselines; CLAUDE.md edits | foreground | kairix-pro ADRs 017/018/019/020 |
+| **0 (ADR + arming) — DONE 2026-05-22** | This document; F34–F44 check scripts with empty (or seeded) baselines; CLAUDE.md edits; fitness-functions.md canonical entries. Landed in commits `acf89f81..6f8359c2` plus this doc's earlier commits. F41 + F43 baselines seeded at 7 entries each (existing provider plugins); F49 will shrink them as plugins gain `py.typed` + contract tests. All other F34–F44 baselines empty (vacuous-green; armed for Wave 1 surfaces). | foreground | kairix-pro ADRs 017/018/019/020 |
 | **1 (scaffold, 6 worktrees)** | SC-1 `kairix/core/connectors/` skeleton + Protocols · SC-2 `kairix/connectors/_base.py` + registry · SC-3 `kairix/extractors/_base.py` + registry · SC-4 schema migration · SC-5 F34–F44 checks · SC-6 red BDD feature files | yes | Wave 0 |
 | **2 (Obsidian end-to-end, 4 worktrees)** | IM-1 cursor + dead-letter stores · IM-2 connector pipeline · IM-3 worker `_default_connector_sync` · IM-4 markitdown + passthrough extractors · IM-5 Obsidian connector (watchdog + reconciliation) · IM-6 functional parity vs legacy `DocumentScanner` on dogfood VM, then delete the legacy scanner | yes | Wave 1 |
 | **3 (PDF mixed-media, 3 worktrees)** | MM-1 pdfplumber fallback · MM-2 OCR pipeline (deskew/binarise/Tesseract) · MM-3 per-page chunk citation; reference-library PDFs (NIST, OpenStax, APRA) in eval | yes | Wave 2 |
