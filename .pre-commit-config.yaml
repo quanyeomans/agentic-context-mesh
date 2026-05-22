@@ -217,6 +217,13 @@ repos:
         pass_filenames: false
         files: ^kairix/providers/.*\.py$
 
+      - id: arch-f34-core-connector-layer-imports
+        name: "arch F34: kairix/core/connectors/** may not import connectors/ or extractors/"
+        entry: python3 scripts/checks/check_f34_core_connector_layer_imports.py
+        language: system
+        pass_filenames: false
+        files: ^kairix/core/connectors/.*\.py$
+
       - id: arch-provider-bdd-completeness
         name: "arch F28: every provider/<name>/ has matching BDD coverage"
         entry: python3 scripts/checks/check_provider_bdd_completeness.py
