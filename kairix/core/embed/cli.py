@@ -238,11 +238,19 @@ def cmd_recall(_args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-def cmd_status(_args: argparse.Namespace) -> int:
-    """Show current embedding status."""
+def cmd_status(args: argparse.Namespace) -> int:
+    """Show current embedding status.
+
+    ``--db-path`` is the F30 subprocess seam — when supplied, status
+    reads from that DB path instead of resolving the platform default.
+    Matches the ``--document-root`` convention used by other CLIs
+    (``kairix store crawl``, ``kairix bootstrap``) so subprocess
+    outcome tests can drive a tmp index without touching the process
+    environment (F2-clean).
+    """
     from .schema import get_pending_chunks
 
-    db_path = get_db_path()
+    db_path = getattr(args, "db_path", None) or get_db_path()
     db = open_db(Path(db_path))
     try:
         pending = get_pending_chunks(db)
@@ -347,7 +355,17 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
     sub.add_parser("recall-check", help="Run recall quality check standalone")
 
     # status
-    sub.add_parser("status", help="Show embedding status")
+    status_p = sub.add_parser("status", help="Show embedding status")
+    status_p.add_argument(
+        "--db-path",
+        default=None,
+        help=(
+            "Read status from this SQLite index instead of the default "
+            "resolution chain (KAIRIX_DB_PATH env / kairix.config.yaml / "
+            "platform default). F30 subprocess seam — keeps tmp-DB "
+            "injection out of monkeypatch.setenv (F2-clean)."
+        ),
+    )
 
     # rebuild-fts — self-heal entry for #223
     sub.add_parser(

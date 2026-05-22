@@ -40,7 +40,7 @@ import sys
 # Lazy imports keep startup fast — only the selected command is imported.
 COMMANDS: dict[str, tuple[str, str, bool]] = {
     "bootstrap": ("kairix.bootstrap_cli", "main", True),
-    "embed": ("kairix.core.embed.cli", "main", False),
+    "embed": ("kairix.core.embed.cli", "main", True),
     "entity": ("kairix.knowledge.entities.cli", "main", True),
     "curator": ("kairix.agents.curator.cli", "main", True),
     "search": ("kairix.core.search.cli", "main", True),
