@@ -121,6 +121,9 @@ python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 # F39 — every chunk write carries source_uri/source_modified_at/sensitivity
 python3 "${SCRIPT_DIR}/check_f39_chunk_metadata.py" || overall=1
 
+# F40 — every extractor plugin declares a version: str module attribute
+python3 "${SCRIPT_DIR}/check_f40_extractor_version.py" || overall=1
+
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
 
