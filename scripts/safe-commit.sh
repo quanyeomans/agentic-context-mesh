@@ -77,11 +77,16 @@ fi
 
 # 3. Type checking (strict — matches CI)
 echo -n "  mypy strict... "
-MYPY_OUT=$(mypy kairix/ --strict 2>&1)
+# Use `uv run mypy` so optional-extra deps (watchdog, markitdown, boto3 etc.)
+# resolve from the project venv rather than the system Python's site-packages.
+# Without `uv run`, system mypy can't see types for kairix.connectors.obsidian
+# (FileSystemEventHandler) or kairix.extractors.markitdown (MarkItDown) and
+# fires false-positive `[misc]` / `[no-any-return]` errors. CI uses uv run mypy.
+MYPY_OUT=$(uv run mypy kairix/ --strict 2>&1)
 if echo "$MYPY_OUT" | grep -q "error"; then
     echo -e "${RED}FAIL${NC}"
     echo "$MYPY_OUT" | grep "error" | head -10
-    echo "Run: mypy kairix/ --strict"
+    echo "Run: uv run mypy kairix/ --strict"
     exit 1
 fi
 echo -e "${GREEN}OK${NC}"
