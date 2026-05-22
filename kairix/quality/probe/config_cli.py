@@ -333,6 +333,23 @@ def _format_over_budget_suffix(r: OperationResult) -> str:
     return " (" + ", ".join(details) + ")"
 
 
+def _format_perf_row(r: OperationResult, longest: int) -> str:
+    """Format one perf-table row for human output.
+
+    Extracted from ``_render_perf_human`` to flatten its cognitive
+    complexity below the F16 threshold of 15. Per-row branching
+    (skipped vs PASS vs FAIL) lives here; the caller is now a flat
+    list comprehension.
+    """
+    op = r.operation.ljust(longest)
+    budget = f"budget={int(r.budget_p50_ms)}/{int(r.budget_p99_ms)}"
+    if r.skipped:
+        return f"  {op}  {budget}  - {r.skip_reason}"
+    verdict = "PASS" if r.within_budget else "FAIL"
+    suffix = _format_over_budget_suffix(r)
+    return f"  {op}  p50={r.p50_ms:.1f}ms  p99={r.p99_ms:.1f}ms  {budget}  {verdict}{suffix}"
+
+
 def _render_perf_human(report: PerfReport) -> str:
     """Human-readable per-capability perf table.
 
@@ -340,18 +357,9 @@ def _render_perf_human(report: PerfReport) -> str:
     observed p50/p99, the budget pair, and a verdict marker. Skipped
     operations render the skip reason in place of the latency numbers.
     """
-    lines = ["kairix probe-config --perf"]
     longest = max((len(r.operation) for r in report.results), default=0)
-    for r in report.results:
-        op = r.operation.ljust(longest)
-        budget = f"budget={int(r.budget_p50_ms)}/{int(r.budget_p99_ms)}"
-        if r.skipped:
-            lines.append(f"  {op}  {budget}  - {r.skip_reason}")
-            continue
-        verdict = "PASS" if r.within_budget else "FAIL"
-        suffix = _format_over_budget_suffix(r)
-        lines.append(f"  {op}  p50={r.p50_ms:.1f}ms  p99={r.p99_ms:.1f}ms  {budget}  {verdict}{suffix}")
-    return "\n".join(lines) + "\n"
+    rows = [_format_perf_row(r, longest) for r in report.results]
+    return "\n".join(["kairix probe-config --perf", *rows]) + "\n"
 
 
 def _emit_perf_report(report: PerfReport, *, as_json: bool, output_path: str | None) -> None:
