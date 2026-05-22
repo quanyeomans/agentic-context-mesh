@@ -1805,3 +1805,146 @@ class FakeObsidian:
 
     def sensitivity_for(self, _item_id: str) -> Any:
         return self._sensitivity
+
+
+# ---------------------------------------------------------------------------
+# Connector-pipeline orchestration fakes (Wave 2 — IM-2)
+#
+# These satisfy the boundary Protocols the ConnectorPipeline composes around
+# real Bronze / Silver / Cursor / DeadLetter stores. The Source and Extractor
+# fakes script behaviour (events + per-item failure injection) so integration
+# tests can prove the per-batch transaction + dead-letter contract.
+# ---------------------------------------------------------------------------
+
+
+class FakeSourceConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector`.
+
+    Constructor takes events to emit and an optional ``fail_on_fetch``
+    set — item_ids in that set raise ``RuntimeError`` from ``fetch``.
+    ``content`` maps item_id to the raw bytes ``fetch`` returns; absent
+    entries return empty bytes.
+
+    Used by ``tests/integration/test_connector_pipeline.py`` to drive
+    the per-batch orchestration through the real Bronze + Silver + Cursor
+    + DeadLetter surfaces.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str = "fake-source",
+        events: list[Any] | None = None,
+        content: dict[str, bytes] | None = None,
+        fail_on_fetch: set[str] | None = None,
+        sensitivity: str = "internal",
+    ) -> None:
+        from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
+
+        self.name = name
+        self._events: list[ChangeEvent] = list(events) if events is not None else []
+        self._content: dict[str, bytes] = dict(content) if content is not None else {}
+        self._fail_on_fetch: set[str] = set(fail_on_fetch) if fail_on_fetch is not None else set()
+        self._sensitivity = sensitivity
+        self.fetch_calls: list[str] = []
+
+    def list_changes(self, _cursor: Any | None) -> Any:
+        return iter(self._events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        self.fetch_calls.append(item_id)
+        if item_id in self._fail_on_fetch:
+            raise RuntimeError(f"fake-source: simulated fetch failure for {item_id!r}")
+        raw = self._content.get(item_id, b"")
+        mime = "text/markdown" if item_id.endswith(".md") else "text/plain"
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime=mime, fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        return f"{self.name}://item/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+
+class FakeExtractor:
+    """Capture-only :class:`kairix.core.protocols.Extractor`.
+
+    Decodes bytes as UTF-8 and returns an ``ExtractedDocument`` carrying
+    that text as ``markdown``. ``quality_ok`` returns True whenever the
+    decoded text is non-empty. Used by the connector-pipeline
+    integration tests where the chunk content matters but the format
+    detail does not.
+    """
+
+    name: str = "fake-extractor"
+    version: str = "0.0.0"
+
+    def __init__(self) -> None:
+        from kairix.core.protocols import DocMetadata, ExtractedDocument
+
+        self._DocMetadata = DocMetadata
+        self._ExtractedDocument = ExtractedDocument
+        self.extract_calls: list[tuple[bytes, str]] = []
+
+    def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
+        del mime, magic_bytes
+        return True
+
+    def extract(self, raw: bytes, mime: str) -> Any:
+        self.extract_calls.append((raw, mime))
+        text = raw.decode("utf-8", errors="replace")
+        return self._ExtractedDocument(
+            markdown=text,
+            pages=(),
+            images=(),
+            metadata=self._DocMetadata(
+                title=None,
+                author=None,
+                created_date=None,
+                language=None,
+                page_count=None,
+            ),
+            confidence=1.0,
+        )
+
+    def quality_ok(self, doc: Any) -> bool:
+        return bool(doc.markdown.strip())
+
+
+class FakeEntityGraphSink:
+    """Capture-only :class:`kairix.core.protocols.EntityGraphSink`.
+
+    Records every staged batch in ``staged`` (a list of tuples). Used
+    by the connector-pipeline integration tests to assert that Silver
+    output reaches the sink. Returns the count of signals staged.
+    """
+
+    def __init__(self) -> None:
+        self.staged: list[tuple[Any, ...]] = []
+
+    def stage(self, signals: Any) -> int:
+        batch = tuple(signals)
+        self.staged.append(batch)
+        return len(batch)
+
+
+class FakeChunkWriter:
+    """Capture-only :class:`kairix.core.connectors.pipeline.ChunkWriter`.
+
+    Records every upsert call's chunks in ``writes`` (a list of tuples).
+    Returns the count of chunks written. Tests assert against ``writes``
+    to verify chunk content + that the rollback path skipped the write.
+    """
+
+    def __init__(self) -> None:
+        self.writes: list[tuple[Any, ...]] = []
+
+    def upsert(self, chunks: Any) -> int:
+        batch = tuple(chunks)
+        self.writes.append(batch)
+        return len(batch)

@@ -14,23 +14,111 @@ extraction in :mod:`kairix.corpus.ingest`, Curator enrichment) stays on
 existing surfaces. The connector path and the conversational corpus
 path are disjoint.
 
-The :class:`~kairix.core.protocols.SilverProcessor` Protocol on
-:mod:`kairix.core.protocols` is the public seam; this module ships the
-production implementation skeleton (Wave 2 fills in the body).
-
-Method bodies are intentionally single-statement
-``raise NotImplementedError`` calls so the F19 unused-parameter rule
-recognises them as abstract-style skeletons.
+Entity-signal extraction (v1, IM-2): a paragraph-boundary-aware regex
+heuristic. We scan for two-or-three-word Capitalised tokens
+(``Jane Smith`` / ``Acme Corp`` / ``First Middle Last``) and tag them as
+``person`` candidates; longer sequences ending in an org suffix
+(``Corp`` / ``Inc`` / ``Ltd`` / ``LLC``) are tagged ``org``. Real NER
+(spaCy / GLiNER) is a Wave 3+ concern; the regex is sufficient to
+populate the ``entity_signals`` staging table so the Curator coupling
+boundary has a stream to consume.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
+
 from kairix.core.protocols import (
     BronzeRef,
+    Chunk,
+    EntitySignal,
     ExtractedDocument,
     Sensitivity,
     SilverOutput,
 )
+
+# Target chunk size at paragraph boundaries (characters). Smaller than
+# the embed-time chunker (which sees overlap + token semantics); Silver
+# only needs to keep chunks search-shaped. Smarter chunking — semantic
+# sectioning, heading-aware splitting — is a Wave 3+ concern.
+_TARGET_CHUNK_CHARS = 1000
+
+# Capitalised-word entity heuristic. Matches two- or three-token sequences
+# where each token is Capitalised (``\b[A-Z][a-z]+``). The trailing token
+# may be an org suffix (``Corp`` / ``Inc`` / ``Ltd`` / ``LLC`` / ``GmbH``)
+# in which case the match is classified as an org rather than a person.
+_ENTITY_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b")
+_ORG_SUFFIXES: frozenset[str] = frozenset({"Corp", "Inc", "Ltd", "LLC", "GmbH", "Plc", "Company", "Group"})
+
+
+def _chunk_markdown(markdown: str) -> tuple[str, ...]:
+    """Split ``markdown`` on paragraph boundaries, ~``_TARGET_CHUNK_CHARS`` each.
+
+    Paragraphs are blocks separated by a blank line. We greedily glue
+    paragraphs into the current chunk until adding the next one would
+    push it past ``_TARGET_CHUNK_CHARS``; then we flush and start a new
+    chunk. Empty input yields an empty tuple.
+    """
+    text = markdown.strip()
+    if not text:
+        return ()
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if not paragraphs:
+        return ()
+
+    chunks: list[str] = []
+    current = ""
+    for para in paragraphs:
+        if not current:
+            current = para
+            continue
+        if len(current) + len(para) + 2 <= _TARGET_CHUNK_CHARS:
+            current = current + "\n\n" + para
+        else:
+            chunks.append(current)
+            current = para
+    if current:
+        chunks.append(current)
+    return tuple(chunks)
+
+
+def _extract_entity_signals(
+    text: str,
+    *,
+    source_uri: str,
+    source_modified_at: str,
+    sensitivity: Sensitivity,
+) -> tuple[EntitySignal, ...]:
+    """Capitalised-word entity heuristic over ``text``.
+
+    Returns one :class:`EntitySignal` per distinct match (de-duplicated
+    within the call). ``person`` for two-or-three-word Capitalised
+    sequences; ``org`` when the trailing token is in ``_ORG_SUFFIXES``.
+    Confidence is fixed at ``0.5`` — the heuristic is deliberately
+    coarse; real NER (Wave 3+) replaces this with a calibrated score.
+    """
+    seen: set[tuple[str, str]] = set()
+    signals: list[EntitySignal] = []
+    for match in _ENTITY_RE.finditer(text):
+        value = match.group(1)
+        last_token = value.rsplit(" ", maxsplit=1)[-1]
+        kind: str = "org" if last_token in _ORG_SUFFIXES else "person"
+        key = (kind, value)
+        if key in seen:
+            continue
+        seen.add(key)
+        signals.append(
+            EntitySignal(
+                kind=kind,  # type: ignore[arg-type]  # F3-rationale: kind is Literal["person","org","relationship"]; the heuristic only emits the first two — narrowing handled by the explicit branch above.
+                value=value,
+                source_uri=source_uri,
+                modified_at=source_modified_at,
+                confidence=0.5,
+                sensitivity=sensitivity,
+            )
+        )
+    return tuple(signals)
 
 
 class DefaultSilverProcessor:
@@ -40,18 +128,13 @@ class DefaultSilverProcessor:
     extraction live ONLY here in production code. Per-connector
     chunkers are a regression and pre-commit blocks them.
 
-    Wave 1 ships the seam-and-shape only; :meth:`process` raises
-    :class:`NotImplementedError`. Wave 2 (IM-1 / IM-2) lands the real
-    chunker + signal extractor; the resulting chunks carry
-    ``source_uri`` + ``source_modified_at`` + ``sensitivity`` per F39.
+    Constructs :class:`~kairix.core.protocols.Chunk` value objects
+    carrying ``source_uri``, ``source_modified_at``, and ``sensitivity``
+    per F39. ``source_page`` is ``None`` for non-paged formats; paged
+    extractors (PDF / PPTX / XLSX) populate ``extracted.pages``, which
+    Wave 3+ will use to cite back to a specific page.
     """
 
-    # process(raw, extracted, source_uri, source_modified_at, sensitivity) -> SilverOutput
-    # Wave 2: split ``extracted.markdown`` into chunks (page-aware
-    # citation via ``extracted.pages``); run the Plain-Python entity-
-    # signal extractor over the rendered text; emit a
-    # :class:`SilverOutput` with the chunks tagged
-    # ``(source_uri, source_modified_at, sensitivity)`` per F39.
     def process(
         self,
         raw: BronzeRef,
@@ -60,4 +143,31 @@ class DefaultSilverProcessor:
         source_modified_at: str,
         sensitivity: Sensitivity,
     ) -> SilverOutput:
-        raise NotImplementedError("DefaultSilverProcessor.process - Wave 2 (SC-1 ships the seam only).")
+        """Split ``extracted.markdown`` into chunks; emit entity signals.
+
+        Every chunk carries ``source_uri`` + ``source_modified_at`` +
+        ``sensitivity`` per F39. ``source_page`` is ``None`` for
+        non-paged inputs (markitdown PDF flat-extract, passthrough
+        markdown); paged extractors populate it from
+        ``extracted.pages`` in a later wave.
+        """
+        chunk_texts = _chunk_markdown(extracted.markdown)
+        chunks = tuple(
+            Chunk(
+                text=chunk_text,
+                content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+                source_name=raw.source_name,
+                source_uri=source_uri,
+                source_modified_at=source_modified_at,
+                source_page=None,
+                sensitivity=sensitivity,
+            )
+            for chunk_text in chunk_texts
+        )
+        signals = _extract_entity_signals(
+            extracted.markdown,
+            source_uri=source_uri,
+            source_modified_at=source_modified_at,
+            sensitivity=sensitivity,
+        )
+        return SilverOutput(chunks=chunks, entity_signals=signals)

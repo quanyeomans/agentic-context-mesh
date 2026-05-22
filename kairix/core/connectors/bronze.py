@@ -9,58 +9,114 @@ extraction, no transformation - so re-extraction with a newer
 Silver tier without re-fetching from the source system.
 
 Storage model is filesystem-with-pointer: the bytes go to
-``.kairix/bronze/<source>/<hash>``; a SQLite ``bronze_records`` row
-carries ``(source_name, item_id, raw_path, mime, fetched_at)`` for
+``<bronze_root>/<source>/<hash[:2]>/<hash>``; a SQLite ``bronze_records``
+row carries ``(source_name, item_id, raw_path, mime, fetched_at)`` for
 replayability. The :class:`BronzeStore` Protocol on
 :mod:`kairix.core.protocols` is the public seam consumers depend on;
-this module ships the production implementation skeleton (Wave 2
-fills in the bodies).
+this module ships the production implementation.
 
-Method bodies are intentionally single-statement
-``raise NotImplementedError`` calls so the F19 unused-parameter rule
-recognises them as abstract-style skeletons. Per-method intent is
-captured in the comments immediately preceding each ``def`` until
-Wave 2 lands the real bodies.
+Atomicity: the caller's per-batch transaction owns the commit; this
+store issues SQL but never calls ``commit()`` or ``rollback()``. The
+filesystem write happens before the SQL row insert so a crash between
+fsync and commit leaves an unreferenced blob (harmless garbage that
+can be GC'd by a sweeper); a crash before fsync rolls back the row
+write on the next transaction so nothing references a missing blob.
 """
 
 from __future__ import annotations
 
+import hashlib
+import sqlite3
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
+from pathlib import Path
 
 from kairix.core.protocols import BronzeRef, MimeType
+
+
+def _content_hash(raw: bytes) -> str:
+    """SHA-256 hash of raw bytes, hex-encoded."""
+    return hashlib.sha256(raw).hexdigest()
 
 
 class FilesystemBronzeStore:
     """Production :class:`~kairix.core.protocols.BronzeStore` implementation.
 
-    Wave 1 ships the seam-and-shape only; method bodies raise
-    :class:`NotImplementedError`. Wave 2 (IM-1 / IM-2) lands the real
-    write / read / replay logic - atomic fsync-then-commit ordering
-    inside the per-batch SQLite transaction so Bronze write and cursor
-    advance commit together or roll back together.
+    Persists raw bytes to ``<bronze_root>/<source>/<hash[:2]>/<hash>``
+    and records a pointer row in SQLite. The caller's per-batch
+    transaction owns the commit; the store never commits on its own.
     """
 
-    # write(source_name, item_id, raw, mime) -> BronzeRef
-    # Wave 2: persist bytes to ``paths.bronze_root() / source_name / hash``
-    # then UPSERT the SQLite ``bronze_records`` row. Idempotent on
-    # ``(source_name, item_id)``. The returned :class:`BronzeRef`
-    # carries the on-disk path the SilverProcessor and replay paths
-    # read back from.
+    def __init__(self, db: sqlite3.Connection, bronze_root: Path | str) -> None:
+        self._db = db
+        self._bronze_root = Path(bronze_root)
+
     def write(self, source_name: str, item_id: str, raw: bytes, mime: MimeType) -> BronzeRef:
-        raise NotImplementedError("FilesystemBronzeStore.write - Wave 2 (SC-1 ships the seam only).")
+        """Persist bytes to disk and upsert a SQLite pointer row.
 
-    # read(ref) -> (bytes, mime)
-    # Wave 2: open ``paths.bronze_root() / ref.raw_path`` and return
-    # ``(bytes, ref.mime)``. Raises ``FileNotFoundError`` if the blob
-    # is missing (caller's responsibility to surface).
+        Idempotent on ``(source_name, item_id)`` — repeated writes for
+        the same key overwrite the existing pointer. Does NOT commit;
+        the caller's per-batch transaction owns the commit.
+        """
+        digest = _content_hash(raw)
+        rel_path = f"{source_name}/{digest[:2]}/{digest}"
+        abs_path = self._bronze_root / rel_path
+        abs_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write to a temp path then rename, so a partial write never
+        # leaves a half-blob at the final path.
+        tmp_path = abs_path.with_suffix(abs_path.suffix + ".tmp")
+        tmp_path.write_bytes(raw)
+        tmp_path.replace(abs_path)
+        fetched_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        self._db.execute(
+            "INSERT OR REPLACE INTO bronze_records "
+            "(source_name, item_id, raw_path, mime, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (source_name, item_id, rel_path, mime, fetched_at),
+        )
+        return BronzeRef(
+            source_name=source_name,
+            item_id=item_id,
+            raw_path=rel_path,
+            mime=mime,
+            fetched_at=fetched_at,
+        )
+
     def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]:
-        raise NotImplementedError("FilesystemBronzeStore.read - Wave 2 (SC-1 ships the seam only).")
+        """Read the bytes referenced by ``ref`` plus the recorded mime hint.
 
-    # replay(source_name, since=None) -> Iterator[BronzeRef]
-    # Wave 2: SELECT from ``bronze_records`` filtered by source +
-    # fetched_at, yield :class:`BronzeRef` rows lazily. Used by
-    # re-extraction workflows after an
-    # :class:`~kairix.core.protocols.Extractor` version bumps.
+        Raises :class:`FileNotFoundError` if the blob is missing on
+        disk (caller's responsibility to surface).
+        """
+        abs_path = self._bronze_root / ref.raw_path
+        return abs_path.read_bytes(), ref.mime
+
     def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]:
-        raise NotImplementedError("FilesystemBronzeStore.replay - Wave 2 (SC-1 ships the seam only).")
+        """Yield :class:`BronzeRef` rows for ``source_name``, oldest first.
+
+        ``since`` restricts the stream to records with
+        ``fetched_at >= since.isoformat()``. Used by re-extraction
+        workflows after an :class:`Extractor` version bumps.
+        """
+        if since is None:
+            rows = self._db.execute(
+                "SELECT source_name, item_id, raw_path, mime, fetched_at "
+                "FROM bronze_records WHERE source_name = ? "
+                "ORDER BY fetched_at ASC",
+                (source_name,),
+            ).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT source_name, item_id, raw_path, mime, fetched_at "
+                "FROM bronze_records WHERE source_name = ? AND fetched_at >= ? "
+                "ORDER BY fetched_at ASC",
+                (source_name, since.isoformat()),
+            ).fetchall()
+        for row in rows:
+            yield BronzeRef(
+                source_name=str(row[0]),
+                item_id=str(row[1]),
+                raw_path=str(row[2]),
+                mime=str(row[3]),
+                fetched_at=str(row[4]),
+            )
