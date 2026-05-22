@@ -18,12 +18,17 @@ still be paused (so it stops piling on a shared host), and an operator pause
 survives worker restarts.
 
 Tests inject ``state_path`` / ``flag_path`` directly so they don't need to
-monkeypatch env vars or touch the user's real data dir.
+monkeypatch env vars or touch the user's real data dir. The F30 subprocess
+seam is the ``--state-path`` / ``--flag-path`` argparse args (mirrors the
+``--document-root`` pattern from ``kairix store crawl``), so an outcome
+test can drive the binary against a tmp path without touching the process
+environment (F2-clean).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -71,11 +76,14 @@ def status(
     state_path: Path | None = None,
     out: TextIO | None = None,
     err: TextIO | None = None,
+    as_json: bool = False,
 ) -> int:
     """``kairix worker status`` — exit 0 if state file present, 1 if missing.
 
     I/O sinks are injectable so unit tests capture stdout/stderr without
-    monkeypatching ``sys``.
+    monkeypatching ``sys``. ``as_json=True`` renders the structured state
+    envelope (the same dict ``WorkerState.to_dict`` produces) for machine
+    consumers and for the F30 subprocess outcome test.
     """
     state_path = state_path if state_path is not None else worker_state_path()
     out = out if out is not None else sys.stdout
@@ -85,7 +93,10 @@ def status(
     if state is None:
         err.write(f"kairix worker: no state file at {state_path} — worker not running or never started\n")
         return 1
-    out.write(format_status(state) + "\n")
+    if as_json:
+        out.write(json.dumps(state.to_dict(), indent=2) + "\n")
+    else:
+        out.write(format_status(state) + "\n")
     return 0
 
 
@@ -119,10 +130,60 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("run", help="Start the worker loop (default).")
-    sub.add_parser("status", help="Print the worker's last-known phase and counters.")
-    sub.add_parser("pause", help="Pause the running worker by creating a flag file.")
-    sub.add_parser("resume", help="Resume the running worker by removing the flag file.")
+    status_p = sub.add_parser("status", help="Print the worker's last-known phase and counters.")
+    status_p.add_argument(
+        "--state-path",
+        default=None,
+        help=(
+            "Override the worker state JSON path for this invocation. When "
+            "omitted, defaults to ``kairix.paths.worker_state_path()`` (the "
+            "production data dir). Mirrors the ``--document-root`` pattern "
+            "from ``kairix store crawl`` so F30 subprocess outcome tests "
+            "can drive a tmp state file without touching the process "
+            "environment (F2-clean)."
+        ),
+    )
+    status_p.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit the full WorkerState dict as JSON on stdout (machine-readable).",
+    )
+    pause_p = sub.add_parser("pause", help="Pause the running worker by creating a flag file.")
+    pause_p.add_argument(
+        "--flag-path",
+        default=None,
+        help=(
+            "Override the pause-flag path for this invocation. When omitted, "
+            "defaults to ``kairix.paths.worker_pause_flag_path()``. Subprocess "
+            "seam for F30 outcome tests; matches ``--state-path`` on status."
+        ),
+    )
+    resume_p = sub.add_parser("resume", help="Resume the running worker by removing the flag file.")
+    resume_p.add_argument(
+        "--flag-path",
+        default=None,
+        help=(
+            "Override the pause-flag path for this invocation. When omitted, "
+            "defaults to ``kairix.paths.worker_pause_flag_path()``. Subprocess "
+            "seam for F30 outcome tests; matches ``--state-path`` on status."
+        ),
+    )
     return parser
+
+
+def _resolve_state_path(arg: str | None, injected: Path | None) -> Path | None:
+    """In-process ``state_path=`` kwarg wins; otherwise use ``--state-path``."""
+    if injected is not None:
+        return injected
+    return Path(arg) if arg else None
+
+
+def _resolve_flag_path_arg(arg: str | None, injected: Path | None) -> Path | None:
+    """In-process ``flag_path=`` kwarg wins; otherwise use ``--flag-path``."""
+    if injected is not None:
+        return injected
+    return Path(arg) if arg else None
 
 
 def main(
@@ -131,16 +192,25 @@ def main(
     state_path: Path | None = None,
     flag_path: Path | None = None,
 ) -> int | None:
-    """CLI entry point. Routes to the right subcommand."""
+    """CLI entry point. Routes to the right subcommand.
+
+    ``state_path`` / ``flag_path`` are the in-process injection seams used by
+    unit tests. The ``--state-path`` / ``--flag-path`` CLI flags are the
+    subprocess (F30) seams. Precedence: in-process kwarg wins over CLI flag
+    wins over ``kairix.paths`` defaults.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.cmd == "status":
-        return status(state_path=state_path)
+        resolved_state = _resolve_state_path(getattr(args, "state_path", None), state_path)
+        return status(state_path=resolved_state, as_json=getattr(args, "as_json", False))
     if args.cmd == "pause":
-        return pause(flag_path=flag_path)
+        resolved_flag = _resolve_flag_path_arg(getattr(args, "flag_path", None), flag_path)
+        return pause(flag_path=resolved_flag)
     if args.cmd == "resume":
-        return resume(flag_path=flag_path)
+        resolved_flag = _resolve_flag_path_arg(getattr(args, "flag_path", None), flag_path)
+        return resume(flag_path=resolved_flag)
 
     # Default (``None`` or ``run``): start the worker loop.
     from kairix.worker import main as worker_main
