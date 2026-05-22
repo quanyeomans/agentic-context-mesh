@@ -118,14 +118,8 @@ python3 "${SCRIPT_DIR}/check_no_real_names_in_fixtures.py" || overall=1
 # F33 — shellcheck disable directives require rationale
 python3 "${SCRIPT_DIR}/check_shellcheck_disable_with_reason.py" || overall=1
 
-# F41 — every plugin tree carries py.typed + no bare type: ignore
-python3 "${SCRIPT_DIR}/check_f41_plugin_typing.py" || overall=1
-
-# F42 — connector-surface Protocol returns are frozen dataclasses / allowed shapes
-python3 "${SCRIPT_DIR}/check_f42_protocol_return_types.py" || overall=1
-
-# F43 — every plugin has tests/contracts/test_<name>_protocol.py importing fake + real
-python3 "${SCRIPT_DIR}/check_f43_plugin_contract_tests.py" || overall=1
+# F44 — engagement-scope code (kairix/**) may not import firm-scope storage clients (Postgres)
+bash "${SCRIPT_DIR}/check-f44-engagement-firm-boundary.sh" || overall=1
 
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
@@ -155,6 +149,12 @@ python3 "${SCRIPT_DIR}/check_f38_silver_singleton.py" || overall=1
 python3 "${SCRIPT_DIR}/check_f39_chunk_metadata.py" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f40_extractor_version.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f41_plugin_typing.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f42_protocol_return_types.py" || overall=1
+
+python3 "${SCRIPT_DIR}/check_f43_plugin_contract_tests.py" || overall=1
 
 # G9 — every services/<name>/ has a README.md (Go side; mirrors F23)
 python3 "${SCRIPT_DIR}/check_go_readme_coverage.py" || overall=1
