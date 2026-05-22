@@ -97,6 +97,17 @@ ollama        = "kairix.providers.ollama:make_provider"
 litellm_proxy = "kairix.providers.litellm_proxy:make_provider"
 anthropic     = "kairix.providers.anthropic:make_provider"
 
+# Connector plugin discovery — same name-filtered Python entry-points
+# shape as kairix.providers. Operators select connectors by config string
+# (``connectors[].name`` in ``kairix.config.yaml``), not by import statement.
+# Third parties ship their own pip distribution that declares the same group;
+# ``pip install kairix-connector-foo`` then ``connectors: [foo]`` works with
+# zero kairix code change. See
+# docs/architecture/connector-ingestion-architecture.md §8.
+# Wave 1 (SC-2): empty table; Wave 2 lands ``obsidian``; later waves add
+# ``sharepoint``, ``dex_crm``, ``m365_email_headers``, ``m365_calendar``.
+[project.entry-points."kairix.connectors"]
+
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"
 Issues = "https://github.com/three-cubes/kairix/issues"
