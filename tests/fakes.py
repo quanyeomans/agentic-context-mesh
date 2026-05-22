@@ -1752,3 +1752,56 @@ class FakeCorpusEmbedder:
         if len(self.calls) <= len(self._scripted):
             return self._scripted[len(self.calls) - 1]
         return self._scripted[-1]
+
+
+# ---------------------------------------------------------------------------
+# Connector fakes (Wave 2 — IM-5)
+# ---------------------------------------------------------------------------
+
+
+class FakeObsidian:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the Obsidian
+    plugin's contract test.
+
+    Constructor takes the events to emit and a content fixture; the fake
+    satisfies the full Protocol surface without touching the filesystem,
+    watchdog, or any real thread. This is the canonical fake F43 pairs
+    with the real :class:`kairix.connectors.obsidian.ObsidianConnector`
+    inside ``tests/contracts/test_obsidian_protocol.py``.
+    """
+
+    name: str = "obsidian"
+
+    def __init__(
+        self,
+        *,
+        vault_root: Path | str = "/fake/vault",
+        events: list[Any] | None = None,
+        content: dict[str, bytes] | None = None,
+        sensitivity: str = "internal",
+    ) -> None:
+        from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
+
+        self.vault_root = Path(vault_root)
+        self._events: list[ChangeEvent] = list(events) if events is not None else []
+        self._content: dict[str, bytes] = dict(content) if content is not None else {}
+        self._sensitivity = sensitivity
+
+    def list_changes(self, cursor: Any | None) -> Any:
+        return iter(self._events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        raw = self._content.get(item_id, b"")
+        mime = "text/markdown" if item_id.endswith(".md") else "application/octet-stream"
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime=mime, fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        return f"obsidian://open?vault={self.vault_root.name}&file={item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity

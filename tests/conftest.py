@@ -137,6 +137,10 @@ pytest_plugins = [
     # docs/architecture/connector-ingestion-architecture.md §2 + §3.
     "tests.bdd.steps.extractor_passthrough_steps",
     "tests.bdd.steps.extractor_markitdown_steps",
+    # Connector plugin BDD step modules — Wave 2 IM-5 lands the first
+    # connector (obsidian). Future connectors (sharepoint, dex_crm, ...)
+    # append a sibling entry per F36.
+    "tests.bdd.steps.connector_obsidian_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

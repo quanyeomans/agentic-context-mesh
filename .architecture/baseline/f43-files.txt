@@ -1,3 +1,4 @@
+kairix/connectors/obsidian
 kairix/providers/anthropic
 kairix/providers/azure_foundry
 kairix/providers/azure_legacy

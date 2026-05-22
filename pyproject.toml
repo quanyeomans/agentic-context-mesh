@@ -30,6 +30,12 @@ dependencies = [
     "langgraph>=1.0.10,<2",
     "lxml>=6.1.0",
     "openai>=1.40,<3",
+    # Filesystem-event watcher — Apache 2.0, commercial-safe. First-party
+    # Obsidian connector (``kairix/connectors/obsidian/``) tails vault
+    # edits between full-scan reconciliation passes. Per F37, ``watchdog``
+    # may only be imported under ``kairix/connectors/<name>/`` or
+    # ``kairix/core/connectors/``.
+    "watchdog>=3.0.0,<7",
 ]
 
 [project.optional-dependencies]
@@ -123,6 +129,7 @@ anthropic     = "kairix.providers.anthropic:make_provider"
 # Wave 1 (SC-2): empty table; Wave 2 lands ``obsidian``; later waves add
 # ``sharepoint``, ``dex_crm``, ``m365_email_headers``, ``m365_calendar``.
 [project.entry-points."kairix.connectors"]
+obsidian = "kairix.connectors.obsidian:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and
