@@ -105,10 +105,10 @@ echo -e "${GREEN}OK${NC}"
 # coverage was skipped; CI will still enforce it.
 echo -n "  tests + coverage... "
 if [[ "${KAIRIX_SKIP_COVERAGE:-0}" == "1" ]]; then
-    TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
+    TEST_OUT=$(uv run python -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
     COVERAGE_SKIPPED=1
 else
-    TEST_OUT=$(python3 -m pytest tests/ -x --timeout=30 \
+    TEST_OUT=$(uv run python -m pytest tests/ -x --timeout=30 \
         -m "unit or bdd or contract" \
         --cov=kairix --cov-report=xml:coverage.xml \
         --cov-fail-under=80 2>&1)
