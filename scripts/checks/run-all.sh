@@ -124,6 +124,9 @@ python3 "${SCRIPT_DIR}/check_f41_plugin_typing.py" || overall=1
 # F42 — connector-surface Protocol returns are frozen dataclasses / allowed shapes
 python3 "${SCRIPT_DIR}/check_f42_protocol_return_types.py" || overall=1
 
+# F43 — every plugin has tests/contracts/test_<name>_protocol.py importing fake + real
+python3 "${SCRIPT_DIR}/check_f43_plugin_contract_tests.py" || overall=1
+
 # F45 — every new top-level capability ships with a BDD feature
 bash "${SCRIPT_DIR}/check-f45-new-capability-bdd.sh" || overall=1
 
