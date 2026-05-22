@@ -173,15 +173,20 @@ def _plugin_violates(plugin_dir: Path, repo_root: Path) -> bool:
         return True
     # Build the dotted production module path: kairix.<tree>.<name>
     # (e.g. kairix.providers.openai). The plugin_dir is
-    # <repo_root>/kairix/<tree>/<name>.
-    parts = plugin_dir.parts
-    # Find the index of 'kairix' in the path parts and slice from
-    # there.
+    # ``<repo_root>/kairix/<tree>/<name>``; resolving relative to
+    # ``repo_root`` avoids the worktree-bug where the filesystem path
+    # itself contains ``kairix`` as a parent directory (e.g.
+    # ``/work/kairix/kairix/kairix/extractors/<name>``) — using
+    # ``parts.index('kairix')`` on the absolute path picks the wrong
+    # occurrence and the dotted lookup mismatches every legitimate
+    # contract-test import.
     try:
-        kx_idx = parts.index("kairix")
+        rel_parts = plugin_dir.resolve().relative_to(repo_root.resolve()).parts
     except ValueError:
         return True
-    plugin_dotted = ".".join(parts[kx_idx:])
+    if not rel_parts or rel_parts[0] != "kairix":
+        return True
+    plugin_dotted = ".".join(rel_parts)
     return not _file_imports_both(contract_file, plugin_dotted)
 
 

@@ -59,6 +59,22 @@ bedrock = [
     # selected, never at module import time.
     "boto3>=1.34,<2",
 ]
+markitdown = [
+    # markitdown (MIT, Microsoft) — rich-document extractor for PDF / DOCX
+    # / PPTX / XLSX / HTML. Heavy transitive deps (onnxruntime, magika,
+    # protobuf, plus pdfminer-six + pdfplumber + cryptography + pillow
+    # via the [pdf] extra) so operators ingesting only markdown /
+    # plain-text content skip the extra and stay on
+    # ``kairix.extractors.passthrough``.
+    # ``kairix.extractors.markitdown`` lazy-imports the library inside the
+    # plugin's converter factory; module import succeeds without the
+    # extra, only ``extract()`` raises a typed error when the upstream is
+    # absent. Floor pinned at 0.1.5 (current stable on PyPI, MIT-licensed).
+    # The ``[pdf]`` extra pulls pdfminer-six + pdfplumber so the PDF
+    # path works out-of-the-box; without it markitdown raises a typed
+    # ``MissingDependencyException`` on PDF input.
+    "markitdown[pdf]>=0.1.5,<1",
+]
 dev = [
     # Test runner
     "pytest>=8.0",
@@ -110,9 +126,13 @@ anthropic     = "kairix.providers.anthropic:make_provider"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and
-# register here. Empty in Wave 1 (SC-3 scaffold only); Wave 2 adds
-# ``markitdown`` + ``passthrough``, Wave 3 adds ``pdf_fallback`` + ``ocr``.
+# register here. Wave 2 IM-4 lands ``markitdown`` + ``passthrough``;
+# Wave 3 will add ``pdf_fallback`` + ``ocr``. markitdown wraps the
+# upstream library; the library is an optional dependency (extra
+# ``markitdown``) so the core wheel stays light.
 [project.entry-points."kairix.extractors"]
+passthrough = "kairix.extractors.passthrough:make_extractor"
+markitdown  = "kairix.extractors.markitdown:make_extractor"
 
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"

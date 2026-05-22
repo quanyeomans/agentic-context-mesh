@@ -21,4 +21,6 @@ Feature: End-to-end connector sync journey
     And the cursor for the connector advances past the fixture
 
     Examples: First-party connector and extractor pairs
-      | connector | extractor |
+      | connector | extractor   |
+      | obsidian  | passthrough |
+      | obsidian  | markitdown  |
