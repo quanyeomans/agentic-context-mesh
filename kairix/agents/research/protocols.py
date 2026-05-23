@@ -22,7 +22,9 @@ class ConfidenceParser(Protocol):
     signal failure — that is what the bug we are fixing did.
     """
 
-    def parse(self, response: str) -> float: ...
+    def parse(self, response: str) -> float:
+        """Return the parsed confidence in [0.0, 1.0]; raise ConfidenceParseError if absent."""
+        ...
 
 
 class ConfidenceParseError(ValueError):

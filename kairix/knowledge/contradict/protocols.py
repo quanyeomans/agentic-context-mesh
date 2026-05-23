@@ -24,7 +24,9 @@ class ClaimExtractor(Protocol):
     inputs.
     """
 
-    def extract(self, content: str, *, top_n: int = 3) -> list[str]: ...
+    def extract(self, content: str, *, top_n: int = 3) -> list[str]:
+        """Return at most ``top_n`` top-signal claim strings extracted from ``content``."""
+        ...
 
 
 @runtime_checkable
@@ -40,4 +42,6 @@ class ContradictionScorer(Protocol):
 
     category: str
 
-    def score(self, claim: str, candidate: str) -> tuple[float, str]: ...
+    def score(self, claim: str, candidate: str) -> tuple[float, str]:
+        """Return ``(score in [0.0, 1.0], reason)``; ``(0.0, "")`` on parse failure."""
+        ...

@@ -48,9 +48,13 @@ class ContentClassifier(Protocol):
     individual ``classify_fn`` / ``classify_llm_fn`` callables.
     """
 
-    def classify_rules(self, query: str, agent: str) -> Any: ...
+    def classify_rules(self, query: str, agent: str) -> Any:
+        """Return a rule-based classification result for ``(query, agent)``."""
+        ...
 
-    def classify_with_llm(self, query: str, agent: str) -> Any: ...
+    def classify_with_llm(self, query: str, agent: str) -> Any:
+        """Return an LLM-based classification result for ``(query, agent)``."""
+        ...
 
 
 class DefaultContentClassifier:

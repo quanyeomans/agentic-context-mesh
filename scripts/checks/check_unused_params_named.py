@@ -107,6 +107,27 @@ def _is_abstract_or_overload(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bo
             target = only.exc.func if isinstance(only.exc, ast.Call) else only.exc
             if isinstance(target, ast.Name) and target.id == "NotImplementedError":
                 return True
+    # F20 fix-ups land docstring + ``...`` / ``pass`` two-statement bodies;
+    # these are still abstract — the signature is the contract.
+    if len(func.body) == 2:
+        first, second = func.body
+        first_is_docstring = (
+            isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str)
+        )
+        if first_is_docstring:
+            if isinstance(second, ast.Pass):
+                return True
+            second_is_ellipsis = (
+                isinstance(second, ast.Expr)
+                and isinstance(second.value, ast.Constant)
+                and second.value.value is Ellipsis
+            )
+            if second_is_ellipsis:
+                return True
+            if isinstance(second, ast.Raise) and isinstance(second.exc, (ast.Name, ast.Call)):
+                target = second.exc.func if isinstance(second.exc, ast.Call) else second.exc
+                if isinstance(target, ast.Name) and target.id == "NotImplementedError":
+                    return True
     return False
 
 

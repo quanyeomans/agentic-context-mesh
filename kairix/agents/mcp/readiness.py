@@ -43,9 +43,13 @@ class ReadinessGate(Protocol):
     startup hook, after lazy-init of Neo4j/LLM/vector clients.
     """
 
-    def is_ready(self) -> bool: ...
+    def is_ready(self) -> bool:
+        """Return True once warm-up has completed, False before."""
+        ...
 
-    def mark_ready(self) -> None: ...
+    def mark_ready(self) -> None:
+        """Flip the gate to ready. Called once by the startup hook; idempotent."""
+        ...
 
 
 class EventReadinessGate:

@@ -74,7 +74,9 @@ class VectorSearcher(Protocol):
     Implementations return document paths in similarity order.
     """
 
-    def search_vectors(self, vector: np.ndarray, *, limit: int) -> list[str]: ...
+    def search_vectors(self, vector: np.ndarray, *, limit: int) -> list[str]:
+        """Return up to ``limit`` document paths in vector-similarity order."""
+        ...
 
 
 def get_recall_queries(
