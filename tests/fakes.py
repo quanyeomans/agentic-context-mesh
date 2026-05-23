@@ -2367,6 +2367,48 @@ class FakeM365EmailHeadersConnector:
         return "personal"
 
 
+class FakeM365CalendarConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    M365 calendar plugin (Wave 5 KP-3).
+    """
+
+    name: str = "m365_calendar"
+
+    def __init__(
+        self,
+        *,
+        events: list[Any] | None = None,
+        content: dict[str, bytes] | None = None,
+        sensitivity: str = "internal",
+        delta_link: str | None = None,
+    ) -> None:
+        from kairix.core.protocols import ChangeEvent
+
+        self._events: list[ChangeEvent] = list(events) if events is not None else []
+        self._content: dict[str, bytes] = dict(content) if content is not None else {}
+        self._sensitivity = sensitivity
+        self.last_delta_link = delta_link
+
+    def list_changes(self, cursor: Any | None) -> Any:
+        del cursor
+        return iter(self._events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        raw = self._content.get(item_id, b"{}")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime="application/json", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        return f"https://outlook.office.com/calendar/item/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 
