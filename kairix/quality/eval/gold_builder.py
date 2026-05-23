@@ -176,6 +176,77 @@ def _vector_search(  # pragma: no cover — prod-only path; tests inject FakeRet
 # ---------------------------------------------------------------------------
 
 
+def _build_bm25_query(
+    fts_query: str,
+    weights: tuple[float, float, float],
+    collections: list[str] | None,
+    limit: int,
+) -> tuple[str, list[Any]]:
+    """Build the BM25 SELECT statement + bound parameters.
+
+    Two branches: with-collection-filter vs without. Extracted from
+    ``GoldBuilder._bm25_search_with_weights`` to keep that method under
+    F16's cognitive-complexity ceiling — the dual SQL-string template
+    plus the try/except/row-loop block nested above 15 when inlined.
+    """
+    w_fp, w_title, w_doc = weights
+    bm25_args = f"{float(w_fp)}, {float(w_title)}, {float(w_doc)}"
+    if collections:
+        placeholders = ",".join("?" * len(collections))
+        # safe: float() cast on bm25 weights (validated finite/positive above);
+        # no ? binding available for bm25 args
+        sql = f"""
+            SELECT d.collection, d.path, d.title, c.doc,
+                   bm25(documents_fts, {bm25_args}) AS score
+            FROM documents_fts
+            JOIN documents d ON d.id = documents_fts.rowid
+            JOIN content c ON c.hash = d.hash
+            WHERE documents_fts MATCH ?
+              AND d.collection IN ({placeholders})
+              AND d.active = 1
+            ORDER BY score ASC
+            LIMIT ?
+        """
+        params: list[Any] = [fts_query, *collections, limit]
+    else:
+        # safe: float() cast on bm25 weights (validated finite/positive above);
+        # no ? binding available for bm25 args
+        sql = f"""
+            SELECT d.collection, d.path, d.title, c.doc,
+                   bm25(documents_fts, {bm25_args}) AS score
+            FROM documents_fts
+            JOIN documents d ON d.id = documents_fts.rowid
+            JOIN content c ON c.hash = d.hash
+            WHERE documents_fts MATCH ?
+              AND d.active = 1
+            ORDER BY score ASC
+            LIMIT ?
+        """
+        params = [fts_query, limit]
+    return sql, params
+
+
+def _row_to_result(row: sqlite3.Row) -> dict[str, str]:
+    """Render one FTS5 result row into the public {path, title, snippet, collection} dict.
+
+    Handles the YAML front-matter strip on the document body. Extracted
+    from ``GoldBuilder._bm25_search_with_weights`` for the same F16
+    reason as ``_build_bm25_query``.
+    """
+    doc_text = row["doc"] or ""
+    if doc_text.startswith("---"):
+        parts = doc_text.split("---", 2)
+        snippet = parts[2].strip()[:300] if len(parts) >= 3 else doc_text[:300]
+    else:
+        snippet = doc_text[:300]
+    return {
+        "path": str(row["path"]),
+        "title": str(row["title"] or ""),
+        "snippet": snippet,
+        "collection": str(row["collection"]),
+    }
+
+
 class GoldBuilder:
     """LLMJudge + Retriever-injected gold suite builder.
 
@@ -278,64 +349,14 @@ class GoldBuilder:
 
         with closing(db) as conn:
             conn.row_factory = sqlite3.Row
-            w_fp, w_title, w_doc = weights
+            sql, params = _build_bm25_query(fts_query, weights, collections, limit)
             try:
-                if collections:
-                    placeholders = ",".join("?" * len(collections))
-                    # safe: float() cast on bm25 weights (validated finite/positive above);
-                    # no ? binding available for bm25 args
-                    sql = f"""
-                        SELECT d.collection, d.path, d.title, c.doc,
-                               bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) AS score
-                        FROM documents_fts
-                        JOIN documents d ON d.id = documents_fts.rowid
-                        JOIN content c ON c.hash = d.hash
-                        WHERE documents_fts MATCH ?
-                          AND d.collection IN ({placeholders})
-                          AND d.active = 1
-                        ORDER BY score ASC
-                        LIMIT ?
-                    """
-                    params: list[Any] = [fts_query, *collections, limit]
-                else:
-                    # safe: float() cast on bm25 weights (validated finite/positive above);
-                    # no ? binding available for bm25 args
-                    sql = f"""
-                        SELECT d.collection, d.path, d.title, c.doc,
-                               bm25(documents_fts, {float(w_fp)}, {float(w_title)}, {float(w_doc)}) AS score
-                        FROM documents_fts
-                        JOIN documents d ON d.id = documents_fts.rowid
-                        JOIN content c ON c.hash = d.hash
-                        WHERE documents_fts MATCH ?
-                          AND d.active = 1
-                        ORDER BY score ASC
-                        LIMIT ?
-                    """
-                    params = [fts_query, limit]
-
                 rows = conn.execute(sql, params).fetchall()
             except Exception as e:
                 logger.warning("gold_builder: FTS query failed — %s", e)
                 return []
 
-            results = []
-            for row in rows:
-                doc_text = row["doc"] or ""
-                if doc_text.startswith("---"):
-                    parts = doc_text.split("---", 2)
-                    snippet = parts[2].strip()[:300] if len(parts) >= 3 else doc_text[:300]
-                else:
-                    snippet = doc_text[:300]
-                results.append(
-                    {
-                        "path": str(row["path"]),
-                        "title": str(row["title"] or ""),
-                        "snippet": snippet,
-                        "collection": str(row["collection"]),
-                    }
-                )
-
-            return results
+            return [_row_to_result(row) for row in rows]
 
     # ------------------------------------------------------------------
     # Vector retrieval — routes through the injected Retriever protocol

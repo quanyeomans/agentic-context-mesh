@@ -72,27 +72,39 @@ class MonitorResult:
 # ---------------------------------------------------------------------------
 
 
+def _parse_jsonl_lines(text: str) -> list[dict[str, Any]]:
+    """Parse a JSONL string into entries, skipping blank and malformed lines.
+
+    Extracted from ``_load_log`` to keep that function below F16's
+    cognitive-complexity ceiling — the inner per-line try/except plus
+    the outer file-read try/except triple-nested above 15.
+    """
+    entries: list[dict[str, Any]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    return entries
+
+
 def _load_log(log_path: str) -> list[dict[str, Any]]:
     """Load existing monitor log entries. Returns [] on missing file or parse error."""
     p = Path(log_path)
     if not p.exists():
         return []
-    entries = []
     try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    entries.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
+        return _parse_jsonl_lines(p.read_text(encoding="utf-8"))
     # Defensive guard for read-time OS errors (unreadable file, permission
     # denied, transient I/O failure). The two test-reachable failure modes —
     # missing file and corrupt JSON — are handled above; this catch-all
     # only fires under the OS-level failures we can't induce in unit tests.
     except Exception as e:  # pragma: no cover — OS-level read failures not inducible in unit tests
         logger.warning("monitor: failed to load log %r — %s", log_path, e)
-    return entries
+        return []
 
 
 def _append_log(log_path: str, entry: dict[str, Any], max_entries: int = _MAX_LOG_ENTRIES) -> None:

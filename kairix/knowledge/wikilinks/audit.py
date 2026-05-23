@@ -13,6 +13,7 @@ import json
 import random
 import re
 import time
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -365,6 +366,27 @@ def weekly_report(
     return "\n".join(lines)
 
 
+def _parse_log_lines_since(lines: Iterable[str], cutoff: float) -> list[dict[str, Any]]:
+    """Parse JSONL ``lines``, keeping entries whose ``ts`` is >= ``cutoff``.
+
+    Extracted from ``_read_recent_log`` to keep that function under F16's
+    cognitive-complexity ceiling — the open/for-line/strip/per-line
+    try-decode/ts-window check chain nested above 15 when inlined.
+    """
+    entries: list[dict[str, Any]] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("ts", 0) >= cutoff:
+            entries.append(entry)
+    return entries
+
+
 def _read_recent_log(days: int = 7, *, log_path: str | None = None) -> list[dict[str, Any]]:
     """Read injection log entries from the last N days.
 
@@ -375,20 +397,9 @@ def _read_recent_log(days: int = 7, *, log_path: str | None = None) -> list[dict
     monkey-patching the module constant.
     """
     cutoff = time.time() - (days * 86400)
-    entries: list[dict[str, Any]] = []
     effective_path = log_path if log_path is not None else _LOG_PATH
     try:
         with open(effective_path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if entry.get("ts", 0) >= cutoff:
-                        entries.append(entry)
-                except json.JSONDecodeError:
-                    continue
+            return _parse_log_lines_since(fh, cutoff)
     except OSError:
-        pass
-    return entries
+        return []

@@ -227,72 +227,17 @@ def run_timeline(
         deps: Injectable dependencies; production callers leave None.
     """
     d = deps or TimelineDeps()
-    extract = d.extract_window_fn
-    rewrite = d.rewrite_query_fn
-    query_chunks = d.query_chunks_fn
-    search = d.search_fn
-
     try:
-        # 1. Resolve time window — explicit args win; otherwise extract from query.
-        start: date | None = since
-        end: date | None = until
-        if start is None and end is None:
-            try:
-                start, end = extract(query, anchor_date)
-            except Exception:
-                logger.debug("extract_window failed", exc_info=True)
-                start, end = None, None
-
-        time_window = _format_window(start, end)
-        is_temporal = bool(time_window)
-
-        # 2. Rewrite the query when temporal — rewriter expands "last week"
-        # into a date range so downstream search backends see the expansion.
-        rewritten = query
-        if is_temporal:
-            try:
-                rewritten = rewrite(query, anchor_date)
-            except Exception:
-                logger.debug("rewrite_query failed", exc_info=True)
-                rewritten = query
-
-        # 3. Primary backend: structured temporal-chunks index.
-        chunk_hits: list[TimelineHit] = []
-        if is_temporal:
-            try:
-                chunks = query_chunks(rewritten, start, end, chunk_types, limit)
-                chunk_hits = [_chunk_to_hit(c) for c in chunks]
-            except Exception:
-                logger.warning("temporal-chunks query failed", exc_info=True)
-
-        if chunk_hits:
-            return TimelineResult(
-                original_query=query,
-                rewritten_query=rewritten,
-                is_temporal=True,
-                fell_back=False,
-                time_window=time_window,
-                results=chunk_hits,
-            )
-
-        # 4. Fall-through: search pipeline on rewritten query. We always
-        # try this when temporal-chunks came back empty, so MCP callers
-        # (and CLI users with no data in the temporal index) still get a
-        # signal. fell_back=True signals "primary backend was empty".
-        search_hits: list[TimelineHit] = []
-        try:
-            sr = search(rewritten, 3000, agent, scope)
-            search_hits = _search_to_hits(sr, limit)
-        except Exception:
-            logger.warning("search fallback failed", exc_info=True)
-
-        return TimelineResult(
-            original_query=query,
-            rewritten_query=rewritten,
-            is_temporal=is_temporal,
-            fell_back=True,
-            time_window=time_window,
-            results=search_hits,
+        return _run_timeline_inner(
+            query,
+            anchor_date,
+            agent,
+            scope,
+            since,
+            until,
+            chunk_types,
+            limit,
+            d,
         )
     except Exception as exc:
         logger.warning("run_timeline failed: %s", exc, exc_info=True)
@@ -305,3 +250,144 @@ def run_timeline(
             results=[],
             error=f"{type(exc).__name__}: {exc}",
         )
+
+
+def _resolve_window(
+    extract: Callable[..., tuple[date | None, date | None]],
+    query: str,
+    anchor_date: date | None,
+    since: date | None,
+    until: date | None,
+) -> tuple[date | None, date | None]:
+    """Pick the explicit (since,until) when present, else extract from query.
+
+    Returns ``(None, None)`` on any extract failure — including the
+    ``extract()`` returning a non-tuple, which would otherwise raise at
+    the caller's ``start, end = _resolve_window(...)`` unpacking. The
+    unpack happens INSIDE this try so the failure is caught here, not
+    propagated. Extracted from ``run_timeline`` to flatten one of its
+    four nested try/except branches out of the parent — F16 demanded
+    the split.
+    """
+    if since is not None or until is not None:
+        return since, until
+    try:
+        start, end = extract(query, anchor_date)
+        return start, end
+    except Exception:
+        logger.debug("extract_window failed", exc_info=True)
+        return None, None
+
+
+def _rewrite_temporal_query(
+    rewrite: Callable[[str, date | None], str],
+    query: str,
+    anchor_date: date | None,
+) -> str:
+    """Rewrite a temporal query, falling back to the original on failure.
+
+    Extracted from ``run_timeline`` for the same F16 reason as
+    ``_resolve_window``.
+    """
+    try:
+        return rewrite(query, anchor_date)
+    except Exception:
+        logger.debug("rewrite_query failed", exc_info=True)
+        return query
+
+
+def _query_temporal_chunks(
+    query_chunks: Callable[..., list[Any]],
+    rewritten: str,
+    start: date | None,
+    end: date | None,
+    chunk_types: list[str] | None,
+    limit: int,
+) -> list[TimelineHit]:
+    """Run the temporal-chunks backend; return [] on failure (logged).
+
+    Extracted from ``run_timeline`` for the same F16 reason as
+    ``_resolve_window``.
+    """
+    try:
+        chunks = query_chunks(rewritten, start, end, chunk_types, limit)
+        return [_chunk_to_hit(c) for c in chunks]
+    except Exception:
+        logger.warning("temporal-chunks query failed", exc_info=True)
+        return []
+
+
+def _search_fallback(
+    search: Callable[..., Any],
+    rewritten: str,
+    agent: str | None,
+    scope: Scope,
+    limit: int,
+) -> list[TimelineHit]:
+    """Run the search-pipeline fallback; return [] on failure (logged).
+
+    Extracted from ``run_timeline`` for the same F16 reason as
+    ``_resolve_window``.
+    """
+    try:
+        sr = search(rewritten, 3000, agent, scope)
+        return _search_to_hits(sr, limit)
+    except Exception:
+        logger.warning("search fallback failed", exc_info=True)
+        return []
+
+
+def _run_timeline_inner(
+    query: str,
+    anchor_date: date | None,
+    agent: str | None,
+    scope: Scope,
+    since: date | None,
+    until: date | None,
+    chunk_types: list[str] | None,
+    limit: int,
+    d: TimelineDeps,
+) -> TimelineResult:
+    """The non-failure-handling body of ``run_timeline``.
+
+    Extracted so ``run_timeline`` can be a thin try/except wrapper — F16
+    flagged the inlined version at score 33, twice the ceiling. Any
+    uncaught exception in this helper is caught by the caller and
+    transformed into a populated ``TimelineResult.error``.
+    """
+    start, end = _resolve_window(d.extract_window_fn, query, anchor_date, since, until)
+    time_window = _format_window(start, end)
+    is_temporal = bool(time_window)
+
+    rewritten = _rewrite_temporal_query(d.rewrite_query_fn, query, anchor_date) if is_temporal else query
+
+    chunk_hits: list[TimelineHit] = []
+    if is_temporal:
+        chunk_hits = _query_temporal_chunks(
+            d.query_chunks_fn,
+            rewritten,
+            start,
+            end,
+            chunk_types,
+            limit,
+        )
+
+    if chunk_hits:
+        return TimelineResult(
+            original_query=query,
+            rewritten_query=rewritten,
+            is_temporal=True,
+            fell_back=False,
+            time_window=time_window,
+            results=chunk_hits,
+        )
+
+    search_hits = _search_fallback(d.search_fn, rewritten, agent, scope, limit)
+    return TimelineResult(
+        original_query=query,
+        rewritten_query=rewritten,
+        is_temporal=is_temporal,
+        fell_back=True,
+        time_window=time_window,
+        results=search_hits,
+    )

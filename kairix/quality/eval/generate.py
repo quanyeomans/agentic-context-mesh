@@ -393,26 +393,59 @@ def generate_queries(
     backend: ChatBackend = chat_backend if chat_backend is not None else default_chat_backend()
 
     for attempt in range(2):
-        try:
-            if not api_key or not endpoint:
-                raise ValueError("No API credentials")
-            content = _call_via_backend(prompt, api_key, endpoint, deployment, backend)
-            return parse_llm_query_response(content, allowed_cats, source_doc_path, doc_title)
-        except Exception as e:
-            if attempt == 0:
-                logger.debug(
-                    "generate_queries: parse failure (attempt 1) for %r — %s",
-                    doc_title,
-                    e,
-                )
-            else:
-                logger.warning(
-                    "generate_queries: failed for %r after 2 attempts — %s",
-                    doc_title,
-                    e,
-                )
+        result = _try_generate_attempt(
+            prompt,
+            allowed_cats,
+            source_doc_path,
+            doc_title,
+            api_key,
+            endpoint,
+            deployment,
+            backend,
+            attempt,
+        )
+        if result is not None:
+            return result
 
     return []
+
+
+def _try_generate_attempt(
+    prompt: str,
+    allowed_cats: list[str],
+    source_doc_path: str,
+    doc_title: str,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    backend: ChatBackend,
+    attempt: int,
+) -> list[GeneratedQuery] | None:
+    """Run one ``generate_queries`` attempt; return parsed queries or None on failure.
+
+    Extracted from ``generate_queries`` to keep the retry driver under
+    F16's cognitive-complexity ceiling — the try/except/credential-guard/
+    log-level switch nested above 15 when inlined.
+    """
+    try:
+        if not api_key or not endpoint:
+            raise ValueError("No API credentials")
+        content = _call_via_backend(prompt, api_key, endpoint, deployment, backend)
+        return parse_llm_query_response(content, allowed_cats, source_doc_path, doc_title)
+    except Exception as e:
+        if attempt == 0:
+            logger.debug(
+                "generate_queries: parse failure (attempt 1) for %r — %s",
+                doc_title,
+                e,
+            )
+        else:
+            logger.warning(
+                "generate_queries: failed for %r after 2 attempts — %s",
+                doc_title,
+                e,
+            )
+        return None
 
 
 class QueryGenerator:
@@ -999,25 +1032,13 @@ class SuiteGenerator:
             )
 
         raw_cases: list[dict[str, Any]] = raw.get("cases", [])
-        n_enriched = 0
-        n_skipped = 0
-        n_failed = 0
-        enriched_cases: list[dict[str, Any]] = []
-
-        for case in raw_cases:
-            query = case.get("query", "")
-            if not query:
-                enriched_cases.append(case)
-                n_skipped += 1
-                continue
-            updated_case, status = self._enrich_one(case, query, api_key, endpoint, deployment, agent)
-            enriched_cases.append(updated_case)
-            if status == "enriched":
-                n_enriched += 1
-            elif status == "failed":
-                n_failed += 1
-            else:
-                n_skipped += 1
+        enriched_cases, n_enriched, n_skipped, n_failed = self._enrich_all_cases(
+            raw_cases,
+            api_key,
+            endpoint,
+            deployment,
+            agent,
+        )
 
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -1043,6 +1064,41 @@ class SuiteGenerator:
             n_failed=n_failed,
             errors=errors,
         )
+
+    def _enrich_all_cases(
+        self,
+        raw_cases: list[dict[str, Any]],
+        api_key: str,
+        endpoint: str,
+        deployment: str,
+        agent: str,
+    ) -> tuple[list[dict[str, Any]], int, int, int]:
+        """Apply ``_enrich_one`` to every case, returning enriched list + counts.
+
+        Extracted from ``enrich_suite`` to keep that driver under F16's
+        cognitive-complexity ceiling — the credentials/load/loop/write
+        block accumulated above 15 when the per-case enrichment dispatch
+        was inlined.
+        """
+        n_enriched = 0
+        n_skipped = 0
+        n_failed = 0
+        enriched_cases: list[dict[str, Any]] = []
+        for case in raw_cases:
+            query = case.get("query", "")
+            if not query:
+                enriched_cases.append(case)
+                n_skipped += 1
+                continue
+            updated_case, status = self._enrich_one(case, query, api_key, endpoint, deployment, agent)
+            enriched_cases.append(updated_case)
+            if status == "enriched":
+                n_enriched += 1
+            elif status == "failed":
+                n_failed += 1
+            else:
+                n_skipped += 1
+        return enriched_cases, n_enriched, n_skipped, n_failed
 
     def _enrich_one(
         self,

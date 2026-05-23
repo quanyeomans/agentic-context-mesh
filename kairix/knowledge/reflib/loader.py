@@ -159,6 +159,26 @@ def validate_and_build_edge(
         return None
 
 
+def _upsert_node_by_label(
+    label: str,
+    node: Any,
+    neo4j_client: Any,
+) -> bool:
+    """Dispatch a single node upsert to the right neo4j method based on label.
+
+    Returns True on success, False on unknown label or upsert failure.
+    Extracted from ``load_nodes`` to keep that function under F16's
+    cognitive-complexity ceiling — the label-dispatch chain plus the
+    success/failure branching inside the outer for-loop nested above 15.
+    """
+    if label in _LABEL_DISPATCH:
+        method_name = _LABEL_DISPATCH[label][1]
+        return bool(getattr(neo4j_client, method_name)(node))
+    if label in _GENERIC_LABELS:
+        return bool(_upsert_generic_node(neo4j_client, label, node))
+    return False
+
+
 def load_nodes(
     nodes_path: Path,
     neo4j_client: Any,
@@ -187,15 +207,7 @@ def load_nodes(
             report.nodes_loaded += 1
             continue
 
-        if label in _LABEL_DISPATCH:
-            method_name = _LABEL_DISPATCH[label][1]
-            ok = getattr(neo4j_client, method_name)(node)
-        elif label in _GENERIC_LABELS:
-            ok = _upsert_generic_node(neo4j_client, label, node)
-        else:
-            ok = False
-
-        if ok:
+        if _upsert_node_by_label(label, node, neo4j_client):
             report.nodes_loaded += 1
         else:
             report.nodes_skipped += 1

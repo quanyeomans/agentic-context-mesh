@@ -423,30 +423,65 @@ def _embed_and_store_batch(
         )
 
     try:
-        with db:
-            for chunk, vector in zip(matched, vectors, strict=True):
-                stage_embedding(
-                    db,
-                    chunk["hash"],
-                    chunk["seq"],
-                    chunk["pos"],
-                    vector,
-                    deployment,
-                    now,
-                    chunk_date=chunk.get("chunk_date"),
-                )
-        if vec_index is not None:
-            try:
-                batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in matched]
-                vec_index.add_vectors(batch_hash_seqs, vectors)
-                if (batch_idx + 1) % save_interval == 0:
-                    vec_index.save()
-            except Exception:
-                logger.exception("usearch batch %d failed", batch_idx)
-        return len(matched), unaccounted
+        _stage_batch_embeddings(db, matched, vectors, deployment, now)
     except sqlite3.Error:
         logger.exception("DB write for batch %d failed", batch_idx)
         return 0, list(batch)
+
+    _add_batch_to_vec_index(vec_index, matched, vectors, batch_idx, save_interval)
+    return len(matched), unaccounted
+
+
+def _stage_batch_embeddings(
+    db: sqlite3.Connection,
+    matched: list[dict[str, Any]],
+    vectors: list[list[float]],
+    deployment: str,
+    now: int,
+) -> None:
+    """Stage all matched chunk embeddings in a single SQLite transaction.
+
+    Extracted from ``_embed_and_store_batch`` to keep that function under
+    F16's cognitive-complexity ceiling — the nested ``with db:`` + per-chunk
+    ``stage_embedding`` loop + per-vector index-write block nested above 15.
+    """
+    with db:
+        for chunk, vector in zip(matched, vectors, strict=True):
+            stage_embedding(
+                db,
+                chunk["hash"],
+                chunk["seq"],
+                chunk["pos"],
+                vector,
+                deployment,
+                now,
+                chunk_date=chunk.get("chunk_date"),
+            )
+
+
+def _add_batch_to_vec_index(
+    vec_index: Any,
+    matched: list[dict[str, Any]],
+    vectors: list[list[float]],
+    batch_idx: int,
+    save_interval: int,
+) -> None:
+    """Append batch vectors to the usearch ANN index, optionally checkpointing.
+
+    No-op when ``vec_index`` is None. Any exception is logged and
+    swallowed — usearch failures must not break the SQLite write path.
+    Extracted from ``_embed_and_store_batch`` for the same F16 reason as
+    ``_stage_batch_embeddings`` above.
+    """
+    if vec_index is None:
+        return
+    try:
+        batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in matched]
+        vec_index.add_vectors(batch_hash_seqs, vectors)
+        if (batch_idx + 1) % save_interval == 0:
+            vec_index.save()
+    except Exception:
+        logger.exception("usearch batch %d failed", batch_idx)
 
 
 def _save_index_checkpoint(vec_index: Any) -> None:
