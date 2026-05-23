@@ -36,6 +36,8 @@ The design needs to balance:
 | `03-bdd-scenarios.md` | Per-connector + per-use-case Gherkin scenarios that pin the topology decisions. New `tests/bdd/features/connector_*.feature` rows + `use_case_*.feature` files; gaps for connectors not yet implemented. |
 | `04-simulation.md` | Mental simulations of the layered model against each connector + use case. Identifies where the model breaks. |
 | `05-non-functionals.md` | Storage growth, indexing latency, freshness SLOs, document-conversion cost, rate-limit + quota budgets per source. |
+| `06-onyx-comparative-analysis.md` | Onyx (open-source enterprise search, ~50 connectors) framework patterns mapped against our 5-layer model — adopt / reject / adapt. |
+| `07-research-closeout.md` | Closes the per-connector open research items 01-source-analysis flagged (Dex webhooks, M365 body shape, Notion teamspace policy, GitHub scope semantics, M365 calendar sensitivity). |
 | `ADR.md` | Canonical architectural decision once analysis converges. |
 
 ## Layers (proposed; refined throughout)
@@ -74,7 +76,9 @@ The design needs to balance:
 | `03-bdd-scenarios.md` | drafted 2026-05-23 (30+ Gherkin scenarios) |
 | `04-simulation.md` | drafted 2026-05-23 (12 break points + resolutions) |
 | `05-non-functionals.md` | drafted 2026-05-23 (storage / freshness / latency / cost per source) |
-| `ADR.md` | drafted 2026-05-23 — **PROPOSED**, pending review |
+| `06-onyx-comparative-analysis.md` | in progress (Onyx framework patterns + gaps vs our 5-layer model) |
+| `07-research-closeout.md` | in progress (closing Dex webhook + M365 body + Notion teamspace + GitHub scope + M365 calendar.sensitivity open questions) |
+| `ADR.md` | drafted 2026-05-23 — **PROPOSED**, pending review (will revise after 06+07 land) |
 
 External research gaps tracked in `01-source-analysis.md` §"Open
-questions" per connector.
+questions" per connector — being closed in `07-research-closeout.md`.
