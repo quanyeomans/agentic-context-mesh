@@ -56,7 +56,7 @@ class _Ctx:
 
 
 @pytest.fixture
-def m365_flag_ctx() -> _Ctx:
+def m365_email_flag_ctx() -> _Ctx:
     return _Ctx()
 
 
@@ -66,10 +66,10 @@ def m365_flag_ctx() -> _Ctx:
 
 
 @given(parsers.parse("the operator has the m365-email-headers connector flag set to {value}"))
-def _operator_sets_flag(m365_flag_ctx: _Ctx, value: str) -> None:
+def _operator_sets_flag(m365_email_flag_ctx: _Ctx, value: str) -> None:
     """Pin the flag's value via :class:`FakeFeatureFlagResolver`."""
     parsed = value.strip().lower() == "true"
-    m365_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag("connector_m365_email_headers", parsed)
+    m365_email_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag("connector_m365_email_headers", parsed)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ def _operator_sets_flag(m365_flag_ctx: _Ctx, value: str) -> None:
 
 
 @when("the worker m365 connector sync tick runs")
-def _worker_tick_runs(m365_flag_ctx: _Ctx, caplog: pytest.LogCaptureFixture) -> None:
+def _worker_tick_runs(m365_email_flag_ctx: _Ctx, caplog: pytest.LogCaptureFixture) -> None:
     """Invoke the production :func:`dispatch_m365_email_headers_sync`.
 
     The ON / OFF branches are wrapped so we observe selection without
@@ -87,11 +87,11 @@ def _worker_tick_runs(m365_flag_ctx: _Ctx, caplog: pytest.LogCaptureFixture) -> 
     The branch helpers still log via the production helper bodies so
     the distinct INFO markers fire.
     """
-    resolver = m365_flag_ctx.resolver
+    resolver = m365_email_flag_ctx.resolver
     assert resolver is not None, "Given step must run before When"
 
     def _wrapped_on() -> ConnectorSyncResult:
-        m365_flag_ctx.on_branch_calls += 1
+        m365_email_flag_ctx.on_branch_calls += 1
         # Call the production marker log directly (which mirrors what
         # ``run_via_m365_email_headers_connector`` emits) but short-
         # circuit before run_connector_sync_pipeline so the BDD
@@ -101,7 +101,7 @@ def _worker_tick_runs(m365_flag_ctx: _Ctx, caplog: pytest.LogCaptureFixture) -> 
         return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
 
     def _wrapped_off() -> ConnectorSyncResult:
-        m365_flag_ctx.off_branch_calls += 1
+        m365_email_flag_ctx.off_branch_calls += 1
         return m365_off_branch_noop()
 
     # Reference the production default ON helper to keep its symbol
@@ -110,13 +110,13 @@ def _worker_tick_runs(m365_flag_ctx: _Ctx, caplog: pytest.LogCaptureFixture) -> 
     _ = run_via_m365_email_headers_connector
 
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        m365_flag_ctx.branch_result = dispatch_m365_email_headers_sync(
+        m365_email_flag_ctx.branch_result = dispatch_m365_email_headers_sync(
             read_flag=resolver.get,
             on_branch=_wrapped_on,
             off_branch=_wrapped_off,
         )
 
-    m365_flag_ctx.captured_logs = [rec.getMessage() for rec in caplog.records]
+    m365_email_flag_ctx.captured_logs = [rec.getMessage() for rec in caplog.records]
 
 
 # ---------------------------------------------------------------------------
@@ -129,28 +129,28 @@ def _has_marker(logs: list[str] | None, marker: str) -> bool:
 
 
 @then("the m365 connector OFF branch log appears")
-def _off_branch_log(m365_flag_ctx: _Ctx) -> None:
-    assert _has_marker(m365_flag_ctx.captured_logs, _OFF_BRANCH_MARKER), (
-        f"expected the m365 OFF branch log; got {m365_flag_ctx.captured_logs!r}"
+def _off_branch_log(m365_email_flag_ctx: _Ctx) -> None:
+    assert _has_marker(m365_email_flag_ctx.captured_logs, _OFF_BRANCH_MARKER), (
+        f"expected the m365 OFF branch log; got {m365_email_flag_ctx.captured_logs!r}"
     )
 
 
 @then("the m365 connector ON branch log appears")
-def _on_branch_log(m365_flag_ctx: _Ctx) -> None:
-    assert _has_marker(m365_flag_ctx.captured_logs, _ON_BRANCH_MARKER), (
-        f"expected the m365 ON branch log; got {m365_flag_ctx.captured_logs!r}"
+def _on_branch_log(m365_email_flag_ctx: _Ctx) -> None:
+    assert _has_marker(m365_email_flag_ctx.captured_logs, _ON_BRANCH_MARKER), (
+        f"expected the m365 ON branch log; got {m365_email_flag_ctx.captured_logs!r}"
     )
 
 
 @then("the m365 connector ON branch does not run")
-def _on_branch_skipped(m365_flag_ctx: _Ctx) -> None:
-    assert m365_flag_ctx.on_branch_calls == 0, (
-        f"expected ON branch to NOT run; on_branch_calls={m365_flag_ctx.on_branch_calls}"
+def _on_branch_skipped(m365_email_flag_ctx: _Ctx) -> None:
+    assert m365_email_flag_ctx.on_branch_calls == 0, (
+        f"expected ON branch to NOT run; on_branch_calls={m365_email_flag_ctx.on_branch_calls}"
     )
 
 
 @then("the m365 connector OFF branch does not run")
-def _off_branch_skipped(m365_flag_ctx: _Ctx) -> None:
-    assert m365_flag_ctx.off_branch_calls == 0, (
-        f"expected OFF branch to NOT run; off_branch_calls={m365_flag_ctx.off_branch_calls}"
+def _off_branch_skipped(m365_email_flag_ctx: _Ctx) -> None:
+    assert m365_email_flag_ctx.off_branch_calls == 0, (
+        f"expected OFF branch to NOT run; off_branch_calls={m365_email_flag_ctx.off_branch_calls}"
     )

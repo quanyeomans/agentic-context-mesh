@@ -66,7 +66,7 @@ class _Ctx:
 
 
 @pytest.fixture
-def m365_flag_ctx() -> _Ctx:
+def m365_calendar_flag_ctx() -> _Ctx:
     return _Ctx()
 
 
@@ -76,9 +76,9 @@ def m365_flag_ctx() -> _Ctx:
 
 
 @given(parsers.parse("the operator has the connector-m365-calendar flag set to {value}"))
-def _operator_sets_flag(m365_flag_ctx: _Ctx, value: str) -> None:
+def _operator_sets_flag(m365_calendar_flag_ctx: _Ctx, value: str) -> None:
     parsed = value.strip().lower() == "true"
-    m365_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag(_FLAG_NAME, parsed)
+    m365_calendar_flag_ctx.resolver = FakeFeatureFlagResolver().with_flag(_FLAG_NAME, parsed)
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +87,9 @@ def _operator_sets_flag(m365_flag_ctx: _Ctx, value: str) -> None:
 
 
 @when(parsers.parse("the worker resolves the enabled connector set"))
-def _worker_resolves(m365_flag_ctx: _Ctx) -> None:
-    assert m365_flag_ctx.resolver is not None, "Given step must run before When"
-    m365_flag_ctx.resolved = resolve_enabled_connectors(m365_flag_ctx.resolver.get)
+def _worker_resolves(m365_calendar_flag_ctx: _Ctx) -> None:
+    assert m365_calendar_flag_ctx.resolver is not None, "Given step must run before When"
+    m365_calendar_flag_ctx.resolved = resolve_enabled_connectors(m365_calendar_flag_ctx.resolver.get)
 
 
 # ---------------------------------------------------------------------------
@@ -98,31 +98,32 @@ def _worker_resolves(m365_flag_ctx: _Ctx) -> None:
 
 
 @then(parsers.parse("the m365_calendar connector is in the resolved set"))
-def _m365_in_set(m365_flag_ctx: _Ctx) -> None:
-    assert m365_flag_ctx.resolved is not None, "When step must populate resolved"
-    assert _CONNECTOR_NAME in m365_flag_ctx.resolved, f"expected {_CONNECTOR_NAME!r} in {m365_flag_ctx.resolved!r}"
+def _m365_in_set(m365_calendar_flag_ctx: _Ctx) -> None:
+    assert m365_calendar_flag_ctx.resolved is not None, "When step must populate resolved"
+    resolved = m365_calendar_flag_ctx.resolved
+    assert _CONNECTOR_NAME in resolved, f"expected {_CONNECTOR_NAME!r} in {resolved!r}"
 
 
 @then(parsers.parse("the m365_calendar connector is not in the resolved set"))
-def _m365_not_in_set(m365_flag_ctx: _Ctx) -> None:
-    assert m365_flag_ctx.resolved is not None, "When step must populate resolved"
-    assert _CONNECTOR_NAME not in m365_flag_ctx.resolved, (
-        f"unexpected {_CONNECTOR_NAME!r} in {m365_flag_ctx.resolved!r}"
+def _m365_not_in_set(m365_calendar_flag_ctx: _Ctx) -> None:
+    assert m365_calendar_flag_ctx.resolved is not None, "When step must populate resolved"
+    assert _CONNECTOR_NAME not in m365_calendar_flag_ctx.resolved, (
+        f"unexpected {_CONNECTOR_NAME!r} in {m365_calendar_flag_ctx.resolved!r}"
     )
 
 
 @then(parsers.parse("no Graph traffic is initiated for the m365_calendar connector"))
-def _no_graph_traffic(m365_flag_ctx: _Ctx) -> None:
+def _no_graph_traffic(m365_calendar_flag_ctx: _Ctx) -> None:
     # The BDD layer doesn't construct a Graph client; if the flag-OFF
     # scenario succeeded at the previous assertion, no construction
     # would happen on the worker side either. The assertion is
     # structurally redundant but pinned by F54 (both-branch BDD must
     # carry a non-trivial OFF-side assertion).
-    assert m365_flag_ctx.resolved is not None
-    assert _CONNECTOR_NAME not in m365_flag_ctx.resolved
+    assert m365_calendar_flag_ctx.resolved is not None
+    assert _CONNECTOR_NAME not in m365_calendar_flag_ctx.resolved
 
 
 @then(parsers.parse("the m365_calendar connector ingest branch is ready to run"))
-def _ingest_branch_ready(m365_flag_ctx: _Ctx) -> None:
-    assert m365_flag_ctx.resolved is not None
-    assert _CONNECTOR_NAME in m365_flag_ctx.resolved
+def _ingest_branch_ready(m365_calendar_flag_ctx: _Ctx) -> None:
+    assert m365_calendar_flag_ctx.resolved is not None
+    assert _CONNECTOR_NAME in m365_calendar_flag_ctx.resolved
