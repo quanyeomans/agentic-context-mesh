@@ -426,8 +426,18 @@ def cmd_guide(args: argparse.Namespace) -> int:
         print(f"  Dest:   {dest}")
         return 0
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
+    # CLI trust boundary: dest is derived from --document-root / --output (both
+    # user-supplied). The kairix CLI runs with the calling user's filesystem
+    # permissions and operates inside the local-process trust model; the user
+    # can already write anywhere their account permits via shell redirection,
+    # so --output / --document-root are the trust boundary itself. The trailing
+    # NOSONAR suppressions cover the parent mkdir and the write where S2083
+    # fires; the surrounding scripts/** exclusion in sonar-project.properties
+    # documents the same rationale for the operator-script siblings.
+    dest.parent.mkdir(parents=True, exist_ok=True)  # NOSONAR — CLI trust boundary; see comment above
+    dest.write_text(
+        guide_src.read_text(encoding="utf-8"), encoding="utf-8"
+    )  # NOSONAR — CLI trust boundary; see comment above
     _print_guide_install_success(dest)
     return 0
 

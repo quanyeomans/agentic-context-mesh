@@ -38,7 +38,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Any, TextIO
 
 from kairix.paths import worker_pause_flag_path, worker_state_path
 from kairix.worker_state import WorkerState, read_state
@@ -180,6 +180,17 @@ def _auto_heal_gaps(db: sqlite3.Connection, gaps: tuple[object, ...], out: TextI
             out.write(f"auto-heal: rebuild_fts indexed {count} documents\n")
 
 
+def _render_preflight_human(report: Any, out: TextIO) -> None:
+    """Render the human-readable preflight report (no exit-code logic)."""
+    if report.healthy and not report.gaps:
+        out.write("Preflight integrity check: PASSED (no gaps detected)\n")
+        return
+    status_word = "PASSED" if report.healthy else "FAILED"
+    out.write(f"Preflight integrity check: {status_word} ({len(report.gaps)} gap(s))\n")
+    for gap in report.gaps:
+        out.write(_format_gap_line(gap) + "\n")
+
+
 def preflight(
     *,
     db_path: Path | None = None,
@@ -221,13 +232,7 @@ def preflight(
     if as_json:
         out.write(json.dumps(report_to_dict(report), indent=2) + "\n")
     else:
-        if report.healthy and not report.gaps:
-            out.write("Preflight integrity check: PASSED (no gaps detected)\n")
-        else:
-            status_word = "PASSED" if report.healthy else "FAILED"
-            out.write(f"Preflight integrity check: {status_word} ({len(report.gaps)} gap(s))\n")
-            for gap in report.gaps:
-                out.write(_format_gap_line(gap) + "\n")
+        _render_preflight_human(report, out)
     return 0 if report.healthy else 1
 
 
