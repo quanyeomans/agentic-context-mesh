@@ -170,6 +170,18 @@ echo -n "  confidential... "
 bash scripts/pre-commit-confidential-check.sh 2>/dev/null || { echo -e "${RED}FAIL${NC}"; exit 1; }
 echo -e "${GREEN}OK${NC}"
 
+# 8. Sonar new-code parity — mirror CI's `1 · Quality gate` locally so
+# Sonar findings are batched and fixed pre-push, not discovered per-cycle.
+# See docs/architecture/local-first-feedback-loops.md.
+# Skip with KAIRIX_SKIP_SONAR_PARITY=1 during a focused refactor series.
+echo -n "  sonar new-code parity... "
+SONAR_OUT=$(python3 scripts/checks/check_sonar_new_code.py 2>&1) || {
+    echo -e "${RED}FAIL${NC}"
+    echo "$SONAR_OUT"
+    exit 1
+}
+echo -e "${GREEN}OK${NC}"
+
 echo ""
 echo -e "${GREEN}All gates passed. Committing.${NC}"
 git commit -m "$MESSAGE"
