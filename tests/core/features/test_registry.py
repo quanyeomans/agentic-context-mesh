@@ -16,15 +16,22 @@ from kairix.core.features.registry import REGISTRY, FeatureFlag, validate_regist
 pytestmark = pytest.mark.unit
 
 
-def test_registry_is_empty_at_pr2_landing() -> None:
-    """PR-2 lands the registry empty — every future PR that adds a flag
-    flips this expectation. The empty-at-landing invariant is also the
-    contract the CLI / MCP outcome tests assert against.
+def test_registry_has_obsidian_connector_primary_at_pr6_landing() -> None:
+    """PR-6 lands the first flag — ``obsidian_connector_primary`` at
+    introduce stage. Every future PR that adds a flag appends to this
+    assertion.
 
-    Sabotage: add a dummy entry to REGISTRY → this test fails (and the
-    F30 outcome tests fail on the non-empty flags list). Verified.
+    Sabotage: rename the registry entry's key → this test fails
+    because ``"obsidian_connector_primary" in REGISTRY`` is False.
+    Verified during PR-6 development.
     """
-    assert REGISTRY == {}, f"expected empty REGISTRY at PR-2 landing; got: {sorted(REGISTRY)}"
+    assert "obsidian_connector_primary" in REGISTRY, (
+        f"expected the obsidian_connector_primary entry at PR-6 landing; got: {sorted(REGISTRY)}"
+    )
+    entry = REGISTRY["obsidian_connector_primary"]
+    assert entry.default is False
+    assert entry.stage == "introduce"
+    assert entry.related_spec == "docs/architecture/connector-ingestion-architecture.md"
 
 
 def test_feature_flag_is_frozen() -> None:

@@ -126,14 +126,24 @@ def test_remediation_carries_action_markers() -> None:
     assert "run:" in rem
 
 
-def test_vacuous_green_when_module_absent() -> None:
-    """When ``kairix.core.features.registry`` cannot be imported, the
-    gate stays green (vacuous). PR-2 may not be landed yet.
+def test_loads_live_registry_after_pr6() -> None:
+    """PR-6 lands the first flag — ``_load_registry`` returns a non-None
+    dict containing the canonical entry.
 
-    Verified via the real-repo invocation: ``main()`` returns 0 when
-    the module is absent (the current state in this worktree).
+    Pre-PR-2 the registry module did not exist and ``_load_registry``
+    returned ``None`` (vacuous-green). PR-2 added the empty registry;
+    PR-6 added the first entry. The detector still resolves cleanly —
+    ``main()`` returns 0 because the entry's ``target_retire_in`` is
+    within 6 months of the current setuptools-scm version.
+
+    Sabotage proof: remove the obsidian_connector_primary entry from
+    REGISTRY → ``"obsidian_connector_primary" in registry`` becomes False
+    and this test fails on the explicit-key assertion.
     """
     detector = _load_detector()
-    # _load_registry returns None when the module is absent.
-    assert detector._load_registry() is None  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    registry = detector._load_registry()  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert registry is not None, "registry must load cleanly post-PR-2"
+    assert "obsidian_connector_primary" in registry, (
+        f"expected the PR-6 entry; got: {sorted(registry) if registry else 'None'}"
+    )
     assert detector.main() == 0  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs

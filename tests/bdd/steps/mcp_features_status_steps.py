@@ -27,13 +27,16 @@ def _mcp_features_state() -> dict[str, Any]:
     return {"envelope": None}
 
 
-@given("the kairix features registry has no entries declared")
-def _registry_has_no_entries_mcp() -> None:
-    """No-op — registry is empty at PR-2 landing.
+@given("the kairix features registry has entries declared")
+def _registry_has_entries() -> None:
+    """No-op — the registry is populated at PR-6 landing with at least
+    the ``obsidian_connector_primary`` flag (see
+    ``kairix/core/features/registry.py:REGISTRY``).
 
     The CLI scenario uses a slightly different phrase
     (``... is empty``) so the two step packs can co-exist without
-    pytest-bdd ambiguity. Both phrases land on the same registry state.
+    pytest-bdd ambiguity. The CLI scenario pins an empty view via the
+    CLI's ``status_provider`` DI seam.
     """
 
 
@@ -42,10 +45,10 @@ def _agent_calls_tool(_mcp_features_state: dict[str, Any]) -> None:
     _mcp_features_state["envelope"] = tool_features_status()
 
 
-@then("the tool_features_status envelope carries an empty flags list")
-def _envelope_carries_empty_flags(_mcp_features_state: dict[str, Any]) -> None:
+@then("the tool_features_status envelope carries a non-empty flags list")
+def _envelope_carries_non_empty_flags(_mcp_features_state: dict[str, Any]) -> None:
     envelope = _mcp_features_state["envelope"]
-    assert envelope["flags"] == [], f"expected empty flags list (registry is empty); got: {envelope['flags']!r}"
+    assert envelope["flags"], f"expected non-empty flags list; got: {envelope['flags']!r}"
 
 
 @then("the tool_features_status envelope has an empty error string")

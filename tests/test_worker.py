@@ -1481,18 +1481,28 @@ def test_connector_sync_result_default_zero_counters() -> None:
 
 @pytest.mark.unit
 def test_run_connector_sync_default_no_config_returns_zero(caplog: pytest.LogCaptureFixture) -> None:
-    """IM-3: ``_default_connector_sync`` with no ``kairix.config.yaml``
-    (or an empty ``connectors:`` list) is a zero-counter no-op and
-    ``run_connector_sync`` logs the structured-completion line.
+    """PR-6: ``run_connector_sync`` with an injected zero-counter
+    ``connector_sync_fn`` logs the structured-completion line.
 
-    Sabotage proof: change the early-return in ``_default_connector_sync``
-    to ``return ConnectorSyncResult(synced=99, ...)`` and the
+    The original IM-3 variant relied on the default
+    ``_default_connector_sync`` short-circuiting to zero. After PR-6
+    the default branches on the ``obsidian_connector_primary`` flag and
+    the legacy path reaches the on-disk DocumentScanner. Driving the
+    default-factory branches is the job of the PR-6 integration tests
+    in ``tests/integration/test_feature_flag_obsidian_connector_primary.py``;
+    this unit test stays focused on the worker's logging contract.
+
+    Sabotage proof: drop the ``%d failed=...`` substitution from the
+    structured-log line in ``run_connector_sync`` and the
     ``synced=0`` substring check below fails. Restored, the test passes.
     """
     import logging
 
+    def _zero_sync() -> ConnectorSyncResult:
+        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
     with caplog.at_level(logging.INFO, logger="kairix.worker"):
-        run_connector_sync(WorkerDeps())  # default deps → real _default_connector_sync
+        run_connector_sync(WorkerDeps(connector_sync_fn=_zero_sync))
     completion = [r.getMessage() for r in caplog.records if "connector sync complete" in r.getMessage()]
     assert completion, "expected a 'connector sync complete' log line"
     assert "synced=0" in completion[0]
@@ -1714,13 +1724,20 @@ def test_main_loop_does_not_run_connector_sync_while_paused(tmp_path: Path) -> N
 
 @pytest.mark.unit
 def test_main_loop_default_connector_sync_does_not_crash_worker(tmp_path: Path) -> None:
-    """End-to-end Wave-1 guarantee: with no ``connector_sync_fn`` override,
-    the worker's default raises ``NotImplementedError`` and the loop
-    survives — embed still runs to completion in a subsequent iteration.
+    """End-to-end guarantee: the worker loop survives an unexpected
+    raise from ``connector_sync_fn`` — embed still runs to completion
+    in a subsequent iteration.
 
-    Sabotage proof: remove the ``except NotImplementedError`` branch
-    from ``run_connector_sync`` and the worker crashes on the first
-    maintenance tick — the second embed call never happens.
+    PR-6: the default ``_default_connector_sync`` no longer raises
+    ``NotImplementedError`` (it branches on the
+    ``obsidian_connector_primary`` flag). To preserve the original
+    test's intent — "an exceptional connector sync does not bring
+    down the worker" — we now inject a ``connector_sync_fn`` that
+    raises and assert the embed loop still progresses.
+
+    Sabotage proof: remove the ``except (Exception, SystemExit)``
+    catch from ``run_connector_sync`` and the worker crashes on the
+    first maintenance tick — the second embed call never happens.
     """
     import os
 
@@ -1731,13 +1748,15 @@ def test_main_loop_default_connector_sync_does_not_crash_worker(tmp_path: Path) 
         if embed_calls["n"] >= 2:
             os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal so the loop exits after the second embed.
 
-    # Note: no connector_sync_fn override — exercises the
-    # NotImplementedError-raising default.
+    def _raising_connector_sync() -> ConnectorSyncResult:
+        raise RuntimeError("simulated connector_sync failure")
+
     deps = WorkerDeps(
         embed=_embed_then_shutdown,
         entity_seed=lambda: None,
         health_check=lambda: [],
         wikilinks=lambda: None,
+        connector_sync_fn=_raising_connector_sync,
         sleep=lambda _s: None,
         state=WorkerState(),
         state_path=tmp_path / "worker-state.json",
@@ -1754,5 +1773,5 @@ def test_main_loop_default_connector_sync_does_not_crash_worker(tmp_path: Path) 
     )
 
     assert embed_calls["n"] >= 2, (
-        f"main loop must survive the default connector_sync NotImplementedError; got {embed_calls['n']} embed call(s)."
+        f"main loop must survive an exceptional connector_sync_fn; got {embed_calls['n']} embed call(s)."
     )
