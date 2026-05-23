@@ -29,7 +29,9 @@ if TYPE_CHECKING:
 class IntentClassifier(Protocol):
     """Classifies a search query into a QueryIntent dispatch category."""
 
-    def classify(self, query: str) -> QueryIntent: ...
+    def classify(self, query: str) -> QueryIntent:
+        """Return the QueryIntent dispatch category for ``query``."""
+        ...
 
 
 @runtime_checkable
@@ -41,11 +43,17 @@ class DocumentRepository(Protocol):
         query: str,
         collections: list[str] | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[dict[str, Any]]:
+        """Return up to ``limit`` FTS5-ranked document rows for ``query``."""
+        ...
 
-    def get_by_path(self, path: str) -> dict[str, Any] | None: ...
+    def get_by_path(self, path: str) -> dict[str, Any] | None:
+        """Return the document row for ``path``, or None if absent."""
+        ...
 
-    def get_chunk_dates(self, paths: list[str]) -> dict[str, str]: ...
+    def get_chunk_dates(self, paths: list[str]) -> dict[str, str]:
+        """Return a ``path -> ISO-8601 date`` map for the given document paths."""
+        ...
 
     def insert_or_update(
         self,
@@ -54,7 +62,9 @@ class DocumentRepository(Protocol):
         title: str,
         content: str,
         content_hash: str,
-    ) -> None: ...
+    ) -> None:
+        """UPSERT the document row keyed on ``path`` and refresh FTS state."""
+        ...
 
 
 @runtime_checkable
@@ -62,13 +72,21 @@ class GraphRepository(Protocol):
     """Interface for the entity graph (Neo4j backed)."""
 
     @property
-    def available(self) -> bool: ...
+    def available(self) -> bool:
+        """True when the graph backend is reachable; False when degraded or offline."""
+        ...
 
-    def find_entity(self, name: str) -> dict[str, Any] | None: ...
+    def find_entity(self, name: str) -> dict[str, Any] | None:
+        """Return the entity row whose canonical name matches ``name``, else None."""
+        ...
 
-    def entity_in_degrees(self) -> list[dict[str, Any]]: ...
+    def entity_in_degrees(self) -> list[dict[str, Any]]:
+        """Return per-entity in-degree counts for diagnostics / ranking signals."""
+        ...
 
-    def cypher(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]: ...
+    def cypher(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Execute ``query`` with optional ``params`` and return result rows."""
+        ...
 
 
 @runtime_checkable
@@ -80,50 +98,70 @@ class VectorRepository(Protocol):
         query_vec: list[float],
         k: int,
         collections: list[str] | None = None,
-    ) -> list[dict[str, Any]]: ...
+    ) -> list[dict[str, Any]]:
+        """Return up to ``k`` nearest-neighbour rows for ``query_vec``."""
+        ...
 
-    def add_vectors(self, items: list[tuple[str, list[float]]]) -> int: ...
+    def add_vectors(self, items: list[tuple[str, list[float]]]) -> int:
+        """Insert/update the ``(path, vector)`` pairs and return rows written."""
+        ...
 
-    def count(self) -> int: ...
+    def count(self) -> int:
+        """Return the total number of vectors currently indexed."""
+        ...
 
 
 @runtime_checkable
 class EmbeddingService(Protocol):
     """Text embedding interface (single and batch)."""
 
-    def embed(self, text: str) -> list[float]: ...
+    def embed(self, text: str) -> list[float]:
+        """Return a single embedding vector for ``text``."""
+        ...
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]: ...
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Return one embedding vector per input string, in input order."""
+        ...
 
 
 @runtime_checkable
 class FusionStrategy(Protocol):
     """Fuses BM25 and vector result lists into a single ranked list."""
 
-    def fuse(self, bm25: list[Any], vec: list[Any]) -> list[Any]: ...
+    def fuse(self, bm25: list[Any], vec: list[Any]) -> list[Any]:
+        """Merge BM25 and vector hits into a single ranked result list."""
+        ...
 
 
 @runtime_checkable
 class BoostStrategy(Protocol):
     """Post-fusion boost strategy (entity, procedural, temporal, etc.)."""
 
-    def boost(self, results: list[Any], query: str, context: dict[str, Any]) -> list[Any]: ...
+    def boost(self, results: list[Any], query: str, context: dict[str, Any]) -> list[Any]:
+        """Re-rank ``results`` in place of strategy-specific signals; return the new order."""
+        ...
 
 
 @runtime_checkable
 class ScoringStrategy(Protocol):
     """Scores retrieved results against gold-standard documents."""
 
-    def score(self, retrieved: list[str], gold: list[dict[str, Any]]) -> float: ...
+    def score(self, retrieved: list[str], gold: list[dict[str, Any]]) -> float:
+        """Return the relevance score of ``retrieved`` against ``gold`` (0.0-1.0)."""
+        ...
 
 
 @runtime_checkable
 class SearchLogger(Protocol):
     """Structured logging for search and query events."""
 
-    def log_search(self, event: dict[str, Any]) -> None: ...
+    def log_search(self, event: dict[str, Any]) -> None:
+        """Emit a structured search-event record (query, hits, latency, …)."""
+        ...
 
-    def log_query(self, event: dict[str, Any]) -> None: ...
+    def log_query(self, event: dict[str, Any]) -> None:
+        """Emit a structured query-event record (intent, agent, context, …)."""
+        ...
 
 
 @runtime_checkable
@@ -139,7 +177,9 @@ class CollectionResolver(Protocol):
     business logic only depends on the Protocol surface (G4: config at boundary).
     """
 
-    def resolve(self, agent: str | None, scope: Any) -> list[str] | None: ...
+    def resolve(self, agent: str | None, scope: Any) -> list[str] | None:
+        """Return the concrete collection list for ``(agent, scope)``; None = no filter."""
+        ...
 
 
 @runtime_checkable
@@ -158,11 +198,17 @@ class AgentRegistry(Protocol):
     ALL_AGENTS / EVERYTHING scope so the misconfiguration is loud.
     """
 
-    def list_agents(self) -> list[Any]: ...
+    def list_agents(self) -> list[Any]:
+        """Return all configured agent definitions (declarative YAML rows)."""
+        ...
 
-    def collection_for(self, name: str) -> str: ...
+    def collection_for(self, name: str) -> str:
+        """Return the collection name owned by agent ``name``. Raises if absent."""
+        ...
 
-    def validate_write(self, agent_name: str, path: str) -> bool: ...
+    def validate_write(self, agent_name: str, path: str) -> bool:
+        """Return True if ``agent_name`` is allowed to write under ``path``."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +249,9 @@ class ChatBackend(Protocol):
         system: str | None = None,
         temperature: float = 0.0,
         timeout_s: float = 30.0,
-    ) -> str: ...
+    ) -> str:
+        """Return the completed assistant message text for ``prompt``."""
+        ...
 
 
 @runtime_checkable
@@ -227,9 +275,13 @@ class LLMJudge(Protocol):
         candidates: list[tuple[str, str]],
         *,
         runs: int = 1,
-    ) -> Any: ...
+    ) -> Any:
+        """Return a JudgeResult-shaped object with per-candidate 0/1/2 relevance grades."""
+        ...
 
-    def calibrate(self) -> bool: ...
+    def calibrate(self) -> bool:
+        """Return True when the judge passes its sanity-check calibration suite."""
+        ...
 
 
 @runtime_checkable
@@ -254,7 +306,9 @@ class QueryGenerator(Protocol):
         *,
         n: int,
         categories: list[str],
-    ) -> list[Any]: ...
+    ) -> list[Any]:
+        """Return 0..n intent-tagged eval queries derived from ``(title, body)``."""
+        ...
 
 
 @runtime_checkable
@@ -281,7 +335,9 @@ class Retriever(Protocol):
         *,
         collections: list[str] | None = None,
         cfg: Any = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Return ranked candidate documents for ``query`` honouring the ``collections`` filter."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -316,21 +372,29 @@ class MemoryStore(Protocol):
     # add(content, *, metadata): backend-assigned id. metadata carries
     # backend-agnostic fields (source path, agent, timestamp, entity hints);
     # backends ignore unknown keys and round-trip the rest on search.
-    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str: ...
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str:
+        """Persist ``content`` (with optional metadata) and return the backend-assigned id."""
+        ...
 
     # search(query, *, top_k): up to top_k Memory-shaped objects, best
     # first. Empty list is a valid "no relevant content" signal — callers
     # MUST tolerate it. Implementations may return fewer than top_k.
-    def search(self, query: str, *, top_k: int = 10) -> list[Any]: ...
+    def search(self, query: str, *, top_k: int = 10) -> list[Any]:
+        """Return up to ``top_k`` Memory-shaped objects matching ``query``, best first."""
+        ...
 
     # update(memory_id, content): replace content of an existing memory.
     # Raises KeyError (or backend equivalent) if id absent. Backends with
     # append-only semantics (mem0 consolidation) may supersede rather than
     # replace — the Protocol does not pin the strategy.
-    def update(self, memory_id: str, content: str) -> None: ...
+    def update(self, memory_id: str, content: str) -> None:
+        """Replace or supersede the content of the memory identified by ``memory_id``."""
+        ...
 
     # delete(memory_id): remove. No-op if id is already absent.
-    def delete(self, memory_id: str) -> None: ...
+    def delete(self, memory_id: str) -> None:
+        """Delete the memory identified by ``memory_id``; no-op if already absent."""
+        ...
 
 
 @runtime_checkable
@@ -350,10 +414,21 @@ class ConversationStore(Protocol):
     the chat-specific entry point.
     """
 
-    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str: ...
-    def search(self, query: str, *, top_k: int = 10) -> list[Any]: ...
-    def update(self, memory_id: str, content: str) -> None: ...
-    def delete(self, memory_id: str) -> None: ...
+    def add(self, content: str, *, metadata: dict[str, Any] | None = None) -> str:
+        """Persist ``content`` (with optional metadata) and return the backend-assigned id."""
+        ...
+
+    def search(self, query: str, *, top_k: int = 10) -> list[Any]:
+        """Return up to ``top_k`` Memory-shaped objects matching ``query``, best first."""
+        ...
+
+    def update(self, memory_id: str, content: str) -> None:
+        """Replace or supersede the content of the memory identified by ``memory_id``."""
+        ...
+
+    def delete(self, memory_id: str) -> None:
+        """Delete the memory identified by ``memory_id``; no-op if already absent."""
+        ...
 
     # add_turn(*, message, role, conversation_id, timestamp): adds a single
     # turn; returns the id of the most-recently-produced memory record.
@@ -368,7 +443,9 @@ class ConversationStore(Protocol):
         role: str,
         conversation_id: str,
         timestamp: str | None = None,
-    ) -> str: ...
+    ) -> str:
+        """Ingest one conversation turn; return the id of the produced memory record."""
+        ...
 
 
 @runtime_checkable
@@ -387,13 +464,24 @@ class Memory(Protocol):
     """
 
     @property
-    def id(self) -> str: ...
+    def id(self) -> str:
+        """Stable identifier assigned by the backend on add()."""
+        ...
+
     @property
-    def content(self) -> str: ...
+    def content(self) -> str:
+        """The recalled memory text."""
+        ...
+
     @property
-    def score(self) -> float: ...
+    def score(self) -> float:
+        """Recall score rescaled to [0.0, 1.0] (1.0 = best match)."""
+        ...
+
     @property
-    def metadata(self) -> dict[str, Any]: ...
+    def metadata(self) -> dict[str, Any]:
+        """Backend-agnostic metadata round-tripped from add() (path, agent, timestamp, …)."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -456,25 +544,54 @@ class FactRecord(Protocol):
     """
 
     @property
-    def id(self) -> str: ...
+    def id(self) -> str:
+        """Deterministic id derived from (entity, attribute, source_turn_ids)."""
+        ...
+
     @property
-    def entity(self) -> str: ...
+    def entity(self) -> str:
+        """The canonical entity this fact is about (subject)."""
+        ...
+
     @property
-    def attribute(self) -> str: ...
+    def attribute(self) -> str:
+        """The attribute / predicate (e.g. 'role', 'lives_in')."""
+        ...
+
     @property
-    def value(self) -> str: ...
+    def value(self) -> str:
+        """The attribute value extracted by the LLM."""
+        ...
+
     @property
-    def confidence(self) -> float: ...
+    def confidence(self) -> float:
+        """LLM-rated confidence in [0.0, 1.0]; calibrated against ground truth."""
+        ...
+
     @property
-    def source_turn_ids(self) -> tuple[str, ...]: ...
+    def source_turn_ids(self) -> tuple[str, ...]:
+        """Raw turn ids this fact was grounded in; never empty for a valid record."""
+        ...
+
     @property
-    def extracted_at(self) -> str: ...
+    def extracted_at(self) -> str:
+        """Wall-clock ISO-8601 timestamp at extraction time."""
+        ...
+
     @property
-    def superseded_by(self) -> str | None: ...
+    def superseded_by(self) -> str | None:
+        """Id of a newer fact that replaces this one; None for live (current) facts."""
+        ...
+
     @property
-    def namespace(self) -> str: ...
+    def namespace(self) -> str:
+        """Engagement / tenant namespace for scoped recall."""
+        ...
+
     @property
-    def evidence_at(self) -> str | None: ...
+    def evidence_at(self) -> str | None:
+        """Event-time ISO-8601 anchor for the fact (Lever A); None for legacy rows."""
+        ...
 
 
 @runtime_checkable
@@ -489,9 +606,14 @@ class FactHit(Protocol):
     """
 
     @property
-    def record(self) -> FactRecord: ...
+    def record(self) -> FactRecord:
+        """The underlying FactRecord this hit refers to."""
+        ...
+
     @property
-    def score(self) -> float: ...
+    def score(self) -> float:
+        """Retrieval score assigned to this hit (higher = better)."""
+        ...
 
 
 @runtime_checkable
@@ -534,7 +656,9 @@ class FactExtractor(Protocol):
         turns: list[dict[str, Any]],
         window_hint: dict[str, Any] | None = None,
         session_metadata: dict[str, Any] | None = None,
-    ) -> list[FactRecord]: ...
+    ) -> list[FactRecord]:
+        """Return zero or more FactRecords grounded in the supplied turns."""
+        ...
 
 
 @runtime_checkable
@@ -556,26 +680,34 @@ class FactStore(Protocol):
     # add(fact): persist a fact. Idempotent on the fact's deterministic id.
     # Adding a fact whose id already exists is a no-op — the existing record
     # stays. Contract that makes ingest pipelines safely re-runnable.
-    def add(self, fact: FactRecord) -> None: ...
+    def add(self, fact: FactRecord) -> None:
+        """Persist ``fact``; idempotent on its deterministic id."""
+        ...
 
     # search(query, *, top_k, namespace): up to top_k facts matching query,
     # best first. namespace=non-None restricts to that namespace (engagement-
     # scoped recall for consultancy-in-a-box); None means "all namespaces".
     # Empty list is a valid "no facts" signal; by default excludes superseded.
-    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[FactHit]: ...
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[FactHit]:
+        """Return up to ``top_k`` non-superseded facts matching ``query`` in ``namespace``."""
+        ...
 
     # find_conflicts(*, entity, attribute, namespace): live (non-superseded)
     # facts for the (entity, attribute) key. Used by the consolidation pass:
     # on every new fact, the ingest pipeline finds existing facts about the
     # same entity-attribute pair, then runs the contradict use case to decide
     # whether the new fact supersedes them.
-    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[FactRecord]: ...
+    def find_conflicts(self, *, entity: str, attribute: str, namespace: str | None = None) -> list[FactRecord]:
+        """Return all live facts for the (entity, attribute) key in ``namespace``."""
+        ...
 
     # supersede(*, old_id, new_id): mark old_id as superseded by new_id.
     # After this, old_id no longer appears in default search but stays
     # retrievable for audit (future include_superseded=True kwarg).
     # Raises KeyError if either id is absent.
-    def supersede(self, *, old_id: str, new_id: str) -> None: ...
+    def supersede(self, *, old_id: str, new_id: str) -> None:
+        """Mark ``old_id`` as superseded by ``new_id``; raises KeyError if either is absent."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -624,7 +756,9 @@ class DocumentWriter(Protocol):
         session_id: str,
         rendered_body: str,
         frontmatter: dict[str, Any],
-    ) -> Path: ...
+    ) -> Path:
+        """Persist one rendered session document; return its on-disk path. Idempotent."""
+        ...
 
 
 @runtime_checkable
@@ -644,7 +778,9 @@ class CorpusEmbedder(Protocol):
     :class:`IngestResult` can carry an honest ``chunks_indexed``.
     """
 
-    def embed(self, paths_to_embed: tuple[Path, ...]) -> int: ...
+    def embed(self, paths_to_embed: tuple[Path, ...]) -> int:
+        """Embed the supplied document paths; return the count of chunks indexed."""
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -849,10 +985,21 @@ class SourceConnector(Protocol):
 
     name: str
 
-    def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]: ...
-    def fetch(self, item_id: str) -> RawArtefact: ...
-    def source_link(self, item_id: str) -> str: ...
-    def sensitivity_for(self, item_id: str) -> Sensitivity: ...
+    def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]:
+        """Yield ChangeEvents observed since ``cursor`` (None = full enumeration)."""
+        ...
+
+    def fetch(self, item_id: str) -> RawArtefact:
+        """Return the raw bytes + mime hint for one source item."""
+        ...
+
+    def source_link(self, item_id: str) -> str:
+        """Return a stable URI back to the item in its source system."""
+        ...
+
+    def sensitivity_for(self, item_id: str) -> Sensitivity:
+        """Return the configured sensitivity tier for the given item."""
+        ...
 
 
 @runtime_checkable
@@ -870,9 +1017,17 @@ class Extractor(Protocol):
     name: str
     version: str
 
-    def can_extract(self, mime: MimeType, magic_bytes: bytes) -> bool: ...
-    def extract(self, raw: bytes, mime: MimeType) -> ExtractedDocument: ...
-    def quality_ok(self, doc: ExtractedDocument) -> bool: ...
+    def can_extract(self, mime: MimeType, magic_bytes: bytes) -> bool:
+        """Return True if this extractor can handle the given mime / magic bytes."""
+        ...
+
+    def extract(self, raw: bytes, mime: MimeType) -> ExtractedDocument:
+        """Return an ExtractedDocument (markdown + pages + images + metadata) from ``raw``."""
+        ...
+
+    def quality_ok(self, doc: ExtractedDocument) -> bool:
+        """Return True if the extraction is good enough to skip the next escalation tier."""
+        ...
 
 
 @runtime_checkable
@@ -885,9 +1040,17 @@ class BronzeStore(Protocol):
     re-fetching from the source system.
     """
 
-    def write(self, source_name: str, item_id: str, raw: bytes, mime: MimeType) -> BronzeRef: ...
-    def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]: ...
-    def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]: ...
+    def write(self, source_name: str, item_id: str, raw: bytes, mime: MimeType) -> BronzeRef:
+        """Persist ``raw`` and return a BronzeRef pointer for later replay."""
+        ...
+
+    def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]:
+        """Return the raw bytes + mime for ``ref``."""
+        ...
+
+    def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]:
+        """Yield every BronzeRef for ``source_name`` (optionally since ``since``)."""
+        ...
 
 
 @runtime_checkable
@@ -908,7 +1071,9 @@ class SilverProcessor(Protocol):
         source_uri: str,
         source_modified_at: str,
         sensitivity: Sensitivity,
-    ) -> SilverOutput: ...
+    ) -> SilverOutput:
+        """Return a SilverOutput (chunks + entity signals) for one extracted document."""
+        ...
 
 
 @runtime_checkable
@@ -922,7 +1087,9 @@ class EntityGraphSink(Protocol):
     asynchronous, batched, and idempotent.
     """
 
-    def stage(self, signals: Sequence[EntitySignal]) -> int: ...
+    def stage(self, signals: Sequence[EntitySignal]) -> int:
+        """Stage the given signals (SQLite) and return the count actually written."""
+        ...
 
 
 @runtime_checkable
@@ -939,6 +1106,10 @@ class FeatureFlagResolver(Protocol):
     snapshots, which is a ``@dataclass(frozen=True)`` per F42.
     """
 
-    def get(self, name: str) -> bool: ...
+    def get(self, name: str) -> bool:
+        """Return the resolved effective value for flag ``name``."""
+        ...
 
-    def iter_all(self) -> Iterator[FlagStatus]: ...
+    def iter_all(self) -> Iterator[FlagStatus]:
+        """Yield a FlagStatus snapshot for every flag in the registry."""
+        ...

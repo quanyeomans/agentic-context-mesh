@@ -62,9 +62,13 @@ class SummaryLoader(Protocol):
     abstracts/overviews.
     """
 
-    def get_l0(self, path: str) -> str | None: ...
+    def get_l0(self, path: str) -> str | None:
+        """Return the L0 abstract for ``path``, or None if not available."""
+        ...
 
-    def get_l1(self, path: str) -> str | None: ...
+    def get_l1(self, path: str) -> str | None:
+        """Return the L1 overview for ``path``, or None if not available."""
+        ...
 
 
 # ---------------------------------------------------------------------------

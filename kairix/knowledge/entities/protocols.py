@@ -48,4 +48,6 @@ class SuggestionFilter(Protocol):
     inspect surrounding tokens.
     """
 
-    def apply(self, suggestions: list[Suggestion], context: str) -> list[Suggestion]: ...
+    def apply(self, suggestions: list[Suggestion], context: str) -> list[Suggestion]:
+        """Return a new (possibly transformed) list of suggestions; never mutates input."""
+        ...
