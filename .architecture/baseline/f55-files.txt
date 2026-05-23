@@ -1,0 +1,13 @@
+# F55 baseline — files that either (a) declare a Chunker plugin without
+# a module-level version: str OR (b) construct Chunk(...) without
+# passing chunker_version=. Grandfathered offenders only;
+# baseline is shrink-only per F49.
+#
+# Today: only kairix/core/connectors/silver.py qualifies. Two Chunk(...)
+# call sites at line ~188 and ~202 (page-chunks + flat-markdown chunks)
+# emit Chunk without chunker_version. Wave C threads ChunkerRegistry
+# through Silver and removes this line.
+#
+# kairix/chunkers/ does not exist yet (Wave F creates the tree); no
+# plugin-side violations possible at landing.
+kairix/core/connectors/silver.py

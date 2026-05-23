@@ -2605,6 +2605,28 @@ integration: [`feature-flag-architecture.md`](feature-flag-architecture.md).
 
 ---
 
+### F55 / F57 / F58 / F61 — connector / collection / scope topology v2
+
+Landed in Wave A of the connector / collection / scope topology v2 ADR
+(see [`connector-scope-topology/ADR.md`](connector-scope-topology/ADR.md))
+to arm the gate **before** Wave C runtime code grows into the gap. All
+four are vacuous-green or carry a single grandfathered entry today;
+Waves C–F shrink baselines to zero as the production code lands. Per
+the gap analysis Table B + `10-test-architecture.md` §"New F-rules
+required".
+
+| Rule | Locks | Mechanism |
+|---|---|---|
+| **F55** | Every `Chunker` plugin under `kairix/chunkers/<name>/` declares a module-level `version: str`; every `Chunk(...)` constructor call passes `chunker_version=` (mirrors F40 for extractors). Without the version surfaced at the write site, re-chunk sweeps become whole-corpus rebuilds. | `scripts/checks/check_f55_chunker_version.py`; AST walk over `kairix/**/*.py`. Baseline: `.architecture/baseline/f55-files.txt` (today: `kairix/core/connectors/silver.py` grandfathered until Wave C threads `ChunkerRegistry` through Silver) |
+| **F57** | Every SQL `UPDATE topology_cc_pairs ... SET status = ?` lives in a module that also declares a top-level `_ALLOWED_TRANSITIONS: dict[CCPairStatus, frozenset[CCPairStatus]]` dispatch dict. Ad-hoc updates bypass the state-machine; ADR v2 §3 defines the only legal transitions (`SCHEDULED → INITIAL_INDEXING → ACTIVE ↔ PAUSED / DELETING / INVALID`). | `scripts/checks/check_f57_ccpair_lifecycle_integrity.py`; string-literal scan + module-level AST attribute check. Baseline: `.architecture/baseline/f57-files.txt` (empty; vacuous-green pre-Wave-C) |
+| **F58** | When a `HierarchyConnector` class exists in production code, at least one test under `tests/contracts/` must have a function name matching `test_*hierarchy*parent_before_child*` AND reference `HierarchyConnector`. Every `HierarchyNode` emission must have `raw_parent_id` either None (root) or referencing a previously-emitted node within the same `iter_containers()` call. | `scripts/checks/check_f58_hierarchy_parent_before_child.py`; test-collecting gate (mandatory only once the Protocol exists). Baseline: `.architecture/baseline/f58-files.txt` (empty; vacuous-green pre-Wave-E) |
+| **F61** | Bare `_SqliteChunkWriter(db, collection=...)` construction lives only under `kairix/core/connectors/` (the framework owns the writer). Everywhere else flows through `CollectionRouter`. Extends F38 with the per-collection routing layer. | `scripts/checks/check_f61_collection_router_singleton.py`; AST scan. Baseline: `.architecture/baseline/f61-files.txt` (today: `kairix/worker.py` grandfathered until Wave C rewires `_run_one_connector_batch` through `CollectionRouter`) |
+
+Canonical reference for the wave plan + Protocol roster + capability
+mix-ins these rules protect: [`connector-scope-topology/ADR.md`](connector-scope-topology/ADR.md).
+
+---
+
 ### F50 — net-new files cannot accrete F-rule baseline debt
 
 Closes the per-file-shrink-only loophole identified by the 2026-05-22
