@@ -162,6 +162,26 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_config": FeatureFlag(
+        name="topology_v2_config",
+        default=False,
+        description=(
+            "Wave D of the connector/collection/scope topology v2 migration — "
+            "controls whether the 6 operator-config blocks (connectors / credentials / "
+            "cc_pairs / collections / scope_profiles / skills) are PARSED + APPLIED. "
+            "When OFF, the parser still loads the YAML but the topology v2 surface "
+            "is inert (rows aren't written, scope profiles aren't enforced at search, "
+            "skills aren't dispatched). When ON, the worker startup + `kairix config "
+            "validate` + `kairix features status` + `kairix cc-pair *` verbs read "
+            "from the parsed surface. Default-off until the dogfood VM cutover "
+            "validates the operator-config promotion path."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
     "topology_v2_runtime": FeatureFlag(
         name="topology_v2_runtime",
         default=False,

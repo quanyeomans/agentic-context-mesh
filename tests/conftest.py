@@ -188,6 +188,13 @@ pytest_plugins = [
     # registry + ScopeProfileResolver + ResultEnvelope behind the
     # ``topology_v2_runtime`` flag. F54 both-branch coverage.
     "tests.bdd.steps.feature_flag_topology_v2_runtime_steps",
+    # Topology v2 Wave D — operator config promotion (6 YAML blocks +
+    # 5 cross-reference validators + kairix cc-pair CLI + topology v2
+    # diagnostics in `kairix features status`) behind the
+    # ``topology_v2_config`` flag. F45 / F54 coverage.
+    "tests.bdd.steps.cli_cc_pair_steps",
+    "tests.bdd.steps.mcp_cc_pair_steps",
+    "tests.bdd.steps.feature_flag_topology_v2_config_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

@@ -31,6 +31,7 @@ Subcommands:
   worker      Background worker: run loop, pause/resume operator controls
   config      Validate kairix.config.yaml against the schema and print errors
   ingest-chat Ingest JSONL chat transcripts into the document + fact stores
+  cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -70,6 +71,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "config": ("kairix.core.search.config_validator", "main", True),
     "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
     "features": ("kairix.core.features.cli", "main", True),
+    "cc-pair": ("kairix.core.connectors.cc_pair_cli", "main", True),
 }
 
 
