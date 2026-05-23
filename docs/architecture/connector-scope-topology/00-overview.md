@@ -39,7 +39,10 @@ The design needs to balance:
 | `06-onyx-comparative-analysis.md` | Onyx (open-source enterprise search, 48 connectors) framework patterns mapped against our 5-layer model — adopt / reject / adapt. |
 | `07-research-closeout.md` | Closes the per-connector open research items 01-source-analysis flagged (Dex webhooks, M365 body shape, Notion teamspace policy, GitHub scope semantics, M365 calendar sensitivity). |
 | `08-chunking-and-entity-strategies.md` | Per-source-kind chunking + entity-modelling strategies (markdown / office / code / tickets / chat / email / calendar / CRM / web / transcripts / database / blob) + chunker dispatch shape that preserves F38. |
-| `ADR.md` | Canonical architectural decision once analysis converges. |
+| `09-extended-bdd-scenarios.md` | Actor-perspective BDD scenarios (operator / agent / human / auditor / sysadmin / external-user) + composition edge cases + failure-injection. Identifies 22 net-new feature files missing from `03`. |
+| `10-test-architecture.md` | Test surface ADR v2 requires: per-capability contract tests, chunker contracts, property tests for composition rules, failure-injection, migration tests, 7 new F-rules, ~85 net-new test files. |
+| `11-implementation-gap-analysis.md` | Concrete code-walk against current `main`. Per-component status table (15 ADR-v2 components × current-code status). Wave-by-wave file-level delivery map. |
+| `ADR.md` | Canonical architectural decision (v2 — 6-concern model + 9 capability Protocols + chunker registry + 7-wave migration). |
 
 ## Layers (proposed; refined throughout)
 
@@ -81,9 +84,9 @@ The design needs to balance:
 | `07-research-closeout.md` | drafted 2026-05-23 (5 open questions resolved with citations) |
 | `08-chunking-and-entity-strategies.md` | drafted 2026-05-23 (12 source kinds × chunking + entity-extraction + libraries + failure modes; chunker registry shape) |
 | `ADR.md` | drafted 2026-05-23 v2 — **PROPOSED** (6-concern model: Connector × Credential × cc_pair × Container/HierarchyNode × Collection × ScopeProfile+Skill+ChunkerRegistry; 9 capability Protocols; 7-wave migration) |
-| `09-extended-bdd-scenarios.md` | pending — actor-perspective scenarios + missing-BDD analysis (operator / agent / human / auditor / external-user) |
-| `10-test-architecture.md` | pending — test surface required (per-capability contracts, chunker contracts, scope-profile composition property tests) |
-| `11-implementation-gap-analysis.md` | pending — explicit walk of `kairix/core/connectors/`, `tests/bdd/features/`, `tests/contracts/` against ADR v2 |
+| `09-extended-bdd-scenarios.md` | drafted 2026-05-23 — 22 net-new feature files across operator / agent / human / auditor / sysadmin / external-user perspectives + composition + failure-injection |
+| `10-test-architecture.md` | drafted 2026-05-23 — per-capability contract tests, chunker contracts, property tests, failure-injection, migration tests, 7 new F-rules, ~85 net-new test files |
+| `11-implementation-gap-analysis.md` | drafted 2026-05-23 — concrete code-walk against current `main`; per-component status table; F-rule deltas; wave-by-wave file-level delivery map |
 
 External research gaps tracked in `01-source-analysis.md` §"Open
 questions" per connector — closed in `07-research-closeout.md`.
