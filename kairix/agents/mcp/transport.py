@@ -34,6 +34,17 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+# Default Retry-After header value (seconds) returned by the cold-start
+# middleware when the readiness gate is False. Matches the existing
+# application-layer cold-start envelope's retry hint.
+_RETRY_AFTER_SECONDS = 8
+
+# Paths that bypass the cold-start middleware — these probes are how
+# operators and load balancers detect readiness in the first place, so
+# they must always respond regardless of warm state.
+_HEALTH_PATH_PREFIXES = ("/healthz",)
 
 # Module-level start timestamp captured on first build_mcp_app() call.
 # This is *implementation* of the public function — not exposed elsewhere.
@@ -154,6 +165,81 @@ def _derive_ready_from_checks(checks: dict[str, Any]) -> bool:
     return all(relevant) if relevant else True
 
 
+def _build_cold_start_body(path: str) -> dict[str, Any]:
+    """Cold-start envelope returned as the 503 response body.
+
+    Matches the application-layer envelope shape from
+    :func:`kairix.agents.mcp.cold_start.cold_start_envelope` so an MCP
+    client that already knows how to parse the in-tool envelope sees the
+    same structure here. The ``tool`` field is the request path because
+    the transport layer fires before the MCP router has resolved which
+    tool the client was reaching.
+    """
+    return {
+        "status": "retryable_not_ready",
+        "error": "ColdStart",
+        "error_code": "KAIRIX_COLD_START",
+        "tool": path,
+        "retry_after_ms": _RETRY_AFTER_SECONDS * 1000,
+        "estimated_seconds_remaining": float(_RETRY_AFTER_SECONDS),
+        "guidance": (
+            f"kairix is warming (one-time cost per process). Retry this call "
+            f"in ~{_RETRY_AFTER_SECONDS} seconds. Subsequent calls in this "
+            "process will be fast — the warm-up is amortised."
+        ),
+        "agent_instruction": (
+            "Do not answer from memory, do not use a lower-quality fallback, "
+            "and do not treat this as a completed retrieval. Wait "
+            "retry_after_ms, retry the same call once, then surface the "
+            "cold-start blocker if it is still not ready."
+        ),
+        "see_also": ["docs/operations/MCP-DEPLOYMENT.md"],
+    }
+
+
+class ColdStartMiddleware:
+    """ASGI middleware that returns HTTP 503 + Retry-After while not ready.
+
+    Fixes the gap from KFEAT-020: MCP clients see ``fetch_failed`` (a
+    transport-level fault) during the window between the uvicorn port
+    binding and the application-layer readiness gate flipping True. Before
+    this middleware, requests that landed in that window either crashed
+    inside the not-yet-mounted MCP router or got opaque 500s; after this
+    middleware, every non-health request returns a structured 503 with
+    ``Retry-After: N`` so well-behaved HTTP clients (including the MCP
+    TypeScript SDK) retry rather than dismiss kairix as broken.
+
+    Health probes (``/healthz`` and ``/healthz/ready``) bypass the gate so
+    operators and load balancers always get an answer.
+
+    ``readiness_check`` is the same callable wired into ``/healthz`` and
+    the tool-level cold-start envelope, so all three layers agree on
+    ready/not-ready.
+    """
+
+    def __init__(self, app: ASGIApp, readiness_check: Callable[[], bool]) -> None:
+        self._app = app
+        self._readiness_check = readiness_check
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if any(path.startswith(prefix) for prefix in _HEALTH_PATH_PREFIXES):
+            await self._app(scope, receive, send)
+            return
+        if self._readiness_check():
+            await self._app(scope, receive, send)
+            return
+        response = JSONResponse(
+            _build_cold_start_body(path),
+            status_code=503,
+            headers={"Retry-After": str(_RETRY_AFTER_SECONDS)},
+        )
+        await response(scope, receive, send)
+
+
 def _apply_settings(server: Any) -> None:
     """Set stateless_http and json_response on server.settings if present.
 
@@ -234,8 +320,17 @@ def build_mcp_app(
     # starts/stops correctly when the composed app is served.
     lifespan = getattr(streamable_app.router, "lifespan_context", None)
     if lifespan is not None:
-        return Starlette(routes=routes, lifespan=lifespan)
-    return Starlette(routes=routes)
+        app = Starlette(routes=routes, lifespan=lifespan)
+    else:
+        app = Starlette(routes=routes)
+
+    # Cold-start gate (KFEAT-020): when a readiness check is wired, every
+    # non-health request returns HTTP 503 + Retry-After until ready, so MCP
+    # clients see a retryable status instead of fetch_failed at the
+    # transport layer.
+    if readiness_check is not None:
+        app.add_middleware(ColdStartMiddleware, readiness_check=readiness_check)
+    return app
 
 
-__all__ = ["build_mcp_app"]
+__all__ = ["ColdStartMiddleware", "build_mcp_app"]

@@ -36,12 +36,21 @@ services:
       neo4j:
         condition: service_healthy
     restart: unless-stopped
+    # Healthcheck uses `kairix onboard ready` — the narrow flag-file readiness
+    # probe (sub-millisecond, no neo4j touch). Distinct from `kairix onboard
+    # check` (heavy configuration diagnostic — secrets, paths, neo4j probe,
+    # embed pipeline) which previously ran here every 60s and made the
+    # container flip unhealthy on transient neo4j slowness, blowing in-process
+    # warm state and surfacing as `fetch_failed` to MCP clients (KFEAT-020).
+    # start_period generous so the initial warm (~7-10s on a hot node, ~30s+
+    # on a fresh container) is treated as "starting", matching the
+    # docker-compose.example.yml operator-facing shape.
     healthcheck:
-      test: ["CMD", "kairix", "onboard", "check"]
-      interval: 60s
-      timeout: 30s
+      test: ["CMD", "kairix", "onboard", "ready"]
+      interval: 30s
+      timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 120s
     # Resource limits — sized for the v2026.5.10.5 async-tool refactor
     # which lets concurrent /mcp calls run on separate threads (#177).
     # Steady-state RSS observed at ~1.2 GB; 3 GB allows headroom for
