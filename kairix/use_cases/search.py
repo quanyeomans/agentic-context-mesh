@@ -42,18 +42,25 @@ def _default_search(
     budget: int,
     scope: Scope,
     agent: str | None,
+    collections: list[str] | None = None,
 ) -> Any:
     """Lazy-load the production search pipeline.
 
     Kept inside the use-case module (rather than a shim) so the file
     owns its own production wiring — eliminates the ``_search_defaults``
     indirection layer that the F7 coverage baseline had to grandfather.
+
+    ``collections``: when set (via the CLI's ``--collection`` flag, which
+    threads through ``SearchDeps._search_with_collection``), the value
+    is passed to ``pipeline.search`` so retrieval is restricted to the
+    listed collection set. Default ``None`` preserves scope-based
+    resolution.
     """
     from kairix.core.factory import build_search_pipeline
     from kairix.core.search.config_loader import load_config
 
     pipeline = build_search_pipeline(config=load_config())
-    return pipeline.search(query=query, budget=budget, scope=scope, agent=agent)
+    return pipeline.search(query=query, budget=budget, scope=scope, agent=agent, collections=collections)
 
 
 def _default_entity_card(name: str) -> dict[str, Any] | None:
