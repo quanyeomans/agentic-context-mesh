@@ -44,7 +44,7 @@ def test_fake_fact_record_satisfies_protocol() -> None:
     and this assertion fails — runtime_checkable probes for every
     documented property.
     """
-    record = FakeFactRecord(id="f1", entity="Caroline", attribute="role", value="VP")
+    record = FakeFactRecord(id="f1", entity="agent-alpha", attribute="role", value="VP")
     assert isinstance(record, FactRecord)
 
 
@@ -87,12 +87,12 @@ def test_add_then_search_round_trips_fact_through_value_overlap() -> None:
     is mixed with no-match facts.
     """
     store = FakeFactStore()
-    target = FakeFactRecord(id="f-target", entity="Caroline", attribute="status", value="single")
+    target = FakeFactRecord(id="f-target", entity="agent-alpha", attribute="status", value="single")
     distractor = FakeFactRecord(id="f-distractor", entity="John", attribute="hobby", value="bowling")
     store.add(target)
     store.add(distractor)
 
-    hits = store.search("Caroline status", top_k=5)
+    hits = store.search("agent-alpha status", top_k=5)
     assert hits, "search must surface the target fact when query shares words"
     matched = [h for h in hits if h.record.id == "f-target"]
     assert matched, f"search must include target id; got ids={[h.record.id for h in hits]}"
@@ -148,13 +148,13 @@ def test_search_excludes_superseded_facts_by_default() -> None:
     results despite being superseded by the new one.
     """
     store = FakeFactStore()
-    old = FakeFactRecord(id="f-old", entity="Caroline", attribute="status", value="married")
-    new = FakeFactRecord(id="f-new", entity="Caroline", attribute="status", value="single")
+    old = FakeFactRecord(id="f-old", entity="agent-alpha", attribute="status", value="married")
+    new = FakeFactRecord(id="f-new", entity="agent-alpha", attribute="status", value="single")
     store.add(old)
     store.add(new)
     store.supersede(old_id="f-old", new_id="f-new")
 
-    hits = store.search("Caroline status", top_k=10)
+    hits = store.search("agent-alpha status", top_k=10)
     hit_ids = {h.record.id for h in hits}
     assert "f-old" not in hit_ids, f"superseded fact must not appear in default search; got {hit_ids!r}"
     assert "f-new" in hit_ids, "new fact must still appear"
@@ -190,12 +190,12 @@ def test_find_conflicts_returns_live_facts_for_entity_attribute_key() -> None:
     returned so the consolidation code can rely on the shape.
     """
     store = FakeFactStore()
-    store.add(FakeFactRecord(id="f1", entity="Caroline", attribute="status", value="single"))
-    store.add(FakeFactRecord(id="f2", entity="Caroline", attribute="status", value="dating"))
-    store.add(FakeFactRecord(id="f3", entity="Caroline", attribute="job", value="VP"))  # different attribute
+    store.add(FakeFactRecord(id="f1", entity="agent-alpha", attribute="status", value="single"))
+    store.add(FakeFactRecord(id="f2", entity="agent-alpha", attribute="status", value="dating"))
+    store.add(FakeFactRecord(id="f3", entity="agent-alpha", attribute="job", value="VP"))  # different attribute
     store.add(FakeFactRecord(id="f4", entity="John", attribute="status", value="married"))  # different entity
 
-    conflicts = store.find_conflicts(entity="Caroline", attribute="status")
+    conflicts = store.find_conflicts(entity="agent-alpha", attribute="status")
     ids = {f.id for f in conflicts}
     assert ids == {"f1", "f2"}, f"find_conflicts must return only entity+attribute matches; got {ids!r}"
 

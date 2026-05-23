@@ -94,12 +94,25 @@ _SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # The detector and its test file embed the names by definition — they
 # document what the rule catches. Self-exempt to avoid the dogfood
 # trap. Anything else added here demands a PR-description rationale.
+#
+# ``docs/architecture/fitness-functions.md`` documents the F32 rule
+# itself (and reuses the same identifier in the F30 worked example);
+# it is the source-of-truth for the rule, not a violator of it.
 EXEMPT_FILES = frozenset(
     {
         "scripts/checks/check_no_real_names_in_fixtures.py",
         "tests/checks/test_no_real_names_in_fixtures.py",
+        "docs/architecture/fitness-functions.md",
     }
 )
+
+# Path-prefix exclusions. ``reference-library/`` is vendored upstream
+# scholarly content (the Turing Way, Data Feminism, etc.) — the names
+# inside are accurate citations of the authors of those works, not
+# kairix-authored fixtures. Editing vendored content would falsify
+# the upstream attribution; excluding the tree keeps the rule honest
+# about what it's actually policing (kairix-authored artefacts).
+EXEMPT_PATH_PREFIXES: tuple[str, ...] = ("reference-library/",)
 
 REMEDIATION = """Refactor real identifiers to generic placeholders — to pass.
 
@@ -169,6 +182,8 @@ def main() -> int:
 
     for rel in files:
         if rel in EXEMPT_FILES:
+            continue
+        if any(rel.startswith(prefix) for prefix in EXEMPT_PATH_PREFIXES):
             continue
         if not _is_in_scope(rel):
             continue

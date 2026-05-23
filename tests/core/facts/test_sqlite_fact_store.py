@@ -48,7 +48,7 @@ def _make_store(tmp_path: Path) -> SQLiteFactStore:
 def _make_record(
     *,
     fact_id: str = "f1",
-    entity: str = "Caroline",
+    entity: str = "agent-alpha",
     attribute: str = "status",
     value: str = "single",
     source_turn_ids: tuple[str, ...] = ("t1",),
@@ -96,7 +96,7 @@ def test_record_satisfies_fact_record_protocol_after_round_trip(
     """
     store = _make_store(tmp_path)
     store.add(_make_record(fact_id="f1"))
-    conflicts = store.find_conflicts(entity="Caroline", attribute="status")
+    conflicts = store.find_conflicts(entity="agent-alpha", attribute="status")
     assert len(conflicts) == 1
     assert isinstance(conflicts[0], FactRecord)
 
@@ -185,7 +185,7 @@ def test_mint_id_is_deterministic_across_invocations() -> None:
     Sabotage-proof: replace ``hashlib.sha256`` with a random-prefixed
     digest and the two ids diverge.
     """
-    args = {"entity": "Caroline", "attribute": "status", "source_turn_ids": ("t1", "t2")}
+    args = {"entity": "agent-alpha", "attribute": "status", "source_turn_ids": ("t1", "t2")}
     assert StoredFactRecord.mint_id(**args) == StoredFactRecord.mint_id(**args)
 
 
@@ -219,12 +219,12 @@ def test_find_conflicts_returns_only_entity_attribute_matches(tmp_path: Path) ->
     ``find_conflicts`` SQL and ``f3`` leaks into the result set.
     """
     store = _make_store(tmp_path)
-    store.add(_make_record(fact_id="f1", entity="Caroline", attribute="status"))
-    store.add(_make_record(fact_id="f2", entity="Caroline", attribute="status", value="dating"))
-    store.add(_make_record(fact_id="f3", entity="Caroline", attribute="job"))
+    store.add(_make_record(fact_id="f1", entity="agent-alpha", attribute="status"))
+    store.add(_make_record(fact_id="f2", entity="agent-alpha", attribute="status", value="dating"))
+    store.add(_make_record(fact_id="f3", entity="agent-alpha", attribute="job"))
     store.add(_make_record(fact_id="f4", entity="John", attribute="status"))
 
-    conflicts = store.find_conflicts(entity="Caroline", attribute="status")
+    conflicts = store.find_conflicts(entity="agent-alpha", attribute="status")
     ids = {f.id for f in conflicts}
     assert ids == {"f1", "f2"}, f"unexpected ids; got {ids!r}"
 
@@ -236,7 +236,7 @@ def test_find_conflicts_excludes_superseded(tmp_path: Path) -> None:
     store.add(_make_record(fact_id="f-new", value="married"))
     store.supersede(old_id="f-old", new_id="f-new")
 
-    live = store.find_conflicts(entity="Caroline", attribute="status")
+    live = store.find_conflicts(entity="agent-alpha", attribute="status")
     assert {f.id for f in live} == {"f-new"}
 
 
@@ -246,10 +246,10 @@ def test_find_conflicts_honours_namespace(tmp_path: Path) -> None:
     store.add(_make_record(fact_id="f-a", namespace="eng-a"))
     store.add(_make_record(fact_id="f-b", namespace="eng-b"))
 
-    conflicts_a = store.find_conflicts(entity="Caroline", attribute="status", namespace="eng-a")
+    conflicts_a = store.find_conflicts(entity="agent-alpha", attribute="status", namespace="eng-a")
     assert {f.id for f in conflicts_a} == {"f-a"}
 
-    conflicts_all = store.find_conflicts(entity="Caroline", attribute="status")
+    conflicts_all = store.find_conflicts(entity="agent-alpha", attribute="status")
     assert {f.id for f in conflicts_all} == {"f-a", "f-b"}
 
 
@@ -269,7 +269,7 @@ def test_supersede_links_old_to_new_and_masks_old_in_search(tmp_path: Path) -> N
     store.add(_make_record(fact_id="f-new", value="single"))
     store.supersede(old_id="f-old", new_id="f-new")
 
-    hits = store.search("Caroline", top_k=10)
+    hits = store.search("agent-alpha", top_k=10)
     hit_ids = {h.record.id for h in hits}
     assert "f-old" not in hit_ids
     assert "f-new" in hit_ids
@@ -381,7 +381,7 @@ def test_round_trip_preserves_all_record_fields(tmp_path: Path) -> None:
     store = _make_store(tmp_path)
     original = StoredFactRecord(
         id="f-round",
-        entity="Caroline",
+        entity="agent-alpha",
         attribute="status",
         value="single",
         confidence=0.77,
@@ -392,7 +392,7 @@ def test_round_trip_preserves_all_record_fields(tmp_path: Path) -> None:
     )
     store.add(original)
     recovered = store.find_conflicts(
-        entity="Caroline",
+        entity="agent-alpha",
         attribute="status",
         namespace="eng-x",
     )
@@ -436,12 +436,12 @@ def test_search_question_mark_does_not_raise(tmp_path: Path) -> None:
     """
     db = tmp_path / "facts.sqlite"
     store = SQLiteFactStore(db_path=db)
-    store.add(_make_record(fact_id="f1", entity="caroline", attribute="role", value="VP"))
+    store.add(_make_record(fact_id="f1", entity="agent-alpha", attribute="role", value="VP"))
     # Must not raise. Empty result is fine (no fact contains "What" etc.)
-    hits = store.search("What is Caroline's role?")
-    # Should actually find the f1 fact via OR-join on "caroline" / "role"
+    hits = store.search("What is agent-alpha's role?")
+    # Should actually find the f1 fact via OR-join on "agent-alpha" / "role"
     assert any(h.record.id == "f1" for h in hits), (
-        "OR-joined query 'What/is/Caroline/role' must surface the matching fact"
+        "OR-joined query 'What/is/agent-alpha/role' must surface the matching fact"
     )
 
 
@@ -454,10 +454,10 @@ def test_search_or_joins_multi_word_query_not_and(tmp_path: Path) -> None:
     """
     db = tmp_path / "facts.sqlite"
     store = SQLiteFactStore(db_path=db)
-    store.add(_make_record(fact_id="f-lgbtq", entity="caroline", attribute="event", value="LGBTQ support group"))
+    store.add(_make_record(fact_id="f-lgbtq", entity="agent-alpha", attribute="event", value="LGBTQ support group"))
     store.add(_make_record(fact_id="f-other", entity="john", attribute="hobby", value="cooking"))
 
-    hits = store.search("When did Caroline go to the LGBTQ support group")
+    hits = store.search("When did agent-alpha go to the LGBTQ support group")
     ids = {h.record.id for h in hits}
     assert "f-lgbtq" in ids, (
         f"OR-joined token search must surface the matching fact; got {ids!r}. "
@@ -506,14 +506,14 @@ def test_search_reserved_fts5_words_dropped(tmp_path: Path) -> None:
     not passed through (they'd be parsed as FTS5 operators).
 
     Sabotage-proof: remove the ``reserved`` filter and the query
-    ``and Caroline`` passes ``and OR Caroline`` to FTS5 which raises.
+    ``and agent-alpha`` passes ``and OR agent-alpha`` to FTS5 which raises.
     """
     db = tmp_path / "facts.sqlite"
     store = SQLiteFactStore(db_path=db)
-    store.add(_make_record(fact_id="f1", entity="caroline", attribute="role", value="VP"))
+    store.add(_make_record(fact_id="f1", entity="agent-alpha", attribute="role", value="VP"))
 
     # 'and' is a reserved FTS5 operator; if passed through unfiltered FTS5 raises
-    hits = store.search("and Caroline")
+    hits = store.search("and agent-alpha")
     assert any(h.record.id == "f1" for h in hits)
 
 
@@ -532,7 +532,7 @@ def test_evidence_at_persists_and_recalls_on_round_trip(tmp_path: Path) -> None:
     store = _make_store(tmp_path)
     record = StoredFactRecord(
         id="f-evidence",
-        entity="Caroline",
+        entity="agent-alpha",
         attribute="moved_from",
         value="Sweden",
         confidence=0.85,

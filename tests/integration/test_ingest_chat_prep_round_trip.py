@@ -111,18 +111,18 @@ _TRANSCRIPT_TURNS = [
     {
         "role": "user",
         "speaker": "ops",
-        "content": "Quick reminder: Caroline is the VP of People at Acme. She owns onboarding.",
+        "content": "Quick reminder: agent-alpha is the VP of People at Acme. She owns onboarding.",
     },
     {
         "role": "assistant",
         "speaker": "agent",
-        "content": "Got it — Caroline (VP of People, Acme) is the onboarding owner.",
+        "content": "Got it — agent-alpha (VP of People, Acme) is the onboarding owner.",
     },
 ]
 
 
 def _write_transcript(tmp_path: Path) -> Path:
-    """Write a 2-turn JSONL transcript naming Caroline as VP of People."""
+    """Write a 2-turn JSONL transcript naming agent-alpha as VP of People."""
     path = tmp_path / "session-001.jsonl"
     with path.open("w", encoding="utf-8") as f:
         for turn in _TRANSCRIPT_TURNS:
@@ -181,8 +181,8 @@ def _kairix_subprocess_env(tmp_path: Path, cfg: Path) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def test_ingest_chat_then_prep_surfaces_caroline_fact(tmp_path: Path) -> None:
-    """End-to-end: ingest a transcript naming Caroline's role; ``kairix prep``
+def test_ingest_chat_then_prep_surfaces_agent_alpha_fact(tmp_path: Path) -> None:
+    """End-to-end: ingest a transcript naming agent-alpha's role; ``kairix prep``
     surfaces it.
 
     This is F30's reference outcome shape — subprocess + realistic input +
@@ -219,7 +219,7 @@ def test_ingest_chat_then_prep_surfaces_caroline_fact(tmp_path: Path) -> None:
 
     # Step 2 — query for the fact via the production prep subprocess.
     prep = subprocess.run(
-        [sys.executable, "-m", "kairix.cli", "prep", "What is Caroline's role?"],
+        [sys.executable, "-m", "kairix.cli", "prep", "What is agent-alpha's role?"],
         capture_output=True,
         timeout=120,
         check=False,
@@ -246,15 +246,15 @@ def test_ingest_chat_then_prep_surfaces_caroline_fact(tmp_path: Path) -> None:
     out_lower = prep_stdout.lower()
     matched = "vp" in out_lower or "vice president" in out_lower
     assert matched, (
-        "prep response should mention 'VP' or 'Vice President' (Caroline's role "
+        "prep response should mention 'VP' or 'Vice President' (agent-alpha's role "
         "in the ingested transcript). Got:\n"
         f"{prep_stdout}\n"
         f"stderr:\n{prep_stderr}"
     )
 
-    # Sources should reference Caroline (case-insensitive — LLM may title-case).
-    assert "caroline" in out_lower, (
-        f"prep response should reference Caroline. Got:\n{prep_stdout}\nstderr:\n{prep_stderr}"
+    # Sources should reference agent-alpha (case-insensitive — LLM may title-case).
+    assert "agent-alpha" in out_lower, (
+        f"prep response should reference agent-alpha. Got:\n{prep_stdout}\nstderr:\n{prep_stderr}"
     )
 
 

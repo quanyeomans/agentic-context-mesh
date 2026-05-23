@@ -31,7 +31,12 @@ _CHECKS_DIR = _REPO_ROOT / "scripts" / "checks"
 if str(_CHECKS_DIR) not in sys.path:
     sys.path.insert(0, str(_CHECKS_DIR))
 
-from check_no_real_names_in_fixtures import _is_in_scope, _scan_file  # noqa: E402
+from check_no_real_names_in_fixtures import (  # noqa: E402
+    EXEMPT_FILES,
+    EXEMPT_PATH_PREFIXES,
+    _is_in_scope,
+    _scan_file,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -95,6 +100,56 @@ def test_extension_outside_scope_is_skipped_by_orchestrator() -> None:
     assert _is_in_scope("scripts/checks/check_no_real_names_in_fixtures.py") is False
     assert _is_in_scope("tests/use_cases/data.txt") is False  # tests/ but wrong ext
     assert _is_in_scope("docs/architecture/ENGINEERING.rst") is False  # docs/ but wrong ext
+
+
+def test_rule_documentation_file_is_exempt() -> None:
+    """``docs/architecture/fitness-functions.md`` documents the F32 rule
+    itself and reuses the same identifier in the F30 worked example.
+    It is the source-of-truth for the rule; exempting it stops the
+    dogfood trap where the doc-that-defines-the-rule trips the rule.
+
+    Sabotage-proof: remove ``docs/architecture/fitness-functions.md``
+    from ``EXEMPT_FILES`` and this assertion fails because the path
+    no longer appears in the exempt set.
+    """
+    assert "docs/architecture/fitness-functions.md" in EXEMPT_FILES
+
+
+def test_reference_library_tree_is_exempt() -> None:
+    """``reference-library/`` is vendored upstream scholarly content.
+    Names inside are accurate citations of the authors of those works,
+    not kairix-authored fixtures. Excluding the whole tree keeps the
+    rule honest about what it's actually policing.
+
+    Sabotage-proof: remove ``reference-library/`` from
+    ``EXEMPT_PATH_PREFIXES`` and this assertion fails.
+    """
+    assert "reference-library/" in EXEMPT_PATH_PREFIXES
+
+
+def test_kairix_owned_test_file_is_still_flagged(tmp_path: Path) -> None:
+    """Symmetry check — exemptions cover docs + vendored content only.
+    A kairix-authored test file under ``tests/`` is still in scope and
+    a real name in it still trips the gate. Without this, the exemption
+    additions above would silently widen into the kairix tree.
+
+    Sabotage-proof: extend ``EXEMPT_PATH_PREFIXES`` to include
+    ``tests/`` and this assertion fails because the path-level scope
+    is no longer enforced for kairix-owned tests.
+    """
+    rel = "tests/use_cases/test_some_fixture.py"
+    # No prefix in EXEMPT_PATH_PREFIXES may match a tests/ path.
+    assert not any(rel.startswith(prefix) for prefix in EXEMPT_PATH_PREFIXES)
+    # And the path is still in scope for the detector.
+    assert _is_in_scope(rel) is True
+
+    # And a real name inside that file still produces a violation.
+    f = tmp_path / "test_some_fixture.py"
+    f.write_text(
+        'record = FakeFactRecord(entity="Caroline", attribute="role", value="VP")\n',
+        encoding="utf-8",
+    )
+    assert len(_scan_file(f, rel)) == 1
 
 
 def test_multiple_violations_in_one_file_all_get_reported(tmp_path: Path) -> None:

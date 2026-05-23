@@ -37,7 +37,7 @@ pytestmark = pytest.mark.unit
 _HAPPY_PATH_RESPONSE = json.dumps(
     [
         {
-            "entity": "Caroline",
+            "entity": "agent-alpha",
             "attribute": "role",
             "value": "Head of Product",
             "confidence": 0.92,
@@ -55,7 +55,7 @@ def _turn(turn_id: str, role: str = "user", content: str = "hello") -> dict[str,
 def _two_turns() -> list[dict[str, object]]:
     """Return the canonical two-turn happy-path window."""
     return [
-        _turn("t1", "user", "Caroline runs product."),
+        _turn("t1", "user", "agent-alpha runs product."),
         _turn("t2", "assistant", "Got it — she's Head of Product."),
     ]
 
@@ -89,7 +89,7 @@ def test_happy_path_parses_records_with_provenance() -> None:
 
     assert len(records) == 1
     record = records[0]
-    assert record.entity == "Caroline"
+    assert record.entity == "agent-alpha"
     assert record.attribute == "role"
     assert record.value == "Head of Product"
     assert record.source_turn_ids == ("t1", "t2")
@@ -145,7 +145,7 @@ def test_partially_malformed_keeps_valid_records(caplog: pytest.LogCaptureFixtur
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.92,
@@ -164,7 +164,7 @@ def test_partially_malformed_keeps_valid_records(caplog: pytest.LogCaptureFixtur
         records = extractor.extract(turns=_two_turns())
 
     assert len(records) == 1
-    assert records[0].entity == "Caroline"
+    assert records[0].entity == "agent-alpha"
     assert any("missing required keys" in rec.message for rec in caplog.records)
 
 
@@ -198,7 +198,7 @@ def test_confidence_comes_from_llm_payload() -> None:
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.42,
@@ -226,7 +226,7 @@ def test_evidence_turn_ids_become_source_turn_ids() -> None:
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.9,
@@ -254,7 +254,7 @@ def test_id_is_deterministic_across_runs() -> None:
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.9,
@@ -320,7 +320,7 @@ def test_custom_prompt_template_overrides_default() -> None:
     sent = llm.chat_calls[0]["messages"][0]["content"]
     assert "CUSTOM TEMPLATE marker XYZ" in sent
     # Turns block is interpolated where the placeholder used to be.
-    assert "t1:user: Caroline runs product." in sent
+    assert "t1:user: agent-alpha runs product." in sent
 
 
 def test_turns_placeholder_is_substituted_with_formatted_lines() -> None:
@@ -335,7 +335,7 @@ def test_turns_placeholder_is_substituted_with_formatted_lines() -> None:
 
     sent = llm.chat_calls[0]["messages"][0]["content"]
     assert "{{turns}}" not in sent
-    assert "t1:user: Caroline runs product." in sent
+    assert "t1:user: agent-alpha runs product." in sent
     assert "t2:assistant: Got it — she's Head of Product." in sent
 
 
@@ -368,7 +368,7 @@ def test_markdown_fenced_response_is_unwrapped() -> None:
     records = extractor.extract(turns=_two_turns())
 
     assert len(records) == 1
-    assert records[0].entity == "Caroline"
+    assert records[0].entity == "agent-alpha"
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ def test_non_list_json_response_returns_empty(caplog: pytest.LogCaptureFixture) 
     """Sabotage-proof: drop the ``isinstance(parsed, list)`` check in
     ``_parse_response`` and this test fails because the dict shape
     falls through to the for-loop and raises on a missing key."""
-    llm = FakeLLMBackend(chat_response='{"entity": "Caroline"}')
+    llm = FakeLLMBackend(chat_response='{"entity": "agent-alpha"}')
     extractor = LLMFactExtractor(llm=llm)
 
     with caplog.at_level(logging.WARNING, logger="kairix.core.facts.extractor"):
@@ -402,7 +402,7 @@ def test_confidence_out_of_range_skips_record(caplog: pytest.LogCaptureFixture) 
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 5.5,  # invalid
@@ -428,7 +428,7 @@ def test_empty_evidence_turn_ids_skips_record(caplog: pytest.LogCaptureFixture) 
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.9,
@@ -452,7 +452,7 @@ def test_evidence_turn_ids_wrong_type_skips_record(caplog: pytest.LogCaptureFixt
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.9,
@@ -492,7 +492,7 @@ def test_confidence_non_numeric_rejected(caplog: pytest.LogCaptureFixture) -> No
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": "high",  # non-numeric — must be rejected
@@ -529,7 +529,7 @@ def test_confidence_bool_rejected(caplog: pytest.LogCaptureFixture) -> None:
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": True,
@@ -554,7 +554,7 @@ def test_namespace_kwarg_flows_to_records() -> None:
     response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.9,
@@ -624,7 +624,7 @@ def test_llm_fact_extractor_integrates_with_ingest_chat(tmp_path: Path) -> None:
                 "conversation_id": "c1",
                 "id": "t1",
                 "role": "user",
-                "content": "Caroline runs product.",
+                "content": "agent-alpha runs product.",
             },
             {
                 "conversation_id": "c1",
@@ -685,7 +685,7 @@ def test_evidence_at_defaults_to_session_metadata_date_time() -> None:
     llm_response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "role",
                 "value": "Head of Product",
                 "confidence": 0.9,
@@ -818,7 +818,7 @@ def test_attribute_rewrites_snap_drift_to_canonical(raw_attribute: str, expected
     llm_response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": raw_attribute,
                 "value": "Sweden" if "country" in raw_attribute else "thing",
                 "confidence": 0.9,
@@ -850,7 +850,7 @@ def test_attribute_drops_filter_non_factual_keys(drop_attribute: str) -> None:
     llm_response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": drop_attribute,
                 "value": "some noise",
                 "confidence": 0.9,
@@ -879,7 +879,7 @@ def test_canonical_attribute_passthrough_untouched() -> None:
     llm_response = json.dumps(
         [
             {
-                "entity": "Caroline",
+                "entity": "agent-alpha",
                 "attribute": "moved_from",  # canonical from prompt list
                 "value": "Sweden",
                 "confidence": 0.9,

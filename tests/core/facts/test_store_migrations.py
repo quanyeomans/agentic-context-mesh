@@ -197,12 +197,12 @@ def test_find_conflicts_on_unmigrated_legacy_db_projects_evidence_at_as_none(
     """
     db = tmp_path / "legacy.sqlite"
     _build_legacy_schema(db)
-    _insert_legacy_row(db, fact_id="leg1", entity="Caroline", attribute="status", value="single")
+    _insert_legacy_row(db, fact_id="leg1", entity="agent-alpha", attribute="status", value="single")
 
     # Construct a store but never call add — schema migration does not run.
     store = SQLiteFactStore(db_path=db)
 
-    records = store.find_conflicts(entity="Caroline", attribute="status")
+    records = store.find_conflicts(entity="agent-alpha", attribute="status")
     assert len(records) == 1, f"expected 1 record from legacy DB; got {len(records)}"
     record = records[0]
     assert record.id == "leg1"
@@ -232,7 +232,7 @@ def test_search_on_unmigrated_legacy_db_projects_evidence_at_as_none(
     _insert_legacy_row(
         db,
         fact_id="leg-search",
-        entity="Caroline",
+        entity="agent-alpha",
         attribute="role",
         value="distinctvaluetoken",
     )

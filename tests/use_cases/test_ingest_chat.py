@@ -718,9 +718,9 @@ def test_two_ingests_supersede_prior_fact_on_conflict(tmp_path: Path) -> None:
     _write_jsonl(transcript_b, [_turn("c2", 0)])
 
     store = FakeFactStore()
-    # First ingest: Caroline=single
+    # First ingest: agent-alpha=single
     extractor_a = FakeFactExtractor(
-        scripted_facts=[FakeFactRecord(id="f-a", entity="Caroline", attribute="status", value="single")]
+        scripted_facts=[FakeFactRecord(id="f-a", entity="agent-alpha", attribute="status", value="single")]
     )
     ingest_chat(
         transcript_a,
@@ -728,9 +728,9 @@ def test_two_ingests_supersede_prior_fact_on_conflict(tmp_path: Path) -> None:
         fact_store=store,
         fact_extractor=extractor_a,
     )
-    # Second ingest: Caroline=married — should supersede f-a.
+    # Second ingest: agent-alpha=married — should supersede f-a.
     extractor_b = FakeFactExtractor(
-        scripted_facts=[FakeFactRecord(id="f-b", entity="Caroline", attribute="status", value="married")]
+        scripted_facts=[FakeFactRecord(id="f-b", entity="agent-alpha", attribute="status", value="married")]
     )
     result = ingest_chat(
         transcript_b,
@@ -739,7 +739,7 @@ def test_two_ingests_supersede_prior_fact_on_conflict(tmp_path: Path) -> None:
         fact_extractor=extractor_b,
     )
 
-    live = store.find_conflicts(entity="Caroline", attribute="status")
+    live = store.find_conflicts(entity="agent-alpha", attribute="status")
     live_ids = {f.id for f in live}
     assert live_ids == {"f-b"}  # f-a no longer live
     assert result.facts_superseded == 1
@@ -759,7 +759,7 @@ def test_two_ingests_same_value_coexist(tmp_path: Path) -> None:
 
     store = FakeFactStore()
     extractor_a = FakeFactExtractor(
-        scripted_facts=[FakeFactRecord(id="f-a", entity="Caroline", attribute="status", value="single")]
+        scripted_facts=[FakeFactRecord(id="f-a", entity="agent-alpha", attribute="status", value="single")]
     )
     ingest_chat(
         transcript_a,
@@ -768,7 +768,7 @@ def test_two_ingests_same_value_coexist(tmp_path: Path) -> None:
         fact_extractor=extractor_a,
     )
     extractor_b = FakeFactExtractor(
-        scripted_facts=[FakeFactRecord(id="f-b", entity="Caroline", attribute="status", value="single")]
+        scripted_facts=[FakeFactRecord(id="f-b", entity="agent-alpha", attribute="status", value="single")]
     )
     result = ingest_chat(
         transcript_b,
@@ -777,7 +777,7 @@ def test_two_ingests_same_value_coexist(tmp_path: Path) -> None:
         fact_extractor=extractor_b,
     )
 
-    live = store.find_conflicts(entity="Caroline", attribute="status")
+    live = store.find_conflicts(entity="agent-alpha", attribute="status")
     live_ids = {f.id for f in live}
     assert live_ids == {"f-a", "f-b"}
     assert result.facts_superseded == 0

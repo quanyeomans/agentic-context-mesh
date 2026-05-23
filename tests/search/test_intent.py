@@ -247,7 +247,7 @@ def test_attribute_fact_long_narrative_query_falls_to_other_intents() -> None:
 @pytest.mark.parametrize(
     "query",
     [
-        "what did Caroline research?",
+        "what did agent-alpha research?",
         "what did Jordan publish?",
         "what did Acme acquire?",
     ],
@@ -266,7 +266,7 @@ def test_attribute_fact_what_did_x_verb_pattern(query: str) -> None:
 @pytest.mark.parametrize(
     "query",
     [
-        "who is Caroline's friend?",
+        "who is agent-alpha's friend?",
         "who was Jordan's mentor?",
         "who is Acme's CEO?",
     ],
@@ -296,7 +296,7 @@ def test_attribute_fact_what_did_x_do_temporal_still_wins() -> None:
     in priority order so the test continues to pass — confirming the
     priority guard works as documented.
     """
-    assert classify("what did Caroline do last week?") == QueryIntent.TEMPORAL
+    assert classify("what did agent-alpha do last week?") == QueryIntent.TEMPORAL
 
 
 @pytest.mark.unit
@@ -309,5 +309,5 @@ def test_attribute_fact_what_did_x_multi_clause_falls_through() -> None:
     """
     # No tight ATTRIBUTE_FACT shape (extra trailing clause); no
     # TEMPORAL/MULTI_HOP/ENTITY/PROCEDURAL signal → SEMANTIC.
-    result = classify("what did Caroline research about ancient civilisations")
+    result = classify("what did agent-alpha research about ancient civilisations")
     assert result == QueryIntent.SEMANTIC
