@@ -29,3 +29,4 @@ Feature: End-to-end connector sync journey
       | obsidian  | pptx         |
       | obsidian  | docx         |
       | obsidian  | xlsx         |
+      | dex_crm   | passthrough  |
