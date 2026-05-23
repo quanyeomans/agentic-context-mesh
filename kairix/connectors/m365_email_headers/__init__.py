@@ -43,7 +43,13 @@ from kairix.connectors.m365_email_headers.graph_client import (
     M365GraphClient,
 )
 
+# F56 capability declaration (Wave B shims duck-type Protocol satisfaction).
+CAPABILITIES: frozenset[str] = frozenset(
+    {"SourceConnector", "CheckpointedConnector", "CredentialsConnector", "OAuthConnector"}
+)
+
 __all__ = [
+    "CAPABILITIES",
     "HEADER_ONLY_SELECT",
     "GraphMessage",
     "M365EmailHeadersConnector",
