@@ -1478,3 +1478,194 @@ ContainerTransient = ContainerTransientError
 
 class UnexpectedValidationError(ConnectorValidationError):
     """Transient validation failure — does NOT disable the cc_pair."""
+
+
+# =============================================================================
+# Topology v2 (Wave B) — capability mix-in Protocols (Onyx-derived)
+# =============================================================================
+#
+# Wave B splits the single flat :class:`SourceConnector` Protocol into
+# a base + optional capabilities. A connector implementation advertises
+# capabilities by satisfying the relevant Protocols; the framework's
+# runner dispatches via runtime ``isinstance`` checks against each
+# capability Protocol.
+#
+# These Protocols land as additive shapes — Wave B itself is pure-
+# additive (the 4 shipped connectors get default-impl shims so they
+# continue to satisfy the new surfaces without behavioural change). The
+# ``topology_v2_protocol`` feature flag gates whether the worker's
+# connector-sync dispatch routes through the new capability path; Wave
+# C activates it at runtime.
+#
+# See docs/architecture/connector-scope-topology/ADR.md §"Connector
+# Protocol — capability mix-ins (Onyx-derived)" for the canonical
+# decision; this surface mirrors that section.
+
+
+@runtime_checkable
+class PollConnector(Protocol):
+    """Connectors that pull changes via a delta cursor (most current shape).
+
+    The container-scoped delta-poll surface — :meth:`list_changes_for_container`
+    accepts a :class:`Container` (carrying its own per-cc_pair cursor
+    token) and yields :class:`ChangeEvent` items observed since that
+    cursor. Distinct from the legacy single-cursor
+    :class:`SourceConnector.list_changes` because the v2 topology
+    surfaces a per-container cursor (per-drive, per-mailbox, per-channel)
+    instead of a single connector-wide token.
+    """
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """Yield ChangeEvents observed since ``container.cursor_token``."""
+        ...
+
+
+@runtime_checkable
+class CheckpointedConnector(Protocol):
+    """Connectors whose cursor is a richer per-batch Checkpoint blob (Onyx pattern).
+
+    Some sources (Microsoft Graph delta, Confluence cursor pages,
+    Notion incremental sync) carry richer per-batch state than a single
+    timestamp — full deltaLink URLs, opaque resumption tokens, pagination
+    cursors. The CheckpointedConnector surface accepts an opaque
+    checkpoint string (``None`` for first sync) and yields
+    :class:`ChangeEvent` items for that batch.
+    """
+
+    def load_from_checkpoint(self, container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
+        """Yield ChangeEvents from the given checkpoint (None = first sync)."""
+        ...
+
+
+@runtime_checkable
+class SlimConnector(Protocol):
+    """ID-only enumeration for prune cycles — separate from full retrieval.
+
+    Prune cycles need to know "what ids does the source still have?"
+    without paying the cost of fetching every body. SlimConnector
+    yields item_ids only — the orchestrator diffs against
+    ``documents.item_id`` to detect deletes and stage tombstones.
+    """
+
+    def retrieve_all_slim_docs(self, container: Container) -> Iterator[str]:
+        """Yield the item_id strings the source currently exposes for ``container``."""
+        ...
+
+
+@runtime_checkable
+class SlimConnectorWithPermSync(Protocol):
+    """Slim retrieval that also reports per-doc ACL (for AccessType.SYNC cc_pairs).
+
+    Sources with per-doc permissions (SharePoint, Drive, Confluence
+    restricted pages) need a permission-sync cycle that pulls the
+    current ACL alongside the id list. Each yielded tuple is
+    ``(item_id, acl_serialised)`` — the serialised form is opaque to
+    the framework; the connector's perm-sync handler parses it.
+    """
+
+    def retrieve_all_slim_docs_with_perms(self, container: Container) -> Iterator[tuple[str, str]]:
+        """Yield ``(item_id, acl_serialised)`` tuples for ``container``."""
+        ...
+
+
+@runtime_checkable
+class EventConnector(Protocol):
+    """Webhook-driven push surface (sub-minute freshness).
+
+    Sources with webhook / change-notification surfaces (Microsoft
+    Graph subscriptions, Slack RTM events, Notion webhook, GitHub
+    webhook) implement EventConnector. The framework subscribes once,
+    holds the subscription_id, renews on TTL, and routes inbound events
+    through :meth:`handle_event` which yields :class:`ChangeEvent` items.
+    """
+
+    def subscribe(self, callback_url: str) -> str | None:
+        """Subscribe to source events; return an opaque subscription_id (None = unsupported)."""
+        ...
+
+    def renew_subscription(self, subscription_id: str) -> str:
+        """Renew a subscription before its TTL; return the (possibly new) id."""
+        ...
+
+    def unsubscribe(self, subscription_id: str) -> None:
+        """Cancel the subscription cleanly (idempotent on unknown id)."""
+        ...
+
+    def handle_event(self, event: Mapping[str, Any]) -> Iterator[ChangeEvent]:
+        """Translate one inbound webhook payload into ChangeEvent items."""
+        ...
+
+
+@runtime_checkable
+class Resolver(Protocol):
+    """Per-document failure replay — cheaper than re-running the window.
+
+    When a sync tick fails partway through (rate limit, transient 503,
+    extractor crash on one item), the orchestrator stages the failed
+    item_ids in the deadletter table. Resolver lets the framework
+    re-pull only those items on the next tick instead of replaying the
+    whole window. ``include_permissions=True`` re-pulls the ACL too —
+    used when the failure originated in the perm-sync path.
+    """
+
+    def reindex(self, failed_item_ids: tuple[str, ...], *, include_permissions: bool = False) -> Iterator[ChangeEvent]:
+        """Yield ChangeEvent items for the given failed ids (optionally ACL-included)."""
+        ...
+
+
+@runtime_checkable
+class HierarchyConnector(Protocol):
+    """Emits source's folder/space/site tree as HierarchyNodes (parent-before-child).
+
+    Sources with a folder / space / channel hierarchy (SharePoint
+    sites, Drive folders, Notion pages, Slack channels) implement
+    :class:`HierarchyConnector` so the search layer can answer "files
+    in this folder", "siblings of this doc", "all docs under site:X"
+    without re-deriving from ``source_uri`` prefixes. Emission order is
+    parent-before-child so the receiver can build the tree in one pass.
+    """
+
+    def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
+        """Yield HierarchyNode items parent-before-child for the given cc_pair."""
+        ...
+
+
+@runtime_checkable
+class OAuthConnector(Protocol):
+    """For source kinds needing three-legged OAuth flow.
+
+    OAuthConnector exposes the two URL-building classmethods every
+    three-legged OAuth flow needs: the authorization URL the operator
+    visits, and the code-to-token exchange that swaps the redirect
+    code for an access+refresh token pair. Classmethods (not instance
+    methods) because the flow happens BEFORE the connector instance
+    exists — the resulting tokens get stored as a :class:`Credential`
+    that the constructor later loads.
+    """
+
+    @classmethod
+    def oauth_authorization_url(cls, state: str) -> str:
+        """Return the URL the operator visits to grant OAuth consent."""
+        ...
+
+    @classmethod
+    def oauth_code_to_token(cls, code: str) -> dict[str, Any]:
+        """Exchange the OAuth code for a token dict (access_token + refresh_token + expiry)."""
+        ...
+
+
+@runtime_checkable
+class CredentialsConnector(Protocol):
+    """For source kinds that load credentials from a separate Credential record.
+
+    Some connectors transform / normalise / validate the raw credential
+    blob (e.g. unwrap a Key Vault reference, decrypt an AES-wrapped
+    secret, fetch a downstream service token). ``load_credentials``
+    accepts the raw mapping and returns the transformed mapping —
+    returning ``None`` signals the credential is invalid for this
+    connector's source kind.
+    """
+
+    def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
+        """Transform / validate the raw credential mapping; ``None`` = invalid."""
+        ...

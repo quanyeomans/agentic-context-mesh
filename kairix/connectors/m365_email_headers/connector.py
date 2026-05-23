@@ -49,6 +49,7 @@ from kairix.connectors.m365_email_headers.graph_client import (
 )
 from kairix.core.protocols import (
     ChangeEvent,
+    Container,
     Cursor,
     RawArtefact,
     Sensitivity,
@@ -270,6 +271,68 @@ class M365EmailHeadersConnector:
         Protection labels) without breaking the Protocol.
         """
         return LOCKED_SENSITIVITY
+
+    # ------------------------------------------------------------------
+    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # ------------------------------------------------------------------
+    # The shims below let the connector satisfy the new capability
+    # Protocols (CheckpointedConnector, CredentialsConnector,
+    # OAuthConnector) by delegating to existing methods OR raising
+    # actionable NotImplementedError where the source kind does not
+    # support the surface. Production routing through these methods is
+    # gated by ``topology_v2_protocol`` (default-off).
+
+    def load_from_checkpoint(self, _container: Container, checkpoint: str | None) -> Iterator[ChangeEvent]:
+        """CheckpointedConnector shim — delegate to :meth:`list_changes` using the checkpoint.
+
+        Graph delta works on opaque deltaLink strings; the shim forwards
+        ``checkpoint`` (or ``None`` for cold-start) directly to
+        :meth:`list_changes` so observable behaviour matches the v1 path.
+        ``_container`` is accepted for Protocol compliance but the
+        legacy path is single-mailbox per cc_pair (Wave E activates
+        per-container routing).
+        """
+        return self.list_changes(checkpoint)
+
+    def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
+        """CredentialsConnector shim — return the input unchanged.
+
+        Client-credentials flow consumes the operator-supplied tenant /
+        client / secret triple as-is; no transformation, no token
+        exchange at this surface (the OAuth2 helper exchanges at
+        first-fetch time). Returning the input keeps the framework's
+        credential-loading pass a no-op.
+        """
+        return credentials
+
+    @classmethod
+    def oauth_authorization_url(cls, _state: str) -> str:
+        """OAuthConnector shim — raise actionable NotImplementedError.
+
+        This connector uses the OAuth2 client-credentials flow (app-only,
+        no operator-in-the-loop) per ADR-004 — there is no authorization
+        URL to visit. The shim raises so a framework path that mistakenly
+        routes to the three-legged flow fails loudly with a fix hint.
+        """
+        raise NotImplementedError(
+            "m365_email_headers: client-credentials flow only; OAuth user flow not supported for this plugin. "
+            "fix: drive auth via the configured tenant_id / client_id / client_secret triple. "
+            "next: see kairix/connectors/m365_email_headers/connector.py for the credential contract."
+        )
+
+    @classmethod
+    def oauth_code_to_token(cls, _code: str) -> dict[str, Any]:
+        """OAuthConnector shim — raise actionable NotImplementedError.
+
+        Counterpart to :meth:`oauth_authorization_url` — no code-to-token
+        exchange because this connector does not surface an OAuth
+        consent screen.
+        """
+        raise NotImplementedError(
+            "m365_email_headers: client-credentials flow only; OAuth user flow not supported for this plugin. "
+            "fix: drive auth via the configured tenant_id / client_id / client_secret triple. "
+            "next: see kairix/connectors/m365_email_headers/connector.py for the credential contract."
+        )
 
     # ------------------------------------------------------------------
     # Forward-only API (read by orchestration)

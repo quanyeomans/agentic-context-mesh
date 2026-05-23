@@ -42,6 +42,7 @@ from kairix.connectors.dex_crm.client import (
 )
 from kairix.core.protocols import (
     ChangeEvent,
+    Container,
     Cursor,
     RawArtefact,
     Sensitivity,
@@ -248,6 +249,34 @@ class DexCrmConnector:
         records.
         """
         return self._sensitivity
+
+    # ------------------------------------------------------------------
+    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # ------------------------------------------------------------------
+    # The shims below let the connector satisfy the new capability
+    # Protocols (PollConnector, CredentialsConnector) by delegating to
+    # existing methods. Production routing through these methods is
+    # gated by the ``topology_v2_protocol`` feature flag (default-off);
+    # Wave C activates the runtime path.
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """PollConnector shim — delegate to :meth:`list_changes` using the container cursor.
+
+        Dex CRM has one logical container (the tenant). The shim
+        forwards ``container.cursor_token`` to the existing
+        :meth:`list_changes` so observable behaviour is identical.
+        """
+        return self.list_changes(container.cursor_token)
+
+    def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
+        """CredentialsConnector shim — return the input unchanged.
+
+        Dex auth is API-key only — no transformation, no derived
+        secrets, no token exchange. The shim returns the input mapping
+        as-is so the framework's credential-loading pass remains a
+        no-op for this connector.
+        """
+        return credentials
 
     # ------------------------------------------------------------------
     # Internals

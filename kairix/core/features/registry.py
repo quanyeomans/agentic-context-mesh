@@ -145,6 +145,23 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_protocol": FeatureFlag(
+        name="topology_v2_protocol",
+        default=False,
+        description=(
+            "Wave B of the connector/collection/scope topology v2 migration — "
+            "controls whether the worker's connector-sync dispatch routes through "
+            "the new capability-mix-in path (using PollConnector / CheckpointedConnector "
+            "etc.) vs the legacy single-cursor SourceConnector path. Wave B lands "
+            "the Protocols + shims with the flag default-off so existing behaviour "
+            "is preserved; Wave C runtime activates the routing."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
 }
 
 
