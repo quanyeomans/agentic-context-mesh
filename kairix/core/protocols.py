@@ -14,9 +14,15 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from kairix.core.search.intent import QueryIntent
+
+if TYPE_CHECKING:
+    # F42: FeatureFlagResolver.iter_all returns FlagStatus (frozen-dc);
+    # import behind TYPE_CHECKING to keep protocols.py free of the
+    # kairix.core.features import cycle at module-load time.
+    from kairix.core.features.resolver import FlagStatus
 
 
 @runtime_checkable
@@ -917,3 +923,22 @@ class EntityGraphSink(Protocol):
     """
 
     def stage(self, signals: Sequence[EntitySignal]) -> int: ...
+
+
+@runtime_checkable
+class FeatureFlagResolver(Protocol):
+    """Test seam for feature-flag resolution.
+
+    Per ``docs/architecture/feature-flag-architecture.md`` §3.3 step 4 —
+    the resolver Protocol exposes the boundary tests use; the canonical
+    ``FakeFeatureFlagResolver`` from ``tests/fakes.py`` lets unit tests
+    pin specific flag states without touching the global registry.
+
+    ``get`` returns a bool (the resolved effective value);
+    ``iter_all`` yields :class:`kairix.core.features.resolver.FlagStatus`
+    snapshots, which is a ``@dataclass(frozen=True)`` per F42.
+    """
+
+    def get(self, name: str) -> bool: ...
+
+    def iter_all(self) -> Iterator[FlagStatus]: ...

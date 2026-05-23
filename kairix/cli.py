@@ -3,6 +3,7 @@ kairix — private knowledge retrieval for AI agents and teams.
 
 Subcommands:
   bootstrap   Agent orientation envelope: role, board, recent memory, goals, health
+  features    Inspect registered feature flags (status + effective values)
   embed       Embed documents into the kairix vector index
   search      Hybrid search: BM25 + vector via RRF
   entity      Entity management: suggest (NER), validate (Wikidata), audit, purge
@@ -68,6 +69,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "worker": ("kairix.worker_cli", "main", True),
     "config": ("kairix.core.search.config_validator", "main", True),
     "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
+    "features": ("kairix.core.features.cli", "main", True),
 }
 
 

@@ -782,3 +782,128 @@ class TestTraceEnabled:
         assert trace_enabled() is False
         monkeypatch.setenv("KAIRIX_TRACE", "0")
         assert trace_enabled() is False
+
+
+class TestFeatureFlagOverride:
+    """Round-trip tests for ``feature_flag_override`` (PR-2 feature-flag scaffold).
+
+    Per ``docs/architecture/feature-flag-architecture.md`` §3.4 the
+    env-var override is highest priority; ``feature_flag_override``
+    returns True / False / None so the resolver can distinguish "unset"
+    from "explicitly false".
+    """
+
+    @pytest.mark.unit
+    def test_unset_returns_none(self, monkeypatch) -> None:
+        """No env var → ``None`` so the resolver falls through layers."""
+        from kairix.paths import feature_flag_override
+
+        monkeypatch.delenv("KAIRIX_FEATURE_CANARY", raising=False)
+        assert feature_flag_override("canary") is None
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("truthy", ["1", "true", "True", "yes", "on", "ON"])
+    def test_truthy_values_return_true(self, monkeypatch, truthy: str) -> None:
+        """Documented truthy values resolve to ``True`` (case-insensitive)."""
+        from kairix.paths import feature_flag_override
+
+        monkeypatch.setenv("KAIRIX_FEATURE_CANARY", truthy)
+        assert feature_flag_override("canary") is True
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("falsy", ["0", "false", "False", "no", "off"])
+    def test_falsy_values_return_false(self, monkeypatch, falsy: str) -> None:
+        """Documented falsy values resolve to ``False``."""
+        from kairix.paths import feature_flag_override
+
+        monkeypatch.setenv("KAIRIX_FEATURE_CANARY", falsy)
+        assert feature_flag_override("canary") is False
+
+    @pytest.mark.unit
+    def test_garbage_value_returns_none_with_warning(self, monkeypatch, caplog) -> None:
+        """A non-boolean string logs a warning and returns ``None``.
+
+        Sabotage: remove the warning log → the operator's typo silently
+        disables the override; this assertion fails.
+        """
+        from kairix.paths import feature_flag_override
+
+        monkeypatch.setenv("KAIRIX_FEATURE_CANARY", "maybe")
+        with caplog.at_level("WARNING"):
+            result = feature_flag_override("canary")
+        assert result is None
+        assert any("not a recognised boolean" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.unit
+    def test_uppercases_the_flag_name(self, monkeypatch) -> None:
+        """The env var name is ``KAIRIX_FEATURE_<UPPERCASE>`` regardless
+        of the case the caller passes. Locks the spec §3.4 contract.
+        """
+        from kairix.paths import feature_flag_override
+
+        monkeypatch.setenv("KAIRIX_FEATURE_MY_FLAG", "1")
+        assert feature_flag_override("my_flag") is True
+        assert feature_flag_override("My_Flag") is True
+
+
+class TestFeatureFlagConfigOverlay:
+    """Round-trip tests for ``feature_flag_config_overlay``.
+
+    The middle layer of §3.4 — reads the ``features:`` section from
+    ``kairix.config.yaml``. Returns an empty dict when the file or
+    section is missing so the resolver falls back to the registry
+    default.
+    """
+
+    @pytest.mark.unit
+    def test_returns_empty_dict_when_config_missing(self, monkeypatch, tmp_path) -> None:
+        """No config file → empty dict."""
+        from kairix.paths import feature_flag_config_overlay
+
+        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(tmp_path / "missing.yaml"))
+        assert feature_flag_config_overlay() == {}
+
+    @pytest.mark.unit
+    def test_reads_features_section(self, monkeypatch, tmp_path) -> None:
+        """``features: {flag_a: true, flag_b: false}`` parses round-trip."""
+        from kairix.paths import feature_flag_config_overlay
+
+        cfg = tmp_path / "kairix.config.yaml"
+        cfg.write_text("features:\n  flag_a: true\n  flag_b: false\n", encoding="utf-8")
+        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg))
+
+        overlay = feature_flag_config_overlay()
+        assert overlay == {"flag_a": True, "flag_b": False}
+
+    @pytest.mark.unit
+    def test_returns_empty_dict_when_features_section_absent(self, monkeypatch, tmp_path) -> None:
+        """Config file exists but ``features:`` key missing → empty dict."""
+        from kairix.paths import feature_flag_config_overlay
+
+        cfg = tmp_path / "kairix.config.yaml"
+        cfg.write_text("paths:\n  document_root: /tmp\n", encoding="utf-8")
+        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg))
+
+        assert feature_flag_config_overlay() == {}
+
+    @pytest.mark.unit
+    def test_malformed_yaml_returns_empty_dict(self, monkeypatch, tmp_path) -> None:
+        """Malformed YAML doesn't raise — gracefully falls back to empty."""
+        from kairix.paths import feature_flag_config_overlay
+
+        cfg = tmp_path / "kairix.config.yaml"
+        cfg.write_text("features: this is not a dict\n  - oops\n", encoding="utf-8")
+        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg))
+
+        assert feature_flag_config_overlay() == {}
+
+    @pytest.mark.unit
+    def test_non_dict_features_section_returns_empty_dict(self, monkeypatch, tmp_path) -> None:
+        """``features: []`` (a list, not a dict) → empty overlay."""
+        from kairix.paths import feature_flag_config_overlay
+
+        cfg = tmp_path / "kairix.config.yaml"
+        cfg.write_text("features: []\n", encoding="utf-8")
+        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg))
+
+        assert feature_flag_config_overlay() == {}
