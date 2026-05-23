@@ -80,7 +80,10 @@ The design needs to balance:
 | `06-onyx-comparative-analysis.md` | drafted 2026-05-23 (Onyx framework patterns; cc_pair triad, HierarchyNode, capability mix-ins, SlimConnector, Resolver to adopt) |
 | `07-research-closeout.md` | drafted 2026-05-23 (5 open questions resolved with citations) |
 | `08-chunking-and-entity-strategies.md` | drafted 2026-05-23 (12 source kinds × chunking + entity-extraction + libraries + failure modes; chunker registry shape) |
-| `ADR.md` | drafted 2026-05-23 — **NEEDS REVISION** to incorporate 06+07+08 findings (cc_pair triad, HierarchyNode, chunker registry, capability mix-ins) |
+| `ADR.md` | drafted 2026-05-23 v2 — **PROPOSED** (6-concern model: Connector × Credential × cc_pair × Container/HierarchyNode × Collection × ScopeProfile+Skill+ChunkerRegistry; 9 capability Protocols; 7-wave migration) |
+| `09-extended-bdd-scenarios.md` | pending — actor-perspective scenarios + missing-BDD analysis (operator / agent / human / auditor / external-user) |
+| `10-test-architecture.md` | pending — test surface required (per-capability contracts, chunker contracts, scope-profile composition property tests) |
+| `11-implementation-gap-analysis.md` | pending — explicit walk of `kairix/core/connectors/`, `tests/bdd/features/`, `tests/contracts/` against ADR v2 |
 
 External research gaps tracked in `01-source-analysis.md` §"Open
 questions" per connector — closed in `07-research-closeout.md`.
