@@ -29,6 +29,7 @@ import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -251,14 +252,8 @@ class DexCrmClient:
         rate-limited) without echoing the base URL or any query-string
         tokens that might carry sensitive identifiers.
         """
-        path = url
-        for prefix in ("https://", "http://"):
-            if path.startswith(prefix):
-                rest = path[len(prefix) :]
-                slash = rest.find("/")
-                path = rest[slash:] if slash >= 0 else "/"
-                break
-        return path
+        parsed = urlparse(url)
+        return parsed.path or "/"
 
 
 __all__ = [
