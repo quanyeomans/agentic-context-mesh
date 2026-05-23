@@ -58,6 +58,9 @@ _EXPECTED_TOOLS = {
     # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
     "ingest_chat",
     "facts_about",
+    # Wave D (topology v2 operator config) — agent-readable cc-pair surface
+    # (mutating lifecycle is operator-owned; agents see an escalation stub)
+    "cc_pair",
 }
 
 
