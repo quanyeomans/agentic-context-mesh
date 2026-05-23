@@ -12,6 +12,7 @@ from kairix.core.protocols import (
     BoostStrategy,
     DocumentRepository,
     EmbeddingService,
+    FeatureFlagResolver,
     FusionStrategy,
     GraphRepository,
     IntentClassifier,
@@ -43,6 +44,7 @@ from tests.fakes import (
     FakeClassifier,
     FakeDocumentRepository,
     FakeEmbeddingService,
+    FakeFeatureFlagResolver,
     FakeFusion,
     FakeGraphRepository,
     FakeScorer,
@@ -94,6 +96,10 @@ class TestProtocolCompliance:
     @pytest.mark.contract
     def test_fake_search_logger_satisfies_protocol(self):
         assert isinstance(FakeSearchLogger(), SearchLogger)
+
+    @pytest.mark.contract
+    def test_fake_feature_flag_resolver_satisfies_protocol(self):
+        assert isinstance(FakeFeatureFlagResolver(), FeatureFlagResolver)
 
 
 # ---------------------------------------------------------------------------

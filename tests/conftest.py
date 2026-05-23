@@ -153,6 +153,10 @@ pytest_plugins = [
     # connector (obsidian). Future connectors (sharepoint, dex_crm, ...)
     # append a sibling entry per F36.
     "tests.bdd.steps.connector_obsidian_steps",
+    # PR-2 — feature-flag scaffold (kairix features status CLI + MCP tool).
+    # See docs/architecture/feature-flag-architecture.md.
+    "tests.bdd.steps.cli_features_steps",
+    "tests.bdd.steps.mcp_features_status_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

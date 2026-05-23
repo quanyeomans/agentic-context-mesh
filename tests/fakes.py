@@ -2314,3 +2314,71 @@ class FakeChunkWriter:
         batch = tuple(chunks)
         self.writes.append(batch)
         return len(batch)
+
+
+class FakeFeatureFlagResolver:
+    """In-memory :class:`kairix.core.protocols.FeatureFlagResolver`.
+
+    Protocol-compliant fake — tests pin specific flag states without
+    touching the global :data:`kairix.core.features.registry.REGISTRY`
+    or monkey-patching env vars. The fake never reads
+    ``kairix.config.yaml`` or ``KAIRIX_FEATURE_*`` (F2/F4-clean by
+    construction).
+
+    Use the :meth:`with_flag` builder to thread declarations through a
+    test fluently:
+
+        >>> resolver = FakeFeatureFlagResolver().with_flag(
+        ...     "obsidian_connector_primary", True
+        ... )
+        >>> resolver.get("obsidian_connector_primary")
+        True
+
+    Unknown flags raise ``KeyError`` — matching the production resolver's
+    behaviour so tests catch typos the same way production does.
+    """
+
+    def __init__(self, flags: dict[str, bool] | None = None) -> None:
+        self._flags: dict[str, bool] = dict(flags or {})
+
+    def with_flag(self, name: str, value: bool) -> FakeFeatureFlagResolver:
+        """Builder — return a copy with ``name`` set to ``value``.
+
+        Returns a *new* resolver so chained ``with_flag`` calls don't
+        mutate a shared instance. The pattern matches the FakePaths-
+        style immutable construction used elsewhere in this module.
+        """
+        merged = dict(self._flags)
+        merged[name] = value
+        return FakeFeatureFlagResolver(merged)
+
+    def get(self, name: str) -> bool:
+        if name not in self._flags:
+            raise KeyError(
+                f"unknown feature flag {name!r}. fix: declare it via FakeFeatureFlagResolver().with_flag(name, value)."
+            )
+        return self._flags[name]
+
+    def iter_all(self) -> Any:
+        """Yield ``FlagStatus`` snapshots for every declared flag.
+
+        Builds the snapshots lazily — the import of
+        :class:`kairix.core.features.resolver.FlagStatus` happens at
+        call time so tests that never iterate keep the fake free of any
+        kairix.core.features dependency.
+        """
+        from kairix.core.features.resolver import FlagStatus
+
+        for name in sorted(self._flags):
+            value = self._flags[name]
+            yield FlagStatus(
+                name=name,
+                default=value,
+                effective=value,
+                source="default",
+                stage="introduce",
+                introduced_in="v0.0.0",
+                target_retire_in="v9999.0.0",
+                owner="test",
+                related_spec=None,
+            )

@@ -595,6 +595,44 @@ def tool_warm() -> dict[str, Any]:
         }
 
 
+def tool_features_status() -> dict[str, Any]:
+    """Return the same JSON envelope as ``kairix features status --json``.
+
+    Per F53 + the feature-flag-architecture spec §3.5, agents introspect
+    the live flag state through this tool. Thin adapter — delegates to
+    :func:`kairix.core.features.status` so CLI and MCP stay aligned.
+
+    Read-only, sub-millisecond. Returns the envelope shape:
+
+        {
+          "flags": [
+            {"name": ..., "default": ..., "effective": ..., "stage": ..., ...},
+            ...
+          ],
+          "error": ""
+        }
+
+    On exception, surfaces a typed error string and an empty flags list
+    so the agent can decide whether to fall back or escalate.
+    """
+    from dataclasses import asdict
+
+    try:
+        from kairix.core.features import status as features_status
+
+        entries = features_status()
+        return {
+            "flags": [asdict(entry) for entry in entries],
+            "error": "",
+        }
+    except Exception as exc:
+        logger.warning("tool_features_status failed: %s", exc, exc_info=True)
+        return {
+            "flags": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def tool_worker_status() -> dict[str, Any]:
     """Read the kairix-worker state file and return its current envelope.
 
@@ -934,6 +972,12 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix worker status",
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
+            _cap(
+                name="features_status",
+                mcp_tool="features_status",
+                cli="kairix features status",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
             _cap(name="warm", mcp_tool="warm", cli="kairix warm", category=CAP_CATEGORY_DIAGNOSTIC),
             # Probe search — capped MCP variant
             _cap(
@@ -1240,6 +1284,18 @@ def _register_synthesis_and_diagnostic_tools(
     def worker_status() -> dict[str, Any]:
         """Worker state envelope. Read-only. Identical to `kairix worker status`."""
         return tool_worker_status()
+
+    @server.tool(
+        description=(
+            "List the registered kairix feature flags + their effective values. "
+            "Use to self-introspect what's enabled before relying on flag-gated behaviour. "
+            "Read-only. Identical envelope to `kairix features status --json`."
+        )
+    )
+    @async_tool_handler
+    def features_status() -> dict[str, Any]:
+        """Feature-flag status envelope. Read-only. Identical to `kairix features status --json`."""
+        return tool_features_status()
 
     @server.tool(
         description=(

@@ -40,6 +40,7 @@ _EXPECTED_TOOLS = {
     # Diagnostic capabilities
     "onboard_check",
     "worker_status",
+    "features_status",
     "warm",
     # Agent-safe capped surface (escalates above queries<=20 / concurrency<=3)
     "probe_search",

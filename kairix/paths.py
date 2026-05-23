@@ -33,6 +33,13 @@ _USER_CACHE_DIR = ".cache"
 # duplicated across them.
 _AGENT_KNOWLEDGE_DIR = "04-Agent-Knowledge"
 
+# Env-var name for the operator-supplied config file path. Centralised
+# so the literal isn't duplicated across the three resolvers that need
+# to honour the operator override (F17 hygiene — appears ≥3 times in
+# this module once the feature-flag scaffold's config-overlay reader
+# lands).
+_KAIRIX_CONFIG_PATH_ENV = "KAIRIX_CONFIG_PATH"
+
 
 def is_docker_runtime_check() -> bool:
     """Detect if running inside a Docker container."""
@@ -181,7 +188,7 @@ def _resolve_cached() -> KairixPaths:
 
 def load_paths_from_config() -> dict[str, str]:
     """Load the paths: section from kairix.config.yaml if it exists."""
-    config_path = os.environ.get("KAIRIX_CONFIG_PATH") or "kairix.config.yaml"
+    config_path = os.environ.get(_KAIRIX_CONFIG_PATH_ENV) or "kairix.config.yaml"
     try:
         import yaml
 
@@ -457,7 +464,7 @@ def config_path_override() -> str | None:
     ``load_paths_from_config`` (which still reads via ``os.environ`` to
     avoid a circular import inside this module).
     """
-    value = os.environ.get("KAIRIX_CONFIG_PATH")
+    value = os.environ.get(_KAIRIX_CONFIG_PATH_ENV)
     return value if value else None
 
 
@@ -854,6 +861,71 @@ def entity_overrides_path(*, document_root_arg: str | Path | None = None) -> Pat
         return Path(raw).expanduser()
     base = Path(document_root_arg) if document_root_arg is not None else document_root()
     return base / _AGENT_KNOWLEDGE_DIR / "_entity-overrides.md"
+
+
+def feature_flag_override(name: str) -> bool | None:
+    """Read the ``KAIRIX_FEATURE_<UPPERCASE>`` env-var override for a flag.
+
+    Returns ``True`` / ``False`` when the env var is set to a recognised
+    truthy / falsy value; returns ``None`` when the var is unset (so the
+    resolver falls through to the config-overlay layer).
+
+    Accepted truthy values: ``1``, ``true``, ``yes``, ``on`` (case-
+    insensitive). Accepted falsy values: ``0``, ``false``, ``no``,
+    ``off``. Anything else logs a warning and returns ``None`` so the
+    resolver treats the override as absent.
+
+    Lives in :mod:`kairix.paths` per F4 — every ``KAIRIX_*`` env read
+    stays at the paths boundary. See
+    ``docs/architecture/feature-flag-architecture.md`` §3.4.
+    """
+    env_name = f"KAIRIX_FEATURE_{name.upper()}"
+    raw = os.environ.get(env_name)
+    if raw is None:
+        return None
+    normalised = raw.strip().lower()
+    if normalised in {"1", "true", "yes", "on"}:
+        return True
+    if normalised in {"0", "false", "no", "off"}:
+        return False
+    logger.warning(
+        "%s=%r is not a recognised boolean; ignoring override",
+        env_name,
+        raw,
+    )
+    return None
+
+
+def feature_flag_config_overlay() -> dict[str, bool]:
+    """Return the ``features:`` section from ``kairix.config.yaml``.
+
+    Returns an empty dict when the section is absent or the config file
+    does not exist. Non-bool values are coerced through Python's
+    truthiness so operators who write ``features: {foo: 1}`` get the
+    intuitive interpretation; explicit ``True`` / ``False`` are
+    preserved untouched.
+
+    F4 boundary: keeping the yaml read here means the resolver does not
+    grow its own ``os.environ`` / file-system read surface. See
+    ``docs/architecture/feature-flag-architecture.md`` §3.4.
+    """
+    config_path = os.environ.get(_KAIRIX_CONFIG_PATH_ENV) or "kairix.config.yaml"
+    try:
+        import yaml
+
+        p = Path(config_path).expanduser()
+        if not p.exists():
+            return {}
+        with open(p) as f:
+            data = yaml.safe_load(f) or {}
+        section = data.get("features") or {}
+        if not isinstance(section, dict):
+            return {}
+        return {str(k): bool(v) for k, v in section.items()}
+    except (OSError, ImportError, AttributeError):
+        # Graceful fallback when the config file is missing, yaml is
+        # unavailable, or yaml.safe_load returns an unexpected shape.
+        return {}
 
 
 def agent_memory_path(agent: str, *, root: Path | str | None = None) -> Path:
