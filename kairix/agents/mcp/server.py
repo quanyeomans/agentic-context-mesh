@@ -595,22 +595,33 @@ def tool_warm() -> dict[str, Any]:
         }
 
 
-def tool_features_status() -> dict[str, Any]:
+def _default_topology_v2_db_path() -> Path:
+    """Production callable that returns the configured kairix SQLite path."""
+    from kairix.paths import db_path
+
+    return db_path()
+
+
+def tool_features_status(
+    topology_v2: bool = False,
+    *,
+    read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
+) -> dict[str, Any]:
     """Return the same JSON envelope as ``kairix features status --json``.
 
     Per F53 + the feature-flag-architecture spec §3.5, agents introspect
     the live flag state through this tool. Thin adapter — delegates to
     :func:`kairix.core.features.status` so CLI and MCP stay aligned.
 
-    Read-only, sub-millisecond. Returns the envelope shape:
+    ``topology_v2=True`` extends the envelope with a ``topology_v2``
+    key carrying the Wave D diagnostics (declared cc_pairs +
+    per-actor scope-profile resolution). Default-off so existing agents
+    see byte-identical pre-Wave-D output.
 
-        {
-          "flags": [
-            {"name": ..., "default": ..., "effective": ..., "stage": ..., ...},
-            ...
-          ],
-          "error": ""
-        }
+    ``read_db_path`` is the unit-test DI seam: leaving it ``None``
+    routes through the production :func:`kairix.paths.db_path` resolver;
+    tests pass a callable returning a tmp_path so the topology v2 read
+    hits the test-built schema without env-var monkeypatching (F2-clean).
 
     On exception, surfaces a typed error string and an empty flags list
     so the agent can decide whether to fall back or escalate.
@@ -621,16 +632,53 @@ def tool_features_status() -> dict[str, Any]:
         from kairix.core.features import status as features_status
 
         entries = features_status()
-        return {
+        envelope: dict[str, Any] = {
             "flags": [asdict(entry) for entry in entries],
             "error": "",
         }
+        if topology_v2:
+            envelope["topology_v2"] = _read_topology_v2_diagnostics_for_mcp(read_db_path)
+        return envelope
     except Exception as exc:
         logger.warning("tool_features_status failed: %s", exc, exc_info=True)
         return {
             "flags": [],
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+def _read_topology_v2_diagnostics_for_mcp(
+    read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
+) -> dict[str, Any]:
+    """Read the Wave D topology v2 diagnostics for the MCP envelope.
+
+    Isolated helper so :func:`tool_features_status` stays under the
+    F16 cognitive-complexity ceiling AND the topology v2 read can
+    degrade independently (a missing topology v2 schema returns the
+    zero-snapshot rather than crashing the whole MCP envelope).
+
+    ``read_db_path`` is the DI seam — production callers leave it
+    ``None`` to delegate to :func:`kairix.paths.db_path`; tests pass a
+    tmp-path-returning callable.
+    """
+    import sqlite3
+    from contextlib import closing
+
+    from kairix.core.features.topology_v2_status import (
+        build_topology_v2_diagnostics,
+        render_topology_v2_json,
+    )
+
+    resolved = read_db_path()
+
+    try:
+        conn = sqlite3.connect(str(resolved))
+        with closing(conn):
+            diag = build_topology_v2_diagnostics(conn)
+        return render_topology_v2_json(diag)
+    except sqlite3.Error as exc:
+        logger.warning("topology v2 diagnostics read failed: %s", exc, exc_info=True)
+        return {"cc_pairs": [], "actor_scopes": []}
 
 
 def tool_worker_status() -> dict[str, Any]:
@@ -854,6 +902,31 @@ def tool_embed_rebuild_fts() -> dict[str, Any]:
     )
 
 
+def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
+    """Stub for the cc-pair capability — Wave D lifecycle is operator-owned.
+
+    cc_pair create / pause / resume / delete mutate the topology v2 state
+    machine (kairix.core.connectors.cc_pair F57 lifecycle); agents must
+    escalate to an operator running `kairix cc-pair <verb>` so the
+    transition gets logged + observable via `kairix features status
+    --topology-v2`. The read-only ``list`` verb is also returned through
+    the escalation envelope so agents get one consistent shape per
+    capability.
+    """
+    suffix = "" if verb == "list" else " --id <id>"
+    return _operator_only_envelope(
+        capability="cc-pair",
+        operator_command=f"kairix cc-pair {verb}{suffix}",
+        reason=(
+            "cc-pair mutates the topology v2 cc_pair lifecycle (status state machine "
+            "+ topology_cc_pairs rows); operators run via the CLI so transitions are "
+            "audited. Agents read state via `tool_features_status(topology_v2=True)`."
+        ),
+        expected_runtime_seconds=5,
+        see_also=[_RETRIEVAL_RUNBOOK],
+    )
+
+
 # Capability catalogue constants.
 #
 # CAPABILITIES_TOOL_NAME is the canonical MCP / catalogue name for the
@@ -1053,6 +1126,13 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix embed rebuild-fts",
                 category=CAP_CATEGORY_KNOWLEDGE_WRITE,
                 escalate_via="embed_rebuild_fts",
+            ),
+            _cap(
+                name="cc_pair",
+                mcp_tool=None,
+                cli="kairix cc-pair",
+                category=CAP_CATEGORY_KNOWLEDGE_WRITE,
+                escalate_via="cc_pair",
             ),
         ],
         "schema_version": "1",
@@ -1446,6 +1526,18 @@ def _register_operator_and_ingest_tools(server: Any) -> None:
     def embed_rebuild_fts() -> dict[str, Any]:
         """Operator-only FTS recovery. Returns escalation envelope."""
         return tool_embed_rebuild_fts()
+
+    @server.tool(
+        description=(
+            "cc-pair escalation — Wave D topology v2 cc_pair lifecycle (list / create / "
+            "pause / resume / delete) mutates the state machine; agents must escalate. "
+            "Returns the OperatorOnlyCapability envelope with the exact `kairix cc-pair` command."
+        )
+    )
+    @async_tool_handler
+    def cc_pair(verb: str = "list") -> dict[str, Any]:
+        """Operator-only cc_pair lifecycle. Returns escalation envelope."""
+        return tool_cc_pair(verb=verb)
 
     # ---- Plan B-parity Week 5 Stream A — agent-driven ingest + recall ----
     # ingest_chat lets the agent push JSONL transcripts into the conversation

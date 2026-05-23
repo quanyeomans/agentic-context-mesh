@@ -138,6 +138,8 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "embed",
         "store_crawl",
         "embed_rebuild_fts",
+        # Wave D — topology v2 cc_pair lifecycle escalation stub.
+        "cc_pair",
         # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
         "ingest_chat",
         "facts_about",
@@ -197,6 +199,7 @@ def test_build_server_each_wrapper_dispatches_to_tool_function_under_unit() -> N
         ("embed", {}),
         ("store_crawl", {}),
         ("embed_rebuild_fts", {}),
+        ("cc_pair", {"verb": "list"}),
     ]:
         payload = _call_tool(server, tool_name, args)
         assert isinstance(payload, dict), f"tool {tool_name!r} returned non-dict: {payload!r}"

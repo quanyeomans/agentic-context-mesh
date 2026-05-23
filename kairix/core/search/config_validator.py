@@ -44,11 +44,48 @@ def validate_config(data: dict[str, Any]) -> list[str]:
 
     Returns a list of human-readable error messages. Empty list means valid.
     Never raises — returns errors as strings.
+
+    Also runs the Wave D topology v2 referential-integrity validators
+    when any of the 6 Wave D blocks is present — empty / absent blocks
+    skip cleanly so legacy configs see byte-identical behaviour.
     """
     errors: list[str] = []
     errors.extend(_validate_collections(data.get("collections")))
     errors.extend(_validate_agents(data.get("agents"), data.get("collections")))
+    errors.extend(_validate_topology_v2(data))
     return errors
+
+
+def _validate_topology_v2(data: dict[str, Any]) -> list[str]:
+    """Parse + cross-reference-check the Wave D topology v2 blocks.
+
+    Default-safe: when none of the topology v2 blocks is set, returns
+    ``[]`` without touching the parser. Parse errors and validation
+    failures both render as F21-shaped operator-friendly strings.
+
+    ``collections`` overlaps with the legacy ``collections.shared``
+    block (legacy is ``{shared: [...]}``); Wave D's top-level
+    ``collections`` is reserved for a future evolution where the v2
+    schema lives under a distinct key. For now, Wave D parses every
+    block EXCEPT ``collections`` so the legacy contract that requires
+    ``collections: <mapping>`` stays intact. Cross-reference rule 3
+    (collections.*.sources.*.cc_pair) is therefore inactive until the
+    Wave D top-level key resolves the name overlap — tracked in the
+    Wave D commit body.
+    """
+    topology_keys = ("connectors", "credentials", "cc_pairs", "scope_profiles", "skills")
+    if not any(data.get(k) for k in topology_keys):
+        return []
+    from kairix.config import parse_topology_v2, validate_topology_v2_references
+    from kairix.config.topology_v2 import TopologyV2ParseError
+
+    wave_d_view: dict[str, Any] = {k: data.get(k) for k in topology_keys}
+    try:
+        parsed = parse_topology_v2(wave_d_view)
+    except TopologyV2ParseError as exc:
+        return [f"topology_v2: parse failed — {exc}"]
+    failures = validate_topology_v2_references(parsed)
+    return [f.message for f in failures]
 
 
 def _validate_collection_overrides(prefix: str, name: str, overrides: Any) -> list[str]:
