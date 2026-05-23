@@ -361,12 +361,16 @@ def _emit_mode_stub(mode: str) -> int:
     return 1
 
 
-def _emit_run_header(args: argparse.Namespace, suite: Any, collection: str | None, auto_scoped: bool) -> None:
+def _emit_run_header(args: argparse.Namespace, _suite: Any, collection: str | None, auto_scoped: bool) -> None:
     """Print the operator-facing one-screen run header.
 
     Surfaces every flag the operator passed so the report stands alone
     (no need to scroll back to the invocation). Each header line is
     optional — flags left at their default produce no line.
+
+    ``_suite`` is kept on the signature for future header lines that
+    surface suite-level metadata (F19: underscore-prefixed positional
+    slot consumed by the caller).
     """
     if auto_scoped:
         print(f"  auto-scoping to collection '{collection}' (from suite.meta.default_collection)")
@@ -376,7 +380,6 @@ def _emit_run_header(args: argparse.Namespace, suite: Any, collection: str | Non
     scope = getattr(args, "scope", None)
     if scope:
         print(f"  scope override: {scope!r}")
-    del suite  # consumed by the caller; kept on the signature for future header lines
 
 
 def _emit_validation_warnings(suite: Any) -> None:
@@ -496,9 +499,12 @@ def cmd_run(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> i
     return 0
 
 
-def cmd_list(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> int:
-    """List bundled benchmark suites (resolves #222)."""
-    del args  # unused — list takes no flags
+def cmd_list(_args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> int:
+    """List bundled benchmark suites (resolves #222).
+
+    The ``_args`` parameter is required by the CLI dispatch signature but
+    carries no list-specific flags (F19: underscore-prefixed).
+    """
     d = deps or BenchmarkCLIDeps()
 
     suites = d.list_suites()
