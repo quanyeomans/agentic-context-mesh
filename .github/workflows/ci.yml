@@ -56,6 +56,11 @@ jobs:
               - 'kairix/**/*.py'
               - 'tests/**/*.py'
               - 'pyproject.toml'
+              # SonarCloud's rule set + exclusions live in sonar-project.properties;
+              # editing the file is a Python-quality-relevant change even though
+              # no .py touched. Without this entry, project.properties edits
+              # silently skip the sonarcloud job (#XXX — observed on 0b4095d9).
+              - 'sonar-project.properties'
             docker:
               - 'Dockerfile'
               - 'docker-compose*.yml'
