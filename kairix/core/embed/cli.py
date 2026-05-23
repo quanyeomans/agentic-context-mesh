@@ -285,15 +285,17 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_rebuild_fts(args: argparse.Namespace) -> int:
+def cmd_rebuild_fts(_args: argparse.Namespace) -> int:
     """Rebuild the documents_fts BM25 index in isolation. Self-heal for #223.
 
     Reads from the same documents + content tables that the embed pipeline
     populates — does NOT touch the embed pipeline, vector index, or
     recall canaries. Cheap (~30s on a 50k-doc corpus); use after the
     BM25 leg silently went offline.
+
+    The ``_args`` parameter is required by the CLI dispatch signature but
+    carries no rebuild-fts-specific flags (F19: underscore-prefixed).
     """
-    del args  # unused — no flags
     from pathlib import Path
 
     from kairix.core.db import get_db_path, open_db

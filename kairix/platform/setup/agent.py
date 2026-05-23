@@ -15,18 +15,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _default_chat(prompt: str, api_key: str, endpoint: str) -> str:  # pragma: no cover — prod provider wrapper
+def _default_chat(prompt: str, _api_key: str, _endpoint: str) -> str:  # pragma: no cover — prod provider wrapper
     """Production chat callable — wraps the configured provider plugin.
 
     Kept as a top-level function so ``OnboardingAgentDeps.chat`` has a
     stable, typed default that doesn't resolve the plugin at
     module-import time.
 
-    The ``api_key`` and ``endpoint`` args are part of the chat-callable
-    interface for symmetry with test fakes; the real provider plugin
-    resolves credentials internally (Key Vault, Secrets Manager, etc.).
+    The ``_api_key`` and ``_endpoint`` args are part of the chat-callable
+    interface for symmetry with test fakes (F19: underscore-prefixed);
+    the real provider plugin resolves credentials internally (Key Vault,
+    Secrets Manager, etc.).
     """
-    del api_key, endpoint  # the prod path resolves provider creds internally
     from kairix.paths import provider_name
     from kairix.providers import get_provider
     from kairix.transport.embed_service import ProviderChatBackend

@@ -1375,7 +1375,12 @@ def main(
     # Graceful shutdown
     running = True
 
-    def _shutdown(signum: int, frame: object) -> None:
+    def _shutdown(_signum: int, _frame: object) -> None:
+        """Signal handler — flips ``running`` to False on SIGTERM/SIGINT.
+
+        ``_signum``/``_frame`` are the standard signal-callback positional
+        slots required by ``signal.signal`` (F19: underscore-prefixed).
+        """
         nonlocal running
         logger.info("worker: shutdown signal received")
         running = False

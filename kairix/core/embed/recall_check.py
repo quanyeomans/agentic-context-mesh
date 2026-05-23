@@ -209,13 +209,14 @@ def _default_creds_resolver() -> Credentials | GraphCredentials | None:
         return None
 
 
-def _default_provider_factory(creds: Credentials) -> EmbedProvider:
+def _default_provider_factory(_creds: Credentials) -> EmbedProvider:
     """Production EmbedProvider factory — wraps ``get_embed_provider``.
 
-    Accepts the resolved credentials (unused by ``get_embed_provider`` but
-    exposed for symmetry with test injection).
+    Accepts the resolved credentials (unused by ``get_embed_provider`` —
+    production helper resolves credentials internally; F19:
+    underscore-prefixed for the Callable[[Credentials], EmbedProvider]
+    contract with the injected test factory).
     """
-    del creds  # production helper resolves its own credentials internally
     from kairix.platform.llm.embed_provider import get_embed_provider
 
     return get_embed_provider()

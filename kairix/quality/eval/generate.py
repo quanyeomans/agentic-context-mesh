@@ -480,16 +480,16 @@ class QueryGenerator:
 # ==========================================================================
 
 
-def _retrieve(query: str, intent: str, agent: str = "shape") -> tuple[list[str], list[str]]:
+def _retrieve(query: str, _intent: str, agent: str = "shape") -> tuple[list[str], list[str]]:
     """
     Run hybrid search and return (paths, snippets).
     Returns ([], []) on any failure.
 
-    ``intent`` is part of the historical signature shared with the sibling
+    ``_intent`` is part of the historical signature shared with the sibling
     helpers in hybrid_sweep / runner — kept for call-site uniformity even
-    though hybrid retrieval doesn't dispatch by intent.
+    though hybrid retrieval doesn't dispatch by intent (F19:
+    underscore-prefixed positional slot).
     """
-    del intent
     try:
         from kairix.quality.eval.retrieval import retrieve
 

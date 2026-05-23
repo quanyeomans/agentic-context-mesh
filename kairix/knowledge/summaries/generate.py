@@ -108,7 +108,7 @@ def _call_chat(
     messages: list[dict],
     _api_key: str,
     _endpoint: str,
-    deployment: str,
+    _deployment: str,
     max_tokens: int,
     deps: SummariesDeps,
 ) -> tuple[str, int]:
@@ -118,7 +118,8 @@ def _call_chat(
     Returns (content, estimated_tokens_used). Raises on failure.
 
     The api_key, endpoint, and deployment parameters are accepted for backwards
-    compatibility but ignored — credentials are resolved by the provider plugin.
+    compatibility but ignored — credentials are resolved by the provider plugin
+    (F19: underscore-prefixed positional slots).
 
     ``deps`` is required (non-Optional). Public callers
     (``generate_l0``/``generate_l1``/``generate_summaries``) resolve the
