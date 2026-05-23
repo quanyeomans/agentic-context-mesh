@@ -944,6 +944,12 @@ class Chunk:
     public tier explicitly. ``source_page`` is non-``None`` for PDF /
     PPTX / XLSX content; it lets retrieval cite a specific page back
     to the operator.
+
+    Topology v2 Wave C: ``chunker_version`` is the version-string of the
+    Chunker plugin that emitted this chunk (mirrors
+    ``documents_media.extractor_version``). ``None`` for legacy paths
+    that pre-date the chunker registry; new emitters fill it via
+    ``chunker_version=self.version`` per F55.
     """
 
     text: str
@@ -953,6 +959,7 @@ class Chunk:
     source_modified_at: str
     source_page: int | None
     sensitivity: Sensitivity
+    chunker_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1480,6 +1487,24 @@ class UnexpectedValidationError(ConnectorValidationError):
     """Transient validation failure — does NOT disable the cc_pair."""
 
 
+class CCPairTransitionError(Exception):
+    """Illegal cc_pair status transition rejected by the lifecycle validator.
+
+    Raised by :func:`kairix.core.connectors.cc_pair.transition_cc_pair`
+    when a caller asks for a status jump that is not in
+    ``_ALLOWED_TRANSITIONS`` (per F57). Carries the current and target
+    statuses so callers can log a precise rejection reason without
+    re-querying the row.
+    """
+
+    def __init__(self, current: str, target: str, reason: str | None = None) -> None:
+        self.current = current
+        self.target = target
+        self.reason = reason
+        suffix = f" (reason: {reason})" if reason else ""
+        super().__init__(f"illegal cc_pair transition {current!r} → {target!r}{suffix}")
+
+
 # =============================================================================
 # Topology v2 (Wave B) — capability mix-in Protocols (Onyx-derived)
 # =============================================================================
@@ -1668,4 +1693,43 @@ class CredentialsConnector(Protocol):
 
     def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
         """Transform / validate the raw credential mapping; ``None`` = invalid."""
+        ...
+
+
+# =============================================================================
+# Topology v2 (Wave C) — Chunker Protocol (per-(kind, mime) dispatch)
+# =============================================================================
+#
+# ADR v2 §6 introduces a chunker registry behind the SilverProcessor so
+# different source kinds chunk on their natural unit (code via tree-sitter,
+# tickets per-ticket, slides per-slide, tabular per-row-group, …) instead
+# of one uniform paragraph splitter. Wave C lands the Protocol + a fallback
+# implementation; Wave F lands the per-kind plugins under
+# ``kairix/chunkers/<name>/``.
+
+
+@runtime_checkable
+class Chunker(Protocol):
+    """One chunker plugin — emits :class:`Chunk` from one extractor section.
+
+    Plugins register via the future ``kairix.chunkers`` entry-point group.
+    Each plugin declares ``version: str`` at module level (F55) and writes
+    that string through to every emitted :class:`Chunk` via
+    ``chunker_version=self.version`` so re-chunk sweeps after a version
+    bump can filter the affected corpus.
+
+    The ``section_kind`` argument lets a single chunker route per typed
+    section (text / tabular / image) — Wave F-era chunkers can branch on
+    it; the Wave C fallback is paragraph-shaped over text only.
+    """
+
+    version: str
+
+    def chunk(self, *, text: str, section_kind: str, source_uri: str) -> tuple[Chunk, ...]:
+        """Return :class:`Chunk` items derived from ``text``.
+
+        ``section_kind`` is the typed-section discriminator
+        (``"text"`` / ``"tabular"`` / ``"image"``). ``source_uri`` is
+        propagated through to each emitted :class:`Chunk` per F39.
+        """
         ...

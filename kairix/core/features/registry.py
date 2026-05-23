@@ -162,6 +162,26 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_runtime": FeatureFlag(
+        name="topology_v2_runtime",
+        default=False,
+        description=(
+            "Wave C of the connector/collection/scope topology v2 migration — "
+            "controls whether the worker's connector-sync dispatch routes chunk "
+            "writes through CollectionRouter (per-cc_pair, per-mapping) vs the "
+            "legacy single-collection chunk writer. When ON, the runtime also "
+            "wires the ChunkerRegistry dispatch + ScopeProfileResolver + "
+            "ResultEnvelope freshness signals. When OFF, behaviour is bit-for-bit "
+            "identical to today. Default-off until the dogfood VM cutover "
+            "validates per-folder routing + chunker dispatch + HierarchyNode "
+            "emission for the obsidian-personal cc_pair."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
 }
 
 

@@ -534,8 +534,14 @@ def build_connector_pipeline(
     ``ConnectorPipeline(...)`` directly.
 
     The chunk-writer is bound to ``collection`` (single-collection routing,
-    matching today's worker shape; Wave C ``CollectionRouter`` will replace
-    this).
+    matching today's worker shape; the topology-v2 runtime flag's ON
+    branch wraps this in :class:`CollectionRouter` per cc_pair).
+
+    Topology v2 Wave C: the writer is built via the framework-internal
+    :func:`kairix.core.connectors.collection_router._legacy_chunk_writer`
+    helper, so the construction stays inside ``kairix/core/connectors/``
+    per F61. The factory itself never constructs ``_SqliteChunkWriter``
+    directly.
     """
     from kairix.core.connectors import (
         ConnectorPipeline,
@@ -544,14 +550,14 @@ def build_connector_pipeline(
         DefaultSilverProcessor,
         FilesystemBronzeStore,
     )
-    from kairix.core.connectors.chunk_writer_factory import make_sqlite_chunk_writer
+    from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.worker import _SqliteEntityGraphSink
 
     return ConnectorPipeline(
         db=db,
         bronze=FilesystemBronzeStore(db, bronze_root),
         silver=DefaultSilverProcessor(),
-        chunk_writer=make_sqlite_chunk_writer(db, collection=collection),
+        chunk_writer=legacy_chunk_writer(db, collection=collection),
         entity_graph_sink=_SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
         dead_letter=DeadLetterStore(db),

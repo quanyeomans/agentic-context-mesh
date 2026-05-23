@@ -181,6 +181,10 @@ pytest_plugins = [
     # Topology v2 Wave B — capability mix-in Protocols + default-impl
     # shims behind ``topology_v2_protocol`` flag. F54 both-branch coverage.
     "tests.bdd.steps.feature_flag_topology_v2_protocol_steps",
+    # Topology v2 Wave C — cc_pair lifecycle + CollectionRouter + Chunker
+    # registry + ScopeProfileResolver + ResultEnvelope behind the
+    # ``topology_v2_runtime`` flag. F54 both-branch coverage.
+    "tests.bdd.steps.feature_flag_topology_v2_runtime_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
