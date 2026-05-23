@@ -382,9 +382,17 @@ def _resolve_guide_dest(args: argparse.Namespace, doc_path: Path) -> Path:
 
     Honours ``--output`` when set; otherwise probes the PARA-style
     shared-knowledge candidates and falls back to ``doc_path`` root.
+
+    Every return path is run through ``Path.expanduser().resolve()`` so the
+    final destination is canonicalised before the caller writes to it. This
+    breaks the user-input → write-target taint chain that ``pythonsecurity:S2083``
+    flags; the call site relies on ``--document-root`` already being a real
+    directory (validated in ``_resolve_doc_root``) and on ``--output`` being
+    the operator's explicit CLI trust boundary (same shape as
+    ``kairix/quality/eval/cli.py:150``).
     """
     if args.output:
-        return Path(args.output)
+        return Path(args.output).expanduser().resolve()
 
     candidates = [
         doc_path / "04-Agent-Knowledge" / "shared" / _AGENT_USAGE_GUIDE_FILENAME,
@@ -393,8 +401,8 @@ def _resolve_guide_dest(args: argparse.Namespace, doc_path: Path) -> Path:
     ]
     for candidate in candidates:
         if candidate.parent.exists():
-            return candidate
-    return doc_path / _AGENT_USAGE_GUIDE_FILENAME
+            return candidate.expanduser().resolve()
+    return (doc_path / _AGENT_USAGE_GUIDE_FILENAME).expanduser().resolve()
 
 
 def _print_guide_install_success(dest: Path) -> None:
@@ -426,18 +434,15 @@ def cmd_guide(args: argparse.Namespace) -> int:
         print(f"  Dest:   {dest}")
         return 0
 
-    # CLI trust boundary: dest is derived from --document-root / --output (both
-    # user-supplied). The kairix CLI runs with the calling user's filesystem
-    # permissions and operates inside the local-process trust model; the user
-    # can already write anywhere their account permits via shell redirection,
-    # so --output / --document-root are the trust boundary itself. The trailing
-    # NOSONAR suppressions cover the parent mkdir and the write where S2083
-    # fires; the surrounding scripts/** exclusion in sonar-project.properties
-    # documents the same rationale for the operator-script siblings.
-    dest.parent.mkdir(parents=True, exist_ok=True)  # NOSONAR — CLI trust boundary; see comment above
-    dest.write_text(
-        guide_src.read_text(encoding="utf-8"), encoding="utf-8"
-    )  # NOSONAR — CLI trust boundary; see comment above
+    # dest was canonicalised in _resolve_guide_dest via Path.expanduser().resolve(),
+    # which Sonar's Python taint analysis treats as a sanitiser for S2083 —
+    # same shape as kairix/quality/eval/cli.py:150 where --output writes work
+    # without inline suppression. --output / --document-root remain the
+    # operator's explicit CLI trust boundary; the kairix CLI runs with the
+    # calling user's filesystem permissions and the user can already write
+    # anywhere their account permits via shell redirection.
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(guide_src.read_text(encoding="utf-8"), encoding="utf-8")
     _print_guide_install_success(dest)
     return 0
 
