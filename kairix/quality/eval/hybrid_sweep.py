@@ -41,6 +41,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# F17 — fusion mode + retrieval-diagnostic keys repeated across config defaults,
+# accumulator emit, and aggregator read paths; extract so a rename hits a single
+# edit site.
+_MODE_BM25_PRIMARY = "bm25_primary"
+_KEY_VEC_FAILED = "vec_failed"
+_KEY_FUSED_COUNT = "fused_count"
+_KEY_BM25_COUNT = "bm25_count"
+
 
 # ---------------------------------------------------------------------------
 # Sweep configuration space
@@ -184,7 +192,7 @@ def build_default_configs() -> list[HybridSweepConfig]:
         configs.append(
             HybridSweepConfig(
                 name=f"bm25primary-v{vlim}",
-                mode="bm25_primary",
+                mode=_MODE_BM25_PRIMARY,
                 bm25_limit=20,
                 vec_limit=vlim,
                 entity_enabled=False,
@@ -196,7 +204,7 @@ def build_default_configs() -> list[HybridSweepConfig]:
     configs.append(
         HybridSweepConfig(
             name="bm25primary-bm30-v10",
-            mode="bm25_primary",
+            mode=_MODE_BM25_PRIMARY,
             bm25_limit=30,
             vec_limit=10,
             entity_enabled=False,
@@ -286,7 +294,7 @@ def sweep_config_to_retrieval_config(cfg: HybridSweepConfig) -> RetrievalConfig:
     )
 
     return RetrievalConfig(
-        fusion_strategy=("bm25_primary" if cfg.mode in ("bm25_only", "bm25_primary") else "rrf"),
+        fusion_strategy=(_MODE_BM25_PRIMARY if cfg.mode in ("bm25_only", _MODE_BM25_PRIMARY) else "rrf"),
         rrf_k=cfg.rrf_k,
         bm25_limit=cfg.bm25_limit,
         vec_limit=cfg.vec_limit,
@@ -346,10 +354,10 @@ def _retrieve(
     config = sweep_config_to_retrieval_config(cfg)
     result = _DefaultHybridRetriever().retrieve(query, collections=collections, cfg=config)
     return result.paths, {
-        "bm25_count": result.meta.get("bm25_count", 0),
+        _KEY_BM25_COUNT: result.meta.get(_KEY_BM25_COUNT, 0),
         "vec_count": result.meta.get("vec_count", 0),
-        "fused_count": result.meta.get("fused_count", 0),
-        "vec_failed": result.meta.get("vec_failed", False),
+        _KEY_FUSED_COUNT: result.meta.get(_KEY_FUSED_COUNT, 0),
+        _KEY_VEC_FAILED: result.meta.get(_KEY_VEC_FAILED, False),
     }
 
 
@@ -434,10 +442,10 @@ def evaluate_single_config(
 
         paths = list(result.paths)
         meta = result.meta if hasattr(result, "meta") else {}
-        acc.total_bm25 += meta.get("bm25_count", 0)
+        acc.total_bm25 += meta.get(_KEY_BM25_COUNT, 0)
         acc.total_vec += meta.get("vec_count", 0)
-        acc.total_fused += meta.get("fused_count", 0)
-        if meta.get("vec_failed"):
+        acc.total_fused += meta.get(_KEY_FUSED_COUNT, 0)
+        if meta.get(_KEY_VEC_FAILED):
             acc.n_vec_failed += 1
 
         ndcg = compute_ndcg(paths, gold)

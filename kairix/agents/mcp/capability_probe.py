@@ -36,6 +36,11 @@ from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
+# F17 — capability keys appear in detail-dict writes and the return envelope;
+# extract so a rename hits a single edit site.
+_CAP_SECRETS_LOADED = "secrets_loaded"  # pragma: allowlist secret — capability-name string, not a credential
+_CAP_VECTOR_SEARCH_CAPABLE = "vector_search_capable"
+
 
 class _CheckResult(Protocol):
     """Structural type matching ``onboard.check.CheckResult``.
@@ -96,24 +101,24 @@ def build_capability_probe(
             secrets_result = secrets_fn()
             secrets_loaded = bool(getattr(secrets_result, "ok", False))
             if not secrets_loaded:
-                detail["secrets_loaded"] = getattr(secrets_result, "detail", "") or "LLM credentials missing"
+                detail[_CAP_SECRETS_LOADED] = getattr(secrets_result, "detail", "") or "LLM credentials missing"
         # Defensive: a probe must NEVER raise out to the caller. Failures
         # here mean we couldn't determine the secret state, so we report
         # secrets_loaded=False with the exception in detail.
         except Exception as exc:
             secrets_loaded = False
-            detail["secrets_loaded"] = f"probe failed: {exc}"
+            detail[_CAP_SECRETS_LOADED] = f"probe failed: {exc}"
 
         # Vector search — slower (loads index, runs probe query).
         try:
             vec_result = vector_fn()
             vector_search_capable = bool(getattr(vec_result, "ok", False))
             if not vector_search_capable:
-                detail["vector_search_capable"] = getattr(vec_result, "detail", "") or "vector search unavailable"
+                detail[_CAP_VECTOR_SEARCH_CAPABLE] = getattr(vec_result, "detail", "") or "vector search unavailable"
         # Defensive: same rationale as secrets probe above.
         except Exception as exc:
             vector_search_capable = False
-            detail["vector_search_capable"] = f"probe failed: {exc}"
+            detail[_CAP_VECTOR_SEARCH_CAPABLE] = f"probe failed: {exc}"
 
         # BM25 — implicit; if the kairix process is up the FTS index is
         # queryable. We expose it as a capability so operators can see
@@ -122,8 +127,8 @@ def build_capability_probe(
         bm25_search_capable = True
 
         return {
-            "secrets_loaded": secrets_loaded,
-            "vector_search_capable": vector_search_capable,
+            _CAP_SECRETS_LOADED: secrets_loaded,
+            _CAP_VECTOR_SEARCH_CAPABLE: vector_search_capable,
             "bm25_search_capable": bm25_search_capable,
             "detail": detail,
         }

@@ -25,6 +25,10 @@ from kairix.paths import KairixPaths
 
 _LOG_PATH = str(Path.home() / ".cache" / "kairix" / "wikilinks-log.jsonl")
 
+# F17 — "mention_count" is the shared key in the result-dict shape (emit, sort,
+# render); extract so a rename hits a single edit site.
+_KEY_MENTION_COUNT = "mention_count"
+
 # Canonical wikilink regex (excludes anchor links)
 _WIKILINK_RE = WIKILINK_RE
 
@@ -183,7 +187,7 @@ def _scan_file_for_unlinked(
             continue
         count = _count_plain_mentions(entity, content)
         if count > 0:
-            rows.append({"file": rel_file, "entity_name": entity.name, "mention_count": count})
+            rows.append({"file": rel_file, "entity_name": entity.name, _KEY_MENTION_COUNT: count})
     return rows
 
 
@@ -223,7 +227,7 @@ def find_unlinked_mentions(
     for md_file in sampled:
         results.extend(_scan_file_for_unlinked(md_file, doc_path, entities))
 
-    results.sort(key=lambda x: -x["mention_count"])
+    results.sort(key=lambda x: -x[_KEY_MENTION_COUNT])
     return results
 
 
@@ -265,7 +269,7 @@ def _render_unlinked_mentions(unlinked: list[dict[str, Any]]) -> list[str]:
         _MD_TABLE_DIVIDER_3COL,
     ]
     for item in unlinked[:20]:
-        lines.append(f"| {item['file']} | {item['entity_name']} | {item['mention_count']} |")
+        lines.append(f"| {item['file']} | {item['entity_name']} | {item[_KEY_MENTION_COUNT]} |")
     if len(unlinked) > 20:
         lines.append(f"| _(and {len(unlinked) - 20} more)_ | | |")
     lines.append("")

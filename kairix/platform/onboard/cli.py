@@ -26,6 +26,10 @@ from typing import TYPE_CHECKING, Any
 
 from kairix.paths import document_root_override, env_file_override
 
+# F17 — argparse action keyword repeated across boolean-flag declarations; one
+# constant keeps the well-known sentinel in a single edit site.
+_STORE_TRUE = "store_true"
+
 if TYPE_CHECKING:
     from kairix.platform.onboard.check import CheckResult
 
@@ -509,7 +513,7 @@ def main(
 
     # check
     p_check = sub.add_parser("check", help="Run all deployment health checks")
-    p_check.add_argument("--json", action="store_true", help="Output as JSON")
+    p_check.add_argument("--json", action=_STORE_TRUE, help="Output as JSON")
     p_check.add_argument(
         "--env-file",
         metavar="PATH",
@@ -523,7 +527,7 @@ def main(
     p_guide.add_argument("--output", help="Override destination file path")
     p_guide.add_argument(
         "--dry-run",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Show what would be installed without writing",
     )
     p_guide.add_argument(
@@ -540,7 +544,7 @@ def main(
     # verify
     p_verify = sub.add_parser("verify", help="Run acceptance tests against live deployment")
     p_verify.add_argument("--agent", default="builder", help="Agent name for scoped tests")
-    p_verify.add_argument("--json", action="store_true", help="Output as JSON")
+    p_verify.add_argument("--json", action=_STORE_TRUE, help="Output as JSON")
 
     # ready — narrow readiness probe used as the Docker compose healthcheck
     sub.add_parser(

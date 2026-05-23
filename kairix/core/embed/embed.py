@@ -22,6 +22,10 @@ DEFAULT_DIMS = EMBED_VECTOR_DIMS
 DEFAULT_BATCH_SIZE = 250  # Balanced: large enough for throughput, small enough to avoid Azure 429s
 MAX_RETRIES = 6  # used by OpenAI SDK max_retries
 
+# F17 — chunk_date appears as a dict key in both producer and consumer paths;
+# extract so renames hit a single edit site.
+_KEY_CHUNK_DATE = "chunk_date"
+
 # Chunking — mirrors kairix's CHUNK_SIZE_TOKENS / CHUNK_OVERLAP_TOKENS
 CHUNK_SIZE_CHARS = 3600  # ~900 tokens at 4 chars/token
 CHUNK_OVERLAP_CHARS = 200
@@ -364,7 +368,7 @@ def _gather_pending_chunks(
                     "pos": chunk["pos"],
                     "text": chunk["text"],
                     "path": path,
-                    "chunk_date": doc_date,
+                    _KEY_CHUNK_DATE: doc_date,
                 }
             )
 
@@ -455,7 +459,7 @@ def _stage_batch_embeddings(
                 vector,
                 deployment,
                 now,
-                chunk_date=chunk.get("chunk_date"),
+                chunk_date=chunk.get(_KEY_CHUNK_DATE),
             )
 
 
@@ -600,7 +604,7 @@ def run_embed(
         sample = [str(p)[:200] for p in failed_paths]
         logger.warning("%d chunks failed. Affected paths (sample): %s", len(failed_chunks), sample)
 
-    chunk_date_count = sum(1 for c in all_chunks if c.get("chunk_date"))
+    chunk_date_count = sum(1 for c in all_chunks if c.get(_KEY_CHUNK_DATE))
     if chunk_date_count == 0 and total > 0:
         logger.warning(
             "embed: 0/%d chunks have chunk_date — temporal boost (TMP-7B) will be inert. "

@@ -25,6 +25,13 @@ from kairix.agents.research.state import DEFAULT_MAX_TURNS, ResearcherState
 
 logger = logging.getLogger(__name__)
 
+# F17 — LangGraph node names appear in add_node / add_edge / conditional-edge map;
+# one constant per node keeps the wiring in a single edit site.
+_NODE_CLASSIFY_INTENT = "classify_intent"
+_NODE_EVALUATE_SUFFICIENCY = "evaluate_sufficiency"
+_NODE_REFINE_QUERY = "refine_query"
+_NODE_SYNTHESISE = "synthesise"
+
 
 def _default_classify() -> Callable[..., Any]:
     """Lazy production import for intent classification."""
@@ -122,26 +129,26 @@ def build_researcher_graph(
 
     _synth = partial(synthesise, llm_backend=d.llm_backend) if d.llm_backend else synthesise
 
-    graph.add_node("classify_intent", _classify)
+    graph.add_node(_NODE_CLASSIFY_INTENT, _classify)
     graph.add_node("retrieve", _retrieve)
-    graph.add_node("evaluate_sufficiency", _eval)
-    graph.add_node("refine_query", refine_query)
-    graph.add_node("synthesise", _synth)
+    graph.add_node(_NODE_EVALUATE_SUFFICIENCY, _eval)
+    graph.add_node(_NODE_REFINE_QUERY, refine_query)
+    graph.add_node(_NODE_SYNTHESISE, _synth)
 
     # Wire edges
-    graph.set_entry_point("classify_intent")
-    graph.add_edge("classify_intent", "retrieve")
-    graph.add_edge("retrieve", "evaluate_sufficiency")
+    graph.set_entry_point(_NODE_CLASSIFY_INTENT)
+    graph.add_edge(_NODE_CLASSIFY_INTENT, "retrieve")
+    graph.add_edge("retrieve", _NODE_EVALUATE_SUFFICIENCY)
     graph.add_conditional_edges(
-        "evaluate_sufficiency",
+        _NODE_EVALUATE_SUFFICIENCY,
         route_after_evaluation,
         {
-            "synthesise": "synthesise",
-            "refine_query": "refine_query",
+            _NODE_SYNTHESISE: _NODE_SYNTHESISE,
+            _NODE_REFINE_QUERY: _NODE_REFINE_QUERY,
         },
     )
-    graph.add_edge("refine_query", "retrieve")
-    graph.add_edge("synthesise", END)
+    graph.add_edge(_NODE_REFINE_QUERY, "retrieve")
+    graph.add_edge(_NODE_SYNTHESISE, END)
 
     return graph.compile()
 

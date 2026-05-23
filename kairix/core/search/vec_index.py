@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 # Default dimensions — reads KAIRIX_EMBED_DIMS env var (default 1536)
 DIMS = EMBED_VECTOR_DIMS
 
+# F17 — "collection" appears as a SQLite row key on read AND a result-dict key on
+# emit (same conceptual coupling); extract so a rename hits a single edit site.
+_KEY_COLLECTION = "collection"
+
 # Default number of vector results to retrieve before fusion
 VECTOR_DEFAULT_K: int = 20
 
@@ -245,7 +249,7 @@ class VectorIndex:
             row = rows_by_hash.get(content_hash)
             if row is None:
                 continue
-            if collections and row["collection"] not in collections:
+            if collections and row[_KEY_COLLECTION] not in collections:
                 continue
             snippet_raw = row["snippet"]
             snippet = strip_frontmatter(snippet_raw)[:300] if snippet_raw else ""
@@ -260,7 +264,7 @@ class VectorIndex:
                     "hash_seq": hash_seq,
                     "distance": distance,
                     "path": row["path"],
-                    "collection": row["collection"],
+                    _KEY_COLLECTION: row[_KEY_COLLECTION],
                     "title": row["title"],
                     "snippet": snippet,
                     "source_page": int(raw_page) if isinstance(raw_page, int) else None,

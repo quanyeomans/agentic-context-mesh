@@ -20,6 +20,10 @@ from kairix.text import truncate_to_tokens
 
 logger = logging.getLogger(__name__)
 
+# F17 — agent-knowledge directory name is referenced from three fetchers; one constant
+# keeps the layout in a single edit site.
+_AGENT_KNOWLEDGE_DIR = "04-Agent-Knowledge"
+
 
 # ---------------------------------------------------------------------------
 # Source 1: Recent memory log files (last 7 days)
@@ -177,9 +181,9 @@ def fetch_entity_stub(agent: str, max_tokens: int = 400, document_root: Path | N
         root = _resolve_document_root(document_root)
         # Try agent-specific entity stub (concept type)
         candidate_paths = [
-            root / "04-Agent-Knowledge" / "entities" / "concept" / f"{agent}.md",
-            root / "04-Agent-Knowledge" / "entities" / "agent" / f"{agent}.md",
-            root / "04-Agent-Knowledge" / "entities" / "person" / f"{agent}.md",
+            root / _AGENT_KNOWLEDGE_DIR / "entities" / "concept" / f"{agent}.md",
+            root / _AGENT_KNOWLEDGE_DIR / "entities" / "agent" / f"{agent}.md",
+            root / _AGENT_KNOWLEDGE_DIR / "entities" / "person" / f"{agent}.md",
         ]
 
         for path in candidate_paths:
@@ -225,8 +229,8 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300, document_root: Path
     try:
         root = _resolve_document_root(document_root)
         rules_paths = [
-            root / "04-Agent-Knowledge" / agent / "rules.md",
-            root / "04-Agent-Knowledge" / "shared" / "rules.md",
+            root / _AGENT_KNOWLEDGE_DIR / agent / "rules.md",
+            root / _AGENT_KNOWLEDGE_DIR / "shared" / "rules.md",
         ]
 
         parts: list[str] = []
@@ -278,7 +282,7 @@ def fetch_recent_decisions(agent: str, max_tokens: int = 400, document_root: Pat
         root = _resolve_document_root(document_root)
         parts: list[str] = []
 
-        decisions_path = root / "04-Agent-Knowledge" / agent / "decisions.md"
+        decisions_path = root / _AGENT_KNOWLEDGE_DIR / agent / "decisions.md"
         if decisions_path.exists():
             section = _read_decisions_file(decisions_path)
             if section is not None:

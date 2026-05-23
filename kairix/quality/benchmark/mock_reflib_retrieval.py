@@ -15,6 +15,11 @@ from __future__ import annotations
 from kairix.quality.benchmark._mock_engine import build_keyword_index
 from kairix.quality.benchmark._mock_engine import mock_retrieve as _engine_retrieve
 
+# F17 — tag values repeated across fixture-corpus entries; extract so a tag
+# rename hits a single edit site.
+_TAG_ENGINEERING = "engineering"
+_TAG_HYPOTHESIS = "hypothesis"
+
 # ---------------------------------------------------------------------------
 # Fixture corpus — 30 representative reference library documents
 # ---------------------------------------------------------------------------
@@ -126,7 +131,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
         ),
         "keywords": {
             "prompt",
-            "engineering",
+            _TAG_ENGINEERING,
             "pattern",
             "chain-of-thought",
             "few-shot",
@@ -268,7 +273,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "end-to-end",
             "pyramid",
             "property",
-            "hypothesis",
+            _TAG_HYPOTHESIS,
             "contract",
             "pact",
             "mutation",
@@ -347,7 +352,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "statistical",
             "bayesian",
             "inference",
-            "hypothesis",
+            _TAG_HYPOTHESIS,
             "testing",
             "p-value",
             "confidence",
@@ -371,7 +376,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
         ),
         "keywords": {
             "analytics",
-            "engineering",
+            _TAG_ENGINEERING,
             "dbt",
             "warehouse",
             "sql",
@@ -402,7 +407,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "bandit",
             "control",
             "treatment",
-            "hypothesis",
+            _TAG_HYPOTHESIS,
             "feature",
             "flag",
             "stratified",
@@ -795,7 +800,7 @@ FIXTURE_DOCUMENTS: list[dict] = [
             "aristotle",
             "basis",
             "truth",
-            "engineering",
+            _TAG_ENGINEERING,
         },
     },
     # --- health (1) ---

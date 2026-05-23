@@ -54,6 +54,10 @@ logger = logging.getLogger(__name__)
 # is silently allowlisted but won't drive NerLabelFilter overrides.
 _VALID_LABELS: frozenset[str] = frozenset({"ORG", "PERSON", "GPE", "PRODUCT", "WORK_OF_ART"})
 
+# F17 — flag name appears in the parser dispatch, the kwarg passthrough, and the
+# returned dict; extract so a flag rename hits a single edit site.
+_FLAG_CASE_INSENSITIVE = "case_insensitive"
+
 # Head of a single entry: leading ``- `` then a quoted term, then
 # ``: LABEL``. The quotes around the term are required so terms
 # containing colons/commas don't trip the parser. The optional
@@ -196,7 +200,7 @@ def _parse_entry(line: str, *, lineno: int, source: str) -> tuple[str, list[str]
         return None
 
     flags = _parse_flags(head.group("tail") or "")
-    variants = _expand_terms(term, case_insensitive=flags.get("case_insensitive", False))
+    variants = _expand_terms(term, case_insensitive=flags.get(_FLAG_CASE_INSENSITIVE, False))
     return label, variants
 
 
@@ -210,8 +214,8 @@ def _parse_flags(tail: str) -> dict[str, bool]:
     for fm in _FLAG_PATTERN.finditer(tail):
         key = fm.group("key").lower()
         value = fm.group("value").lower()
-        if key == "case_insensitive":
-            flags["case_insensitive"] = value in {"true", "1", "yes"}
+        if key == _FLAG_CASE_INSENSITIVE:
+            flags[_FLAG_CASE_INSENSITIVE] = value in {"true", "1", "yes"}
         else:
             logger.warning("entity-overrides: ignoring unknown flag %r", key)
     return flags

@@ -66,6 +66,11 @@ DEGRADATION_THRESHOLD = 0.10  # alert if score drops more than 10%
 RECALL_LIMIT = 5  # top-k results to check for gold hit
 ADAPTIVE_SAMPLE_SIZE = 5  # number of documents to sample for adaptive queries
 
+# F17 — embed model default + recall-canary JSON key appear in multiple sites;
+# extract so renames hit a single edit site.
+_DEFAULT_EMBED_MODEL = "text-embedding-3-large"
+_KEY_GOLD_FRAGMENT = "gold_fragment"
+
 
 @runtime_checkable
 class VectorSearcher(Protocol):
@@ -165,7 +170,7 @@ def load_canary_cache(cache_path: Path = CANARY_CACHE) -> list[tuple[str, str, s
     out: list[tuple[str, str, str]] = []
     for entry in queries:
         try:
-            out.append((str(entry["id"]), str(entry["query"]), str(entry["gold_fragment"])))
+            out.append((str(entry["id"]), str(entry["query"]), str(entry[_KEY_GOLD_FRAGMENT])))
         except (KeyError, TypeError):
             return None
     return out
@@ -187,7 +192,7 @@ def save_canary_cache(
         "version": CANARY_CACHE_VERSION,
         "created_at": int(time.time()),
         "corpus_size_at_creation": corpus_size,
-        "queries": [{"id": qid, "query": q, "gold_fragment": gf} for qid, q, gf in queries],
+        "queries": [{"id": qid, "query": q, _KEY_GOLD_FRAGMENT: gf} for qid, q, gf in queries],
     }
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -246,7 +251,7 @@ def _resolve_provider_and_model(
         logger.warning("Embed credentials not set — skipping recall check")
         return None, None
 
-    chosen_model = model if model is not None else (creds.model or "text-embedding-3-large")
+    chosen_model = model if model is not None else (creds.model or _DEFAULT_EMBED_MODEL)
 
     try:
         provider = provider_factory(creds)
@@ -260,7 +265,7 @@ def _embed_query(
     query: str,
     *,
     provider: EmbedProvider,
-    model: str = "text-embedding-3-large",
+    model: str = _DEFAULT_EMBED_MODEL,
 ) -> np.ndarray | None:
     """Embed a single query string via the supplied EmbedProvider.
 
@@ -376,7 +381,7 @@ class RecallChecker:
             provider = resolved_provider
             model = resolved_model
         else:
-            model = self._resolved_model or "text-embedding-3-large"
+            model = self._resolved_model or _DEFAULT_EMBED_MODEL
         return _embed_query(query, provider=provider, model=model)
 
     def _search(self, vector: np.ndarray, limit: int) -> list[str]:
@@ -434,7 +439,7 @@ class RecallChecker:
                     {
                         "id": qid,
                         "query": query,
-                        "gold_fragment": gold_fragment,
+                        _KEY_GOLD_FRAGMENT: gold_fragment,
                         "hit": False,
                         "returned": [],
                         "skipped": True,
@@ -450,7 +455,7 @@ class RecallChecker:
                 {
                     "id": qid,
                     "query": query,
-                    "gold_fragment": gold_fragment,
+                    _KEY_GOLD_FRAGMENT: gold_fragment,
                     "hit": hit,
                     "returned": files,
                     "skipped": False,

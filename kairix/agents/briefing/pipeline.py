@@ -30,6 +30,15 @@ from kairix.text import estimate_tokens, truncate_to_tokens
 
 logger = logging.getLogger(__name__)
 
+# F17 — source-name keys appear in caps dict, truncation order, fetch-task tuples,
+# and resolver calls; extract so renames are a single edit.
+_KEY_MEMORY_LOGS = "memory_logs"
+_KEY_RECENT_MEMORY = "recent_memory"
+_KEY_ENTITY_STUB = "entity_stub"
+_KEY_KNOWLEDGE_RULES = "knowledge_rules"
+_KEY_RECENT_DECISIONS = "recent_decisions"
+_KEY_HYBRID_SEARCH = "hybrid_search"
+
 
 def _default_synthesise() -> Callable[..., str]:
     """Return the production synthesiser. Lazy import breaks the module cycle."""
@@ -62,12 +71,12 @@ class BriefingDeps:
 
 # Token caps per source (approximate)
 _SOURCE_TOKEN_CAPS: dict[str, int] = {
-    "memory_logs": 500,
-    "recent_memory": 300,
-    "entity_stub": 400,
-    "knowledge_rules": 300,
-    "recent_decisions": 400,
-    "hybrid_search": 600,
+    _KEY_MEMORY_LOGS: 500,
+    _KEY_RECENT_MEMORY: 300,
+    _KEY_ENTITY_STUB: 400,
+    _KEY_KNOWLEDGE_RULES: 300,
+    _KEY_RECENT_DECISIONS: 400,
+    _KEY_HYBRID_SEARCH: 600,
 }
 
 # Total context budget before truncation (3000 tokens ~ 2300 words)
@@ -75,12 +84,12 @@ TOTAL_CONTEXT_CAP = 3000
 
 # Priority order for truncation when over budget (lowest priority first)
 _TRUNCATION_ORDER = [
-    "hybrid_search",
-    "recent_decisions",
-    "knowledge_rules",
-    "entity_stub",
-    "recent_memory",
-    "memory_logs",
+    _KEY_HYBRID_SEARCH,
+    _KEY_RECENT_DECISIONS,
+    _KEY_KNOWLEDGE_RULES,
+    _KEY_ENTITY_STUB,
+    _KEY_RECENT_MEMORY,
+    _KEY_MEMORY_LOGS,
 ]
 
 
@@ -201,40 +210,40 @@ def generate_briefing(
 
         return getattr(_sources_mod, default_import_path)
 
-    _fetch_memory_logs = _resolve_source("memory_logs", "fetch_memory_logs")
-    _fetch_recent_memory = _resolve_source("recent_memory", "fetch_recent_memory")
-    _fetch_entity_stub = _resolve_source("entity_stub", "fetch_entity_stub")
-    _fetch_knowledge_rules = _resolve_source("knowledge_rules", "fetch_knowledge_rules")
-    _fetch_recent_decisions = _resolve_source("recent_decisions", "fetch_recent_decisions")
-    _fetch_hybrid_search = _resolve_source("hybrid_search", "fetch_hybrid_search")
+    _fetch_memory_logs = _resolve_source(_KEY_MEMORY_LOGS, "fetch_memory_logs")
+    _fetch_recent_memory = _resolve_source(_KEY_RECENT_MEMORY, "fetch_recent_memory")
+    _fetch_entity_stub = _resolve_source(_KEY_ENTITY_STUB, "fetch_entity_stub")
+    _fetch_knowledge_rules = _resolve_source(_KEY_KNOWLEDGE_RULES, "fetch_knowledge_rules")
+    _fetch_recent_decisions = _resolve_source(_KEY_RECENT_DECISIONS, "fetch_recent_decisions")
+    _fetch_hybrid_search = _resolve_source(_KEY_HYBRID_SEARCH, "fetch_hybrid_search")
 
     # Steps 1-6: concurrent source fetching
     source_tasks = [
-        ("memory_logs", _fetch_memory_logs, agent, _SOURCE_TOKEN_CAPS["memory_logs"]),
+        (_KEY_MEMORY_LOGS, _fetch_memory_logs, agent, _SOURCE_TOKEN_CAPS[_KEY_MEMORY_LOGS]),
         (
-            "recent_memory",
+            _KEY_RECENT_MEMORY,
             _fetch_recent_memory,
             agent,
-            _SOURCE_TOKEN_CAPS["recent_memory"],
+            _SOURCE_TOKEN_CAPS[_KEY_RECENT_MEMORY],
         ),
-        ("entity_stub", _fetch_entity_stub, agent, _SOURCE_TOKEN_CAPS["entity_stub"]),
+        (_KEY_ENTITY_STUB, _fetch_entity_stub, agent, _SOURCE_TOKEN_CAPS[_KEY_ENTITY_STUB]),
         (
-            "knowledge_rules",
+            _KEY_KNOWLEDGE_RULES,
             _fetch_knowledge_rules,
             agent,
-            _SOURCE_TOKEN_CAPS["knowledge_rules"],
+            _SOURCE_TOKEN_CAPS[_KEY_KNOWLEDGE_RULES],
         ),
         (
-            "recent_decisions",
+            _KEY_RECENT_DECISIONS,
             _fetch_recent_decisions,
             agent,
-            _SOURCE_TOKEN_CAPS["recent_decisions"],
+            _SOURCE_TOKEN_CAPS[_KEY_RECENT_DECISIONS],
         ),
         (
-            "hybrid_search",
+            _KEY_HYBRID_SEARCH,
             _fetch_hybrid_search,
             agent,
-            _SOURCE_TOKEN_CAPS["hybrid_search"],
+            _SOURCE_TOKEN_CAPS[_KEY_HYBRID_SEARCH],
         ),
     ]
 
@@ -243,7 +252,7 @@ def generate_briefing(
     logger.info("pipeline: collected %d sources for %r", sources_count, agent)
 
     # Surface missing memory — helps users diagnose stale briefings
-    memory_keys = {"memory_logs", "recent_memory"}
+    memory_keys = {_KEY_MEMORY_LOGS, _KEY_RECENT_MEMORY}
     if not (memory_keys & context.keys()):
         from kairix.paths import agent_memory_path
 

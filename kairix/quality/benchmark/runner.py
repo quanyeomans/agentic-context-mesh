@@ -34,6 +34,13 @@ from kairix.quality.eval.metrics import (
     reciprocal_rank_graded,
 )
 
+# F17 — category names + per-case fields repeated across scorer dispatch, summary
+# emit, and CSV header / row paths; extract so a key rename hits a single edit site.
+_CATEGORY_CLASSIFICATION = "classification"
+_KEY_WEIGHTED_TOTAL = "weighted_total"
+_KEY_SCORE_METHOD = "score_method"
+_KEY_ELAPSED_MS = "elapsed_ms"
+
 if TYPE_CHECKING:
     from kairix.core.protocols import ChatBackend
 
@@ -425,7 +432,7 @@ def _category_diagnosis(category: str, score: float) -> str:
         "conceptual": "❌ abstract queries not resolving — check intent classifier routing",
         "multi_hop": "❌ multi-hop requires connected retrieval — Phase 3 planning layer",
         "procedural": "❌ procedural docs not surfacing — check collection scope",
-        "classification": "❌ classification rules not matching — check rules.py patterns",
+        _CATEGORY_CLASSIFICATION: "❌ classification rules not matching — check rules.py patterns",
     }
     return diagnoses[category]
 
@@ -433,7 +440,7 @@ def _category_diagnosis(category: str, score: float) -> str:
 def format_interpretation(result: BenchmarkResult) -> str:
     """Return a human-readable interpretation section."""
     lines: list[str] = []
-    wt = result.summary["weighted_total"]
+    wt = result.summary[_KEY_WEIGHTED_TOTAL]
     tier = score_tier(wt)
 
     lines.append("=" * 60)
@@ -512,7 +519,7 @@ def _score_ndcg(case: Any, paths: list[str], _deps: BenchmarkDeps) -> tuple[floa
 
 
 _SCORE_DISPATCH: dict[str, Callable[[Any, list[str], BenchmarkDeps], tuple[float, dict[str, Any]]]] = {
-    "classification": _score_classification,
+    _CATEGORY_CLASSIFICATION: _score_classification,
     "exact": _score_exact,
     "fuzzy": _score_fuzzy,
     "ndcg": _score_ndcg,
@@ -561,8 +568,8 @@ def retrieve_case(
     The retrieval callable lives on ``deps.retrieve``; production calls land
     on ``runner.retrieve`` (delegating to the shared retrieval module).
     """
-    if case.score_method == "classification":
-        return [], [], {"scored_by": "classification"}
+    if case.score_method == _CATEGORY_CLASSIFICATION:
+        return [], [], {"scored_by": _CATEGORY_CLASSIFICATION}
     deps = deps if deps is not None else BenchmarkDeps()
     try:
         return deps.retrieve(
@@ -597,9 +604,9 @@ def compute_weighted_total(
     let perfect-scoring v1.1 suites report 1.05; surfaced by contract test.)
     """
     effective_weights = dict(CATEGORY_WEIGHTS)
-    if suite_version >= "1.1" and per_category_avg.get("classification", 0.0) > 0:
+    if suite_version >= "1.1" and per_category_avg.get(_CATEGORY_CLASSIFICATION, 0.0) > 0:
         # Conservation: temporal donates 0.10 to classification.
-        effective_weights["classification"] = 0.10
+        effective_weights[_CATEGORY_CLASSIFICATION] = 0.10
         effective_weights["temporal"] = 0.10
     return round(
         sum(per_category_avg.get(cat, 0.0) * w for cat, w in effective_weights.items()),
@@ -611,7 +618,7 @@ def aggregate_ndcg_metrics(
     case_results: list[dict[str, Any]],
 ) -> tuple[float | None, float | None, float | None]:
     """Compute NDCG@10, Hit@5, MRR@10 averages across NDCG-scored cases."""
-    ndcg_cases = [c for c in case_results if c.get("score_method") == "ndcg"]
+    ndcg_cases = [c for c in case_results if c.get(_KEY_SCORE_METHOD) == "ndcg"]
     if not ndcg_cases:
         return None, None, None
     n = len(ndcg_cases)
@@ -647,7 +654,7 @@ def _build_single_shot_runs(case_results: list[dict[str, Any]]) -> list[dict[str
                 "case_id": row.get("id", ""),
                 "category": row.get("category", ""),
                 "query": row.get("query", ""),
-                "latency_ms": row.get("elapsed_ms", 0.0),
+                "latency_ms": row.get(_KEY_ELAPSED_MS, 0.0),
                 "succeeded": succeeded,
                 "score": row.get("score"),
                 "stage_latency_ms": {},
@@ -731,7 +738,7 @@ def run_benchmark(
     deps = deps if deps is not None else BenchmarkDeps()
 
     case_results: list[dict[str, Any]] = []
-    all_categories = set(CATEGORY_WEIGHTS.keys()) | {"classification"}
+    all_categories = set(CATEGORY_WEIGHTS.keys()) | {_CATEGORY_CLASSIFICATION}
     category_scores: dict[str, list[float]] = {cat: [] for cat in all_categories}
 
     for case in suite.cases:
@@ -764,10 +771,10 @@ def run_benchmark(
             "original_category",
             "query",
             "gold_path",
-            "score_method",
+            _KEY_SCORE_METHOD,
             "score",
             "retrieved_paths",
-            "elapsed_ms",
+            _KEY_ELAPSED_MS,
         }
         safe_extras: dict[str, Any] = {
             k: v for k, v in {**ndcg_detail, **retrieval_meta}.items() if k not in canonical_keys
@@ -779,10 +786,10 @@ def run_benchmark(
                 "original_category": case.category,
                 "query": case.query,
                 "gold_path": case.gold_path,
-                "score_method": case.score_method,
+                _KEY_SCORE_METHOD: case.score_method,
                 "score": round(score, 4),
                 "retrieved_paths": paths[:10],
-                "elapsed_ms": round(elapsed_ms, 1),
+                _KEY_ELAPSED_MS: round(elapsed_ms, 1),
                 **safe_extras,
             }
         )
@@ -813,11 +820,11 @@ def run_benchmark(
             "fusion_override": fusion_override,
             "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "n_cases": len(suite.cases),
-            "weighted_total": weighted_total,
+            _KEY_WEIGHTED_TOTAL: weighted_total,
             "mode": mode,
         },
         summary={
-            "weighted_total": weighted_total,
+            _KEY_WEIGHTED_TOTAL: weighted_total,
             "category_scores": per_category_avg,
             "gates": gates,
             "ndcg_at_10": ndcg_at_10,

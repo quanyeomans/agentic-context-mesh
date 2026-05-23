@@ -68,6 +68,11 @@ from typing import Any
 
 from kairix.core.db import get_db_path, open_db
 
+# F17 — score-summary key + reserved mode name appear in baseline-compare,
+# rendering, and mode-dispatch sites; extract so renames hit a single edit site.
+_KEY_WEIGHTED_TOTAL = "weighted_total"
+_MODE_CONCURRENT = "concurrent"
+
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -161,7 +166,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     run_p.add_argument(
         "--mode",
         default="legacy",
-        choices=["legacy", "single-shot", "concurrent", "soak"],
+        choices=["legacy", "single-shot", _MODE_CONCURRENT, "soak"],
         help=(
             "Execution mode (default: legacy — the historical NDCG-aggregate path). "
             "'single-shot' additionally surfaces per-query QueryRunResult rows in "
@@ -329,8 +334,8 @@ def _emit_baseline_compare(result: Any, baseline_path: str) -> None:
     except (FileNotFoundError, json.JSONDecodeError) as exc:
         print(f"  baseline compare skipped: {exc}")
         return
-    a = baseline.get("summary", {}).get("weighted_total", 0.0)
-    b = result.summary.get("weighted_total", 0.0)
+    a = baseline.get("summary", {}).get(_KEY_WEIGHTED_TOTAL, 0.0)
+    b = result.summary.get(_KEY_WEIGHTED_TOTAL, 0.0)
     delta = b - a
     if delta > 0:
         marker = "▲"
@@ -349,7 +354,7 @@ def _emit_mode_stub(mode: str) -> int:
     surface so they can still answer the question. Affordance follows the
     F21 template (``fix:`` / ``next:`` / ``run:`` markers).
     """
-    alias = "kairix probe search" if mode == "concurrent" else "kairix soak run"
+    alias = "kairix probe search" if mode == _MODE_CONCURRENT else "kairix soak run"
     print(
         f"❌ --mode {mode} is not yet wired into the unified dispatcher.\n"
         f"   fix: use the legacy CLI for now: {alias}\n"
@@ -461,7 +466,7 @@ def cmd_run(args: argparse.Namespace, deps: BenchmarkCLIDeps | None = None) -> i
     d = deps or BenchmarkCLIDeps()
 
     mode_arg = getattr(args, "mode", "legacy")
-    if mode_arg in ("concurrent", "soak"):
+    if mode_arg in (_MODE_CONCURRENT, "soak"):
         return _emit_mode_stub(mode_arg)
 
     suite_or_rc = _load_suite_or_exit(args.suite)
@@ -603,10 +608,12 @@ def cmd_compare(args: argparse.Namespace) -> int:
     print("=" * 60)
     print("BENCHMARK COMPARISON")
     print("=" * 60)
-    print(f"  A: {a_label}  total={a_sum.get('weighted_total', 0):.3f}  [{score_tier(a_sum.get('weighted_total', 0))}]")
-    print(f"  B: {b_label}  total={b_sum.get('weighted_total', 0):.3f}  [{score_tier(b_sum.get('weighted_total', 0))}]")
+    a_total = a_sum.get(_KEY_WEIGHTED_TOTAL, 0)
+    b_total = b_sum.get(_KEY_WEIGHTED_TOTAL, 0)
+    print(f"  A: {a_label}  total={a_total:.3f}  [{score_tier(a_total)}]")
+    print(f"  B: {b_label}  total={b_total:.3f}  [{score_tier(b_total)}]")
 
-    delta = b_sum.get("weighted_total", 0) - a_sum.get("weighted_total", 0)
+    delta = b_sum.get(_KEY_WEIGHTED_TOTAL, 0) - a_sum.get(_KEY_WEIGHTED_TOTAL, 0)
     print(f"\n  Delta: {_direction_marker(delta)} {abs(delta):.3f}")
     a_ndcg = a_sum.get("ndcg_at_10")
     b_ndcg = b_sum.get("ndcg_at_10")

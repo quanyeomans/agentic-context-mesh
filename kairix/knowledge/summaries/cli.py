@@ -16,6 +16,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# F17 — argparse action keyword repeated across boolean-flag declarations; one
+# constant keeps the well-known sentinel in a single edit site.
+_STORE_TRUE = "store_true"
+
 # ---------------------------------------------------------------------------
 # Credential helper
 # ---------------------------------------------------------------------------
@@ -156,14 +160,14 @@ def main(
         description="Generate L0/L1 tiered summaries for vault documents.",
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--all", action="store_true", help="Generate for all vault docs")
-    group.add_argument("--stale", action="store_true", help="Generate only stale/missing")
+    group.add_argument("--all", action=_STORE_TRUE, help="Generate for all vault docs")
+    group.add_argument("--stale", action=_STORE_TRUE, help="Generate only stale/missing")
     group.add_argument("--path", metavar="FILE", help="Single file to summarise")
-    group.add_argument("--status", action="store_true", help="Show coverage stats")
+    group.add_argument("--status", action=_STORE_TRUE, help="Show coverage stats")
 
     parser.add_argument(
         "--include-l1",
-        action="store_true",
+        action=_STORE_TRUE,
         default=False,
         help="Also generate L1 structured overview (slower, more tokens)",
     )

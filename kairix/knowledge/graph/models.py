@@ -15,6 +15,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+# F17 — every node type's to_dict() emits "vault_path" as a key; extract so a
+# schema rename hits a single edit site.
+_KEY_VAULT_PATH = "vault_path"
+
 
 class NodeLabel(str, Enum):
     """Valid Neo4j node labels. Used to validate GraphEdge labels and prevent injection."""
@@ -77,7 +81,7 @@ class OrganisationNode:
             "name": self.name,
             "tier": self.tier,
             "engagement_status": self.engagement_status,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
             "industry": self.industry,
             "geography": self.geography,
             "stakeholder_personas": self.stakeholder_personas,
@@ -121,7 +125,7 @@ class PersonNode:
             "role": self.role,
             "relationship_type": self.relationship_type,
             "last_interaction": self.last_interaction,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
             "interests": self.interests,
             "aliases": self.aliases,
         }
@@ -148,7 +152,7 @@ class OutcomeNode:
             "id": self.id,
             "name": self.name,
             "domain": self.domain,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
         }
 
 
@@ -175,7 +179,7 @@ class ConceptNode:
             "id": self.id,
             "name": self.name,
             "domain": self.domain,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
             "aliases": self.aliases,
         }
 
@@ -203,7 +207,7 @@ class FrameworkNode:
             "id": self.id,
             "name": self.name,
             "domain": self.domain,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
             "aliases": self.aliases,
         }
 
@@ -231,7 +235,7 @@ class TechnologyNode:
             "id": self.id,
             "name": self.name,
             "category": self.category,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
             "aliases": self.aliases,
         }
 
@@ -262,7 +266,7 @@ class PublicationNode:
             "name": self.name,
             "authors": self.authors,
             "year": self.year,
-            "vault_path": self.vault_path,
+            _KEY_VAULT_PATH: self.vault_path,
             "aliases": self.aliases,
         }
 

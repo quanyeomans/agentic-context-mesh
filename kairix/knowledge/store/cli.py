@@ -15,6 +15,10 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+# F17 — argparse action keyword repeated across boolean-flag declarations; one
+# constant keeps the well-known sentinel in a single edit site.
+_STORE_TRUE = "store_true"
+
 
 def main(
     argv: list[str] | None = None,
@@ -61,25 +65,25 @@ def main(
     )
     crawl_p.add_argument(
         "--dry-run",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Print what would be written without writing",
     )
-    crawl_p.add_argument("--verbose", action="store_true", help="Log each entity discovered")
+    crawl_p.add_argument("--verbose", action=_STORE_TRUE, help="Log each entity discovered")
     crawl_p.add_argument(
         "--reset",
-        action="store_true",
+        action=_STORE_TRUE,
         help="DETACH DELETE every node + relationship before crawling (destructive). Requires --confirm or KAIRIX_NONINTERACTIVE=1.",
     )
     crawl_p.add_argument(
         "--confirm",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Required interlock for --reset — without it (or KAIRIX_NONINTERACTIVE=1) the reset is refused.",
     )
 
     # ── health ───────────────────────────────────────────────────────────────
     health_p = sub.add_parser("health", help="Document store and entity graph health summary")
     health_p.add_argument("--document-root", default=None, help="Document root directory")
-    health_p.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
+    health_p.add_argument("--json", dest="json_out", action=_STORE_TRUE, help="Output as JSON")
 
     args = parser.parse_args(argv)
 

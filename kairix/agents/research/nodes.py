@@ -22,6 +22,32 @@ from kairix.agents.research.state import (
 
 logger = logging.getLogger(__name__)
 
+# F17 — ResearcherState keys appear in every node's return-dict shape; the
+# constants centralise the dict-write side. Reads via `state.get(...)` would
+# need `Literal[str]` keys for TypedDict overload narrowing — using a constant
+# resolves to `str` and loses the typed-value mapping. Typed _get_* helpers
+# below isolate the literal-key access to a single site per field.
+_STATE_CONFIDENCE = "confidence"
+_STATE_REFINED_QUERY = "refined_query"
+_STATE_RETRIEVED_CHUNKS = "retrieved_chunks"
+
+
+def _get_chunks(state: ResearcherState) -> list[dict[str, Any]]:
+    """Typed read for ``retrieved_chunks`` — needed because constant-key reads
+    on a TypedDict lose typed-value narrowing (TypedDict overloads require
+    ``Literal[str]`` keys)."""
+    return state.get("retrieved_chunks", [])
+
+
+def _get_refined_query(state: ResearcherState) -> str:
+    """Typed read for ``refined_query`` — see ``_get_chunks`` rationale."""
+    return state.get("refined_query") or ""
+
+
+def _get_confidence(state: ResearcherState) -> float:
+    """Typed read for ``confidence`` — see ``_get_chunks`` rationale."""
+    return state.get("confidence", 0.0)
+
 
 def _default_classify() -> Callable[..., Any]:
     """Lazy production import for intent classification."""
@@ -96,7 +122,7 @@ def retrieve(
     d = deps or RetrieveDeps()
     search_fn = d.search_fn
 
-    query = state.get("refined_query") or state["query"]
+    query = _get_refined_query(state) or state["query"]
     turns = state.get("turns", 0)
 
     # Use a bigger budget on refinement turns — we need more context
@@ -108,7 +134,7 @@ def retrieve(
     new_results = [{"path": b.result.path, "snippet": b.content[:500]} for b in sr.results]
 
     # Accumulate results across turns (don't replace previous finds)
-    existing = list(state.get("retrieved_chunks") or [])
+    existing = list(_get_chunks(state))
 
     # Deduplicate by path
     seen_paths = {r.get("path", "") for r in existing}
@@ -123,7 +149,7 @@ def retrieve(
         len(new_results),
         len(existing),
     )
-    return {"retrieved_chunks": existing}
+    return {_STATE_RETRIEVED_CHUNKS: existing}
 
 
 def evaluate_sufficiency(
@@ -142,11 +168,11 @@ def evaluate_sufficiency(
     was always 0.0 because raw json.loads failed silently.
     """
     query = state["query"]
-    chunks = state.get("retrieved_chunks", [])
+    chunks = _get_chunks(state)
     turns = state.get("turns", 0)
 
     if not chunks:
-        return {"confidence": 0.0, "refined_query": query}
+        return {_STATE_CONFIDENCE: 0.0, _STATE_REFINED_QUERY: query}
 
     # Build a summary of what we found
     found_summary = "\n".join(f"- {r.get('path', '?')}: {r.get('snippet', '')[:200]}" for r in chunks[:10])
@@ -182,7 +208,7 @@ def evaluate_sufficiency(
     except Exception as exc:
         logger.warning("research: evaluate_sufficiency LLM call failed — %s", exc)
         # If LLM fails, treat as insufficient so we try again (up to max_turns)
-        return {"confidence": 0.0, "gaps": [], "refined_query": query}
+        return {_STATE_CONFIDENCE: 0.0, "gaps": [], _STATE_REFINED_QUERY: query}
 
     # Confidence via the parser chain — works on both JSON and prose
     if confidence_parser is None:
@@ -203,7 +229,7 @@ def evaluate_sufficiency(
     gaps: list[str] = []
     try:
         parsed = json.loads(response)
-        refined = parsed.get("refined_query")
+        refined = parsed.get(_STATE_REFINED_QUERY)
         raw_gaps = parsed.get("gaps") or []
         gaps = raw_gaps if isinstance(raw_gaps, list) else [str(raw_gaps)]
     except (json.JSONDecodeError, TypeError):
@@ -219,9 +245,9 @@ def evaluate_sufficiency(
         len(gaps),
     )
     return {
-        "confidence": confidence,
+        _STATE_CONFIDENCE: confidence,
         "gaps": gaps,
-        "refined_query": refined or state.get("refined_query") or query,
+        _STATE_REFINED_QUERY: refined or _get_refined_query(state) or query,
     }
 
 
@@ -234,7 +260,7 @@ def refine_query(state: ResearcherState) -> dict[str, Any]:
 def synthesise(state: ResearcherState, *, llm_backend: Any = None) -> dict[str, Any]:
     """Build a clear answer from the search results, citing sources."""
     query = state["query"]
-    chunks = state.get("retrieved_chunks", [])
+    chunks = _get_chunks(state)
 
     found_summary = "\n".join(f"Source: {r.get('path', '?')}\n{r.get('snippet', '')[:300]}\n" for r in chunks[:8])
 
@@ -259,12 +285,12 @@ def synthesise(state: ResearcherState, *, llm_backend: Any = None) -> dict[str, 
 
             llm_backend = get_default_backend()
         synthesis = llm_backend.chat(messages, max_tokens=500)
-        return {"synthesis": synthesis, "confidence": state.get("confidence", 0.0)}
+        return {"synthesis": synthesis, _STATE_CONFIDENCE: _get_confidence(state)}
     except Exception as exc:
         logger.warning("research: synthesise LLM call failed — %s", exc)
         return {
             "synthesis": f"Found {len(chunks)} relevant documents but synthesis failed.",
-            "confidence": state.get("confidence", 0.0),
+            _STATE_CONFIDENCE: _get_confidence(state),
             "error": "Synthesis failed — check server logs for details.",
         }
 
@@ -277,7 +303,7 @@ def route_after_evaluation(state: ResearcherState) -> str:
     a best-effort answer so callers get usable output with a confidence
     score they can inspect.
     """
-    confidence = state.get("confidence", 0.0)
+    confidence = _get_confidence(state)
     turns = state.get("turns", 0)
     max_turns = state.get("max_turns", DEFAULT_MAX_TURNS)
 

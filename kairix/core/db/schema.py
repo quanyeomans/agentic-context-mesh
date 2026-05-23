@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "3"
 
+# F17 — table names appear in schema validation, migration, and conditional
+# column-add logic; one constant per table keeps the SQL identifier in a single
+# edit site.
+_TABLE_CONTENT_VECTORS = "content_vectors"
+_TABLE_DOCUMENTS_MEDIA = "documents_media"
+
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
     """
@@ -204,9 +210,9 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
     required_tables = (
         "documents",
         "content",
-        "content_vectors",
+        _TABLE_CONTENT_VECTORS,
         # Connector-framework Wave 1 (SC-4)
-        "documents_media",
+        _TABLE_DOCUMENTS_MEDIA,
         "document_pages",
         "connector_cursors",
         "connector_deadletter",
@@ -238,7 +244,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
     expected_cols = {
         "documents": {"id", "collection", "path", "hash", "active", "sensitivity"},
         "content": {"hash", "doc"},
-        "content_vectors": {"hash", "seq", "pos"},
+        _TABLE_CONTENT_VECTORS: {"hash", "seq", "pos"},
     }
     for table, expected in expected_cols.items():
         # safe: table name from expected_cols keys (hardcoded)
@@ -527,9 +533,9 @@ def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> No
     if "documents" in tables:
         for column, column_def in _DOCUMENTS_TOPOLOGY_V2_COLUMNS:
             _add_column_if_missing(db, "documents", column, column_def)
-    if "documents_media" in tables:
+    if _TABLE_DOCUMENTS_MEDIA in tables:
         for column, column_def in _DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS:
-            _add_column_if_missing(db, "documents_media", column, column_def)
+            _add_column_if_missing(db, _TABLE_DOCUMENTS_MEDIA, column, column_def)
 
 
 def migrate(db: sqlite3.Connection) -> None:
@@ -557,8 +563,8 @@ def migrate(db: sqlite3.Connection) -> None:
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
     # chunk_date migration
-    if "content_vectors" in tables:
-        _add_column_if_missing(db, "content_vectors", "chunk_date", "TEXT")
+    if _TABLE_CONTENT_VECTORS in tables:
+        _add_column_if_missing(db, _TABLE_CONTENT_VECTORS, "chunk_date", "TEXT")
 
     # agent_owner migration — per-document agent provenance for #114.
     # Existing rows get NULL (treated as shared / not agent-owned) until a
@@ -586,5 +592,5 @@ def migrate(db: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_documents_agent_owner ON documents(agent_owner);
             CREATE INDEX IF NOT EXISTS idx_documents_source_uri ON documents(source_uri);
         """)
-    if "content_vectors" in tables:
+    if _TABLE_CONTENT_VECTORS in tables:
         db.execute("CREATE INDEX IF NOT EXISTS idx_content_vectors_chunk_date ON content_vectors(chunk_date)")

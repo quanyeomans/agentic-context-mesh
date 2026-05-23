@@ -28,6 +28,10 @@ STALENESS_THRESHOLD_DAYS = 90
 
 _NO_ISSUES_LINE = "✅ None."
 
+# F17 — shared prefix across three entity-issue Cypher queries (line 175/185/196 in this
+# module); extract so the common WHERE clause is a single edit site.
+_MATCH_WHERE_OPEN = "MATCH (n) WHERE ("
+
 _ENTITY_LABELS = (
     "Organisation",
     "Person",
@@ -172,7 +176,7 @@ def run_health_check(
     # Individual check sections
     synthesis_failures = _query_entity_issues(
         neo4j_client,
-        f"MATCH (n) WHERE ({label_where}) "
+        f"{_MATCH_WHERE_OPEN}{label_where}) "
         "AND (n.summary IS NULL OR trim(toString(n.summary)) = '') "
         "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label "
         "ORDER BY labels(n)[0], n.name",
@@ -182,7 +186,7 @@ def run_health_check(
 
     missing_vault_path = _query_entity_issues(
         neo4j_client,
-        f"MATCH (n) WHERE ({label_where}) "
+        f"{_MATCH_WHERE_OPEN}{label_where}) "
         "AND (n.vault_path IS NULL OR trim(toString(n.vault_path)) = '') "
         "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label "
         "ORDER BY labels(n)[0], n.name",
@@ -193,7 +197,7 @@ def run_health_check(
     threshold_str = (datetime.now(timezone.utc) - timedelta(days=staleness_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     stale_entities = _query_entity_issues(
         neo4j_client,
-        f"MATCH (n) WHERE ({label_where}) "
+        f"{_MATCH_WHERE_OPEN}{label_where}) "
         "AND n.last_seen IS NOT NULL AND toString(n.last_seen) < $threshold "
         "RETURN n.id AS id, n.name AS name, labels(n)[0] AS label, "
         "n.last_seen AS last_seen "

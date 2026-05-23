@@ -36,6 +36,21 @@ from kairix.paths import mcp_port as _mcp_port
 
 logger = logging.getLogger(__name__)
 
+# F17 — check names appear as registry keys, CheckResult names emitted from each
+# check, and remediation lookups; one constant per name keeps the check identifier
+# in a single edit site.
+_CHECK_QUERY_CACHE_STATS = "query_cache_stats"
+_CHECK_EMBED_CACHE_STATS = "embed_cache_stats"
+_CHECK_KAIRIX_ON_PATH = "kairix_on_path"
+_CHECK_WRAPPER_INSTALLED = "wrapper_installed"
+_CHECK_SECRETS_LOADED = "secrets_loaded"  # pragma: allowlist secret — check-name string, not a credential
+_CHECK_DOCUMENT_ROOT_CONFIGURED = "document_root_configured"
+_CHECK_VECTOR_SEARCH_WORKING = "vector_search_working"
+_CHECK_NEO4J_REACHABLE = "neo4j_reachable"
+_CHECK_AGENT_KNOWLEDGE_POPULATED = "agent_knowledge_populated"
+_CHECK_CHUNK_DATE_POPULATED = "chunk_date_populated"
+_CHECK_MCP_SERVICE = "mcp_service"
+
 
 @dataclass
 class CheckResult:
@@ -101,50 +116,50 @@ class OnboardResult:
 # is the one-line "run this now" command an agent or healthcheck can act on.
 
 _CANONICAL_REMEDIATIONS: dict[str, str] = {
-    "query_cache_stats": (
+    _CHECK_QUERY_CACHE_STATS: (
         "Diagnostic check — no remediation required. Cache hit-rate is informational; "
         "tune `KAIRIX_QUERY_CACHE_MAX_ENTRIES` / `KAIRIX_QUERY_CACHE_MAX_AGE_S` if needed."
     ),
-    "embed_cache_stats": (
+    _CHECK_EMBED_CACHE_STATS: (
         "Diagnostic check — no remediation required. Cache hit-rate is informational; "
         "tune `KAIRIX_EMBED_CACHE_MAX_ENTRIES` / `KAIRIX_EMBED_CACHE_MAX_AGE_S` if needed."
     ),
-    "kairix_on_path": (
+    _CHECK_KAIRIX_ON_PATH: (
         "Run `bash scripts/deploy-vm.sh` on the host to install the wrapper + symlink; "
         "or manually export `PATH=/opt/openclaw/bin:$PATH`."
     ),
-    "wrapper_installed": (
+    _CHECK_WRAPPER_INSTALLED: (
         "Run `bash scripts/deploy-vm.sh` to install /opt/kairix/bin/kairix-wrapper.sh "
         "and repoint /usr/local/bin/kairix at it."
     ),
-    "secrets_loaded": (
+    _CHECK_SECRETS_LOADED: (
         "Run `sudo systemctl enable --now kairix-fetch-secrets.service` on the host; "
         "if that fails, confirm `/run/secrets/kairix.env` exists and contains "
         "`KAIRIX_LLM_API_KEY=...` and `KAIRIX_LLM_ENDPOINT=...`."
     ),
-    "document_root_configured": (
+    _CHECK_DOCUMENT_ROOT_CONFIGURED: (
         "Set `KAIRIX_DOCUMENT_ROOT=/your/docs/path` in /opt/kairix/service.env and ensure the directory exists."
     ),
-    "vector_search_working": (
+    _CHECK_VECTOR_SEARCH_WORKING: (
         "Run `docker logs kairix-worker-1` for embed-pipeline errors; confirm "
         "`kairix onboard check secrets_loaded` passes; then run `kairix embed --limit 20` "
         "to test the embed pipeline."
     ),
-    "neo4j_reachable": (
+    _CHECK_NEO4J_REACHABLE: (
         "Run `bash scripts/install-neo4j.sh` to install Neo4j, then set "
         "`KAIRIX_NEO4J_URI=bolt://localhost:7687` in /opt/kairix/service.env. "
         "Neo4j is optional — entity boost degrades gracefully when offline."
     ),
-    "agent_knowledge_populated": (
+    _CHECK_AGENT_KNOWLEDGE_POPULATED: (
         "Run `kairix embed` to populate the agent knowledge store from the document root, "
         "or create at least one memory file at "
         "$KAIRIX_DOCUMENT_ROOT/04-Agent-Knowledge/<agent>/memory/YYYY-MM-DD.md."
     ),
-    "chunk_date_populated": (
+    _CHECK_CHUNK_DATE_POPULATED: (
         "Run `kairix embed --rebuild-canaries` to refresh the chunk_date index. "
         "If chunk_date is missing entirely, run `kairix embed` to trigger the migration."
     ),
-    "mcp_service": (
+    _CHECK_MCP_SERVICE: (
         "Register kairix with at least one MCP consumer harness: "
         '`openclaw mcp set mcp-kairix \'{"type":"stdio","command":"/path/to/kairix-start.sh"}\'`, '
         "add to ~/Library/Application Support/Claude/claude_desktop_config.json, or run "
@@ -209,7 +224,7 @@ def check_kairix_on_path(deps: OnboardChecksDeps | None = None) -> CheckResult:
     path = d.which("kairix")
     if path is None:
         return CheckResult(
-            name="kairix_on_path",
+            name=_CHECK_KAIRIX_ON_PATH,
             ok=False,
             detail="kairix not found on PATH",
             fix=(
@@ -218,7 +233,7 @@ def check_kairix_on_path(deps: OnboardChecksDeps | None = None) -> CheckResult:
                 "Or manually: export PATH=/opt/openclaw/bin:$PATH"
             ),
         )
-    return CheckResult(name="kairix_on_path", ok=True, detail=f"kairix found at {path}")
+    return CheckResult(name=_CHECK_KAIRIX_ON_PATH, ok=True, detail=f"kairix found at {path}")
 
 
 def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResult:
@@ -232,7 +247,7 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
 
     if d.is_docker():
         return CheckResult(
-            name="wrapper_installed",
+            name=_CHECK_WRAPPER_INSTALLED,
             ok=True,
             detail="Running in Docker — wrapper check skipped (pip install in image)",
         )
@@ -240,7 +255,7 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
     path = d.which("kairix")
     if path is None:
         return CheckResult(
-            name="wrapper_installed",
+            name=_CHECK_WRAPPER_INSTALLED,
             ok=False,
             detail="kairix not on PATH — cannot check wrapper",
             fix="Run scripts/deploy-vm.sh to install the wrapper and symlink.",
@@ -256,7 +271,7 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
 
         if first_line.startswith("#!") and "python" in first_line:
             return CheckResult(
-                name="wrapper_installed",
+                name=_CHECK_WRAPPER_INSTALLED,
                 ok=False,
                 detail=f"kairix symlink points to raw Python binary: {resolved}",
                 fix=(
@@ -269,20 +284,20 @@ def check_wrapper_installed(deps: OnboardChecksDeps | None = None) -> CheckResul
             )
         if first_line.startswith("#!") and ("bash" in first_line or "sh" in first_line):
             return CheckResult(
-                name="wrapper_installed",
+                name=_CHECK_WRAPPER_INSTALLED,
                 ok=True,
                 detail=f"wrapper installed at {resolved}",
             )
 
         return CheckResult(
-            name="wrapper_installed",
+            name=_CHECK_WRAPPER_INSTALLED,
             ok=False,
             detail=f"kairix binary has unexpected format (header: {first_line[:60]})",
             fix="Run scripts/deploy-vm.sh to reinstall the wrapper.",
         )
     except Exception as exc:
         return CheckResult(
-            name="wrapper_installed",
+            name=_CHECK_WRAPPER_INSTALLED,
             ok=False,
             detail=f"Cannot read kairix binary at {resolved}: {exc}",
             fix="Check file permissions on the kairix binary.",
@@ -327,7 +342,7 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
     if api_key and endpoint:
         masked_key = api_key[:8] + "..." if len(api_key) > 8 else "***"
         return CheckResult(
-            name="secrets_loaded",
+            name=_CHECK_SECRETS_LOADED,
             ok=True,
             detail=f"LLM credentials present (key: {masked_key}, endpoint: {endpoint[:40]}...)",
         )
@@ -346,7 +361,7 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
         missing_in_file = [k for k in _REQUIRED_SECRETS if k not in found]
         if not missing_in_file:
             return CheckResult(
-                name="secrets_loaded",
+                name=_CHECK_SECRETS_LOADED,
                 ok=True,
                 detail=(
                     f"Secrets file found at {probe} — credentials will be active on first search call. "
@@ -355,7 +370,7 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
             )
         # File exists but is missing keys — give specific guidance
         return CheckResult(
-            name="secrets_loaded",
+            name=_CHECK_SECRETS_LOADED,
             ok=False,
             detail=f"Secrets file at {probe} is missing required keys: {', '.join(missing_in_file)}",
             fix=(
@@ -369,7 +384,7 @@ def check_secrets_loaded(env: Mapping[str, str] | None = None) -> CheckResult:
     missing_env = [k for k in _REQUIRED_SECRETS if not os.environ.get(k)]
     default_path = _SECRETS_FILE_PROBE_PATHS[-1]
     return CheckResult(
-        name="secrets_loaded",
+        name=_CHECK_SECRETS_LOADED,
         ok=False,
         detail=f"LLM credentials not found in environment or secrets file: {', '.join(missing_env)}",
         fix=(
@@ -393,7 +408,7 @@ def check_document_root_configured(env: Mapping[str, str] | None = None) -> Chec
     doc_root = env.get("KAIRIX_DOCUMENT_ROOT", "")
     if not doc_root:
         return CheckResult(
-            name="document_root_configured",
+            name=_CHECK_DOCUMENT_ROOT_CONFIGURED,
             ok=False,
             detail="KAIRIX_DOCUMENT_ROOT is not set",
             fix=("Set KAIRIX_DOCUMENT_ROOT in /opt/kairix/service.env:\n  KAIRIX_DOCUMENT_ROOT=/data/documents"),
@@ -401,7 +416,7 @@ def check_document_root_configured(env: Mapping[str, str] | None = None) -> Chec
     p = Path(doc_root)
     if not p.exists():
         return CheckResult(
-            name="document_root_configured",
+            name=_CHECK_DOCUMENT_ROOT_CONFIGURED,
             ok=False,
             detail=f"KAIRIX_DOCUMENT_ROOT directory does not exist: {doc_root}",
             fix=(
@@ -411,7 +426,7 @@ def check_document_root_configured(env: Mapping[str, str] | None = None) -> Chec
         )
     md_count = sum(1 for _ in p.rglob("*.md") if not _.name.startswith("."))
     return CheckResult(
-        name="document_root_configured",
+        name=_CHECK_DOCUMENT_ROOT_CONFIGURED,
         ok=True,
         detail=f"Document root: {doc_root} ({md_count:,} .md files found)",
     )
@@ -441,7 +456,7 @@ def check_vector_search_working(pipeline: Any | None = None) -> CheckResult:
 
         if vec_failed:
             return CheckResult(
-                name="vector_search_working",
+                name=_CHECK_VECTOR_SEARCH_WORKING,
                 ok=False,
                 detail=(
                     f"Vector search failed (vec_failed=True). "
@@ -458,7 +473,7 @@ def check_vector_search_working(pipeline: Any | None = None) -> CheckResult:
 
         if vec_count is not None and vec_count == 0 and result_count == 0:
             return CheckResult(
-                name="vector_search_working",
+                name=_CHECK_VECTOR_SEARCH_WORKING,
                 ok=False,
                 detail="Search returned 0 results (vec=0, bm25=0) — vault may not be embedded yet",
                 fix=(
@@ -475,14 +490,14 @@ def check_vector_search_working(pipeline: Any | None = None) -> CheckResult:
             detail_parts.append(f"bm25={bm25_count}")
 
         return CheckResult(
-            name="vector_search_working",
+            name=_CHECK_VECTOR_SEARCH_WORKING,
             ok=True,
             detail=f"Vector search working ({', '.join(detail_parts)})",
         )
 
     except Exception as exc:
         return CheckResult(
-            name="vector_search_working",
+            name=_CHECK_VECTOR_SEARCH_WORKING,
             ok=False,
             detail=f"Search raised an exception: {exc}",
             fix=(
@@ -508,7 +523,7 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
             client = get_client()
         if not getattr(client, "available", False):
             return CheckResult(
-                name="neo4j_reachable",
+                name=_CHECK_NEO4J_REACHABLE,
                 ok=False,
                 detail="Neo4j client unavailable (KAIRIX_NEO4J_URI not set or connection refused)",
                 fix=(
@@ -527,7 +542,7 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
 
         if total == 0:
             return CheckResult(
-                name="neo4j_reachable",
+                name=_CHECK_NEO4J_REACHABLE,
                 ok=False,
                 detail="Neo4j reachable but empty — document crawler has not run",
                 fix=(
@@ -538,14 +553,14 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
             )
 
         return CheckResult(
-            name="neo4j_reachable",
+            name=_CHECK_NEO4J_REACHABLE,
             ok=True,
             detail=f"Neo4j reachable — {total:,} nodes in graph",
         )
 
     except Exception as exc:
         return CheckResult(
-            name="neo4j_reachable",
+            name=_CHECK_NEO4J_REACHABLE,
             ok=False,
             detail=f"Neo4j check failed: {exc}",
             fix=(
@@ -571,7 +586,7 @@ def check_agent_knowledge_populated(document_root_path: Path | None = None) -> C
     agent_knowledge = document_root_path / "04-Agent-Knowledge"
     if not agent_knowledge.exists():
         return CheckResult(
-            name="agent_knowledge_populated",
+            name=_CHECK_AGENT_KNOWLEDGE_POPULATED,
             ok=False,
             detail=f"Agent knowledge directory not found: {agent_knowledge}",
             fix=(
@@ -585,7 +600,7 @@ def check_agent_knowledge_populated(document_root_path: Path | None = None) -> C
     memory_files = list(agent_knowledge.rglob("*/memory/*.md"))
     if not memory_files:
         return CheckResult(
-            name="agent_knowledge_populated",
+            name=_CHECK_AGENT_KNOWLEDGE_POPULATED,
             ok=False,
             detail=f"No agent memory logs found under {agent_knowledge}",
             fix=(
@@ -596,7 +611,7 @@ def check_agent_knowledge_populated(document_root_path: Path | None = None) -> C
         )
 
     return CheckResult(
-        name="agent_knowledge_populated",
+        name=_CHECK_AGENT_KNOWLEDGE_POPULATED,
         ok=True,
         detail=f"Agent memory logs found: {len(memory_files)} files under {agent_knowledge}",
     )
@@ -612,7 +627,7 @@ def _query_chunk_date_counts(db: Any) -> tuple[int, int] | CheckResult:
     cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
     if "chunk_date" not in cols:
         return CheckResult(
-            name="chunk_date_populated",
+            name=_CHECK_CHUNK_DATE_POPULATED,
             ok=False,
             detail="chunk_date column missing from content_vectors",
             fix=(
@@ -633,7 +648,7 @@ def _grade_chunk_date_coverage(total: int, dated: int) -> CheckResult:
     """
     if total == 0:
         return CheckResult(
-            name="chunk_date_populated",
+            name=_CHECK_CHUNK_DATE_POPULATED,
             ok=False,
             detail="content_vectors is empty — vault has not been embedded",
             fix="Run: kairix embed",
@@ -641,7 +656,7 @@ def _grade_chunk_date_coverage(total: int, dated: int) -> CheckResult:
     pct = 100 * dated / total
     if dated == 0:
         return CheckResult(
-            name="chunk_date_populated",
+            name=_CHECK_CHUNK_DATE_POPULATED,
             ok=False,
             detail=f"chunk_date: 0/{total} chunks dated (0%) — TMP-7B temporal boost is inert",
             fix=(
@@ -651,7 +666,7 @@ def _grade_chunk_date_coverage(total: int, dated: int) -> CheckResult:
         )
     if pct < 20:
         return CheckResult(
-            name="chunk_date_populated",
+            name=_CHECK_CHUNK_DATE_POPULATED,
             ok=False,
             detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%) — low coverage, temporal boost degraded",
             fix=(
@@ -660,7 +675,7 @@ def _grade_chunk_date_coverage(total: int, dated: int) -> CheckResult:
             ),
         )
     return CheckResult(
-        name="chunk_date_populated",
+        name=_CHECK_CHUNK_DATE_POPULATED,
         ok=True,
         detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%)",
     )
@@ -708,14 +723,14 @@ def check_chunk_date_populated(
 
     except FileNotFoundError:
         return CheckResult(
-            name="chunk_date_populated",
+            name=_CHECK_CHUNK_DATE_POPULATED,
             ok=False,
             detail="Index not found — vault not embedded yet",
             fix="Run: kairix embed",
         )
     except Exception as exc:
         return CheckResult(
-            name="chunk_date_populated",
+            name=_CHECK_CHUNK_DATE_POPULATED,
             ok=False,
             detail=f"chunk_date check failed: {exc}",
             fix="Check kairix index at ~/.cache/kairix/index.sqlite",
@@ -932,13 +947,13 @@ def check_mcp_service(
 
     if active:
         return CheckResult(
-            name="mcp_service",
+            name=_CHECK_MCP_SERVICE,
             ok=True,
             detail="kairix MCP server accessible — " + "; ".join(active),
         )
 
     return CheckResult(
-        name="mcp_service",
+        name=_CHECK_MCP_SERVICE,
         ok=False,
         detail="kairix MCP server not configured for any consumer — " + "; ".join(inactive),
         fix=(
@@ -985,13 +1000,13 @@ def check_query_cache_stats(query_cache: Any | None = None) -> CheckResult:
             f"oldest_age_s={stats.oldest_entry_age_s:.1f}, "
             f"evictions={stats.evictions}"
         )
-        return CheckResult(name="query_cache_stats", ok=True, detail=detail)
+        return CheckResult(name=_CHECK_QUERY_CACHE_STATS, ok=True, detail=detail)
     except Exception as exc:
         # Diagnostic check must never block onboarding; a missing cache
         # is reported as a passing check with a degraded detail string
         # rather than a failure (operators see the warning, not a red).
         return CheckResult(
-            name="query_cache_stats",
+            name=_CHECK_QUERY_CACHE_STATS,
             ok=True,
             detail=f"query cache: unavailable ({exc})",
         )
@@ -1024,13 +1039,13 @@ def check_embed_cache_stats(embed_cache: Any | None = None) -> CheckResult:
             f"oldest_age_s={stats.oldest_entry_age_s:.1f}, "
             f"evictions={stats.evictions}"
         )
-        return CheckResult(name="embed_cache_stats", ok=True, detail=detail)
+        return CheckResult(name=_CHECK_EMBED_CACHE_STATS, ok=True, detail=detail)
     except Exception as exc:
         # Diagnostic check must never block onboarding; a missing cache
         # is reported as a passing check with a degraded detail string
         # rather than a failure (operators see the warning, not a red).
         return CheckResult(
-            name="embed_cache_stats",
+            name=_CHECK_EMBED_CACHE_STATS,
             ok=True,
             detail=f"embed cache: unavailable ({exc})",
         )
