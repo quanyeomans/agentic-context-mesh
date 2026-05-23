@@ -2,15 +2,21 @@
 kairix worker — operator CLI for the background worker (#224 phases 4 + 5).
 
 Subcommands:
-  run     Start the worker loop (default if no subcommand given).
-  status  Print the worker's last-known state from the persisted JSON file.
-          Exit 0 if present, 1 if missing — so a shell monitor (or Docker
-          healthcheck) can detect a never-started worker. (#224 phase 5)
-  pause   Touch the pause flag file. The running worker enters PAUSED phase
-          at the next loop iteration (within ``PAUSE_POLL_INTERVAL_S``) and
-          stops doing task work until the flag is removed. (#224 phase 4)
-  resume  Remove the pause flag file. The running worker transitions back
-          to IDLE at the next loop iteration. Idempotent. (#224 phase 4)
+  run        Start the worker loop (default if no subcommand given).
+  status     Print the worker's last-known state from the persisted JSON file.
+             Exit 0 if present, 1 if missing — so a shell monitor (or Docker
+             healthcheck) can detect a never-started worker. (#224 phase 5)
+  pause      Touch the pause flag file. The running worker enters PAUSED phase
+             at the next loop iteration (within ``PAUSE_POLL_INTERVAL_S``) and
+             stops doing task work until the flag is removed. (#224 phase 4)
+  resume     Remove the pause flag file. The running worker transitions back
+             to IDLE at the next loop iteration. Idempotent. (#224 phase 4)
+  preflight  Audit the persistence invariants (FTS rows match documents,
+             vectors match content, no orphans). Exit 0 if healthy, 1 if any
+             error-severity gap. Run before every deploy / cutover; the
+             worker boot path runs the same check and logs the report at
+             startup. ``--auto-heal`` invokes ``rebuild_fts`` for the
+             documents-without-fts gap.
 
 Pause/resume are deliberately decoupled from the worker process: they only
 toggle a touch-file in the kairix data dir. A stuck/unresponsive worker can
@@ -32,10 +38,17 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from kairix.paths import worker_pause_flag_path, worker_state_path
 from kairix.worker_state import WorkerState, read_state
+
+if TYPE_CHECKING:
+    import sqlite3
+
+# argparse store-true action — extracted because the literal appears
+# on every boolean flag and the no-duplicate-string rule trips at 3+.
+_STORE_TRUE = "store_true"
 
 
 def _format_age(seconds_ago: float) -> str:
@@ -122,6 +135,102 @@ def resume(*, flag_path: Path | None = None) -> int:
     return 0
 
 
+def _open_db_for_preflight(db_path: Path | None) -> sqlite3.Connection:
+    """Open the SQLite connection preflight should audit.
+
+    Production callers pass ``db_path=None`` and we resolve the default
+    via :func:`kairix.core.db.open_db`; tests pass an explicit tmp
+    path so preflight runs against a sandboxed DB.
+    """
+    from kairix.core.db import open_db
+
+    return open_db(db_path) if db_path is not None else open_db()
+
+
+def _format_gap_line(gap: object) -> str:
+    """Render one integrity gap as a short operator-readable line."""
+    # Local import to keep worker_cli importable without the integrity
+    # module on the path (e.g. during partial-tree static analysis).
+    from kairix.core.db.integrity import IntegrityGap
+
+    if not isinstance(gap, IntegrityGap):
+        return str(gap)
+    sample_str = ", ".join(gap.sample[:3])
+    sample_part = f" sample=[{sample_str}]" if sample_str else ""
+    return f"[{gap.severity.upper()}] {gap.invariant}: count={gap.count}{sample_part} — {gap.remediation}"
+
+
+def _auto_heal_gaps(db: sqlite3.Connection, gaps: tuple[object, ...], out: TextIO) -> None:
+    """Attempt remediation for the gaps we know how to fix automatically.
+
+    Today only ``documents-without-fts`` is auto-healable via
+    ``rebuild_fts``; other gaps are surfaced for operator action. The
+    helper writes a one-line summary per heal attempt to ``out`` so the
+    operator sees what ran.
+    """
+    from kairix.core.db.fts import rebuild_fts
+    from kairix.core.db.integrity import INVARIANT_DOCUMENTS_WITHOUT_FTS, IntegrityGap
+
+    for gap in gaps:
+        if not isinstance(gap, IntegrityGap):
+            continue
+        if gap.invariant == INVARIANT_DOCUMENTS_WITHOUT_FTS:
+            out.write(f"auto-heal: rebuilding FTS5 index for {gap.count} documents...\n")
+            count = rebuild_fts(db)
+            out.write(f"auto-heal: rebuild_fts indexed {count} documents\n")
+
+
+def preflight(
+    *,
+    db_path: Path | None = None,
+    out: TextIO | None = None,
+    err: TextIO | None = None,
+    as_json: bool = False,
+    auto_heal: bool = False,
+) -> int:
+    """``kairix worker preflight`` — audit persistence invariants.
+
+    Exit 0 if healthy, 1 if any error-severity gap. Warn / info gaps
+    do not flip the exit code but are surfaced for visibility.
+
+    ``--auto-heal`` runs :func:`kairix.core.db.fts.rebuild_fts` for the
+    ``documents-without-fts`` gap, then re-runs the audit and reports
+    the post-heal state. Mirrors the existing ``kairix embed rebuild-fts``
+    surface but folded into the preflight workflow so operators have a
+    single "fix what's fixable" entry point.
+
+    The ``db_path`` / ``out`` / ``err`` kwargs are the in-process test
+    seam; the CLI binds them from argparse args.
+    """
+    from kairix.core.db.integrity import check_integrity, report_to_dict
+
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+
+    db = _open_db_for_preflight(db_path)
+    try:
+        report = check_integrity(db)
+        if auto_heal and report.gaps:
+            _auto_heal_gaps(db, report.gaps, out)
+            db.commit()
+            # Re-check post-heal so the operator sees the new state.
+            report = check_integrity(db)
+    finally:
+        db.close()
+
+    if as_json:
+        out.write(json.dumps(report_to_dict(report), indent=2) + "\n")
+    else:
+        if report.healthy and not report.gaps:
+            out.write("Preflight integrity check: PASSED (no gaps detected)\n")
+        else:
+            status_word = "PASSED" if report.healthy else "FAILED"
+            out.write(f"Preflight integrity check: {status_word} ({len(report.gaps)} gap(s))\n")
+            for gap in report.gaps:
+                out.write(_format_gap_line(gap) + "\n")
+    return 0 if report.healthy else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Argparse for ``kairix worker [run|status|pause|resume]``."""
     parser = argparse.ArgumentParser(
@@ -146,7 +255,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_p.add_argument(
         "--json",
         dest="as_json",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Emit the full WorkerState dict as JSON on stdout (machine-readable).",
     )
     pause_p = sub.add_parser("pause", help="Pause the running worker by creating a flag file.")
@@ -169,6 +278,34 @@ def build_parser() -> argparse.ArgumentParser:
             "seam for F30 outcome tests; matches ``--state-path`` on status."
         ),
     )
+    preflight_p = sub.add_parser(
+        "preflight",
+        help="Audit persistence invariants; exit 1 if any error-severity gap.",
+    )
+    preflight_p.add_argument(
+        "--db-path",
+        default=None,
+        help=(
+            "Audit this SQLite index instead of the default resolution chain "
+            "(``KAIRIX_DB_PATH`` env / kairix.config.yaml / platform default). "
+            "F30 subprocess seam — keeps tmp-DB injection out of "
+            "monkeypatch.setenv (F2-clean)."
+        ),
+    )
+    preflight_p.add_argument(
+        "--json",
+        dest="as_json",
+        action=_STORE_TRUE,
+        help="Emit the full IntegrityReport as JSON on stdout (machine-readable).",
+    )
+    preflight_p.add_argument(
+        "--auto-heal",
+        action=_STORE_TRUE,
+        help=(
+            "Run rebuild_fts for documents-without-fts gaps, then re-audit. "
+            "Other gaps require operator action via the per-gap remediation."
+        ),
+    )
     return parser
 
 
@@ -186,18 +323,27 @@ def _resolve_flag_path_arg(arg: str | None, injected: Path | None) -> Path | Non
     return Path(arg) if arg else None
 
 
+def _resolve_db_path_arg(arg: str | None, injected: Path | None) -> Path | None:
+    """In-process ``db_path=`` kwarg wins; otherwise use ``--db-path``."""
+    if injected is not None:
+        return injected
+    return Path(arg) if arg else None
+
+
 def main(
     argv: list[str] | None = None,
     *,
     state_path: Path | None = None,
     flag_path: Path | None = None,
+    db_path: Path | None = None,
 ) -> int | None:
     """CLI entry point. Routes to the right subcommand.
 
-    ``state_path`` / ``flag_path`` are the in-process injection seams used by
-    unit tests. The ``--state-path`` / ``--flag-path`` CLI flags are the
-    subprocess (F30) seams. Precedence: in-process kwarg wins over CLI flag
-    wins over ``kairix.paths`` defaults.
+    ``state_path`` / ``flag_path`` / ``db_path`` are the in-process
+    injection seams used by unit tests. The ``--state-path`` /
+    ``--flag-path`` / ``--db-path`` CLI flags are the subprocess (F30)
+    seams. Precedence: in-process kwarg wins over CLI flag wins over
+    ``kairix.paths`` defaults.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -211,6 +357,13 @@ def main(
     if args.cmd == "resume":
         resolved_flag = _resolve_flag_path_arg(getattr(args, "flag_path", None), flag_path)
         return resume(flag_path=resolved_flag)
+    if args.cmd == "preflight":
+        resolved_db = _resolve_db_path_arg(getattr(args, "db_path", None), db_path)
+        return preflight(
+            db_path=resolved_db,
+            as_json=getattr(args, "as_json", False),
+            auto_heal=getattr(args, "auto_heal", False),
+        )
 
     # Default (``None`` or ``run``): start the worker loop.
     from kairix.worker import main as worker_main

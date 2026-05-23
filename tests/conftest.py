@@ -78,6 +78,9 @@ pytest_plugins = [
     "tests.bdd.steps.probe_steps",
     "tests.bdd.steps.probe_per_query_telemetry_steps",
     "tests.bdd.steps.worker_steps",
+    # Worker preflight — persistence-integrity audit at boot / on demand.
+    # See kairix/core/db/integrity.py for the IM-6 regression context.
+    "tests.bdd.steps.worker_preflight_steps",
     "tests.bdd.steps.bootstrap_steps",
     "tests.bdd.steps.usage_guide_steps",
     "tests.bdd.steps.classify_steps",
