@@ -58,7 +58,8 @@ def _replace_document_root(paths: KairixPaths, document_root: Path) -> KairixPat
     """
     from dataclasses import replace
 
-    return replace(paths, document_root=document_root)
+    replaced: KairixPaths = replace(paths, document_root=document_root)
+    return replaced
 
 
 def main(argv: list[str] | None = None, *, paths: KairixPaths | None = None) -> None:
