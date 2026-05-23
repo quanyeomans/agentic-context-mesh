@@ -1,0 +1,10 @@
+# F61 baseline — files outside kairix/core/connectors/ that directly
+# construct _SqliteChunkWriter(db, collection=...). Grandfathered
+# offenders only; baseline is shrink-only per F49.
+#
+# Today: only kairix/worker.py qualifies. _run_one_connector_batch
+# (around line 305) builds _SqliteChunkWriter(db, collection=name)
+# inline. Wave C will rewire to flow through CollectionRouter, paying
+# this entry down to zero. After paydown the gate stays armed against
+# any future direct construction outside the framework.
+kairix/worker.py

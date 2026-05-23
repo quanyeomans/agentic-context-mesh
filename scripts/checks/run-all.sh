@@ -148,6 +148,18 @@ bash "${SCRIPT_DIR}/check-f53-features-status-surface.sh" || overall=1
 # F54 — every flag in REGISTRY has both-branch test coverage
 bash "${SCRIPT_DIR}/check-f54-flag-both-branch-tested.sh" || overall=1
 
+# F55 — Chunker plugin declares version + every Chunk(...) carries chunker_version=
+python3 "${SCRIPT_DIR}/check_f55_chunker_version.py" || overall=1
+
+# F57 — cc_pair lifecycle state-machine integrity (UPDATE topology_cc_pairs.status routed through _ALLOWED_TRANSITIONS)
+python3 "${SCRIPT_DIR}/check_f57_ccpair_lifecycle_integrity.py" || overall=1
+
+# F58 — HierarchyConnector requires a parent-before-child contract test under tests/contracts/
+python3 "${SCRIPT_DIR}/check_f58_hierarchy_parent_before_child.py" || overall=1
+
+# F61 — _SqliteChunkWriter constructor lives only under kairix/core/connectors/ (CollectionRouter singleton)
+python3 "${SCRIPT_DIR}/check_f61_collection_router_singleton.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
