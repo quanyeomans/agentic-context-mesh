@@ -123,6 +123,41 @@ def trim_context(context: dict[str, str]) -> dict[str, str]:
     return trimmed
 
 
+def _fetch_sources_concurrently(
+    source_tasks: list[tuple[str, Callable, str, int]],
+) -> dict[str, str]:
+    """Run all source fetchers in parallel, returning a name -> content map.
+
+    Failed futures are logged and skipped — never raised. Extracted from
+    ``generate_briefing`` to keep that pipeline under F16's
+    cognitive-complexity ceiling — the ThreadPoolExecutor + as_completed
+    + per-future try/except + log-on-content block nested above 15 when
+    inlined.
+    """
+    context: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_map: dict[Future, str] = {}
+        for name, fn, *args in source_tasks:
+            future = executor.submit(_run_source, name, fn, *args)
+            future_map[future] = name
+
+        for future in as_completed(future_map, timeout=25):
+            try:
+                source_name, content = future.result()
+            except Exception as e:
+                failed_name = future_map[future]
+                logger.warning("pipeline: source %r future failed — %s", failed_name, e)
+                continue
+            if content:
+                context[source_name] = content
+                logger.debug(
+                    "pipeline: source %r returned %d tokens",
+                    source_name,
+                    estimate_tokens(content),
+                )
+    return context
+
+
 def generate_briefing(
     agent: str,
     *,
@@ -203,28 +238,7 @@ def generate_briefing(
         ),
     ]
 
-    context: dict[str, str] = {}
-
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        future_map: dict[Future, str] = {}
-        for name, fn, *args in source_tasks:
-            future = executor.submit(_run_source, name, fn, *args)
-            future_map[future] = name
-
-        for future in as_completed(future_map, timeout=25):
-            try:
-                source_name, content = future.result()
-                if content:
-                    context[source_name] = content
-                    logger.debug(
-                        "pipeline: source %r returned %d tokens",
-                        source_name,
-                        estimate_tokens(content),
-                    )
-            except Exception as e:
-                name = future_map[future]
-                logger.warning("pipeline: source %r future failed — %s", name, e)
-
+    context = _fetch_sources_concurrently(source_tasks)
     sources_count = len(context)
     logger.info("pipeline: collected %d sources for %r", sources_count, agent)
 

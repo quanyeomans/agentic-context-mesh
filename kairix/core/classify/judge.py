@@ -47,7 +47,6 @@ def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> 
     Returns:
         ClassificationResult. On failure, returns confidence=0.0 and needs_confirmation=True.
     """
-    from kairix.core.classify.router import resolve_target_path
     from kairix.core.classify.rules import VALID_AGENTS, ClassificationResult
 
     # Validate agent
@@ -69,41 +68,7 @@ def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> 
     ]
 
     try:
-        if llm_backend is None:
-            from kairix.platform.llm import get_default_backend as _get_llm
-
-            llm_backend = _get_llm()
-        raw = llm_backend.chat(messages, max_tokens=200)
-        if not raw:
-            raise ValueError("empty response from LLM")
-
-        # Parse JSON — handle code fence wrapping
-        text = raw.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # Remove first and last code fence lines
-            inner = "\n".join(lines[1:-1] if lines[-1].strip().startswith("```") else lines[1:])
-            text = inner.strip()
-
-        parsed = json.loads(text)
-        classification_type = parsed.get("type", "unknown")
-        confidence = float(parsed.get("confidence", 0.5))
-        reason = parsed.get("reason", "LLM classification")
-
-        # Resolve target path
-        try:
-            target_path = resolve_target_path(agent, classification_type)
-        except (ValueError, KeyError):
-            target_path = ""
-
-        return ClassificationResult(
-            type=classification_type,
-            target_path=target_path,
-            confidence=confidence,
-            reason=reason,
-            needs_confirmation=confidence < 0.70,
-        )
-
+        return _call_and_parse_llm(messages, agent, llm_backend)
     except Exception as e:
         logger.warning("judge: LLM classification failed — %s", e)
         return ClassificationResult(
@@ -113,3 +78,55 @@ def classify_with_llm(content: str, agent: str = "shared", llm_backend=None) -> 
             reason="LLM classification failed — check server logs for details.",
             needs_confirmation=True,
         )
+
+
+def _call_and_parse_llm(
+    messages: list[dict[str, str]],
+    agent: str,
+    llm_backend: object,
+) -> ClassificationResult:  # noqa: F821 — forward reference, imported in classify_with_llm body
+    """Run the LLM call, parse the JSON response, resolve a target path.
+
+    Raises on any LLM/parse/empty failure — caller wraps with the
+    "needs_confirmation=True, confidence=0.0" failure envelope. Extracted
+    from ``classify_with_llm`` to keep that function under F16's
+    cognitive-complexity ceiling — the nested try/code-fence-strip/
+    nested-target-resolve block tipped above 15 when inlined.
+    """
+    from kairix.core.classify.router import resolve_target_path
+    from kairix.core.classify.rules import ClassificationResult
+
+    if llm_backend is None:
+        from kairix.platform.llm import get_default_backend as _get_llm
+
+        llm_backend = _get_llm()
+    raw = llm_backend.chat(messages, max_tokens=200)  # type: ignore[attr-defined] — duck-typed LLM backend; matches existing classify_with_llm signature
+    if not raw:
+        raise ValueError("empty response from LLM")
+
+    # Parse JSON — handle code fence wrapping
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first and last code fence lines
+        inner = "\n".join(lines[1:-1] if lines[-1].strip().startswith("```") else lines[1:])
+        text = inner.strip()
+
+    parsed = json.loads(text)
+    classification_type = parsed.get("type", "unknown")
+    confidence = float(parsed.get("confidence", 0.5))
+    reason = parsed.get("reason", "LLM classification")
+
+    # Resolve target path
+    try:
+        target_path = resolve_target_path(agent, classification_type)
+    except (ValueError, KeyError):
+        target_path = ""
+
+    return ClassificationResult(
+        type=classification_type,
+        target_path=target_path,
+        confidence=confidence,
+        reason=reason,
+        needs_confirmation=confidence < 0.70,
+    )

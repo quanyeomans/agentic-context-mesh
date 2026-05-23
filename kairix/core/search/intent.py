@@ -282,6 +282,32 @@ def _matches_any(patterns: list[re.Pattern[str]], q: str) -> bool:
     return any(p.search(q) for p in patterns)
 
 
+def _classify_nonempty(q: str) -> QueryIntent:
+    """Classify a pre-stripped, non-empty query by priority-ordered pattern checks.
+
+    Priority order: TEMPORAL > MULTI_HOP > ATTRIBUTE_FACT > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
+    Extracted from ``classify`` to keep the public function under F16's
+    cognitive-complexity ceiling — ``classify`` retains the empty-guard
+    + try/except safety net, this helper owns the dispatch chain.
+    """
+    if _matches_any(_TEMPORAL_PATTERNS, q):
+        return QueryIntent.TEMPORAL
+    if _matches_any(_MULTI_HOP_PATTERNS, q):
+        return QueryIntent.MULTI_HOP
+    # Attribute-fact slotted BEFORE ENTITY so "what is acme's address?"
+    # routes to the fact retriever, not the ENTITY-graph branch (which
+    # expects "tell me about ..." narrative framing).
+    if _is_attribute_fact_query(q):
+        return QueryIntent.ATTRIBUTE_FACT
+    if _matches_any(_ENTITY_PATTERNS, q):
+        return QueryIntent.ENTITY
+    if _matches_any(_PROCEDURAL_PATTERNS, q):
+        return QueryIntent.PROCEDURAL
+    if _is_keyword_query(q):
+        return QueryIntent.KEYWORD
+    return QueryIntent.SEMANTIC
+
+
 def classify(query: str) -> QueryIntent:
     """
     Classify a query string into a QueryIntent.
@@ -294,21 +320,6 @@ def classify(query: str) -> QueryIntent:
         q = query.strip()
         if not q:
             return QueryIntent.SEMANTIC
-        if _matches_any(_TEMPORAL_PATTERNS, q):
-            return QueryIntent.TEMPORAL
-        if _matches_any(_MULTI_HOP_PATTERNS, q):
-            return QueryIntent.MULTI_HOP
-        # Attribute-fact slotted BEFORE ENTITY so "what is acme's address?"
-        # routes to the fact retriever, not the ENTITY-graph branch (which
-        # expects "tell me about ..." narrative framing).
-        if _is_attribute_fact_query(q):
-            return QueryIntent.ATTRIBUTE_FACT
-        if _matches_any(_ENTITY_PATTERNS, q):
-            return QueryIntent.ENTITY
-        if _matches_any(_PROCEDURAL_PATTERNS, q):
-            return QueryIntent.PROCEDURAL
-        if _is_keyword_query(q):
-            return QueryIntent.KEYWORD
-        return QueryIntent.SEMANTIC
+        return _classify_nonempty(q)
     except Exception:
         return QueryIntent.SEMANTIC

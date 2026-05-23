@@ -602,6 +602,70 @@ def check_agent_knowledge_populated(document_root_path: Path | None = None) -> C
     )
 
 
+def _query_chunk_date_counts(db: Any) -> tuple[int, int] | CheckResult:
+    """Inspect content_vectors for chunk_date coverage. Returns (total, dated) or an error CheckResult.
+
+    Extracted from ``check_chunk_date_populated`` so the column-missing
+    early-return doesn't have to live inside the outer try/except — that
+    nesting pushed the parent over F16's ceiling.
+    """
+    cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
+    if "chunk_date" not in cols:
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=False,
+            detail="chunk_date column missing from content_vectors",
+            fix=(
+                "Run kairix embed to add the column and populate dates.\nThe migration is automatic on next embed run."
+            ),
+        )
+    total = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
+    dated = db.execute("SELECT COUNT(*) FROM content_vectors WHERE chunk_date IS NOT NULL").fetchone()[0]
+    return total, dated
+
+
+def _grade_chunk_date_coverage(total: int, dated: int) -> CheckResult:
+    """Turn raw chunk_date counts into a CheckResult with the right severity.
+
+    Extracted from ``check_chunk_date_populated`` to flatten the if/if/if
+    severity-ladder out of the outer try-block. Same F16 motivation as
+    ``_query_chunk_date_counts``.
+    """
+    if total == 0:
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=False,
+            detail="content_vectors is empty — vault has not been embedded",
+            fix="Run: kairix embed",
+        )
+    pct = 100 * dated / total
+    if dated == 0:
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=False,
+            detail=f"chunk_date: 0/{total} chunks dated (0%) — TMP-7B temporal boost is inert",
+            fix=(
+                "Run kairix embed to populate chunk_date from document frontmatter and filenames.\n"
+                "Documents need 'date: YYYY-MM-DD' in frontmatter or a date in their filename."
+            ),
+        )
+    if pct < 20:
+        return CheckResult(
+            name="chunk_date_populated",
+            ok=False,
+            detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%) — low coverage, temporal boost degraded",
+            fix=(
+                "Add 'date: YYYY-MM-DD' frontmatter to more documents, or use dated filenames.\n"
+                "Re-run kairix embed after updating documents."
+            ),
+        )
+    return CheckResult(
+        name="chunk_date_populated",
+        ok=True,
+        detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%)",
+    )
+
+
 def check_chunk_date_populated(
     db_path: Path | None = None,
     *,
@@ -633,59 +697,14 @@ def check_chunk_date_populated(
 
         db = _opener(db_path)
         try:
-            # Check if the column exists first
-            cols = {row[1] for row in db.execute("PRAGMA table_info(content_vectors)")}
-            if "chunk_date" not in cols:
-                return CheckResult(
-                    name="chunk_date_populated",
-                    ok=False,
-                    detail="chunk_date column missing from content_vectors",
-                    fix=(
-                        "Run kairix embed to add the column and populate dates.\n"
-                        "The migration is automatic on next embed run."
-                    ),
-                )
-
-            total = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
-            dated = db.execute("SELECT COUNT(*) FROM content_vectors WHERE chunk_date IS NOT NULL").fetchone()[0]
+            counts_or_error = _query_chunk_date_counts(db)
         finally:
             db.close()
 
-        if total == 0:
-            return CheckResult(
-                name="chunk_date_populated",
-                ok=False,
-                detail="content_vectors is empty — vault has not been embedded",
-                fix="Run: kairix embed",
-            )
-
-        pct = 100 * dated / total
-        if dated == 0:
-            return CheckResult(
-                name="chunk_date_populated",
-                ok=False,
-                detail=f"chunk_date: 0/{total} chunks dated (0%) — TMP-7B temporal boost is inert",
-                fix=(
-                    "Run kairix embed to populate chunk_date from document frontmatter and filenames.\n"
-                    "Documents need 'date: YYYY-MM-DD' in frontmatter or a date in their filename."
-                ),
-            )
-        if pct < 20:
-            return CheckResult(
-                name="chunk_date_populated",
-                ok=False,
-                detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%) — low coverage, temporal boost degraded",
-                fix=(
-                    "Add 'date: YYYY-MM-DD' frontmatter to more documents, or use dated filenames.\n"
-                    "Re-run kairix embed after updating documents."
-                ),
-            )
-
-        return CheckResult(
-            name="chunk_date_populated",
-            ok=True,
-            detail=f"chunk_date: {dated}/{total} chunks dated ({pct:.0f}%)",
-        )
+        if isinstance(counts_or_error, CheckResult):
+            return counts_or_error
+        total, dated = counts_or_error
+        return _grade_chunk_date_coverage(total, dated)
 
     except FileNotFoundError:
         return CheckResult(
@@ -737,6 +756,33 @@ _CLAUDE_DESKTOP_CONFIG_PATHS = (
 _MCP_SSE_PORT = _mcp_port()
 
 
+def _check_openclaw_config_file(p: Path) -> tuple[bool, str] | None:
+    """Inspect one OpenClaw config file for a kairix MCP registration.
+
+    Returns a (ok, detail) verdict when the file registers kairix,
+    otherwise ``None`` so the caller continues to the next candidate.
+    Extracted from ``_probe_openclaw_harness`` so the per-candidate
+    parse + dispatch chain doesn't have to live inside the outer
+    for-loop's try/except — that nesting pushed the parent over F16.
+    """
+    import json as _json
+
+    try:
+        data = _json.loads(p.read_text())
+    except (OSError, _json.JSONDecodeError):
+        return None
+    # OpenClaw stores MCP servers at mcp.servers (set via `openclaw mcp set`)
+    mcp_servers = data.get("mcp", {}).get("servers", {})
+    if _MCP_KAIRIX_SERVER_NAME not in mcp_servers:
+        return None
+    entry = mcp_servers[_MCP_KAIRIX_SERVER_NAME]
+    cmd = entry.get("command", "")
+    cmd_ok = bool(cmd) and Path(cmd).exists() and os.access(cmd, os.X_OK)
+    if cmd_ok:
+        return True, f"OpenClaw: registered in {p.name}, start command executable"
+    return False, f"OpenClaw: registered but start command missing/not executable: {cmd}"
+
+
 def _probe_openclaw_harness(*, config_paths: tuple[Path | str, ...] | None = None) -> tuple[bool, str]:
     """Return (ok, detail) for the OpenClaw stdio harness.
 
@@ -745,32 +791,14 @@ def _probe_openclaw_harness(*, config_paths: tuple[Path | str, ...] | None = Non
     tests pass a tmp-path tuple to drive the registered / missing /
     bad-command branches without monkey-patching the constant.
     """
-    import json as _json
-
     paths = config_paths if config_paths is not None else _OPENCLAW_JSON_PATHS
     for candidate in paths:
-        try:
-            p = Path(str(candidate))
-            if not p.exists():
-                continue
-            data = _json.loads(p.read_text())
-            # OpenClaw stores MCP servers at mcp.servers (set via `openclaw mcp set`)
-            mcp_servers = data.get("mcp", {}).get("servers", {})
-            if _MCP_KAIRIX_SERVER_NAME in mcp_servers:
-                entry = mcp_servers[_MCP_KAIRIX_SERVER_NAME]
-                cmd = entry.get("command", "")
-                cmd_ok = bool(cmd) and Path(cmd).exists() and os.access(cmd, os.X_OK)
-                if cmd_ok:
-                    return (
-                        True,
-                        f"OpenClaw: registered in {p.name}, start command executable",
-                    )
-                return (
-                    False,
-                    f"OpenClaw: registered but start command missing/not executable: {cmd}",
-                )
-        except (OSError, _json.JSONDecodeError):
+        p = Path(str(candidate))
+        if not p.exists():
             continue
+        verdict = _check_openclaw_config_file(p)
+        if verdict is not None:
+            return verdict
 
     # Fallback: try openclaw CLI
     try:

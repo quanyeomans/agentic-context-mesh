@@ -77,31 +77,44 @@ def load_secrets(path: str | Path | None = None) -> int:
     if not secrets_path.exists():
         return 0
 
-    count = 0
     try:
-        for lineno, line in enumerate(secrets_path.read_text(encoding="utf-8").splitlines(), 1):
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if "=" not in stripped:
-                logger.debug("secrets: skipping malformed line %d (no '=')", lineno)
-                continue
-            key, _, value = stripped.partition("=")
-            key = key.strip()
-            if not key:
-                continue
-            if key in os.environ:
-                # Existing env var takes priority — sidecar secrets are fallback
-                continue
-            os.environ[key] = value
-            count += 1
+        text = secrets_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         logger.warning("secrets: failed to load secrets file — %s", exc)
         return 0
 
+    count = 0
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if _apply_secret_line(line, lineno):
+            count += 1
+
     if count:
         logger.debug("secrets: loaded %d variable(s)", count)
     return count
+
+
+def _apply_secret_line(line: str, lineno: int) -> bool:
+    """Parse one ``KEY=VALUE`` line and set ``os.environ[KEY]`` if applicable.
+
+    Returns True when an env var was set, False when the line was skipped
+    (blank/comment/malformed/key already in environ). Extracted from
+    ``load_secrets`` to keep that function under F16's cognitive-complexity
+    ceiling — the per-line guard chain inside a try/except inside a
+    for-loop tripped above 15.
+    """
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return False
+    if "=" not in stripped:
+        logger.debug("secrets: skipping malformed line %d (no '=')", lineno)
+        return False
+    key, _, value = stripped.partition("=")
+    key = key.strip()
+    if not key or key in os.environ:
+        # Existing env var takes priority — sidecar secrets are fallback
+        return False
+    os.environ[key] = value
+    return True
 
 
 @lru_cache(maxsize=1)

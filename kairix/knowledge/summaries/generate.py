@@ -189,6 +189,47 @@ def generate_l1(
     return overview
 
 
+def _summarise_one_file(
+    path: str,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    include_l1: bool,
+    deps: SummariesDeps,
+) -> SummaryResult | None:
+    """Read one file, generate L0 (and optionally L1) summaries, return result.
+
+    Returns ``None`` if the file is missing (logged + skipped). Extracted
+    from ``generate_summaries`` to keep the batch driver under F16's
+    cognitive-complexity ceiling — the per-file try/exists/conditional-L1
+    block nested above 15 when inlined.
+    """
+    file_path = Path(path)
+    if not file_path.exists():
+        logger.warning("generate_summaries: file not found — %s", path)
+        return None
+
+    content = file_path.read_text(encoding="utf-8", errors="replace")
+    now = datetime.now(timezone.utc).isoformat()
+
+    l0 = generate_l0(path, content, api_key, endpoint, deployment, deps=deps)
+    tokens_total = estimate_tokens(l0)
+
+    l1: str | None = None
+    if include_l1:
+        l1 = generate_l1(path, content, api_key, endpoint, deployment, deps=deps)
+        tokens_total += estimate_tokens(l1)
+
+    return SummaryResult(
+        path=path,
+        l0=l0,
+        l1=l1,
+        model=deployment,
+        generated_at=now,
+        tokens_used=tokens_total,
+    )
+
+
 def generate_summaries(
     paths: list[str],
     api_key: str,
@@ -218,38 +259,18 @@ def generate_summaries(
             time.sleep(sleep_ms / 1000.0)
 
         try:
-            file_path = Path(path)
-            if not file_path.exists():
-                logger.warning("generate_summaries: file not found — %s", path)
-                continue
-
-            content = file_path.read_text(encoding="utf-8", errors="replace")
-            now = datetime.now(timezone.utc).isoformat()
-            tokens_total = 0
-
-            l0 = generate_l0(path, content, api_key, endpoint, deployment, deps=deps)
-            # Rough token estimate for L0 if usage not tracked here
-            tokens_total += estimate_tokens(l0)
-
-            l1: str | None = None
-            if include_l1:
-                l1 = generate_l1(path, content, api_key, endpoint, deployment, deps=deps)
-                tokens_total += estimate_tokens(l1)
-
-            results.append(
-                SummaryResult(
-                    path=path,
-                    l0=l0,
-                    l1=l1,
-                    model=deployment,
-                    generated_at=now,
-                    tokens_used=tokens_total,
-                )
-            )
-
+            result = _summarise_one_file(path, api_key, endpoint, deployment, include_l1, deps)
         except Exception:
             logger.exception("generate_summaries: failed for %s", path)
             continue
+
+        # Skip the post-call sleep when the file was missing, preserving the
+        # pre-refactor behaviour (the previous loop used ``continue`` after
+        # the missing-file branch, bypassing the trailing sleep).
+        if result is None:
+            continue
+
+        results.append(result)
 
         # Sleep between individual calls (within batch) as well
         if sleep_ms > 0:

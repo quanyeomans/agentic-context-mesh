@@ -26,6 +26,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+_MEMORY_LOG_TAGS = ("[pending]", "[blocked]", "[action:", "todo", "## ")
+
+
+def _extract_tagged_lines(path: Path, day_label: str) -> list[str]:
+    """Read one memory log file; return labelled lines matching the tag set.
+
+    Returns ``[]`` on any read failure (logged). Extracted from
+    ``fetch_memory_logs`` so the per-day file processing doesn't have to
+    live in a try/except inside a for-loop inside another try/except —
+    that triple nesting pushed the parent over F16's ceiling.
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("sources: error reading memory log %s — %s", path, e)
+        return []
+    out: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if any(tag in stripped.lower() for tag in _MEMORY_LOG_TAGS):
+            out.append(f"[{day_label}] {stripped}")
+    return out
+
+
 def fetch_memory_logs(agent: str, max_tokens: int = 500, memory_dir: Path | None = None) -> str:
     """
     Fetch last 7 days of memory log files for agent.
@@ -49,21 +73,11 @@ def fetch_memory_logs(agent: str, max_tokens: int = 500, memory_dir: Path | None
 
         today = date.today()
         lines: list[str] = []
-
         for days_back in range(7):
             day = today - timedelta(days=days_back)
             path = memory_dir / f"{day.isoformat()}.md"
-            if not path.exists():
-                continue
-            try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-                # Extract tagged items and session headers
-                for line in content.splitlines():
-                    stripped = line.strip()
-                    if any(tag in stripped.lower() for tag in ["[pending]", "[blocked]", "[action:", "todo", "## "]):
-                        lines.append(f"[{day.isoformat()}] {stripped}")
-            except Exception as e:
-                logger.warning("sources: error reading memory log %s — %s", path, e)
+            if path.exists():
+                lines.extend(_extract_tagged_lines(path, day.isoformat()))
 
         if not lines:
             return ""
@@ -81,6 +95,41 @@ def fetch_memory_logs(agent: str, max_tokens: int = 500, memory_dir: Path | None
 # ---------------------------------------------------------------------------
 
 
+def _read_memory_day(path: Path, day_label: str) -> str | None:
+    """Read one memory file as a headed section; return None on read failure.
+
+    Extracted from ``fetch_recent_memory`` to keep the parent under F16's
+    cognitive-complexity ceiling — the per-day exists/try/read block
+    inside an outer try/except triple-nested above 15.
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("sources: error reading %s — %s", path, e)
+        return None
+    return f"### {day_label}\n{content}"
+
+
+def _collect_recent_memory_sections(memory_dir: Path) -> list[str]:
+    """Return today's + yesterday's labelled memory sections, skipping read errors.
+
+    Extracted from ``fetch_recent_memory`` to keep the public function
+    under F16's cognitive-complexity ceiling — once the outer try/except
+    + memory_dir resolution + non-empty guard live in the parent, the
+    per-day collection still tipped above 15.
+    """
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    parts: list[str] = []
+    for day in [today, yesterday]:
+        path = memory_dir / f"{day.isoformat()}.md"
+        if path.exists():
+            section = _read_memory_day(path, day.isoformat())
+            if section is not None:
+                parts.append(section)
+    return parts
+
+
 def fetch_recent_memory(agent: str, max_tokens: int = 300, memory_dir: Path | None = None) -> str:
     """
     Fetch today's and yesterday's memory files for agent (full content).
@@ -94,19 +143,7 @@ def fetch_recent_memory(agent: str, max_tokens: int = 300, memory_dir: Path | No
         if not memory_dir.exists():
             return ""
 
-        today = date.today()
-        yesterday = today - timedelta(days=1)
-
-        parts: list[str] = []
-        for day in [today, yesterday]:
-            path = memory_dir / f"{day.isoformat()}.md"
-            if path.exists():
-                try:
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                    parts.append(f"### {day.isoformat()}\n{content}")
-                except Exception as e:
-                    logger.warning("sources: error reading %s — %s", path, e)
-
+        parts = _collect_recent_memory_sections(memory_dir)
         if not parts:
             return ""
 
@@ -166,6 +203,20 @@ def fetch_entity_stub(agent: str, max_tokens: int = 400, document_root: Path | N
 # ---------------------------------------------------------------------------
 
 
+def _read_rules_file(path: Path) -> str | None:
+    """Read one rules.md file as a labelled section; return None on read failure.
+
+    Extracted from ``fetch_knowledge_rules`` for the same F16 reason as
+    ``_read_memory_day``.
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("sources: error reading rules %s — %s", path, e)
+        return None
+    return f"### Rules from {path.parent.name}/rules.md\n{content}"
+
+
 def fetch_knowledge_rules(agent: str, max_tokens: int = 300, document_root: Path | None = None) -> str:
     """
     Fetch rules/constraints from agent's knowledge collection.
@@ -181,11 +232,9 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300, document_root: Path
         parts: list[str] = []
         for path in rules_paths:
             if path.exists():
-                try:
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                    parts.append(f"### Rules from {path.parent.name}/rules.md\n{content}")
-                except Exception as e:
-                    logger.warning("sources: error reading rules %s — %s", path, e)
+                section = _read_rules_file(path)
+                if section is not None:
+                    parts.append(section)
 
         if not parts:
             return ""
@@ -203,6 +252,23 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300, document_root: Path
 # ---------------------------------------------------------------------------
 
 
+def _read_decisions_file(path: Path) -> str | None:
+    """Read decisions.md trimmed to the last ~30 days (last 3000 chars); None on failure.
+
+    Extracted from ``fetch_recent_decisions`` for the same F16 reason as
+    ``_read_memory_day``.
+    """
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("sources: error reading decisions.md — %s", e)
+        return None
+    # Take last 30 days worth — heuristic: last 3000 chars
+    if len(content) > 3000:
+        content = content[-3000:]
+    return f"### decisions.md\n{content}"
+
+
 def fetch_recent_decisions(agent: str, max_tokens: int = 400, document_root: Path | None = None) -> str:
     """
     Fetch decisions from last 30 days from decisions.md.
@@ -212,17 +278,11 @@ def fetch_recent_decisions(agent: str, max_tokens: int = 400, document_root: Pat
         root = _resolve_document_root(document_root)
         parts: list[str] = []
 
-        # decisions.md
         decisions_path = root / "04-Agent-Knowledge" / agent / "decisions.md"
         if decisions_path.exists():
-            try:
-                content = decisions_path.read_text(encoding="utf-8", errors="replace")
-                # Take last 30 days worth — heuristic: last 3000 chars
-                if len(content) > 3000:
-                    content = content[-3000:]
-                parts.append(f"### decisions.md\n{content}")
-            except Exception as e:
-                logger.warning("sources: error reading decisions.md — %s", e)
+            section = _read_decisions_file(decisions_path)
+            if section is not None:
+                parts.append(section)
 
         if not parts:
             return ""
