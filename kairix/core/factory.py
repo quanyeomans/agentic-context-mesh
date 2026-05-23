@@ -544,13 +544,14 @@ def build_connector_pipeline(
         DefaultSilverProcessor,
         FilesystemBronzeStore,
     )
-    from kairix.worker import _SqliteChunkWriter, _SqliteEntityGraphSink
+    from kairix.core.connectors.chunk_writer_factory import make_sqlite_chunk_writer
+    from kairix.worker import _SqliteEntityGraphSink
 
     return ConnectorPipeline(
         db=db,
         bronze=FilesystemBronzeStore(db, bronze_root),
         silver=DefaultSilverProcessor(),
-        chunk_writer=_SqliteChunkWriter(db, collection=collection),
+        chunk_writer=make_sqlite_chunk_writer(db, collection=collection),
         entity_graph_sink=_SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
         dead_letter=DeadLetterStore(db),
