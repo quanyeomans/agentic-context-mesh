@@ -275,6 +275,21 @@ def bm25_primary_fuse(
         return []
 
 
+def _mark_existing_vec_hit(
+    results: list[FusedResult],
+    path_lower: str,
+    rank: int,
+    result: Any,
+) -> None:
+    for fr in results:
+        if fr.path.lower() == path_lower:
+            fr.in_vec = True
+            fr.vec_rank = rank
+            if fr.source_page is None:
+                fr.source_page = _extract_source_page(result)
+            return
+
+
 def _bm25_primary_impl(
     bm25: list[BM25Result],
     vec: list[VecResult],
@@ -309,18 +324,12 @@ def _bm25_primary_impl(
     base_rank = len(results)
     for rank, result in enumerate(vec, start=1):
         path = canonical_path(result["path"])
+        path_lower = path.lower()
 
-        if path.lower() in seen:
-            # Mark BM25 result as also in vec
-            for fr in results:
-                if fr.path.lower() == path.lower():
-                    fr.in_vec = True
-                    fr.vec_rank = rank
-                    if fr.source_page is None:
-                        fr.source_page = _extract_source_page(result)
-                    break
+        if path_lower in seen:
+            _mark_existing_vec_hit(results, path_lower, rank, result)
             continue
-        seen.add(path.lower())
+        seen.add(path_lower)
 
         fr = FusedResult(
             path=path,

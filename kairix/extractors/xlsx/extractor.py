@@ -310,7 +310,7 @@ def _merged_cell_mask(sheet: Worksheet) -> dict[tuple[int, int], bool]:
     ranges = getattr(sheet, "merged_cells", None)
     if ranges is None:
         return masked
-    for merge in list(ranges.ranges):
+    for merge in ranges.ranges:
         top_row = merge.min_row
         top_col = merge.min_col
         for r in range(merge.min_row, merge.max_row + 1):
