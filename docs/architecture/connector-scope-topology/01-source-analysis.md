@@ -391,6 +391,92 @@ Open questions: do we ingest reactions / Loop components / meeting transcripts a
 
 ---
 
+## Onyx connector catalog (reference)
+
+Source: [`onyx-dot-app/onyx`](https://github.com/onyx-dot-app/onyx) `main` @ `cd7c86e78f20373c5459a174e70a9da9740f1038`, path `backend/onyx/connectors/`. 48 connectors enumerated (3 directories excluded: `cross_connector_utils/`, `google_utils/`, `mock_connector/`).
+
+This is the **breadth envelope** kairix should consider — not a commitment to ship all of these, but a reference for the source-shape diversity any layered topology must accommodate. Detailed framework analysis in `06-onyx-comparative-analysis.md`.
+
+| Connector | Source kind | Auth model | Notes |
+|---|---|---|---|
+| airtable | database | PAT | Base + table scoped per connection |
+| asana | ticketing | PAT | Workspace-scoped |
+| axero | wiki-doc-store (intranet) | API key | Forums, articles, blogs, wikis |
+| bitbucket | code | App password / access token | Workspace + repo scoped |
+| blob | file-system (S3/GCS/Azure/R2/OCI) | Multi-cloud creds via `BlobType` enum | Tabular files via `TabularSection` |
+| bookstack | wiki-doc-store | API token id + secret | Base URL configurable |
+| canvas | wiki-doc-store (LMS) | API access token | Course-scoped; perm-sync |
+| clickup | ticketing | API token | Team/workspace scoped |
+| coda | wiki-doc-store (hybrid doc/db) | API token | Rate-limited |
+| confluence | wiki-doc-store | API token / OAuth / PAT (cloud + DC) | Largest module set; multi-instance |
+| discord | chat | Bot token | Guild + channel scoped |
+| discourse | wiki-doc-store (forum) | API key + username | Per-instance base URL |
+| document360 | wiki-doc-store | API token + portal id | Rate-limited 100/min |
+| dropbox | cloud-drive | OAuth refresh token | App key + secret + refresh token |
+| drupal_wiki | wiki-doc-store | API token | Checkpointed + slim-doc + perm-sync |
+| egnyte | cloud-drive (enterprise) | OAuth | Multi-instance per `{domain}.egnyte.com` |
+| file | file-system (Onyx FileStore upload) | none | Server-side upload |
+| fireflies | meeting-transcripts | API key | GraphQL endpoint |
+| freshdesk | ticketing (helpdesk) | API key (HTTP basic) | 300-page hard cap workaround |
+| gitbook | wiki-doc-store | PAT (Bearer) | Space + content model |
+| github | code | PAT or GitHub App | Repo + org scoped; rate-limit aware |
+| gitlab | code | PAT | Group + project scoped |
+| gmail | email | Google OAuth (delegated / SA) | Shared `google_utils/` |
+| gong | meeting-transcripts (sales calls) | OAuth / API key | Checkpointed; pending-transcript retry |
+| google_drive | cloud-drive | Google OAuth or SA delegated | Largest Google connector |
+| google_site | wiki-doc-store (legacy zip) | none | Zip upload, not live API |
+| guru | wiki-doc-store (knowledge cards) | User + user-token pair | Per-collection token possible |
+| highspot | wiki-doc-store (sales enablement) | API key + secret | Spot-filterable; perm-sync |
+| hubspot | crm | API key / private app token | Rate-limited |
+| imap | email | Username + password (IMAP) | Generic; checkpointed + perm-sync |
+| jira | ticketing | API token / OAuth / PAT (cloud + DC) | Project + JQL; perm-sync |
+| linear | ticketing | API key | GraphQL |
+| loopio | other (RFP library) | OAuth client credentials | Library:read scope |
+| mediawiki | wiki-doc-store | none / API token | Built on `pywikibot` |
+| notion | wiki-doc-store | Internal integration token | Workspace-scoped |
+| outline | wiki-doc-store | API token + base URL | Self-hostable; multi-instance |
+| productboard | ticketing (product feedback) | Bearer token | Features, components, products |
+| salesforce | crm | OAuth | Largest CRM; SOQL; perm-aware |
+| sharepoint | cloud-drive (M365 libraries) | Azure AD app | Multi-site selection |
+| slab | wiki-doc-store | Bot token (GraphQL) | Perm-sync supported |
+| slack | chat | Bot token (OAuth) | Channel + thread; perm-sync |
+| teams | chat (MS Teams) | Azure AD app | MS Graph; checkpointed + perm-sync |
+| testrail | ticketing (test cases) | API key (HTTP basic) | Project-scoped |
+| web | web (crawl / sitemap) | none / basic-auth | Recursive crawl with rules |
+| wikipedia | wiki-doc-store (public) | none | Specialisation of mediawiki |
+| xenforo | wiki-doc-store (forum board) | none (scrape) | HTML scraping with BS4 |
+| zendesk | ticketing (helpdesk + KB) | API token + email (HTTP basic) | Tickets + KB articles |
+| zulip | chat | Bot credentials | Stream + topic; per-instance |
+
+### Categories represented (Onyx coverage emphasis)
+
+| Category | Count | Examples |
+|---|---:|---|
+| wiki-doc-store | 18 | confluence, notion, bookstack, outline, slab, gitbook, ... |
+| ticketing | 8 | jira, linear, asana, clickup, freshdesk, zendesk, productboard, testrail |
+| chat | 4 | slack, teams, discord, zulip |
+| cloud-drive | 4 | google_drive, sharepoint, dropbox, egnyte |
+| code | 3 | github, gitlab, bitbucket |
+| email | 2 | gmail, imap |
+| crm | 2 | salesforce, hubspot |
+| file-system | 2 | blob (S3/GCS/Azure), file (upload) |
+| meeting-transcripts | 2 | gong, fireflies |
+| database | 1 | airtable |
+| web | 1 | web (crawl) |
+| other | 1 | loopio (RFP library) |
+
+### Implications for kairix's design envelope
+
+- **wiki-doc-store dominates** (~37%). The connector framework must handle HTML-heavy doc shapes with hierarchy (spaces → pages → sub-pages), permission overlays, multi-tenant base URLs. Most operator deployments will touch ≥1 wiki-doc source.
+- **ticketing is second** (~17%). Treat issue/task/case as a first-class entity type, not a special case of "doc" — chunking + entity strategy is fundamentally different (per-ticket with comments + status + linked-tickets + assignees). Detail in `08-chunking-and-entity-strategies.md`.
+- **Auth diversity is real** — 8+ distinct shapes. Credential abstraction in our ADR must accommodate without per-shape special-casing.
+- **Multi-instance is universal** — base URL configurability is the norm. Single-tenant assumptions don't survive contact. cc_pair triad (per §06) is the right answer.
+- **Permission sync is opt-in per-connector** — observed in 10+ Onyx connectors. Protocol must leave room without mandating.
+- **Categories kairix's initial 4 connectors did NOT cover**: ticketing, database, web, meeting-transcripts. `kairix.connectors.jira` lands first by category-importance (second-largest Onyx category; most-named in operator conversation).
+- **No real-time / streaming in Onyx's set** — slack and imap could stream but Onyx polls. F37 (streams stay in `kairix/connectors/`) is the right shape; Onyx's choice to poll is informative — push complexity often isn't worth the latency improvement for ingest.
+
+---
+
 ## Cross-system synthesis
 
 ---
