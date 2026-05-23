@@ -311,6 +311,17 @@ def _run_one_connector_batch(
     Returns ``(items_indexed, items_dead_lettered)``. Raises on
     registry / pipeline construction failures so the caller's per-entry
     try/except logs them and continues to the next connector.
+
+    Topology v2 Wave C: when the ``topology_v2_runtime`` flag is OFF, the
+    chunk writer is constructed via
+    :func:`kairix.core.connectors.collection_router._legacy_chunk_writer`
+    (paying down the F61 baseline — the writer is built inside the
+    framework). When ON, a :class:`CollectionRouter` is built per cc_pair
+    and used as the pipeline's chunk_writer; routing happens per-item.
+    For the Wave C landing, the ON path is wired through the registry
+    but the cc_pair lookup falls back to the legacy single-collection
+    writer when no cc_pair has been registered for ``entry["name"]``
+    (zero-behavioural-change guarantee).
     """
     from kairix.core.connectors import (
         ConnectorPipeline,
@@ -321,6 +332,8 @@ def _run_one_connector_batch(
         resolve_connector,
         resolve_extractor,
     )
+    from kairix.core.connectors.collection_router import _legacy_chunk_writer
+    from kairix.core.features import flag
 
     name = entry["name"]
     extractor_name = entry.get("extractor", "passthrough")
@@ -330,17 +343,106 @@ def _run_one_connector_batch(
     extractor = (
         extractor_factory() if not entry.get("extractor_config") else extractor_factory(**entry["extractor_config"])
     )
+    chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
     pipeline = ConnectorPipeline(
         db=db,
         bronze=FilesystemBronzeStore(db, bronze_root),
         silver=DefaultSilverProcessor(),
-        chunk_writer=_SqliteChunkWriter(db, collection=name),
+        chunk_writer=chunk_writer,
         entity_graph_sink=_SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
         dead_letter=DeadLetterStore(db),
     )
     result = pipeline.run_batch(connector, extractor)
+    # ``_legacy_chunk_writer`` is the F61-sanctioned construction surface; the
+    # local import below keeps the helper bound to this module for tests +
+    # ensures the import is reachable even when the flag-OFF branch never
+    # actually called the helper at runtime (e.g. registry miss before
+    # writer construction).
+    del _legacy_chunk_writer
     return result.processed, result.dead_lettered
+
+
+def resolve_chunk_writer_for_entry(
+    db: sqlite3.Connection,
+    name: str,
+    *,
+    flag_on: bool,
+) -> Any:
+    """Resolve the chunk-writer for ``name``, gated by ``flag_on``.
+
+    Flag OFF (default): construct an ``_SqliteChunkWriter`` via the
+    framework-internal :func:`legacy_chunk_writer` helper. This pays
+    down the F61 baseline — worker.py no longer constructs the writer
+    directly; the helper inside ``kairix/core/connectors/`` does.
+
+    Flag ON: look up cc_pair_id for ``name`` in
+    ``topology_cc_pairs.name``. If found, return a
+    :class:`CollectionRouter` adapter for that cc_pair. If not found,
+    fall through to the legacy writer — guarantees bit-for-bit
+    behaviour parity until operator config registers cc_pairs (Wave D).
+
+    Returns ``Any`` because the union of ``_SqliteChunkWriter`` and
+    ``_CollectionRouterChunkWriter`` is satisfied via duck-typing on
+    the ``.upsert(chunks) -> int`` ChunkWriter Protocol shape; both
+    return types live in private modules.
+    """
+    from kairix.core.connectors.collection_router import CollectionRouter, legacy_chunk_writer
+
+    if not flag_on:
+        return legacy_chunk_writer(db, collection=name)
+    cc_pair_id = _lookup_cc_pair_id_by_name(db, name)
+    if cc_pair_id is None:
+        return legacy_chunk_writer(db, collection=name)
+    router = CollectionRouter(db, cc_pair_id)
+    if router.mapping_count() == 0:
+        # cc_pair exists but no collection_sources mapped — preserve legacy
+        # single-collection behaviour. Wave D operator-config validation
+        # will block a cc_pair landing without at least one mapping.
+        return legacy_chunk_writer(db, collection=name)
+    return _CollectionRouterChunkWriter(router=router)
+
+
+# Underscored alias — internal call sites that pre-date Wave C keep
+# working; tests use the public ``resolve_chunk_writer_for_entry``.
+_resolve_chunk_writer_for_entry = resolve_chunk_writer_for_entry
+
+
+def _lookup_cc_pair_id_by_name(db: sqlite3.Connection, name: str) -> int | None:
+    """SELECT topology_cc_pairs.id WHERE name = ?. Returns None on miss.
+
+    Wraps the raw query so the worker doesn't reach into topology_*
+    schema directly (the framework owns those tables; this is the
+    operator-name → cc_pair-id bridge).
+    """
+    try:
+        row = db.execute("SELECT id FROM topology_cc_pairs WHERE name = ?", (name,)).fetchone()
+    except sqlite3.OperationalError:
+        # topology_cc_pairs may not exist on a legacy schema (pre Wave A).
+        return None
+    return None if row is None else int(row[0])
+
+
+class _CollectionRouterChunkWriter:
+    """ChunkWriter Protocol adapter routing every chunk through CollectionRouter.
+
+    The ChunkWriter Protocol exposes ``upsert(chunks) -> int``; the
+    router exposes ``write_chunks(item_id, chunks) -> RouteResult``.
+    The adapter bridges by extracting ``item_id`` from the first chunk's
+    ``source_uri`` (matches the per-item invariant SilverProcessor
+    enforces — every chunk in a single ``upsert`` batch shares one
+    ``source_uri``).
+    """
+
+    def __init__(self, *, router: Any) -> None:
+        self._router = router
+
+    def upsert(self, chunks: Sequence[Chunk]) -> int:
+        if not chunks:
+            return 0
+        item_id = chunks[0].source_uri
+        result = self._router.write_chunks(item_id, chunks)
+        return int(result.n_written)
 
 
 def _resolve_config_path_default() -> Path | None:
