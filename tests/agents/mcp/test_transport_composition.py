@@ -334,3 +334,109 @@ def test_healthz_ready_route_is_present() -> None:
 
     paths = _route_paths(app)
     assert "/healthz/ready" in paths
+
+
+# ---------------------------------------------------------------------------
+# KFEAT-020 — Cold-start middleware: HTTP 503 + Retry-After during warm-up
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_cold_start_middleware_returns_503_when_not_ready() -> None:
+    """Non-health requests during warm-up return 503 with the cold-start envelope.
+
+    Before KFEAT-020, MCP clients saw fetch_failed at the transport layer
+    when requests landed before the readiness gate flipped. The middleware
+    closes that gap by returning a structured 503 + Retry-After so clients
+    can retry instead of dismissing kairix as broken.
+    """
+    server = _FakeFastMCP()
+    not_ready: Callable[[], bool] = lambda: False  # noqa: E731 — concise test stub
+    app = build_mcp_app(server, readiness_check=not_ready)
+
+    with TestClient(app) as client:
+        response = client.post("/mcp")
+
+    assert response.status_code == 503
+    assert response.headers.get("Retry-After") == "8"
+    body = response.json()
+    assert body["status"] == "retryable_not_ready"
+    assert body["error_code"] == "KAIRIX_COLD_START"
+    assert body["retry_after_ms"] == 8000
+    assert body["tool"] == "/mcp"
+    assert "Retry this call" in body["guidance"]
+
+
+@pytest.mark.unit
+def test_cold_start_middleware_passes_through_when_ready() -> None:
+    """When readiness is True, the middleware is a no-op and routes work normally."""
+    server = _FakeFastMCP()
+    ready: Callable[[], bool] = lambda: True  # noqa: E731 — concise test stub
+    app = build_mcp_app(server, readiness_check=ready)
+
+    with TestClient(app) as client:
+        response = client.post("/mcp")
+
+    assert response.status_code == 200
+    assert response.text == "streamable-ok"
+    assert server.streamable_calls == 1
+
+
+@pytest.mark.unit
+def test_cold_start_middleware_does_not_gate_healthz() -> None:
+    """/healthz must always respond — it is how clients detect readiness."""
+    server = _FakeFastMCP()
+    not_ready: Callable[[], bool] = lambda: False  # noqa: E731 — concise test stub
+    app = build_mcp_app(server, readiness_check=not_ready)
+
+    with TestClient(app) as client:
+        response = client.get("/healthz")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready"] is False
+    assert "Retry-After" not in response.headers
+
+
+@pytest.mark.unit
+def test_cold_start_middleware_does_not_gate_healthz_ready() -> None:
+    """/healthz/ready must always respond — same rationale as /healthz."""
+    server = _FakeFastMCP()
+    not_ready: Callable[[], bool] = lambda: False  # noqa: E731 — concise test stub
+    app = build_mcp_app(server, readiness_check=not_ready)
+
+    with TestClient(app) as client:
+        response = client.get("/healthz/ready")
+
+    assert response.status_code == 200
+    assert "Retry-After" not in response.headers
+
+
+@pytest.mark.unit
+def test_cold_start_middleware_omitted_when_no_readiness_check() -> None:
+    """Without a readiness check the middleware is not installed (back-compat)."""
+    server = _FakeFastMCP()
+    app = build_mcp_app(server)  # readiness_check defaults to None
+
+    with TestClient(app) as client:
+        response = client.post("/mcp")
+
+    # No 503 because no middleware to flip it; the underlying route runs.
+    assert response.status_code == 200
+
+
+@pytest.mark.unit
+def test_cold_start_middleware_tracks_readiness_flip_at_runtime() -> None:
+    """The readiness callable is invoked per request — flipping it mid-life unlocks /mcp."""
+    server = _FakeFastMCP()
+    state = {"ready": False}
+    app = build_mcp_app(server, readiness_check=lambda: state["ready"])
+
+    with TestClient(app) as client:
+        first = client.post("/mcp")
+        assert first.status_code == 503
+
+        state["ready"] = True
+        second = client.post("/mcp")
+        assert second.status_code == 200
+        assert server.streamable_calls == 1
