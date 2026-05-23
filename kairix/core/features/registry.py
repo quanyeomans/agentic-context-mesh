@@ -46,7 +46,8 @@ class FeatureFlag:
 
 
 # Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
-# at introduce stage (default off). Future PRs add Wave 5+ connector flags.
+# at introduce stage (default off). Wave 5 KP-1 adds ``connector_dex_crm``
+# at introduce stage (default off); KP-2 / KP-3 follow for the M365 pair.
 REGISTRY: dict[str, FeatureFlag] = {
     "obsidian_connector_primary": FeatureFlag(
         name="obsidian_connector_primary",
@@ -59,6 +60,19 @@ REGISTRY: dict[str, FeatureFlag] = {
         # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
         # soak → retire. ``target_retire_in`` is 2 months from the
         # introduce-stage landing (current 2026-05 dispatch window).
+        introduced_in="v2026.5.23",
+        target_retire_in="v2026.7.23",
+        owner="connector-framework",
+        related_spec="docs/architecture/connector-ingestion-architecture.md",
+    ),
+    "connector_dex_crm": FeatureFlag(
+        name="connector_dex_crm",
+        default=False,
+        description=(
+            "Enable the Dex CRM connector — pulls Person/Org entity signals "
+            "from the Dex API into the entity_signals staging table."
+        ),
+        stage="introduce",
         introduced_in="v2026.5.23",
         target_retire_in="v2026.7.23",
         owner="connector-framework",

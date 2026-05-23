@@ -170,6 +170,7 @@ anthropic     = "kairix.providers.anthropic:make_provider"
 # ``sharepoint``, ``dex_crm``, ``m365_email_headers``, ``m365_calendar``.
 [project.entry-points."kairix.connectors"]
 obsidian = "kairix.connectors.obsidian:make_connector"
+dex_crm  = "kairix.connectors.dex_crm:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and

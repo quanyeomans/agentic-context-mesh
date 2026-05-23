@@ -160,6 +160,9 @@ pytest_plugins = [
     # PR-6 — IM-6 recast: ``obsidian_connector_primary`` flag at introduce
     # stage. Both-branch coverage per F54.
     "tests.bdd.steps.feature_flag_obsidian_connector_primary_steps",
+    # Wave 5 KP-1 — Dex CRM connector flag at introduce stage. F54.
+    "tests.bdd.steps.feature_flag_connector_dex_crm_steps",
+    "tests.bdd.steps.connector_dex_crm_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

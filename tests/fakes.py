@@ -2173,6 +2173,66 @@ class FakeObsidian:
         return self._sensitivity
 
 
+class FakeDexCrmConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    Dex CRM connector plugin's contract test.
+
+    Constructor takes the events to emit and a content map keyed by
+    item_id. The fake satisfies the full Protocol surface without any
+    HTTP, secret resolution, or threading. This is the canonical fake
+    F43 pairs with the real
+    :class:`kairix.connectors.dex_crm.DexCrmConnector` inside
+    ``tests/contracts/test_dex_crm_protocol.py``.
+    """
+
+    name: str = "dex_crm"
+
+    def __init__(
+        self,
+        *,
+        events: list[Any] | None = None,
+        content: dict[str, Any] | None = None,
+        sensitivity: str = "internal",
+    ) -> None:
+        from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
+
+        self._events: list[ChangeEvent] = list(events) if events is not None else []
+        self._content: dict[str, Any] = dict(content) if content is not None else {}
+        self._sensitivity = sensitivity
+
+    def list_changes(self, cursor: Any | None) -> Any:
+        del cursor
+        return iter(self._events)
+
+    def fetch(self, item_id: str) -> Any:
+        import json
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        payload = self._content.get(item_id, {"id": item_id})
+        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime="application/json", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        from urllib.parse import quote
+
+        if ":" not in item_id:
+            return f"https://app.getdex.com/contacts/{quote(item_id, safe='')}"
+        kind, raw_id = item_id.split(":", 1)
+        path = {
+            "contact": "contacts",
+            "organisation": "organisations",
+            "relationship": "relationships",
+        }.get(kind, "contacts")
+        return f"https://app.getdex.com/{path}/{quote(raw_id, safe='')}"
+
+    def sensitivity_for(self, item_id: str) -> Any:
+        del item_id
+        return self._sensitivity
+
+
 # ---------------------------------------------------------------------------
 # Connector-pipeline orchestration fakes (Wave 2 — IM-2)
 #
