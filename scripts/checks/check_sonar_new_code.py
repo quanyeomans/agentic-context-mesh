@@ -46,17 +46,25 @@ import urllib.request
 
 REMEDIATION = """sonar new-code parity: at least one net-new SonarCloud issue or hotspot remains.
 
-fix: read the rule key + file:line printed below and apply the local recipe from
-docs/architecture/local-first-feedback-loops.md §Rule map; if the rule has no
-recipe yet, add one in the same commit that fixes the issue.
+fix: read each `<rule>  <severity>  <file>:<line>` row below; apply the
+positive-pattern recipe shown on the line directly underneath it (or in
+docs/architecture/local-first-feedback-loops.md §Rule map for the canonical
+shape). Recipes are copy-paste-adapt — the agent reads the recipe and writes
+that exact shape into the named file.
 
-next: re-run `python3 scripts/checks/check_sonar_new_code.py` until it prints
-`0 new-code issues, 0 new-code hotspots`.
+Pattern: for each row,
+  1. read the recipe (the `fix: ...` line directly under the row),
+  2. apply it at the printed `file:line`,
+  3. re-run this script until 0/0,
+  4. commit once via safe-commit.sh.
 
+next: `python3 scripts/checks/check_sonar_new_code.py` — repeat until clean.
 run: bash scripts/safe-commit.sh "<message>"
 
-KAIRIX_SKIP_SONAR_PARITY=1 skips this gate locally for a focused refactor
-series; CI's `1 · Quality gate` job remains authoritative."""
+If a rule has no recipe row in the §Rule map, add the recipe in the same
+commit that fixes the issue. KAIRIX_SKIP_SONAR_PARITY=1 skips this gate
+locally for a focused refactor series; CI's `1 · Quality gate` remains
+authoritative."""
 
 DEFAULT_PROJECT_KEY = "three-cubes_kairix"
 DEFAULT_BRANCH = "main"
@@ -65,27 +73,45 @@ HTTP_TIMEOUT_S = 10
 
 # fix-recipe hints keyed by Sonar rule. Keep terse; the canonical recipe
 # table is in docs/architecture/local-first-feedback-loops.md.
+# Each hint shows the positive pattern as a code shape, so the agent
+# reading the failure can apply it directly without re-deriving the
+# pattern from a description. Canonical references in
+# docs/architecture/local-first-feedback-loops.md §Rule map.
 FIX_HINTS: dict[str, str] = {
-    "python:S3776": "fix: extract the deepest nested construct into a helper; sabotage-prove it.",
-    "python:S5886": (
-        "fix: construct the dataclass explicitly; don't use dataclasses.replace "
-        "on an annotated `-> SomeDataclass` return."
+    "python:S3776": (
+        "fix: hoist the inner-most for/if block into a `_helper(...)` function; "
+        "call it from the outer loop. Example: `_mark_existing_vec_hit` in "
+        "`kairix/core/search/rrf.py` (replaced a 3-deep nested for/if/if)."
     ),
-    "python:S5890": "fix: don't annotate the local assignment — construct the dataclass directly.",
-    "python:S7504": "fix: drop the list() wrapper; the upstream is already iterable.",
-    "python:S5869": "fix: collapse the regex character class (e.g. [a-z]+ not [a-z][a-z]*).",
-    "python:S6353": "fix: simplify the regex character-class repetition.",
-    "python:S6792": "fix: use PEP 695 `type` parameter syntax instead of TypeVar.",
-    "python:S6796": "fix: use a PEP 695 generic parameter instead of declaring a TypeVar.",
-    "python:S5727": "fix: remove the identity check — the type is already narrowed.",
-    "python:S5754": "fix: re-raise with `raise ... from <cause>` or narrow the except.",
-    "python:S1186": "fix: add a one-line `# Intentionally empty — <why>` or a docstring.",
-    "python:S5655": "fix: match the call-site argument type to the function signature.",
-    "python:S3358": "fix: extract the nested conditional into an independent statement.",
-    "docker:S7031": "fix: merge consecutive RUN instructions with &&.",
+    "python:S5886": (
+        "fix: `return SomeDataclass(field=new_value, other=x.other, third=x.third)` "
+        "— construct explicitly with field-by-field copy. Example: "
+        "`_replace_document_root` in `kairix/knowledge/wikilinks/cli.py`."
+    ),
+    "python:S5890": (
+        "fix: drop the local annotation and construct the dataclass directly: "
+        "`return SomeDataclass(field=v, other=x.other, ...)`."
+    ),
+    "python:S7504": "fix: `for x in seq:` — drop the list() wrapper around an already-iterable seq.",
+    "python:S5869": "fix: `[a-z]+` — collapse `[a-z][a-z]*` and remove any duplicate class members.",
+    "python:S6353": "fix: `[a-z]+` — replace `[a-z][a-z]*` style repetition with the `+` quantifier.",
+    "python:S6792": "fix: `class C[T]:` — use PEP 695 generic syntax instead of `TypeVar('T'); class C(Generic[T])`.",
+    "python:S6796": "fix: `def f[T](x: T) -> T:` — declare type parameters PEP 695-style on the def.",
+    "python:S5727": "fix: remove the redundant check; use the variable directly (the type is already narrowed).",
+    "python:S5754": "fix: `raise NewError(...) from exc` — chain the cause instead of bare-re-raising a broad except.",
+    "python:S1186": "fix: `# Intentionally empty — <reason>` or a one-line docstring inside the body.",
+    "python:S5655": "fix: convert the argument at the call site to the type the signature declares.",
+    "python:S3358": (
+        "fix: `tmp = X if cond else Y; result = f(tmp)` — hoist the inner ternary "
+        "into a named statement before the outer use."
+    ),
+    "docker:S7031": "fix: `RUN a && b && c` — merge consecutive RUN instructions into one layer.",
 }
 
-DEFAULT_HINT = "fix: see docs/architecture/local-first-feedback-loops.md §Rule map; add a recipe row if missing."
+DEFAULT_HINT = (
+    "fix: see docs/architecture/local-first-feedback-loops.md §Rule map for a "
+    "positive-pattern recipe; add a row there in the same commit that fixes the issue."
+)
 
 
 def _api_get(url: str) -> dict | None:
