@@ -28,23 +28,113 @@ that touch lint / type / Sonar / coverage gates.
 4. **Push once.** The next CI run is *confirming* a green local state,
    not *teaching* you about issues.
 
-## Rule map — Sonar key → local detector / fix recipe
+## Rule map — Sonar key → local detector → positive-pattern recipe
 
-| Sonar rule | Local detector | Fix recipe |
-|---|---|---|
-| `python:S3776` cognitive complexity > 15 | `scripts/checks/check_cognitive_complexity.py` (F16) | Extract the deepest nested construct (loop body → helper). Sabotage-prove the helper. The baseline allow-list grandfathers existing offenders but does **not** cover *increases* in baselined files — those still gate on Sonar. The local check now flags delta-in-baseline too. |
-| `python:S5886` / `python:S5890` DataclassInstance return/assign | mypy strict | Don't use `dataclasses.replace` on a function with an annotated `-> SomeDataclass` return — Sonar's type-tracker sees `DataclassInstance`. Construct the dataclass explicitly (`SomeDataclass(field=...)`). |
-| `python:S7504` unnecessary `list()` | ruff `UP / RUF` | Drop the `list()` wrapper when the upstream is already iterable for the consumer. |
-| `python:S5869` / `python:S6353` regex char-class | ruff `RUF055` family | Use `[a-z]+` not `[a-z][a-z]*`; remove duplicate class members. |
-| `python:S6792` / `python:S6796` generics syntax | ruff `UP040` / `UP046` | Use PEP 695 `type` parameter syntax instead of `TypeVar` for new declarations. |
-| `python:S5727` identity-always-true | mypy `comparison-overlap` | Remove the dead identity check; the type is already narrowed. |
-| `python:S5754` broad except + reraise | ruff `B904` / `BLE001` | Re-raise with `raise ... from <cause>` or narrow the except. |
-| `python:S1186` empty function body | F20 (`check_empty_body_intent.py`) | Add a one-line `# Intentionally empty — <why>` or a docstring. |
-| `python:S5655` argument type mismatch | mypy | Fix the call site; the type checker is right. |
-| `docker:S7031` consecutive RUN | hadolint via pre-commit | Merge consecutive `RUN` instructions with `&&`. |
+Each recipe shows the **shape to write** — copy-paste-adapt directly.
+Canonical examples reference real code in this repo where available.
 
-When a new Sonar rule appears, add a row here and a detector in
-`check_sonar_new_code.py` in the same commit.
+### `python:S3776` cognitive complexity > 15
+- Local detector: `scripts/checks/check_cognitive_complexity.py` (F16)
+- Recipe: hoist the inner-most loop / branch block into a `_helper(...)` function and call it from the outer loop. Canonical example: `_mark_existing_vec_hit` in `kairix/core/search/rrf.py` replaced a 3-deep nested `for / if / if`.
+- Pattern:
+  ```python
+  def _mark_existing_vec_hit(results, path_lower, rank, result):
+      for fr in results:
+          if fr.path.lower() == path_lower:
+              fr.in_vec = True
+              fr.vec_rank = rank
+              return
+
+  def _bm25_primary_impl(bm25, vec):
+      for rank, result in enumerate(vec, start=1):
+          if path_lower in seen:
+              _mark_existing_vec_hit(results, path_lower, rank, result)
+              continue
+          ...
+  ```
+- Note: the F16 baseline allow-list grandfathers existing offenders. Sonar gates *increases* in baselined files; the local script now flags those too.
+
+### `python:S5886` / `python:S5890` DataclassInstance return / assign
+- Local detector: mypy strict + this script
+- Recipe: construct the dataclass explicitly with field-by-field copy. Canonical example: `_replace_document_root` in `kairix/knowledge/wikilinks/cli.py`.
+- Pattern:
+  ```python
+  def _replace_document_root(paths: KairixPaths, document_root: Path) -> KairixPaths:
+      return KairixPaths(
+          document_root=document_root,
+          db_path=paths.db_path,
+          log_dir=paths.log_dir,
+          workspace_root=paths.workspace_root,
+      )
+  ```
+
+### `python:S7504` unnecessary `list()`
+- Local detector: ruff `UP / RUF`
+- Pattern:
+  ```python
+  for x in seq:           # not: for x in list(seq):
+      ...
+  ```
+
+### `python:S5869` / `python:S6353` regex character class
+- Local detector: ruff `RUF055` family
+- Pattern:
+  ```python
+  re.compile(r"[a-z]+")   # not: r"[a-z][a-z]*"; deduplicate members.
+  ```
+
+### `python:S6792` / `python:S6796` generics syntax
+- Local detector: ruff `UP040` / `UP046`
+- Pattern (PEP 695):
+  ```python
+  class Cache[T]: ...
+  def head[T](xs: list[T]) -> T: ...
+  ```
+
+### `python:S5727` identity-always-true
+- Local detector: mypy `comparison-overlap`
+- Pattern: use the variable directly; the type is already narrowed. If the value really might be `None` the type should reflect it (`X | None`).
+
+### `python:S5754` broad except + reraise
+- Local detector: ruff `B904` / `BLE001`
+- Pattern:
+  ```python
+  except SpecificError as exc:
+      raise DomainError("…") from exc
+  ```
+
+### `python:S1186` empty function body
+- Local detector: `scripts/checks/check_empty_body_intent.py` (F20)
+- Pattern:
+  ```python
+  def hook() -> None:
+      """One-line docstring stating the intent."""
+      # or: # Intentionally empty — <why>
+  ```
+
+### `python:S5655` argument type mismatch
+- Local detector: mypy
+- Recipe: convert the argument at the call site to the declared type. If the conversion isn't possible the signature is wrong — narrow / overload the parameter type.
+
+### `python:S3358` nested conditional expression
+- Local detector: ruff (configurable)
+- Pattern:
+  ```python
+  tmp = a if cond else b
+  result = f(tmp)
+  ```
+
+### `docker:S7031` consecutive RUN
+- Local detector: hadolint via pre-commit
+- Pattern:
+  ```dockerfile
+  RUN apt-get update \
+   && apt-get install -y --no-install-recommends pkg-a pkg-b \
+   && rm -rf /var/lib/apt/lists/*
+  ```
+
+When a new Sonar rule appears, add a section here AND a row in
+`scripts/checks/check_sonar_new_code.py:FIX_HINTS` in the same commit.
 
 ## Why — the loop economics
 
