@@ -27,6 +27,7 @@ from kairix.paths import (
     data_dir,
     document_root,
     maintenance_skip_noop_threshold,
+    preflight_strict,
     worker_pause_flag_path,
     worker_state_path,
 )
@@ -1083,6 +1084,94 @@ def _resolve_schedule(
     )
 
 
+@dataclass
+class PreflightDeps:
+    """Injectable dependencies for :func:`_run_preflight_at_boot`.
+
+    F6-clean: each field carries a ``default_factory`` so production
+    callers construct ``PreflightDeps()`` and get the real boundary
+    functions; tests pass a ``PreflightDeps(db_factory=fake,
+    strict_fn=lambda: True)`` rooted at tmp_path to drive the boot
+    audit against a sandboxed DB. Mirrors the discipline established
+    by :class:`WorkerDeps` / :class:`ConnectorSyncDeps`.
+
+    Fields:
+      * ``db_factory`` — opens the SQLite connection preflight should
+        audit; default :func:`kairix.core.db.open_db`.
+      * ``strict_fn`` — returns True when boot should abort on any
+        error-severity gap; default :func:`kairix.paths.preflight_strict`
+        (reads ``KAIRIX_PREFLIGHT_STRICT``).
+    """
+
+    db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
+    strict_fn: Callable[[], bool] = field(default_factory=lambda: preflight_strict)
+
+
+def _run_preflight_at_boot(deps: PreflightDeps | None = None) -> bool:
+    """Run the persistence-integrity audit before the first embed cycle.
+
+    Returns True iff boot should continue. Logs the report at INFO when
+    healthy, WARNING-per-gap when not. In strict mode
+    (``KAIRIX_PREFLIGHT_STRICT=1``) returns False on any error-severity
+    gap so the worker exits non-zero; otherwise always returns True
+    (visibility without crashloop) — the IM-6 incident proved we need
+    the warning surface more than a hard stop on slightly-degraded
+    boots.
+
+    ``deps`` is the F6-clean injection seam: production callers omit
+    ``deps`` and the default factory wires real boundary calls; tests
+    pass a :class:`PreflightDeps` rooted at tmp_path so the boot path
+    never touches the dev's real index.
+    """
+    from kairix.core.db.integrity import check_integrity
+
+    deps = deps if deps is not None else PreflightDeps()
+
+    try:
+        db = deps.db_factory()
+    except Exception as exc:  # pragma: no cover - boundary
+        logger.warning("worker: preflight could not open db — %s", exc)
+        return True
+
+    try:
+        report = check_integrity(db)
+    except Exception as exc:
+        logger.warning("worker: preflight integrity check raised — %s", exc)
+        return True
+    finally:
+        db.close()
+
+    if report.healthy and not report.gaps:
+        logger.info("worker: preflight integrity check passed")
+        return True
+
+    error_gaps = [g for g in report.gaps if g.severity == "error"]
+    logger.warning(
+        "worker: preflight integrity check found %d gap(s) — %d error / %d warn / %d info",
+        len(report.gaps),
+        sum(1 for g in report.gaps if g.severity == "error"),
+        sum(1 for g in report.gaps if g.severity == "warn"),
+        sum(1 for g in report.gaps if g.severity == "info"),
+    )
+    for gap in report.gaps:
+        remediation_first_line = gap.remediation.split(";")[0].strip()
+        logger.warning(
+            "worker: preflight gap — [%s] %s count=%d — %s",
+            gap.severity,
+            gap.invariant,
+            gap.count,
+            remediation_first_line,
+        )
+
+    if error_gaps and deps.strict_fn():
+        logger.warning(
+            "worker: preflight strict mode active — %d error-severity gap(s) — exiting",
+            len(error_gaps),
+        )
+        return False
+    return True
+
+
 def _boot_state(deps: WorkerDeps) -> WorkerState:
     """Load prior state from disk (increment restart_count) or start fresh.
 
@@ -1248,6 +1337,12 @@ def main(
         schedule.entity,
         schedule.wikilinks,
     )
+
+    # Preflight integrity audit — catches the IM-6 failure mode (FTS
+    # silently empty) before the first embed cycle. Logs the report at
+    # boot; ``KAIRIX_PREFLIGHT_STRICT=1`` makes error gaps fatal.
+    if not _run_preflight_at_boot():
+        return
 
     state = _boot_state(deps)
     # Persist initial state (STARTING) so ``kairix worker status`` is

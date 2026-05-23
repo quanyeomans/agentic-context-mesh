@@ -838,6 +838,25 @@ def noninteractive_mode() -> bool:
     return raw in {"1", "true", "yes"}
 
 
+def preflight_strict() -> bool:
+    """Return True when ``KAIRIX_PREFLIGHT_STRICT=1`` makes preflight gaps fatal.
+
+    The worker calls :func:`kairix.core.db.integrity.check_integrity`
+    on boot and, by default, logs error-severity gaps but keeps
+    running so a slightly-degraded VM doesn't crashloop. Operators
+    who want a hard stop on degraded boot set this env var to ``1``
+    (typical for staging / canary deploys); production VMs leave it
+    unset.
+
+    Accepted truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    Anything else — including unset — is False. F4-clean: the env
+    read lives here at the boundary, the worker passes the boolean
+    through.
+    """
+    raw = os.environ.get("KAIRIX_PREFLIGHT_STRICT", "").strip().lower()
+    return raw in {"1", "true", "yes"}
+
+
 def entity_overrides_path(*, document_root_arg: str | Path | None = None) -> Path:
     """Path to the operator-edited entity overrides file.
 
