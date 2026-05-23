@@ -151,6 +151,9 @@ bash "${SCRIPT_DIR}/check-f54-flag-both-branch-tested.sh" || overall=1
 # F55 — Chunker plugin declares version + every Chunk(...) carries chunker_version=
 python3 "${SCRIPT_DIR}/check_f55_chunker_version.py" || overall=1
 
+# F56 — every connector plugin declares the required capability set
+bash "${SCRIPT_DIR}/check-f56-connector-capability-declaration.sh" || overall=1
+
 # F57 — cc_pair lifecycle state-machine integrity (UPDATE topology_cc_pairs.status routed through _ALLOWED_TRANSITIONS)
 python3 "${SCRIPT_DIR}/check_f57_ccpair_lifecycle_integrity.py" || overall=1
 

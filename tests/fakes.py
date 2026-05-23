@@ -2554,3 +2554,130 @@ class FakeFeatureFlagResolver:
                 owner="test",
                 related_spec=None,
             )
+
+
+# =============================================================================
+# Topology v2 Wave B — canonical capability-mix-in Protocol fakes
+# =============================================================================
+# Minimal stubs satisfying each new capability Protocol from
+# ``kairix.core.protocols``. Used by ``tests/contracts/test_capability_protocols.py``
+# to prove the Protocol shape is satisfied by both the canonical Fake
+# AND the shipped connectors' Wave B shims. OAuthConnector +
+# CredentialsConnector deliberately don't get dedicated Fakes — their
+# methods don't carry observable state, so the shipped connectors'
+# shim path is the contract proof.
+
+
+class FakePollConnector:
+    """Scripted :class:`kairix.core.protocols.PollConnector`.
+
+    Yields the pre-seeded change events from
+    :meth:`list_changes_for_container` regardless of the container's
+    cursor token. Used by contract tests to assert the Protocol shape.
+    """
+
+    def __init__(self, *, events: list[Any] | None = None) -> None:
+        self._events = list(events) if events is not None else []
+
+    def list_changes_for_container(self, container: Any) -> Any:
+        del container
+        return iter(self._events)
+
+
+class FakeCheckpointedConnector:
+    """Scripted :class:`kairix.core.protocols.CheckpointedConnector`."""
+
+    def __init__(self, *, events: list[Any] | None = None) -> None:
+        self._events = list(events) if events is not None else []
+
+    def load_from_checkpoint(self, container: Any, checkpoint: str | None) -> Any:
+        del container, checkpoint
+        return iter(self._events)
+
+
+class FakeSlimConnector:
+    """Scripted :class:`kairix.core.protocols.SlimConnector`.
+
+    Yields the pre-seeded item_id strings from
+    :meth:`retrieve_all_slim_docs`. Used by prune-cycle contract tests.
+    """
+
+    def __init__(self, *, item_ids: list[str] | None = None) -> None:
+        self._item_ids = list(item_ids) if item_ids is not None else []
+
+    def retrieve_all_slim_docs(self, container: Any) -> Any:
+        del container
+        return iter(self._item_ids)
+
+
+class FakeSlimConnectorWithPermSync:
+    """Scripted :class:`kairix.core.protocols.SlimConnectorWithPermSync`."""
+
+    def __init__(self, *, entries: list[tuple[str, str]] | None = None) -> None:
+        self._entries = list(entries) if entries is not None else []
+
+    def retrieve_all_slim_docs_with_perms(self, container: Any) -> Any:
+        del container
+        return iter(self._entries)
+
+
+class FakeEventConnector:
+    """Scripted :class:`kairix.core.protocols.EventConnector`.
+
+    Records every subscribe / renew / unsubscribe call and replays
+    seeded events from :meth:`handle_event`. Used by webhook-path
+    contract tests.
+    """
+
+    def __init__(self, *, events: list[Any] | None = None) -> None:
+        self._events = list(events) if events is not None else []
+        self.subscribe_calls: list[str] = []
+        self.renew_calls: list[str] = []
+        self.unsubscribe_calls: list[str] = []
+        self.handled_payloads: list[Any] = []
+
+    def subscribe(self, callback_url: str) -> str | None:
+        self.subscribe_calls.append(callback_url)
+        return f"sub-{len(self.subscribe_calls)}"
+
+    def renew_subscription(self, subscription_id: str) -> str:
+        self.renew_calls.append(subscription_id)
+        return subscription_id
+
+    def unsubscribe(self, subscription_id: str) -> None:
+        self.unsubscribe_calls.append(subscription_id)
+
+    def handle_event(self, event: Any) -> Any:
+        self.handled_payloads.append(event)
+        return iter(self._events)
+
+
+class FakeResolver:
+    """Scripted :class:`kairix.core.protocols.Resolver`.
+
+    Records every reindex call's failed_item_ids + include_permissions
+    flag; yields seeded ChangeEvent items from :meth:`reindex`. Used
+    by per-document failure-replay contract tests.
+    """
+
+    def __init__(self, *, events: list[Any] | None = None) -> None:
+        self._events = list(events) if events is not None else []
+        self.reindex_calls: list[tuple[tuple[str, ...], bool]] = []
+
+    def reindex(self, failed_item_ids: tuple[str, ...], *, include_permissions: bool = False) -> Any:
+        self.reindex_calls.append((failed_item_ids, include_permissions))
+        return iter(self._events)
+
+
+class FakeHierarchyConnector:
+    """Scripted :class:`kairix.core.protocols.HierarchyConnector`.
+
+    Yields the pre-seeded HierarchyNode list parent-before-child.
+    """
+
+    def __init__(self, *, nodes: list[Any] | None = None) -> None:
+        self._nodes = list(nodes) if nodes is not None else []
+
+    def load_hierarchy(self, cc_pair_id: int) -> Any:
+        del cc_pair_id
+        return iter(self._nodes)

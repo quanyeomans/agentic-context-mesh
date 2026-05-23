@@ -178,6 +178,9 @@ pytest_plugins = [
     # ``obsidian`` collection invisible to BM25 because the chunk-writer
     # skipped the FTS5 write).
     "tests.bdd.steps.connector_search_round_trip_steps",
+    # Topology v2 Wave B — capability mix-in Protocols + default-impl
+    # shims behind ``topology_v2_protocol`` flag. F54 both-branch coverage.
+    "tests.bdd.steps.feature_flag_topology_v2_protocol_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

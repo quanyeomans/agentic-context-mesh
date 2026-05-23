@@ -54,7 +54,9 @@ from kairix.connectors.obsidian.watcher import FileChange, WatchdogSource
 from kairix.core.db.scanner import CollectionConfig
 from kairix.core.protocols import (
     ChangeEvent,
+    Container,
     Cursor,
+    HierarchyNode,
     RawArtefact,
     Sensitivity,
 )
@@ -211,6 +213,61 @@ class ObsidianConnector:
         overrides without breaking the Protocol.
         """
         return self._sensitivity
+
+    # ------------------------------------------------------------------
+    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # ------------------------------------------------------------------
+    # The shims below let the connector satisfy the new capability
+    # Protocols (PollConnector, SlimConnector, HierarchyConnector) by
+    # delegating to existing methods. Production routing through these
+    # methods is gated by the ``topology_v2_protocol`` feature flag
+    # (default-off); Wave C activates the runtime path.
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """PollConnector shim — delegate to :meth:`list_changes` using the container cursor.
+
+        ``container.cursor_token`` carries the per-cc_pair delta cursor
+        (replacing the legacy single-cursor-per-connector). The shim
+        forwards the token to the existing :meth:`list_changes` so the
+        observable behaviour is identical to the v1 path.
+        """
+        return self.list_changes(container.cursor_token)
+
+    def retrieve_all_slim_docs(self, _container: Container) -> Iterator[str]:
+        """SlimConnector shim — enumerate item_ids only via the reconciler walk.
+
+        Drives the same :class:`FullScanReconciler` the change-detection
+        path uses, but extracts only ``item_id`` (no hash compare, no
+        change-event construction). Used by the prune cycle to diff
+        against ``documents.item_id`` and stage tombstones.
+        """
+        # An empty known-state mapping forces the reconciler to emit one
+        # ChangeEvent per file; we strip down to item_ids only so the
+        # caller pays no chunk-construction cost. Behavioural shape:
+        # same enumeration order as the change-detection path.
+        events = self._reconciler.reconcile({})
+        return iter(ev.item_id for ev in events)
+
+    def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
+        """HierarchyConnector shim — emit one root FOLDER node.
+
+        Obsidian vaults are filesystem-flat at the Hierarchy level — the
+        vault itself is the only "folder" the search layer needs to know
+        about. A future ADR can extend this to emit per-subdirectory
+        FOLDER nodes if operators want folder-scoped collections; the
+        current shim yields one root node with ``display_name``=vault
+        root basename.
+        """
+        yield HierarchyNode(
+            cc_pair_id=cc_pair_id,
+            raw_node_id=self._vault_root.name,
+            raw_parent_id=None,
+            display_name=self._vault_root.name,
+            link=None,
+            node_type="FOLDER",
+            external_access_json=None,
+            sensitivity_hint=None,
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
