@@ -91,6 +91,19 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
             confidence REAL NOT NULL,
             sensitivity TEXT NOT NULL
         );
+        -- Topology v2 Wave A tables — minimal shapes so validate_schema accepts the DB.
+        CREATE TABLE IF NOT EXISTS topology_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_credentials (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_cc_pairs (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_containers (cc_pair_id INTEGER, container_id TEXT);
+        CREATE TABLE IF NOT EXISTS topology_hierarchy_nodes (cc_pair_id INTEGER, raw_node_id TEXT);
+        CREATE TABLE IF NOT EXISTS topology_collections (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_collection_sources (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_federated_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_group_grants (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_scope_profiles (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_scope_entries (id INTEGER PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS topology_skills (id INTEGER PRIMARY KEY);
     """)
     db.commit()
 

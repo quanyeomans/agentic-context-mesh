@@ -29,7 +29,7 @@ from . import EMBED_VECTOR_DIMS
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
@@ -212,6 +212,20 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "connector_deadletter",
         "bronze_records",
         "entity_signals",
+        # Topology v2 Wave A — 12 net-new tables. Existence is unconditional;
+        # population is gated by the `topology_v2_schema` feature flag.
+        "topology_connectors",
+        "topology_credentials",
+        "topology_cc_pairs",
+        "topology_containers",
+        "topology_hierarchy_nodes",
+        "topology_collections",
+        "topology_collection_sources",
+        "topology_federated_connectors",
+        "topology_group_grants",
+        "topology_scope_profiles",
+        "topology_scope_entries",
+        "topology_skills",
     )
     for required in required_tables:
         if required not in tables:
@@ -341,12 +355,181 @@ CREATE TABLE IF NOT EXISTS entity_signals (
 """
 
 
+# Topology v2 (Wave A) — 12 new tables for the connector/collection/scope
+# topology evolution. Tables exist unconditionally (CREATE IF NOT EXISTS);
+# the `topology_v2_schema` feature flag controls whether they get populated.
+# See docs/architecture/connector-scope-topology/ADR.md.
+_TOPOLOGY_V2_TABLES_DDL = """
+CREATE TABLE IF NOT EXISTS topology_connectors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    connector_specific_config TEXT NOT NULL,
+    refresh_freq_seconds INTEGER,
+    prune_freq_seconds INTEGER,
+    perm_sync_freq_seconds INTEGER,
+    default_sensitivity TEXT NOT NULL DEFAULT 'internal',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topology_credentials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    credential_ref TEXT NOT NULL,
+    user_id TEXT,
+    admin_public INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topology_cc_pairs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    connector_id INTEGER NOT NULL,
+    credential_id INTEGER,
+    name TEXT NOT NULL UNIQUE,
+    access_type TEXT NOT NULL DEFAULT 'PRIVATE',
+    status TEXT NOT NULL DEFAULT 'SCHEDULED',
+    last_successful_index_time TEXT,
+    last_time_perm_sync TEXT,
+    last_time_external_group_sync TEXT,
+    last_time_hierarchy_fetch TEXT,
+    in_repeated_error_state INTEGER NOT NULL DEFAULT 0,
+    total_docs_indexed INTEGER NOT NULL DEFAULT 0,
+    refresh_freq_override_seconds INTEGER,
+    prune_freq_override_seconds INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (connector_id) REFERENCES topology_connectors(id),
+    FOREIGN KEY (credential_id) REFERENCES topology_credentials(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_containers (
+    cc_pair_id INTEGER NOT NULL,
+    container_id TEXT NOT NULL,
+    access_state TEXT NOT NULL DEFAULT 'ACCESSIBLE',
+    cursor_token TEXT,
+    last_synced_at TEXT,
+    PRIMARY KEY (cc_pair_id, container_id),
+    FOREIGN KEY (cc_pair_id) REFERENCES topology_cc_pairs(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_hierarchy_nodes (
+    cc_pair_id INTEGER NOT NULL,
+    raw_node_id TEXT NOT NULL,
+    raw_parent_id TEXT,
+    display_name TEXT NOT NULL,
+    link TEXT,
+    node_type TEXT NOT NULL,
+    external_access_json TEXT,
+    sensitivity_hint TEXT,
+    PRIMARY KEY (cc_pair_id, raw_node_id),
+    FOREIGN KEY (cc_pair_id) REFERENCES topology_cc_pairs(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_collections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    default_sensitivity TEXT NOT NULL DEFAULT 'internal',
+    on_unmapped_item TEXT NOT NULL DEFAULT 'land_in_default_collection',
+    visibility TEXT NOT NULL DEFAULT 'engagement',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topology_collection_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL,
+    cc_pair_id INTEGER NOT NULL,
+    source_path_filter TEXT NOT NULL,
+    sensitivity_override TEXT,
+    FOREIGN KEY (collection_id) REFERENCES topology_collections(id),
+    FOREIGN KEY (cc_pair_id) REFERENCES topology_cc_pairs(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_federated_connectors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    query_strategy TEXT NOT NULL,
+    FOREIGN KEY (collection_id) REFERENCES topology_collections(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_group_grants (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id INTEGER NOT NULL,
+    group_id TEXT NOT NULL,
+    can_read INTEGER NOT NULL DEFAULT 1,
+    can_write INTEGER NOT NULL DEFAULT 0,
+    max_sensitivity TEXT NOT NULL DEFAULT 'internal',
+    UNIQUE(collection_id, group_id),
+    FOREIGN KEY (collection_id) REFERENCES topology_collections(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_scope_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor_id TEXT NOT NULL UNIQUE,
+    actor_kind TEXT NOT NULL,
+    inherits_from_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS topology_scope_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope_profile_id INTEGER NOT NULL,
+    collection_name TEXT NOT NULL,
+    can_read INTEGER NOT NULL DEFAULT 1,
+    can_write INTEGER NOT NULL DEFAULT 0,
+    max_sensitivity TEXT NOT NULL DEFAULT 'internal',
+    UNIQUE(scope_profile_id, collection_name),
+    FOREIGN KEY (scope_profile_id) REFERENCES topology_scope_profiles(id)
+);
+
+CREATE TABLE IF NOT EXISTS topology_skills (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    ranking TEXT NOT NULL DEFAULT 'fuse_then_rerank',
+    iteration TEXT NOT NULL DEFAULT 'one_shot',
+    task_collections_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+# Topology v2 — additional columns on existing tables.
+_DOCUMENTS_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("archived", "INTEGER NOT NULL DEFAULT 0"),
+    ("access_lost", "INTEGER NOT NULL DEFAULT 0"),
+    ("chunker_version", "TEXT"),
+)
+
+_DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (("chunker_version", "TEXT"),)
+
+
 def _migrate_documents_connector_columns(db: sqlite3.Connection, tables: set[str]) -> None:
     """Add connector-framework Wave 1 columns to legacy documents tables."""
     if "documents" not in tables:
         return
     for column, column_def in _DOCUMENTS_CONNECTOR_COLUMNS:
         _add_column_if_missing(db, "documents", column, column_def)
+
+
+def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> None:
+    """Add topology v2 (Wave A) columns to existing tables.
+
+    Pure-additive — `archived` + `access_lost` default to 0 (false),
+    `chunker_version` defaults to NULL. No behavioural change until
+    `topology_v2_schema` flag flips and write paths start populating.
+    """
+    if "documents" in tables:
+        for column, column_def in _DOCUMENTS_TOPOLOGY_V2_COLUMNS:
+            _add_column_if_missing(db, "documents", column, column_def)
+    if "documents_media" in tables:
+        for column, column_def in _DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS:
+            _add_column_if_missing(db, "documents_media", column, column_def)
 
 
 def migrate(db: sqlite3.Connection) -> None:
@@ -387,6 +570,11 @@ def migrate(db: sqlite3.Connection) -> None:
     # Connector-framework Wave 1 (SC-4): new columns + new tables.
     _migrate_documents_connector_columns(db, tables)
     db.executescript(_CONNECTOR_TABLES_DDL)
+
+    # Topology v2 (Wave A): additional tables + columns. Pure-additive;
+    # write paths are gated by the `topology_v2_schema` feature flag.
+    _migrate_topology_v2_columns(db, tables)
+    db.executescript(_TOPOLOGY_V2_TABLES_DDL)
     db.commit()
 
     # Ensure indexes exist (idempotent) — only if the tables exist
