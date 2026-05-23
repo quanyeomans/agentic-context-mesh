@@ -131,8 +131,8 @@ def test_fresh_create_schema_bumps_schema_version_meta_row() -> None:
     row = db.execute("SELECT value FROM kairix_meta WHERE key='schema_version'").fetchone()
     assert row is not None
     assert row[0] == SCHEMA_VERSION
-    # Explicit: the bump landed (was "1" pre-SC-4).
-    assert SCHEMA_VERSION == "2"
+    # Explicit: the bump landed (was "2" pre-topology-v2-Wave-A which added 12 new tables).
+    assert SCHEMA_VERSION == "3"
 
 
 @pytest.mark.integration
