@@ -45,6 +45,15 @@ class FeatureFlag:
     related_spec: str | None = None
 
 
+# F17 — extract duplicated string literals so adding flags doesn't churn
+# the literal across every entry. ≥3 occurrences with ≥10 chars triggers
+# the check; these four are the canonical recurring fields.
+_CONNECTOR_FRAMEWORK_OWNER = "connector-framework"
+_CONNECTOR_INGESTION_SPEC = "docs/architecture/connector-ingestion-architecture.md"
+_FLAG_INTRODUCED_IN_DISPATCH_WINDOW = "v2026.5.23"
+_FLAG_TARGET_RETIRE_IN = "v2026.7.23"
+
+
 # Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
 # at introduce stage (default off). Wave 5 KP-1 adds ``connector_dex_crm``
 # at introduce stage (default off); KP-2 / KP-3 follow for the M365 pair.
@@ -60,10 +69,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
         # soak → retire. ``target_retire_in`` is 2 months from the
         # introduce-stage landing (current 2026-05 dispatch window).
-        introduced_in="v2026.5.23",
-        target_retire_in="v2026.7.23",
-        owner="connector-framework",
-        related_spec="docs/architecture/connector-ingestion-architecture.md",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_FLAG_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
     "connector_dex_crm": FeatureFlag(
         name="connector_dex_crm",
@@ -73,10 +82,26 @@ REGISTRY: dict[str, FeatureFlag] = {
             "from the Dex API into the entity_signals staging table."
         ),
         stage="introduce",
-        introduced_in="v2026.5.23",
-        target_retire_in="v2026.7.23",
-        owner="connector-framework",
-        related_spec="docs/architecture/connector-ingestion-architecture.md",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_FLAG_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
+    ),
+    "connector_m365_email_headers": FeatureFlag(
+        name="connector_m365_email_headers",
+        default=False,
+        description=(
+            "Enable the M365 email-headers connector — pulls From/To/CC/Subject/Date "
+            "metadata via Microsoft Graph delta query. NO body content per ADR-004."
+        ),
+        stage="introduce",
+        # KP-2 cutover plan (per feature-flag-architecture.md §7):
+        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
+        # soak → retire.
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_FLAG_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
 }
 

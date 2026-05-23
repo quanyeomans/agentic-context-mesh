@@ -2297,6 +2297,76 @@ class FakeSourceConnector:
         return self._sensitivity
 
 
+class FakeM365EmailHeadersConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    M365 email-headers plugin's contract test.
+
+    Constructor takes the header envelopes to emit; the fake satisfies
+    the full Protocol surface without touching the network, OAuth2
+    helper, or any real Graph endpoint. This is the canonical fake F43
+    pairs with the real
+    :class:`kairix.connectors.m365_email_headers.M365EmailHeadersConnector`
+    inside ``tests/contracts/test_m365_email_headers_protocol.py``.
+
+    Locked sensitivity tier per ADR-004 + ADR-005: every event /
+    fetch reports the ``personal`` tier; the constructor does NOT
+    accept a sensitivity override so the fake structurally mirrors
+    the real-connector's locked-tier behaviour.
+    """
+
+    name: str = "m365_email_headers"
+
+    def __init__(
+        self,
+        *,
+        user_principal_name: str = "agent-alpha@example.com",
+        envelopes: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._upn = user_principal_name
+        self._envelopes: list[dict[str, Any]] = list(envelopes) if envelopes is not None else []
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        """Yield one ``created`` ChangeEvent per seeded envelope.
+
+        Matches the real connector's positional+keyword acceptance for
+        the ``cursor`` parameter — the SourceConnector Protocol passes
+        it positionally; contract tests pass it as a keyword.
+        """
+        _ = cursor  # cursor is ignored by the fake; events are scripted
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        for env in self._envelopes:
+            events.append(
+                ChangeEvent(
+                    op="created",
+                    item_id=str(env.get("id", "")),
+                    modified_at=str(env.get("receivedDateTime", "1970-01-01T00:00:00Z")),
+                    metadata={"sensitivity": "personal"},
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        import json as _json
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        match = next((env for env in self._envelopes if env.get("id") == item_id), None)
+        payload = _json.dumps(match if match is not None else {"id": item_id}, sort_keys=True).encode("utf-8")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=payload, mime="application/json", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        from urllib.parse import quote
+
+        return f"https://outlook.office.com/mail/inbox/id/{quote(item_id, safe='')}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return "personal"
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 
