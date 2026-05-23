@@ -835,7 +835,11 @@ class ChangeEvent:
     :class:`Chunk.source_modified_at` so search can boost recency.
     """
 
-    op: Literal["created", "modified", "deleted"]
+    # Topology v2 Wave A: extended enum with `archived` (recoverable soft-delete,
+    # chunks remain but marked) and `access_lost` (credential revoked, chunks
+    # frozen but not re-fetchable). Old emitters keep using the original three;
+    # only flag-gated Wave C+ paths emit the new values.
+    op: Literal["created", "modified", "archived", "access_lost", "deleted"]
     item_id: str
     modified_at: str
     parent_id: str | None = None
@@ -851,11 +855,18 @@ class RawArtefact:
     (format detection via mime + magic bytes). ``fetched_at`` is the
     wall-clock at fetch time, distinct from ``ChangeEvent.modified_at``
     (the source's own modify time).
+
+    Topology v2 Wave A: ``sensitivity_hint`` carries per-item sensitivity
+    when the source surfaces it (SharePoint Purview labels, Slack channel
+    privacy, GitHub repo visibility, Drive sharing tier). Silver applies
+    a 5-step fallback chain — hint > collection-source override >
+    collection default > cc_pair access-type→F39 map > connector default.
     """
 
     raw: bytes
     mime: MimeType
     fetched_at: str
+    sensitivity_hint: Sensitivity | None = None
 
 
 @dataclass(frozen=True)
@@ -1113,3 +1124,357 @@ class FeatureFlagResolver(Protocol):
     def iter_all(self) -> Iterator[FlagStatus]:
         """Yield a FlagStatus snapshot for every flag in the registry."""
         ...
+
+
+# =============================================================================
+# Topology v2 (Wave A) — connector / collection / scope topology
+# =============================================================================
+#
+# These dataclasses + enums + exceptions are the v2 vocabulary. They land
+# in Wave A as pure definitions — no behaviour wired yet. The
+# ``topology_v2_schema`` feature flag gates whether any code path
+# WRITES to the schema tables that these dataclasses represent.
+#
+# See docs/architecture/connector-scope-topology/ADR.md for the
+# canonical decision; this surface mirrors that ADR's sections 1-6.
+
+
+F39Tier = Literal["public", "internal", "confidential", "restricted"]
+"""F39 sensitivity tier — strictly richer than the legacy ``Sensitivity``
+literal (kept for back-compat). New code uses ``F39Tier``; legacy code
+keeps ``Sensitivity``. Both are valid until Wave G retires the legacy
+literal."""
+
+
+HierarchyNodeType = Literal[
+    "FOLDER",
+    "SOURCE",
+    "SHARED_DRIVE",
+    "MY_DRIVE",
+    "SPACE",
+    "PAGE",
+    "PROJECT",
+    "DATABASE",
+    "WORKSPACE",
+    "SITE",
+    "DRIVE",
+    "CHANNEL",
+]
+"""12-value normalised vocabulary for source-side container shapes
+(per Onyx's `HierarchyNodeType` enum). Used by the
+``HierarchyConnector`` capability to emit the source's own folder /
+space / site / channel tree as first-class structured data."""
+
+
+ContainerAccessState = Literal[
+    "ACCESSIBLE",
+    "REVOKED",
+    "NOT_YET_GRANTED",
+    "TRANSIENT_ERROR",
+]
+"""Container access lifecycle. ``REVOKED`` means a previously-accessible
+container is now permission-denied (e.g. SharePoint Sites.Selected grant
+removed). ``NOT_YET_GRANTED`` means the credential reaches the parent
+but this container hasn't been explicitly added (e.g. Notion integration
+not connected to a page). ``TRANSIENT_ERROR`` means rate-limited or
+temporary outage — retry per ``retry_after``."""
+
+
+CCPairAccessType = Literal["PUBLIC", "PRIVATE", "SYNC"]
+"""Per-cc_pair access mode. PUBLIC = any actor in engagement sees
+everything. PRIVATE = only explicit cc_pair group grants see. SYNC =
+pull ACLs from source and enforce per-doc; ``perm_sync_freq`` controls
+cadence."""
+
+
+CCPairStatus = Literal[
+    "SCHEDULED",
+    "INITIAL_INDEXING",
+    "ACTIVE",
+    "PAUSED",
+    "DELETING",
+    "INVALID",
+]
+"""cc_pair lifecycle state machine. Valid transitions:
+SCHEDULED → INITIAL_INDEXING → ACTIVE ↔ PAUSED / DELETING / INVALID.
+F57 enforces transition integrity at runtime."""
+
+
+ScopeProfileActorKind = Literal["agent", "human", "team", "group", "skill"]
+"""Kind of actor a ScopeProfile applies to."""
+
+
+CollectionVisibility = Literal["public", "engagement", "team", "private"]
+"""Collection visibility tier — controls default broad access."""
+
+
+@dataclass(frozen=True)
+class ConnectorInstance:
+    """Topology v2 §1 — Connector (kind + config).
+
+    The configured target. Decoupled from credentials (see ``Credential``)
+    and from operational state (see ``ConnectorCredentialPair``).
+    """
+
+    id: int
+    kind: str
+    name: str
+    connector_specific_config: Mapping[str, Any]
+    refresh_freq_seconds: int | None
+    prune_freq_seconds: int | None
+    perm_sync_freq_seconds: int | None
+    default_sensitivity: F39Tier
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class Credential:
+    """Topology v2 §2 — Credential (auth shape).
+
+    Encrypted at rest. Decoupled from connector so the same auth blob
+    can drive multiple scoped connectors AND a connector's credential
+    can rotate without losing operational state.
+    """
+
+    id: int
+    kind: str
+    name: str
+    credential_ref: str
+    user_id: str | None
+    admin_public: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ConnectorCredentialPair:
+    """Topology v2 §3 — the operational unit.
+
+    Binding of one Connector + one Credential with its own cursor scope,
+    status, audit timestamps, and access mode. The cc_pair_id is the
+    cursor + deadletter scope key.
+    """
+
+    id: int
+    connector_id: int
+    credential_id: int | None
+    name: str
+    access_type: CCPairAccessType
+    status: CCPairStatus
+    last_successful_index_time: str | None
+    last_time_perm_sync: str | None
+    last_time_external_group_sync: str | None
+    last_time_hierarchy_fetch: str | None
+    in_repeated_error_state: bool
+    total_docs_indexed: int
+    refresh_freq_override_seconds: int | None
+    prune_freq_override_seconds: int | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class Container:
+    """Topology v2 §4 — per-cc_pair internal scope unit.
+
+    Each Container has its own delta cursor (replacing the v1 single-
+    cursor-per-connector). Per-drive (SharePoint), per-mailbox (Graph),
+    per-channel (Slack), per-repo (GitHub), per-user-shared-drive
+    (Drive) — all map to a Container row.
+    """
+
+    cc_pair_id: int
+    container_id: str
+    access_state: ContainerAccessState
+    cursor_token: str | None
+    last_synced_at: str | None
+
+
+@dataclass(frozen=True)
+class HierarchyNode:
+    """Topology v2 §4 — source-side folder / space / site / channel tree.
+
+    Emitted by ``HierarchyConnector`` capability parent-before-child.
+    Lets the search layer answer "files in this folder", "siblings of
+    this doc", "all docs under site:X" without re-deriving from
+    ``source_uri`` prefixes.
+    """
+
+    cc_pair_id: int
+    raw_node_id: str
+    raw_parent_id: str | None
+    display_name: str
+    link: str | None
+    node_type: HierarchyNodeType
+    external_access_json: str | None
+    sensitivity_hint: F39Tier | None
+
+
+@dataclass(frozen=True)
+class CollectionSource:
+    """Topology v2 §5 — one (cc_pair, filter) mapping into a Collection."""
+
+    cc_pair_id: int
+    source_path_filter: str
+    sensitivity_override: F39Tier | None
+
+
+@dataclass(frozen=True)
+class FederatedConnector:
+    """Topology v2 §5 — external search-index member of a Collection.
+
+    Lets a Collection compose external search endpoints (Vespa, Elastic,
+    MCP) alongside ingested cc_pair sources without re-ingesting.
+    """
+
+    id: int
+    collection_id: int
+    kind: str
+    endpoint: str
+    query_strategy: str
+
+
+@dataclass(frozen=True)
+class GroupGrant:
+    """Topology v2 §5 — per-group access to a Collection.
+
+    Per-group is operationally cheaper than per-actor at team scale —
+    add Alice to ``team-engagement`` and she inherits the group's
+    grants without per-actor profile changes.
+    """
+
+    id: int
+    collection_id: int
+    group_id: str
+    can_read: bool
+    can_write: bool
+    max_sensitivity: F39Tier
+
+
+@dataclass(frozen=True)
+class Collection:
+    """Topology v2 §5 — retrieval bucket, decoupled from connectors.
+
+    Aggregates one or more cc_pairs via filters, plus optional
+    federated members. Search ranks within / over the Collection's
+    chunks.
+    """
+
+    id: int
+    name: str
+    default_sensitivity: F39Tier
+    on_unmapped_item: Literal["land_in_default_collection", "drop"]
+    visibility: CollectionVisibility
+    sources: tuple[CollectionSource, ...]
+    federated_members: tuple[FederatedConnector, ...]
+    group_grants: tuple[GroupGrant, ...]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ScopeEntry:
+    """Topology v2 §6 — one (collection, rights) entry in a ScopeProfile."""
+
+    collection_name: str
+    can_read: bool
+    can_write: bool
+    max_sensitivity: F39Tier
+
+
+@dataclass(frozen=True)
+class ScopeProfile:
+    """Topology v2 §6 — per-actor (or per-group) access bundle.
+
+    Composition rules: collections by intersection across requesting
+    principals; ``max_sensitivity`` by F39-min (least permissive); write
+    rights by AND. Caller can opt into union via authorised
+    ``scope_composition: "union"`` token.
+    """
+
+    id: int
+    actor_id: str
+    actor_kind: ScopeProfileActorKind
+    inherits_from: tuple[str, ...]
+    entries: tuple[ScopeEntry, ...]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class TaskCollection:
+    """Topology v2 §6 — one named member of a Skill's task_collections.
+
+    May match a real Collection or be a virtual aggregator scoped to
+    the skill invocation.
+    """
+
+    name: str
+    sources: tuple[CollectionSource, ...]
+    weight: float
+
+
+@dataclass(frozen=True)
+class Skill:
+    """Topology v2 §6 — composable search strategy.
+
+    Defines an ordered set of task_collections + ranking + iteration
+    shape. Invoked via ``kairix skill <name>`` or via the MCP
+    ``tool_invoke_skill`` surface.
+    """
+
+    id: int
+    name: str
+    task_collections: tuple[TaskCollection, ...]
+    ranking: str
+    iteration: Literal["one_shot", "sequential_per_task_collection", "graph_anchored"]
+    created_at: str
+    updated_at: str
+
+
+# =============================================================================
+# Typed exceptions at the connector framework boundary (Onyx-derived)
+# =============================================================================
+
+
+class ConnectorValidationError(Exception):
+    """Base for all connector-validation failures. Configuration / credential
+    / scope problems all derive from this so the runner can type-narrow."""
+
+
+class CredentialInvalidError(ConnectorValidationError):
+    """Credential is structurally wrong (missing fields, malformed)."""
+
+
+class CredentialExpiredError(ConnectorValidationError):
+    """Credential expired (OAuth refresh failed, token revoked)."""
+
+
+class InsufficientPermissionsError(ConnectorValidationError):
+    """Auth succeeded but the credential lacks permission for the requested scope."""
+
+
+class ContainerAccessDeniedError(Exception):
+    """A specific Container is no longer reachable (e.g. SharePoint Sites.Selected
+    grant revoked). cc_pair stays alive for its other containers."""
+
+
+class ContainerTransientError(Exception):
+    """Container is temporarily unavailable (rate limit, 503, timeout).
+    Retry per ``retry_after`` seconds."""
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+# Back-compat aliases — keep the ADR's named exceptions importable under
+# their ADR shape; the underscore-error suffix versions above are the
+# canonical names per ruff N818 (mandatory "Error" suffix on exception classes).
+ContainerAccessDenied = ContainerAccessDeniedError
+ContainerTransient = ContainerTransientError
+
+
+class UnexpectedValidationError(ConnectorValidationError):
+    """Transient validation failure — does NOT disable the cc_pair."""

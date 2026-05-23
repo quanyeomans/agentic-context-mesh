@@ -50,8 +50,11 @@ class FeatureFlag:
 # the check; these four are the canonical recurring fields.
 _CONNECTOR_FRAMEWORK_OWNER = "connector-framework"
 _CONNECTOR_INGESTION_SPEC = "docs/architecture/connector-ingestion-architecture.md"
+_TOPOLOGY_V2_SPEC = "docs/architecture/connector-scope-topology/ADR.md"
 _FLAG_INTRODUCED_IN_DISPATCH_WINDOW = "v2026.5.23"
 _FLAG_TARGET_RETIRE_IN = "v2026.7.23"
+# Topology v2 retire window is longer — 7-wave migration ramping over ~12 months.
+_TOPOLOGY_V2_TARGET_RETIRE_IN = "v2027.5.23"
 
 
 # Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
@@ -119,6 +122,28 @@ REGISTRY: dict[str, FeatureFlag] = {
         target_retire_in="v2026.7.23",
         owner="connector-framework",
         related_spec="docs/architecture/connector-ingestion-architecture.md",
+    ),
+    "topology_v2_schema": FeatureFlag(
+        name="topology_v2_schema",
+        default=False,
+        description=(
+            "Wave A of the connector/collection/scope topology v2 migration — "
+            "controls whether the v2 schema tables (connectors, credentials, "
+            "cc_pairs, containers, hierarchy_nodes, collections, collection_sources, "
+            "federated_connectors, group_grants, scope_profiles, skills, task_collections) "
+            "get POPULATED. Tables exist unconditionally (CREATE IF NOT EXISTS); "
+            "the flag gates whether anything writes to them. Default-off until "
+            "Wave B Protocol shims land."
+        ),
+        stage="introduce",
+        # Topology v2 migration plan (per docs/architecture/connector-scope-topology/ADR.md):
+        # Wave A schema → B Protocol → C runtime → D operator config → E per-connector
+        # multi-container → F chunker plugins → G retirement. Each wave gets its own
+        # flag; this one is the foundation.
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
     ),
 }
 

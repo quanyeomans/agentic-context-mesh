@@ -32,6 +32,9 @@ def test_validate_schema_passes_on_valid_db() -> None:
     Includes the connector-framework Wave 1 tables added in SCHEMA_VERSION 2
     (SC-4): documents_media, document_pages, connector_cursors,
     connector_deadletter, bronze_records, entity_signals.
+
+    Plus the topology v2 Wave A tables added in SCHEMA_VERSION 3:
+    12 topology_* tables.
     """
     db = sqlite3.connect(":memory:")
     db.executescript("""
@@ -59,6 +62,25 @@ def test_validate_schema_passes_on_valid_db() -> None:
             source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
             confidence REAL NOT NULL, sensitivity TEXT NOT NULL
         );
+        -- Topology v2 Wave A tables (minimal shapes for schema-validation purposes).
+        CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE topology_cc_pairs (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE topology_containers (
+            cc_pair_id INTEGER, container_id TEXT,
+            PRIMARY KEY (cc_pair_id, container_id)
+        );
+        CREATE TABLE topology_hierarchy_nodes (
+            cc_pair_id INTEGER, raw_node_id TEXT,
+            PRIMARY KEY (cc_pair_id, raw_node_id)
+        );
+        CREATE TABLE topology_collections (id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE topology_collection_sources (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_federated_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_group_grants (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_scope_profiles (id INTEGER PRIMARY KEY, actor_id TEXT);
+        CREATE TABLE topology_scope_entries (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_skills (id INTEGER PRIMARY KEY, name TEXT);
     """)
     errors = validate_schema(db)
     assert errors == []
@@ -106,6 +128,20 @@ def test_validate_schema_detects_missing_column() -> None:
             source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
             confidence REAL NOT NULL, sensitivity TEXT NOT NULL
         );
+        -- Topology v2 Wave A tables — minimal shapes so the validator
+        -- reaches the column check on `documents` (the table under test).
+        CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_cc_pairs (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_containers (cc_pair_id INTEGER, container_id TEXT);
+        CREATE TABLE topology_hierarchy_nodes (cc_pair_id INTEGER, raw_node_id TEXT);
+        CREATE TABLE topology_collections (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_collection_sources (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_federated_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_group_grants (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_scope_profiles (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_scope_entries (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_skills (id INTEGER PRIMARY KEY);
     """)
     errors = validate_schema(db)
     assert any("hash" in e for e in errors)
@@ -141,11 +177,14 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
     SCHEMA_VERSION 2 (SC-4) added six connector-framework tables to the
     required set: documents_media, document_pages, connector_cursors,
     connector_deadletter, bronze_records, entity_signals.
+
+    SCHEMA_VERSION 3 (topology v2 Wave A) added twelve topology_* tables
+    to the required set.
     """
     db = sqlite3.connect(":memory:")
     errors = validate_schema(db)
-    # 3 legacy core tables + 6 connector-framework tables = 9
-    assert len(errors) == 9
+    # 3 legacy core + 6 connector-framework + 12 topology v2 = 21
+    assert len(errors) == 21
     assert any("documents" in e for e in errors)
     assert any("content" in e for e in errors)
     assert any("content_vectors" in e for e in errors)
@@ -155,6 +194,11 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
     assert any("connector_deadletter" in e for e in errors)
     assert any("bronze_records" in e for e in errors)
     assert any("entity_signals" in e for e in errors)
+    # Topology v2 (Wave A)
+    assert any("topology_connectors" in e for e in errors)
+    assert any("topology_collections" in e for e in errors)
+    assert any("topology_scope_profiles" in e for e in errors)
+    assert any("topology_skills" in e for e in errors)
 
 
 @pytest.mark.unit
@@ -186,6 +230,20 @@ def test_validate_schema_missing_content_vectors_only() -> None:
             source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
             confidence REAL NOT NULL, sensitivity TEXT NOT NULL
         );
+        -- Topology v2 Wave A tables — minimal shapes so this test
+        -- isolates `content_vectors` as the only missing table.
+        CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_cc_pairs (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_containers (cc_pair_id INTEGER, container_id TEXT);
+        CREATE TABLE topology_hierarchy_nodes (cc_pair_id INTEGER, raw_node_id TEXT);
+        CREATE TABLE topology_collections (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_collection_sources (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_federated_connectors (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_group_grants (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_scope_profiles (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_scope_entries (id INTEGER PRIMARY KEY);
+        CREATE TABLE topology_skills (id INTEGER PRIMARY KEY);
     """)
     errors = validate_schema(db)
     assert len(errors) == 1

@@ -169,6 +169,10 @@ pytest_plugins = [
     # Wave 5 KP-3 — M365 calendar connector + flag.
     "tests.bdd.steps.connector_m365_calendar_steps",
     "tests.bdd.steps.feature_flag_connector_m365_calendar_steps",
+    # Topology v2 Wave A — schema additions + new dataclasses behind
+    # ``topology_v2_schema`` flag. F54 both-branch coverage. See
+    # docs/architecture/connector-scope-topology/ADR.md.
+    "tests.bdd.steps.feature_flag_topology_v2_schema_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
