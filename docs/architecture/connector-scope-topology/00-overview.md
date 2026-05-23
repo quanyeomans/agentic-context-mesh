@@ -69,12 +69,12 @@ The design needs to balance:
 | Section | Status |
 |---|---|
 | `00-overview.md` | drafted 2026-05-23 |
-| `01-source-analysis.md` | in progress |
-| `02-use-cases.md` | not started |
-| `03-bdd-scenarios.md` | not started |
-| `04-simulation.md` | not started |
-| `05-non-functionals.md` | not started |
-| `ADR.md` | pending — gated on simulation convergence |
+| `01-source-analysis.md` | drafted 2026-05-23 (8 connector kinds; 3 closed via external research) |
+| `02-use-cases.md` | drafted 2026-05-23 (14 use cases across 5 modalities) |
+| `03-bdd-scenarios.md` | drafted 2026-05-23 (30+ Gherkin scenarios) |
+| `04-simulation.md` | drafted 2026-05-23 (12 break points + resolutions) |
+| `05-non-functionals.md` | drafted 2026-05-23 (storage / freshness / latency / cost per source) |
+| `ADR.md` | drafted 2026-05-23 — **PROPOSED**, pending review |
 
 External research gaps tracked in `01-source-analysis.md` §"Open
 questions" per connector.

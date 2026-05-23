@@ -465,6 +465,7 @@ Waves 0–2 deliver the vault's stated Wave-1 exit criteria. Waves 3–6 absorb 
 
 ## 12. References
 
+- `connector-scope-topology/` — **proposed evolution** of this framework. The Wave 0–5 framework defined here is foundational; the connector-scope-topology ADR adds the layered model (connector instance / container / collection / scope profile / skill) for multi-instance + multi-tenant + per-actor-scoped retrieval. See `connector-scope-topology/ADR.md`.
 - `provider-plugin-architecture.md` — the architectural precedent this document mirrors
 - `fitness-functions.md` — F-rule canon; this document adds F34–F44
 - `ENGINEERING.md` — repository-wide testing patterns
