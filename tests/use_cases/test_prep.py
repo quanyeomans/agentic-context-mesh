@@ -421,21 +421,21 @@ def test_fact_row_short_snippet_is_not_filtered_by_chunk_floor() -> None:
          (the fact row was filtered out, sources came back empty).
       3. Restored the exemption → test passes again.
     """
-    fact_inner = _FakeInner(title="Caroline — role", path="facts://fact-001")
-    fact_snippet = "Caroline role: VP of People"  # 27 chars, below the 40-char chunk floor
+    fact_inner = _FakeInner(title="agent-alpha — role", path="facts://fact-001")
+    fact_snippet = "agent-alpha role: VP of People"  # 27 chars, below the 40-char chunk floor
     assert len(fact_snippet) < 40, "Snippet must be below the chunk floor for this test to be meaningful"
 
     sr = _FakeSearchResult(results=[_FakeBudgeted(result=fact_inner, content=fact_snippet)])
-    deps, captured = _build_deps(sr=sr, summary="Caroline is VP of People.")
-    out = run_prep("What is Caroline's role?", deps=deps)
+    deps, captured = _build_deps(sr=sr, summary="agent-alpha is VP of People.")
+    out = run_prep("What is agent-alpha's role?", deps=deps)
 
     assert out.error == ""
-    assert out.sources == ["Caroline — role"], (
+    assert out.sources == ["agent-alpha — role"], (
         "fact row should survive the chunk floor exemption — if this assertion fails, "
         "the D1 regression has returned and short fact snippets are being filtered again"
     )
     user_msg = captured["chat"]["messages"][1]["content"]
-    assert "Caroline role: VP of People" in user_msg, (
+    assert "agent-alpha role: VP of People" in user_msg, (
         "fact snippet content must reach the LLM message body, not just the sources list"
     )
 
