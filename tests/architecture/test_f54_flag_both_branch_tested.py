@@ -165,11 +165,18 @@ def test_remediation_carries_action_markers() -> None:
     assert "run:" in rem
 
 
-def test_vacuous_green_when_module_absent() -> None:
-    """The detector returns 0 when kairix.core.features.registry is absent.
+def test_loads_live_registry_after_pr6() -> None:
+    """Post-PR-6 the detector loads the live registry; ``main()`` stays
+    green because the obsidian_connector_primary flag carries the
+    canonical BDD feature file + integration test + E2E composed-path
+    artefacts in the same commit (F54's contract).
 
-    PR-2 may not be landed yet; F54 must not block.
+    Sabotage proof: delete
+    ``tests/bdd/features/feature_flag_obsidian_connector_primary.feature``
+    → F54 fires on missing-feature-file and ``main()`` returns 1.
     """
     detector = _load_detector()
-    assert detector._load_registry() is None  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    registry = detector._load_registry()  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert registry is not None, "registry must load cleanly post-PR-2"
+    assert "obsidian_connector_primary" in registry
     assert detector.main() == 0  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs

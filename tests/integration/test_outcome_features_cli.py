@@ -35,8 +35,8 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def test_features_status_subprocess_text_mode_reports_empty_registry() -> None:
-    """Empty registry → exit 0 + friendly "No feature flags" line on stdout."""
+def test_features_status_subprocess_text_mode_lists_registered_flags() -> None:
+    """Populated registry → exit 0 + the obsidian_connector_primary row on stdout."""
     t0 = time.monotonic()
     proc = subprocess.run(
         [sys.executable, "-m", "kairix.cli", "features", "status"],
@@ -49,8 +49,8 @@ def test_features_status_subprocess_text_mode_reports_empty_registry() -> None:
     assert proc.returncode == 0, (
         f"features status exited {proc.returncode}\n--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
     )
-    assert "No feature flags registered" in proc.stdout, (
-        f"expected friendly empty-registry line in stdout: {proc.stdout!r}"
+    assert "obsidian_connector_primary" in proc.stdout, (
+        f"expected the obsidian_connector_primary row in stdout: {proc.stdout!r}"
     )
     # Operator surfaces should stay fast — failing the budget here means
     # the dispatcher is doing real work it shouldn't.
@@ -79,7 +79,9 @@ def test_features_status_subprocess_json_mode_emits_envelope() -> None:
     parsed = json.loads(proc.stdout)
     assert "flags" in parsed, f"expected 'flags' key in envelope; got keys: {list(parsed)}"
     assert isinstance(parsed["flags"], list), f"expected 'flags' to be a list; got {type(parsed['flags']).__name__}"
-    # Registry is empty at PR-2 landing — every future PR that adds a
-    # flag will see this list grow. The shape itself is what F30 asserts;
-    # the per-flag contents live in PR-6+ outcome tests.
-    assert parsed["flags"] == [], f"expected empty flags list at PR-2 landing; got: {parsed['flags']!r}"
+    # Registry has the obsidian_connector_primary entry at PR-6 landing;
+    # every future PR that adds a flag will see this list grow.
+    names = [entry["name"] for entry in parsed["flags"]]
+    assert "obsidian_connector_primary" in names, (
+        f"expected obsidian_connector_primary in flags list at PR-6 landing; got: {names!r}"
+    )

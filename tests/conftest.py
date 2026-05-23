@@ -157,6 +157,9 @@ pytest_plugins = [
     # See docs/architecture/feature-flag-architecture.md.
     "tests.bdd.steps.cli_features_steps",
     "tests.bdd.steps.mcp_features_status_steps",
+    # PR-6 — IM-6 recast: ``obsidian_connector_primary`` flag at introduce
+    # stage. Both-branch coverage per F54.
+    "tests.bdd.steps.feature_flag_obsidian_connector_primary_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

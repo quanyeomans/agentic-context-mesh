@@ -424,16 +424,158 @@ def run_connector_sync_pipeline(deps: ConnectorSyncDeps | None = None) -> Connec
         db.close()
 
 
-def _default_connector_sync() -> ConnectorSyncResult:
-    """Zero-arg shim wiring :class:`WorkerDeps.connector_sync_fn` to
-    :func:`run_connector_sync_pipeline` with default dependencies.
+def run_via_connector_pipeline(deps: ConnectorSyncDeps | None = None) -> ConnectorSyncResult:
+    """Flag-ON branch — drive every configured connector through the
+    canonical :class:`~kairix.core.connectors.ConnectorPipeline`.
 
-    The shim exists because :class:`WorkerDeps.connector_sync_fn` has
-    type ``Callable[[], ConnectorSyncResult]``; the Deps-class shape on
-    :func:`run_connector_sync_pipeline` carries the F6-clean seam tests
-    use, and this shim adapts it for the worker-loop dispatch slot.
+    Thin shim over :func:`run_connector_sync_pipeline`. The split
+    exists so the OFF and ON branches stay symmetrical in
+    :func:`_default_connector_sync` — one named helper each, no inline
+    orchestration. Emits a branch-identifier INFO log so operators
+    (and BDD scenarios) can see which path the flag selected this tick.
+
+    ``deps`` is the F6-clean injection seam — production callers omit
+    it and the default ``ConnectorSyncDeps()`` factory wires the real
+    boundary calls; BDD + integration tests pass a tmp_path-rooted
+    deps object so the pipeline runs against a sandboxed DB / config.
     """
-    return run_connector_sync_pipeline()
+    logger.info("worker: connector sync routing via obsidian connector pipeline (flag ON)")
+    return run_connector_sync_pipeline(deps)
+
+
+@dataclass
+class LegacyScannerDeps:
+    """Injectable dependencies for :func:`run_via_legacy_document_scanner`.
+
+    F6-clean: every field carries a ``default_factory`` so production
+    callers construct ``LegacyScannerDeps()`` and get the real boundary
+    functions; tests build ``LegacyScannerDeps(document_root_resolver=...,
+    db_factory=...)`` to sandbox the scanner against a tmp_path-rooted
+    document store. Mirrors :class:`ConnectorSyncDeps`'s discipline for
+    the sibling ON-branch path.
+
+    Fields:
+      * ``document_root_resolver`` — returns the legacy document root;
+        default :func:`kairix.paths.document_root`.
+      * ``db_factory`` — opens the SQLite connection the scanner writes
+        through; default :func:`kairix.core.db.open_db`.
+    """
+
+    document_root_resolver: Callable[[], Path] = field(default_factory=lambda: document_root)
+    db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
+
+
+def run_via_legacy_document_scanner(deps: LegacyScannerDeps | None = None) -> ConnectorSyncResult:
+    """Flag-OFF branch — pre-IM-3 ``DocumentScanner`` indexing path.
+
+    Runs the legacy ``kairix.core.db.scanner.DocumentScanner`` over the
+    configured :func:`document_root`, then reports the scan counters in
+    a :class:`ConnectorSyncResult` so the maintenance-cycle dispatch
+    surface stays uniform across branches:
+
+    * ``synced`` = ``ScanReport.new + ScanReport.updated`` — items the
+      scanner brought into the index this tick.
+    * ``failed`` = ``ScanReport.errors`` — per-file read / hash errors
+      the scanner logged but absorbed.
+    * ``dead_letter_added`` = 0 — the legacy scanner has no dead-letter
+      surface (that's a connector-framework affordance).
+
+    When the document root does not exist the scanner short-circuits to
+    a zero-counter result without raising — same no-op posture as the
+    ``run_connector_sync_pipeline`` empty-config branch, so flipping the
+    flag on/off on an empty deploy is symmetrical.
+
+    ``deps`` is the F6-clean injection seam — production callers omit
+    ``deps`` and the default factory wires real boundary calls; BDD +
+    integration tests pass a ``LegacyScannerDeps`` rooted at tmp_path so
+    the legacy branch never touches the dev's real vault.
+    """
+    logger.info("worker: connector sync routing via legacy document scanner (flag OFF)")
+    deps = deps if deps is not None else LegacyScannerDeps()
+    droot = deps.document_root_resolver()
+    if not droot.exists():
+        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+    from kairix.core.db.scanner import CollectionConfig, DocumentScanner
+
+    db = deps.db_factory()
+    try:
+        scanner = DocumentScanner(db, document_root=droot)
+        report = scanner.scan([CollectionConfig(name="default", path=".")])
+    finally:
+        db.close()
+
+    return ConnectorSyncResult(
+        synced=report.new + report.updated,
+        failed=report.errors,
+        dead_letter_added=0,
+    )
+
+
+def _default_connector_sync() -> ConnectorSyncResult:
+    """Worker-loop dispatch slot for the connector-sync maintenance task.
+
+    Branches on the ``obsidian_connector_primary`` feature flag (PR-6
+    of the feature-flag plan; see
+    ``docs/architecture/feature-flag-architecture.md`` §7):
+
+    * Flag **OFF** (default) — legacy ``DocumentScanner`` path. Keeps
+      pre-IM-3 indexing behaviour intact so the cutover is reversible
+      until the flag is retired (see §4 lifecycle).
+    * Flag **ON** — :class:`~kairix.core.connectors.ConnectorPipeline`
+      path. Each configured connector is driven through
+      list_changes → fetch → bronze → silver → cursor.advance.
+
+    Both code paths stay present until the flag retires; F54 requires
+    both branches to carry tests (BDD + integration + E2E).
+
+    Production callers reach this via ``WorkerDeps.connector_sync_fn``
+    default-factory. Tests that need to pin the flag value compose
+    :func:`dispatch_connector_sync` with a ``FakeFeatureFlagResolver``
+    and pass the result through ``WorkerDeps(connector_sync_fn=...)``
+    — see :func:`dispatch_connector_sync` for the composition shape.
+    """
+    return dispatch_connector_sync()
+
+
+def _default_flag_value(name: str) -> bool:
+    """Production default for :func:`dispatch_connector_sync`'s
+    ``read_flag`` argument — delegates to :func:`kairix.core.features.flag`.
+
+    Lifted to a module-level helper so the dispatcher's signature can
+    carry a real callable default (F6-clean) without a per-call
+    ``Optional[...] = None`` shape.
+    """
+    from kairix.core.features import flag as _prod_flag
+
+    return _prod_flag(name)
+
+
+def dispatch_connector_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_connector_pipeline,
+    off_branch: Callable[[], ConnectorSyncResult] = run_via_legacy_document_scanner,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the connector-sync slot.
+
+    Public function that the BDD + integration tests reach to pin a
+    specific flag value through a :class:`FakeFeatureFlagResolver`
+    without monkey-patching the resolver module (F1-clean). The
+    parameter names deliberately avoid the F6 ``_fn`` / ``_resolver``
+    / ``_factory`` / ``_loader`` / ``_builder`` / ``_provider``
+    suffixes because they're real boundary callables on a public
+    composition root, not test-only seams.
+
+    ``on_branch`` / ``off_branch`` default to the real production
+    branch helpers — the BDD step file leaves them unchanged and
+    observes the branch via the distinct INFO logs each helper emits.
+    Integration tests likewise leave them defaulted or pass
+    tmp_path-rooted variants when they need to assert against the
+    resulting ConnectorSyncResult counters.
+    """
+    if read_flag("obsidian_connector_primary"):
+        return on_branch()
+    return off_branch()
 
 
 @dataclass

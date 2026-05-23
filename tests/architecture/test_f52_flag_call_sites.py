@@ -134,11 +134,21 @@ def test_remediation_carries_action_markers() -> None:
     assert "run:" in rem
 
 
-def test_vacuous_green_when_module_absent() -> None:
-    """The detector returns 0 when kairix.core.features.registry is absent.
+def test_loads_live_registry_names_after_pr6() -> None:
+    """Post-PR-6 the detector loads the live registry name set.
 
-    PR-2 may not be landed yet; F52 must not block.
+    Pre-PR-2 the registry module was absent and ``_load_registry_names``
+    returned ``None``. PR-2 made it importable (empty set); PR-6 added
+    the first entry. ``main()`` stays green because the production
+    ``flag("obsidian_connector_primary")`` call site in ``kairix.worker``
+    references a name that exists in the registry.
+
+    Sabotage proof: rename the registry entry's name field to something
+    other than ``"obsidian_connector_primary"`` → the worker's call
+    site no longer matches and F52 fires.
     """
     detector = _load_detector()
-    assert detector._load_registry_names() is None  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    names = detector._load_registry_names()  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
+    assert names is not None, "registry must load cleanly post-PR-2"
+    assert "obsidian_connector_primary" in names
     assert detector.main() == 0  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs

@@ -29,19 +29,24 @@ from kairix.agents.mcp.server import tool_features_status
 pytestmark = pytest.mark.integration
 
 
-def test_tool_features_status_envelope_carries_empty_flags_list_at_pr2() -> None:
-    """Empty registry → envelope has ``flags == []`` and ``error == ""``.
+def test_tool_features_status_envelope_carries_obsidian_connector_primary_at_pr6() -> None:
+    """PR-6 registry → envelope's ``flags`` list contains the
+    obsidian_connector_primary entry; ``error == ""``.
 
     Drives the production happy path: the MCP tool delegates to
-    :func:`kairix.core.features.status`; the resolver returns an empty
-    tuple; ``asdict`` projection yields an empty ``flags`` list. The
-    envelope must be JSON-serialisable (every key a string, every leaf
-    primitive) so FastMCP can ship it on the wire.
+    :func:`kairix.core.features.status`; the resolver projects every
+    registry entry to a :class:`FlagStatus`; ``asdict`` yields the
+    JSON-serialisable envelope. Pinning the per-flag name proves the
+    composed surface flows live registry data through the tool — not
+    just any list.
     """
     envelope = tool_features_status()
 
-    assert envelope["flags"] == [], f"expected empty 'flags' list at PR-2 landing; got: {envelope['flags']!r}"
     assert envelope["error"] == "", f"expected empty 'error' string; got: {envelope['error']!r}"
+    names = [entry["name"] for entry in envelope["flags"]]
+    assert "obsidian_connector_primary" in names, (
+        f"expected obsidian_connector_primary entry at PR-6 landing; got: {names!r}"
+    )
 
 
 def test_tool_features_status_envelope_has_documented_keys() -> None:

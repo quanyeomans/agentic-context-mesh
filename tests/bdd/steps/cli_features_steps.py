@@ -36,25 +36,31 @@ def _features_state() -> dict[str, Any]:
 
 
 @given("the kairix features registry is empty")
-def _registry_is_empty() -> None:
-    """No-op — the registry is empty at PR-2 landing.
+def _registry_is_empty(_features_state: dict[str, Any]) -> None:
+    """Pin the scenario to an empty-registry view via the CLI's
+    ``status_provider`` DI seam.
 
-    Future PRs that add flags will need a setup hook here that captures
-    and restores the registry's snapshot per scenario. For now the
-    assertion is implicit: ``REGISTRY`` is the empty dict on import.
+    The CLI's ``main`` accepts a ``status_provider`` kwarg specifically
+    so tests can substitute the snapshot without touching the global
+    REGISTRY. Storing the empty-tuple provider in the per-scenario
+    state lets the @when steps thread it through unchanged.
     """
+    _features_state["status_provider"] = lambda: ()
 
 
 def _run_features_status(state: dict[str, Any], *, json_mode: bool) -> None:
     """Invoke ``kairix features status`` and capture stdout + exit code.
 
     Wraps the call so both scenarios share one path — the JSON-mode
-    scenario only differs in the argv it passes.
+    scenario only differs in the argv it passes. ``state[status_provider]``
+    is the DI seam set by the @given that pins the registry view.
     """
     argv = ["status", "--json"] if json_mode else ["status"]
     buf = io.StringIO()
+    provider = state.get("status_provider")
+    kwargs = {"status_provider": provider} if provider is not None else {}
     with redirect_stdout(buf):
-        exit_code = features_main(argv)
+        exit_code = features_main(argv, **kwargs)
     state["stdout"] = buf.getvalue()
     state["exit_code"] = exit_code if exit_code is not None else 0
 

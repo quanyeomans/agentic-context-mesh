@@ -45,8 +45,26 @@ class FeatureFlag:
     related_spec: str | None = None
 
 
-# Public registry. Empty at PR-2 landing — future PRs add entries.
-REGISTRY: dict[str, FeatureFlag] = {}
+# Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
+# at introduce stage (default off). Future PRs add Wave 5+ connector flags.
+REGISTRY: dict[str, FeatureFlag] = {
+    "obsidian_connector_primary": FeatureFlag(
+        name="obsidian_connector_primary",
+        default=False,
+        description=(
+            "Route document indexing through kairix.connectors.obsidian instead of the legacy DocumentScanner."
+        ),
+        stage="introduce",
+        # IM-6 cutover plan (per feature-flag-architecture.md §7):
+        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
+        # soak → retire. ``target_retire_in`` is 2 months from the
+        # introduce-stage landing (current 2026-05 dispatch window).
+        introduced_in="v2026.5.23",
+        target_retire_in="v2026.7.23",
+        owner="connector-framework",
+        related_spec="docs/architecture/connector-ingestion-architecture.md",
+    ),
+}
 
 
 def validate_registry(registry: dict[str, FeatureFlag]) -> None:
