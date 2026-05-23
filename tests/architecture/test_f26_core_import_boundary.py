@@ -79,14 +79,36 @@ def test_core_imports_providers_is_flagged(tmp_path: Path) -> None:
     ``kairix.core`` module clears the flag.
     """
     detector = _load_detector()
-    target = tmp_path / "kairix" / "core" / "factory.py"
+    target = tmp_path / "kairix" / "core" / "some_consumer.py"
     _write(target, "from kairix.providers.azure_foundry import make_provider\n")
     violations = detector.collect_violations(tmp_path)
-    assert Path("kairix/core/factory.py") in violations
+    assert Path("kairix/core/some_consumer.py") in violations
 
     # Sabotage: replace with a legal core sibling import.
     _write(target, "from kairix.core.protocols import LLMBackend\n")
     assert detector.collect_violations(tmp_path) == set()
+
+
+def test_factory_composition_root_is_exempt(tmp_path: Path) -> None:
+    """``kairix/core/factory.py`` is the composition root — by architectural
+    design it crosses the layer boundary to wire concrete providers into
+    pipelines. The rule encodes this as an explicit allowlist (see
+    ``_ALLOWLIST_PATHS`` in ``check_provider_layer_imports.py``); the
+    f26-files baseline must stay empty.
+
+    Sabotage-proof inline: the same import lands in a sibling file
+    (``some_other.py``) and IS flagged — proving the allowlist is
+    factory-specific, not a blanket disable.
+    """
+    detector = _load_detector()
+    factory = tmp_path / "kairix" / "core" / "factory.py"
+    _write(factory, "from kairix.providers.openai import OpenAIProvider\n")
+    assert detector.collect_violations(tmp_path) == set()
+
+    # Sabotage: the same import in a non-factory file IS flagged.
+    sibling = tmp_path / "kairix" / "core" / "some_other.py"
+    _write(sibling, "from kairix.providers.openai import OpenAIProvider\n")
+    assert Path("kairix/core/some_other.py") in detector.collect_violations(tmp_path)
 
 
 def test_core_imports_transport_via_plain_import_is_flagged(tmp_path: Path) -> None:

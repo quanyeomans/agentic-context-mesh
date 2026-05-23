@@ -91,9 +91,9 @@ missing_keys=""
 for key in "${REQUIRED_KEYS[@]}"; do
     value=$(
         set +u
-        # shellcheck disable=SC1090
+        # shellcheck disable=SC1090 # rationale: $SECRETS_FILE path is operator-supplied at runtime, so it can't be a literal here; the subshell isolates any side effects.
         . "$SECRETS_FILE" 2>/dev/null
-        # shellcheck disable=SC1090
+        # shellcheck disable=SC1090 # rationale: ${APP_DIR}/.env is operator-deploy-time, not a literal we can statically source.
         . "${APP_DIR}/.env" 2>/dev/null
         eval "echo \${${key}:-}"
     )

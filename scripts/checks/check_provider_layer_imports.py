@@ -46,6 +46,20 @@ _FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "kairix.transport",
 )
 
+# Composition-root exemption. ``kairix/core/factory.py`` is the runtime
+# wire-up — it must import concrete providers/transport to compose
+# protocol implementations into pipelines. The exemption is encoded
+# here (not as an open baseline entry) because it's an architectural
+# invariant, not pre-existing tech debt. See
+# ``docs/architecture/provider-plugin-architecture.md`` §"Composition
+# root" for the rationale; the factory is the *only* file in core/
+# whose job description is to cross the layer boundary.
+_ALLOWLIST_PATHS: frozenset[str] = frozenset(
+    {
+        "kairix/core/factory.py",
+    }
+)
+
 REMEDIATION = """Refactor to route the call through a Protocol in
 kairix/core/protocols.py — domain code must not know which provider or
 transport is loaded.
@@ -133,6 +147,12 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     violations: set[Path] = set()
     for path in core_dir.rglob("*.py"):
         if "__pycache__" in path.parts:
+            continue
+        try:
+            rel = path.resolve().relative_to(repo_root)
+        except ValueError:
+            continue
+        if rel.as_posix() in _ALLOWLIST_PATHS:
             continue
         if file_has_violation(path):
             try:
