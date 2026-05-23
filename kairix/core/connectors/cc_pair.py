@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
+from typing import Any
 
 from kairix.core.protocols import (
     CCPairAccessType,
@@ -68,7 +69,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _row_to_cc_pair(row: tuple) -> ConnectorCredentialPair:  # type: ignore[type-arg]  # F3-rationale: sqlite3.Row index access; full typing requires runtime row-factory dance not worth the noise here.
+def _row_to_cc_pair(row: tuple[Any, ...]) -> ConnectorCredentialPair:
     """Map an ``topology_cc_pairs`` row tuple to the frozen dataclass."""
     return ConnectorCredentialPair(
         id=row[0],
