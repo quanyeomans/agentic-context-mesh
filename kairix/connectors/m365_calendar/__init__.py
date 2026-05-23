@@ -38,7 +38,13 @@ from kairix.connectors.m365_calendar.graph_client import (
     M365GraphCalendarClient,
 )
 
+# F56 capability declaration (Wave B shims duck-type Protocol satisfaction).
+CAPABILITIES: frozenset[str] = frozenset(
+    {"SourceConnector", "CheckpointedConnector", "CredentialsConnector", "OAuthConnector"}
+)
+
 __all__ = [
+    "CAPABILITIES",
     "CalendarDeltaPage",
     "CalendarEventRecord",
     "M365CalendarConfig",

@@ -37,7 +37,11 @@ from __future__ import annotations
 
 from kairix.connectors.dex_crm.connector import DexCrmConnector, make_connector
 
+# F56 capability declaration (Wave B shims duck-type Protocol satisfaction).
+CAPABILITIES: frozenset[str] = frozenset({"SourceConnector", "PollConnector", "CredentialsConnector"})
+
 __all__ = [
+    "CAPABILITIES",
     "DexCrmConnector",
     "make_connector",
 ]

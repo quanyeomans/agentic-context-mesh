@@ -29,7 +29,14 @@ from kairix.connectors.obsidian.connector import ObsidianConnector, make_connect
 from kairix.connectors.obsidian.reconciler import FullScanReconciler
 from kairix.connectors.obsidian.watcher import WatchdogSource
 
+# F56 capability declaration. Wave B added Protocol-satisfying shims by
+# duck-typing rather than inheritance; this marker lets the AST detector
+# agree (the runtime isinstance probe also passes locally but CI may not
+# have optional deps installed for the import probe to succeed).
+CAPABILITIES: frozenset[str] = frozenset({"SourceConnector", "PollConnector", "SlimConnector", "HierarchyConnector"})
+
 __all__ = [
+    "CAPABILITIES",
     "FullScanReconciler",
     "ObsidianConnector",
     "WatchdogSource",
