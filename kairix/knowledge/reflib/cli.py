@@ -20,6 +20,17 @@ from kairix.paths import reflib_root_override
 
 _REFLIB_ROOT_HELP = "Reference library root directory (default: KAIRIX_REFLIB_ROOT env var)"
 
+# F17 — argparse + status-envelope keys repeated across subparsers and the
+# status emit/printer paths; extract so a rename hits a single edit site.
+_FLAG_REFLIB_ROOT = "--reflib-root"
+_STORE_TRUE = "store_true"
+_KEY_COLLECTIONS = "collections"
+_KEY_NODES_FILE = "nodes_file"
+_KEY_EDGES_FILE = "edges_file"
+_KEY_NODE_COUNT = "node_count"
+_KEY_EDGE_COUNT = "edge_count"
+_KEY_LAST_MODIFIED = "last_modified"
+
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
@@ -34,12 +45,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Load extracted entities from the reference library into Neo4j",
     )
     install_p.add_argument(
-        "--reflib-root",
+        _FLAG_REFLIB_ROOT,
         default=None,
         help=_REFLIB_ROOT_HELP,
     )
-    install_p.add_argument("--dry-run", action="store_true", help="Validate without writing to Neo4j")
-    install_p.add_argument("--verbose", action="store_true", help="Show per-entity detail")
+    install_p.add_argument("--dry-run", action=_STORE_TRUE, help="Validate without writing to Neo4j")
+    install_p.add_argument("--verbose", action=_STORE_TRUE, help="Show per-entity detail")
 
     # ── status ──────────────────────────────────────────────────────────────
     status_p = sub.add_parser(
@@ -47,11 +58,11 @@ def main(argv: list[str] | None = None) -> None:
         help="Show reference library installation status and entity counts",
     )
     status_p.add_argument(
-        "--reflib-root",
+        _FLAG_REFLIB_ROOT,
         default=None,
         help=_REFLIB_ROOT_HELP,
     )
-    status_p.add_argument("--json", dest="json_out", action="store_true", help="Output as JSON")
+    status_p.add_argument("--json", dest="json_out", action=_STORE_TRUE, help="Output as JSON")
 
     # ── extract (placeholder) ───────────────────────────────────────────────
     extract_p = sub.add_parser(
@@ -59,7 +70,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Run entity extraction on reference library collections (placeholder)",
     )
     extract_p.add_argument(
-        "--reflib-root",
+        _FLAG_REFLIB_ROOT,
         default=None,
         help=_REFLIB_ROOT_HELP,
     )
@@ -158,12 +169,12 @@ def _cmd_status(args: argparse.Namespace) -> None:
     status: dict[str, Any] = {
         "reflib_root": str(reflib_root),
         "entities_dir_exists": entities_dir.is_dir(),
-        "collections": _discover_collections(reflib_root),
-        "nodes_file": None,
-        "edges_file": None,
-        "node_count": 0,
-        "edge_count": 0,
-        "last_modified": None,
+        _KEY_COLLECTIONS: _discover_collections(reflib_root),
+        _KEY_NODES_FILE: None,
+        _KEY_EDGES_FILE: None,
+        _KEY_NODE_COUNT: 0,
+        _KEY_EDGE_COUNT: 0,
+        _KEY_LAST_MODIFIED: None,
     }
 
     _read_entity_files(entities_dir, status)
@@ -191,36 +202,38 @@ def _read_entity_files(entities_dir: Path, status: dict[str, Any]) -> None:
     if nodes_path.exists():
         try:
             nodes_data = json.loads(nodes_path.read_text(encoding="utf-8"))
-            status["nodes_file"] = str(nodes_path)
-            status["node_count"] = len(nodes_data)
+            status[_KEY_NODES_FILE] = str(nodes_path)
+            status[_KEY_NODE_COUNT] = len(nodes_data)
             mtime = datetime.fromtimestamp(nodes_path.stat().st_mtime)
-            status["last_modified"] = mtime.isoformat()
+            status[_KEY_LAST_MODIFIED] = mtime.isoformat()
         except (json.JSONDecodeError, OSError):
-            status["nodes_file"] = f"{nodes_path} (unreadable)"
+            status[_KEY_NODES_FILE] = f"{nodes_path} (unreadable)"
 
     if edges_path.exists():
         try:
             edges_data = json.loads(edges_path.read_text(encoding="utf-8"))
-            status["edges_file"] = str(edges_path)
-            status["edge_count"] = len(edges_data)
+            status[_KEY_EDGES_FILE] = str(edges_path)
+            status[_KEY_EDGE_COUNT] = len(edges_data)
         except (json.JSONDecodeError, OSError):
-            status["edges_file"] = f"{edges_path} (unreadable)"
+            status[_KEY_EDGES_FILE] = f"{edges_path} (unreadable)"
 
 
 def _format_status_text(status: dict[str, Any]) -> str:
     """Format status dict as human-readable text."""
+    collections = status[_KEY_COLLECTIONS]
+    last_modified = status[_KEY_LAST_MODIFIED]
     lines = [
         "Reference Library Status",
         f"  Root:       {status['reflib_root']}",
-        f"  Collections: {len(status['collections'])}",
+        f"  Collections: {len(collections)}",
     ]
-    for c in status["collections"]:
+    for c in collections:
         lines.append(f"    - {c}")
     lines.append(f"  Entities dir: {'yes' if status['entities_dir_exists'] else 'no'}")
-    lines.append(f"  Nodes:  {status['node_count']}")
-    lines.append(f"  Edges:  {status['edge_count']}")
-    if status["last_modified"]:
-        lines.append(f"  Last indexed: {status['last_modified']}")
+    lines.append(f"  Nodes:  {status[_KEY_NODE_COUNT]}")
+    lines.append(f"  Edges:  {status[_KEY_EDGE_COUNT]}")
+    if last_modified:
+        lines.append(f"  Last indexed: {last_modified}")
     return "\n".join(lines)
 
 

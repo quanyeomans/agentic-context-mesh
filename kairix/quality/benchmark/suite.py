@@ -271,14 +271,17 @@ def validate_gold_titles_structure(
         return
 
     for j, gt in enumerate(gold_titles):
+        # F17 — single error-prefix template shared across every branch keeps the
+        # "gold_titles[N]" call-out in a single edit site.
+        prefix = f"Case [{i}] ({case_id}): gold_titles[{j}]"
         if not isinstance(gt, dict):
-            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] must be a mapping")
+            errors.append(f"{prefix} must be a mapping")
         elif "title" not in gt:
-            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'title'")
+            errors.append(f"{prefix} missing required field 'title'")
         elif "relevance" not in gt:
-            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] missing required field 'relevance'")
+            errors.append(f"{prefix} missing required field 'relevance'")
         elif gt["relevance"] not in (0, 1, 2):
-            errors.append(f"Case [{i}] ({case_id}): gold_titles[{j}] relevance must be 0, 1, or 2")
+            errors.append(f"{prefix} relevance must be 0, 1, or 2")
 
 
 _VALID_SCOPE_VALUES = frozenset({"shared", "agent", "shared+agent", "all-agents", "everything"})

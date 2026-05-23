@@ -92,10 +92,15 @@ def canonical_path(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+# F17 — "collection" dict-key and "organisation" entity-label are read repeatedly
+# downstream; extract so a key rename hits a single edit site.
+_KEY_COLLECTION = "collection"
+_LABEL_ORGANISATION = "organisation"
+
 _LABEL_TO_DIR: dict[str, str] = {
     "person": "person",
-    "organisation": "organisation",
-    "organization": "organisation",
+    _LABEL_ORGANISATION: _LABEL_ORGANISATION,
+    "organization": _LABEL_ORGANISATION,
     "concept": "concept",
 }
 
@@ -193,7 +198,7 @@ def _rrf_impl(
         if path not in fused:
             fused[path] = FusedResult(
                 path=path,
-                collection=result["collection"],
+                collection=result[_KEY_COLLECTION],
                 title=result["title"],
                 snippet=result["snippet"],
                 source_page=_extract_source_page(result),
@@ -212,7 +217,7 @@ def _rrf_impl(
         if path not in fused:
             fused[path] = FusedResult(
                 path=path,
-                collection=result["collection"],
+                collection=result[_KEY_COLLECTION],
                 title=result["title"],
                 snippet=result["snippet"],
                 source_page=_extract_source_page(result),
@@ -308,7 +313,7 @@ def _bm25_primary_impl(
 
         fr = FusedResult(
             path=path,
-            collection=result["collection"],
+            collection=result[_KEY_COLLECTION],
             title=result["title"],
             snippet=result["snippet"],
             in_bm25=True,
@@ -333,7 +338,7 @@ def _bm25_primary_impl(
 
         fr = FusedResult(
             path=path,
-            collection=result["collection"],
+            collection=result[_KEY_COLLECTION],
             title=result["title"],
             snippet=result["snippet"],
             in_vec=True,

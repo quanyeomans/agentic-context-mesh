@@ -48,14 +48,18 @@ class TemporalChunk:
 # Patterns
 # ---------------------------------------------------------------------------
 
+# F17 — "in_progress" is the normalised status value emitted from three heading
+# variants; extract so a status-vocabulary change hits a single edit site.
+_STATUS_IN_PROGRESS = "in_progress"
+
 # Kanban column headings — normalised to status strings
 _COLUMN_STATUS: dict[str, str] = {
     "done": "done",
     "completed": "done",
     "finished": "done",
-    "in progress": "in_progress",
-    "in-progress": "in_progress",
-    "wip": "in_progress",
+    "in progress": _STATUS_IN_PROGRESS,
+    "in-progress": _STATUS_IN_PROGRESS,
+    "wip": _STATUS_IN_PROGRESS,
     "ready": "ready",
     "todo": "ready",
     "to do": "ready",

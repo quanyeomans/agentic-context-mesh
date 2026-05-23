@@ -59,6 +59,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# F17 — default query-generation deployment + ndcg score-method label repeat
+# across every generator signature and case-emit path; extract so a rename
+# hits a single edit site.
+_DEFAULT_DEPLOYMENT = "gpt-4o-mini"
+_KEY_SCORE_METHOD = "score_method"
+_SCORE_METHOD_NDCG = "ndcg"
+
 
 # Path to kairix's SQLite index (resolved via kairix.core.db)
 def _get_db_path_str() -> str:
@@ -360,7 +367,7 @@ def generate_queries(
     categories: list[str] | None = None,
     api_key: str = "",
     endpoint: str = "",
-    deployment: str = "gpt-4o-mini",
+    deployment: str = _DEFAULT_DEPLOYMENT,
     source_doc_path: str = "",
     chat_backend: ChatBackend | None = None,
 ) -> list[GeneratedQuery]:
@@ -581,7 +588,7 @@ def build_case(
         "id": case_id,
         "category": intent,
         "query": query,
-        "score_method": "ndcg",
+        _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
         "gold_titles": gold_titles,
     }
 
@@ -688,7 +695,7 @@ def write_generated_suite(
             "generated_by": "kairix eval generate",
             "n_cases": len(cases),
             "categories": cats,
-            "score_method": "ndcg",
+            _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
         },
         "cases": cases,
     }
@@ -713,7 +720,7 @@ def generate_suite(
     categories: list[str] | None = None,
     api_key: str | None = None,
     endpoint: str | None = None,
-    deployment: str = "gpt-4o-mini",
+    deployment: str = _DEFAULT_DEPLOYMENT,
     calibrate_first: bool = True,
     seed: int | None = None,
     agent: str = "shape",
@@ -741,7 +748,7 @@ def enrich_suite(
     db_path: str = _get_db_path_str(),
     api_key: str | None = None,
     endpoint: str | None = None,
-    deployment: str = "gpt-4o-mini",
+    deployment: str = _DEFAULT_DEPLOYMENT,
     agent: str = "shape",
 ) -> EnrichmentResult:
     """Production-default shim — see ``SuiteGenerator.enrich_suite``."""
@@ -866,7 +873,7 @@ class SuiteGenerator:
         *,
         api_key: str = "",
         endpoint: str = "",
-        deployment: str = "gpt-4o-mini",
+        deployment: str = _DEFAULT_DEPLOYMENT,
         agent: str = "shape",
     ) -> tuple[list[dict[str, Any]], int, int, dict[str, int]]:
         """Run the GPL pipeline over sampled docs.
@@ -931,7 +938,7 @@ class SuiteGenerator:
         categories: list[str] | None = None,
         api_key: str | None = None,
         endpoint: str | None = None,
-        deployment: str = "gpt-4o-mini",
+        deployment: str = _DEFAULT_DEPLOYMENT,
         calibrate_first: bool = True,
         seed: int | None = None,
         agent: str = "shape",
@@ -995,7 +1002,7 @@ class SuiteGenerator:
         db_path: str = "",
         api_key: str | None = None,
         endpoint: str | None = None,
-        deployment: str = "gpt-4o-mini",
+        deployment: str = _DEFAULT_DEPLOYMENT,
         agent: str = "shape",
     ) -> EnrichmentResult:
         """Re-judge an existing suite's cases to produce graded gold_titles."""
@@ -1132,7 +1139,7 @@ class SuiteGenerator:
 
         updated = dict(case)
         updated["gold_titles"] = gold_titles
-        updated["score_method"] = "ndcg"
+        updated[_KEY_SCORE_METHOD] = _SCORE_METHOD_NDCG
         updated.pop("gold_paths", None)
         return updated, "enriched"
 

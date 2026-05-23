@@ -23,11 +23,15 @@ from kairix.core.classify.router import VALID_AGENTS
 # Data types
 # ---------------------------------------------------------------------------
 
+# F17 — procedural-pattern is the classification type emitted by two rule groups
+# (strong + weak); extract so renaming the type is a single edit.
+_TYPE_PROCEDURAL_PATTERN = "procedural-pattern"
+
 VALID_TYPES = frozenset(
     {
         "episodic",
         "procedural-rule",
-        "procedural-pattern",
+        _TYPE_PROCEDURAL_PATTERN,
         "semantic-decision",
         "semantic-fact",
         "entity",
@@ -136,7 +140,7 @@ def classify_by_rules(content: str) -> tuple[str | None, str]:
     _rule_groups: list[tuple[list[re.Pattern], str, str]] = [
         (
             _RE_PROCEDURAL_PATTERN_STRONG,
-            "procedural-pattern",
+            _TYPE_PROCEDURAL_PATTERN,
             "contains procedural pattern marker",
         ),
         (
@@ -146,7 +150,7 @@ def classify_by_rules(content: str) -> tuple[str | None, str]:
         ),
         (
             _RE_PROCEDURAL_PATTERN_WEAK,
-            "procedural-pattern",
+            _TYPE_PROCEDURAL_PATTERN,
             "contains procedural pattern marker",
         ),
         (

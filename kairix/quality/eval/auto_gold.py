@@ -17,6 +17,12 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# F17 — score-method tag + "conceptual" category repeated across every generated
+# case; extract so a rename hits a single edit site.
+_KEY_SCORE_METHOD = "score_method"
+_SCORE_METHOD_NDCG = "ndcg"
+_CATEGORY_CONCEPTUAL = "conceptual"
+
 _PROCEDURAL_PATTERNS = re.compile(r"(?:^|/)(?:how-to|runbook|procedure|sop|guide|playbook|tutorial)", re.IGNORECASE)
 _DATE_PATTERNS = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -104,7 +110,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
                 "id": f"AG-R{idx:03d}",
                 "category": "recall",
                 "query": f"{readable}",
-                "score_method": "ndcg",
+                _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
             }
         )
 
@@ -115,9 +121,9 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
         queries.append(
             {
                 "id": f"AG-C{idx:03d}",
-                "category": "conceptual",
+                "category": _CATEGORY_CONCEPTUAL,
                 "query": f"explain the concept of {readable}",
-                "score_method": "ndcg",
+                _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
             }
         )
 
@@ -136,7 +142,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
                 "id": f"AG-P{idx:03d}",
                 "category": "procedural",
                 "query": f"how to {readable}",
-                "score_method": "ndcg",
+                _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
             }
         )
 
@@ -150,7 +156,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
                     "id": f"AG-T{idx:03d}",
                     "category": "temporal",
                     "query": f"recent changes to {readable}",
-                    "score_method": "ndcg",
+                    _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
                 }
             )
 
@@ -164,7 +170,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
                     "id": f"AG-E{idx:03d}",
                     "category": "entity",
                     "query": f"what is {readable}",
-                    "score_method": "ndcg",
+                    _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
                 }
             )
 
@@ -179,16 +185,16 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
                     "id": f"AG-M{idx:03d}",
                     "category": "multi_hop",
                     "query": f"how does {t1} relate to {t2}",
-                    "score_method": "ndcg",
+                    _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
                 }
             )
 
     # Pad to reach target count by cycling titles with variant templates
     variant_templates = [
         ("recall", "what is {title}"),
-        ("conceptual", "explain {title} in simple terms"),
+        (_CATEGORY_CONCEPTUAL, "explain {title} in simple terms"),
         ("recall", "find documents about {title}"),
-        ("conceptual", "compare {title} with alternatives"),
+        (_CATEGORY_CONCEPTUAL, "compare {title} with alternatives"),
     ]
     vi = 0
     while len(queries) < n and titles:
@@ -201,7 +207,7 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
                 "id": f"AG-V{idx:03d}",
                 "category": cat,
                 "query": tmpl.format(title=readable),
-                "score_method": "ndcg",
+                _KEY_SCORE_METHOD: _SCORE_METHOD_NDCG,
             }
         )
         vi += 1

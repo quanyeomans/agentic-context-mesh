@@ -49,6 +49,10 @@ _WEIGHT_PRESETS: dict[str, tuple[float, float, float]] = {
     "bm25-fp-title": (5.0, 3.0, 1.0),
 }
 
+# F17 — "collection" appears as both a SQLite row key and result-dict key in 5+
+# sites; extract so a rename hits a single edit site.
+_KEY_COLLECTION = "collection"
+
 
 def path_title(path: str) -> str:
     """Build a unique path-based gold title from a document path.
@@ -157,7 +161,7 @@ def _vector_search(  # pragma: no cover — prod-only path; tests inject FakeRet
                 "path": r["path"],
                 "title": r["title"],
                 "snippet": r["snippet"][:300],
-                "collection": r["collection"],
+                _KEY_COLLECTION: r[_KEY_COLLECTION],
             }
             for r in results
         ]
@@ -243,7 +247,7 @@ def _row_to_result(row: sqlite3.Row) -> dict[str, str]:
         "path": str(row["path"]),
         "title": str(row["title"] or ""),
         "snippet": snippet,
-        "collection": str(row["collection"]),
+        _KEY_COLLECTION: str(row[_KEY_COLLECTION]),
     }
 
 
@@ -392,7 +396,7 @@ class GoldBuilder:
                     "path": p,
                     "title": "",
                     "snippet": (snippets[i] if i < len(snippets) else "")[:300],
-                    "collection": "",
+                    _KEY_COLLECTION: "",
                 }
                 for i, p in enumerate(paths[:limit])
             ]
@@ -407,7 +411,7 @@ class GoldBuilder:
                         "path": r.get("path", ""),
                         "title": r.get("title", ""),
                         "snippet": (r.get("snippet", "") or "")[:300],
-                        "collection": r.get("collection", ""),
+                        _KEY_COLLECTION: r.get(_KEY_COLLECTION, ""),
                     }
                 )
         return out
@@ -448,7 +452,7 @@ class GoldBuilder:
                         path=path,
                         title=r["title"],
                         snippet=r["snippet"],
-                        collection=r["collection"],
+                        collection=r[_KEY_COLLECTION],
                     )
                 candidates[path].sources.append(system)
 

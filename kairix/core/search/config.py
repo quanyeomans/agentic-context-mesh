@@ -36,8 +36,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# F17 — fusion strategy enum value repeated across the FUSION_STRATEGIES tuple
+# and three factory defaults; extract so renames hit a single edit site.
+_FUSION_BM25_PRIMARY = "bm25_primary"
+
 # Valid fusion strategy values
-FUSION_STRATEGIES = ("bm25_primary", "rrf")
+FUSION_STRATEGIES = (_FUSION_BM25_PRIMARY, "rrf")
 
 
 @dataclass(frozen=True)
@@ -139,7 +143,7 @@ class RetrievalConfig:
     # Fusion strategy: "bm25_primary" or "rrf".
     # bm25_primary: BM25 results ranked first, vector-only appended at bottom.
     # rrf: standard Reciprocal Rank Fusion with equal BM25/vector weight.
-    fusion_strategy: str = "bm25_primary"
+    fusion_strategy: str = _FUSION_BM25_PRIMARY
 
     # RRF constant (only used when fusion_strategy="rrf"). Higher values
     # give more weight to documents appearing in both lists.
@@ -245,7 +249,7 @@ class RetrievalConfig:
 #         --collection reference-library --quick
 
 REFLIB_RETRIEVAL_CONFIG = RetrievalConfig(
-    fusion_strategy="bm25_primary",
+    fusion_strategy=_FUSION_BM25_PRIMARY,
     bm25_limit=20,
     vec_limit=5,
     entity=EntityBoostConfig(enabled=True, factor=0.20, cap=2.0),

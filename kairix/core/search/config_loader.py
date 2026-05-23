@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_FILENAME = "kairix.config.yaml"
 
+# F17 — config keys repeated across loader, merger, and dict-build paths;
+# extract so a YAML schema rename hits a single edit site.
+_KEY_PROCEDURAL = "procedural"
+_KEY_RERANK_INTENTS = "rerank_intents"
+_KEY_DATE_PATH_BOOST = "date_path_boost"
+_KEY_CHUNK_DATE_BOOST = "chunk_date_boost"
+
 # The path the Docker image bundles its canonical config at. Operators
 # overlay sparse host-side overrides via ``KAIRIX_CONFIG_OVERLAY_PATH``;
 # the layered loader reads BASE from this location unless
@@ -432,7 +439,7 @@ def parse_config(data: dict) -> RetrievalConfig:
 
     entity_cfg = _parse_entity(boosts.get("entity", {}) or {}) if boosts.get("entity") else defaults.entity
     procedural_cfg = (
-        _parse_procedural(boosts.get("procedural", {}) or {}) if boosts.get("procedural") else defaults.procedural
+        _parse_procedural(boosts.get(_KEY_PROCEDURAL, {}) or {}) if boosts.get(_KEY_PROCEDURAL) else defaults.procedural
     )
     temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {}) if boosts.get("temporal") else defaults.temporal
     rerank_cfg = _parse_rerank(retrieval.get("rerank", {}) or {}) if retrieval.get("rerank") else defaults.rerank
@@ -628,8 +635,8 @@ def _parse_procedural(d: dict) -> ProceduralBoostConfig:
 
 def _parse_temporal(d: dict) -> TemporalBoostConfig:
     defaults = TemporalBoostConfig()
-    date_path = d.get("date_path_boost", {}) or {}
-    chunk_date = d.get("chunk_date_boost", {}) or {}
+    date_path = d.get(_KEY_DATE_PATH_BOOST, {}) or {}
+    chunk_date = d.get(_KEY_CHUNK_DATE_BOOST, {}) or {}
     return TemporalBoostConfig(
         date_path_boost_enabled=bool(date_path.get("enabled", defaults.date_path_boost_enabled)),
         date_path_boost_factor=float(date_path.get("factor", defaults.date_path_boost_factor)),
@@ -666,9 +673,9 @@ def _merge_top_level_scalars(base: RetrievalConfig, overrides: dict) -> dict:
             out[key] = type(getattr(base, key))(overrides[key])
     # rerank_intents is a tuple[str, ...] — coerce list/None from YAML into
     # the right shape (per-collection override).
-    if "rerank_intents" in overrides:
-        intents = overrides["rerank_intents"] or []
-        out["rerank_intents"] = tuple(str(x) for x in intents)
+    if _KEY_RERANK_INTENTS in overrides:
+        intents = overrides[_KEY_RERANK_INTENTS] or []
+        out[_KEY_RERANK_INTENTS] = tuple(str(x) for x in intents)
     return out
 
 
@@ -699,12 +706,12 @@ def _merge_temporal_boost(base: RetrievalConfig, override: dict) -> Any:
     ``_parse_temporal`` expects the nested shape, not the flat field names.
     """
     base_temporal_dict = {
-        "date_path_boost": {
+        _KEY_DATE_PATH_BOOST: {
             "enabled": base.temporal.date_path_boost_enabled,
             "factor": base.temporal.date_path_boost_factor,
             "recency_window_days": base.temporal.date_path_recency_window_days,
         },
-        "chunk_date_boost": {
+        _KEY_CHUNK_DATE_BOOST: {
             "enabled": base.temporal.chunk_date_boost_enabled,
             "decay_halflife_days": base.temporal.chunk_date_decay_halflife_days,
             "guard_explicit_only": base.temporal.chunk_date_boost_guard_explicit_only,
@@ -712,7 +719,7 @@ def _merge_temporal_boost(base: RetrievalConfig, override: dict) -> Any:
     }
     user_temporal = override or {}
     merged: dict[str, Any] = dict(base_temporal_dict)
-    for sub_key in ("date_path_boost", "chunk_date_boost"):
+    for sub_key in (_KEY_DATE_PATH_BOOST, _KEY_CHUNK_DATE_BOOST):
         if sub_key in user_temporal:
             merged[sub_key] = {**base_temporal_dict[sub_key], **user_temporal[sub_key]}
     return _parse_temporal(merged)
@@ -743,8 +750,8 @@ def merge_retrieval_config(base: RetrievalConfig, overrides: dict) -> RetrievalC
     boosts = overrides.get("boosts", {}) or {}
     if "entity" in boosts:
         top_fields["entity"] = _merge_entity_boost(base, boosts["entity"])
-    if "procedural" in boosts:
-        top_fields["procedural"] = _merge_procedural_boost(base, boosts["procedural"])
+    if _KEY_PROCEDURAL in boosts:
+        top_fields[_KEY_PROCEDURAL] = _merge_procedural_boost(base, boosts[_KEY_PROCEDURAL])
     if "temporal" in boosts:
         top_fields["temporal"] = _merge_temporal_boost(base, boosts["temporal"])
 

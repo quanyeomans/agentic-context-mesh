@@ -48,24 +48,43 @@ class RawRelationship:
 
 
 # ---------------------------------------------------------------------------
+# Domain values — referenced by collection map AND every seed entity below.
+# F17 — extracted so a domain-vocabulary rename hits a single edit site.
+# ---------------------------------------------------------------------------
+
+_DOMAIN_PHILOSOPHY = "philosophy"
+_DOMAIN_SOFTWARE_ENGINEERING = "software-engineering"
+_DOMAIN_ARTIFICIAL_INTELLIGENCE = "artificial-intelligence"
+_DOMAIN_TECHNOLOGY = "technology"
+_DOMAIN_INDUSTRY_STANDARDS = "industry-standards"
+_DOMAIN_DATA_SCIENCE = "data-science"
+_DOMAIN_CYBERSECURITY = "cybersecurity"
+_DOMAIN_PRODUCT_MANAGEMENT = "product-management"
+_DOMAIN_PERSONAL_DEVELOPMENT = "personal-development"
+_DOMAIN_FOUNDATIONS = "foundations"
+
+# Entity-type label repeated across seed dispatch + relationship builders.
+_TYPE_ORGANISATION = "Organisation"
+
+# ---------------------------------------------------------------------------
 # Domain mapping — collection name to human-readable domain
 # ---------------------------------------------------------------------------
 
 _COLLECTION_DOMAIN: dict[str, str] = {
-    "agentic-ai": "artificial-intelligence",
-    "data-and-analysis": "data-science",
-    "engineering": "software-engineering",
-    "security": "cybersecurity",
+    "agentic-ai": _DOMAIN_ARTIFICIAL_INTELLIGENCE,
+    "data-and-analysis": _DOMAIN_DATA_SCIENCE,
+    "engineering": _DOMAIN_SOFTWARE_ENGINEERING,
+    "security": _DOMAIN_CYBERSECURITY,
     "operating-models": "operating-models",
-    "product-and-design": "product-management",
+    "product-and-design": _DOMAIN_PRODUCT_MANAGEMENT,
     "leadership-and-culture": "leadership",
     "economics-and-strategy": "strategy",
-    "personal-effectiveness": "personal-development",
+    "personal-effectiveness": _DOMAIN_PERSONAL_DEVELOPMENT,
     "health-and-fitness": "health",
-    "philosophy": "philosophy",
+    _DOMAIN_PHILOSOPHY: _DOMAIN_PHILOSOPHY,
     "family-and-education": "education",
-    "industry-standards": "industry-standards",
-    "foundations": "foundations",
+    _DOMAIN_INDUSTRY_STANDARDS: _DOMAIN_INDUSTRY_STANDARDS,
+    _DOMAIN_FOUNDATIONS: _DOMAIN_FOUNDATIONS,
 }
 
 # ---------------------------------------------------------------------------
@@ -74,122 +93,122 @@ _COLLECTION_DOMAIN: dict[str, str] = {
 
 _SEED_PEOPLE: dict[str, dict[str, Any]] = {
     "Marcus Aurelius": {
-        "domain": "philosophy",
+        "domain": _DOMAIN_PHILOSOPHY,
         "aliases": ["Marcus Aurelius Antoninus"],
     },
-    "Epictetus": {"domain": "philosophy"},
-    "Seneca": {"domain": "philosophy", "aliases": ["Lucius Annaeus Seneca"]},
-    "Sun Tzu": {"domain": "philosophy", "aliases": ["Sunzi"]},
-    "Lao-Tse": {"domain": "philosophy", "aliases": ["Laozi", "Lao Tzu", "Lao-Tzu"]},
-    "Patanjali": {"domain": "philosophy"},
-    "Confucius": {"domain": "philosophy", "aliases": ["Kong Qiu", "Kongzi"]},
-    "Aristotle": {"domain": "philosophy"},
-    "Plato": {"domain": "philosophy"},
-    "Miyamoto Musashi": {"domain": "philosophy", "aliases": ["Musashi"]},
+    "Epictetus": {"domain": _DOMAIN_PHILOSOPHY},
+    "Seneca": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Lucius Annaeus Seneca"]},
+    "Sun Tzu": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Sunzi"]},
+    "Lao-Tse": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Laozi", "Lao Tzu", "Lao-Tzu"]},
+    "Patanjali": {"domain": _DOMAIN_PHILOSOPHY},
+    "Confucius": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Kong Qiu", "Kongzi"]},
+    "Aristotle": {"domain": _DOMAIN_PHILOSOPHY},
+    "Plato": {"domain": _DOMAIN_PHILOSOPHY},
+    "Miyamoto Musashi": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Musashi"]},
     "John Dewey": {"domain": "education"},
     "Maria Montessori": {"domain": "education"},
 }
 
 _SEED_ORGANISATIONS: dict[str, dict[str, Any]] = {
     "OWASP": {
-        "domain": "cybersecurity",
+        "domain": _DOMAIN_CYBERSECURITY,
         "aliases": ["Open Web Application Security Project"],
     },
     "CNCF": {
-        "domain": "software-engineering",
+        "domain": _DOMAIN_SOFTWARE_ENGINEERING,
         "aliases": ["Cloud Native Computing Foundation"],
     },
-    "Google": {"domain": "technology"},
-    "Microsoft": {"domain": "technology"},
-    "Mozilla": {"domain": "technology", "aliases": ["Mozilla Foundation"]},
-    "dbt Labs": {"domain": "data-science", "aliases": ["dbt"]},
-    "PostHog": {"domain": "data-science"},
-    "OpenAI": {"domain": "artificial-intelligence"},
-    "EleutherAI": {"domain": "artificial-intelligence"},
+    "Google": {"domain": _DOMAIN_TECHNOLOGY},
+    "Microsoft": {"domain": _DOMAIN_TECHNOLOGY},
+    "Mozilla": {"domain": _DOMAIN_TECHNOLOGY, "aliases": ["Mozilla Foundation"]},
+    "dbt Labs": {"domain": _DOMAIN_DATA_SCIENCE, "aliases": ["dbt"]},
+    "PostHog": {"domain": _DOMAIN_DATA_SCIENCE},
+    "OpenAI": {"domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE},
+    "EleutherAI": {"domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE},
     "Stanford": {
-        "domain": "artificial-intelligence",
+        "domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE,
         "aliases": ["Stanford University"],
     },
-    "18F": {"domain": "software-engineering"},
+    "18F": {"domain": _DOMAIN_SOFTWARE_ENGINEERING},
     "USDS": {
-        "domain": "product-management",
+        "domain": _DOMAIN_PRODUCT_MANAGEMENT,
         "aliases": ["United States Digital Service"],
     },
     "GDS": {
-        "domain": "software-engineering",
+        "domain": _DOMAIN_SOFTWARE_ENGINEERING,
         "aliases": ["Government Digital Service"],
     },
-    "Meta": {"domain": "technology", "aliases": ["Facebook"]},
+    "Meta": {"domain": _DOMAIN_TECHNOLOGY, "aliases": ["Facebook"]},
     "BIAN": {
-        "domain": "industry-standards",
+        "domain": _DOMAIN_INDUSTRY_STANDARDS,
         "aliases": ["Banking Industry Architecture Network"],
     },
-    "MOSIP": {"domain": "industry-standards"},
-    "Dropbox": {"domain": "technology"},
-    "DAIR.AI": {"domain": "artificial-intelligence"},
-    "Panaversity": {"domain": "artificial-intelligence"},
-    "SuttaCentral": {"domain": "philosophy"},
-    "Neuromatch": {"domain": "foundations", "aliases": ["Neuromatch Academy"]},
-    "GrowthBook": {"domain": "data-science"},
+    "MOSIP": {"domain": _DOMAIN_INDUSTRY_STANDARDS},
+    "Dropbox": {"domain": _DOMAIN_TECHNOLOGY},
+    "DAIR.AI": {"domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE},
+    "Panaversity": {"domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE},
+    "SuttaCentral": {"domain": _DOMAIN_PHILOSOPHY},
+    "Neuromatch": {"domain": _DOMAIN_FOUNDATIONS, "aliases": ["Neuromatch Academy"]},
+    "GrowthBook": {"domain": _DOMAIN_DATA_SCIENCE},
     "PyMC Labs": {"domain": "strategy", "aliases": ["PyMC"]},
-    "Gong": {"domain": "product-management"},
+    "Gong": {"domain": _DOMAIN_PRODUCT_MANAGEMENT},
 }
 
 _SEED_FRAMEWORKS: dict[str, dict[str, Any]] = {
     "Twelve-Factor App": {
-        "domain": "software-engineering",
+        "domain": _DOMAIN_SOFTWARE_ENGINEERING,
         "aliases": ["12-Factor", "12 Factor App"],
     },
     "SLSA": {
-        "domain": "cybersecurity",
+        "domain": _DOMAIN_CYBERSECURITY,
         "aliases": ["Supply-chain Levels for Software Artifacts"],
     },
-    "CycloneDX": {"domain": "cybersecurity"},
-    "arc42": {"domain": "software-engineering"},
+    "CycloneDX": {"domain": _DOMAIN_CYBERSECURITY},
+    "arc42": {"domain": _DOMAIN_SOFTWARE_ENGINEERING},
     "HELM": {
-        "domain": "artificial-intelligence",
+        "domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE,
         "aliases": ["Holistic Evaluation of Language Models"],
     },
     "FSRS": {
-        "domain": "personal-development",
+        "domain": _DOMAIN_PERSONAL_DEVELOPMENT,
         "aliases": ["Free Spaced Repetition Scheduler"],
     },
     "OKR": {
-        "domain": "personal-development",
+        "domain": _DOMAIN_PERSONAL_DEVELOPMENT,
         "aliases": ["Objectives and Key Results"],
     },
     "Business Model Canvas": {"domain": "strategy"},
-    "OpenTelemetry": {"domain": "software-engineering", "aliases": ["OTel"]},
+    "OpenTelemetry": {"domain": _DOMAIN_SOFTWARE_ENGINEERING, "aliases": ["OTel"]},
     "ADR": {
-        "domain": "software-engineering",
+        "domain": _DOMAIN_SOFTWARE_ENGINEERING,
         "aliases": ["Architecture Decision Record", "Architecture Decision Records"],
     },
     "MADR": {
-        "domain": "software-engineering",
+        "domain": _DOMAIN_SOFTWARE_ENGINEERING,
         "aliases": ["Markdown ADR", "Markdown Architecture Decision Record"],
     },
 }
 
 _SEED_TECHNOLOGIES: dict[str, dict[str, Any]] = {
-    "AutoGen": {"domain": "artificial-intelligence"},
+    "AutoGen": {"domain": _DOMAIN_ARTIFICIAL_INTELLIGENCE},
     "Robyn": {"domain": "strategy", "aliases": ["Meta Robyn"]},
     "Meridian": {"domain": "strategy", "aliases": ["Google Meridian"]},
     "PyMC-Marketing": {"domain": "strategy"},
-    "Neo4j": {"domain": "technology"},
+    "Neo4j": {"domain": _DOMAIN_TECHNOLOGY},
 }
 
 _SEED_PUBLICATIONS: dict[str, dict[str, Any]] = {
     "Tao Te Ching": {
-        "domain": "philosophy",
+        "domain": _DOMAIN_PHILOSOPHY,
         "aliases": ["Tao Teh King", "Dao De Jing"],
     },
-    "Art of War": {"domain": "philosophy", "aliases": ["The Art of War"]},
-    "Bhagavad Gita": {"domain": "philosophy"},
-    "Yoga Sutras": {"domain": "philosophy", "aliases": ["Yoga Sutras of Patanjali"]},
-    "Bushido": {"domain": "philosophy", "aliases": ["Bushido: The Soul of Japan"]},
-    "Chuang Tzu": {"domain": "philosophy", "aliases": ["Zhuangzi"]},
-    "Meditations": {"domain": "philosophy"},
-    "Discourses": {"domain": "philosophy", "aliases": ["Discourses of Epictetus"]},
+    "Art of War": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["The Art of War"]},
+    "Bhagavad Gita": {"domain": _DOMAIN_PHILOSOPHY},
+    "Yoga Sutras": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Yoga Sutras of Patanjali"]},
+    "Bushido": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Bushido: The Soul of Japan"]},
+    "Chuang Tzu": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Zhuangzi"]},
+    "Meditations": {"domain": _DOMAIN_PHILOSOPHY},
+    "Discourses": {"domain": _DOMAIN_PHILOSOPHY, "aliases": ["Discourses of Epictetus"]},
 }
 
 # ---------------------------------------------------------------------------
@@ -324,7 +343,7 @@ def extract_from_frontmatter(
         entities.append(
             RawEntity(
                 name=source,
-                entity_type="Organisation",
+                entity_type=_TYPE_ORGANISATION,
                 description=f"Source organisation: {source}",
                 source_docs=[rel_path],
                 domain=domain,
@@ -339,7 +358,7 @@ def extract_from_frontmatter(
                     from_name=title,
                     from_type="Document",
                     to_name=source,
-                    to_type="Organisation",
+                    to_type=_TYPE_ORGANISATION,
                     kind="AUTHORED_BY",
                     source_doc=rel_path,
                     confidence=0.9,
@@ -464,7 +483,7 @@ _ALL_SEEDS: dict[str, tuple[str, str, dict[str, Any]]] = {}
 for _n, _i in _SEED_PEOPLE.items():
     _ALL_SEEDS[_n] = ("Person", "Historical/notable person", _i)
 for _n, _i in _SEED_ORGANISATIONS.items():
-    _ALL_SEEDS[_n] = ("Organisation", "Organisation", _i)
+    _ALL_SEEDS[_n] = (_TYPE_ORGANISATION, _TYPE_ORGANISATION, _i)
 for _n, _i in _SEED_FRAMEWORKS.items():
     _ALL_SEEDS[_n] = ("Framework", "Framework/standard", _i)
 for _n, _i in _SEED_TECHNOLOGIES.items():

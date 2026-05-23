@@ -25,6 +25,10 @@ _DEFAULT_DEPLOYMENT = "gpt-4o-mini"
 _DEFAULT_AGENT = "shape"
 _AGENT_HELP = "Agent for retrieval scoping (default: shape)"
 
+# F17 — argparse action keyword repeated across boolean-flag declarations; one
+# constant keeps the well-known sentinel in a single edit site.
+_STORE_TRUE = "store_true"
+
 
 def _cmd_generate(args: argparse.Namespace) -> int:
     from kairix.quality.eval.generate import SuiteGenerator
@@ -491,7 +495,7 @@ def main(argv: list[str] | None = None) -> None:
         default=_DEFAULT_DEPLOYMENT,
         help="Azure deployment (default: gpt-4o-mini)",
     )
-    p_gen.add_argument("--no-calibrate", action="store_true", help="Skip calibration anchor check")
+    p_gen.add_argument("--no-calibrate", action=_STORE_TRUE, help="Skip calibration anchor check")
     p_gen.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     p_gen.add_argument("--agent", default=_DEFAULT_AGENT, help=_AGENT_HELP)
 
@@ -553,7 +557,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Retrieval systems to pool (default: bm25-equal,bm25-filepath,bm25-title,vector)",
     )
     p_gold.add_argument("--judge-runs", type=int, default=2, help="Judge runs per query (default: 2)")
-    p_gold.add_argument("--no-calibrate", action="store_true", help="Skip judge calibration")
+    p_gold.add_argument("--no-calibrate", action=_STORE_TRUE, help="Skip judge calibration")
     p_gold.add_argument("--limit", type=int, default=10, help="Top-k per system (default: 10)")
 
     # --- auto-gold ---
@@ -606,7 +610,7 @@ def main(argv: list[str] | None = None) -> None:
     p_hsweep.add_argument("--collection", default=None, help="Restrict search to this collection only")
     p_hsweep.add_argument(
         "--quick",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Quick mode: run only baseline + key RRF k variants",
     )
 

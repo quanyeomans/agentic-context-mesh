@@ -24,6 +24,10 @@ from kairix.text import estimate_tokens
 
 logger = logging.getLogger(__name__)
 
+# F17 — default deployment is the L0/L1/dispatcher fallback; extract so a model
+# bump hits a single edit site.
+_DEFAULT_DEPLOYMENT = "gpt-4o-mini"
+
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
@@ -142,7 +146,7 @@ def generate_l0(
     content: str,
     api_key: str,
     endpoint: str,
-    deployment: str = "gpt-4o-mini",
+    deployment: str = _DEFAULT_DEPLOYMENT,
     *,
     deps: SummariesDeps | None = None,
 ) -> str:
@@ -168,7 +172,7 @@ def generate_l1(
     content: str,
     api_key: str,
     endpoint: str,
-    deployment: str = "gpt-4o-mini",
+    deployment: str = _DEFAULT_DEPLOYMENT,
     *,
     deps: SummariesDeps | None = None,
 ) -> str:
@@ -234,7 +238,7 @@ def generate_summaries(
     paths: list[str],
     api_key: str,
     endpoint: str,
-    deployment: str = "gpt-4o-mini",
+    deployment: str = _DEFAULT_DEPLOYMENT,
     include_l1: bool = False,
     batch_size: int = 10,
     sleep_ms: int = 100,

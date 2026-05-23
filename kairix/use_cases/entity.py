@@ -17,6 +17,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# F17 — Mention attribute names shared across dict ingest, attribute reflection,
+# and serialisation paths; extract so a rename hits a single edit site.
+_KEY_DESCRIPTION = "description"
+_KEY_CONFIDENCE = "confidence"
+
 
 def _default_neo4j_client() -> Any:
     from kairix.knowledge.graph.client import get_client
@@ -210,16 +215,16 @@ def _project_match(m: Any) -> EntityValidateMatch:
         return EntityValidateMatch(
             qid=str(m.get("qid", "")),
             label=str(m.get("label", "")),
-            description=str(m.get("description", "")),
+            description=str(m.get(_KEY_DESCRIPTION, "")),
             url=str(m.get("url", "")),
-            confidence=str(m.get("confidence", "")),
+            confidence=str(m.get(_KEY_CONFIDENCE, "")),
         )
     return EntityValidateMatch(
         qid=str(getattr(m, "qid", "")),
         label=str(getattr(m, "label", "")),
-        description=str(getattr(m, "description", "")),
+        description=str(getattr(m, _KEY_DESCRIPTION, "")),
         url=str(getattr(m, "url", "")),
-        confidence=str(getattr(m, "confidence", "")),
+        confidence=str(getattr(m, _KEY_CONFIDENCE, "")),
     )
 
 
@@ -259,9 +264,9 @@ def entity_validate_output_to_envelope(out: EntityValidateOutput) -> dict[str, A
             {
                 "qid": m.qid,
                 "label": m.label,
-                "description": m.description,
+                _KEY_DESCRIPTION: m.description,
                 "url": m.url,
-                "confidence": m.confidence,
+                _KEY_CONFIDENCE: m.confidence,
             }
             for m in out.matches
         ],

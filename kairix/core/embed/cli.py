@@ -23,6 +23,10 @@ from kairix.core.db import get_db_path, open_db
 from .embed import DEFAULT_BATCH_SIZE
 from .recall_check import run_recall_gate
 
+# F17 — argparse action keyword repeated across boolean-flag declarations; one
+# constant keeps the well-known sentinel in a single edit site.
+_STORE_TRUE = "store_true"
+
 
 def _default_pipeline_runner() -> Callable[..., Any]:
     """Lazy-import the pipeline runner so cmd_embed stays cheap to import."""
@@ -321,14 +325,14 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
         prog="kairix embed",
         description="Embed documents into the kairix vector index",
     )
-    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--verbose", "-v", action=_STORE_TRUE)
     sub = parser.add_subparsers(dest="command")
 
     # embed (default)
     embed_p = sub.add_parser("embed", help="Run embedding pipeline (default)")
     embed_p.add_argument(
         "--force",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Re-embed all chunks (clears existing vectors)",
     )
     embed_p.add_argument("--limit", type=int, default=None, help="Cap total chunks (for validation)")
@@ -338,10 +342,10 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
         default=DEFAULT_BATCH_SIZE,
         help="Chunks per Azure API call",
     )
-    embed_p.add_argument("--skip-recall-check", action="store_true", help="Skip post-embed quality gate")
+    embed_p.add_argument("--skip-recall-check", action=_STORE_TRUE, help="Skip post-embed quality gate")
     embed_p.add_argument(
         "--rebuild-canaries",
-        action="store_true",
+        action=_STORE_TRUE,
         help=(
             "Discard the persisted recall canary suite and sample fresh from "
             "the corpus. Use after a major index rebuild."
@@ -349,7 +353,7 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
     )
     embed_p.add_argument(
         "--skip-summarise",
-        action="store_true",
+        action=_STORE_TRUE,
         help="Skip post-embed L0 summary generation",
     )
 

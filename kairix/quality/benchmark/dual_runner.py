@@ -14,6 +14,10 @@ from kairix.quality.benchmark.baseline import REGRESSION_THRESHOLD
 from kairix.quality.benchmark.runner import BenchmarkResult, run_benchmark
 from kairix.quality.benchmark.suite import load_suite
 
+# F17 — score-summary key used as delta key + baseline / comparison lookups;
+# extract so a rename hits a single edit site.
+_KEY_WEIGHTED_TOTAL = "weighted_total"
+
 
 @dataclass
 class DualBenchmarkResult:
@@ -67,13 +71,13 @@ def run_dual_benchmark(
             deltas[cat] = round(c_score - b_score, 4)
 
         # Overall weighted total delta
-        deltas["weighted_total"] = round(
-            comparison.summary["weighted_total"] - baseline.summary["weighted_total"],
+        deltas[_KEY_WEIGHTED_TOTAL] = round(
+            comparison.summary[_KEY_WEIGHTED_TOTAL] - baseline.summary[_KEY_WEIGHTED_TOTAL],
             4,
         )
 
         # Regression detected if comparison weighted total drops below baseline by threshold
-        regression_detected = deltas["weighted_total"] < -REGRESSION_THRESHOLD
+        regression_detected = deltas[_KEY_WEIGHTED_TOTAL] < -REGRESSION_THRESHOLD
 
     return DualBenchmarkResult(
         baseline=baseline,
