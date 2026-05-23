@@ -1,143 +1,205 @@
-# ADR — Connector / Collection / Scope Topology
+# ADR — Connector / Collection / Scope Topology (v2)
 
-**Status**: Proposed (2026-05-23). Pending review during IM-6 soak window.
+**Status**: Proposed (2026-05-23; revised 2026-05-23 after Onyx framework deep-dive + chunking-strategy research). Pending review during IM-6 soak window.
 
-**Context**: The current connector framework (Wave 0–5) hardwires
-`name = entry-point key = SQL collection = cursor scope = source
-identity`. That overload is only honest for the simplest case (one
-credential per logical store, one collection per credential, no
-per-actor scope enforcement). Every other source kind we care about
-(SharePoint, Notion, M365, Slack, GitHub, Google Drive) and every
-common retrieval pattern (memory tiers, team-scoped search, skill-driven
-SoW preparation, graph-anchored entity briefing) requires the topology
-to separate concerns that today share one field.
+**Context**: Current connector framework (Wave 0–5) hardwires `name = entry-point key = SQL collection = cursor scope = source identity`. That overload is only honest for the simplest case (one credential per logical store, one collection per credential, no per-actor scope enforcement). Onyx ships 48 connectors and the source-kind diversity it exposes (wiki-doc-store, ticketing, chat, cloud-drive, code, email, CRM, meeting transcripts, database, web, file-system) requires a richer topology. The chunking-strategy research (`08-chunking-and-entity-strategies.md`) further demands that the Silver layer dispatch into per-`(kind, mime)` chunkers rather than apply uniform paragraph chunking.
 
-Companion analysis: `00-overview.md` through `05-non-functionals.md`.
-The simulation in `04-simulation.md` walked the layered model against
-every use case + per-connector scenario and identified 12 concrete
-break points; this ADR resolves each with a schema + interface
-decision.
+Companion analysis:
+- `00-overview.md` — package nav
+- `01-source-analysis.md` — per-source dimensional analysis (8 firsthand + 48-connector Onyx catalog)
+- `02-use-cases.md` — 14 use cases across 5 modalities
+- `03-bdd-scenarios.md` — 30+ Gherkin scenarios pinning behaviour
+- `04-simulation.md` — 12 break points in the naive layered model + resolutions
+- `05-non-functionals.md` — storage / freshness / latency / cost envelopes
+- `06-onyx-comparative-analysis.md` — Onyx framework (`cd7c86e7`) patterns; 10 adoptions, 7 preserve-ours
+- `07-research-closeout.md` — 5 open questions resolved (Dex poll-only, M365 body as flag, Notion teamspace policy, GitHub App-first, M365 calendar sensitivity wire-through)
+- `08-chunking-and-entity-strategies.md` — 12 source kinds × chunking + entity-extraction + libraries + dispatch shape
 
 ## Decision
 
-Adopt a five-layer model with explicit interface boundaries:
+Adopt a **6-concern model** with explicit interface boundaries. Each concern has its own data shape, its own lifecycle, its own audit surface.
 
-### 1. Connector instance (credential boundary)
+### 1. Connector (kind + config)
+
+A `Connector` is the **configured target** — what we're talking to and how it's parameterised, distinct from credentials and from operational state.
 
 ```python
 @dataclass(frozen=True)
-class ConnectorInstance:
-    name: str                       # unique instance id (cursor + deadletter scope)
-    kind: str                       # entry-point key (obsidian, sharepoint, …)
-    credential_ref: str | None      # secret-store path (kv://, file://, env://)
-    config: Mapping[str, Any]       # kind-specific config
-    default_sensitivity: F39Tier    # fallback per F39 chain
-    freshness_strategy: FreshnessStrategy  # push + poll + reconcile cadence
+class Connector:
+    id: int                                       # surrogate primary key
+    kind: str                                     # entry-point key (obsidian, sharepoint, notion, …)
+    name: str                                     # operator-facing label, unique within deployment
+    connector_specific_config: Mapping[str, Any]  # kind-specific config (vault_root, site_filter, …)
+    refresh_freq: timedelta | None                # ingest cadence default
+    prune_freq: timedelta | None                  # slim-doc reconcile cadence default
+    perm_sync_freq: timedelta | None              # ACL refresh cadence default
+    default_sensitivity: F39Tier                  # fallback per F39 chain
 ```
 
-YAML shape in `kairix.config.yaml`:
+YAML shape:
 
 ```yaml
 connectors:
-  - name: sharepoint-corp
-    kind: sharepoint
-    credential_ref: kv://kairix/sharepoint-app-tenant-credentials
-    config:
+  - kind: sharepoint
+    name: sharepoint-corp
+    connector_specific_config:
       tenant_id: <tenant-uuid>
-      app_id: <app-uuid>
       site_filter: ["site:engineering", "site:research"]
+      sensitivity_label_map: { "abc-public": public, "abc-internal": internal }
+    refresh_freq: 5m
+    prune_freq: 24h
+    perm_sync_freq: 1h
     default_sensitivity: internal
-    freshness_strategy:
-      push: { enabled: true, endpoint: https://kairix.tld/webhooks/sharepoint-corp }
-      poll: { interval: 5m, reconcile_every_n_polls: 12 }
 ```
 
-Key change vs current: `kind` is distinct from `name`. Two instances
-can share `kind` (multi-vault Obsidian, multi-tenant Dex). Migration
-defaults `kind = name` for back-compat.
+### 2. Credential (auth shape, encrypted)
 
-### 2. Container (per-instance internal scope unit)
+A `Credential` is the **secret material** — decoupled from connector so the same auth blob can drive multiple scoped connectors, AND a connector's credential can rotate without losing operational state.
+
+```python
+@dataclass(frozen=True)
+class Credential:
+    id: int
+    kind: str                                     # must equal a Connector.kind it can drive
+    credential_json: SensitiveValue[dict]         # encrypted at rest (EncryptedJson column type)
+    user_id: UUID | None                          # owner (delegated OAuth shapes); None for app-only
+    admin_public: bool                            # operator-grant scope — can be assigned by admin to non-owner cc_pairs
+```
+
+YAML shape (operator-side; the encrypted material lives in KV / sidecar):
+
+```yaml
+credentials:
+  - kind: sharepoint
+    name: sharepoint-app-tenant
+    credential_ref: kv://kairix/sharepoint-app-tenant-credentials
+    admin_public: yes
+```
+
+### 3. ConnectorCredentialPair — the operational unit
+
+The **binding** of one Connector + one Credential, with its own cursor scope, its own status, its own audit timestamps, its own access mode. This is the unit operators reason about ("the kairix-team SharePoint connector is paused"). The cc_pair_id is the cursor + deadletter scope key, replacing the overloaded `name` field of the v1 ADR.
+
+```python
+@dataclass(frozen=True)
+class ConnectorCredentialPair:
+    id: int
+    connector_id: int
+    credential_id: int
+    name: str                                     # operator-facing ("kairix-team SharePoint")
+    access_type: AccessType                       # PUBLIC | PRIVATE | SYNC (see §6)
+    status: CCPairStatus                          # SCHEDULED | INITIAL_INDEXING | ACTIVE | PAUSED | DELETING | INVALID
+    last_successful_index_time: datetime | None
+    last_time_perm_sync: datetime | None
+    last_time_external_group_sync: datetime | None
+    last_time_hierarchy_fetch: datetime | None
+    in_repeated_error_state: bool
+    total_docs_indexed: int
+    refresh_freq_override: timedelta | None       # overrides connector default
+    prune_freq_override: timedelta | None
+```
+
+Key Onyx-derived insight: the cc_pair binds Connector × Credential and owns the timestamps. Same credential can drive two cc_pairs (one ingesting site:X, one ingesting site:Y) with independent cursors. Same Connector can rotate credentials over time without losing cursor state.
+
+### 4. Container + HierarchyNode (per-cc_pair internal scope tree)
+
+A cc_pair enumerates `Container`s within its scope (per-drive, per-channel, per-mailbox, per-repo, etc.). The Container is the **cursor scope unit** — each has its own delta token. Containers form a tree via `HierarchyNode`s — emitted parent-before-child by the connector during ingest so retrieval can answer "files in this folder / siblings of this doc / all docs under site:X" without re-deriving structure from `source_uri` prefixes.
 
 ```python
 @dataclass(frozen=True)
 class Container:
-    connector_name: str
-    container_id: str               # kind-specific opaque string (drive_id, mailbox_id, channel_id, …)
-    access_state: Literal["accessible", "revoked", "not_yet_granted", "transient_error"]
+    cc_pair_id: int
+    container_id: str                             # kind-specific opaque (drive_id, mailbox_id, channel_id, …)
+    access_state: ContainerAccessState            # ACCESSIBLE | REVOKED | NOT_YET_GRANTED | TRANSIENT_ERROR
     cursor_token: str | None
-    last_synced_at: datetime
+    last_synced_at: datetime | None
+
+@dataclass(frozen=True)
+class HierarchyNode:
+    cc_pair_id: int
+    raw_node_id: str                              # source-stable id
+    raw_parent_id: str | None                     # for parent-before-child traversal
+    display_name: str
+    link: str | None                              # source URL for navigation
+    node_type: HierarchyNodeType                  # 12-value enum below
+    external_access: ExternalAccess | None        # ACL inheritance start
+    sensitivity_hint: F39Tier | None              # per-node sensitivity (e.g. private channel)
+
+class HierarchyNodeType(Enum):
+    FOLDER, SOURCE, SHARED_DRIVE, MY_DRIVE, SPACE, PAGE, PROJECT,
+    DATABASE, WORKSPACE, SITE, DRIVE, CHANNEL
 ```
 
-Schema: new `connector_containers` table; primary key `(connector_name, container_id)`. The existing
-`connector_cursors` table is **deprecated** in favour of this richer
-shape (migration: existing rows become `(connector_name, container_id=connector_name, cursor_token, ...)`).
+Schema: `connector_containers` and `connector_hierarchy_nodes` tables; primary keys `(cc_pair_id, container_id)` and `(cc_pair_id, raw_node_id)` respectively. The v1 ADR's `connector_cursors` table is **deprecated** — migration writes `(cc_pair_id, container_id=cc_pair_name, cursor_token=existing)` for single-container connectors.
 
-Connector Protocol gains:
+### 5. Collection (retrieval bucket, decoupled from connectors)
 
-```python
-class SourceConnector(Protocol):
-    def iter_containers(self) -> Iterator[Container]: ...
-    def list_changes(self, container: Container) -> Iterator[ChangeEvent]: ...
-    def reconcile_container(self, container_id: str, *, full: bool = True) -> Iterator[ChangeEvent]: ...
-    def subscribe(self, callback_url: str) -> Subscription | None: ...        # optional
-    def renew_subscription(self, sub: Subscription) -> Subscription: ...      # optional
-```
-
-`ChangeEvent.op` extends to:
-`"created" | "modified" | "archived" | "access_lost" | "deleted"`.
-
-`RawArtefact` extends with `sensitivity_hint: F39Tier | None`.
-
-### 3. Collection (retrieval bucket — decoupled from connector)
+A `Collection` aggregates one or more cc_pairs via filters, plus optional federated members (external search indices we want to compose without re-ingesting). Search ranks within / over the Collection's chunks.
 
 ```python
 @dataclass(frozen=True)
 class Collection:
+    id: int
     name: str
-    sources: tuple[CollectionSource, ...]
     default_sensitivity: F39Tier
     on_unmapped_item: Literal["land_in_default_collection", "drop"]
     visibility: Literal["public", "engagement", "team", "private"]
+    sources: tuple[CollectionSource, ...]
+    federated_members: tuple[FederatedConnector, ...]
+    group_grants: tuple[GroupGrant, ...]          # per-group access (was per-actor in v1)
 
 @dataclass(frozen=True)
 class CollectionSource:
-    connector_name: str
-    source_path_filter: str             # glob on item_id
+    cc_pair_id: int
+    source_path_filter: str                       # glob on item_id within cc_pair's hierarchy
     sensitivity_override: F39Tier | None
+
+@dataclass(frozen=True)
+class FederatedConnector:
+    kind: str                                     # vespa | elastic | external-mcp
+    endpoint: str
+    query_strategy: str                           # operator-defined adapter
+
+@dataclass(frozen=True)
+class GroupGrant:
+    group_id: str
+    read: bool
+    write: bool
+    max_sensitivity: F39Tier
 ```
 
 YAML shape:
 
 ```yaml
 collections:
-  - name: vault-projects
-    sources:
-      - connector_name: obsidian-personal
-        source_path_filter: "01-Projects/**"
-    default_sensitivity: internal
-
-  - name: client-x-engagement      # aggregates across connectors
-    sources:
-      - { connector_name: obsidian-personal, source_path_filter: "01-Projects/Client-X/**" }
-      - { connector_name: sharepoint-corp,   source_path_filter: "site:client-x/**" }
-      - { connector_name: dex-crm-personal,  source_path_filter: "orgs/client-x" }
+  - name: client-x-engagement
     default_sensitivity: confidential
-    visibility: engagement
+    sources:
+      - { cc_pair: kairix-team-sharepoint, source_path_filter: "site:client-x/**" }
+      - { cc_pair: obsidian-personal,      source_path_filter: "01-Projects/Client-X/**" }
+      - { cc_pair: dex-crm-personal,       source_path_filter: "orgs/client-x" }
+    federated_members:
+      - { kind: external-mcp, endpoint: https://other-search.tld/mcp, query_strategy: pass_through }
+    group_grants:
+      - { group_id: team-engagement, read: yes, write: no, max_sensitivity: confidential }
 ```
 
-Runtime layer: `CollectionRouter` consumes `(connector_name, item_id)`
-and routes chunks to the matching collection's chunk-writer.
-Most-specific filter wins (sort by filter length).
+**Two material additions vs v1**: (a) `federated_members` — external search indices as collection members (Onyx pattern; useful for "compose existing operator searches without re-indexing"); (b) `group_grants` — per-group access alongside per-actor (scales better as teams grow).
 
-Schema: new `collections` and `collection_sources` tables (auto-populated from YAML on worker boot for visibility / audit).
+Runtime layer: `CollectionRouter` consumes `(cc_pair_id, item_id)` and routes chunks to the matching collection's chunk-writer. Most-specific filter wins.
 
-### 4. Scope profile (per-actor access)
+### 6. Scope profile + Skill + Chunker registry
+
+Three runtime concerns folded into one decision because they all sit between the ingest layer and the search surface.
+
+**Scope profile** — per-actor OR per-group bundle:
 
 ```python
 @dataclass(frozen=True)
 class ScopeProfile:
     actor_id: str
-    actor_kind: Literal["agent", "human", "team", "skill"]
+    actor_kind: Literal["agent", "human", "team", "group"]
+    inherits_from: tuple[str, ...]                # group membership for transitive grants
     entries: tuple[ScopeEntry, ...]
 
 @dataclass(frozen=True)
@@ -145,68 +207,51 @@ class ScopeEntry:
     collection_name: str
     read: bool
     write: bool
-    max_sensitivity: F39Tier          # cap; entries at higher tier excluded
+    max_sensitivity: F39Tier
 ```
 
-YAML shape:
+Composition rules: collections by intersection across requesting principals; `max_sensitivity` by F39-min (least permissive); write rights by AND. Caller can opt into union via authorised `scope_composition: "union"` token.
 
-```yaml
-scope_profiles:
-  - actor_id: agent-shape
-    actor_kind: agent
-    entries:
-      - { collection_name: agent-shape/private-memory,   read: yes, write: yes,  max_sensitivity: restricted }
-      - { collection_name: team-shape-builder/decisions, read: yes, write: yes,  max_sensitivity: confidential }
-      - { collection_name: team-shape-builder/lessons,   read: yes, write: no,   max_sensitivity: confidential }
-      - { collection_name: reference-library,            read: yes, write: no,   max_sensitivity: public }
-      # team-legal/contracts deliberately absent → no read
-
-  - actor_id: team-shape-builder
-    actor_kind: team
-    entries:
-      # team-level entries inherited by team members per membership map
-```
-
-### 5. Skill (composable search strategy)
+**Skill** — composable search strategy:
 
 ```python
 @dataclass(frozen=True)
 class Skill:
     name: str
     task_collections: tuple[TaskCollection, ...]
-    ranking: str                      # named strategy key
+    ranking: str                                  # named strategy ("fuse_then_rerank_by_skill_priors", …)
     iteration: Literal["one_shot", "sequential_per_task_collection", "graph_anchored"]
 
 @dataclass(frozen=True)
 class TaskCollection:
-    name: str                         # may match real Collection or be virtual aggregator
+    name: str                                     # may match a real Collection or be virtual
     sources: tuple[CollectionSource, ...]
     weight: float
 ```
 
-YAML shape:
+**Chunker registry** — per-`(kind, mime)` dispatch behind `SilverProcessor` (preserves F38: silver stays the single chunking surface; dispatch lives inside it):
 
-```yaml
-skills:
-  - name: prepare-sow
-    task_collections:
-      - name: client-x-engagement
-        weight: 1.0
-        sources: ...
-      - name: reference-superannuation-au
-        weight: 0.7
-        sources: ...
-      - name: ai-operating-model-pattern
-        weight: 0.8
-        sources: ...
-      - name: team-engagement-lessons
-        weight: 0.5
-        sources: ...
-    ranking: fuse_then_rerank_by_skill_priors
-    iteration: sequential_per_task_collection
+```python
+class Chunker(Protocol):
+    version: str                                  # F40-equivalent: chunker version on every chunk
+    def chunk(self, section: Section, *, context: ChunkContext) -> tuple[Chunk, ...]: ...
+
+# Registry keyed by (kind, mime); default fallback per kind; default fallback overall is paragraph.
+CHUNKER_REGISTRY: dict[tuple[str, str], Chunker] = {
+    ("code", "text/x-python"):                TreeSitterChunker(language="python", v="1"),
+    ("code", "text/x-go"):                    TreeSitterChunker(language="go", v="1"),
+    ("ticketing", "application/json"):        PerTicketChunker(v="1"),
+    ("chat", "application/json"):             ThreadAwareChunker(v="1"),
+    ("wiki-doc-store", "text/markdown"):      MarkdownStructuralChunker(v="2"),
+    ("office", "application/vnd.openxmlformats-officedocument.presentationml.presentation"): SlideChunker(v="1"),
+    ("office", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): TabularRowChunker(v="1"),
+    # … per 08-chunking-and-entity-strategies.md
+}
 ```
 
-### 6. Search strategy (runtime resolver)
+Chunkers are versioned (`Chunker.version`), written to `documents_media.chunker_version` (alongside `extractor_version`). Bumping a chunker version triggers re-chunk on next sync for that kind; old chunks tombstoned. New F-rule: **F55 — every `Chunker` plugin declares `version: str` and writes it to `documents_media.chunker_version`** (parallel to F40).
+
+### 7. Search strategy (runtime resolver)
 
 ```python
 class SearchStrategy(Protocol):
@@ -216,121 +261,296 @@ class SearchStrategy(Protocol):
 @dataclass(frozen=True)
 class ResolvedScope:
     collections: tuple[ResolvedCollection, ...]
-    excluded_collections: tuple[ExcludedCollection, ...]      # for envelope transparency
+    excluded_collections: tuple[ExcludedCollection, ...]
 
 @dataclass(frozen=True)
 class ResolvedCollection:
     name: str
-    max_sensitivity: F39Tier          # effective cap (intersection across actors)
-    weight: float                     # from skill if present
+    max_sensitivity: F39Tier
+    weight: float
 
 @dataclass(frozen=True)
 class ExcludedCollection:
     name: str
-    reason: Literal["actor_lacks_read", "sensitivity_cap_too_high", "container_revoked", "container_transient"]
+    reason: Literal["actor_lacks_read", "sensitivity_cap_too_high", "container_revoked", "container_transient", "perm_sync_stale"]
     escalation_hint: str | None
 ```
 
-Multi-actor composition: collections by intersection, `max_sensitivity`
-by F39-min, write-rights by AND. Caller can opt into union via
-authorised `scope_composition: "union"` flag.
-
-`ResultEnvelope` includes per-source freshness (last_synced, age,
-state), included / excluded collections (no silent loss of context),
-and per-collection result contribution counts.
+`ResultEnvelope` carries per-source freshness, included / excluded collections (NO silent loss of context), per-collection result contribution counts, per-chunk source ACL state, per-chunk sensitivity tier.
 
 ---
 
-## Resolved break points (from `04-simulation.md`)
+## Connector Protocol — capability mix-ins (Onyx-derived)
+
+The single flat `SourceConnector` Protocol from v1 splits into a **base + optional capabilities**. A connector implementation advertises capabilities by satisfying the relevant Protocols. The framework's runner uses `isinstance` checks against each capability Protocol to dispatch.
+
+```python
+# Required base
+class SourceConnector(Protocol):
+    kind: str
+    def load_credentials(self, credentials: dict) -> dict | None: ...
+    def iter_containers(self) -> Iterator[Container]: ...
+    def fetch(self, item_id: str) -> RawArtefact: ...
+    def source_link(self, item_id: str) -> str: ...
+    def sensitivity_for(self, item_id: str) -> F39Tier: ...
+
+# Optional capabilities (composed by inheritance / structural typing)
+class PollConnector(Protocol):
+    def list_changes(self, container: Container) -> Iterator[ChangeEvent]: ...
+
+class CheckpointedConnector(Protocol):
+    def load_from_checkpoint(self, container: Container, checkpoint: Checkpoint) -> CheckpointOutput: ...
+
+class SlimConnector(Protocol):
+    """Cheap ID-only enumeration for prune cycles. Returns SlimDoc with id + last_modified + maybe minimal metadata."""
+    def retrieve_all_slim_docs(self, container: Container, start: datetime, end: datetime) -> Iterator[SlimDoc]: ...
+
+class SlimConnectorWithPermSync(SlimConnector, Protocol):
+    """Slim retrieval that also reports per-doc ACL — drives perm-sync cycles."""
+    def retrieve_all_slim_docs_with_perms(self, container: Container, start: datetime, end: datetime) -> Iterator[SlimDocWithPerms]: ...
+
+class EventConnector(Protocol):
+    """Webhook-driven push surface."""
+    def subscribe(self, callback_url: str) -> Subscription | None: ...
+    def renew_subscription(self, subscription: Subscription) -> Subscription: ...
+    def unsubscribe(self, subscription: Subscription) -> None: ...
+    def handle_event(self, event: dict) -> Iterator[ChangeEvent]: ...
+
+class Resolver(Protocol):
+    """Per-document failure replay — re-pulls only docs that previously failed."""
+    def reindex(self, failures: tuple[ConnectorFailure, ...], *, include_permissions: bool = False) -> Iterator[ChangeEvent]: ...
+
+class HierarchyConnector(Protocol):
+    """Emits the source's own folder/space/site tree as HierarchyNodes."""
+    def load_hierarchy(self, cc_pair: ConnectorCredentialPair) -> Iterator[HierarchyNode]: ...
+
+class OAuthConnector(Protocol):
+    """For source kinds that need three-legged OAuth flow."""
+    @classmethod
+    def oauth_authorization_url(cls, state: str) -> str: ...
+    @classmethod
+    def oauth_code_to_token(cls, code: str) -> dict: ...
+```
+
+A `ConfluenceConnector` would declare:
+```python
+class ConfluenceConnector(SourceConnector, CheckpointedConnector, SlimConnector,
+                         SlimConnectorWithPermSync, Resolver, HierarchyConnector,
+                         OAuthConnector, CredentialsConnector):
+    ...
+```
+
+This is more explicit than v1's flat Protocol — capability is declarative at the connector class, not buried in optional methods returning `None`. New F-rule: **F56 — every connector under `kairix/connectors/<name>/` declares at least `SourceConnector` + one of `{PollConnector, CheckpointedConnector, EventConnector}`**.
+
+---
+
+## RawArtefact + Section (per 08-chunking)
+
+`RawArtefact` carries the raw bytes; the Extractor (per F38, F40) returns typed `Section`s:
+
+```python
+@dataclass(frozen=True)
+class RawArtefact:
+    raw: bytes
+    mime: str
+    sensitivity_hint: F39Tier | None              # per-item override (Purview label, Slack channel privacy, GitHub repo visibility, Drive sharing tier)
+    source_modified_at: datetime
+    metadata: Mapping[str, Any]
+
+# Typed sections — discriminated union output of Extractor
+@dataclass(frozen=True)
+class TextSection:
+    kind: Literal["text"] = "text"
+    text: str
+    link: str | None                              # per-section source URL
+    heading_path: tuple[str, ...]                 # breadcrumbs
+
+@dataclass(frozen=True)
+class TabularSection:
+    kind: Literal["tabular"] = "tabular"
+    rows: tuple[tuple[str, ...], ...]
+    headers: tuple[str, ...]
+    sheet_name: str | None
+    link: str | None
+
+@dataclass(frozen=True)
+class ImageSection:
+    kind: Literal["image"] = "image"
+    image_bytes: bytes
+    alt_text: str | None
+    ocr_text: str | None
+    link: str | None
+
+Section = TextSection | TabularSection | ImageSection
+```
+
+The chunker registry dispatches per `(kind, mime, section.kind)`. A pptx slide → ImageSection(s) + TextSection(s) per slide; the SlideChunker emits one chunk per slide pulling both. A docx → TextSection(s) with heading_path; the MarkdownStructuralChunker emits per-section chunks. A xlsx sheet → TabularSection; the TabularRowChunker emits per-row-group chunks.
+
+---
+
+## ChangeEvent + ConnectorFailure (typed first-class)
+
+```python
+class ChangeOp(Enum):
+    CREATED, MODIFIED, ARCHIVED, ACCESS_LOST, DELETED
+
+@dataclass(frozen=True)
+class ChangeEvent:
+    op: ChangeOp
+    item_id: str
+    modified_at: datetime
+    container_id: str                             # the Container that emitted this
+    parent_node_id: str | None                    # for hierarchy back-link
+    sensitivity_hint: F39Tier | None
+    metadata: Mapping[str, Any]                   # archived=True, etc.
+
+@dataclass(frozen=True)
+class ConnectorFailure:
+    """Emitted mid-stream by the connector. Runner collects and Resolver.reindex() replays."""
+    failed_document_id: str
+    failure_kind: Literal["fetch", "extract", "silver", "writer", "sink", "rate_limit", "auth"]
+    failure_message: str
+    retry_after: float | None
+```
+
+Typed exception hierarchy at the framework boundary (Onyx-derived):
+
+```python
+class ConnectorValidationError(Exception): ...
+class CredentialInvalidError(ConnectorValidationError): ...
+class CredentialExpiredError(ConnectorValidationError): ...
+class InsufficientPermissionsError(ConnectorValidationError): ...
+class ContainerAccessDenied(Exception):
+    """A specific container is no longer reachable; cc_pair stays alive for other containers."""
+class ContainerTransient(Exception):
+    """Rate limit / 503 / connection error; retry per retry_after."""
+class UnexpectedValidationError(ConnectorValidationError):
+    """Transient; does NOT disable the cc_pair."""
+```
+
+---
+
+## AccessType — per-cc_pair access mode
+
+Per Onyx (complementing F39 per-chunk tier):
+
+```python
+class AccessType(Enum):
+    PUBLIC = "public"            # any actor in engagement sees everything in this cc_pair
+    PRIVATE = "private"          # only explicit cc_pair-group-grants see
+    SYNC = "sync"                # pull ACLs from source and enforce per-doc; perm_sync_freq controls cadence
+```
+
+`AccessType.SYNC` means "the source (SharePoint, Slack, etc.) is the source of truth for who-sees-what; kairix pulls + mirrors". F39 tier still applies on top; the two compose: actor reaches collection (scope-profile) → per-collection ACL further filters (cc_pair access_type=SYNC + per-doc ExternalAccess).
+
+---
+
+## Resolved break points (from `04-simulation.md`, expanded)
+
+| # | Break | v1 resolution | v2 refinement |
+|---|---|---|---|
+| 1 | SourceConnector single-cursor | `iter_containers()` + per-container `list_changes(container)` | cc_pair owns the operational state; Container is the cursor scope unit; CheckpointedConnector + PollConnector capabilities differentiate cursor shapes |
+| 2 | Chunk-writer bound to one collection | `CollectionRouter` per-connector | CollectionRouter at the cc_pair level (since a Connector can drive many cc_pairs each routing differently) |
+| 3 | sensitivity_for hook is too late | `RawArtefact.sensitivity_hint` + four-step fallback | Five-step chain now (per-item-hint > collection_source.override > collection.default > cc_pair.access_type→F39-map > connector.default) |
+| 4 | Sites.Selected revocation | `Container.access_state` | Plus typed `ContainerAccessDenied` exception + cc_pair `in_repeated_error_state` flag for operator visibility |
+| 5 | archive vs delete | `ChangeEvent.op` enum extended | Same |
+| 6 | Slack message edit | per-item-root RESET-and-WRITE | Same; chunker dispatch picks per-message chunking from registry |
+| 7 | GitHub force-push | `reconcile_container(full=True)` | Resolver capability + cc_pair-level hierarchy refresh |
+| 8 | Cross-source entity resolution | Curator's surface; provenance edges | Same; HierarchyNode emissions enrich the back-references |
+| 9 | Inaccessible task_collection | `ResultEnvelope.excluded_collections` | Same |
+| 10 | Aggregated query intersection | composition rule | Same; group-based grants make composition cheaper at scale |
+| 11 | Webhook + reconciler universal | optional `subscribe`/etc. | EventConnector + SlimConnector as separate capabilities (push + reconcile-prune); Onyx pattern of `prune_freq` separate from `refresh_freq` adopted |
+| 12 | Parallel per-container backfill | bounded ThreadPool | Same; rate-limit handlers shared via Redis when multi-worker (Onyx pattern) |
+
+**New break points surfaced by Onyx research / chunking research:**
 
 | # | Break | Resolution |
 |---|---|---|
-| 1 | SourceConnector single-cursor | `iter_containers()` + per-container `list_changes(container)` |
-| 2 | Chunk-writer bound to one collection per connector | `CollectionRouter` per-connector with per-collection chunk-writers |
-| 3 | sensitivity_for hook is too late | `RawArtefact.sensitivity_hint` + four-step fallback chain |
-| 4 | Sites.Selected revocation not modelled | `Container.access_state` + `ContainerAccessDenied` outcome |
-| 5 | archive vs delete | `ChangeEvent.op` enum extended; `documents.archived` + `access_lost` columns |
-| 6 | Slack message edit | per-item-root RESET-and-WRITE; chunk index re-derived |
-| 7 | GitHub force-push | `reconcile_container(full=True)` Protocol method, operator + event triggerable |
-| 8 | Cross-source entity resolution | unchanged (Curator's surface); provenance edges enable scope-filtered chunk back-refs |
-| 9 | Inaccessible task_collection | `ResultEnvelope.excluded_collections` with reason + escalation_hint |
-| 10 | Aggregated query intersection | composition rule (∩ for collections, F39-min for sensitivity) |
-| 11 | Webhook + reconciler universal | Protocol-level optional `subscribe`/`renew_subscription`/`unsubscribe`; framework-managed |
-| 12 | Parallel per-container backfill | ConnectorPipeline gains bounded ThreadPool (cap defaults per `05-non-functionals.md`) |
+| 13 | OAuth token TTL < indexing-run duration | `OAuthConnector` capability + dynamic credential rotation under per-cc_pair lock (Onyx `OnyxDBCredentialsProvider` pattern) |
+| 14 | Permission sync as a distinct concern | `SlimConnectorWithPermSync` + `cc_pair.last_time_perm_sync` separate from `last_successful_index_time` |
+| 15 | Per-doc failure replay too expensive via re-running window | `Resolver.reindex(failures)` capability |
+| 16 | Hierarchy queries (files-in-folder, siblings-of-doc) require re-deriving from `source_uri` | `HierarchyNode` first-class emission with `HierarchyNodeType` enum + `parent_id` chain |
+| 17 | Code-aware chunking would mis-fire under uniform paragraph chunker | Chunker registry keyed by `(kind, mime, section.kind)` + F55 chunker versioning |
+| 18 | Compose existing operator search indices without re-ingesting | `FederatedConnector` membership in `Collection` |
 
 ---
 
-## Migration plan
-
-Five waves; each is reversible-until-validated via a feature flag per
-`feature-flag-architecture.md`.
+## Migration plan — 7 waves (back-compat per `feature-flag-architecture.md`)
 
 ### Wave A — schema additions (back-compat)
 
-Add net-new tables / columns without breaking existing code:
-- `connector_containers` (alongside existing `connector_cursors`)
-- `collections` + `collection_sources`
-- `documents.archived` + `documents.access_lost` columns (default false)
-- `RawArtefact.sensitivity_hint` field (default None)
-- `ChangeEvent.op` enum extended (back-compat)
+- New tables: `connectors`, `credentials`, `connector_credential_pairs`, `connector_containers`, `connector_hierarchy_nodes`, `collections`, `collection_sources`, `federated_connectors`, `group_grants`, `scope_profiles`, `skills`, `chunker_registry`.
+- Extend `documents`: add `archived bool`, `access_lost bool`, `chunker_version text`.
+- Extend `documents_media`: add `chunker_version text` (parallel to `extractor_version`).
+- Extend `RawArtefact` dataclass: `sensitivity_hint` (default None).
+- Extend `ChangeEvent.op` enum (back-compat).
+- New typed exceptions (additive).
 
-Feature flag: `topology_v2_schema` (introduce stage default-off; only
-controls whether new tables are populated).
+Feature flag: `topology_v2_schema` (introduce stage default-off; controls whether new tables are populated alongside existing).
 
-### Wave B — connector Protocol extensions
+### Wave B — Protocol capability split
 
-Extend `SourceConnector` Protocol with optional new methods:
-- `iter_containers()` — default impl yields one container with `container_id=connector.name`
-- `list_changes(container)` — default impl delegates to existing `list_changes(cursor)` for single-container connectors
-- `reconcile_container(container_id, full=True)` — default impl re-runs `list_changes(cursor=None)`
-- `subscribe()/renew_subscription()/unsubscribe()` — optional; default returns None (poll-only)
+Extend `kairix.core.protocols` with the capability Protocols (`PollConnector`, `CheckpointedConnector`, `SlimConnector`, `SlimConnectorWithPermSync`, `EventConnector`, `Resolver`, `HierarchyConnector`, `OAuthConnector`). Existing 4 shipped connectors (obsidian, dex_crm, m365_email_headers, m365_calendar) get default-impl shims so they continue to satisfy the new shapes without behavioural change. F-rule **F56** lands (per-connector capability declaration check).
 
-All existing connectors (obsidian, dex_crm, m365_email_headers,
-m365_calendar) get the default impls without behavioural change.
 Feature flag: `topology_v2_protocol` (introduce stage default-off).
 
-### Wave C — runtime: CollectionRouter + ScopeProfile resolver
+### Wave C — runtime: cc_pair + CollectionRouter + Chunker registry
 
-Land:
-- `CollectionRouter` in ConnectorPipeline
-- `ScopeProfileResolver` reading `scope_profiles` YAML
-- `ResultEnvelope` extended with per-source freshness + included /
-  excluded collections
+- cc_pair lifecycle (create / pause / resume / delete) + status state-machine.
+- `CollectionRouter` in `kairix/core/connectors/silver.py` dispatching per-mapping.
+- `ChunkerRegistry` keyed by `(kind, mime, section.kind)` with default fallback. F55 lands.
+- `ResultEnvelope` extended with per-source freshness + included / excluded collections.
+- `ScopeProfileResolver` reading `scope_profiles` YAML.
 
-Feature flag: `topology_v2_runtime` (introduce stage default-off).
-When OFF: behaviour is identical to current (collection = connector
-name, no scope enforcement at search). When ON: new behaviour kicks
-in. Both branches tested per F54.
+Feature flag: `topology_v2_runtime` (introduce stage default-off). When OFF: behaviour identical to current (collection = cc_pair name, no scope enforcement at search, uniform chunker). When ON: new behaviour kicks in. Both branches tested per F54.
 
 ### Wave D — operator config promotion
 
-Add `collections:` + `scope_profiles:` + `skills:` blocks to the
-operator config schema. Validation rules:
-- `collections.*.sources.*.connector_name` must reference a declared
-  connector instance
-- `scope_profiles.*.entries.*.collection_name` must reference a
-  declared collection
-- `skills.*.task_collections.*.sources.*.connector_name` must
-  reference a declared connector
+Add `connectors:` / `credentials:` / `cc_pairs:` / `collections:` / `scope_profiles:` / `skills:` blocks to operator config schema. Validation rules:
+- `cc_pairs.*.connector` references declared connector.
+- `cc_pairs.*.credential` references declared credential.
+- `collections.*.sources.*.cc_pair` references declared cc_pair.
+- `scope_profiles.*.entries.*.collection_name` references declared collection.
+- `skills.*.task_collections.*.sources.*.cc_pair` references declared cc_pair.
 
-`kairix features status` extended to show collection-routing /
-scope-resolution diagnostics per actor.
+`kairix features status` extended to show topology v2 diagnostics per actor. `kairix cc-pair list` / `kairix cc-pair pause <id>` etc. new operator CLI verbs.
 
-### Wave E — connector-side opt-in to multi-container
+### Wave E — per-connector opt-in to multi-container
 
-For each connector kind that benefits (SharePoint, Notion, Slack,
-GitHub, Google Drive), the per-kind connector implementation overrides
-`iter_containers()` to enumerate its real container set + uses the
-per-container `list_changes(container)` path. Default sensitivity hint
-emission per kind.
+For each connector kind that benefits (sharepoint, notion, slack, github, google_drive, teams, jira, confluence), implement per-container path:
+- `iter_containers()` enumerates real containers
+- `load_from_checkpoint(container, checkpoint)` for CheckpointedConnector
+- `retrieve_all_slim_docs(container, start, end)` for SlimConnector
+- `load_hierarchy(cc_pair)` emitting HierarchyNodes
+- Default sensitivity hint emission per kind
+- Typed-exception emission per failure mode
 
-This is a per-connector flag (e.g. `topology_v2_sharepoint`) so each
-plugin's adoption is independent. F54 requires both-branch tests per
-flag.
+Per-connector flag (`topology_v2_sharepoint`, `topology_v2_notion`, etc.) so each plugin's adoption is independent. F54 both-branch tests per flag.
 
-After Wave E for all kinds: retire `topology_v2_*` flags + delete the
-default-impl shims; the protocol becomes "thick" at the connector
-side. ~12 months from Wave A landing.
+### Wave F — chunker plugins per source kind
+
+Implement chunker plugins per `08-chunking-and-entity-strategies.md`:
+- `TreeSitterChunker` (code: python/go/typescript/rust)
+- `PerTicketChunker` (jira/linear/asana/zendesk)
+- `ThreadAwareChunker` (slack/teams/discord)
+- `MarkdownStructuralChunker v2` (notion/confluence/obsidian/bookstack)
+- `SlideChunker` (pptx)
+- `TabularRowChunker` (xlsx/airtable)
+- `EmailThreadChunker` (gmail/m365/imap)
+- `EventChunker` (calendar)
+- `TranscriptChunker` (gong/fireflies)
+- Web crawl chunker (trafilatura-extracted text)
+
+Each ships with `version: str` (F55), a contract test (F43-equivalent for chunkers), and BDD coverage.
+
+### Wave G — retirement
+
+After all topology_v2_* flags promote to default-ON for 4 weeks of cutover-stage soak:
+- Retire flags + delete default-impl shims.
+- Drop deprecated `connector_cursors` table.
+- Drop the v1 `name = entry-point key = collection = cursor scope` overload entirely.
+
+~12 months from Wave A landing.
 
 ---
 
@@ -338,138 +558,156 @@ side. ~12 months from Wave A landing.
 
 ```yaml
 connectors:
-  - name: obsidian-personal
-    kind: obsidian
-    config: { vault_root: /data/vaults/personal }
+  - kind: obsidian
+    name: obsidian-personal
+    connector_specific_config: { vault_root: /data/vaults/personal }
+    refresh_freq: 5m
     default_sensitivity: internal
 
-  - name: sharepoint-corp
-    kind: sharepoint
-    credential_ref: kv://kairix/sharepoint-app
-    config:
+  - kind: sharepoint
+    name: sharepoint-corp
+    connector_specific_config:
       tenant_id: <uuid>
       sensitivity_label_map: { abc-public: public, abc-internal: internal, abc-confidential: confidential }
+    refresh_freq: 5m
+    prune_freq: 24h
+    perm_sync_freq: 1h
     default_sensitivity: internal
-    freshness_strategy:
-      push: { enabled: yes, endpoint: ... }
-      poll: { interval: 5m }
+
+credentials:
+  - kind: sharepoint
+    name: sharepoint-app-tenant
+    credential_ref: kv://kairix/sharepoint-app
+    admin_public: yes
+
+cc_pairs:
+  - connector: obsidian-personal
+    credential: null    # no credential; local FS
+    name: obsidian-personal-default
+    access_type: PRIVATE
+
+  - connector: sharepoint-corp
+    credential: sharepoint-app-tenant
+    name: kairix-team-sharepoint
+    access_type: SYNC
 
 collections:
   - name: vault-projects
     sources:
-      - { connector_name: obsidian-personal, source_path_filter: "01-Projects/**" }
+      - { cc_pair: obsidian-personal-default, source_path_filter: "01-Projects/**" }
+    default_sensitivity: internal
 
   - name: client-x-engagement
     sources:
-      - { connector_name: obsidian-personal, source_path_filter: "01-Projects/Client-X/**" }
-      - { connector_name: sharepoint-corp,   source_path_filter: "site:client-x/**" }
+      - { cc_pair: obsidian-personal-default, source_path_filter: "01-Projects/Client-X/**" }
+      - { cc_pair: kairix-team-sharepoint,    source_path_filter: "site:client-x/**" }
     default_sensitivity: confidential
+    group_grants:
+      - { group_id: team-engagement, read: yes, write: no, max_sensitivity: confidential }
 
 scope_profiles:
   - actor_id: agent-shape
     actor_kind: agent
+    inherits_from: [ team-shape-builder ]
     entries:
       - { collection_name: agent-shape/private-memory, read: yes, write: yes, max_sensitivity: restricted }
-      - { collection_name: vault-projects,             read: yes, write: no,  max_sensitivity: internal }
-      - { collection_name: client-x-engagement,        read: yes, write: no,  max_sensitivity: confidential }
+
+  - actor_id: team-shape-builder
+    actor_kind: group
+    entries:
+      - { collection_name: team-shape-builder/decisions, read: yes, write: yes, max_sensitivity: confidential }
+      - { collection_name: vault-projects,               read: yes, write: no,  max_sensitivity: internal }
+      - { collection_name: client-x-engagement,          read: yes, write: no,  max_sensitivity: confidential }
 
 skills:
   - name: prepare-sow
     task_collections:
       - { name: client-x-engagement,         weight: 1.0 }
       - { name: reference-superannuation-au, weight: 0.7 }
+      - { name: ai-operating-model-pattern,  weight: 0.8 }
+      - { name: team-engagement-lessons,     weight: 0.5 }
     ranking: fuse_then_rerank_by_skill_priors
     iteration: sequential_per_task_collection
 ```
 
 ---
 
-## Consequences
+## Acceptance criteria
 
-### Wins
+The ADR v2 is considered landed when:
 
-- **Multi-vault Obsidian works** (the conversation-starter for this ADR).
-- **Multi-tenant connectors** (multiple Dex instances, multiple
-  SharePoint tenants) are first-class.
-- **Cross-source collections** (client-x-engagement aggregating
-  Obsidian + SharePoint + Dex) become trivial to declare.
-- **Per-actor + per-team access control** moves from operator-trust to
-  enforcement layer.
-- **Per-skill task scoping** (prepare-sow, triage-morning, brief-on-X)
-  becomes declarative.
-- **Per-item sensitivity** (SharePoint labels, Slack channel privacy,
-  GitHub repo visibility) overrides connector defaults via fallback chain.
-- **Freshness transparency** in every result envelope — agents make
-  informed decisions about staleness.
-- **Push + poll universality** — every source uses the same shape;
-  no per-connector subscription-lifecycle reinvention.
+1. **Wave A + B**: schema + Protocol capability shims merge with all flags off (no behavioural change). F54 both-branch tests exist for every new flag.
+2. **Wave C runtime** lands with the dogfood VM's `obsidian-personal` cc_pair running in:
+   - per-folder routing mode (`CollectionRouter` end-to-end)
+   - chunker-registry dispatch (markdown structural chunker v2 active for the obsidian collection)
+   - HierarchyNode emission (folder tree queryable via `kairix worker hierarchy show`)
+3. **Wave E**: at least one tenant-credential connector (sharepoint OR notion OR jira) lands in multi-container mode with both-branch tests, proving per-container cursor + sensitivity-hint + perm-sync paths.
+4. **Wave F**: at least 3 chunker plugins land (markdown structural, code via tree-sitter, per-ticket) with contract tests AND BDD coverage AND F55 version-string compliance.
+5. **`kairix features status`** shows topology v2 surface. Operator config reference doc at `docs/operations/configuration/connectors-and-collections.md`.
+6. **IM-6 obsidian** promotes to cutover-stage under the new topology, not the legacy single-collection shape.
 
-### Tradeoffs
-
-- **Schema breadth**: 3 new tables, multiple existing tables extended.
-  Migration is back-compat per Wave A but adds operational surface.
-- **Operator config grows**: `collections`, `scope_profiles`, `skills`
-  blocks add YAML lines. Mitigated by sensible defaults (a deployment
-  with one connector + no scope profile + no skills behaves like today).
-- **Protocol surface widens**: `SourceConnector` gains 5 methods, 3
-  optional. Default impls keep existing plugins running unchanged.
-- **Cognitive load on agents using kairix**: scope profile + skill +
-  task is more concept-set than "give me top-K". Mitigated by sensible
-  defaults — most calls still produce sensible results with no skill
-  invocation.
-
-### Non-consequences (deliberately not addressed)
-
-- **Curator + entity resolution semantics** — unchanged; the topology
-  hooks into the existing Neo4j surface via chunk back-references.
-- **Hybrid retrieval pipeline** (BM25 + vector + RRF + intent + boosts)
-  — unchanged; we change WHAT collections it scopes over, not HOW it ranks.
-- **Bronze / Silver / chunk-writer internals** — unchanged within a
-  connector run.
-- **Two-scope (engagement vs firm) boundary** per ADR-017 — unchanged;
-  the topology operates within one engagement scope.
+After all six: the topology_v2_* flags retire over Wave G.
 
 ---
 
-## Acceptance criteria
+## Consequences
 
-The ADR is considered landed when:
+### Wins (refined from v1)
 
-1. Wave A schema + Wave B Protocol shims merge with feature flags off
-   (no behavioural change).
-2. F54 both-branch tests exist for every new flag.
-3. Wave C runtime lands with `obsidian-personal` running in
-   per-folder routing mode on the dogfood VM — proves the
-   `CollectionRouter` end-to-end without depending on multi-connector
-   integrations.
-4. At least one Wave E connector (sharepoint OR notion) lands in
-   multi-container mode with both-branch tests, proving the
-   per-container cursor + sensitivity-hint paths.
-5. `kairix features status` shows the topology v2 surface; operator
-   config reference doc lands at
-   `docs/operations/configuration/connectors-and-collections.md`.
+- **Multi-vault Obsidian, multi-tenant SharePoint, multi-org GitHub** all first-class via cc_pair triad.
+- **Cross-source collections** + federated members (compose external search indices without re-ingest).
+- **Per-actor + per-team + per-group access** enforced at search-time, not filtered post-hoc.
+- **Per-skill task scoping** declaratively expressed in YAML.
+- **Per-item sensitivity** (Purview labels, Slack channel privacy, GitHub visibility, Drive sharing tier) via 5-step fallback chain.
+- **HierarchyNode** unlocks folder / space / site navigation queries.
+- **Per-source chunker dispatch** so code, tickets, slides, tables, transcripts all chunk on their natural unit.
+- **Failure-replay (Resolver) + prune (Slim) + perm-sync (SlimWithPermSync)** as separate scheduled cycles with independent cursors.
+- **Webhook + reconciler universality** with framework-managed subscription lifecycle.
+- **Typed exception hierarchy** at the connector boundary gives the runner type-narrowed handling.
+- **Federated connector membership** in Collection composes external search indices the operator already runs.
 
-After all five: the IM-6 obsidian cutover promotes to cutover-stage
-(default = true) under the new topology, not the legacy
-single-collection shape.
+### Tradeoffs
+
+- **Schema breadth**: 12 net-new tables, multiple extended. Migration is back-compat per Wave A but the operational surface widens.
+- **Capability Protocol explosion**: 9 optional Protocols means a connector author has more to think about. Mitigated by sensible defaults at the framework layer.
+- **Operator config doubles** in line count: `connectors` + `credentials` + `cc_pairs` separated. Mitigated by validation rules + a `kairix init connector --kind X` scaffold that authors the triad in one go.
+- **Chunker registry adds versioning concern**: F55 (chunker_version on every chunk) plus re-chunk-on-version-bump complexity. Mitigated by lazy re-chunk (only when the chunk's `chunker_version` < current registry version AND the item is next-touched by sync).
+- **Cognitive load on retrieval callers**: scope profile + skill + task is more concept-set than "give me top-K". Mitigated by sensible defaults — most calls still produce sensible results with no skill invocation; defaults to the actor's profile + uniform ranking.
+
+### Non-consequences (deliberately not addressed)
+
+- **Curator + entity resolution semantics** — unchanged; topology hooks into existing Neo4j surface via chunk back-references. HierarchyNode emissions enrich it.
+- **Hybrid retrieval pipeline** (BM25 + vector + RRF + intent + boosts) — unchanged in mechanics; WHAT collections it scopes over changes.
+- **Bronze raw-blob storage** — unchanged within a cc_pair run.
+- **Two-scope (engagement vs firm) boundary** per ADR-017 — unchanged; topology operates within one engagement scope.
+
+---
+
+## What's NOT yet covered (gates the next iteration)
+
+The §09 extended BDD doc + §10 test architecture + §11 implementation-gap analysis are required to complete the design package:
+
+- **Actor-perspective BDD scenarios** for operator / agent / human / auditor / external user that the current scenarios miss.
+- **Test architecture**: which Protocol contracts get contract tests; how chunker plugins are tested in isolation; how scope-profile composition is property-tested.
+- **Implementation-gap analysis**: explicit walk of `kairix/core/connectors/`, `tests/bdd/features/`, `tests/contracts/`, `kairix.config.yaml` schema to enumerate what changes per wave.
+
+These three land next as `09-extended-bdd-scenarios.md`, `10-test-architecture.md`, `11-implementation-gap-analysis.md`.
 
 ---
 
 ## References
 
 - `00-overview.md` — package nav + non-goals
-- `01-source-analysis.md` — per-connector auth / scope / freshness / storage
-- `02-use-cases.md` — 14 use cases across memory / knowledge /
-  composite / graph / access modalities
-- `03-bdd-scenarios.md` — Gherkin scenarios pinning each topology decision
-- `04-simulation.md` — model walked, 12 break points identified +
-  resolved
-- `05-non-functionals.md` — storage / freshness / latency / cost
-  envelopes per connector
-- `connector-ingestion-architecture.md` — the Wave 0-5 framework this
-  builds on
-- `feature-flag-architecture.md` — the flag pattern Wave A-E adopt
-- `provider-plugin-architecture.md` — the parallel three-layer split
-  this mirrors for connectors
+- `01-source-analysis.md` — per-connector dimensional analysis + Onyx 48-connector catalog
+- `02-use-cases.md` — 14 use cases
+- `03-bdd-scenarios.md` — 30+ topology-pinning scenarios
+- `04-simulation.md` — break-point walk
+- `05-non-functionals.md` — storage / latency / freshness / cost
+- `06-onyx-comparative-analysis.md` — Onyx framework patterns at `cd7c86e7`
+- `07-research-closeout.md` — 5 open-question resolutions
+- `08-chunking-and-entity-strategies.md` — 12-source-kind chunking + entity strategies
+- `connector-ingestion-architecture.md` — Wave 0–5 framework this builds on
+- `feature-flag-architecture.md` — Wave A–G flag pattern
+- `provider-plugin-architecture.md` — parallel three-layer split
 - `fact-layer.md` — entity resolution surface this composes with
 - `ADR-017` (kairix-pro repo) — engagement / firm scope boundary
