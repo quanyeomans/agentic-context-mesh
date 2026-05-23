@@ -31,3 +31,4 @@ Feature: End-to-end connector sync journey
       | obsidian            | xlsx         |
       | dex_crm             | passthrough  |
       | m365_email_headers  | passthrough  |
+      | m365_calendar       | passthrough  |

@@ -166,6 +166,9 @@ pytest_plugins = [
     # Wave 5 KP-2 — M365 email-headers connector (header-only per ADR-004).
     "tests.bdd.steps.connector_m365_email_headers_steps",
     "tests.bdd.steps.feature_flag_connector_m365_email_headers_steps",
+    # Wave 5 KP-3 — M365 calendar connector + flag.
+    "tests.bdd.steps.connector_m365_calendar_steps",
+    "tests.bdd.steps.feature_flag_connector_m365_calendar_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

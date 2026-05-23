@@ -103,6 +103,23 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
+    "connector_m365_calendar": FeatureFlag(
+        name="connector_m365_calendar",
+        default=False,
+        description=(
+            "Enable the M365 calendar connector — pulls event date/attendees/subject/location "
+            "via Microsoft Graph delta query. Feeds entity signals + timeline."
+        ),
+        stage="introduce",
+        # KP-3 cutover plan (per feature-flag-architecture.md §7):
+        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
+        # soak → retire. ``target_retire_in`` is 2 months from the
+        # introduce-stage landing (current 2026-05 dispatch window).
+        introduced_in="v2026.5.23",
+        target_retire_in="v2026.7.23",
+        owner="connector-framework",
+        related_spec="docs/architecture/connector-ingestion-architecture.md",
+    ),
 }
 
 
