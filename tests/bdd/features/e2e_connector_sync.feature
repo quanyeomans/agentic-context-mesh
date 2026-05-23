@@ -21,12 +21,13 @@ Feature: End-to-end connector sync journey
     And the cursor for the connector advances past the fixture
 
     Examples: First-party connector and extractor pairs
-      | connector | extractor    |
-      | obsidian  | passthrough  |
-      | obsidian  | markitdown   |
-      | obsidian  | pdf_fallback |
-      | obsidian  | ocr          |
-      | obsidian  | pptx         |
-      | obsidian  | docx         |
-      | obsidian  | xlsx         |
-      | dex_crm   | passthrough  |
+      | connector           | extractor    |
+      | obsidian            | passthrough  |
+      | obsidian            | markitdown   |
+      | obsidian            | pdf_fallback |
+      | obsidian            | ocr          |
+      | obsidian            | pptx         |
+      | obsidian            | docx         |
+      | obsidian            | xlsx         |
+      | dex_crm             | passthrough  |
+      | m365_email_headers  | passthrough  |

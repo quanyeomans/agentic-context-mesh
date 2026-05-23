@@ -169,8 +169,9 @@ anthropic     = "kairix.providers.anthropic:make_provider"
 # Wave 1 (SC-2): empty table; Wave 2 lands ``obsidian``; later waves add
 # ``sharepoint``, ``dex_crm``, ``m365_email_headers``, ``m365_calendar``.
 [project.entry-points."kairix.connectors"]
-obsidian = "kairix.connectors.obsidian:make_connector"
-dex_crm  = "kairix.connectors.dex_crm:make_connector"
+obsidian           = "kairix.connectors.obsidian:make_connector"
+dex_crm            = "kairix.connectors.dex_crm:make_connector"
+m365_email_headers = "kairix.connectors.m365_email_headers:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and
