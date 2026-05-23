@@ -54,12 +54,16 @@ def _replace_document_root(paths: KairixPaths, document_root: Path) -> KairixPat
 
     F30 subprocess seam — keeps the existing in-process ``paths=`` kwarg
     winning, and only kicks in when no kwarg was supplied (the
-    subprocess test case).
+    subprocess test case). Explicit construction (rather than
+    ``dataclasses.replace``) keeps Sonar's type analysis able to see
+    the concrete return type.
     """
-    from dataclasses import replace
-
-    replaced: KairixPaths = replace(paths, document_root=document_root)
-    return replaced
+    return KairixPaths(
+        document_root=document_root,
+        db_path=paths.db_path,
+        log_dir=paths.log_dir,
+        workspace_root=paths.workspace_root,
+    )
 
 
 def main(argv: list[str] | None = None, *, paths: KairixPaths | None = None) -> None:
