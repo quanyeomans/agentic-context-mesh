@@ -511,3 +511,47 @@ def build_search_pipeline(
     )
     _PIPELINE_CACHE[cfg] = pipeline
     return pipeline
+
+
+# ---------------------------------------------------------------------------
+# Connector pipeline factory — F46 sanctioned entry point for BDD step impls
+# that exercise the connector framework's per-batch composition.
+# ---------------------------------------------------------------------------
+
+
+def build_connector_pipeline(
+    *,
+    db: Any,
+    bronze_root: Any,
+    collection: str,
+) -> Any:
+    """Construct a production-shape ConnectorPipeline against ``db``.
+
+    Composes the shipped Bronze + Silver + chunk-writer + entity-graph-sink
+    + cursor + dead-letter stores using the same wiring the worker uses
+    via ``run_connector_sync_pipeline``. F46-sanctioned entry point so BDD
+    step impls exercising connector-ingest behaviour don't construct
+    ``ConnectorPipeline(...)`` directly.
+
+    The chunk-writer is bound to ``collection`` (single-collection routing,
+    matching today's worker shape; Wave C ``CollectionRouter`` will replace
+    this).
+    """
+    from kairix.core.connectors import (
+        ConnectorPipeline,
+        CursorStore,
+        DeadLetterStore,
+        DefaultSilverProcessor,
+        FilesystemBronzeStore,
+    )
+    from kairix.worker import _SqliteChunkWriter, _SqliteEntityGraphSink
+
+    return ConnectorPipeline(
+        db=db,
+        bronze=FilesystemBronzeStore(db, bronze_root),
+        silver=DefaultSilverProcessor(),
+        chunk_writer=_SqliteChunkWriter(db, collection=collection),
+        entity_graph_sink=_SqliteEntityGraphSink(db),
+        cursor_store=CursorStore(db),
+        dead_letter=DeadLetterStore(db),
+    )

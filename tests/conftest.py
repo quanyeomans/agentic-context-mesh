@@ -173,6 +173,11 @@ pytest_plugins = [
     # ``topology_v2_schema`` flag. F54 both-branch coverage. See
     # docs/architecture/connector-scope-topology/ADR.md.
     "tests.bdd.steps.feature_flag_topology_v2_schema_steps",
+    # IM-6 FTS-gap regression pin — connector-ingested chunks must be
+    # findable via BM25 (the cutover surfaced 68,814 chunks in the
+    # ``obsidian`` collection invisible to BM25 because the chunk-writer
+    # skipped the FTS5 write).
+    "tests.bdd.steps.connector_search_round_trip_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

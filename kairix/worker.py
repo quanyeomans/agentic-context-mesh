@@ -160,15 +160,20 @@ class _SqliteChunkWriter:
     ``DocumentScanner`` writer surface — there is no production
     ``DocumentsTableWriter`` yet. This writer persists each
     :class:`~kairix.core.protocols.Chunk` against the canonical
-    ``documents`` + ``content`` + ``content_vectors`` tables using the
-    same shared :class:`sqlite3.Connection` the pipeline drives, so the
-    per-batch transaction stays atomic.
+    ``documents`` + ``content`` + ``content_vectors`` + ``documents_fts``
+    tables using the same shared :class:`sqlite3.Connection` the pipeline
+    drives, so the per-batch transaction stays atomic.
 
     The writer never commits — the caller's per-batch transaction owns
     the commit (matches :class:`FilesystemBronzeStore` discipline).
-    Wave 3+ will swap in a richer writer that updates the FTS5 index;
-    Wave 2's responsibility is "chunks land in the documents table" so
-    operators can prove end-to-end flow on a real vault.
+
+    FTS5 invariant (post-IM-6 fix): every chunk write also lands a
+    ``documents_fts`` row so BM25 retrieval can find it. Without this,
+    the hybrid ranker silently degrades to vector-only for new-path
+    chunks (the IM-6 dogfood-VM cutover surfaced this — see
+    contract test ``tests/contracts/test_chunk_writer_fts_invariant.py``
+    and integration test
+    ``tests/integration/test_connector_search_round_trip.py``).
     """
 
     def __init__(self, db: sqlite3.Connection, collection: str) -> None:
@@ -176,22 +181,35 @@ class _SqliteChunkWriter:
         self._collection = collection
 
     def upsert(self, chunks: Sequence[Chunk]) -> int:
-        """Persist ``chunks`` to the documents + content + content_vectors tables.
+        """Persist ``chunks`` to documents + content + content_vectors + documents_fts.
 
         Each chunk lands as one ``documents`` row keyed by ``(collection,
         path=source_uri+seq)``, one ``content`` row keyed by
-        ``content_hash``, and one ``content_vectors`` row carrying the
-        chunk sequence. Does NOT commit.
+        ``content_hash``, one ``content_vectors`` row carrying the chunk
+        sequence, AND one ``documents_fts`` row so BM25 search finds it.
+        Does NOT commit.
         """
         written = 0
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         for seq, chunk in enumerate(chunks):
             path = f"{chunk.source_uri}#{seq}"
+            # Use UPSERT (ON CONFLICT DO UPDATE) rather than INSERT OR REPLACE.
+            # INSERT OR REPLACE on a UNIQUE conflict DELETEs the old row and
+            # INSERTs a new one — that allocates a fresh rowid, which orphans
+            # the existing documents_fts row keyed by the old rowid. UPSERT
+            # preserves the documents.id so the FTS row stays addressable.
             self._db.execute(
-                "INSERT OR REPLACE INTO documents "
+                "INSERT INTO documents "
                 "(collection, path, hash, source_name, source_uri, "
                 "source_modified_at, source_page, sensitivity, created_at, modified_at, active) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT (collection, path) DO UPDATE SET "
+                "hash = excluded.hash, source_name = excluded.source_name, "
+                "source_uri = excluded.source_uri, "
+                "source_modified_at = excluded.source_modified_at, "
+                "source_page = excluded.source_page, "
+                "sensitivity = excluded.sensitivity, "
+                "modified_at = excluded.modified_at, active = 1",
                 (
                     self._collection,
                     path,
@@ -213,6 +231,20 @@ class _SqliteChunkWriter:
                 "INSERT OR REPLACE INTO content_vectors (hash, seq, pos) VALUES (?, ?, ?)",
                 (chunk.content_hash, seq, 0),
             )
+            # FTS5 write — look up the stable documents.id via the unique key
+            # (collection, path), then DELETE-then-INSERT the FTS row so the
+            # match-text reflects the current chunk.text on update.
+            row = self._db.execute(
+                "SELECT id FROM documents WHERE collection = ? AND path = ?",
+                (self._collection, path),
+            ).fetchone()
+            if row is not None:
+                doc_id = row[0]
+                self._db.execute("DELETE FROM documents_fts WHERE rowid = ?", (doc_id,))
+                self._db.execute(
+                    "INSERT INTO documents_fts (rowid, filepath, title, doc) VALUES (?, ?, ?, ?)",
+                    (doc_id, path, "", chunk.text),
+                )
             written += 1
         return written
 
