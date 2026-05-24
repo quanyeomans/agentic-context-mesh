@@ -198,6 +198,12 @@ pytest_plugins = [
     # KFEAT-018 — release-time paydown doc snapshot currency gate.
     # See docs/features/KFEAT-018-paydown-doc-refresh/BRIEF.md.
     "tests.bdd.steps.check_paydown_doc_currency_steps",
+    # Topology v2 Wave E — per-connector multi-container pilot for the
+    # obsidian connector behind the ``topology_v2_obsidian`` flag.
+    # F45 / F54 coverage. Each top-level vault folder becomes its own
+    # Container with its own delta cursor; load_hierarchy walks the
+    # filesystem parent-before-child per F58.
+    "tests.bdd.steps.feature_flag_topology_v2_obsidian_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

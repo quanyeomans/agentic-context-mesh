@@ -202,6 +202,30 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_obsidian": FeatureFlag(
+        name="topology_v2_obsidian",
+        default=False,
+        description=(
+            "Wave E of the connector/collection/scope topology v2 migration — "
+            "per-connector pilot for the obsidian connector. When ON, the "
+            "ObsidianConnector emits one Container per top-level vault folder "
+            "(each with its own delta cursor) instead of a single "
+            "connector-wide cursor, and load_hierarchy walks the vault "
+            "filesystem emitting one FOLDER node per directory parent-before-child. "
+            "When OFF, the connector retains the Wave B shim shape — "
+            "list_changes_for_container delegates to the legacy single "
+            "list_changes call, and load_hierarchy emits one root FOLDER node. "
+            "Default-off until the per-folder routing pattern soaks against the "
+            "dogfood vault; this pilot's shape is the template for the "
+            "dex_crm / m365_* / sharepoint / notion / slack / github "
+            "wave-E adoption."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
 }
 
 
