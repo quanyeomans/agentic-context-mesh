@@ -230,6 +230,14 @@ pytest_plugins = [
     # load_hierarchy emits a root FOLDER node plus one child per
     # configured calendar parent-before-child per F58.
     "tests.bdd.steps.feature_flag_topology_v2_m365_calendar_steps",
+    # Topology v2 Wave E — per-connector slice for the sharepoint
+    # connector behind the ``topology_v2_sharepoint`` flag. Sibling
+    # to the m365_calendar / obsidian / dex_crm pilots. Each configured
+    # Graph drive becomes its own Container with its own
+    # @odata.deltaLink cursor; load_hierarchy emits a root SITE FOLDER
+    # plus one DRIVE FOLDER per configured drive parent-before-child
+    # per F58; Resolver.reindex replays only the supplied failed ids.
+    "tests.bdd.steps.feature_flag_topology_v2_sharepoint_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

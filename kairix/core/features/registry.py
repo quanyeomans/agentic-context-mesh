@@ -320,6 +320,34 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_sharepoint": FeatureFlag(
+        name="topology_v2_sharepoint",
+        default=False,
+        description=(
+            "Wave E of the connector/collection/scope topology v2 migration — "
+            "per-connector slice for the sharepoint connector. When ON, the "
+            "SharePointConnector emits one Container per configured Graph drive "
+            "(each with its own @odata.deltaLink as cursor_token) instead of a "
+            "single packed JSON cursor map; list_changes_for_container scopes "
+            "the Graph delta query to that drive ONLY using the container's own "
+            "cursor; load_hierarchy emits a root SITE FOLDER plus one DRIVE "
+            "child per configured drive parent-before-child per F58; the "
+            "Resolver.reindex method replays only the supplied failed item ids "
+            "instead of re-running a delta window. When OFF, the connector "
+            "retains the Wave B shim shape — list_changes_for_container "
+            "delegates to the legacy single-cursor list_changes, load_hierarchy "
+            "emits one root FOLDER node, and reindex is unavailable. Default-off "
+            "until the per-drive routing pattern soaks against the dogfood "
+            "tenant; mirrors the obsidian / m365_calendar / m365_email_headers "
+            "Wave E pilots and shares the Azure AD app registration with the "
+            "M365 siblings per ADR-019."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
     "maintenance_loop": FeatureFlag(
         name="maintenance_loop",
         default=False,

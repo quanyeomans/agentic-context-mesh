@@ -54,6 +54,7 @@ from kairix.core.protocols import (
     ChangeEvent,
     Container,
     Cursor,
+    HierarchyNode,
     RawArtefact,
     Sensitivity,
 )
@@ -77,6 +78,21 @@ GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 
 # Mime hint for binaries whose Graph envelope didn't declare one.
 DEFAULT_FETCH_MIME = "application/octet-stream"
+
+# Wave E topology v2 pilot — name of the per-connector flag that gates
+# the multi-container shape. Module-level constant so the F52 call-site
+# scan picks up exactly one verbatim reference per call site.
+TOPOLOGY_V2_SHAREPOINT_FLAG = "topology_v2_sharepoint"
+
+# Wave E hierarchy root node id. Each configured drive becomes a DRIVE-
+# typed child FOLDER under this root SITE node.
+_HIERARCHY_ROOT_ID = "sharepoint"
+_HIERARCHY_ROOT_DISPLAY = "SharePoint"
+
+# F17 — metadata key for the sensitivity tier carried on every emitted
+# ChangeEvent. Extracted as a constant so the repeated literal across
+# the legacy + Wave E emission paths has one edit site.
+_META_SENSITIVITY_KEY = "sensitivity"
 
 
 def _now_iso() -> str:
@@ -117,6 +133,25 @@ class SharePointDriveSpec:
     drive_id: str
     site_id: str | None = None
     display_name: str | None = None
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production default for the topology-v2-sharepoint flag check.
+
+    Delegates to :func:`kairix.core.features.flag` so the production
+    path threads through the env-var → config-overlay → registry
+    resolution chain. Tests inject a different callable (typically one
+    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
+    branch under test is pinned without monkey-patching the resolver
+    module (F1-clean / F2-clean).
+
+    Lifted to a module-level helper so the connector's signature can
+    carry a real callable default (F6-clean) without a per-call
+    ``Optional[...] = None`` shape.
+    """
+    from kairix.core.features import flag as _prod_flag
+
+    return _prod_flag(name)
 
 
 def _resolve_credentials_from_secrets() -> SharePointCredentials:
@@ -171,6 +206,7 @@ class SharePointConnector:
         client_builder: Callable[[OAuth2ClientCredsAuth], SharePointGraphClient] | None = None,
         auth: OAuth2ClientCredsAuth | None = None,
         default_sensitivity: Sensitivity = DEFAULT_SENSITIVITY,
+        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         if not drives:
             raise ValueError(
@@ -181,6 +217,7 @@ class SharePointConnector:
             )
         self._drives: tuple[SharePointDriveSpec, ...] = tuple(drives)
         self._default_sensitivity: Sensitivity = default_sensitivity
+        self._flag_reader = flag_reader
 
         resolved_auth: OAuth2ClientCredsAuth
         if auth is not None:
@@ -352,6 +389,223 @@ class SharePointConnector:
         )
 
     # ------------------------------------------------------------------
+    # Topology v2 Wave E — per-connector multi-container pilot
+    # ------------------------------------------------------------------
+    # Wave B landed shim implementations of the capability Protocols
+    # (CheckpointedConnector / CredentialsConnector / OAuthConnector).
+    # Wave E adds real implementations behind the
+    # ``topology_v2_sharepoint`` flag:
+    #
+    #   * :meth:`iter_containers` — one :class:`Container` per configured
+    #     Graph drive, each with its own ``@odata.deltaLink`` persisted
+    #     as the container's ``cursor_token`` (replaces the v1 single
+    #     packed JSON map).
+    #   * :meth:`list_changes_for_container` — when flag ON, reads
+    #     ``container.cursor_token`` (a per-drive Graph deltaLink) and
+    #     runs the Graph delta query against ``container.container_id``
+    #     (the drive id) ONLY. When flag OFF, retains the Wave B shim
+    #     behaviour (delegate to legacy :meth:`list_changes`).
+    #   * :meth:`load_hierarchy` — when flag ON, emits a root SITE-typed
+    #     FOLDER node plus one DRIVE-typed FOLDER per configured drive
+    #     parent-before-child per F58. When flag OFF, emits one root
+    #     FOLDER node only (Wave B shim shape).
+    #   * :meth:`retrieve_all_slim_docs` — id-only enumeration for the
+    #     prune cycle; drains the per-container delta with envelope
+    #     items only.
+    #   * :meth:`reindex` — :class:`Resolver` — per-item failure replay;
+    #     emits one :class:`ChangeEvent` per failed item id without
+    #     re-running the full delta window.
+    #
+    # The flag defaults OFF so existing operators see bit-for-bit
+    # current behaviour. The ON branch is the per-container pattern
+    # that mirrors the obsidian / m365_calendar / m365_email_headers
+    # Wave E pilots.
+
+    def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
+        """Yield one :class:`Container` per configured Graph drive.
+
+        Topology v2 §4: each Container has its own delta cursor — the
+        Wave E pilot maps each operator-declared drive to its own
+        Container so the operator can add or remove individual drives
+        without disturbing the cursor state of the others.
+
+        ``access_state`` is always ``ACCESSIBLE`` at iteration time;
+        per-drive permission drift (Sites.Selected revocation) surfaces
+        as a request-time error from :meth:`list_changes_for_container`,
+        not at iteration. ``cursor_token`` and ``last_synced_at`` start
+        ``None``; the framework persists subsequent values (the Graph
+        ``@odata.deltaLink``) to the ``topology_containers`` table.
+
+        Calling convention mirrors the sibling Wave E pilots: the
+        framework's lifecycle layer (``kairix/core/connectors/cc_pair.py``)
+        passes ``cc_pair_id`` so the connector can construct the
+        Container without reaching back into the cc_pair store.
+        """
+        for spec in self._drives:
+            yield Container(
+                cc_pair_id=cc_pair_id,
+                container_id=spec.drive_id,
+                access_state="ACCESSIBLE",
+                cursor_token=None,
+                last_synced_at=None,
+            )
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """Stream changes for one container's Graph drive.
+
+        When the ``topology_v2_sharepoint`` flag is ON: reads
+        ``container.cursor_token`` as the per-drive Graph deltaLink
+        (None on first sync) and walks the delta pages for THAT drive
+        only. Per-drive isolation means adding or removing one drive
+        does not affect the cursor state of the others — bypasses the
+        legacy packed JSON cursor map entirely so a single-drive 403
+        cannot poison the shared cursor.
+
+        When the flag is OFF: retains the Wave B shim behaviour —
+        delegate to :meth:`list_changes` with the container's cursor
+        (serialised through ``_serialise_cursor`` so the legacy
+        per-drive map shape round-trips) so the observable shape is
+        identical to the legacy v1 path.
+        """
+        if not self._flag_reader(TOPOLOGY_V2_SHAREPOINT_FLAG):
+            # OFF branch — bit-for-bit Wave B shim. Wrap the container's
+            # cursor as a single-drive JSON map and forward to the
+            # legacy single-cursor list_changes path so the observable
+            # shape (events emitted, _next_cursor populated) matches v1.
+            legacy_cursor: Cursor | None = (
+                _serialise_cursor({container.container_id: container.cursor_token})
+                if container.cursor_token is not None
+                else None
+            )
+            return self.list_changes(legacy_cursor)
+        return self._list_changes_for_container_scoped(container)
+
+    def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
+        """HierarchyConnector — emit nodes parent-before-child per F58.
+
+        When the ``topology_v2_sharepoint`` flag is ON: emits a root
+        SITE-typed FOLDER node (``raw_node_id="sharepoint"``,
+        ``raw_parent_id=None``) followed by one DRIVE-typed FOLDER per
+        configured drive, with ``raw_node_id`` set to the drive id and
+        ``raw_parent_id`` pointing at the root. Parent-before-child per
+        F58.
+
+        When the flag is OFF: emits one root FOLDER node only (Wave B
+        shim shape) so the observable shape matches the sibling
+        connectors' OFF-branch behaviour.
+
+        Per-drive sub-folder hierarchy (Documents / Shared with me /
+        custom libraries) is a Wave-E+1 enhancement — this slice keeps
+        the hierarchy at drive-as-folder granularity to mirror the
+        obsidian / m365_calendar / dex_crm Wave E pilots.
+        """
+        if not self._flag_reader(TOPOLOGY_V2_SHAREPOINT_FLAG):
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=_HIERARCHY_ROOT_ID,
+                raw_parent_id=None,
+                display_name=_HIERARCHY_ROOT_DISPLAY,
+                link=None,
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+            return
+        yield HierarchyNode(
+            cc_pair_id=cc_pair_id,
+            raw_node_id=_HIERARCHY_ROOT_ID,
+            raw_parent_id=None,
+            display_name=_HIERARCHY_ROOT_DISPLAY,
+            link=None,
+            node_type="SITE",
+            external_access_json=None,
+            sensitivity_hint=None,
+        )
+        for spec in self._drives:
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=spec.drive_id,
+                raw_parent_id=_HIERARCHY_ROOT_ID,
+                display_name=spec.display_name or spec.drive_id,
+                link=None,
+                node_type="DRIVE",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+
+    def retrieve_all_slim_docs(self, container: Container) -> Iterator[str]:
+        """SlimConnector — id-only enumeration for the prune cycle.
+
+        Drains the per-container delta endpoint (or full enumeration
+        when the container's cursor is None) and emits only the
+        ``item_id`` strings. The orchestrator diffs this against the
+        ``documents`` table to detect deletes and stage tombstones —
+        much cheaper than re-fetching every body.
+
+        Reads ``container.cursor_token`` so the prune scan honours the
+        per-container resume position; ``None`` triggers a full
+        enumeration (cold-prune). Filters tombstones (removed items)
+        out because the prune cycle is asking "what ids does the source
+        still have?".
+        """
+        drive_id = container.container_id
+        start_url = container.cursor_token
+        for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
+            if not item.item_id or item.removed:
+                continue
+            yield item.item_id
+
+    def reindex(
+        self,
+        failed_item_ids: tuple[str, ...],
+        *,
+        include_permissions: bool = False,
+    ) -> Iterator[ChangeEvent]:
+        """Resolver — per-item failure replay.
+
+        Cheaper than re-running a delta window after a partial-fetch
+        failure: yields one :class:`ChangeEvent` per id in
+        ``failed_item_ids`` so the orchestrator can re-drive the
+        downstream pipeline (fetch → extract → silver → index) against
+        ONLY the items that failed.
+
+        Each emitted event is shaped as a ``modified`` op (the item
+        existed before the failure and still exists; reindex is a
+        replay of the silver/index path, not a tombstone scan). The
+        event's ``modified_at`` carries the wall-clock at replay time
+        so any downstream recency-sort sees the replay as recent.
+
+        ``include_permissions`` is accepted per the Protocol surface
+        but the Wave E slice ships only the bare reindex path —
+        permission-replay layers on top when SlimConnectorWithPermSync
+        lands in a follow-up slice. The kwarg is recorded in metadata
+        so a future slice can route to the perm-sync replay without a
+        Protocol break.
+
+        Filters duplicate ids and empty strings so the orchestrator's
+        deadletter table can safely feed the raw tuple without
+        pre-cleaning. The "replay only failed ids" filter is the
+        load-bearing invariant — sabotage-proved by integration
+        coverage that asserts the emitted ids match the failures tuple
+        and nothing else.
+        """
+        seen: set[str] = set()
+        for raw_id in failed_item_ids:
+            if not raw_id or raw_id in seen:
+                continue
+            seen.add(raw_id)
+            yield ChangeEvent(
+                op="modified",
+                item_id=raw_id,
+                modified_at=_now_iso(),
+                metadata={
+                    _META_SENSITIVITY_KEY: self._default_sensitivity,
+                    "reindex": True,
+                    "include_permissions": include_permissions,
+                },
+            )
+
+    # ------------------------------------------------------------------
     # Forward-only API
     # ------------------------------------------------------------------
 
@@ -368,6 +622,32 @@ class SharePointConnector:
     # Internals
     # ------------------------------------------------------------------
 
+    def _list_changes_for_container_scoped(self, container: Container) -> Iterator[ChangeEvent]:
+        """Wave E ON-branch: drain Graph delta for one container's drive only.
+
+        Reads the container's own ``cursor_token`` (the per-drive Graph
+        ``@odata.deltaLink``) and walks delta pages for the container's
+        drive id only. Each container's cursor is read independently —
+        adding or removing one drive does not disturb another drive's
+        resume position.
+
+        Bypasses the legacy ``_serialise_cursor`` / ``_deserialise_cursor``
+        packed JSON map entirely so a single-drive failure cannot
+        poison the shared cursor. The per-container path's events still
+        populate ``self._cache`` so :meth:`fetch` can resolve the drive
+        id without a second Graph call.
+        """
+        drive_id = container.container_id
+        start_url = container.cursor_token
+        events: list[ChangeEvent] = []
+        for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
+            event = self._item_to_event(item, drive_id=drive_id)
+            if event is None:
+                continue
+            self._cache[event.item_id] = item
+            events.append(event)
+        return iter(events)
+
     def _item_to_event(self, item: DriveItemRef, *, drive_id: str) -> ChangeEvent | None:
         """Translate one envelope to a typed :class:`ChangeEvent`.
 
@@ -383,14 +663,14 @@ class SharePointConnector:
                 op="deleted",
                 item_id=item.item_id,
                 modified_at=modified_at,
-                metadata={"sensitivity": self._default_sensitivity, "drive_id": drive_id},
+                metadata={_META_SENSITIVITY_KEY: self._default_sensitivity, "drive_id": drive_id},
             )
         return ChangeEvent(
             op="created",
             item_id=item.item_id,
             modified_at=modified_at,
             metadata={
-                "sensitivity": self._default_sensitivity,
+                _META_SENSITIVITY_KEY: self._default_sensitivity,
                 "drive_id": drive_id,
                 "name": item.name,
                 "mime": item.mime or "",
