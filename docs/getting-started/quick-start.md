@@ -11,7 +11,11 @@ Pick the path that matches your environment and skip the other one.
 
 - **An LLM API key** — Azure OpenAI, standard OpenAI, or any OpenAI-compatible provider
 - **A folder of documents** — markdown files, text files, or structured notes
-- **Optional: SharePoint OAuth triple** — tenant id / client id / client secret if you want the `connector_sharepoint` topology v2 alpha (v2026.5.24a1+)
+- **Optional: connector secrets** — only the connectors you plan to enable need their secrets provisioned:
+  - SharePoint — M365 OAuth triple (`CONNECTOR_M365_*`); v2026.5.24a1+
+  - Slack — bot token (optional app token for live events); v2026.5.24a2+
+  - GitHub — personal access token OR app-installation triple + webhook secret; v2026.5.24a2+
+  - Notion — integration token; v2026.5.24a2+
 
 ---
 
@@ -170,55 +174,60 @@ kairix deployment check
   ✓ agent_knowledge_populated
   ✓ chunk_date_populated
   ✓ mcp_service
+  ✓ query_cache_stats
+  ✓ embed_cache_stats
   ✓ topology_v2_config_valid — skipped — topology_v2_config flag is OFF (default-safe)
   ✓ topology_v2_cc_pairs_registered — skipped — topology_v2_config flag is OFF (default-safe)
   ✓ sharepoint_credentials_loaded — skipped — connector_sharepoint flag is OFF (default-safe)
+  ✓ maintenance_loop_ticking — skipped — maintenance_loop flag is OFF (default-safe)
 ──────────────────────────────────────────────────
-  All 14 checks passed
+  All 15 checks passed
 ```
 
 If any check fails the output names the next command to run.
+
+`agent_knowledge_populated` looks at `04-Agent-Knowledge/**/*.md` under your document root by default. If your vault uses a different layout, set `paths.agent_knowledge_dir` (directory name) and `paths.agent_memory_glob` (file pattern) in `kairix.config.yaml`. See [v2026.5.24a3 upgrade notes](../upgrades/v2026.5.24a3.md) for the full options.
 
 ---
 
 ## Topology v2 alpha (v2026.5.24a1+)
 
-Topology v2 unlocks the new operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills) plus the SharePoint connector. Every part is gated by a default-off feature flag so existing deployments stay bit-for-bit identical until you flip them.
+Topology v2 unlocks the operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills) plus four shipping connectors (SharePoint, Slack, GitHub, Notion). Every part is gated by a default-off feature flag so existing deployments stay bit-for-bit identical until you flip them.
 
-Four flags control the alpha:
+The flags split into three groups:
 
-| Flag | What it does |
-|------|--------------|
-| `topology_v2_config` | Parse + apply the `topology_v2:` block in your config |
-| `topology_v2_obsidian` | Per-folder containers + parent-before-child hierarchy walk for Obsidian |
-| `connector_sharepoint` | Enable the SharePoint connector (Graph drive-delta + extractor dispatch) |
-| `topology_v2_runtime` | Route chunk writes through the per-cc_pair CollectionRouter |
+| Group | Flag | What it does |
+|---|---|---|
+| Operator surface | `topology_v2_config` | Parse + apply the `topology_v2:` block in your config |
+| Operator surface | `topology_v2_runtime` | Route chunk writes through the per-cc_pair CollectionRouter |
+| Connector slots | `connector_sharepoint` | Enable SharePoint (Graph drive-delta + extractor dispatch) |
+| Connector slots | `connector_slack` | Enable Slack (Web API + Socket Mode live events) |
+| Connector slots | `connector_github` | Enable GitHub (REST + GraphQL + webhook listener) |
+| Connector slots | `connector_notion` | Enable Notion (workspace pages + database rows) |
+| Per-source pilots | `topology_v2_obsidian` | One Container per Obsidian folder + delta cursor |
+| Per-source pilots | `topology_v2_dex_crm` | Tenant Container for Dex CRM |
+| Per-source pilots | `topology_v2_m365_email_headers` | One Container per mailbox |
+| Per-source pilots | `topology_v2_m365_calendar` | One Container per calendar |
+| Per-source pilots | `topology_v2_sharepoint` | One Container per drive |
+| Per-source pilots | `topology_v2_slack` | One Container per channel |
+| Per-source pilots | `topology_v2_github` | One Container per repository |
+| Per-source pilots | `topology_v2_notion` | One Container per page tree |
+| Background loop | `maintenance_loop` | Periodic orphan-vector cleanup (24h default) |
 
 To turn the alpha on:
 
 1. **Author the YAML.** Copy [`kairix.config.example.yaml`](https://github.com/three-cubes/kairix/blob/main/kairix.config.example.yaml) at the repo root into your config path (Docker overlay: `kairix.config.local.yaml`; pip: `~/.kairix/kairix.config.yaml`). The example shape parses cleanly and `kairix config validate` reports zero failures against it.
-2. **Flip the flags.** Add the four flags to the `features:` block (or set `KAIRIX_FEATURE_TOPOLOGY_V2_CONFIG=true` etc. in your env).
-3. **Set the SharePoint secrets** (only if you flipped `connector_sharepoint`):
-    ```bash
-    # Docker — append to .env:
-    CONNECTOR_M365_TENANT_ID=<your-aad-tenant-guid>
-    CONNECTOR_M365_CLIENT_ID=<your-app-registration-client-id>
-    CONNECTOR_M365_CLIENT_SECRET=<your-app-registration-secret>
-
-    # Pip — append to ~/.config/kairix/secrets/kairix.env:
-    CONNECTOR_M365_TENANT_ID=...
-    CONNECTOR_M365_CLIENT_ID=...
-    CONNECTOR_M365_CLIENT_SECRET=...
-    ```
+2. **Flip the flags.** Add only the flags for the surfaces you want active. The example config's `features:` block lists every flag with a comment beside each.
+3. **Set the secrets** for each connector you enabled. See the per-connector recipe in [`docs/upgrades/v2026.5.24a2.md`](../upgrades/v2026.5.24a2.md) — each connector lists the exact env-var names + where to put them for Docker and pip.
 4. **Apply + verify.**
     ```bash
     kairix worker apply-config       # materialise declared cc_pairs into topology_cc_pairs
     kairix config validate           # parser + 5 cross-reference checks
-    kairix features status           # confirm the four flags are on
-    kairix onboard check             # the 3 new topology v2 checks must all pass
+    kairix features status           # confirm the flags are on
+    kairix onboard check             # all 15 checks should pass
     ```
 
-The three new checks (`topology_v2_config_valid`, `topology_v2_cc_pairs_registered`, `sharepoint_credentials_loaded`) all skip with `ok=True` when their flag is off — the alpha is reversible at any time by removing the four flags from the `features:` block.
+The connector-credentials onboard checks skip with `ok=True` when their flag is off — the alpha is reversible at any time by removing the flag entry from the `features:` block.
 
 ---
 

@@ -150,9 +150,26 @@ retrieval:
 #
 # features:
 #   topology_v2_config: true        # parse + apply the topology_v2 block below
-#   topology_v2_obsidian: true      # per-folder containers + parent-before-child walk
-#   connector_sharepoint: true      # enable the SharePoint connector
-#   maintenance_loop: true          # KFEAT-021 Phase 1 — proactive orphan-vector cleanup
+#   maintenance_loop: true          # background orphan-vector cleanup (default-OFF)
+#
+#   # ── Connector slots — flip ON only after the matching secrets are set
+#   connector_sharepoint: true      # M365 SharePoint document libraries
+#   connector_slack: true           # Slack workspace channels + DMs
+#   connector_github: true          # GitHub repos / issues / pull requests
+#   connector_notion: true          # Notion pages + database rows
+#
+#   # ── Per-connector topology v2 pilots — emit one Container per source
+#   # unit (folder / drive / channel / repo / page tree) with its own
+#   # delta cursor. Default-off; reversible at any time by removing the
+#   # entry. Mirrors the obsidian pilot shape.
+#   topology_v2_obsidian: true            # per-folder containers (Obsidian)
+#   topology_v2_dex_crm: true             # tenant Container (Dex CRM)
+#   topology_v2_m365_email_headers: true  # per-mailbox containers
+#   topology_v2_m365_calendar: true       # per-calendar containers
+#   topology_v2_sharepoint: true          # per-drive containers
+#   topology_v2_slack: true               # per-channel containers
+#   topology_v2_github: true              # per-repo containers
+#   topology_v2_notion: true              # per-page-tree containers
 
 # ──────────────────────────────────────────────────────────────────────────
 # topology_v2 — connectors / collections / scope profiles / skills
@@ -204,6 +221,44 @@ topology_v2:
         drive_id: "b!exampleDriveIdReplaceWithRealOne"
         site_id: "contoso.sharepoint.com,xxxx,yyyy"
 
+    - id: slack-workspace-conn
+      kind: slack
+      name: "Slack — your-team workspace"
+      # Sensitivity is set per channel kind by the connector itself
+      # (public → internal, private → confidential, DM → personal), so
+      # this default applies only to envelopes that arrive without a
+      # channel id (rare). ``internal`` is the safe baseline.
+      default_sensitivity: internal
+      # Required: the workspace id (Slack admin → about → workspace id).
+      # The bot token + app token are read from CONNECTOR_SLACK_BOT_TOKEN
+      # and CONNECTOR_SLACK_APP_TOKEN; the latter is only required if you
+      # want Socket Mode live events (otherwise the connector polls).
+      connector_specific_config:
+        workspace_id: "T01ABCDEF"
+
+    - id: github-org-conn
+      kind: github
+      name: "GitHub — example-org"
+      # Private repos are the GitHub default; pin ``client-confidential``
+      # unless every repo is public-by-policy.
+      default_sensitivity: client-confidential
+      # The connector reads CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN OR the
+      # App triple (CONNECTOR_GITHUB_APP_ID / _INSTALLATION_ID /
+      # _APP_PRIVATE_KEY) — provide whichever your org uses. The webhook
+      # secret (CONNECTOR_GITHUB_WEBHOOK_SECRET) is required if you want
+      # the live push / issues / pull_request listener.
+      connector_specific_config: {}
+
+    - id: notion-workspace-conn
+      kind: notion
+      name: "Notion — your-team workspace"
+      default_sensitivity: internal
+      # The Notion integration token (CONNECTOR_NOTION_INTEGRATION_TOKEN)
+      # scopes the connector to whichever pages + databases you've shared
+      # with the integration. No workspace id is required — the token
+      # itself is the workspace selector.
+      connector_specific_config: {}
+
   # ── credentials ─────────────────────────────────────────────────────────
   # Each entry declares one credential bundle the connectors can
   # reference. ``secret_name`` is the logical name passed to
@@ -224,6 +279,35 @@ topology_v2:
       # Mark this credential public when every agent should be able to
       # use it (most M365 SharePoint deployments). Leave false for
       # per-actor credentials (e.g. personal Dex CRM tokens).
+      admin_public: true
+
+    # Slack — one bot token per workspace, optionally an app token for
+    # Socket Mode live events.
+    #   CONNECTOR_SLACK_BOT_TOKEN  — xoxb-... (required)
+    #   CONNECTOR_SLACK_APP_TOKEN  — xapp-... (only for Socket Mode)
+    - id: slack-bot
+      kind: bearer_token
+      secret_name: connector-slack  # pragma: allowlist secret — logical name
+      admin_public: true
+
+    # GitHub — pick ONE of PAT or App-installation. Provide both env-var
+    # sets here; the connector picks whichever resolves.
+    #   CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN  — ghp_... (simple path)
+    #   CONNECTOR_GITHUB_APP_ID                 — App-installation path
+    #   CONNECTOR_GITHUB_INSTALLATION_ID
+    #   CONNECTOR_GITHUB_APP_PRIVATE_KEY        — PEM contents on one line
+    #   CONNECTOR_GITHUB_WEBHOOK_SECRET         — for the live webhook listener
+    - id: github-credential
+      kind: github_dual_path
+      secret_name: connector-github  # pragma: allowlist secret — logical name
+      admin_public: true
+
+    # Notion — single integration token; share each page/database with
+    # the integration via the Notion UI before it can read them.
+    #   CONNECTOR_NOTION_INTEGRATION_TOKEN  — secret_... (required)
+    - id: notion-integration
+      kind: bearer_token
+      secret_name: connector-notion  # pragma: allowlist secret — logical name
       admin_public: true
 
   # ── cc_pairs (ConnectorCredentialPair) ──────────────────────────────────
