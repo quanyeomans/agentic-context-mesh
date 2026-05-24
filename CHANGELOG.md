@@ -7,6 +7,61 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.24a3] - 2026-05-24 — Configurable agent-knowledge layout for onboard check (alpha)
+
+> **Upgrading?** Straight pull from a2 — no config change required. The default glob is broader than earlier alphas, so vaults that previously failed `agent_knowledge_populated` will now pass it. Full notes: [`docs/upgrades/v2026.5.24a3.md`](docs/upgrades/v2026.5.24a3.md).
+
+### New for operators
+
+- **`agent_knowledge_populated` onboard check now reads its layout from `kairix.config.yaml`.** Two new optional keys live under `paths:` — `paths.agent_knowledge_dir` (default `04-Agent-Knowledge`) names the directory; `paths.agent_memory_glob` (default `**/*.md`) is the recursive glob that identifies memory files. The new default accepts any `.md` file anywhere under the agent-knowledge tree, so vaults using `<agent>/<date>.md`, `<agent>/memory/<date>.md`, or a shared `memory/` directory all pass without operator action. Pin a stricter glob (e.g. `*/memory/*.md`) if you want the check to enforce a specific per-agent layout.
+- **The check's failure detail names the glob it searched.** When the check fails, the message includes both the directory it looked in and the pattern it applied, so the layout-vs-config mismatch is visible at a glance.
+
+### Behaviour changes worth noting
+
+- **Onboard healthcheck reliability.** This fixes a sharp edge in v2026.5.24a2 deployments where the docker compose healthcheck would mark the kairix container unhealthy if the operator's vault didn't match the previously-hard-coded `<agent>/memory/<file>.md` layout. The broader default glob accepts more layouts; the config knobs let strict layouts opt back in.
+
+### Things that haven't changed
+
+- Every other onboard check. Only `agent_knowledge_populated` is affected.
+- The briefing pipeline. It continues to read from `04-Agent-Knowledge/<agent>/memory/`; a follow-up will reconcile the briefing resolver with the same config knobs so both surfaces read from one place.
+- Every feature flag from v2026.5.24a2 — pulling this version does not flip any flag.
+
+## [2026.5.24a2] - 2026-05-24 — Slack + GitHub + Notion connectors + maintenance loop (alpha)
+
+> **Upgrading?** Nothing required — every new connector and the maintenance loop are gated by default-off feature flags. To opt into any of them, follow [`docs/upgrades/v2026.5.24a2.md`](docs/upgrades/v2026.5.24a2.md).
+
+### New for operators
+
+- **Slack connector** behind `connector_slack`. Pulls public, private, and direct-message channels via the Slack Web API, plus a Socket Mode listener for live events. Sensitivity is set per channel kind (public → internal, private → confidential, DM → personal) so the F39 routing applies without operator config. Per-cc_pair token rotation + reconnect-with-jitter on disconnect.
+- **GitHub connector** behind `connector_github`. Pulls code (commits + blobs), issues, and pull requests via REST + GraphQL, with a webhook listener for push / issues / pull_request / installation_repositories events. Personal access tokens or app installations both work — the connector picks whichever credential resolved. Abuse-detection backoff is automatic when GitHub returns secondary rate-limit responses.
+- **Notion connector** behind `connector_notion`. Pulls workspace pages plus database rows via the public API, renders block trees to Markdown, then dispatches the output to the existing kairix extractor registry (passthrough or markitdown).
+- **Per-source topology v2 pilots for the existing connector fleet.** Seven new flags — `topology_v2_dex_crm`, `topology_v2_m365_email_headers`, `topology_v2_m365_calendar`, `topology_v2_sharepoint`, `topology_v2_slack`, `topology_v2_github`, `topology_v2_notion` — each emit one Container per source-side unit (tenant, mailbox, calendar, drive, channel, repository, page tree) with its own delta cursor. Default-off; mirrors the obsidian pilot shape landed in v2026.5.24a1.
+- **Background maintenance loop** behind `maintenance_loop`. When the flag is on, the worker fires a periodic tick (default every 24 hours, tunable via `KAIRIX_MAINTENANCE_INTERVAL_S`) that prunes orphaned `content_vectors` rows into a soft-delete table with a 7-day retention window before hard-deleting. Replaces the reactive preflight orphan check — ghost search hits get cleaned up in the background instead of blocking the next ingest.
+- **New surfaces.** `kairix worker maintenance` fires a one-shot maintenance tick on demand. `kairix worker preflight --auto-heal` now prunes orphan vectors alongside its existing FTS auto-heal. `kairix features status --maintenance` shows loop cadence + last-tick timestamp + cumulative orphan count.
+- **One new onboard check.** `maintenance_loop_ticking` reports whether the worker has fired a tick within the expected interval when the flag is on, and skips with `ok=true` when the flag is off. Default deploy now reports 15 checks (was 14).
+
+### New for agents
+
+- **Connector recipes in `docs/getting-started/agent-driven-setup.md`** for each new connector — what secret to ask the user for, what env-var name to set it under, what `topology_v2.connectors:` entry to write, what flag to flip. Every recipe follows the positive-pattern affordance shape (fix + next + run) instead of a "don't do X" list.
+
+### Behaviour changes worth noting
+
+- **Default deploy reports 15 onboard checks instead of 14.** The new `maintenance_loop_ticking` check reports `ok=true` with a `"skipped — maintenance_loop flag is OFF"` detail when the flag is off. Healthchecks asserting `total == 14` will need to move to `total >= 15`; healthchecks that consume `fully_passed` are unaffected.
+- **First sync after flipping a `topology_v2_<connector>` flag re-walks the source** to emit per-source containers. Subsequent syncs ride the delta cursors and are fast.
+- **First maintenance tick can take longer than subsequent ticks** if your index has accumulated months of orphan vectors. The `orphans_pruned` counter trends to single digits once the index has settled.
+
+### Internal
+
+- **Wave E topology v2 connector adoption.** Per-connector pilots ship for all 8 connectors in the fleet; the legacy single-cursor shim stays as the default until each pilot soaks against a real corpus.
+- **KFEAT-021 Phase 1** — the proactive replacement for the reactive KFEAT-020 preflight check. Five sabotage proofs cover the orphan-vector pruning loop, retention window, flag-OFF inertness, and the stall-detection check.
+- **F-rule discipline** — every new connector ships with the canonical test discipline (contract / integration both branches / e2e composed-path / BDD both branches), the F39 sensitivity routing locked at the boundary, and F54 both-branch coverage for every new flag.
+
+### Things that haven't changed
+
+- The legacy `collections:` + `agents:` blocks. Operators using them continue to work.
+- The provider plugin selector (`provider:`). Same shape, same plugins.
+- MCP tool names + JSON schemas. The 12 tools shipped in v2026.5.18 (plus `tool_features_status` from v2026.5.24a1) are unchanged.
+
 ## [2026.5.24a1] - 2026-05-23 — Topology v2 operator config + SharePoint connector + MCP cold-start fix (alpha)
 
 > **Upgrading?** Nothing required — every new behaviour sits behind a default-off feature flag, so pulling this version is a structural no-op. To opt into the alpha (topology v2 + SharePoint), follow [`docs/upgrades/v2026.5.24a1.md`](docs/upgrades/v2026.5.24a1.md).

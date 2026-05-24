@@ -17,6 +17,8 @@ Operational procedures and incident runbooks for kairix deployments.
 | NDCG@10 dropped after a config or index change | [runbook-benchmark-regression](runbook-benchmark-regression.md) |
 | Specific queries scoring poorly | [how-to-debug-search-ranking](how-to-debug-search-ranking.md) |
 | Updating kairix on a systemd VM (package bump, unit-file change, fetch-secrets change) | [kairix-systemd-update](../../runbooks/kairix-systemd-update.md) — pre-capture, ordered restart, gate on onboard check, manual rollback |
+| `agent_knowledge_populated` onboard check fails after upgrade | [how-to-upgrade-kairix §"Troubleshooting"](how-to-upgrade-kairix.md#troubleshooting-agent_knowledge_populated-fails-after-upgrade) — pin `paths.agent_knowledge_dir` + `paths.agent_memory_glob` in `kairix.config.yaml` |
+| Ghost search hits pointing at deleted documents, orphan vector counts climbing | Enable `maintenance_loop` in `kairix.config.yaml` — see [v2026.5.24a2 upgrade notes](../../upgrades/v2026.5.24a2.md#maintenance-loop) |
 | Setting up MCP server for the first time | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) |
 | Migrating an existing MCP client off SSE | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) |
 

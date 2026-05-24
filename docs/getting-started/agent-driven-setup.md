@@ -28,10 +28,18 @@ Collect these inputs before you write any files. If the user has not provided on
 | `CONNECTOR_M365_CLIENT_SECRET` | App registration client secret | enabling `connector_sharepoint` |
 | `KAIRIX_NEO4J_PASSWORD` | Neo4j bolt password | enabling Neo4j (entity boost + multi-hop) |
 | SharePoint drive id | Graph drive identifier per site | enabling `connector_sharepoint` |
+| `CONNECTOR_SLACK_BOT_TOKEN` | Workspace bot token (`xoxb-...`) | enabling `connector_slack` |
+| `CONNECTOR_SLACK_APP_TOKEN` | App-level token (`xapp-...`) for Socket Mode live events | enabling `connector_slack` with live events |
+| Slack workspace id | `T01ABC...` from Slack admin → about | enabling `connector_slack` |
+| `CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN` OR App triple | GitHub auth — PAT is simplest; App scales to many repos | enabling `connector_github` |
+| `CONNECTOR_GITHUB_WEBHOOK_SECRET` | Random 32-byte hex for webhook HMAC validation | enabling `connector_github` live events |
+| `CONNECTOR_NOTION_INTEGRATION_TOKEN` | Notion internal-integration token (`secret_...`) | enabling `connector_notion` |
 
 If the user says "use the local Neo4j" — provision Neo4j via the [`docs/operations/runbooks/how-to-install-neo4j.md`](../operations/runbooks/how-to-install-neo4j.md) recipe and use the password it sets.
 
-If the user has not provided a SharePoint drive id, do NOT make one up. Tell the user to run `kairix sharepoint list-sites` after the basic install and pick the drive id by name. The connector flag stays off until the operator pins a drive id.
+For the SharePoint drive id, ask the user to run `kairix sharepoint list-sites` after the basic install and pick the drive id by name. The connector flag stays off until the operator pins a drive id — this keeps a missing id from silently selecting the wrong drive.
+
+For Notion, after the integration token is set, the user has to share each page or database with the integration via the Notion UI before it can be indexed. The integration name appears in Notion's share dialog.
 
 ---
 
@@ -72,17 +80,19 @@ Write that file to `~/.kairix/kairix.config.yaml` (or whatever path you set as `
 
 ### Topology v2 add-on (only if the user asked for connectors)
 
-When the user has asked you to wire up the SharePoint connector OR multi-folder Obsidian routing, append the `topology_v2:` block from `kairix.config.example.yaml`. Set the `features:` block to flip the four flags:
+When the user has asked you to wire up a connector (SharePoint, Slack, GitHub, or Notion) OR multi-folder Obsidian routing, append the `topology_v2:` block from `kairix.config.example.yaml`. Each connector flag flips independently — turn on only the ones the user has asked for and has secrets for.
 
 ```yaml
 features:
-  topology_v2_config: true
-  topology_v2_obsidian: true       # only if user wants per-folder Obsidian containers
-  connector_sharepoint: true       # only if user provided the M365 triple + drive id
-  topology_v2_runtime: true        # only after the operator has soaked topology_v2_config
+  topology_v2_config: true                  # required when any connector_* flag is on
+  topology_v2_obsidian: true                # only if user wants per-folder Obsidian containers
+  connector_sharepoint: true                # only if user provided the M365 triple + drive id
+  connector_slack: true                     # only if user provided slack bot + (optional) app token
+  connector_github: true                    # only if user provided PAT or app triple
+  connector_notion: true                    # only if user provided the integration token
 ```
 
-Do NOT flip `topology_v2_runtime` on a brand-new install unless the user has explicitly asked — it changes chunk write routing and the user should validate the parsed config first.
+Leave `topology_v2_runtime` OFF on a brand-new install. Flip it only when the user has explicitly asked AND `topology_v2_config` has been on for at least one full sync cycle — `topology_v2_runtime` changes chunk write routing, and the user should validate the parsed config first (`kairix config validate` reports zero failures). The cutover protocol in `docs/architecture/feature-flag-architecture.md` §"Cutover protocol" walks through the snapshot → flip → soak → diff sequence.
 
 ---
 
@@ -110,6 +120,14 @@ kairix resolves secrets through this chain (every step is checked in order):
 | `connector-m365-tenant-id` | `CONNECTOR_M365_TENANT_ID` |
 | `connector-m365-client-id` | `CONNECTOR_M365_CLIENT_ID` |
 | `connector-m365-client-secret` | `CONNECTOR_M365_CLIENT_SECRET` |
+| `connector-slack-bot-token` | `CONNECTOR_SLACK_BOT_TOKEN` |
+| `connector-slack-app-token` | `CONNECTOR_SLACK_APP_TOKEN` |
+| `connector-github-personal-access-token` | `CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN` |
+| `connector-github-app-id` | `CONNECTOR_GITHUB_APP_ID` |
+| `connector-github-installation-id` | `CONNECTOR_GITHUB_INSTALLATION_ID` |
+| `connector-github-app-private-key` | `CONNECTOR_GITHUB_APP_PRIVATE_KEY` |
+| `connector-github-webhook-secret` | `CONNECTOR_GITHUB_WEBHOOK_SECRET` |
+| `connector-notion-integration-token` | `CONNECTOR_NOTION_INTEGRATION_TOKEN` |
 
 ### Docker secret file (Path A)
 

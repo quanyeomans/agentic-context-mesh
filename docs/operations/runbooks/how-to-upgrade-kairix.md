@@ -4,6 +4,32 @@
 
 ---
 
+## Migration to v2026.5.24a-series: alpha track with new connectors + maintenance loop
+
+The v2026.5.24 alpha series (a1 → a3) adds the topology v2 operator-config surface, four new connectors (SharePoint, Slack, GitHub, Notion), a background maintenance loop, and a configurable `agent_knowledge_populated` onboard check. Every behaviour is gated by a default-off feature flag — pulling the alpha doesn't change anything until you flip a flag.
+
+The cumulative upgrade path:
+
+- [v2026.5.24a1](../../upgrades/v2026.5.24a1.md) — topology v2 operator-config + SharePoint connector
+- [v2026.5.24a2](../../upgrades/v2026.5.24a2.md) — Slack, GitHub, Notion connectors + maintenance loop
+- [v2026.5.24a3](../../upgrades/v2026.5.24a3.md) — configurable `agent_knowledge_populated` glob + directory
+
+If you skip directly from a stable release to a3, read all three notes in order — each documents flags + secrets that the next builds on.
+
+### Troubleshooting: `agent_knowledge_populated` fails after upgrade
+
+The default glob (`**/*.md` under `04-Agent-Knowledge/`) matches most layouts, but vaults that use a different directory name or stricter pattern can pin both via `kairix.config.yaml`:
+
+```yaml
+paths:
+  agent_knowledge_dir: "team-memory"           # if your vault uses a different dir name
+  agent_memory_glob: "*/memory/*.md"           # if you want the strict <agent>/memory/<file>.md layout
+```
+
+The check's failure detail names the directory and glob that were searched, so the mismatch is visible at a glance.
+
+---
+
 ## Migration to v2026.5.17: pick your provider plugin
 
 v2026.5.17 retires the `KAIRIX_PROVIDER` env-var seam — the LLM/embed plugin is now selected by a top-level `provider:` field in `kairix.config.yaml`. The plugin is the only embed/chat path; each plugin owns its own credential-retrieval pattern (Azure → Key Vault; AWS → Secrets Manager; etc.), so secrets stay where the plugin's runbook puts them.
