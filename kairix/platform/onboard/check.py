@@ -154,7 +154,9 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
     _CHECK_NEO4J_REACHABLE: (
         "Run `bash scripts/install-neo4j.sh` to install Neo4j, then set "
         "`KAIRIX_NEO4J_URI=bolt://localhost:7687` in /opt/kairix/service.env. "
-        "Neo4j is optional — entity boost degrades gracefully when offline."
+        "Neo4j is required for production — entity boost, multi-hop, alias resolution, "
+        "and briefing all rely on it. The system loads without it but entity-heavy "
+        "queries degrade significantly."
     ),
     _CHECK_AGENT_KNOWLEDGE_POPULATED: (
         "Run `kairix embed` to populate the agent knowledge store from the document root, "
@@ -570,7 +572,7 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
                     "  docker run -d --name neo4j -p 7687:7687 -e NEO4J_AUTH=neo4j/YOUR_PASSWORD neo4j:5-community\n"
                     "Then set KAIRIX_NEO4J_URI in /opt/kairix/service.env:\n"
                     "  KAIRIX_NEO4J_URI=bolt://localhost:7687\n"
-                    "Neo4j is optional — entity boost and multi-hop queries are degraded without it."
+                    "Neo4j is required for production — entity boost and multi-hop queries are degraded without it."
                 ),
             )
 

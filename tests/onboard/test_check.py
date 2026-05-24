@@ -62,7 +62,8 @@ def test_wrapper_check_skipped_in_docker() -> None:
 
 @pytest.mark.unit
 def test_neo4j_fix_hint_contains_install_script() -> None:
-    """fix hint must reference install-neo4j.sh when Neo4j is unavailable."""
+    """fix hint must reference install-neo4j.sh + docker fallback + the
+    production-required framing when Neo4j is unavailable."""
     fake_client = _FakeNeo4jClient(available=False)
 
     result = check_neo4j_reachable(neo4j_client=fake_client)
@@ -71,7 +72,12 @@ def test_neo4j_fix_hint_contains_install_script() -> None:
     assert result.fix is not None
     assert "install-neo4j.sh" in result.fix
     assert "docker" in result.fix.lower()
-    assert "optional" in result.fix.lower()
+    # The fix hint frames Neo4j as required for production — the system
+    # loads without it but entity-heavy queries degrade. Earlier versions
+    # called it "optional"; the framing landed in v2026.5.24a3 because
+    # operators were skipping Neo4j based on the "optional" wording and
+    # then hitting recall regressions on entity-named queries.
+    assert "required for production" in result.fix.lower()
 
 
 @pytest.mark.unit

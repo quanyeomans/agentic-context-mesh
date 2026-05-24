@@ -55,6 +55,23 @@ _SECRET_ENV_MAP = {
     "kairix-embed-pool-keepalive": "KAIRIX_EMBED_POOL_KEEPALIVE",
     "kairix-embed-pool-expiry-s": "KAIRIX_EMBED_POOL_EXPIRY_S",
     "kairix-neo4j-password": "KAIRIX_NEO4J_PASSWORD",
+    # Connector secrets — env-var form is the upper-snake-case version of
+    # the logical name. Operators on the bundle-env-file path use the
+    # right-hand column; per-file and KV paths use the logical name (left)
+    # verbatim.
+    "connector-m365-tenant-id": "CONNECTOR_M365_TENANT_ID",
+    "connector-m365-client-id": "CONNECTOR_M365_CLIENT_ID",
+    "connector-m365-client-secret": "CONNECTOR_M365_CLIENT_SECRET",  # pragma: allowlist secret
+    "connector-slack-bot-token": "CONNECTOR_SLACK_BOT_TOKEN",
+    "connector-slack-app-token": "CONNECTOR_SLACK_APP_TOKEN",
+    "connector-slack-client-id": "CONNECTOR_SLACK_CLIENT_ID",
+    "connector-slack-client-secret": "CONNECTOR_SLACK_CLIENT_SECRET",  # pragma: allowlist secret
+    "connector-github-personal-access-token": "CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN",
+    "connector-github-app-id": "CONNECTOR_GITHUB_APP_ID",
+    "connector-github-installation-id": "CONNECTOR_GITHUB_INSTALLATION_ID",
+    "connector-github-app-private-key": "CONNECTOR_GITHUB_APP_PRIVATE_KEY",
+    "connector-github-webhook-secret": "CONNECTOR_GITHUB_WEBHOOK_SECRET",  # pragma: allowlist secret
+    "connector-notion-token": "CONNECTOR_NOTION_TOKEN",
 }
 
 

@@ -23,7 +23,7 @@ If kairix is in Docker, prefix host commands with `docker exec <container-name>`
 
 Entity data lives in Neo4j. Kairix populates Neo4j by walking the document store and extracting `[[wikilink]]` references — one entity node per unique wikilink target, one `MENTIONS` edge per occurrence. The crawler is `kairix store crawl`.
 
-The kairix SQLite + usearch index is independent — search continues to work without Neo4j (entity boost is just disabled).
+The kairix SQLite + usearch index is independent — search returns hits without Neo4j, but entity boost, multi-hop, alias resolution, and briefing synthesis all degrade. Neo4j is required for production deployments; this runbook covers a rebuild, not a teardown.
 
 ## Before you start
 

@@ -26,16 +26,16 @@ Collect these inputs before you write any files. If the user has not provided on
 | `CONNECTOR_M365_TENANT_ID` | AAD tenant GUID | enabling `connector_sharepoint` |
 | `CONNECTOR_M365_CLIENT_ID` | App registration client id | enabling `connector_sharepoint` |
 | `CONNECTOR_M365_CLIENT_SECRET` | App registration client secret | enabling `connector_sharepoint` |
-| `KAIRIX_NEO4J_PASSWORD` | Neo4j bolt password | enabling Neo4j (entity boost + multi-hop) |
+| `KAIRIX_NEO4J_PASSWORD` (or `kairix-neo4j-password` in KV) | Neo4j bolt password | **required for production** — entity boost, multi-hop, alias resolution, briefing synthesis all need it |
 | SharePoint drive id | Graph drive identifier per site | enabling `connector_sharepoint` |
 | `CONNECTOR_SLACK_BOT_TOKEN` | Workspace bot token (`xoxb-...`) | enabling `connector_slack` |
 | `CONNECTOR_SLACK_APP_TOKEN` | App-level token (`xapp-...`) for Socket Mode live events | enabling `connector_slack` with live events |
 | Slack workspace id | `T01ABC...` from Slack admin → about | enabling `connector_slack` |
 | `CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN` OR App triple | GitHub auth — PAT is simplest; App scales to many repos | enabling `connector_github` |
 | `CONNECTOR_GITHUB_WEBHOOK_SECRET` | Random 32-byte hex for webhook HMAC validation | enabling `connector_github` live events |
-| `CONNECTOR_NOTION_INTEGRATION_TOKEN` | Notion internal-integration token (`secret_...`) | enabling `connector_notion` |
+| `CONNECTOR_NOTION_TOKEN` | Notion internal-integration token (`secret_...`) | enabling `connector_notion` |
 
-If the user says "use the local Neo4j" — provision Neo4j via the [`docs/operations/runbooks/how-to-install-neo4j.md`](../operations/runbooks/how-to-install-neo4j.md) recipe and use the password it sets.
+Neo4j is part of every production deployment — the bundled `docker-compose.yml` ships a Neo4j sidecar by default. Provision its password (`kairix-neo4j-password` in KV; `KAIRIX_NEO4J_PASSWORD` in the bundle env file) before standing kairix up. For non-Docker installs, follow the [`docs/operations/runbooks/how-to-install-neo4j.md`](../operations/runbooks/how-to-install-neo4j.md) recipe and use the password it sets.
 
 For the SharePoint drive id, ask the user to run `kairix sharepoint list-sites` after the basic install and pick the drive id by name. The connector flag stays off until the operator pins a drive id — this keeps a missing id from silently selecting the wrong drive.
 
@@ -135,61 +135,108 @@ Leave `topology_v2_runtime` OFF on a brand-new install. Flip it only when the us
 
 ## 3. Secrets shape
 
-kairix resolves secrets through this chain (every step is checked in order):
+kairix uses **logical secret names** (lowercase-hyphenated). The name is the same string whatever the resolution path — `connector-slack-bot-token` is the key in Azure Key Vault, the filename for a per-file secret, and the lookup key the connector calls. Two paths are supported for production: **Azure Key Vault** (the dogfood / shared-infra pattern) and **bundled env file** (the simple Docker / pip-on-VM pattern). They can coexist; KV wins when both resolve.
 
-1. **Process env var** — `os.environ.get(env_var_name)`. Fastest.
-2. **Per-file secret** — `<secrets_dir>/<logical-name>` (one secret per file, one-line value).
-3. **Bundle file** — `<secrets_dir>/kairix.env` (KEY=VALUE lines).
-4. **Azure Key Vault** — when `KAIRIX_KV_NAME` is set, fall back to `az keyvault secret show`.
+### Resolution order (every step is checked in order)
+
+1. **Process env var** — `os.environ.get(env_var_name)`. The env-var name is the upper-snake-case version of the logical name (e.g. `CONNECTOR_SLACK_BOT_TOKEN` for logical `connector-slack-bot-token`).
+2. **Per-file secret** — `<secrets_dir>/<logical-name>` (one file per secret, the filename is the logical name verbatim, contents is the value on one line).
+3. **Bundle file** — `<secrets_dir>/kairix.env` (KEY=VALUE lines, where KEY is the env-var name from the table below).
+4. **Azure Key Vault** — when `KAIRIX_KV_NAME` is set, fall back to `az keyvault secret show --vault-name $KAIRIX_KV_NAME --name <logical-name>`. **The KV secret name is the logical name verbatim** — `connector-slack-bot-token`, not `CONNECTOR_SLACK_BOT_TOKEN`.
 
 `<secrets_dir>` is `/run/secrets/` (Docker) or `~/.config/kairix/secrets/` (pip install).
 
-### Logical-name → env-var-name map (the names you write in the secrets file)
+### Path A — Azure Key Vault (production / dogfood)
 
-| Logical name (used by connector code) | Env var (what you write) |
-|--------------------------------------|--------------------------|
-| `kairix-llm-api-key` | `KAIRIX_LLM_API_KEY` |
-| `kairix-llm-endpoint` | `KAIRIX_LLM_ENDPOINT` |
-| `kairix-llm-model` | `KAIRIX_LLM_MODEL` |
-| `kairix-embed-api-key` | `KAIRIX_EMBED_API_KEY` |
-| `kairix-embed-endpoint` | `KAIRIX_EMBED_ENDPOINT` |
-| `kairix-neo4j-password` | `KAIRIX_NEO4J_PASSWORD` |
-| `connector-m365-tenant-id` | `CONNECTOR_M365_TENANT_ID` |
-| `connector-m365-client-id` | `CONNECTOR_M365_CLIENT_ID` |
-| `connector-m365-client-secret` | `CONNECTOR_M365_CLIENT_SECRET` |
-| `connector-slack-bot-token` | `CONNECTOR_SLACK_BOT_TOKEN` |
-| `connector-slack-app-token` | `CONNECTOR_SLACK_APP_TOKEN` |
-| `connector-github-personal-access-token` | `CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN` |
-| `connector-github-app-id` | `CONNECTOR_GITHUB_APP_ID` |
-| `connector-github-installation-id` | `CONNECTOR_GITHUB_INSTALLATION_ID` |
-| `connector-github-app-private-key` | `CONNECTOR_GITHUB_APP_PRIVATE_KEY` |
-| `connector-github-webhook-secret` | `CONNECTOR_GITHUB_WEBHOOK_SECRET` |
-| `connector-notion-integration-token` | `CONNECTOR_NOTION_INTEGRATION_TOKEN` |
-
-### Docker secret file (Path A)
+Set one env var on the kairix runtime (container or systemd unit):
 
 ```
-# /run/secrets/kairix.env — write via docker secret create / volume mount
+KAIRIX_KV_NAME=<your-keyvault-short-name>     # e.g. kairix-prod-kv (without https://...vault.azure.net)
+```
+
+Then create secrets in that vault. **Use the logical name verbatim as the KV secret name** — no uppercasing, no underscore-conversion, exactly what kairix passes to `az keyvault secret show --name`.
+
+#### Runtime identity requirements
+
+The runtime needs **`Get` permission on secrets** in your KV. Either:
+
+- **Access policy mode (legacy):** Add the runtime principal (managed identity or service principal) with `Get` on Secret Permissions. KV → Access policies → Add Access Policy → Get only → select principal.
+- **RBAC mode (preferred):** Grant the runtime principal the **Key Vault Secrets User** role on the vault scope. KV → Access control (IAM) → Add role assignment → Key Vault Secrets User → select principal.
+
+The runtime container must also have the `az` CLI installed and be logged in (managed identity does this automatically; service-principal-on-VM uses `az login --identity` or `az login --service-principal`).
+
+#### Complete list of KV secret names
+
+Every secret kairix may resolve. **The name in this column is the literal value to pass to `az keyvault secret create --name`** (or to type into the portal's "Secret name" field).
+
+| KV secret name (= logical name) | Required for | Notes |
+|---|---|---|
+| `kairix-llm-api-key` | LLM calls (briefing, classification, fact extraction) | Always required |
+| `kairix-llm-endpoint` | Same | Required for Azure / OpenAI-compatible / LiteLLM providers |
+| `kairix-llm-model` | Same | Optional override; default model varies per provider |
+| `kairix-embed-api-key` | Embedding calls | Falls back to `kairix-llm-api-key` if absent |
+| `kairix-embed-endpoint` | Same | Falls back to `kairix-llm-endpoint` if absent |
+| `kairix-embed-model` | Same | Optional override |
+| `kairix-neo4j-password` | Neo4j connection (entity boost, multi-hop, alias resolution) | **Required for production** — see §"Neo4j is required" below |
+| `connector-m365-tenant-id` | SharePoint / m365-email-headers / m365-calendar connectors | Shared across all three M365 connectors |
+| `connector-m365-client-id` | Same | One app registration covers all three |
+| `connector-m365-client-secret` | Same | Required when any M365 connector flag is on |
+| `connector-slack-bot-token` | Slack connector | Required when `connector_slack` is on; `xoxb-...` |
+| `connector-slack-app-token` | Slack Socket Mode | Optional; `xapp-...`; without it the connector polls instead of streaming |
+| `connector-slack-client-id` | Slack OAuth flow | Optional; only for user-initiated install flows |
+| `connector-slack-client-secret` | Same | Optional; same caveat |
+| `connector-github-personal-access-token` | GitHub PAT path | Provide **either** this **or** the App triple below |
+| `connector-github-app-id` | GitHub App path | Provide all three or use the PAT above |
+| `connector-github-installation-id` | Same | |
+| `connector-github-app-private-key` | Same | PEM contents on one line |
+| `connector-github-webhook-secret` | GitHub webhook listener | Required if you want the live event listener; random 32-byte hex |
+| `connector-notion-token` | Notion connector | Required when `connector_notion` is on; `secret_...` |
+
+#### Verifying the KV path resolves
+
+After the secrets are in KV and the runtime has Get permission:
+
+```bash
+# Inside the kairix container or on the VM where kairix runs:
+az keyvault secret show --vault-name $KAIRIX_KV_NAME --name kairix-llm-api-key --query value -o tsv
+# Should print the value. If it errors, the runtime identity is missing Get permission.
+
+kairix onboard check
+# secrets_loaded must report ok=true with the resolution path it used.
+```
+
+### Path B — bundled env file (simple Docker / pip-on-laptop)
+
+Skip this if you're on Path A — the KV path is enough on its own.
+
+Write the bundle file as `KEY=VALUE` lines:
+
+```
+# /run/secrets/kairix.env (Docker) OR ~/.config/kairix/secrets/kairix.env (pip)
 KAIRIX_LLM_API_KEY=<value>
 KAIRIX_LLM_ENDPOINT=<value>
-# Optional — SharePoint connector:
-CONNECTOR_M365_TENANT_ID=<value>
-CONNECTOR_M365_CLIENT_ID=<value>
-CONNECTOR_M365_CLIENT_SECRET=<value>
-# Optional — Neo4j:
-KAIRIX_NEO4J_PASSWORD=<value>
+KAIRIX_NEO4J_PASSWORD=<value>          # production-required (see §"Neo4j is required")
 ```
 
-### Pip secret file (Path B)
+All connector secrets are in the env-var map (`CONNECTOR_M365_*`, `CONNECTOR_SLACK_*`, `CONNECTOR_GITHUB_*`, `CONNECTOR_NOTION_TOKEN`) — they resolve from the bundle file like the core secrets do.
+
+If you'd rather drop a single secret as a file (e.g. for Docker secrets mounted at `/run/secrets/`), the filename is the **logical name verbatim** — no uppercasing:
 
 ```
-# ~/.config/kairix/secrets/kairix.env — chmod 600
-KAIRIX_LLM_API_KEY=<value>
-KAIRIX_LLM_ENDPOINT=<value>
-# (same optional rows as above)
+echo -n 'xoxb-your-real-token' > /run/secrets/connector-slack-bot-token
+echo -n 'secret_your-real-token' > /run/secrets/connector-notion-token
+chmod 600 /run/secrets/connector-*
 ```
 
-Set permissions: `chmod 600 ~/.config/kairix/secrets/kairix.env`.
+Set permissions on the bundle: `chmod 600 ~/.config/kairix/secrets/kairix.env`.
+
+### Neo4j is required
+
+Kairix's onboard check reports Neo4j as "optional" because the system loads without it. In practice every production deployment runs Neo4j — without it, entity boost, multi-hop search, alias resolution, and briefing synthesis all degrade significantly on entity-heavy corpora (which most operator vaults are). The bundled `docker-compose.yml` ships a Neo4j sidecar by default for this reason.
+
+Provision `kairix-neo4j-password` in KV (or `KAIRIX_NEO4J_PASSWORD` in the bundle file). The Neo4j connection URL is set via `KAIRIX_NEO4J_URI` (defaults to `bolt://neo4j:7687` for the bundled compose layout).
+
+If you genuinely want a Neo4j-less deployment, expect: search still returns hits, but entity-named queries drop ~5–10 NDCG points, multi-hop queries return single-hop results only, and the briefing pipeline can't resolve entities across documents. Confirm with the user that this trade-off is intentional before skipping Neo4j.
 
 ---
 
@@ -251,7 +298,7 @@ Every failure path you might hit, with the exact next command. Mirrors the F21 a
 | `topology_v2_config_valid` fails: "<N> cross-reference failure(s)" | A `cc_pair` references a connector / credential that wasn't declared; or a `collection.source` / `scope_profile.entry` references a missing cc_pair / collection | fix: open `kairix.config.yaml` and add the missing entries OR remove the dangling reference. next: run `kairix config validate`. |
 | `topology_v2_cc_pairs_registered` fails: "<N> declared cc_pair(s) not registered" | You wrote new cc_pairs to the YAML but didn't apply them to the DB | fix: `kairix worker apply-config`. next: re-run `kairix onboard check`. |
 | `sharepoint_credentials_loaded` fails: "<N> SharePoint secret(s) unresolved" | The three M365 secrets are not in env / secrets file / Key Vault | fix: write `CONNECTOR_M365_TENANT_ID` / `CONNECTOR_M365_CLIENT_ID` / `CONNECTOR_M365_CLIENT_SECRET` to the secrets file. next: re-run `kairix onboard check sharepoint_credentials_loaded`. |
-| `neo4j_reachable` fails: "client unavailable" | Neo4j is not installed OR `KAIRIX_NEO4J_URI` is wrong | fix: install via `bash scripts/install-neo4j.sh` OR run a containerised neo4j; set `KAIRIX_NEO4J_URI=bolt://localhost:7687`. next: re-run `kairix onboard check`. Neo4j is OPTIONAL — entity boost degrades gracefully. |
+| `neo4j_reachable` fails: "client unavailable" | Neo4j is not installed OR `KAIRIX_NEO4J_URI` is wrong | fix: install via `bash scripts/install-neo4j.sh` OR run the bundled compose (Neo4j is a sidecar in `docker-compose.yml`); set `KAIRIX_NEO4J_URI=bolt://localhost:7687` (pip) or `bolt://neo4j:7687` (compose). next: re-run `kairix onboard check`. Neo4j is required for production — entity boost, multi-hop, and briefing all rely on it. |
 | `mcp_service` fails: "not configured" | No MCP consumer harness has kairix registered | fix: add kairix to the user's `claude_desktop_config.json` OR `~/.openclaw/openclaw.json` (the failure detail names the exact paths). next: re-run `kairix onboard check`. |
 | `kairix worker preflight` fails: "schema version mismatch" | The SQLite DB was created by an older kairix version | fix: `kairix migrate up` (the migration is automatic on next embed; this verb forces it now). next: re-run `kairix worker preflight`. |
 | `kairix benchmark run reflib` fails: gate below threshold | Embed pipeline incomplete or provider mis-tuned | fix: `kairix embed --limit 100` to confirm embed works end-to-end; if green, run `kairix embed` for a full pass; then re-benchmark. next: if the gate still fails, escalate to the user — likely a model-quality issue requiring a provider swap. |
