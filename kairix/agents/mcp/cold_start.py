@@ -4,9 +4,15 @@ The MCP server can be alive before the retrieval stack is warm. LLM agents are
 not reliable retry engines, so cold-start must be encoded as a mechanical,
 retryable state rather than prose hidden in a generic error string.
 
-Operator-facing documentation for the readiness-gate flow lives in
-``docs/operations/MCP-DEPLOYMENT.md`` and the v2026.5.18 upgrade notes at
-``docs/upgrades/v2026.5.18.md``.
+The end-to-end three-layer contract (HTTP 503 + Retry-After at the transport,
+this application-layer envelope, and the structured startup-log events that
+operators pivot on for restart frequency) is documented in
+``docs/operations/MCP-DEPLOYMENT.md`` under "Cold-start affordance contract".
+Agent-side retry guidance ("If you see fetch_failed from kairix") lives in
+``docs/user-guide/agent-usage-guide.md`` — the searchable corpus the
+``kairix onboard guide`` installer ships into operator vaults. The
+v2026.5.18 upgrade notes at ``docs/upgrades/v2026.5.18.md`` carry the
+historical context for the readiness gate introduction.
 """
 
 from __future__ import annotations

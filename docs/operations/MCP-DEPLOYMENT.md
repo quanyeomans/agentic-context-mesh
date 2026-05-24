@@ -59,6 +59,69 @@ If a tool call does arrive before the gate is ready, retrieval tools return the 
 
 Clients and agent runtimes should treat `error_code=KAIRIX_COLD_START` as a wait-and-retry state, not as a completed search failure.
 
+### Cold-start affordance contract
+
+KFEAT-020 hardens the cold-start path against the failure mode where agents see `fetch_failed` during the container-restart window and dismiss kairix as broken instead of retrying. The contract has three layers — operators and MCP client authors only need to know the surface visible at their layer, but they all carry the same retry hint so a client can implement a single retry loop.
+
+**Layer 1 — HTTP 503 + `Retry-After` (transport).** When the readiness gate is closed (uvicorn is bound but warm-up hasn't finished), every non-health request returns:
+
+```
+HTTP/1.1 503 Service Unavailable
+Retry-After: 8
+Content-Type: application/json
+
+{
+  "status": "retryable_not_ready",
+  "error": "ColdStart",
+  "error_code": "KAIRIX_COLD_START",
+  "tool": "<request path>",
+  "retry_after_ms": 8000,
+  "estimated_seconds_remaining": 8.0,
+  "agent_instruction": "Do not answer from memory, do not use a lower-quality fallback, and do not treat this as a completed retrieval. Wait retry_after_ms, retry the same call once, then surface the cold-start blocker if it is still not ready."
+}
+```
+
+This fixes the gap where MCP clients saw `fetch_failed` (a transport-level fault) during the bind-but-not-warm window. The standard `Retry-After` header lets well-behaved HTTP clients retry without reading the body; the JSON body carries the same retry hint for clients that want structured handling.
+
+Health probes (`/healthz`, `/healthz/ready`) bypass the gate so load balancers always get an answer.
+
+**Layer 2 — application-layer cold-start envelope.** If warm-up has completed and the request reaches the MCP router, retrieval tools (`search`, `entity`, `prep`, `timeline`, `research`, `contradict`, `brief`, `bootstrap`, `entity_suggest`, `entity_validate`, `ingest_chat`, `facts_about`) check the per-process readiness gate via the `@warm_gate` decorator. While the in-process gate is closed they return the same envelope shape as Layer 1 (defined in `kairix/agents/mcp/cold_start.py`), but as a 200 OK MCP tool response body — because the MCP protocol layer doesn't have a native retry-after channel. Diagnostic and static tools (`usage_guide`, `onboard_check`, `worker_status`, `warm`, `capabilities`, probes) stay ungated so operators can read them to diagnose the cold state.
+
+**Expected MCP-client behaviour.**
+
+1. On Layer 1 (HTTP 503): honour the `Retry-After` header. Wait the requested seconds, retry the same call once. If still 503, surface "kairix warming" to the user — not "kairix broken".
+2. On Layer 2 (MCP tool envelope with `error_code=KAIRIX_COLD_START`): parse the envelope, wait `retry_after_ms`, retry the same call once. If the second call also returns `KAIRIX_COLD_START`, surface "kairix warming" — not "kairix returned no results".
+3. Either signal is **always retryable** — never a permanent failure. Never substitute a memory-based answer for a `KAIRIX_COLD_START` response.
+
+**Layer 3 — structured startup logs.** Each MCP HTTP-transport process emits three structured log events on the dedicated `kairix.mcp.startup` logger so operators can pivot on container-restart frequency in their log analytics layer:
+
+| Event | When | Fields |
+|---|---|---|
+| `event=mcp_process_started` | Once at the top of the HTTP-transport branch, before warm-up runs. | `pid`, `host`, `port`, `python_version`, `kairix_version`, `previous_warm_age_s` (None on first start; otherwise seconds since the previous warm flag was written, so operators can tell whether the just-killed previous process was warm at death). |
+| `event=mcp_warm_started` | When `warm_retrieval_stack_fn()` returns `ready=True`. | `pid`, `elapsed_ms` (from the warm envelope). |
+| `event=mcp_warm_failed` | When `warm_retrieval_stack_fn()` returns `ready=False`. | `pid`, `warm_result` (full warm envelope as a JSON string, including the failing step). |
+
+All three are `INFO`-level on the dedicated `kairix.mcp.startup` logger so operators can filter without picking up unrelated kairix log volume. Format is grep-friendly `event=<name> key=value` so plain `docker logs <container> | grep event=mcp_` works without a log shipper.
+
+**Operator query recipe** (for any log analytics that ingests `docker logs`):
+
+```
+# count restarts in a window:
+filter: logger == "kairix.mcp.startup" AND message contains "event=mcp_process_started"
+pivot:  count() by hour
+
+# correlate restart cadence with warm failures:
+filter: logger == "kairix.mcp.startup" AND message contains "event=mcp_warm_failed"
+pivot:  count() by hour, extract warm_result.steps[].name as failing_step
+
+# "was the previous process warm at death?" — extract previous_warm_age_s:
+filter: logger == "kairix.mcp.startup" AND message contains "event=mcp_process_started"
+extract: previous_warm_age_s as age
+pivot: histogram(age) — null bucket is fresh container, non-null is restart-while-warmed
+```
+
+A healthy deployment should show `mcp_process_started` no more than 1/day after Part 1's healthcheck fix; spikes correlate with operator-initiated restarts. A spike in `mcp_warm_failed` points at a warm-up dependency (build_search_pipeline failure → sqlite path / schema issue; probe_search failure → vector index missing) rather than a transient outage.
+
 ### `/healthz/ready` — layered readiness
 
 ```bash
