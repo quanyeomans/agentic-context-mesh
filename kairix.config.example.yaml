@@ -1,0 +1,290 @@
+# kairix.config.example.yaml
+#
+# The canonical operator-facing config example for kairix.
+#
+# Copy this file to ``kairix.config.yaml`` (or set
+# ``KAIRIX_CONFIG_PATH=/path/to/your-config.yaml``) and edit the values
+# for your deployment. Every block has inline comments explaining what
+# each field does, which fields are optional, and — for connector /
+# credential blocks — which secret names the operator must set in their
+# environment so the example resolves.
+#
+# This file is the source-of-truth shape for ``kairix config validate``,
+# the ``kairix onboard check`` topology_v2 checks, and the
+# ``kairix-agent-driven-setup`` doc (docs/getting-started/agent-driven-setup.md).
+# If you change the YAML shape here, update both surfaces in the same
+# commit.
+
+# ──────────────────────────────────────────────────────────────────────────
+# Schema version
+# ──────────────────────────────────────────────────────────────────────────
+# Pin the schema version of this file. ``_schema_version`` is the version
+# this example was written against. Operators running the layered-overlay
+# pattern (kairix.config.local.yaml on top of the image-bundled base) may
+# pin a minimum schema with ``_schema_version_required_min: N`` — kairix
+# refuses to start if the image-bundled base has a lower
+# ``_schema_version`` than the overlay requires. Bump this value when a
+# required key is added.
+_schema_version: 1
+
+# ──────────────────────────────────────────────────────────────────────────
+# Provider — the LLM / embed plugin to load
+# ──────────────────────────────────────────────────────────────────────────
+# Which plugin handles chat completion + embedding for this deployment.
+# Each plugin owns its own credential-retrieval pattern (Azure → Key
+# Vault; AWS → Secrets Manager; etc.) so the operator never wires
+# secrets into this YAML. Run ``kairix probe-config`` to verify the
+# selected plugin can reach its endpoint.
+#
+# Installed plugins (shipping today):
+#   azure_foundry  — Azure AI Foundry endpoint (default for existing deploys)
+#   azure_legacy   — Pre-Foundry Azure OpenAI deployment endpoint
+#   openai         — OpenAI direct (api.openai.com or compatible base_url)
+#   bedrock        — AWS Bedrock via boto3 credentials chain
+#   ollama         — local Ollama for air-gapped / dev deployments
+#   litellm_proxy  — LiteLLM proxy in front of any upstream provider
+#   anthropic      — Anthropic Claude direct
+#
+# Secrets the example expects (set in .env / /run/secrets/kairix.env):
+#   KAIRIX_LLM_API_KEY   — required for every cloud provider
+#   KAIRIX_LLM_ENDPOINT  — required for Azure / OpenAI-compatible / LiteLLM
+provider: azure_foundry
+
+# ──────────────────────────────────────────────────────────────────────────
+# Paths (optional — env-var override takes priority)
+# ──────────────────────────────────────────────────────────────────────────
+# Where the document corpus, SQLite index, log directory, and per-agent
+# workspaces live. Each value can also be set via the matching
+# ``KAIRIX_*`` env var (``KAIRIX_DOCUMENT_ROOT`` etc.), which takes
+# priority. Most deployments leave this block uncommented and rely on
+# the env-var defaults.
+#
+# paths:
+#   document_root:  ~/Documents/my-knowledge-store
+#   db_path:        ~/.cache/kairix/index.sqlite
+#   log_dir:        ~/.cache/kairix/logs
+#   workspace_root: ~/.kairix/workspaces
+
+# ──────────────────────────────────────────────────────────────────────────
+# Retrieval — how BM25 + vector results combine, plus boost knobs
+# ──────────────────────────────────────────────────────────────────────────
+# The same shape as kairix.example.config.yaml. Operators typically
+# leave defaults until they have a gold suite (``kairix benchmark run``)
+# to tune against.
+retrieval:
+  # "bm25_primary" (default) — keyword-first for keyword-rich corpora
+  #   (wikis, runbooks, knowledge bases).
+  # "rrf" — equal weight to keyword + meaning-based; better for
+  #   prose-heavy / long-form / multilingual content.
+  fusion_strategy: "bm25_primary"
+
+  boosts:
+    entity:
+      enabled: true
+      factor: 0.20
+      cap: 2.0
+    procedural:
+      enabled: true
+      factor: 1.4
+      path_patterns:
+        - "(?:^|/)how-to-"
+        - "(?:^|/)runbooks?/"
+        - "(?:^|/)runbook-"
+        - "(?:^|/)procedure"
+        - "(?:^|/)sop-"
+        - "(?:^|/)guide-"
+        - "(?:^|/)playbook-"
+    temporal:
+      date_path_boost:
+        enabled: false
+        factor: 1.35
+        recency_window_days: 90
+      chunk_date_boost:
+        enabled: false
+        decay_halflife_days: 30
+
+# ──────────────────────────────────────────────────────────────────────────
+# Legacy collections + agents blocks (backward-compat per #305)
+# ──────────────────────────────────────────────────────────────────────────
+# These two blocks are the v1 operator surface — they still parse and
+# still work. New deployments should declare connectors / collections
+# under ``topology_v2:`` instead (see below); existing deployments are
+# free to keep using these two blocks until the topology v2 migration
+# completes.
+#
+# collections:
+#   shared:
+#     - name: projects
+#       path: "01-Projects"
+#       glob: "**/*.md"
+#     - name: knowledge
+#       path: "05-Knowledge"
+#       glob: "**/*.md"
+#   agent_pattern: "{agent}-memory"
+#
+# agents:
+#   - name: agent-alpha
+#     paths:
+#       - /data/workspaces/agent-alpha
+#     write_path: /data/workspaces/agent-alpha
+
+# ──────────────────────────────────────────────────────────────────────────
+# Feature flags (operator overlay for kairix.core.features.REGISTRY)
+# ──────────────────────────────────────────────────────────────────────────
+# Per-flag overrides for kairix's feature flag resolver. Each flag is a
+# boolean. Values here override the registry default but are themselves
+# overridden by ``KAIRIX_FEATURE_<NAME>`` env vars (so an operator can
+# emergency-flip without editing this YAML).
+#
+# Run ``kairix features status`` to see which flags are on and where
+# their value came from (env / config / default).
+#
+# features:
+#   topology_v2_config: true        # parse + apply the topology_v2 block below
+#   topology_v2_obsidian: true      # per-folder containers + parent-before-child walk
+#   connector_sharepoint: true      # enable the SharePoint connector
+
+# ──────────────────────────────────────────────────────────────────────────
+# topology_v2 — connectors / collections / scope profiles / skills
+# ──────────────────────────────────────────────────────────────────────────
+# The Wave D operator surface for the connector / collection / scope
+# topology v2 migration. Six nested blocks under a single
+# ``topology_v2:`` parent key (the parent-key namespace landed in #305
+# to keep the v2 ``collections:`` block from colliding with the legacy
+# top-level ``collections.shared`` dict above).
+#
+# Gated by the ``topology_v2_config`` feature flag. When the flag is OFF
+# the parser still reads the YAML but the surface is inert — rows aren't
+# written to topology_cc_pairs, scope profiles aren't enforced at search
+# time, skills aren't dispatched. When ON, the worker startup +
+# ``kairix config validate`` + ``kairix features status`` + the new
+# ``kairix onboard check topology_v2_*`` checks all read from the
+# parsed surface.
+#
+# Full spec: docs/architecture/connector-scope-topology/ADR.md.
+topology_v2:
+
+  # ── connectors ──────────────────────────────────────────────────────────
+  # Each entry declares one connector instance. ``kind`` picks the
+  # plugin (must match a directory under ``kairix/connectors/``);
+  # ``id`` is the cross-block reference key; ``name`` is the
+  # operator-facing label.
+  #
+  # ``default_sensitivity`` sets the F39 tier every chunk written by
+  # this connector inherits when the connector itself doesn't pin
+  # per-row sensitivity (public / internal / confidential / restricted).
+  connectors:
+    - id: obsidian-personal-conn
+      kind: obsidian
+      name: "Personal Obsidian Vault"
+      default_sensitivity: internal
+      # connector_specific_config is a free-form key/value mapping the
+      # connector plugin reads. For Obsidian: the vault root path.
+      connector_specific_config:
+        vault_root: "~/Documents/my-knowledge-store"
+
+    - id: sharepoint-corp-conn
+      kind: sharepoint
+      name: "Corporate SharePoint Document Library"
+      default_sensitivity: internal
+      # For SharePoint: the Graph drive id (run
+      # ``kairix sharepoint list-sites`` to enumerate). Pin by id — not
+      # by URL — so the sync stays deterministic across site renames.
+      connector_specific_config:
+        drive_id: "b!exampleDriveIdReplaceWithRealOne"
+        site_id: "contoso.sharepoint.com,xxxx,yyyy"
+
+  # ── credentials ─────────────────────────────────────────────────────────
+  # Each entry declares one credential bundle the connectors can
+  # reference. ``secret_name`` is the logical name passed to
+  # ``kairix.secrets.get_secret`` — resolution chain is env var →
+  # per-file secret → bundle file → Azure Key Vault.
+  #
+  # For Microsoft 365 (SharePoint / m365_email_headers / m365_calendar
+  # all share one Azure AD app registration), the three secrets are:
+  #   connector-m365-tenant-id      → AAD tenant GUID
+  #   connector-m365-client-id      → app registration client id
+  #   connector-m365-client-secret  → app registration client secret
+  # Set in .env (Docker) or ~/.config/kairix/secrets/ (pip) as upper-
+  # case-with-underscores: CONNECTOR_M365_TENANT_ID, etc.
+  credentials:
+    - id: m365-oauth
+      kind: oauth2_client_credentials
+      secret_name: connector-m365  # pragma: allowlist secret — logical name, not a value
+      # Mark this credential public when every agent should be able to
+      # use it (most M365 SharePoint deployments). Leave false for
+      # per-actor credentials (e.g. personal Dex CRM tokens).
+      admin_public: true
+
+  # ── cc_pairs (ConnectorCredentialPair) ──────────────────────────────────
+  # Each entry binds one connector to one credential. The cc_pair is
+  # the runtime unit the worker schedules — every sync, every chunk
+  # write, every status row keys off the cc_pair id.
+  #
+  # ``access_type``: PUBLIC (any agent can search) / PRIVATE (only the
+  # credential owner) / SYNC (cc_pair only syncs, never serves search).
+  cc_pairs:
+    - id: obsidian-personal-pair
+      connector: obsidian-personal-conn
+      credential: null            # local Obsidian needs no credential
+      name: obsidian-personal     # the human-readable cc_pair name
+      access_type: PRIVATE        # personal vault — only the owner
+
+    - id: sharepoint-corp-pair
+      connector: sharepoint-corp-conn
+      credential: m365-oauth
+      name: sharepoint-corp       # the human-readable cc_pair name
+      access_type: PUBLIC         # every agent can search corporate library
+
+  # ── collections ─────────────────────────────────────────────────────────
+  # Each entry is a retrieval bucket. ``sources`` is a list of
+  # (cc_pair, optional path_filter, optional sensitivity_min) entries
+  # — a collection can span multiple cc_pairs (e.g. one "policies"
+  # collection sourced from Obsidian + SharePoint + Notion).
+  collections:
+    - name: obsidian-all
+      sources:
+        - cc_pair: obsidian-personal-pair
+          path_filter: "*"        # everything under the vault root
+
+    - name: sharepoint-public-docs
+      sources:
+        - cc_pair: sharepoint-corp-pair
+          path_filter: "**/Public/**"
+          sensitivity_min: internal   # exclude confidential-tier rows from this collection
+
+  # ── scope_profiles ──────────────────────────────────────────────────────
+  # Each entry declares one actor's read/write scope across the
+  # declared collections. Used by the search pipeline to filter which
+  # collections each agent can reach.
+  #
+  # ``mode`` is one of read / write / read_write (default: read).
+  # ``actor_kind`` picks the resolution chain: agent / human / team /
+  # group / skill (default: agent).
+  scope_profiles:
+    - name: default-agent-profile
+      actor_kind: agent
+      entries:
+        - actor_id: agent-alpha
+          collection_name: obsidian-all
+          mode: read_write
+        - actor_id: agent-alpha
+          collection_name: sharepoint-public-docs
+          mode: read
+
+  # ── skills ──────────────────────────────────────────────────────────────
+  # Each entry is a composable retrieval strategy — a virtual
+  # collection aggregator + retrieval recipe. Skills are dispatched
+  # from the search pipeline when an agent asks for "search via skill
+  # <name>"; the routing matrix lives in the Wave C ChunkerRegistry.
+  #
+  # Most deployments start with zero skills declared (default-safe);
+  # add one once the operator has identified a recurring retrieval
+  # shape (e.g. "corporate-policies-only").
+  skills:
+    - name: corporate-policies-only
+      task_collections:
+        - name: policies
+          sources:
+            - cc_pair: sharepoint-corp-pair
+              path_filter: "**/Policies/**"

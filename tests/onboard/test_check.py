@@ -993,6 +993,381 @@ def test_run_onboard_check_unknown_check_falls_back_to_fix() -> None:
     assert result.failures[0].remediation == "run this specific command"
 
 
+# ---------------------------------------------------------------------------
+# v2026.5.24a1 — topology v2 + SharePoint credential checks
+# ---------------------------------------------------------------------------
+# Each check is gated by a feature flag. When the flag is OFF the check
+# must return ok=True with a "skipped" detail; when ON it exercises the
+# live config / DB / secrets path. Both branches are covered for each
+# check, plus the failure shapes (parse error, validation failure,
+# missing secret, missing cc_pair) so the F21 fix: / next: affordance
+# reaches the operator on every failed branch.
+
+
+# ── check_topology_v2_config_valid ────────────────────────────────────────
+
+_FLAG_TOPOLOGY_V2 = "topology_v2_config"
+_FLAG_SHAREPOINT = "connector_sharepoint"
+
+
+def _flag_on(name: str, *, target: str) -> bool:
+    return name == target
+
+
+def _flag_off(_name: str) -> bool:
+    return False
+
+
+def _deps_for_topology(
+    *,
+    flag_target: str | None = None,
+    config: object | None = None,
+    cc_pairs: frozenset[str] = frozenset(),
+    secrets: dict[str, str] | None = None,
+    config_raises: Exception | None = None,
+    cc_pair_namer_raises: Exception | None = None,
+    secret_raises: Exception | None = None,
+):
+    """Build a TopologyV2CheckDeps with selectable substitutes.
+
+    Helper so each test stays one logical assertion long and doesn't
+    re-construct the same Deps boilerplate.
+    """
+    from kairix.platform.onboard.check import TopologyV2CheckDeps
+
+    def _flag(name: str) -> bool:
+        return flag_target is not None and name == flag_target
+
+    def _config_loader() -> object:
+        if config_raises is not None:
+            raise config_raises
+        return config
+
+    def _cc_pair_namer() -> frozenset[str]:
+        if cc_pair_namer_raises is not None:
+            raise cc_pair_namer_raises
+        return cc_pairs
+
+    def _secret_reader(name: str) -> str | None:
+        if secret_raises is not None:
+            raise secret_raises
+        return (secrets or {}).get(name)
+
+    return TopologyV2CheckDeps(
+        flag_reader=_flag,
+        config_loader=_config_loader,
+        db_cc_pair_namer=_cc_pair_namer,
+        secret_reader=_secret_reader,
+    )
+
+
+@pytest.mark.unit
+def test_topology_v2_config_valid_skipped_when_flag_off() -> None:
+    """Flag OFF → ok=True with 'skipped' detail (default-safe)."""
+    from kairix.platform.onboard.check import check_topology_v2_config_valid
+
+    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=None, config=None))
+    assert result.ok is True
+    assert "skipped" in result.detail
+    assert _FLAG_TOPOLOGY_V2 in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_config_valid_missing_config_when_flag_on() -> None:
+    """Flag ON + no config → ok=False with fix hint pointing at example."""
+    from kairix.platform.onboard.check import check_topology_v2_config_valid
+
+    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=None))
+    assert result.ok is False
+    assert "not found" in result.detail
+    assert result.fix is not None
+    assert "kairix.config.example.yaml" in result.fix
+    assert "fix:" in result.fix
+    assert "next:" in result.fix
+
+
+@pytest.mark.unit
+def test_topology_v2_config_valid_parse_error() -> None:
+    """Flag ON + malformed YAML → ok=False, fix points at validate command."""
+    from kairix.platform.onboard.check import check_topology_v2_config_valid
+
+    # topology_v2.connectors is the wrong shape (str, not list).
+    bad_data = {"topology_v2": {"connectors": "this should be a list"}}
+
+    result = check_topology_v2_config_valid(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=bad_data),
+    )
+    assert result.ok is False
+    assert "parse failed" in result.detail
+    assert result.fix is not None
+    assert "fix:" in result.fix
+
+
+@pytest.mark.unit
+def test_topology_v2_config_valid_cross_reference_failure() -> None:
+    """Flag ON + dangling cc_pair → ok=False with failure summary in detail."""
+    from kairix.platform.onboard.check import check_topology_v2_config_valid
+
+    # cc_pair references a connector that wasn't declared.
+    data = {
+        "topology_v2": {
+            "connectors": [],
+            "credentials": [],
+            "cc_pairs": [
+                {
+                    "id": "bad-pair",
+                    "connector": "nonexistent-connector",
+                    "credential": None,
+                    "name": "bad-pair",
+                }
+            ],
+        }
+    }
+
+    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data))
+    assert result.ok is False
+    assert "cross-reference failure" in result.detail
+    assert "nonexistent-connector" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_config_valid_clean_config_passes() -> None:
+    """Flag ON + valid declarative config → ok=True with counts in detail."""
+    from kairix.platform.onboard.check import check_topology_v2_config_valid
+
+    data = {
+        "topology_v2": {
+            "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian-personal"}],
+            "credentials": [],
+            "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
+            "collections": [{"name": "obsidian-all", "sources": [{"cc_pair": "p1"}]}],
+            "scope_profiles": [],
+            "skills": [],
+        }
+    }
+
+    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data))
+    assert result.ok is True
+    assert "connectors=1" in result.detail
+    assert "cc_pairs=1" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_config_valid_loader_raises() -> None:
+    """Flag ON + loader exception → ok=False with fix hint."""
+    from kairix.platform.onboard.check import check_topology_v2_config_valid
+
+    result = check_topology_v2_config_valid(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config_raises=OSError("yaml parse failed")),
+    )
+    assert result.ok is False
+    assert "loader raised" in result.detail
+    assert result.fix is not None
+    assert "fix:" in result.fix
+
+
+# ── check_topology_v2_cc_pairs_registered ─────────────────────────────────
+
+
+@pytest.mark.unit
+def test_topology_v2_cc_pairs_registered_skipped_when_flag_off() -> None:
+    """Flag OFF → ok=True with skipped detail."""
+    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+
+    result = check_topology_v2_cc_pairs_registered(deps=_deps_for_topology(flag_target=None, config=None))
+    assert result.ok is True
+    assert "skipped" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_cc_pairs_registered_missing_pair() -> None:
+    """Flag ON + declared cc_pair without DB row → ok=False with apply-config fix."""
+    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+
+    data = {
+        "topology_v2": {
+            "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian"}],
+            "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
+        }
+    }
+
+    result = check_topology_v2_cc_pairs_registered(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data, cc_pairs=frozenset()),
+    )
+    assert result.ok is False
+    assert "obsidian-personal" in result.detail
+    assert result.fix is not None
+    assert "apply-config" in result.fix
+
+
+@pytest.mark.unit
+def test_topology_v2_cc_pairs_registered_all_present() -> None:
+    """Flag ON + every declared cc_pair has a DB row → ok=True."""
+    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+
+    data = {
+        "topology_v2": {
+            "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian"}],
+            "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
+        }
+    }
+
+    result = check_topology_v2_cc_pairs_registered(
+        deps=_deps_for_topology(
+            flag_target=_FLAG_TOPOLOGY_V2,
+            config=data,
+            cc_pairs=frozenset({"obsidian-personal"}),
+        ),
+    )
+    assert result.ok is True
+    assert "1 declared cc_pair" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_cc_pairs_registered_no_declared() -> None:
+    """Flag ON + no declared cc_pairs → ok=True (nothing to apply)."""
+    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+
+    data = {"topology_v2": {"connectors": [], "cc_pairs": []}}
+
+    result = check_topology_v2_cc_pairs_registered(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=data),
+    )
+    assert result.ok is True
+    assert "nothing to register" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_cc_pairs_registered_no_config_file() -> None:
+    """Flag ON + no kairix.config.yaml → ok=True (nothing to register)."""
+    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+
+    result = check_topology_v2_cc_pairs_registered(
+        deps=_deps_for_topology(flag_target=_FLAG_TOPOLOGY_V2, config=None),
+    )
+    assert result.ok is True
+    assert "no kairix.config.yaml" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_cc_pairs_registered_db_lookup_fails() -> None:
+    """Flag ON + DB error → ok=False with fix hint."""
+    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
+
+    data = {
+        "topology_v2": {
+            "connectors": [{"id": "c1", "kind": "obsidian", "name": "obsidian"}],
+            "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "obsidian-personal"}],
+        }
+    }
+
+    result = check_topology_v2_cc_pairs_registered(
+        deps=_deps_for_topology(
+            flag_target=_FLAG_TOPOLOGY_V2,
+            config=data,
+            cc_pair_namer_raises=RuntimeError("database is locked"),
+        ),
+    )
+    assert result.ok is False
+    assert "lookup failed" in result.detail
+    assert result.fix is not None
+    assert "fix:" in result.fix
+
+
+# ── check_sharepoint_credentials_loaded ───────────────────────────────────
+
+
+@pytest.mark.unit
+def test_sharepoint_credentials_loaded_skipped_when_flag_off() -> None:
+    """Flag OFF → ok=True with skipped detail."""
+    from kairix.platform.onboard.check import check_sharepoint_credentials_loaded
+
+    result = check_sharepoint_credentials_loaded(deps=_deps_for_topology(flag_target=None))
+    assert result.ok is True
+    assert "skipped" in result.detail
+    assert _FLAG_SHAREPOINT in result.detail
+
+
+@pytest.mark.unit
+def test_sharepoint_credentials_loaded_all_present() -> None:
+    """Flag ON + every M365 secret resolves → ok=True."""
+    from kairix.platform.onboard.check import check_sharepoint_credentials_loaded
+
+    full_map = {
+        "connector-m365-tenant-id": "tenant-value",  # pragma: allowlist secret — test fixture value
+        "connector-m365-client-id": "client-value",  # pragma: allowlist secret — test fixture value
+        "connector-m365-client-secret": "secret-value",  # pragma: allowlist secret — test fixture value
+    }
+    result = check_sharepoint_credentials_loaded(
+        deps=_deps_for_topology(flag_target=_FLAG_SHAREPOINT, secrets=full_map),
+    )
+    assert result.ok is True
+    assert "3 SharePoint secret" in result.detail
+
+
+@pytest.mark.unit
+def test_sharepoint_credentials_loaded_all_missing() -> None:
+    """Flag ON + every secret unresolved → ok=False with all 3 names listed."""
+    from kairix.platform.onboard.check import check_sharepoint_credentials_loaded
+
+    result = check_sharepoint_credentials_loaded(deps=_deps_for_topology(flag_target=_FLAG_SHAREPOINT))
+    assert result.ok is False
+    assert "3 SharePoint secret" in result.detail
+    assert "connector-m365-tenant-id" in result.detail
+    assert "connector-m365-client-id" in result.detail
+    assert "connector-m365-client-secret" in result.detail
+    assert result.fix is not None
+    assert "fix:" in result.fix
+    assert "next:" in result.fix
+
+
+@pytest.mark.unit
+def test_sharepoint_credentials_loaded_partial_missing() -> None:
+    """Flag ON + only tenant resolved → ok=False, names the 2 still missing."""
+    from kairix.platform.onboard.check import check_sharepoint_credentials_loaded
+
+    partial = {
+        "connector-m365-tenant-id": "tenant-value",  # pragma: allowlist secret — test fixture value
+    }
+    result = check_sharepoint_credentials_loaded(
+        deps=_deps_for_topology(flag_target=_FLAG_SHAREPOINT, secrets=partial),
+    )
+    assert result.ok is False
+    assert "2 SharePoint secret" in result.detail
+    assert "connector-m365-client-id" in result.detail
+    assert "connector-m365-client-secret" in result.detail
+    # The one that resolved is NOT in the missing list
+    assert "connector-m365-tenant-id" not in result.detail
+
+
+@pytest.mark.unit
+def test_sharepoint_credentials_loaded_reader_raises() -> None:
+    """Flag ON + secret_reader raises → treats secret as missing (no crash)."""
+    from kairix.platform.onboard.check import check_sharepoint_credentials_loaded
+
+    result = check_sharepoint_credentials_loaded(
+        deps=_deps_for_topology(flag_target=_FLAG_SHAREPOINT, secret_raises=OSError("key vault unreachable")),
+    )
+    assert result.ok is False
+    assert "3 SharePoint secret" in result.detail
+
+
+# ── integration: new checks register in ALL_CHECKS ────────────────────────
+
+
+@pytest.mark.unit
+def test_new_checks_appear_in_all_checks() -> None:
+    """The three new v2026.5.24a1 checks are wired into ALL_CHECKS so they
+    run as part of ``kairix onboard check``. Sabotage-prove: if a check
+    is added to the module but forgotten from ALL_CHECKS, this fails."""
+    from kairix.platform.onboard import check as check_mod
+
+    names = {fn.__name__ for fn in check_mod.ALL_CHECKS}
+    assert "check_topology_v2_config_valid" in names
+    assert "check_topology_v2_cc_pairs_registered" in names
+    assert "check_sharepoint_credentials_loaded" in names
+
+
 @pytest.mark.unit
 def test_run_onboard_check_unknown_and_no_fix_surfaces_bug_hint() -> None:
     """When a check fails AND has neither a canonical entry nor a fix string,

@@ -7,6 +7,44 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.24a1] - 2026-05-23 — Topology v2 operator config + SharePoint connector + MCP cold-start fix (alpha)
+
+> **Upgrading?** Nothing required — every new behaviour sits behind a default-off feature flag, so pulling this version is a structural no-op. To opt into the alpha (topology v2 + SharePoint), follow [`docs/upgrades/v2026.5.24a1.md`](docs/upgrades/v2026.5.24a1.md).
+
+### New for operators
+
+- **A new declarative shape for connectors, collections, scope profiles, and skills.** Add a `topology_v2:` block to your `kairix.config.yaml` and declare each connector instance, credential bundle, connector-credential pair, collection, per-actor scope profile, and skill as a first-class operator entity. Same shape `kairix config validate` reads, same shape the new `topology_v2_*` onboard checks read. The canonical example is at the repo root: [`kairix.config.example.yaml`](kairix.config.example.yaml). Gated by `topology_v2_config` — flag off means the block is parsed but inert. Cutover by editing the YAML, flipping the flag, and running `kairix worker apply-config`.
+- **SharePoint connector** — pulls document libraries (PDF / DOCX / PPTX / XLSX) via Microsoft Graph drive-delta query and dispatches binaries through the existing kairix extractor registry. Reuses the M365 Azure AD app registration the email-headers + calendar siblings already use (one tenant id / client id / client secret triple, three secret names: `connector-m365-tenant-id` / `-client-id` / `-client-secret`). Gated by `connector_sharepoint` — flag off means the connector isn't loaded.
+- **Obsidian per-folder routing** behind `topology_v2_obsidian`. When on, the connector emits one Container per top-level vault folder (each with its own delta cursor), and the hierarchy walk emits one FOLDER node per directory parent-before-child. When off, the connector keeps the legacy single-cursor behaviour.
+- **Three new `kairix onboard check` checks.** `topology_v2_config_valid` parses + cross-references the `topology_v2:` block. `topology_v2_cc_pairs_registered` confirms each declared cc_pair has a row in `topology_cc_pairs`. `sharepoint_credentials_loaded` confirms the three M365 secrets resolve. Each check is gated by the same flag as the feature it covers — flag off means the check reports `ok=true` with a `"skipped"` detail, so a fresh install sees 14 checks pass (was 11) without any operator action.
+- **MCP cold-start is no longer an adoption blocker.** The HTTP server returns HTTP 503 with `Retry-After` while the search pipeline is warming, and `/healthz/ready` is the single readiness source. Structured startup logs ship the warm-up event so you can grep your log shipper for the readiness transition. The previous cold-start envelope returned through tool responses keeps working for agents already wired to parse it.
+
+### New for agents
+
+- **The declarative agent-driven setup recipe** — `docs/getting-started/agent-driven-setup.md` covers what to ask the user, the minimal-viable YAML template, the secret name → env var name map for every connector, the 4-step validation pipeline, and the failure → fix table mirroring the F21 affordance shape. Optimised for unambiguous machine instructions so an LLM agent setting kairix up on a user's behalf has a clean recipe to follow.
+- **Pip-install path lands alongside Docker** in the refreshed `docs/getting-started/quick-start.md`. Parallel sections for Docker (`docker compose up`) and pip (`pip install "kairix[agents]"` → `kairix worker run &` + `kairix mcp serve`). Each step has a verification command (`kairix onboard check`, `kairix worker preflight`, `kairix features status`) so an operator can confirm they're on the happy path.
+
+### Internal
+
+- **#305 namespace fix** — the six topology v2 blocks now nest under a single `topology_v2:` parent key instead of leaking into the top-level `collections:` namespace where they collided with the legacy v1 `collections.shared` dict.
+- **F19 / F17 / F16 paydown** — 100 entries cleared from the unused-params / duplicated-literals / cognitive-complexity baselines, all by refactor (no rule exemptions).
+- **KFEAT-018 currency check** — release-tag-gated assertion that the grandfathering paydown plan snapshot is current as of each release tag. Stops the paydown plan from drifting between releases.
+- **KFEAT-019 Phase 1** — behaviour traceability matrix (135 rows, 31% MISSING baseline) — the inventory we'll burn down across the next several releases.
+- **MCP cold-start parts 3 + 4** — structured startup logs ship the warm-up event with the readiness transition fields; the docs land in `docs/operations/MCP-DEPLOYMENT.md` with the affordance shape for log-shipper consumers.
+
+### Behaviour changes worth noting
+
+- **Default deploy reports 14 onboard checks instead of 11.** The three new checks each report `ok=true` with a `"skipped — <flag> flag is OFF"` detail when their feature flag is off. Any healthcheck that asserts `total == 11` will need to update to `total >= 14`; healthchecks that consume `fully_passed` are unaffected.
+- **Existing Obsidian deployments are unchanged.** `topology_v2_obsidian` defaults to off — single-cursor scan behaviour is preserved bit-for-bit unless you flip the flag.
+- **reflib NDCG@10 may dip 0.01–0.02** if you flip `connector_sharepoint` and point it at a real SharePoint corpus before KFEAT-015 lands per-collection ranker calibration. Re-run `kairix benchmark run` after a full embed pass to settle the new baseline.
+
+### Things that haven't changed
+
+- The legacy `collections:` + `agents:` blocks at the top level of `kairix.config.yaml`. Both continue to work; the new `topology_v2:` block is opt-in.
+- The provider plugin selector (`provider:`). Same shape, same plugins, same secret-retrieval pattern per plugin.
+- MCP tool names + JSON schemas. The 12 tools shipped in v2026.5.18 are unchanged.
+- Authentication. kairix continues to have no built-in auth; deployments that put a gateway in front stay unchanged.
+
 ## [2026.5.18] - 2026-05-21 — Conversational memory shipping + one benchmark CLI + machine-actionable cold-start
 
 > **Upgrading?** Nothing required. Legacy CLIs (`kairix eval`, `kairix probe`, `kairix soak`) keep working with a deprecation notice pointing at the new consolidated `kairix benchmark run`. Full upgrade notes: [`docs/upgrades/v2026.5.18.md`](docs/upgrades/v2026.5.18.md).

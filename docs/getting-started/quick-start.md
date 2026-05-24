@@ -1,16 +1,23 @@
 # Quick Start
 
-Get kairix running and searching your documents in under 30 minutes.
+Get kairix running and searching your documents in under 30 minutes. Two install paths cover most operators:
 
-## What you need
+- **Docker** — the default for shared hosts, VMs, and anywhere `docker compose up -d` is the operating shape. Three containers (kairix / worker / neo4j) with healthchecks.
+- **Pip install** — the default for laptop dogfooding and single-user deployments. One Python virtualenv; kairix runs as two processes (`kairix worker run` and `kairix mcp serve`).
 
-- **Docker and Docker Compose** (Docker Desktop, or Docker Engine + Compose plugin)
+Pick the path that matches your environment and skip the other one.
+
+## What you need (either path)
+
 - **An LLM API key** — Azure OpenAI, standard OpenAI, or any OpenAI-compatible provider
 - **A folder of documents** — markdown files, text files, or structured notes
+- **Optional: SharePoint OAuth triple** — tenant id / client id / client secret if you want the `connector_sharepoint` topology v2 alpha (v2026.5.24a1+)
 
-## Steps
+---
 
-### 1. Get the compose file
+## Path A — Docker
+
+### A1. Get the compose file
 
 ```bash
 curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/docker-compose.yml
@@ -24,7 +31,7 @@ git clone https://github.com/three-cubes/kairix
 cd kairix
 ```
 
-### 2. Set up your credentials
+### A2. Set up your credentials
 
 ```bash
 cp .env.example .env
@@ -42,15 +49,15 @@ KAIRIX_LLM_API_KEY=your-key-here
 # KAIRIX_LLM_API_KEY=sk-your-key-here
 ```
 
-### 3. Point to your documents
+### A3. Point to your documents
 
 ```bash
 ln -s ~/Documents/my-notes ./documents
 ```
 
-**Don't have documents ready?** The container includes 5,800+ curated reference library documents. You can start searching immediately and add your own documents later.
+The container includes 5,800+ curated reference library documents, so you can start searching immediately and add your own documents later.
 
-### 4. Start everything
+### A4. Start everything
 
 ```bash
 docker compose up -d
@@ -61,22 +68,95 @@ This starts three services:
 - **kairix-worker** — indexes your documents automatically every hour
 - **neo4j** — knowledge graph for people/company queries
 
-### 5. Index your documents
+### A5. Index your documents
 
 ```bash
 docker compose exec kairix kairix embed
 ```
 
-This indexes your documents for search. For 1,000 documents (~4,000 chunks), expect ~$0.50-1.00 with text-embedding-3-large.
+For 1,000 documents (~4,000 chunks), expect ~$0.50-1.00 with text-embedding-3-large.
 
-### 6. Verify your setup
+### A6. Verify your setup
 
 ```bash
 docker compose exec kairix kairix onboard check          # human-readable
-docker compose exec kairix kairix onboard check --json   # structured — exits 0 only on 9/9, wire into your healthcheck
+docker compose exec kairix kairix onboard check --json   # structured — exits 0 only on every-check pass, wire into your healthcheck
 ```
 
-You should see:
+The output reports one row per check. Every failed check carries a one-line `remediation` string so you can fix forward without grepping logs. The `--json` shape `{passed, total, fully_passed, failures: [{check, detail, remediation}]}` is the canonical signal for any machine consumer.
+
+---
+
+## Path B — Pip install
+
+### B1. Install the package
+
+```bash
+python3 -m venv ~/.venvs/kairix
+source ~/.venvs/kairix/bin/activate
+pip install "kairix[agents]"
+```
+
+The `[agents]` extra pulls in the MCP server dependencies. Most operators want this.
+
+### B2. Set up your config + secrets
+
+```bash
+# Config file goes anywhere; set KAIRIX_CONFIG_PATH if you don't use the cwd default.
+curl -o ~/.kairix/kairix.config.yaml https://raw.githubusercontent.com/three-cubes/kairix/main/kairix.config.example.yaml
+mkdir -p ~/.config/kairix/secrets
+```
+
+Edit `~/.kairix/kairix.config.yaml` and set `provider:`, `paths.document_root:`, plus the `topology_v2:` block if you want connectors enabled (see the inline comments in the example file).
+
+Put your secrets in a file kairix's resolver can read:
+
+```bash
+cat > ~/.config/kairix/secrets/kairix.env <<EOF
+KAIRIX_LLM_API_KEY=your-key-here
+KAIRIX_LLM_ENDPOINT=https://your-resource.openai.azure.com
+EOF
+chmod 600 ~/.config/kairix/secrets/kairix.env
+```
+
+Optional: if you want the agent-driven setup flow (an LLM agent writes the config on your behalf), see [agent-driven-setup.md](agent-driven-setup.md).
+
+### B3. Start the worker + MCP server
+
+```bash
+# In one terminal — the worker indexes your documents on a schedule.
+export KAIRIX_CONFIG_PATH=~/.kairix/kairix.config.yaml
+export KAIRIX_SECRETS_FILE=~/.config/kairix/secrets/kairix.env
+kairix worker run &
+
+# In another terminal — the MCP server (HTTP / SSE transport).
+export KAIRIX_CONFIG_PATH=~/.kairix/kairix.config.yaml
+export KAIRIX_SECRETS_FILE=~/.config/kairix/secrets/kairix.env
+kairix mcp serve --transport sse --port 8080
+```
+
+For long-running deployments use a systemd unit — see [`docs/operations/SHARED-HOSTS.md`](../operations/SHARED-HOSTS.md) for the unit-file pointer.
+
+### B4. Index your documents
+
+```bash
+kairix embed
+```
+
+### B5. Verify your setup
+
+```bash
+kairix onboard check          # human-readable
+kairix onboard check --json   # structured
+```
+
+Same shape as the Docker path. The JSON envelope is the canonical signal for any healthcheck or CI gate.
+
+---
+
+## What every operator should see (either path)
+
+A clean install reports something like:
 
 ```
 kairix deployment check
@@ -90,22 +170,73 @@ kairix deployment check
   ✓ agent_knowledge_populated
   ✓ chunk_date_populated
   ✓ mcp_service
+  ✓ topology_v2_config_valid — skipped — topology_v2_config flag is OFF (default-safe)
+  ✓ topology_v2_cc_pairs_registered — skipped — topology_v2_config flag is OFF (default-safe)
+  ✓ sharepoint_credentials_loaded — skipped — connector_sharepoint flag is OFF (default-safe)
 ──────────────────────────────────────────────────
-  All 9 checks passed
+  All 14 checks passed
 ```
 
-If any checks fail, the output explains exactly what to fix — each failure carries an `remediation` string. The `--json` shape `{passed, total, fully_passed, failures: [{check, detail, remediation}]}` is the canonical healthcheck signal: structured, machine-readable, exit 0 only on full pass.
+If any check fails the output names the next command to run.
 
-### 7. Verify search quality
+---
 
-Run the built-in benchmark against the reference library — bundled suites resolve by name:
+## Topology v2 alpha (v2026.5.24a1+)
+
+Topology v2 unlocks the new operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills) plus the SharePoint connector. Every part is gated by a default-off feature flag so existing deployments stay bit-for-bit identical until you flip them.
+
+Four flags control the alpha:
+
+| Flag | What it does |
+|------|--------------|
+| `topology_v2_config` | Parse + apply the `topology_v2:` block in your config |
+| `topology_v2_obsidian` | Per-folder containers + parent-before-child hierarchy walk for Obsidian |
+| `connector_sharepoint` | Enable the SharePoint connector (Graph drive-delta + extractor dispatch) |
+| `topology_v2_runtime` | Route chunk writes through the per-cc_pair CollectionRouter |
+
+To turn the alpha on:
+
+1. **Author the YAML.** Copy [`kairix.config.example.yaml`](https://github.com/three-cubes/kairix/blob/main/kairix.config.example.yaml) at the repo root into your config path (Docker overlay: `kairix.config.local.yaml`; pip: `~/.kairix/kairix.config.yaml`). The example shape parses cleanly and `kairix config validate` reports zero failures against it.
+2. **Flip the flags.** Add the four flags to the `features:` block (or set `KAIRIX_FEATURE_TOPOLOGY_V2_CONFIG=true` etc. in your env).
+3. **Set the SharePoint secrets** (only if you flipped `connector_sharepoint`):
+    ```bash
+    # Docker — append to .env:
+    CONNECTOR_M365_TENANT_ID=<your-aad-tenant-guid>
+    CONNECTOR_M365_CLIENT_ID=<your-app-registration-client-id>
+    CONNECTOR_M365_CLIENT_SECRET=<your-app-registration-secret>
+
+    # Pip — append to ~/.config/kairix/secrets/kairix.env:
+    CONNECTOR_M365_TENANT_ID=...
+    CONNECTOR_M365_CLIENT_ID=...
+    CONNECTOR_M365_CLIENT_SECRET=...
+    ```
+4. **Apply + verify.**
+    ```bash
+    kairix worker apply-config       # materialise declared cc_pairs into topology_cc_pairs
+    kairix config validate           # parser + 5 cross-reference checks
+    kairix features status           # confirm the four flags are on
+    kairix onboard check             # the 3 new topology v2 checks must all pass
+    ```
+
+The three new checks (`topology_v2_config_valid`, `topology_v2_cc_pairs_registered`, `sharepoint_credentials_loaded`) all skip with `ok=True` when their flag is off — the alpha is reversible at any time by removing the four flags from the `features:` block.
+
+---
+
+## Search quality check (either path)
+
+Run the built-in benchmark against the reference library:
 
 ```bash
-docker compose exec kairix kairix benchmark list           # enumerate bundled suites
-docker compose exec kairix kairix benchmark run reflib     # runs the reference-library gold suite
+# Docker
+docker compose exec kairix kairix benchmark list
+docker compose exec kairix kairix benchmark run reflib
+
+# Pip
+kairix benchmark list
+kairix benchmark run reflib
 ```
 
-This indexes the reference library (5,800+ open-source documents), runs a 200-case gold suite, and reports search quality scores. Sensible defaults shipped with kairix gate the run (in `pyproject.toml` under `[tool.kairix.benchmark.gates]`): overall **≥ 0.78**, temporal **≥ 0.55**, entity **≥ 0.80**, contextual_prep **≥ 0.60**. Expected baseline:
+Sensible defaults gate the run (in `pyproject.toml` under `[tool.kairix.benchmark.gates]`): overall ≥ 0.78, temporal ≥ 0.55, entity ≥ 0.80, contextual_prep ≥ 0.60. Expected baseline:
 
 | Metric | Expected |
 |--------|----------|
@@ -115,10 +246,16 @@ This indexes the reference library (5,800+ open-source documents), runs a 200-ca
 
 If scores are significantly below these, check your embedding model and LLM connection.
 
-### 8. Search
+---
+
+## Search a document
 
 ```bash
+# Docker
 docker compose exec kairix kairix search "your question here"
+
+# Pip
+kairix search "your question here"
 ```
 
 Your knowledge store is running.
@@ -127,11 +264,10 @@ Your knowledge store is running.
 
 ## Connecting agents
 
-The MCP server runs on port 8080. Any MCP-compatible agent can connect via SSE.
+The MCP server runs on port 8080 (Docker) or whatever you passed to `kairix mcp serve --port` (pip). Any MCP-compatible agent can connect via SSE.
 
 **Claude Desktop / Claude Code:**
 
-Add to your MCP config:
 ```json
 {
   "mcpServers": {
@@ -144,12 +280,14 @@ Add to your MCP config:
 
 See [connecting-agents.md](connecting-agents.md) for OpenClaw, LangGraph, and other platforms.
 
+If you're an LLM agent reading this and standing kairix up on a user's behalf, see [agent-driven-setup.md](agent-driven-setup.md) — the declarative path optimised for unambiguous machine instructions.
+
 ---
 
 ## What happens next
 
 - **Documents are indexed automatically** every hour by the worker service. Operator controls: `kairix worker pause` / `resume` / `status`.
-- **The MCP server exposes 11 tools** — `search`, `entity`, `prep`, `timeline`, `research`, `contradict`, `usage_guide`, `brief`, `bootstrap`, `entity_suggest`, `entity_validate`. Each response carries a `health` envelope (`vector_search` / `bm25` / `chat` / `secrets_loaded`) so agents know what's online and what to surface to their human admin.
+- **The MCP server exposes 12 tools** — `search`, `entity`, `prep`, `timeline`, `research`, `contradict`, `usage_guide`, `brief`, `bootstrap`, `entity_suggest`, `entity_validate`, `warm`. Each response carries a `health` envelope so agents know what's online.
 - **Agents should call `kairix bootstrap <agent>` at session start** to get a one-shot orientation envelope (role, board, recent memory, active goals, health).
-- **Run `kairix onboard check --json`** any time — exit 0 means 9/9, exit 1 prints structured failures with remediation strings.
-- **Run `kairix benchmark run reflib`** to benchmark search quality against the bundled reference-library gold suite. `kairix benchmark list` enumerates the bundled set.
+- **Run `kairix onboard check --json`** any time — exit 0 means every check passed; exit 1 prints structured failures with remediation strings.
+- **Run `kairix benchmark run reflib`** to benchmark search quality against the bundled gold suite.

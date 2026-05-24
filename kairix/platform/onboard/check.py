@@ -50,6 +50,11 @@ _CHECK_NEO4J_REACHABLE = "neo4j_reachable"
 _CHECK_AGENT_KNOWLEDGE_POPULATED = "agent_knowledge_populated"
 _CHECK_CHUNK_DATE_POPULATED = "chunk_date_populated"
 _CHECK_MCP_SERVICE = "mcp_service"
+_CHECK_TOPOLOGY_V2_CONFIG_VALID = "topology_v2_config_valid"
+_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED = "topology_v2_cc_pairs_registered"
+_CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
+    "sharepoint_credentials_loaded"  # pragma: allowlist secret — check-name string, not a credential
+)
 
 
 @dataclass
@@ -164,6 +169,28 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
         '`openclaw mcp set mcp-kairix \'{"type":"stdio","command":"/path/to/kairix-start.sh"}\'`, '
         "add to ~/Library/Application Support/Claude/claude_desktop_config.json, or run "
         "`sudo systemctl enable --now kairix-mcp.service`."
+    ),
+    _CHECK_TOPOLOGY_V2_CONFIG_VALID: (
+        "fix: open kairix.config.yaml and resolve the topology_v2 cross-reference "
+        "failures (every cc_pair must reference a declared connector + credential; "
+        "every collection source / scope_profile entry / skill source must reference "
+        "a declared cc_pair / collection). next: run `kairix config validate` to "
+        "re-run the validator."
+    ),
+    _CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED: (
+        "fix: run `kairix worker apply-config` to write the declared topology_v2 "
+        "cc_pairs into the topology_cc_pairs table. next: re-run "
+        "`kairix onboard check` to confirm every declared cc_pair has a row."
+    ),
+    _CHECK_SHAREPOINT_CREDENTIALS_LOADED: (
+        "fix: set the three M365 client-credentials secrets that the SharePoint "
+        "connector resolves via kairix.secrets.get_secret — "
+        "`connector-m365-tenant-id`, `connector-m365-client-id`, and "
+        "`connector-m365-client-secret`. Docker operators write them as "
+        "KEY=VALUE lines in /run/secrets/kairix.env (uppercase + dash → underscore: "
+        "CONNECTOR_M365_TENANT_ID etc.); pip operators set them in "
+        "~/.kairix/secrets.env or as plain env vars. next: re-run "
+        "`kairix onboard check sharepoint_credentials_loaded`."
     ),
 }
 
@@ -1051,6 +1078,374 @@ def check_embed_cache_stats(embed_cache: Any | None = None) -> CheckResult:
         )
 
 
+# ---------------------------------------------------------------------------
+# v2026.5.24a1 — topology v2 + SharePoint credential checks
+# ---------------------------------------------------------------------------
+# Each check below is gated by a feature flag — when the flag is OFF the
+# check returns ok=True with a "skipped (flag off)" detail so a fresh
+# deployment sees the check exists but is inert. Once the operator flips
+# the corresponding flag, the check exercises the live config / DB /
+# secrets path.
+#
+# Default flag values are read through the standard resolver
+# (``kairix.core.features.flag``) so the same env-var / config-overlay /
+# registry-default chain applies as everywhere else in kairix.
+
+
+_TOPOLOGY_V2_CONFIG_FLAG = "topology_v2_config"
+_CONNECTOR_SHAREPOINT_FLAG = "connector_sharepoint"
+# F17 — the "flag off, check is inert" detail line shows up on every
+# topology v2 / sharepoint check when the flag is off. Pull to a single
+# constant so the wording stays uniform across the three checks.
+_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE = "skipped — {flag} flag is OFF (default-safe)"
+
+# F17 — the three M365 secret names are referenced from both the
+# credential-resolution loop and the failure-detail message.
+_SHAREPOINT_SECRET_NAMES: tuple[str, ...] = (
+    "connector-m365-tenant-id",  # pragma: allowlist secret — secret slot name, not a credential
+    "connector-m365-client-id",  # pragma: allowlist secret — secret slot name, not a credential
+    "connector-m365-client-secret",  # pragma: allowlist secret — secret slot name, not a credential
+)
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production seam — defers to ``kairix.core.features.flag``.
+
+    Lazy import so the onboard-check module stays importable on a fresh
+    install where the registry module has heavy transitive deps.
+    """
+    from kairix.core.features import flag as _flag
+
+    return _flag(name)
+
+
+@dataclass
+class TopologyV2CheckDeps:
+    """Injectable dependencies for the topology v2 + SharePoint checks.
+
+    Bundles the three DI seams the three v2026.5.24a1 checks need
+    (feature-flag reader, config loader, DB cc_pair namer, secret
+    reader) into a single Deps class so the check signatures stay free
+    of test-only ``*_loader=None`` kwargs (F6).
+
+    Production callers leave the dataclass at its default values; tests
+    construct ``TopologyV2CheckDeps(flag_reader=..., config_loader=...,
+    db_cc_pair_namer=..., secret_reader=...)`` to drive each check's
+    branches without monkey-patching the live registry / config /
+    secrets paths. Mirrors the existing :class:`OnboardChecksDeps`
+    pattern in this module.
+
+    Each field defaults via ``field(default_factory=...)`` so a
+    consumer can override individual seams without re-specifying the
+    others — the production defaults all delegate to the standard
+    feature-flag resolver / config loader / SQLite reader / secret
+    resolver.
+    """
+
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_reader)
+    config_loader: Callable[[], dict[str, Any] | None] = field(default_factory=lambda: _default_overlay_path_loader)
+    db_cc_pair_namer: Callable[[], frozenset[str]] = field(default_factory=lambda: _default_db_cc_pair_names)
+    secret_reader: Callable[[str], str | None] = field(default_factory=lambda: _default_secret_reader)
+
+
+def _default_overlay_path_loader() -> dict[str, Any] | None:
+    """Production seam — loads the topology v2 section from kairix.config.yaml.
+
+    Returns the parsed YAML dict (or None when no config file is found
+    or the parse fails). The actual topology_v2 sub-section is read by
+    the caller; this loader returns the full document so the caller
+    sees the same shape ``kairix.config.topology_v2.parse_topology_v2``
+    expects.
+
+    Env-var read for the config path goes through
+    ``kairix.paths.config_path_override`` so the F4 boundary holds
+    (env reads live in paths.py / secrets.py only).
+
+    Lazy yaml import so the module stays light when topology v2 is off.
+    """
+    import yaml as _yaml
+
+    from kairix.paths import config_path_override
+
+    config_path_str = config_path_override() or "kairix.config.yaml"
+    p = Path(config_path_str).expanduser()
+    if not p.exists():
+        return None
+    try:
+        with open(p) as f:
+            data = _yaml.safe_load(f) or {}
+    except (OSError, _yaml.YAMLError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+    """topology_v2: block in kairix.config.yaml parses + passes cross-reference validation.
+
+    When the ``topology_v2_config`` flag is OFF, returns ok=True with a
+    "skipped" detail — the Wave D operator-config surface is inert by
+    default and this check should not block fresh deployments.
+
+    When ON, parses the ``topology_v2:`` block out of the active
+    ``kairix.config.yaml`` (resolved via the standard ``KAIRIX_CONFIG_PATH``
+    env-var or the ``kairix.config.yaml`` default), runs the 5
+    cross-reference rules from
+    ``kairix.config.topology_v2_validators.validate_topology_v2_references``,
+    and reports either ok=True (zero failures) or ok=False with the
+    failure messages compacted into the ``detail`` string.
+
+    ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
+    binds the production flag/config readers). Tests construct a Deps
+    with substitute callables to drive the flag-OFF / parse-error /
+    validation-failure / clean branches without touching the live
+    config file.
+    """
+    d = deps if deps is not None else TopologyV2CheckDeps()
+    if not d.flag_reader(_TOPOLOGY_V2_CONFIG_FLAG):
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            ok=True,
+            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_TOPOLOGY_V2_CONFIG_FLAG),
+        )
+
+    try:
+        data = d.config_loader()
+    except Exception as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            ok=False,
+            detail=f"config loader raised: {exc}",
+            fix="fix: ensure kairix.config.yaml exists and is readable. next: run `kairix config validate`.",
+        )
+
+    if data is None:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            ok=False,
+            detail="kairix.config.yaml not found — topology_v2_config flag is ON but no config to validate",
+            fix=(
+                "fix: create kairix.config.yaml at the repo root (or set KAIRIX_CONFIG_PATH) "
+                "with a topology_v2: block per kairix.config.example.yaml. "
+                "next: run `kairix config validate`."
+            ),
+        )
+
+    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+    from kairix.config.topology_v2_validators import validate_topology_v2_references
+
+    try:
+        parsed = parse_topology_v2(data)
+    except TopologyV2ParseError as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            ok=False,
+            detail=f"topology_v2 parse failed: {exc}",
+            fix="fix: correct the YAML shape in kairix.config.yaml. next: run `kairix config validate`.",
+        )
+
+    failures = validate_topology_v2_references(parsed)
+    if failures:
+        summary = "; ".join(f.message for f in failures[:3])
+        suffix = f" (+{len(failures) - 3} more)" if len(failures) > 3 else ""
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+            ok=False,
+            detail=f"{len(failures)} topology_v2 cross-reference failure(s): {summary}{suffix}",
+            fix=(
+                "fix: declare the missing entries or remove the dangling references. "
+                "next: run `kairix config validate`."
+            ),
+        )
+
+    counts = (
+        f"connectors={len(parsed.connectors)}, credentials={len(parsed.credentials)}, "
+        f"cc_pairs={len(parsed.cc_pairs)}, collections={len(parsed.collections)}, "
+        f"scope_profiles={len(parsed.scope_profiles)}, skills={len(parsed.skills)}"
+    )
+    return CheckResult(
+        name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
+        ok=True,
+        detail=f"topology_v2 config valid ({counts})",
+    )
+
+
+def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+    """Every declared cc_pair in kairix.config.yaml has a row in topology_cc_pairs.
+
+    When the ``topology_v2_config`` flag is OFF, returns ok=True with a
+    "skipped" detail.
+
+    When ON, parses the declared cc_pair names from
+    ``kairix.config.yaml`` and cross-checks against the live
+    ``topology_cc_pairs`` table (read via the production
+    ``list_cc_pairs`` helper). A declared cc_pair without a matching DB
+    row means the apply-bridge hasn't run for it yet — typically a
+    missing ``kairix worker apply-config`` invocation after editing the
+    YAML.
+
+    ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
+    binds the production flag / config / DB readers).
+    """
+    d = deps if deps is not None else TopologyV2CheckDeps()
+    if not d.flag_reader(_TOPOLOGY_V2_CONFIG_FLAG):
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=True,
+            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_TOPOLOGY_V2_CONFIG_FLAG),
+        )
+
+    try:
+        data = d.config_loader()
+    except Exception as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=False,
+            detail=f"config loader raised: {exc}",
+            fix="fix: ensure kairix.config.yaml exists and is readable. next: run `kairix worker apply-config`.",
+        )
+    if data is None:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=True,
+            detail="no kairix.config.yaml — nothing to register",
+        )
+
+    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+
+    try:
+        parsed = parse_topology_v2(data)
+    except TopologyV2ParseError as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=False,
+            detail=f"topology_v2 parse failed: {exc}",
+            fix="fix: correct the YAML shape in kairix.config.yaml. next: run `kairix config validate`.",
+        )
+
+    declared_names = frozenset(p.name for p in parsed.cc_pairs)
+    if not declared_names:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=True,
+            detail="no cc_pairs declared in topology_v2 — nothing to register",
+        )
+
+    try:
+        registered = d.db_cc_pair_namer()
+    except Exception as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=False,
+            detail=f"topology_cc_pairs lookup failed: {exc}",
+            fix="fix: ensure the SQLite database is reachable. next: run `kairix worker apply-config`.",
+        )
+
+    missing = sorted(declared_names - registered)
+    if missing:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+            ok=False,
+            detail=(f"{len(missing)} declared cc_pair(s) not registered in topology_cc_pairs: {', '.join(missing)}"),
+            fix="fix: run `kairix worker apply-config` to materialise the declared cc_pairs.",
+        )
+
+    return CheckResult(
+        name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
+        ok=True,
+        detail=f"{len(declared_names)} declared cc_pair(s) registered",
+    )
+
+
+def _default_db_cc_pair_names() -> frozenset[str]:
+    """Production seam — return the set of cc_pair names from topology_cc_pairs."""
+    from kairix.core.connectors.cc_pair import list_cc_pairs
+    from kairix.core.db import get_db_path, open_db
+
+    db = open_db(Path(get_db_path()))
+    try:
+        rows = list_cc_pairs(db)
+    finally:
+        db.close()
+    return frozenset(row.name for row in rows)
+
+
+def check_sharepoint_credentials_loaded(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+    """SharePoint connector secrets resolve via kairix.secrets.get_secret.
+
+    When the ``connector_sharepoint`` flag is OFF, returns ok=True with
+    a "skipped" detail.
+
+    When ON, attempts to resolve the three M365 client-credentials
+    secrets the SharePoint connector requires:
+
+      * ``connector-m365-tenant-id``
+      * ``connector-m365-client-id``
+      * ``connector-m365-client-secret``
+
+    Reports ok=True iff all three resolve to non-empty strings; ok=False
+    with the missing-name list otherwise. The secret resolution chain
+    is the standard ``kairix.secrets.get_secret`` cascade (env var →
+    per-file secret → bundle file → Azure Key Vault), so the same fix
+    applies whether the operator is on Docker / pip / VM.
+
+    ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
+    binds the production flag + secret readers). Tests construct a
+    Deps with substitute callables to drive the present / partial /
+    missing branches without touching the live environment or Key
+    Vault.
+    """
+    d = deps if deps is not None else TopologyV2CheckDeps()
+    if not d.flag_reader(_CONNECTOR_SHAREPOINT_FLAG):
+        return CheckResult(
+            name=_CHECK_SHAREPOINT_CREDENTIALS_LOADED,
+            ok=True,
+            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_CONNECTOR_SHAREPOINT_FLAG),
+        )
+
+    missing: list[str] = []
+    for name in _SHAREPOINT_SECRET_NAMES:
+        try:
+            value = d.secret_reader(name)
+        except Exception:
+            value = None
+        if not value:
+            missing.append(name)
+
+    if missing:
+        return CheckResult(
+            name=_CHECK_SHAREPOINT_CREDENTIALS_LOADED,
+            ok=False,
+            detail=f"{len(missing)} SharePoint secret(s) unresolved: {', '.join(missing)}",
+            fix=(
+                "fix: set the three M365 client-credentials secrets that the SharePoint "
+                "connector resolves via kairix.secrets.get_secret — "
+                "`connector-m365-tenant-id`, `connector-m365-client-id`, and "
+                "`connector-m365-client-secret`. next: re-run "
+                "`kairix onboard check sharepoint_credentials_loaded`."
+            ),
+        )
+
+    return CheckResult(
+        name=_CHECK_SHAREPOINT_CREDENTIALS_LOADED,
+        ok=True,
+        detail=f"{len(_SHAREPOINT_SECRET_NAMES)} SharePoint secret(s) resolved",
+    )
+
+
+def _default_secret_reader(name: str) -> str | None:
+    """Production seam — defers to ``kairix.secrets.get_secret``.
+
+    Uses ``required=False`` so a missing secret returns ``None`` rather
+    than raising — the calling check translates "any None" into a
+    failure with the missing-name list.
+    """
+    from kairix.secrets import get_secret
+
+    return get_secret(name, required=False)
+
+
 ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_kairix_on_path,
     check_wrapper_installed,
@@ -1063,6 +1458,9 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_mcp_service,
     check_query_cache_stats,
     check_embed_cache_stats,
+    check_topology_v2_config_valid,
+    check_topology_v2_cc_pairs_registered,
+    check_sharepoint_credentials_loaded,
 ]
 
 
