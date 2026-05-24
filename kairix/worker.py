@@ -1251,31 +1251,31 @@ class TopologyV2ApplyDeps:
     db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
 
 
-def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> bool:
+def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
     """Materialise the operator's ``topology_v2:`` YAML into runtime rows.
 
     Gated on the ``topology_v2_config`` feature flag — flag OFF makes
-    the function a structural no-op (returns True without opening the
-    DB), preserving bit-for-bit pre-Wave-D boot behaviour. Flag ON:
-    loads the parsed config, validates cross-references, and calls
+    the function a structural no-op (returns without opening the DB),
+    preserving bit-for-bit pre-Wave-D boot behaviour. Flag ON: loads
+    the parsed config, validates cross-references, and calls
     :func:`kairix.core.connectors.topology_v2_applier.apply_topology_v2`
     against the shared SQLite connection.
 
-    Returns True iff boot should continue. Logs at INFO on success,
-    WARNING on apply failure (the worker continues so the operator can
-    fix the config without crashlooping; the cc_pair lookup in
+    Returns None unconditionally — failures are logged but never crash
+    the boot. The worker continues so the operator can fix the config
+    without crashlooping; the cc_pair lookup in
     :func:`resolve_chunk_writer_for_entry` falls back to the legacy
     writer when no cc_pair has been registered, so a failed apply
-    degrades gracefully).
+    degrades gracefully.
     """
     deps = deps if deps is not None else TopologyV2ApplyDeps()
     if not deps.flag_reader("topology_v2_config"):
-        return True
+        return
 
     config_path = deps.config_path_resolver()
     if config_path is None or not config_path.exists():
         logger.info("worker: topology_v2 apply skipped — no kairix.config.yaml on disk")
-        return True
+        return
 
     import yaml
 
@@ -1291,17 +1291,17 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> bool:
             raw = yaml.safe_load(fh) or {}
     except Exception as exc:
         logger.warning("worker: topology_v2 apply skipped — could not read config: %s", exc)
-        return True
+        return
 
     try:
         parsed = parse_topology_v2(raw)
     except Exception as exc:
         logger.warning("worker: topology_v2 apply skipped — parse failure: %s", exc)
-        return True
+        return
 
     if not (parsed.connectors or parsed.credentials or parsed.cc_pairs or parsed.collections):
         logger.info("worker: topology_v2 apply skipped — no blocks declared in config")
-        return True
+        return
 
     db = deps.db_factory()
     try:
@@ -1311,7 +1311,7 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> bool:
         except ApplyValidationError as exc:
             logger.warning("worker: topology_v2 apply rejected — %s", exc)
             db.rollback()
-            return True
+            return
         db.commit()
     finally:
         db.close()
@@ -1322,7 +1322,6 @@ def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> bool:
         result.updated,
         result.unchanged,
     )
-    return True
 
 
 def _boot_state(deps: WorkerDeps) -> WorkerState:

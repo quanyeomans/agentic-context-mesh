@@ -53,7 +53,7 @@ def test_apply_at_boot_flag_off_is_structural_noop(tmp_path: Path) -> None:
         config_path_resolver=_cfg_resolver,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
     assert calls == {"config": 0, "db": 0}
 
 
@@ -70,7 +70,7 @@ def test_apply_at_boot_flag_on_skips_when_config_path_resolver_returns_none(
         config_path_resolver=lambda: None,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
 
 
 def test_apply_at_boot_flag_on_skips_when_config_path_does_not_exist(
@@ -87,7 +87,7 @@ def test_apply_at_boot_flag_on_skips_when_config_path_does_not_exist(
         config_path_resolver=lambda: missing,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
 
 
 def test_apply_at_boot_flag_on_skips_when_yaml_unparseable(tmp_path: Path) -> None:
@@ -102,7 +102,7 @@ def test_apply_at_boot_flag_on_skips_when_yaml_unparseable(tmp_path: Path) -> No
         config_path_resolver=lambda: config_path,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
 
 
 def test_apply_at_boot_flag_on_skips_when_config_parse_fails(tmp_path: Path) -> None:
@@ -125,7 +125,7 @@ def test_apply_at_boot_flag_on_skips_when_config_parse_fails(tmp_path: Path) -> 
         config_path_resolver=lambda: config_path,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
 
 
 def test_apply_at_boot_flag_on_skips_when_no_blocks_declared(tmp_path: Path) -> None:
@@ -140,7 +140,7 @@ def test_apply_at_boot_flag_on_skips_when_no_blocks_declared(tmp_path: Path) -> 
         config_path_resolver=lambda: config_path,
         db_factory=_db_factory,
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
 
 
 def test_apply_at_boot_flag_on_rolls_back_on_validation_failure(tmp_path: Path) -> None:
@@ -161,7 +161,7 @@ def test_apply_at_boot_flag_on_rolls_back_on_validation_failure(tmp_path: Path) 
         config_path_resolver=lambda: config_path,
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
     # The DB was opened (create_schema ran) but nothing was committed.
     db = sqlite3.connect(str(db_path))
     try:
@@ -192,7 +192,7 @@ def test_apply_at_boot_flag_on_happy_path_commits_rows(tmp_path: Path) -> None:
         config_path_resolver=lambda: config_path,
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    assert apply_topology_v2_at_boot(deps) is True
+    assert apply_topology_v2_at_boot(deps) is None
     db = sqlite3.connect(str(db_path))
     try:
         name = db.execute("SELECT name FROM topology_cc_pairs").fetchone()
