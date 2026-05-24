@@ -1,0 +1,13 @@
+[
+  {
+    "sha": "commit-sha-alpha-001",
+    "commit": {
+      "message": "Wave E github connector seed commit",
+      "author": {
+        "name": "agent-alpha",
+        "email": "agent-alpha@your-team.example",
+        "date": "2026-05-23T01:00:00Z"
+      }
+    }
+  }
+]

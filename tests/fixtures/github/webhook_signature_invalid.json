@@ -1,0 +1,15 @@
+{
+  "action": "opened",
+  "issue": {
+    "number": 99,
+    "title": "Tampered envelope",
+    "body": "Body whose HMAC will be deliberately wrong",
+    "state": "open",
+    "updated_at": "2026-05-23T05:00:00Z"
+  },
+  "repository": {
+    "id": 100,
+    "full_name": "agent-alpha-org/repo-alpha",
+    "visibility": "private"
+  }
+}

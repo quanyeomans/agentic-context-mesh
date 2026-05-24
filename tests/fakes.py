@@ -2573,6 +2573,245 @@ class FakeNotionConnector:
         return self._sensitivity
 
 
+class FakeGitHubConnector:
+    """Scripted GitHub :class:`kairix.core.protocols.SourceConnector`.
+
+    Constructor takes the per-repo envelope set the fake should emit;
+    the fake satisfies the full Wave-E capability surface (base +
+    PollConnector + CheckpointedConnector + EventConnector +
+    SlimConnector + SlimConnectorWithPermSync + Resolver +
+    HierarchyConnector + OAuthConnector + CredentialsConnector)
+    without touching the GitHub REST/GraphQL networks. Canonical fake
+    F43 pairs with the real
+    :class:`kairix.connectors.github.GitHubConnector` inside
+    ``tests/contracts/test_github_protocol.py``.
+
+    Default sensitivity tier is ``client-confidential`` per spec §1
+    (private repos are the GitHub default); the constructor accepts a
+    ``sensitivity`` override so contract assertions can pin both the
+    default and a public-tier configuration.
+    """
+
+    name: str = "github"
+
+    def __init__(
+        self,
+        *,
+        repos: list[dict[str, Any]] | None = None,
+        sensitivity: str = "client-confidential",
+        webhook_secret: str | None = "fake-secret",  # pragma: allowlist secret
+    ) -> None:
+        self._repos: list[dict[str, Any]] = list(repos) if repos is not None else []
+        self._sensitivity = sensitivity
+        self._webhook_secret = webhook_secret
+        self._by_id: dict[str, dict[str, Any]] = {
+            f"github://{r.get('full_name')}/commit/{r.get('sha', 'fake-sha')}": r for r in self._repos
+        }
+        self._seen_deliveries: set[str] = set()
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        from kairix.core.protocols import ChangeEvent
+
+        _ = cursor
+        events: list[ChangeEvent] = []
+        for repo in self._repos:
+            full_name = str(repo.get("full_name", "fake/repo"))
+            sha = str(repo.get("sha", "fake-sha"))
+            events.append(
+                ChangeEvent(
+                    op="modified",
+                    item_id=f"github://{full_name}/commit/{sha}",
+                    modified_at=str(repo.get("committed_at", "2026-05-23T00:00:00Z")),
+                    metadata={
+                        "sensitivity": self._sensitivity,
+                        "repo": full_name,
+                        "kind": "commit",
+                    },
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        item = self._by_id.get(item_id, {})
+        raw = item.get("_content", b"")
+        if not isinstance(raw, bytes):
+            raw = bytes(str(raw).encode("utf-8"))
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(
+            raw=raw,
+            mime="application/json",
+            fetched_at=fetched_at,
+            sensitivity_hint=self._sensitivity,  # type: ignore[arg-type]  # F3 rationale: contract test pins Literal-compatible value
+        )
+
+    def source_link(self, item_id: str) -> str:
+        # Round-trip github://owner/repo/commit/sha -> https URL.
+        prefix = "github://"
+        if item_id.startswith(prefix):
+            rest = item_id[len(prefix) :]
+            return f"https://github.com/{rest}"
+        return f"https://github.com/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def load_from_checkpoint(self, _container: Any, _checkpoint: Any) -> Any:
+        return self.list_changes(None)
+
+    def iter_containers(self, cc_pair_id: int) -> Any:
+        from kairix.core.protocols import Container
+
+        seen: set[str] = set()
+        for repo in self._repos:
+            full_name = str(repo.get("full_name", "fake/repo"))
+            if full_name in seen:
+                continue
+            seen.add(full_name)
+            yield Container(
+                cc_pair_id=cc_pair_id,
+                container_id=full_name,
+                access_state="ACCESSIBLE",
+                cursor_token=None,
+                last_synced_at=None,
+            )
+
+    def list_changes_for_container(self, container: Any) -> Any:
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        for repo in self._repos:
+            full_name = str(repo.get("full_name", "fake/repo"))
+            if full_name != container.container_id:
+                continue
+            sha = str(repo.get("sha", "fake-sha"))
+            events.append(
+                ChangeEvent(
+                    op="modified",
+                    item_id=f"github://{full_name}/commit/{sha}",
+                    modified_at=str(repo.get("committed_at", "2026-05-23T00:00:00Z")),
+                    metadata={
+                        "sensitivity": self._sensitivity,
+                        "repo": full_name,
+                    },
+                )
+            )
+        return iter(events)
+
+    def retrieve_all_slim_docs(self, container: Any) -> Any:
+        for repo in self._repos:
+            if repo.get("full_name") != container.container_id:
+                continue
+            sha = str(repo.get("sha", "fake-sha"))
+            yield f"github://{container.container_id}/commit/{sha}"
+
+    def retrieve_all_slim_docs_with_perms(self, container: Any) -> Any:
+        import json as _json
+
+        for item_id in self.retrieve_all_slim_docs(container):
+            yield item_id, _json.dumps({"visibility": "private"})
+
+    def reindex(self, failed_item_ids: tuple[str, ...], *, include_permissions: bool = False) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import ChangeEvent
+
+        _ = include_permissions
+        for item_id in failed_item_ids:
+            yield ChangeEvent(
+                op="modified",
+                item_id=item_id,
+                modified_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                metadata={"sensitivity": self._sensitivity, "reindex": True},
+            )
+
+    def load_hierarchy(self, cc_pair_id: int) -> Any:
+        from kairix.core.protocols import HierarchyNode
+
+        emitted: set[str] = set()
+        # F58: orgs first, then repos.
+        for repo in self._repos:
+            full_name = str(repo.get("full_name", "fake/repo"))
+            if "/" not in full_name:
+                continue
+            org = full_name.split("/", 1)[0]
+            org_node_id = f"github://{org}"
+            if org_node_id not in emitted:
+                emitted.add(org_node_id)
+                yield HierarchyNode(
+                    cc_pair_id=cc_pair_id,
+                    raw_node_id=org_node_id,
+                    raw_parent_id=None,
+                    display_name=org,
+                    link=f"https://github.com/{org}",
+                    node_type="FOLDER",
+                    external_access_json=None,
+                    sensitivity_hint=None,
+                )
+        for repo in self._repos:
+            full_name = str(repo.get("full_name", "fake/repo"))
+            if "/" not in full_name:
+                continue
+            org = full_name.split("/", 1)[0]
+            org_node_id = f"github://{org}"
+            repo_node_id = f"github://{full_name}"
+            if repo_node_id in emitted:
+                continue
+            emitted.add(repo_node_id)
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=repo_node_id,
+                raw_parent_id=org_node_id,
+                display_name=full_name,
+                link=f"https://github.com/{full_name}",
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+
+    def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
+        return credentials
+
+    @classmethod
+    def oauth_authorization_url(cls, state: str) -> str:
+        return f"https://github.com/login/oauth/authorize?state={state}"
+
+    @classmethod
+    def oauth_code_to_token(cls, code: str) -> dict[str, Any]:
+        return {"auth_kind": "github_user_oauth", "code": code}
+
+    def subscribe(self, callback_url: str) -> str | None:
+        return f"fake-sub-{callback_url}"
+
+    def renew_subscription(self, subscription_id: str) -> str:
+        return subscription_id
+
+    def unsubscribe(self, _subscription_id: str) -> None:
+        return None
+
+    def handle_event(self, event: dict[str, Any]) -> Any:
+        # Mimic real connector: verify signature + dedup deliveries.
+        from kairix.connectors.github.webhook import translate_event, verify_and_parse
+
+        body = event.get("body", b"")
+        headers = event.get("headers", {})
+        secret = event.get("webhook_secret") or self._webhook_secret or ""
+        if not isinstance(body, bytes):
+            body = str(body).encode("utf-8")
+        envelope = verify_and_parse(
+            body=body,
+            headers=headers if isinstance(headers, dict) else {},
+            webhook_secret=secret,
+        )
+        if envelope.delivery_id in self._seen_deliveries:
+            return
+        self._seen_deliveries.add(envelope.delivery_id)
+        yield from translate_event(envelope)
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 

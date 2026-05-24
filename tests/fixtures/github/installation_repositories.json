@@ -1,0 +1,19 @@
+{
+  "total_count": 2,
+  "repositories": [
+    {
+      "id": 100,
+      "full_name": "agent-alpha-org/repo-alpha",
+      "default_branch": "main",
+      "visibility": "private",
+      "archived": false
+    },
+    {
+      "id": 101,
+      "full_name": "agent-alpha-org/repo-beta",
+      "default_branch": "main",
+      "visibility": "public",
+      "archived": false
+    }
+  ]
+}

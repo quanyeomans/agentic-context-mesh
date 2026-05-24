@@ -1,0 +1,105 @@
+# GitHub connector retrieval gold suite per spec §6.5.
+#
+# Wave E v1 of the per-connector gold-suite contract. Catches IM-6-class
+# regressions specifically on the GitHub corpus. References the
+# tests/fixtures/github/ recorded payloads so the suite is hermetic
+# (no real-installation dependency in CI).
+#
+# Threshold: weighted score ≥ 0.85 on every alpha cut that touches
+# GitHub code. Drift > ±2pp from the previous alpha fires a regression
+# alert (mirrors the reflib pattern documented in ADR-021).
+#
+# Schema mirrors `suites/reflib-gold-v3.yaml`:
+#   meta.{version, name, description, default_collection, categories, score_method}
+#   cases[].{id, category, query, score_method, gold_titles[].{title, relevance}}
+
+meta:
+  version: '1.0'
+  generated_by: kairix eval generate (github wave-e author run)
+  n_cases: 8
+  name: github
+  description: GitHub connector retrieval gold suite (8 cases across 6 query classes per design spec §6.5)
+  default_collection: github
+  categories:
+    - code_body
+    - issue_body
+    - pr_body
+    - cross_format_retrieval
+    - negative_wrong_repo
+    - negative_access_revoked
+    - tenancy_isolation
+    - hierarchy
+  score_method: ndcg
+
+cases:
+  # Code body — top result must be the matching source-code chunk.
+  - id: GH-CB-001
+    category: code_body
+    query: "where is the connector pipeline orchestrator entry point"
+    score_method: ndcg
+    gold_titles:
+      - title: kairix-core-connectors-pipeline
+        relevance: 2
+
+  # Issue body — top result must be the issue chunk matching the title.
+  - id: GH-IB-001
+    category: issue_body
+    query: "github connector token rotation under cc_pair lock"
+    score_method: ndcg
+    gold_titles:
+      - title: issue-1-installation-token-rotation
+        relevance: 2
+
+  # PR body — top result must be the PR chunk with the matching body.
+  - id: GH-PB-001
+    category: pr_body
+    query: "wave e github connector greenfield"
+    score_method: ndcg
+    gold_titles:
+      - title: pr-7-wave-e-github-connector
+        relevance: 2
+
+  # Cross-format retrieval — code + issues + PRs all represented in top-10.
+  - id: GH-CFR-001
+    category: cross_format_retrieval
+    query: "github connector"
+    score_method: ndcg
+    gold_titles:
+      - title: kairix-core-connectors-pipeline
+        relevance: 2
+      - title: issue-1-installation-token-rotation
+        relevance: 1
+      - title: pr-7-wave-e-github-connector
+        relevance: 1
+
+  # Negative — query targeting another tenant's content; no hits expected.
+  - id: GH-NEG-WRONG-REPO-001
+    category: negative_wrong_repo
+    query: "other-installation private repo content"
+    score_method: ndcg
+    gold_titles: []
+
+  # Negative — access-revoked repo; results must surface excluded_collections envelope.
+  - id: GH-NEG-REVOKED-001
+    category: negative_access_revoked
+    query: "revoked-installation repository content"
+    score_method: ndcg
+    gold_titles: []
+
+  # Tenancy isolation — two installations with overlapping repo names.
+  - id: GH-TEN-001
+    category: tenancy_isolation
+    query: "agent-alpha-org repo-alpha contents"
+    score_method: ndcg
+    gold_titles:
+      - title: agent-alpha-org-repo-alpha-readme
+        relevance: 2
+
+  # Hierarchy — query for top-level directory results in a repo.
+  - id: GH-HIER-001
+    category: hierarchy
+    query: "files in src directory of repo-alpha"
+    score_method: ndcg
+    gold_titles:
+      - title: agent-alpha-org-repo-alpha-src-main
+        relevance: 2

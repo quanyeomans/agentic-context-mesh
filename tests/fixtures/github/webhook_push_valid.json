@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/main",
+  "forced": false,
+  "repository": {
+    "id": 100,
+    "full_name": "agent-alpha-org/repo-alpha",
+    "visibility": "private"
+  },
+  "commits": [
+    {
+      "id": "push-event-sha-001",
+      "message": "Valid webhook delivery",
+      "timestamp": "2026-05-23T03:00:00Z",
+      "author": {"name": "agent-alpha"}
+    }
+  ]
+}
