@@ -62,6 +62,9 @@ _KEY_VISIBILITY = "visibility"
 _KEY_SENSITIVITY = "sensitivity"
 _KEY_PULL_REQUEST = "pull_request"
 _KEY_UPDATED_AT = "updated_at"
+# Maps the ``repository`` event's action field to its ChangeEvent op
+# (Sonar S3358 — avoid nested conditional in _translate_repository).
+_REPOSITORY_ACTION_TO_OP: dict[str, _ChangeEventOp] = {"archived": "archived", "deleted": "deleted"}
 
 
 class WebhookSignatureError(Exception):
@@ -291,7 +294,7 @@ def _translate_repository(payload: Mapping[str, Any]) -> Iterator[ChangeEvent]:
     repo = payload.get(_KEY_REPOSITORY, {}) or {}
     full_name = str(repo.get("full_name", ""))
     sensitivity_tier = _sensitivity_from_visibility(str(repo.get(_KEY_VISIBILITY, "private")))
-    repo_op: _ChangeEventOp = "archived" if action == "archived" else ("deleted" if action == "deleted" else "modified")
+    repo_op: _ChangeEventOp = _REPOSITORY_ACTION_TO_OP.get(action, "modified")
     yield ChangeEvent(
         op=repo_op,
         item_id=f"github://{full_name}",
