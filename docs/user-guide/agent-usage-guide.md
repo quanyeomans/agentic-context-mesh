@@ -113,6 +113,19 @@ Key fields to check:
 
 You're hitting the legacy `/sse` endpoint and the gateway is dropping the idle connection. Update your MCP client config to point at `/mcp` instead — see [MCP-CLIENT-MIGRATION.md](../operations/MCP-CLIENT-MIGRATION.md). The migration is a one-line URL change in your client config; the old `/sse` path stays mounted, so this is a fix for your client, not a kairix change.
 
+### If you see `fetch_failed` from kairix
+
+`fetch_failed` is **transient cold-start**, not "kairix is broken". The kairix container is restarting or finishing its warm-up; the right move is to wait and retry, not to fall back to memory or skip the search.
+
+Two shapes you might see during a cold-start window:
+
+1. **HTTP 503 with `Retry-After: 8`** — kairix is alive but warming. Wait the requested seconds (default 8) and retry the same call once.
+2. **MCP tool envelope with `error_code: "KAIRIX_COLD_START"`** — the readiness gate is still closed at the application layer. The envelope carries `retry_after_ms` and an `agent_instruction` field. Honour both: wait `retry_after_ms / 1000` seconds, then retry the same call once.
+
+If the second call also fails, surface "kairix is warming up — try again in a minute" to the user. **Never substitute a memory-based answer for a `KAIRIX_COLD_START` response.** Operators monitor the cold-start log events to detect persistent warm-up failures; a fabricated answer would mask the signal.
+
+Full contract: see [`docs/operations/MCP-DEPLOYMENT.md`](../operations/MCP-DEPLOYMENT.md#cold-start-affordance-contract).
+
 ### vec_failed=true (vector search broken)
 This means Azure credentials aren't loaded. Every search falls back to BM25-only, which misses semantic matches.
 

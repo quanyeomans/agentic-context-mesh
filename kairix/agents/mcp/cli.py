@@ -17,13 +17,148 @@ Requires kairix[agents]: pip install 'kairix[agents]'
 from __future__ import annotations
 
 import argparse
+import json
+import logging
+import os
+import platform
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kairix.agents.mcp.cold_start import warm_retrieval_stack
 from kairix.platform.onboard.ports import find_available_port, is_port_available
+
+# Dedicated startup-event logger. Operators filter on this name in log
+# analytics to pivot on container/process restart frequency. See
+# ``docs/operations/MCP-DEPLOYMENT.md`` ("Cold-start affordance contract")
+# for the event vocabulary and the operator-side query recipe.
+_STARTUP_LOGGER_NAME = "kairix.mcp.startup"
+startup_logger = logging.getLogger(_STARTUP_LOGGER_NAME)
+
+# Structured-log event names. Strings live as module constants so log
+# analytics dashboards have a single grep target and F17 (no triple-duplicated
+# literals) stays clean.
+_EVENT_PROCESS_STARTED = "mcp_process_started"
+_EVENT_WARM_STARTED = "mcp_warm_started"
+_EVENT_WARM_FAILED = "mcp_warm_failed"
+
+# Warm-result envelope key — duplicated across the structured-log emit
+# and the human-readable startup message; F17-clean via single constant.
+_KEY_ELAPSED_MS = "elapsed_ms"
+
+
+def _format_event(event: str, fields: dict[str, Any]) -> str:
+    """Render a structured startup-log line.
+
+    Output shape: ``event=<name> key1=<value1> key2=<value2> ...``. Values
+    are JSON-encoded when they contain whitespace or aren't a primitive so
+    a downstream log analytics layer can re-parse the line. Plain scalars
+    are written without quotes to stay grep-friendly for operators reading
+    raw ``docker logs`` output.
+    """
+    parts = [f"event={event}"]
+    for key, value in fields.items():
+        if value is None:
+            rendered = "null"
+        elif isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif isinstance(value, (int, float)):
+            rendered = str(value)
+        elif isinstance(value, str) and " " not in value and '"' not in value:
+            rendered = value
+        else:
+            rendered = json.dumps(value)
+        parts.append(f"{key}={rendered}")
+    return " ".join(parts)
+
+
+def _default_warm_flag_path() -> Path:
+    """Production seam — lazy-import warm_flag_path so it isn't loaded at module import."""
+    from kairix.paths import warm_flag_path
+
+    return warm_flag_path()
+
+
+def _previous_warm_age_seconds(warm_flag_path_fn: Callable[[], Path]) -> float | None:
+    """Read the warm-flag mtime and return ``now - mtime`` in seconds.
+
+    Returns ``None`` on first start (flag absent) or unreadable flag.
+    Operators use this to disambiguate ``container restarted while warm``
+    from ``container restarted while still cold`` in their log analytics.
+
+    ``warm_flag_path_fn`` is the public DI seam — tests inject a tmp_path
+    fake so F2 (no ``monkeypatch.setenv("KAIRIX_WARM_FLAG_PATH", ...)``)
+    stays clean.
+    """
+    try:
+        flag = warm_flag_path_fn()
+        if not flag.exists():
+            return None
+        return round(time.time() - flag.stat().st_mtime, 1)
+    except OSError:
+        return None
+
+
+def _emit_process_started(host: str, port: int, *, previous_warm_age_s: float | None) -> None:
+    """Emit the ``mcp_process_started`` structured log event.
+
+    Fired once per process at the top of the HTTP-transport branch — before
+    warm-up runs. Operators pivot on a count over time to see container
+    restart frequency; ``previous_warm_age_s`` answers ``was the previous
+    process warm when it died?``.
+
+    ``previous_warm_age_s`` is captured by the caller before
+    :func:`kairix.platform.warm.state.reset_warm_state` unlinks the
+    cross-process warm flag — the caller owns ordering so the flag-age
+    signal survives the reset.
+    """
+    from kairix import __version__ as kairix_version
+
+    startup_logger.info(
+        _format_event(
+            _EVENT_PROCESS_STARTED,
+            {
+                "pid": os.getpid(),
+                "host": host,
+                "port": port,
+                "python_version": platform.python_version(),
+                "kairix_version": kairix_version,
+                "previous_warm_age_s": previous_warm_age_s,
+            },
+        )
+    )
+
+
+def _emit_warm_outcome(warm_result: dict[str, Any]) -> None:
+    """Emit ``mcp_warm_started`` (success) or ``mcp_warm_failed`` (not ready).
+
+    Operators correlate this with ``mcp_process_started`` by ``pid`` to see
+    end-to-end warm-up wall-clock per restart and which warm steps failed
+    when ready is False.
+    """
+    if warm_result.get("ready") is True:
+        startup_logger.info(
+            _format_event(
+                _EVENT_WARM_STARTED,
+                {
+                    "pid": os.getpid(),
+                    _KEY_ELAPSED_MS: warm_result.get(_KEY_ELAPSED_MS, 0),
+                },
+            )
+        )
+        return
+    startup_logger.info(
+        _format_event(
+            _EVENT_WARM_FAILED,
+            {
+                "pid": os.getpid(),
+                "warm_result": warm_result,
+            },
+        )
+    )
 
 
 def _default_build_server() -> Callable[..., Any]:
@@ -60,6 +195,7 @@ class McpCliDeps:
     is_port_available_fn: Callable[[int], bool] = field(default_factory=lambda: is_port_available)
     find_available_port_fn: Callable[..., int] = field(default_factory=lambda: find_available_port)
     warm_retrieval_stack_fn: Callable[[], dict[str, Any]] = warm_retrieval_stack
+    warm_flag_path_fn: Callable[[], Path] = field(default_factory=lambda: _default_warm_flag_path)
 
 
 def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> None:
@@ -139,6 +275,12 @@ def _resolve_port(args: argparse.Namespace, *, deps: McpCliDeps) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
+    # Capture the previous warm-flag age BEFORE reset_warm_state unlinks
+    # it — Part 3 of KFEAT-020 needs this for the mcp_process_started log
+    # event so operators can tell whether the just-killed previous process
+    # was warm at death.
+    previous_warm_age_s = _previous_warm_age_seconds(deps.warm_flag_path_fn)
+
     # Clear any stale warm flag from a previous MCP process. The flag lives
     # on the persistent kairix data volume so it survives container restarts
     # by default; the in-process warm state, however, is reset on each
@@ -174,6 +316,13 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
     # http transport — streamable HTTP at /mcp via uvicorn, optional /sse legacy
     port = _resolve_port(args, deps=deps)
 
+    # Emit ``mcp_process_started`` BEFORE warm-up so operators can pivot on
+    # process-start cadence even when warm-up never completes. The matching
+    # ``mcp_warm_started`` / ``mcp_warm_failed`` event below carries the
+    # warm outcome — ``docs/operations/MCP-DEPLOYMENT.md`` documents the
+    # event vocabulary and the log-analytics query recipe.
+    _emit_process_started(args.host, port, previous_warm_age_s=previous_warm_age_s)
+
     from kairix.agents.mcp.capability_probe import build_capability_probe
     from kairix.agents.mcp.readiness import EventReadinessGate
     from kairix.agents.mcp.transport import build_mcp_app
@@ -191,10 +340,11 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
         capability_probe=capability_probe,
     )
     warm_result = deps.warm_retrieval_stack_fn()
+    _emit_warm_outcome(warm_result)
     if warm_result.get("ready") is True:
         gate.mark_ready()
         print(
-            f"warm-up complete — elapsed_ms={warm_result.get('elapsed_ms', 'unknown')}",
+            f"warm-up complete — elapsed_ms={warm_result.get(_KEY_ELAPSED_MS, 'unknown')}",
             file=sys.stderr,
         )
     else:
