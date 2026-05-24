@@ -1,0 +1,5 @@
+{
+  "token": "fake-verification-token-value",
+  "challenge": "ABC123DEFchallenge",
+  "type": "url_verification"
+}

@@ -1,0 +1,11 @@
+{
+  "status": 429,
+  "headers": {
+    "Retry-After": "30",
+    "Content-Type": "application/json"
+  },
+  "body": {
+    "ok": false,
+    "error": "ratelimited"
+  }
+}

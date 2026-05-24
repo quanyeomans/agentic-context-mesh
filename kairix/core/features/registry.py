@@ -125,8 +125,8 @@ REGISTRY: dict[str, FeatureFlag] = {
         # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
         # soak → retire. ``target_retire_in`` is 2 months from the
         # introduce-stage landing (current 2026-05 dispatch window).
-        introduced_in="v2026.5.23",
-        target_retire_in="v2026.7.23",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_FLAG_TARGET_RETIRE_IN,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
@@ -425,6 +425,33 @@ REGISTRY: dict[str, FeatureFlag] = {
         target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
+    ),
+    "connector_slack": FeatureFlag(
+        name="connector_slack",
+        default=False,
+        description=(
+            "Enable the Slack connector — pulls public/private channel + DM message "
+            "history via the Slack Web API delta surface (conversations.history) and "
+            "the realtime push surface (Socket Mode WebSocket + Events API HTTP). "
+            "F39 sensitivity routing per channel kind (public → internal, "
+            "private/mpim → client-confidential, im → personal) per slack.md §1. "
+            "When OFF, the connector emits a single root WORKSPACE hierarchy node "
+            "and list_changes_for_container delegates to the legacy single-cursor "
+            "list_changes path. When ON, each channel becomes a Container with its "
+            "own ts cursor and load_hierarchy walks Workspace → channel → thread "
+            "parent-before-child per F58. Default-off until the per-channel routing "
+            "soaks against the dogfood workspace; mirrors the obsidian Wave E pilot's "
+            "shape and the m365_email_headers per-mailbox pilot."
+        ),
+        stage="introduce",
+        # Slack cutover plan (per docs/architecture/feature-flag-architecture.md §7):
+        # 12-month retire window — Slack workspace re-installs are slower to authorise
+        # than the M365 sibling flows (admin consent + bot scope review per workspace),
+        # so the retire deadline matches the Wave E topology fleet at v2027.5.24.
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in="v2027.5.24",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/connector-scope-topology/connector-design-specs/slack.md",
     ),
     "maintenance_loop": FeatureFlag(
         name="maintenance_loop",

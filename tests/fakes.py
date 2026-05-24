@@ -2812,6 +2812,85 @@ class FakeGitHubConnector:
         yield from translate_event(envelope)
 
 
+class FakeSlackConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    Slack plugin's contract test.
+
+    Constructor takes the channel + message envelopes to emit; the
+    fake satisfies the SourceConnector surface without touching the
+    Slack Web API or Socket Mode WebSocket. This is the canonical fake
+    F43 pairs with the real
+    :class:`kairix.connectors.slack.SlackConnector` inside
+    ``tests/contracts/test_slack_protocol.py``.
+
+    Sensitivity tier defaults to the channel-kind-derived value per
+    slack.md §1 (public_channel → internal, private_channel / mpim →
+    client-confidential, im → personal) so the fake structurally
+    mirrors the real-connector's F39 routing.
+    """
+
+    name: str = "slack"
+
+    def __init__(
+        self,
+        *,
+        channels: list[dict[str, Any]] | None = None,
+        messages: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._channels: list[dict[str, Any]] = list(channels) if channels is not None else []
+        self._messages: list[dict[str, Any]] = list(messages) if messages is not None else []
+        self._kind_by_channel: dict[str, str] = {
+            str(c.get("id")): str(c.get("kind", "public_channel")) for c in self._channels
+        }
+        self._by_item_id: dict[str, dict[str, Any]] = {
+            f"{m.get('channel_id', '')}:{m.get('ts', '')}": m for m in self._messages
+        }
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        """Yield one ``created`` ChangeEvent per seeded message."""
+        _ = cursor
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        for m in self._messages:
+            channel_id = str(m.get("channel_id", ""))
+            ts = str(m.get("ts", ""))
+            events.append(
+                ChangeEvent(
+                    op="created",
+                    item_id=f"{channel_id}:{ts}",
+                    modified_at=str(m.get("modified_at", "2026-05-23T00:00:00Z")),
+                    metadata={"channel_id": channel_id, "ts": ts, "user": m.get("user")},
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        import json as _json
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        match = self._by_item_id.get(item_id, {})
+        payload = _json.dumps(match, sort_keys=True).encode("utf-8")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=payload, mime="application/json", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        channel_id, _, ts = item_id.partition(":")
+        return f"slack://channel/{channel_id}/p{ts.replace('.', '')}"
+
+    def sensitivity_for(self, item_id: str) -> Any:
+        channel_id, _, _ts = item_id.partition(":")
+        kind = self._kind_by_channel.get(channel_id, "public_channel")
+        return {
+            "public_channel": "internal",
+            "private_channel": "client-confidential",
+            "mpim": "client-confidential",
+            "im": "personal",
+        }.get(kind, "personal")
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 

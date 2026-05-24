@@ -1,0 +1,64 @@
+# Test-fixture manifest for the Slack connector (slack.md §6.7).
+#
+# Each fixture below maps to (expected_op, expected_channel_kind,
+# expected_sensitivity, expected_min_score) so the gold-suite assertions
+# and the per-format E2Es can pin expectations from one source of truth.
+#
+# Per-fixture cap per slack.md §6.7: ≤500 KB each, ≤5 MB total corpus.
+# The fixtures below are deliberately tiny (≤50 KB each) so the CI
+# suite stays hermetic with no real-workspace dependency.
+fixtures:
+  - name: conversations_list
+    file: conversations_list.json
+    purpose: Channel enumeration smoke (one public + one private + one DM)
+    expected_op: enumerate
+    expected_kinds: [public_channel, private_channel, im]
+    expected_min_count: 3
+
+  - name: conversations_history_public
+    file: conversations_history_public.json
+    purpose: Public channel history page — internal-tier sensitivity routing
+    expected_op: created
+    expected_channel_kind: public_channel
+    expected_sensitivity: internal
+    expected_min_count: 2
+
+  - name: conversations_history_private
+    file: conversations_history_private.json
+    purpose: Private channel history page — client-confidential sensitivity
+    expected_op: created
+    expected_channel_kind: private_channel
+    expected_sensitivity: client-confidential
+    expected_min_count: 1
+
+  - name: conversations_history_dm
+    file: conversations_history_dm.json
+    purpose: DM history page — personal-tier sensitivity routing
+    expected_op: created
+    expected_channel_kind: im
+    expected_sensitivity: personal
+    expected_min_count: 1
+
+  - name: events_subscription_url_challenge
+    file: events_subscription_url_challenge.json
+    purpose: Slack Events API URL-verification challenge (subscription bootstrap)
+    expected_op: handshake
+    expected_field: challenge
+
+  - name: rate_limit_429
+    file: rate_limit_429.json
+    purpose: Tier-3 rate-limit response shape with Retry-After
+    expected_op: backoff
+    expected_retry_after_seconds: 30
+
+  - name: socket_mode_reconnect_sequence
+    file: socket_mode_reconnect_sequence.json
+    purpose: Socket Mode WS open/close/open sequence (proactive reconnect)
+    expected_op: reconnect
+    expected_min_attempts: 2
+
+  - name: file_attachment_linkage
+    file: file_attachment_linkage.json
+    purpose: Message envelope carrying a file id, mapping to ChangeEvent.metadata.file_ids
+    expected_op: created
+    expected_field: file_ids

@@ -189,6 +189,10 @@ pytest_plugins = [
     "tests.bdd.steps.connector_github_steps",
     "tests.bdd.steps.feature_flag_connector_github_steps",
     "tests.bdd.steps.feature_flag_topology_v2_github_steps",
+    # Wave E Slack — workspace-channels connector + flag. See
+    # docs/architecture/connector-scope-topology/connector-design-specs/slack.md.
+    "tests.bdd.steps.connector_slack_steps",
+    "tests.bdd.steps.feature_flag_connector_slack_steps",
     # Topology v2 Wave A — schema additions + new dataclasses behind
     # ``topology_v2_schema`` flag. F54 both-branch coverage. See
     # docs/architecture/connector-scope-topology/ADR.md.
