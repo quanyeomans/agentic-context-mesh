@@ -138,7 +138,17 @@ jobs:
         # between commits within a release window.
         run: bash scripts/checks/check-baseline-shrinking.sh
 
+      - name: KFEAT-018 — paydown doc snapshot currency
+        # The State table in docs/architecture/grandfathering-paydown.md
+        # must be re-stamped within 7 days of the most recent release
+        # tag (or carry an `<!-- expected-out-of-date-until: ... -->`
+        # extension comment with rationale). Mirrors the F49 invocation
+        # above: release-time only, not per-commit.
+        # See docs/features/KFEAT-018-paydown-doc-refresh/BRIEF.md.
+        run: python3 scripts/checks/check_paydown_doc_currency.py
+
       - name: Extract release notes from CHANGELOG
+
         env:
           LABEL: ${{ inputs.changelog_label }}
         run: |
