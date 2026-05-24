@@ -195,6 +195,9 @@ pytest_plugins = [
     "tests.bdd.steps.cli_cc_pair_steps",
     "tests.bdd.steps.mcp_cc_pair_steps",
     "tests.bdd.steps.feature_flag_topology_v2_config_steps",
+    # KFEAT-018 — release-time paydown doc snapshot currency gate.
+    # See docs/features/KFEAT-018-paydown-doc-refresh/BRIEF.md.
+    "tests.bdd.steps.check_paydown_doc_currency_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
