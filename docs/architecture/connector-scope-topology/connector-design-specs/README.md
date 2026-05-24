@@ -19,11 +19,11 @@ Plus four cross-cutting additions every spec carries:
 
 | Connector | Spec | Status | Wave E status |
 |---|---|---|---|
-| SharePoint | [`sharepoint.md`](sharepoint.md) | ✅ canonical (the bar) | scoped — slice landed v2026.5.24a1, Wave E target this spec |
-| Slack | [`slack.md`](slack.md) | ✅ design spec | scoped — from-scratch build, design contract this spec |
-| GitHub | [`github.md`](github.md) | ✅ design spec | scoped — from-scratch build, design contract this spec |
-| Notion | [`notion.md`](notion.md) | ✅ design spec | scoped — from-scratch build, design contract this spec |
-| Google Drive | (next) | — | backlog — spec when prior three implementations validate the proactive-failure-mode patterns |
+| SharePoint | [`sharepoint.md`](sharepoint.md) | ✅ canonical (the bar) | shipped behind `connector_sharepoint` + `topology_v2_sharepoint` ([v2026.5.24a1](../../../upgrades/v2026.5.24a1.md), [a2](../../../upgrades/v2026.5.24a2.md)) |
+| Slack | [`slack.md`](slack.md) | ✅ design spec | shipped behind `connector_slack` + `topology_v2_slack` ([v2026.5.24a2](../../../upgrades/v2026.5.24a2.md)) |
+| GitHub | [`github.md`](github.md) | ✅ design spec | shipped behind `connector_github` + `topology_v2_github` ([v2026.5.24a2](../../../upgrades/v2026.5.24a2.md)) |
+| Notion | [`notion.md`](notion.md) | ✅ design spec | shipped behind `connector_notion` + `topology_v2_notion` ([v2026.5.24a2](../../../upgrades/v2026.5.24a2.md)) |
+| Google Drive | (next) | — | backlog — spec when the four shipped connectors complete cutover soak and validate the proactive-failure-mode patterns |
 | Jira | (last — needs `01-source-analysis` profile first) | — | backlog |
 
 ## Ordering rationale

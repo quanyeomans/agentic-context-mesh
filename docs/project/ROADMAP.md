@@ -128,6 +128,19 @@ The reference-library numbers above are the upper bound for clean, well-curated 
 
 ---
 
+## Recently shipped (v2026.5.24 alpha series)
+
+Behind default-off feature flags — reversible until each cutover soak validates parity. See [v2026.5.24a2 upgrade notes](../upgrades/v2026.5.24a2.md) and [a3 upgrade notes](../upgrades/v2026.5.24a3.md) for the operator recipe.
+
+- **Topology v2 operator-config surface** — declare connectors / credentials / cc_pairs / collections / scope profiles / skills in `kairix.config.yaml` instead of code. Gated by `topology_v2_config`. Shipped v2026.5.24a1.
+- **SharePoint, Slack, GitHub, and Notion connectors** — each shipped behind its own `connector_<name>` flag with a matching `topology_v2_<name>` per-source-unit Container pilot (per-drive, per-channel, per-repo, per-page-tree). Shipped v2026.5.24a1–a2.
+- **Background maintenance loop** — `maintenance_loop` flag enables periodic orphan-vector cleanup with a 7-day soft-delete retention window. Replaces the reactive preflight orphan check. Shipped v2026.5.24a2.
+- **Configurable agent-knowledge layout** — `paths.agent_knowledge_dir` + `paths.agent_memory_glob` let operators tell the `agent_knowledge_populated` onboard check where their memory files live and what shape they take. Shipped v2026.5.24a3.
+
+Next milestone in this thread is **Wave F (chunker plugins)** — each connector picks its chunker by config rather than baked-in choice. Plus the per-connector cutover soak that promotes each `topology_v2_<name>` flag from introduce → cutover → retire over the next several releases.
+
+---
+
 ## Near-term
 
 - **CLI / MCP feature parity** ([#168](https://github.com/three-cubes/kairix/issues/168)) — every kairix feature exposed via both the CLI and the MCP server with uniform UX. One use case per operation in `kairix/use_cases/`; CLI and MCP become thin adapters with shared parameter names, defaults, output shapes, and help text. Closes the timeline code-path divergence ([#163](https://github.com/three-cubes/kairix/issues/163)) by collapsing it onto the same use case both surfaces consume; subsumes the MCP error envelope shape gap ([#165](https://github.com/three-cubes/kairix/issues/165)) by pushing error-envelope construction into the use case. 8 surface-parity gaps identified (entity suggest/validate missing on MCP; entity get missing on CLI; prep, research, brief, usage_guide each missing on one side). Phased: Phase 1 timeline (template + #163 fix), Phase 2 UX parity audit on already-converged tools, Phase 3 fill missing surfaces in operator-priority order, Phase 4 uniformity polish + help-text single source of truth. See [cli-mcp-feature-parity.md](../architecture/cli-mcp-feature-parity.md). **Targeted for next sprint.**

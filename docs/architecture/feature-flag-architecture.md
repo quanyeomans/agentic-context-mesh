@@ -349,6 +349,23 @@ Operator opt-in via `kairix.config.yaml` `features: {connector_dex_crm: true}` e
 
 `connector_sharepoint` flag. Same shape as Wave 5 entries. Sensitive because SharePoint surfaces client-confidential content (per ADR-005); the cutover protocol's `sensitivity` parity check is non-negotiable here.
 
+### Wave E — connector fleet completion + topology v2 per-source pilots
+
+Landed across `v2026.5.24a1` → `v2026.5.24a3`. Each connector ships behind its own `connector_<name>` flag and gets a matching `topology_v2_<name>` flag for the per-source-unit Container pilot (folders for Obsidian, drives for SharePoint, channels for Slack, repos for GitHub, page-trees for Notion, mailboxes / calendars / tenants for M365 / Dex). Every flag is default-off and lands with the canonical F54 both-branch coverage.
+
+| Connector | `connector_<name>` flag | `topology_v2_<name>` pilot | Sensitivity default |
+|---|---|---|---|
+| Obsidian | n/a (always loaded) | `topology_v2_obsidian` | internal |
+| Dex CRM | `connector_dex_crm` | `topology_v2_dex_crm` | internal |
+| M365 email headers | `connector_m365_email_headers` | `topology_v2_m365_email_headers` | client-confidential |
+| M365 calendar | `connector_m365_calendar` | `topology_v2_m365_calendar` | client-confidential |
+| SharePoint | `connector_sharepoint` | `topology_v2_sharepoint` | internal |
+| Slack | `connector_slack` | `topology_v2_slack` | per-channel-kind (internal / confidential / personal) |
+| GitHub | `connector_github` | `topology_v2_github` | client-confidential |
+| Notion | `connector_notion` | `topology_v2_notion` | internal |
+
+One operational flag also lands in Wave E: `maintenance_loop` enables the background orphan-vector cleanup worker (KFEAT-021 Phase 1). Default-off; see [`docs/upgrades/v2026.5.24a2.md`](../upgrades/v2026.5.24a2.md#maintenance-loop) for the operator recipe.
+
 ### Wave 7 — Vision-enhanced extraction + Teams transcripts
 
 `extractor_vision_enabled` (vision LLM cost-gated) and `connector_teams_transcripts`. Same shape.
