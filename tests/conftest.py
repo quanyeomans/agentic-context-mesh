@@ -209,6 +209,13 @@ pytest_plugins = [
     # Container with its own delta cursor; load_hierarchy walks the
     # filesystem parent-before-child per F58.
     "tests.bdd.steps.feature_flag_topology_v2_obsidian_steps",
+    # Topology v2 Wave E — per-connector multi-container pilot for the
+    # m365_email_headers connector behind the
+    # ``topology_v2_m365_email_headers`` flag. F45 / F54 coverage. Each
+    # configured mailbox becomes its own Container with its own Graph
+    # delta cursor; load_hierarchy emits one root FOLDER plus one
+    # FOLDER per mailbox parent-before-child per F58.
+    "tests.bdd.steps.feature_flag_topology_v2_m365_email_headers_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
