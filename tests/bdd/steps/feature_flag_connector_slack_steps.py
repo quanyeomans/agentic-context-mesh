@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from pytest_bdd import given, parsers, scenarios, then, when
+from pytest_bdd import given, parsers, then, when
 
 from kairix.connectors.slack import (
     SlackChannel,
@@ -42,8 +42,6 @@ from kairix.core.protocols import Container, HierarchyNode
 from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.bdd
-
-scenarios("../features/feature_flag_connector_slack.feature")
 
 _FLAG_NAME = "connector_slack"
 

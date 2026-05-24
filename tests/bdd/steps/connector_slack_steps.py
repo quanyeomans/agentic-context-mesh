@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 import pytest
-from pytest_bdd import given, scenarios, then, when
+from pytest_bdd import given, then, when
 
 from kairix.connectors.slack import (
     SlackConnector,
@@ -32,8 +32,6 @@ from kairix.connectors.slack import (
 from kairix.core.protocols import ChangeEvent
 
 pytestmark = pytest.mark.bdd
-
-scenarios("../features/connector_slack.feature")
 
 _PUBLIC_CHANNEL = "C-PUBLIC"
 _DM_CHANNEL = "D-DM"
