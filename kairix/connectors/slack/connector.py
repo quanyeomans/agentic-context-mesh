@@ -50,6 +50,7 @@ Wave E flag:
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -873,8 +874,8 @@ class SlackConnector:
         }
         # Consume the iterator — the side effects (cache priming,
         # cc_pair_invalid flag) are what the realtime path needs.
-        for _ in self.handle_event(payload):
-            pass
+        # deque(..., maxlen=0) drains in O(1) memory without S108.
+        deque(self.handle_event(payload), maxlen=0)
 
     def _on_credential_expired(self) -> None:
         """Callback fired by :class:`SlackSocketModeHandler` on auth failure."""
