@@ -55,6 +55,33 @@ services:
       # declare the keys you're changing; required keys come from the image.
       # NEVER bind-mount over /opt/kairix/kairix.config.yaml — that shadow-
       # mount drops required keys silently (the v2026.5.17a9 incident).
+      #
+      # Declaring topology v2 (v2026.5.24a1+):
+      #
+      #   The new connector / collection / scope / skill surface lives
+      #   under a ``topology_v2:`` block — declare it inside your
+      #   kairix.config.local.yaml overlay. See kairix.config.example.yaml
+      #   at the repo root for the full operator-facing shape (2 connectors,
+      #   1 credential, 2 cc_pairs, 2 collections, 1 scope_profile, 1 skill).
+      #
+      #   Minimal overlay shape (kairix.config.local.yaml):
+      #     features:
+      #       topology_v2_config: true        # parse + apply the block
+      #       topology_v2_obsidian: true      # per-folder containers + walk
+      #       connector_sharepoint: true      # enable SharePoint connector
+      #     topology_v2:
+      #       connectors: [...]
+      #       credentials: [...]
+      #       cc_pairs:    [...]
+      #       collections: [...]
+      #       scope_profiles: [...]
+      #       skills:      [...]
+      #
+      #   For SharePoint: set the three M365 client-credentials secrets in
+      #   the .env file referenced below (CONNECTOR_M365_TENANT_ID +
+      #   CONNECTOR_M365_CLIENT_ID + CONNECTOR_M365_CLIENT_SECRET). The
+      #   connector resolves them via kairix.secrets.get_secret with the
+      #   logical names connector-m365-tenant-id / -client-id / -client-secret.
       - ./kairix.config.local.yaml:/opt/kairix/kairix.config.local.yaml:ro
     env_file:
       - .env
@@ -65,7 +92,8 @@ services:
       # Point kairix at the host-side overlay file. The image-bundled base
       # at /opt/kairix/kairix.config.yaml is the source of required keys;
       # the overlay supplies operator-specific values (vault paths, agent
-      # registry, retrieval tuning). See docs/operations/runbooks/config-upgrade.md.
+      # registry, retrieval tuning, topology_v2 block). See
+      # docs/operations/runbooks/config-upgrade.md.
       - KAIRIX_CONFIG_OVERLAY_PATH=/opt/kairix/kairix.config.local.yaml
     depends_on:
       neo4j:
