@@ -1224,6 +1224,107 @@ def _run_preflight_at_boot(deps: PreflightDeps | None = None) -> bool:
     return True
 
 
+@dataclass
+class TopologyV2ApplyDeps:
+    """Injectable dependencies for :func:`apply_topology_v2_at_boot`.
+
+    F6-clean: every field has a ``default_factory`` so production callers
+    construct ``TopologyV2ApplyDeps()`` and get the real boundary calls;
+    tests construct ``TopologyV2ApplyDeps(config_path_resolver=...,
+    db_factory=..., flag_reader=lambda _name: True)`` and pass it as a
+    single argument to drive the apply step against a tmp_path-rooted
+    config + DB without touching the dev's real vault.
+
+    Fields:
+      * ``flag_reader`` — returns the effective value of the named
+        feature flag. Default :func:`_default_flag_value`. Tests pass a
+        lambda returning a deterministic bool to pin the apply path
+        independently of the global registry / env state.
+      * ``config_path_resolver`` — returns the ``kairix.config.yaml``
+        path or ``None``. Default :func:`_resolve_config_path_default`.
+      * ``db_factory`` — opens the SQLite connection the apply step
+        writes through; default :func:`kairix.core.db.open_db`.
+    """
+
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
+    config_path_resolver: Callable[[], Path | None] = field(default_factory=lambda: _resolve_config_path_default)
+    db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
+
+
+def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> bool:
+    """Materialise the operator's ``topology_v2:`` YAML into runtime rows.
+
+    Gated on the ``topology_v2_config`` feature flag — flag OFF makes
+    the function a structural no-op (returns True without opening the
+    DB), preserving bit-for-bit pre-Wave-D boot behaviour. Flag ON:
+    loads the parsed config, validates cross-references, and calls
+    :func:`kairix.core.connectors.topology_v2_applier.apply_topology_v2`
+    against the shared SQLite connection.
+
+    Returns True iff boot should continue. Logs at INFO on success,
+    WARNING on apply failure (the worker continues so the operator can
+    fix the config without crashlooping; the cc_pair lookup in
+    :func:`resolve_chunk_writer_for_entry` falls back to the legacy
+    writer when no cc_pair has been registered, so a failed apply
+    degrades gracefully).
+    """
+    deps = deps if deps is not None else TopologyV2ApplyDeps()
+    if not deps.flag_reader("topology_v2_config"):
+        return True
+
+    config_path = deps.config_path_resolver()
+    if config_path is None or not config_path.exists():
+        logger.info("worker: topology_v2 apply skipped — no kairix.config.yaml on disk")
+        return True
+
+    import yaml
+
+    from kairix.config import parse_topology_v2
+    from kairix.core.connectors.topology_v2_applier import (
+        ApplyValidationError,
+        apply_topology_v2,
+    )
+    from kairix.core.db.schema import create_schema
+
+    try:
+        with config_path.open() as fh:
+            raw = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        logger.warning("worker: topology_v2 apply skipped — could not read config: %s", exc)
+        return True
+
+    try:
+        parsed = parse_topology_v2(raw)
+    except Exception as exc:
+        logger.warning("worker: topology_v2 apply skipped — parse failure: %s", exc)
+        return True
+
+    if not (parsed.connectors or parsed.credentials or parsed.cc_pairs or parsed.collections):
+        logger.info("worker: topology_v2 apply skipped — no blocks declared in config")
+        return True
+
+    db = deps.db_factory()
+    try:
+        create_schema(db)
+        try:
+            result = apply_topology_v2(db, parsed)
+        except ApplyValidationError as exc:
+            logger.warning("worker: topology_v2 apply rejected — %s", exc)
+            db.rollback()
+            return True
+        db.commit()
+    finally:
+        db.close()
+
+    logger.info(
+        "worker: topology_v2 applied — created=%d updated=%d unchanged=%d",
+        result.created,
+        result.updated,
+        result.unchanged,
+    )
+    return True
+
+
 def _boot_state(deps: WorkerDeps) -> WorkerState:
     """Load prior state from disk (increment restart_count) or start fresh.
 
@@ -1395,6 +1496,14 @@ def main(
     # boot; ``KAIRIX_PREFLIGHT_STRICT=1`` makes error gaps fatal.
     if not _run_preflight_at_boot():
         return
+
+    # Wave D apply-bridge — when the topology_v2_config flag is ON, read
+    # the parsed config and materialise it into runtime topology_* rows
+    # before the first sync tick. Flag OFF: this is a structural no-op
+    # (the function short-circuits before opening the DB). Failures
+    # degrade gracefully — the legacy single-collection writer remains
+    # the fallback in resolve_chunk_writer_for_entry.
+    apply_topology_v2_at_boot()
 
     state = _boot_state(deps)
     # Persist initial state (STARTING) so ``kairix worker status`` is
