@@ -445,6 +445,66 @@ def test_agent_knowledge_populated_ok(tmp_path: Path) -> None:
     assert "1 files" in result.detail
 
 
+@pytest.mark.unit
+def test_agent_knowledge_default_glob_accepts_files_directly_under_agent(tmp_path: Path) -> None:
+    """Default glob (``**/*.md``) accepts ``<agent>/<date>.md`` — the layout
+    used by dogfood vaults that don't enforce a per-agent ``memory/`` subdir.
+    Regression: pre-config the glob was hard-coded to ``*/memory/*.md`` which
+    rejected this layout and broke the onboard healthcheck after v2026.5.24a2.
+    """
+    from kairix.platform.onboard.check import check_agent_knowledge_populated
+
+    agent_dir = tmp_path / "04-Agent-Knowledge" / "builder"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "2026-05-15.md").write_text("# log")
+
+    result = check_agent_knowledge_populated(document_root_path=tmp_path)
+    assert result.ok is True
+    assert "1 files" in result.detail
+
+
+@pytest.mark.unit
+def test_agent_knowledge_custom_dir_name_and_glob_via_di(tmp_path: Path) -> None:
+    """Operators override the directory name and glob via config; verify both
+    kwargs (the same seams the config helpers feed) route correctly."""
+    from kairix.platform.onboard.check import check_agent_knowledge_populated
+
+    custom = tmp_path / "agent-vault"
+    (custom / "alpha").mkdir(parents=True)
+    (custom / "alpha" / "diary-2026-05-25.txt").write_text("note")
+
+    # Strict glob — only ``diary-*.txt`` files count. The default
+    # ``**/*.md`` would miss the .txt file; the override picks it up.
+    result = check_agent_knowledge_populated(
+        document_root_path=tmp_path,
+        agent_knowledge_dir="agent-vault",
+        memory_glob="**/diary-*.txt",
+    )
+    assert result.ok is True
+    assert "1 files" in result.detail
+
+
+@pytest.mark.unit
+def test_agent_knowledge_custom_glob_rejects_non_matching_files(tmp_path: Path) -> None:
+    """A stricter operator-supplied glob rejects files that don't match.
+    Surfaces the glob pattern in the failure detail so operators can
+    triage layout vs config mismatch."""
+    from kairix.platform.onboard.check import check_agent_knowledge_populated
+
+    agent_dir = tmp_path / "04-Agent-Knowledge" / "builder"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "loose.md").write_text("# log")  # not under memory/
+
+    result = check_agent_knowledge_populated(
+        document_root_path=tmp_path,
+        memory_glob="*/memory/*.md",  # strict — requires <agent>/memory/<file>
+    )
+    assert result.ok is False
+    assert "*/memory/*.md" in result.detail
+    assert result.fix is not None
+    assert "agent_memory_glob" in result.fix
+
+
 # ---------------------------------------------------------------------------
 # check_chunk_date_populated — DI via db_path
 # ---------------------------------------------------------------------------

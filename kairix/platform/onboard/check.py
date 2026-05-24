@@ -608,19 +608,48 @@ def check_neo4j_reachable(neo4j_client: Any | None = None) -> CheckResult:
         )
 
 
-def check_agent_knowledge_populated(document_root_path: Path | None = None) -> CheckResult:
+def check_agent_knowledge_populated(
+    document_root_path: Path | None = None,
+    *,
+    agent_knowledge_dir: str | None = None,
+    memory_glob: str | None = None,
+) -> CheckResult:
     """At least one agent has memory logs (required for briefing pipeline).
 
     Args:
         document_root_path: Override for the document root. Defaults to
                             ``kairix.paths.document_root()``.
+        agent_knowledge_dir: Directory name under ``document_root`` that
+                             holds the agent-knowledge tree. Defaults to
+                             :func:`kairix.paths.agent_knowledge_dir_name`
+                             (which reads ``paths.agent_knowledge_dir`` from
+                             ``kairix.config.yaml``).
+        memory_glob: Glob pattern (relative to the agent-knowledge dir)
+                     that identifies memory log files. Defaults to
+                     :func:`kairix.paths.agent_memory_glob` (which reads
+                     ``paths.agent_memory_glob`` from ``kairix.config.yaml``).
+
+    Both ``agent_knowledge_dir`` and ``memory_glob`` are test seams and
+    operator escape hatches — different vaults arrange agent memory under
+    different conventions, so this check pulls the layout from config
+    rather than hard-coding it.
     """
     if document_root_path is None:
         from kairix.paths import document_root
 
         document_root_path = document_root()
 
-    agent_knowledge = document_root_path / "04-Agent-Knowledge"
+    if agent_knowledge_dir is None:
+        from kairix.paths import agent_knowledge_dir_name
+
+        agent_knowledge_dir = agent_knowledge_dir_name()
+
+    if memory_glob is None:
+        from kairix.paths import agent_memory_glob
+
+        memory_glob = agent_memory_glob()
+
+    agent_knowledge = document_root_path / agent_knowledge_dir
     if not agent_knowledge.exists():
         return CheckResult(
             name=_CHECK_AGENT_KNOWLEDGE_POPULATED,
@@ -628,22 +657,26 @@ def check_agent_knowledge_populated(document_root_path: Path | None = None) -> C
             detail=f"Agent knowledge directory not found: {agent_knowledge}",
             fix=(
                 f"Create the directory:\n"
-                f"  mkdir -p {agent_knowledge}/<agent-name>/memory\n"
-                f"Agents write daily memory logs here during sessions."
+                f"  mkdir -p {agent_knowledge}/<agent-name>\n"
+                "Agents write daily memory logs here during sessions.\n"
+                "To use a different directory name, set "
+                "``paths.agent_knowledge_dir`` in kairix.config.yaml."
             ),
         )
 
-    # Look for any memory log files
-    memory_files = list(agent_knowledge.rglob("*/memory/*.md"))
+    memory_files = list(agent_knowledge.rglob(memory_glob))
     if not memory_files:
         return CheckResult(
             name=_CHECK_AGENT_KNOWLEDGE_POPULATED,
             ok=False,
-            detail=f"No agent memory logs found under {agent_knowledge}",
+            detail=f"No agent memory logs found under {agent_knowledge} (glob={memory_glob!r})",
             fix=(
                 "Agent memory logs are written by agents during sessions.\n"
-                f"Expected path: {agent_knowledge}/<agent>/memory/YYYY-MM-DD.md\n"
-                "Briefing synthesis (kairix brief) requires at least some memory content."
+                f"Searched: {agent_knowledge}/{memory_glob}\n"
+                "Briefing synthesis (kairix brief) requires at least some memory content.\n"
+                "If your vault uses a different layout, set "
+                "``paths.agent_memory_glob`` in kairix.config.yaml "
+                "(default: ``**/*.md``)."
             ),
         )
 

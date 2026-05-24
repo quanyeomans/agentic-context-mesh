@@ -64,6 +64,15 @@ provider: azure_foundry
 #   db_path:        ~/.cache/kairix/index.sqlite
 #   log_dir:        ~/.cache/kairix/logs
 #   workspace_root: ~/.kairix/workspaces
+#   # Agent-knowledge directory under document_root. The briefing pipeline
+#   # and `kairix onboard check agent_knowledge_populated` both read here.
+#   # Default: "04-Agent-Knowledge"
+#   agent_knowledge_dir: "04-Agent-Knowledge"
+#   # Glob (relative to agent_knowledge_dir, evaluated with rglob) that
+#   # identifies memory log files. Default "**/*.md" matches any markdown
+#   # anywhere under the tree. Pin a stricter pattern (e.g.
+#   # "*/memory/*.md") when your vault enforces a per-agent layout.
+#   agent_memory_glob: "**/*.md"
 
 # ──────────────────────────────────────────────────────────────────────────
 # Retrieval — how BM25 + vector results combine, plus boost knobs

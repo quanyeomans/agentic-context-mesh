@@ -907,3 +907,50 @@ class TestFeatureFlagConfigOverlay:
         monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg))
 
         assert feature_flag_config_overlay() == {}
+
+
+class TestAgentKnowledgeDirName:
+    """`agent_knowledge_dir_name()` — config-driven directory override."""
+
+    @pytest.mark.unit
+    def test_default_when_config_missing(self) -> None:
+        """No config → canonical ``04-Agent-Knowledge`` directory name."""
+        from kairix.paths import agent_knowledge_dir_name
+
+        assert agent_knowledge_dir_name(config={}) == "04-Agent-Knowledge"
+
+    @pytest.mark.unit
+    def test_override_via_config_kwarg(self) -> None:
+        """Config seam returns the operator-supplied override verbatim."""
+        from kairix.paths import agent_knowledge_dir_name
+
+        assert agent_knowledge_dir_name(config={"agent_knowledge_dir": "team-memory"}) == "team-memory"
+
+    @pytest.mark.unit
+    def test_empty_string_falls_back_to_default(self) -> None:
+        """An empty string is treated as 'unset' and falls back."""
+        from kairix.paths import agent_knowledge_dir_name
+
+        assert agent_knowledge_dir_name(config={"agent_knowledge_dir": ""}) == "04-Agent-Knowledge"
+
+
+class TestAgentMemoryGlob:
+    """`agent_memory_glob()` — config-driven glob override for the layout
+    used by `kairix onboard check agent_knowledge_populated`."""
+
+    @pytest.mark.unit
+    def test_default_glob_is_broadest_pattern(self) -> None:
+        """Default ``**/*.md`` matches any markdown anywhere under the tree —
+        the broadest workable pattern so layout differences don't trip the
+        healthcheck."""
+        from kairix.paths import agent_memory_glob
+
+        assert agent_memory_glob(config={}) == "**/*.md"
+
+    @pytest.mark.unit
+    def test_strict_per_agent_layout_override(self) -> None:
+        """Operators with a stricter convention pin the per-agent ``memory/``
+        subdir layout via ``paths.agent_memory_glob``."""
+        from kairix.paths import agent_memory_glob
+
+        assert agent_memory_glob(config={"agent_memory_glob": "*/memory/*.md"}) == "*/memory/*.md"

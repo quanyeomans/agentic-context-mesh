@@ -18,6 +18,7 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -1008,6 +1009,33 @@ def feature_flag_config_overlay() -> dict[str, bool]:
         # Graceful fallback when the config file is missing, yaml is
         # unavailable, or yaml.safe_load returns an unexpected shape.
         return {}
+
+
+def agent_knowledge_dir_name(*, config: dict[str, Any] | None = None) -> str:
+    """Return the agent-knowledge directory name under ``document_root``.
+
+    Default ``"04-Agent-Knowledge"``. Override via ``paths.agent_knowledge_dir``
+    in ``kairix.config.yaml`` for vaults that name the tree differently.
+
+    ``config`` is the test seam — production callers leave it ``None`` and
+    the helper reads ``kairix.config.yaml`` itself.
+    """
+    paths_cfg = load_paths_from_config() if config is None else config
+    return str(paths_cfg.get("agent_knowledge_dir") or _AGENT_KNOWLEDGE_DIR)
+
+
+def agent_memory_glob(*, config: dict[str, Any] | None = None) -> str:
+    """Glob (relative to the agent-knowledge dir) for memory log files.
+
+    Default ``"**/*.md"`` — any markdown anywhere under the agent-knowledge
+    tree counts as a memory log. Operators with a stricter layout pin the
+    pattern via ``paths.agent_memory_glob`` in ``kairix.config.yaml``
+    (e.g. ``"*/memory/*.md"`` to require ``<agent>/memory/<file>.md``).
+
+    ``config`` is the test seam.
+    """
+    paths_cfg = load_paths_from_config() if config is None else config
+    return str(paths_cfg.get("agent_memory_glob") or "**/*.md")
 
 
 def agent_memory_path(agent: str, *, root: Path | str | None = None) -> Path:
