@@ -469,3 +469,126 @@ def test_list_changes_emits_only_typed_change_events() -> None:
 
     for ev in events:
         assert isinstance(ev, ChangeEvent), f"non-ChangeEvent emitted: {ev!r}"
+
+
+# ---------------------------------------------------------------------------
+# Wave E production-default DI seams — coverage for the prod-only branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_make_connector_default_production_path_handles_single_calendar() -> None:
+    """Drive ``make_connector`` (the public surface) with the canonical
+    single-mailbox config and confirm the production-default Wave E
+    surface emits exactly one Container per the operator's user_id.
+
+    Sabotage-proof: change ``_configured_upns`` to return ``()`` for the
+    single-mailbox case; the assertion below catches the regression.
+    Tests the production-default factory paths through the public
+    surface only (no internal-name imports per F5).
+    """
+    config: dict[str, Any] = {
+        "user_id": "operator@example.com",
+        "tenant_id": "placeholder-tenant",
+        "client_id": "placeholder-client",
+        "client_secret": "placeholder-secret",  # pragma: allowlist secret
+    }
+    connector = make_connector(config)
+    # iter_containers is a public Wave E method — drives _configured_upns
+    # through to the singleton-from-user_id fallback path.
+    containers = list(connector.iter_containers(cc_pair_id=7))
+    assert [c.container_id for c in containers] == ["operator@example.com"]
+    # load_hierarchy is a public Wave E method — drives the production
+    # hierarchy emission with the default flag-reader (resolves to False,
+    # but the hierarchy emission is unflagged) and confirms the structural
+    # shape (root + one calendar child).
+    nodes = list(connector.load_hierarchy(cc_pair_id=7))
+    assert len(nodes) == 2
+    assert nodes[0].raw_node_id == "m365-calendar"
+    assert nodes[0].raw_parent_id is None
+    assert nodes[1].raw_node_id == "operator@example.com"
+    assert nodes[1].raw_parent_id == "m365-calendar"
+
+
+@pytest.mark.unit
+def test_close_releases_every_per_upn_graph_client() -> None:
+    """``close()`` releases both the legacy client and every per-UPN client.
+
+    Drives the full lifecycle through public surface: construct the
+    connector with Wave E flag ON, drain
+    :meth:`list_changes_for_container` for two distinct UPNs (which
+    causes the per-UPN factory to build two clients), call
+    :meth:`close`, and assert the scripted clients all observed their
+    ``close()`` call. Sabotage-proof: remove the ``for client in
+    self._per_user_clients`` loop in :meth:`close`; the second-client
+    assertion below catches the regression.
+    """
+    from kairix.core.protocols import Container
+
+    closed: dict[str, bool] = {}
+
+    class _ScriptedClient(M365GraphCalendarClient):
+        def __init__(self, upn: str) -> None:
+            self._user_id = upn
+            self._http = None  # type: ignore[assignment]  # scripted client never makes HTTP calls
+            self._page_size = 50
+            self._upn = upn
+            closed[upn] = False
+
+        def fetch_initial_delta(self, _s: str, _e: str) -> CalendarDeltaPage:
+            return CalendarDeltaPage(events=(), next_link=None, delta_link="dl")
+
+        def fetch_delta_page(self, link: str) -> CalendarDeltaPage:
+            return CalendarDeltaPage(events=(), next_link=None, delta_link=link)
+
+        def close(self) -> None:
+            closed[self._upn] = True
+
+    config = M365CalendarConfig(
+        user_id="alice@example.com",
+        tenant_id="t",
+        client_id="c",
+        client_secret="s",  # pragma: allowlist secret
+        user_ids=("alice@example.com", "bob@example.com"),
+    )
+    connector = M365CalendarConnector(
+        config,
+        per_user_client_factory=lambda _c, upn: _ScriptedClient(upn),
+        flag_reader=lambda _name: True,
+    )
+    for upn in ("alice@example.com", "bob@example.com"):
+        container = Container(
+            cc_pair_id=1,
+            container_id=upn,
+            access_state="ACCESSIBLE",
+            cursor_token=None,
+            last_synced_at=None,
+        )
+        list(connector.list_changes_for_container(container))
+
+    # Pre-close: every UPN's scripted client has fired __init__ but not
+    # close() yet.
+    assert closed == {"alice@example.com": False, "bob@example.com": False}
+    connector.close()
+    # Post-close: every UPN's scripted client received its close call.
+    assert closed == {"alice@example.com": True, "bob@example.com": True}
+
+
+@pytest.mark.unit
+def test_make_connector_accepts_user_ids_for_multi_calendar() -> None:
+    """``make_connector`` threads ``user_ids`` through to the config.
+
+    Sabotage-proof: drop the ``user_ids=`` kwarg from the resolved
+    config; this test fails because iter_containers then emits one
+    Container instead of two.
+    """
+    config: dict[str, Any] = {
+        "user_id": "alice@example.com",
+        "tenant_id": "t",
+        "client_id": "c",
+        "client_secret": "s",  # pragma: allowlist secret
+        "user_ids": ("alice@example.com", "bob@example.com"),
+    }
+    connector = make_connector(config)
+    containers = list(connector.iter_containers(cc_pair_id=1))
+    assert [c.container_id for c in containers] == ["alice@example.com", "bob@example.com"]

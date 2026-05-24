@@ -294,6 +294,32 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_m365_calendar": FeatureFlag(
+        name="topology_v2_m365_calendar",
+        default=False,
+        description=(
+            "Wave E of the connector/collection/scope topology v2 migration — "
+            "per-connector slice for the m365_calendar connector. When ON, the "
+            "M365CalendarConnector emits one Container per configured calendar "
+            "(per UPN, e.g. dan@example.com) with each carrying its own Graph "
+            "@odata.deltaLink as cursor_token, and list_changes_for_container "
+            "scopes the Graph delta query to that calendar only. When OFF, the "
+            "connector retains the Wave B shim shape — list_changes_for_container "
+            "delegates to the legacy single-cursor list_changes call that uses "
+            "one shared deltaLink across every configured calendar. "
+            "load_hierarchy emits a root FOLDER node plus one child FOLDER per "
+            "configured calendar on both branches (single calendar-as-folder "
+            "depth; per-calendar sub-folder hierarchy is a Wave-E+1 enhancement). "
+            "Default-off until per-calendar isolation soaks against the dogfood "
+            "tenant; mirrors the obsidian Wave E pilot's shape and shares the "
+            "Azure AD app registration with the m365_email_headers sibling."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
     "maintenance_loop": FeatureFlag(
         name="maintenance_loop",
         default=False,

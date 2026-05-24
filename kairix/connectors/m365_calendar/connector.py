@@ -47,6 +47,7 @@ from kairix.core.protocols import (
     ChangeEvent,
     Container,
     Cursor,
+    HierarchyNode,
     RawArtefact,
     Sensitivity,
 )
@@ -62,6 +63,15 @@ DEFAULT_WINDOW_DAYS_FORWARD = 365
 # id; the orchestrator wraps the connector's source_link result in a
 # clickable affordance for the operator.
 _OUTLOOK_WEB_URL = "https://outlook.office.com/calendar/item/{event_id}"
+
+# Wave E topology v2 pilot — name of the per-connector flag that gates
+# the multi-container shape. Module-level constant so the F52 call-site
+# scan picks up exactly one verbatim reference per call site.
+TOPOLOGY_V2_M365_CALENDAR_FLAG = "topology_v2_m365_calendar"
+
+# Hierarchy root node id for the calendar tree. Each configured calendar
+# (one per UPN) becomes a child FOLDER node under this root.
+_HIERARCHY_ROOT_ID = "m365-calendar"
 
 
 @dataclass(frozen=True)
@@ -87,6 +97,15 @@ class M365CalendarConfig:
     scope: str = DEFAULT_GRAPH_SCOPE
     window_days_back: int = DEFAULT_WINDOW_DAYS_BACK
     window_days_forward: int = DEFAULT_WINDOW_DAYS_FORWARD
+    # Wave E topology v2 — multi-calendar support. When the operator
+    # declares ``user_ids`` (list of UPNs) the connector emits one
+    # :class:`Container` per UPN with that UPN as the ``container_id``.
+    # When unset, the connector falls back to a singleton built from
+    # ``user_id`` so existing single-mailbox deployments keep working
+    # bit-for-bit. The legacy ``list_changes`` path remains the OFF-branch
+    # behaviour; the per-container delta-cursor isolation is the ON-branch
+    # value-add gated by the ``topology_v2_m365_calendar`` flag.
+    user_ids: tuple[str, ...] = ()
 
 
 @dataclass
@@ -102,6 +121,12 @@ class _SyncBatch:
 # httpx + OAuth2 path. Tests inject a factory that returns a stand-in
 # wired against an httpx.MockTransport.
 ClientFactory = Callable[[M365CalendarConfig], M365GraphCalendarClient]
+# ``PerUserClientFactory`` builds a Graph client scoped to one specific
+# UPN — used by the Wave E ON branch so each Container's
+# ``container_id`` (the UPN) drives a distinct
+# ``/users/{upn}/calendar/calendarView/delta`` request, proving
+# per-calendar isolation.
+PerUserClientFactory = Callable[[M365CalendarConfig, str], M365GraphCalendarClient]
 
 
 def _default_client_factory(config: M365CalendarConfig) -> M365GraphCalendarClient:
@@ -115,6 +140,45 @@ def _default_client_factory(config: M365CalendarConfig) -> M365GraphCalendarClie
         )
     )
     return M365GraphCalendarClient(user_id=config.user_id, auth=auth)
+
+
+def _default_per_user_client_factory(config: M365CalendarConfig, user_id: str) -> M365GraphCalendarClient:
+    """Production per-UPN client factory — Wave E ON branch.
+
+    Builds a Graph client bound to the explicit ``user_id`` so the
+    per-container delta query targets that mailbox's calendar
+    specifically. Same OAuth2 app-only triple as the legacy factory —
+    one Azure AD app registration covers every calendar in the tenant
+    per ADR-019 (shared with the ``m365_email_headers`` sibling).
+    """
+    auth = OAuth2ClientCredsAuth(
+        OAuth2Config(
+            tenant_id=config.tenant_id,
+            client_id=config.client_id,
+            client_secret=config.client_secret,
+            scope=config.scope,
+        )
+    )
+    return M365GraphCalendarClient(user_id=user_id, auth=auth)
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production default for the topology-v2-m365_calendar flag check.
+
+    Delegates to :func:`kairix.core.features.flag` so the production
+    path threads through the env-var → config-overlay → registry
+    resolution chain. Tests inject a different callable (typically one
+    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
+    branch under test is pinned without monkey-patching the resolver
+    module (F1-clean / F2-clean).
+
+    Lifted to a module-level helper so the connector's signature can
+    carry a real callable default (F6-clean) without a per-call
+    ``Optional[...] = None`` shape.
+    """
+    from kairix.core.features import flag as _prod_flag
+
+    return _prod_flag(name)
 
 
 def _utc_now() -> datetime:
@@ -151,10 +215,14 @@ class M365CalendarConnector:
         *,
         client_factory: ClientFactory = _default_client_factory,
         clock: Callable[[], datetime] = _utc_now,
+        per_user_client_factory: PerUserClientFactory = _default_per_user_client_factory,
+        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         self._config = config
         self._client_factory = client_factory
         self._clock = clock
+        self._per_user_client_factory = per_user_client_factory
+        self._flag_reader = flag_reader
         self._client: M365GraphCalendarClient | None = None
         # Track event ids the connector has emitted as ``created`` so a
         # subsequent delta page tagged with the same id is reported as
@@ -166,6 +234,10 @@ class M365CalendarConnector:
         # (e.g. tests, cold-start before persistence) still resume from
         # the last known token within one process lifetime.
         self._last_delta_link: str | None = None
+        # Wave E per-container client cache — keyed by UPN. Each
+        # configured calendar holds its own :class:`M365GraphCalendarClient`
+        # so per-calendar requests don't share connection state.
+        self._per_user_clients: dict[str, M365GraphCalendarClient] = {}
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
@@ -292,6 +364,120 @@ class M365CalendarConnector:
         )
 
     # ------------------------------------------------------------------
+    # Topology v2 Wave E — per-connector multi-container pilot
+    # ------------------------------------------------------------------
+    # Wave B landed shim implementations of the capability Protocols
+    # (CheckpointedConnector / CredentialsConnector / OAuthConnector).
+    # Wave E adds real implementations behind the
+    # ``topology_v2_m365_calendar`` flag:
+    #
+    #   * :meth:`iter_containers` — one :class:`Container` per configured
+    #     calendar (per UPN), each with its own Graph ``@odata.deltaLink``
+    #     persisted as the container's ``cursor_token``.
+    #   * :meth:`list_changes_for_container` — when flag ON, reads
+    #     ``container.cursor_token`` (a per-calendar Graph deltaLink) and
+    #     runs the Graph delta query against ``container.container_id``
+    #     (the UPN) ONLY. When flag OFF, retains the Wave B shim
+    #     behaviour (delegate to legacy :meth:`list_changes`).
+    #   * :meth:`load_hierarchy` — emits a root FOLDER node plus one
+    #     FOLDER per configured calendar as a child of root, parent-
+    #     before-child per F58. Single behaviour on both branches —
+    #     the multi-calendar value-add comes from iter_containers +
+    #     list_changes_for_container's per-cursor isolation.
+    #
+    # The flag defaults OFF so existing operators see bit-for-bit
+    # current behaviour. The ON branch is the per-container pattern
+    # that mirrors the obsidian Wave E pilot.
+
+    def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
+        """Yield one :class:`Container` per configured calendar (per UPN).
+
+        Topology v2 §4: each Container has its own delta cursor — the
+        Wave E pilot maps each operator-declared calendar to its own
+        Container so the operator can add or remove individual user
+        mailboxes without affecting the cursor state of the others.
+
+        Calling convention: the framework's lifecycle layer passes
+        ``cc_pair_id`` so the connector can construct the Container
+        without reaching back into the cc_pair store.
+
+        ``access_state`` is always ``ACCESSIBLE`` — Graph app-only auth
+        either grants or doesn't grant the configured calendars at
+        consent time; per-calendar permission drift surfaces as a
+        request-time error, not at iteration. ``cursor_token`` and
+        ``last_synced_at`` start ``None``; the framework persists
+        subsequent values (the Graph ``@odata.deltaLink``) to the
+        ``topology_containers`` table.
+
+        Single-calendar fallback: when the config declares only
+        ``user_id`` (and no ``user_ids`` list) emit one Container with
+        that UPN as ``container_id``. Multi-calendar deployments yield
+        one Container per configured UPN.
+        """
+        for upn in self._configured_upns():
+            yield Container(
+                cc_pair_id=cc_pair_id,
+                container_id=upn,
+                access_state="ACCESSIBLE",
+                cursor_token=None,
+                last_synced_at=None,
+            )
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """Stream calendar events for one Container.
+
+        When the ``topology_v2_m365_calendar`` flag is ON: builds (or
+        re-uses) a Graph client scoped to ``container.container_id``
+        (the UPN), reads ``container.cursor_token`` as the per-calendar
+        Graph ``@odata.deltaLink`` (None on first sync), and drains the
+        delta pages for THAT calendar only. Per-calendar isolation
+        means adding or removing one user's calendar does not affect
+        the cursor state of the others.
+
+        When the flag is OFF: retains the Wave B shim behaviour —
+        delegate to :meth:`list_changes` with the container's cursor so
+        the observable shape is identical to the legacy v1 path.
+        """
+        if not self._flag_reader(TOPOLOGY_V2_M365_CALENDAR_FLAG):
+            return self.list_changes(container.cursor_token)
+        return self._list_changes_scoped(container)
+
+    def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
+        """HierarchyConnector — emit FOLDER nodes parent-before-child.
+
+        Emits a root FOLDER node (``raw_node_id="m365-calendar"``,
+        ``raw_parent_id=None``) followed by one child FOLDER node per
+        configured calendar, with ``raw_node_id`` set to the UPN and
+        ``raw_parent_id`` pointing at the root. Parent-before-child
+        per F58.
+
+        Per-calendar sub-folder hierarchy (work / personal categories)
+        is a Wave-E+1 enhancement — this slice keeps the hierarchy at
+        calendar-as-folder granularity to mirror the dispatch brief.
+        """
+        yield HierarchyNode(
+            cc_pair_id=cc_pair_id,
+            raw_node_id=_HIERARCHY_ROOT_ID,
+            raw_parent_id=None,
+            display_name="M365 Calendars",
+            link=None,
+            node_type="FOLDER",
+            external_access_json=None,
+            sensitivity_hint=None,
+        )
+        for upn in self._configured_upns():
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=upn,
+                raw_parent_id=_HIERARCHY_ROOT_ID,
+                display_name=upn,
+                link=None,
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+
+    # ------------------------------------------------------------------
     # Cursor + cache accessors (used by the orchestration layer)
     # ------------------------------------------------------------------
 
@@ -324,10 +510,19 @@ class M365CalendarConnector:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """Close the underlying Graph client."""
+        """Close the underlying Graph client(s).
+
+        Closes both the legacy single-client (used by
+        :meth:`list_changes`) and every per-UPN client built for the
+        Wave E ON branch. Idempotent — safe to call from any thread,
+        called multiple times.
+        """
         if self._client is not None:
             self._client.close()
             self._client = None
+        for client in self._per_user_clients.values():
+            client.close()
+        self._per_user_clients.clear()
 
     def __enter__(self) -> M365CalendarConnector:
         self._ensure_client()
@@ -403,6 +598,119 @@ class M365CalendarConnector:
             },
         )
 
+    # ------------------------------------------------------------------
+    # Wave E ON-branch internals
+    # ------------------------------------------------------------------
+
+    def _configured_upns(self) -> tuple[str, ...]:
+        """Return the configured calendar UPNs in deterministic order.
+
+        Single-calendar (the historical config shape) emits a tuple of
+        one — derived from ``config.user_id``. Multi-calendar
+        (``config.user_ids`` populated) returns the operator-declared
+        list as-is so emission order is operator-controlled.
+        """
+        if self._config.user_ids:
+            return self._config.user_ids
+        return (self._config.user_id,)
+
+    def _ensure_client_for_upn(self, upn: str) -> M365GraphCalendarClient:
+        """Get-or-create the Graph client scoped to ``upn``.
+
+        Cached per UPN on the connector — first call builds via
+        ``per_user_client_factory``, subsequent calls re-use. The cache
+        is cleared on :meth:`close`.
+        """
+        client = self._per_user_clients.get(upn)
+        if client is None:
+            client = self._per_user_client_factory(self._config, upn)
+            self._per_user_clients[upn] = client
+            # Lazily attach the payload cache on first client build so
+            # the __init__ surface stays simple — same shape as the
+            # legacy ``_ensure_client`` path.
+            if not hasattr(self, "_event_payload_cache"):
+                self._event_payload_cache = {}
+        return client
+
+    def _list_changes_scoped(self, container: Container) -> Iterator[ChangeEvent]:
+        """Wave E ON-branch: drain Graph delta for one container's UPN.
+
+        Reads the container's own ``cursor_token`` (the per-calendar
+        Graph ``@odata.deltaLink``) and walks delta pages for the
+        container's UPN only. Each container's cursor is read
+        independently — adding or removing one calendar does not
+        disturb another calendar's resume position.
+
+        Bypasses :meth:`_drain` / :meth:`_fetch_first_page` because
+        those fall back to the connector-wide ``_last_delta_link``
+        when the explicit cursor is ``None``, which would cross-
+        pollute one container's resume position with another's. The
+        per-container drain reads only ``container.cursor_token``.
+        """
+        upn = container.container_id
+        client = self._ensure_client_for_upn(upn)
+        batch = self._drain_for_container(client, container.cursor_token)
+        return iter(batch.events)
+
+    def _drain_for_container(self, client: M365GraphCalendarClient, cursor: Cursor | None) -> _SyncBatch:
+        """Per-container delta drain — never reads ``self._last_delta_link``.
+
+        Wave E isolation: each container's cursor stands alone. ``None``
+        means first sync for that container (initial date-window
+        query); a string means resume from that container's persisted
+        ``@odata.deltaLink``.
+        """
+        batch = _SyncBatch()
+        first_page = self._fetch_first_page_for_container(client, cursor)
+        for page in iter_pages(client, first_page):
+            self._absorb_page_into_batch(page, batch)
+        return batch
+
+    def _absorb_page_into_batch(self, page: CalendarDeltaPage, batch: _SyncBatch) -> None:
+        """Translate one Graph delta page into ChangeEvents on ``batch``.
+
+        Extracted out of :meth:`_drain_for_container` to keep the per-
+        container drain under the cognitive-complexity ceiling. Updates
+        ``batch.delta_link`` when the page carries one.
+        """
+        for record in page.events:
+            event = self._record_to_change_event(record)
+            if event is None:
+                continue
+            batch.events.append(event)
+            if not record.removed:
+                self._cache_payload(record.event_id, record.raw_payload)
+        if page.delta_link is not None:
+            batch.delta_link = page.delta_link
+
+    def _cache_payload(self, event_id: str, raw_payload: str) -> None:
+        """Lazily attach + write the per-process Graph payload cache.
+
+        Mirrors the lazy-attach shape in :meth:`_ensure_client_for_upn`.
+        Lifted to a helper so :meth:`_absorb_page_into_batch` stays a
+        flat top-level loop.
+        """
+        if not hasattr(self, "_event_payload_cache"):
+            self._event_payload_cache = {}
+        self._event_payload_cache[event_id] = raw_payload
+
+    def _fetch_first_page_for_container(
+        self, client: M365GraphCalendarClient, cursor: Cursor | None
+    ) -> CalendarDeltaPage:
+        """Per-container first-page fetch — does not consult shared state.
+
+        Either resumes from the container's cursor (when set) or runs
+        the configured initial date-window query. Distinct from
+        :meth:`_fetch_first_page` so the per-container path is
+        completely independent of the legacy single-cursor cache.
+        """
+        if cursor is not None:
+            return client.fetch_delta_page(cursor)
+        now = self._clock()
+        window_start = now - timedelta(days=self._config.window_days_back)
+        window_end = now + timedelta(days=self._config.window_days_forward)
+        return client.fetch_initial_delta(_iso(window_start), _iso(window_end))
+
 
 def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:
     """Construct an :class:`M365CalendarConnector` from a config mapping.
@@ -419,6 +727,11 @@ def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:
       :data:`DEFAULT_GRAPH_SCOPE`.
     * ``window_days_back`` / ``window_days_forward`` (optional) —
       initial-sync date window; defaults to 90 / 365.
+    * ``user_ids`` (optional, Wave E) — list/tuple of additional UPNs
+      so a single connector covers multiple calendars. When unset, the
+      Wave E ON branch falls back to a singleton derived from
+      ``user_id``; when set, each entry becomes its own Container with
+      its own delta cursor.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer resolves
@@ -444,5 +757,6 @@ def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:
         scope=str(config.get("scope", DEFAULT_GRAPH_SCOPE)),
         window_days_back=int(config.get("window_days_back", DEFAULT_WINDOW_DAYS_BACK)),
         window_days_forward=int(config.get("window_days_forward", DEFAULT_WINDOW_DAYS_FORWARD)),
+        user_ids=tuple(str(u) for u in config.get("user_ids", ())),
     )
     return M365CalendarConnector(resolved)
