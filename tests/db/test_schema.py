@@ -62,6 +62,11 @@ def test_validate_schema_passes_on_valid_db() -> None:
             source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
             confidence REAL NOT NULL, sensitivity TEXT NOT NULL
         );
+        -- KFEAT-021 Phase 1 — soft-delete staging table for orphan content_vectors.
+        CREATE TABLE content_vectors_pruned (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, seq INTEGER NOT NULL,
+            pos INTEGER NOT NULL, pruned_at TEXT NOT NULL, UNIQUE(hash, seq)
+        );
         -- Topology v2 Wave A tables (minimal shapes for schema-validation purposes).
         CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY, name TEXT);
         CREATE TABLE topology_credentials (id INTEGER PRIMARY KEY, name TEXT);
@@ -128,6 +133,11 @@ def test_validate_schema_detects_missing_column() -> None:
             source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
             confidence REAL NOT NULL, sensitivity TEXT NOT NULL
         );
+        -- KFEAT-021 Phase 1 — soft-delete staging table for orphan content_vectors.
+        CREATE TABLE content_vectors_pruned (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, seq INTEGER NOT NULL,
+            pos INTEGER NOT NULL, pruned_at TEXT NOT NULL, UNIQUE(hash, seq)
+        );
         -- Topology v2 Wave A tables — minimal shapes so the validator
         -- reaches the column check on `documents` (the table under test).
         CREATE TABLE topology_connectors (id INTEGER PRIMARY KEY);
@@ -180,14 +190,18 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
 
     SCHEMA_VERSION 3 (topology v2 Wave A) added twelve topology_* tables
     to the required set.
+
+    KFEAT-021 Phase 1 added the ``content_vectors_pruned`` soft-delete
+    staging table (one additional required table).
     """
     db = sqlite3.connect(":memory:")
     errors = validate_schema(db)
-    # 3 legacy core + 6 connector-framework + 12 topology v2 = 21
-    assert len(errors) == 21
+    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology v2 = 22
+    assert len(errors) == 22
     assert any("documents" in e for e in errors)
     assert any("content" in e for e in errors)
     assert any("content_vectors" in e for e in errors)
+    assert any("content_vectors_pruned" in e for e in errors)
     assert any("documents_media" in e for e in errors)
     assert any("document_pages" in e for e in errors)
     assert any("connector_cursors" in e for e in errors)
@@ -229,6 +243,11 @@ def test_validate_schema_missing_content_vectors_only() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL,
             source_uri TEXT NOT NULL, modified_at TEXT NOT NULL,
             confidence REAL NOT NULL, sensitivity TEXT NOT NULL
+        );
+        -- KFEAT-021 Phase 1 — soft-delete staging table for orphan content_vectors.
+        CREATE TABLE content_vectors_pruned (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, seq INTEGER NOT NULL,
+            pos INTEGER NOT NULL, pruned_at TEXT NOT NULL, UNIQUE(hash, seq)
         );
         -- Topology v2 Wave A tables — minimal shapes so this test
         -- isolates `content_vectors` as the only missing table.

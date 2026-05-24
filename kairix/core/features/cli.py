@@ -23,7 +23,7 @@ import sqlite3
 import sys
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 from kairix.core.features.resolver import FlagStatus, status
 from kairix.core.features.topology_v2_status import (
@@ -35,6 +35,8 @@ from kairix.core.features.topology_v2_status import (
 
 # F17 — flag string duplicated across the parser + arg lookup.
 _FLAG_TOPOLOGY_V2 = "--topology-v2"
+# F17 — argparse store-true action constant used by multiple --flag args.
+_STORE_TRUE = "store_true"
 
 DiagnosticsProvider = Callable[[], TopologyV2Diagnostics | None]
 
@@ -61,13 +63,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument(
         "--json",
-        action="store_true",
+        action=_STORE_TRUE,
         dest="emit_json",
         help="Emit a JSON envelope on stdout instead of the human-readable table.",
     )
     status_parser.add_argument(
         _FLAG_TOPOLOGY_V2,
-        action="store_true",
+        action=_STORE_TRUE,
         dest="emit_topology_v2",
         help=(
             "Include topology v2 diagnostics (declared cc_pairs + per-actor "
@@ -80,6 +82,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="SQLite path for the topology v2 read (default: platform default via kairix.paths.db_path).",
+    )
+    status_parser.add_argument(
+        "--maintenance",
+        action=_STORE_TRUE,
+        dest="emit_maintenance",
+        help=(
+            "Include the KFEAT-021 maintenance-loop diagnostics (last-tick time, "
+            "orphans pruned last tick, current orphan count, next-scheduled-tick time) "
+            "in the output. Backward-compatible — absent the flag, output is unchanged."
+        ),
     )
     return parser
 
@@ -180,11 +192,135 @@ def format_table_with_topology(
     return base + "\n\n" + render_topology_v2_human(diag)
 
 
+@dataclass(frozen=True)
+class MaintenanceDiagnostics:
+    """KFEAT-021 Phase 1 — snapshot rendered by ``kairix features status --maintenance``.
+
+    Fields mirror the persisted ``WorkerState`` slots so the operator
+    surface stays decoupled from the worker-loop internals — anything
+    that writes a worker state JSON can drive this rendering.
+    """
+
+    flag_enabled: bool
+    last_tick_at_iso: str
+    last_tick_orphans_pruned: int
+    current_orphan_count: int
+    pruned_table_size: int
+    next_scheduled_tick_at_iso: str
+    interval_seconds: int
+
+
+MaintenanceDiagnosticsProvider = Callable[[str | None], MaintenanceDiagnostics | None]
+
+
+def _default_maintenance_diagnostics(
+    db_path: str | None,
+) -> (
+    MaintenanceDiagnostics | None
+):  # pragma: no cover — production boundary opens platform-default DB + reads worker-state JSON
+    """Production seam — builds a maintenance diagnostics snapshot.
+
+    Reads:
+      * The ``maintenance_loop`` flag's effective value via the standard
+        feature-flag resolver.
+      * The persisted ``WorkerState.last_maintenance_tick_at`` +
+        ``WorkerState.last_maintenance_orphans_pruned`` slots.
+      * Live ``content_vectors`` orphan count + ``content_vectors_pruned``
+        size via the helpers in
+        :mod:`kairix.core.maintenance.scheduler`.
+      * Configured interval via :func:`maintenance_interval_seconds`.
+
+    Marked no-cover because the production path opens
+    ``kairix.paths.db_path()`` + reads the platform-default worker-state
+    JSON, neither of which exist in unit-test sandboxes. Tests pass a
+    Fake provider through ``main()``'s ``read_maintenance`` kwarg.
+    """
+    try:
+        from kairix.core.features import flag as _flag
+        from kairix.core.maintenance import (
+            compute_next_tick_at,
+            count_current_orphans,
+            count_pruned_rows,
+            render_iso,
+        )
+        from kairix.paths import maintenance_interval_seconds
+        from kairix.worker_state import read_state
+
+        try:
+            flag_enabled = bool(_flag("maintenance_loop"))
+        except KeyError:
+            flag_enabled = False
+
+        if db_path is not None:
+            db = sqlite3.connect(db_path)
+        else:
+            from kairix.paths import db_path as resolve_db
+
+            db = sqlite3.connect(str(resolve_db()))
+        with closing(db):
+            orphan_count = count_current_orphans(db)
+            pruned_size = count_pruned_rows(db)
+
+        # The worker-state JSON path is independent of the db path; the
+        # diagnostic reads the canonical platform-default state path so
+        # the values stay consistent with ``kairix worker status``.
+        from kairix.paths import worker_state_path
+
+        state = read_state(worker_state_path())
+        last_tick = state.last_maintenance_tick_at if state is not None else 0.0
+        last_pruned = state.last_maintenance_orphans_pruned if state is not None else 0
+
+        interval = maintenance_interval_seconds()
+        next_at = compute_next_tick_at(last_tick, interval)
+        return MaintenanceDiagnostics(
+            flag_enabled=flag_enabled,
+            last_tick_at_iso=render_iso(last_tick),
+            last_tick_orphans_pruned=last_pruned,
+            current_orphan_count=orphan_count,
+            pruned_table_size=pruned_size,
+            next_scheduled_tick_at_iso=render_iso(next_at),
+            interval_seconds=interval,
+        )
+    except (sqlite3.Error, ImportError, OSError):
+        # Degrade to None rather than crash — the rest of the surface
+        # stays useful even when maintenance reads fail.
+        return None
+
+
+def render_maintenance_json(diag: MaintenanceDiagnostics) -> dict[str, object]:
+    """Render :class:`MaintenanceDiagnostics` as a JSON-serialisable dict."""
+    return {
+        "enabled": diag.flag_enabled,
+        "last_tick_at": diag.last_tick_at_iso,
+        "orphans_pruned_last_tick": diag.last_tick_orphans_pruned,
+        "current_orphan_count": diag.current_orphan_count,
+        "pruned_table_size": diag.pruned_table_size,
+        "next_scheduled_tick_at": diag.next_scheduled_tick_at_iso,
+        "interval_seconds": diag.interval_seconds,
+    }
+
+
+def render_maintenance_human(diag: MaintenanceDiagnostics) -> str:
+    """Render :class:`MaintenanceDiagnostics` as a human-readable block."""
+    lines = [
+        "KFEAT-021 maintenance loop:",
+        f"  enabled:                  {str(diag.flag_enabled).lower()}",
+        f"  last_tick_at:             {diag.last_tick_at_iso or 'never'}",
+        f"  orphans_pruned_last_tick: {diag.last_tick_orphans_pruned}",
+        f"  current_orphan_count:     {diag.current_orphan_count}",
+        f"  pruned_table_size:        {diag.pruned_table_size}",
+        f"  interval_seconds:         {diag.interval_seconds}",
+        f"  next_scheduled_tick_at:   {diag.next_scheduled_tick_at_iso or 'on next loop iteration'}",
+    ]
+    return "\n".join(lines)
+
+
 def main(
     argv: list[str] | None = None,
     *,
     status_provider: Callable[[], tuple[FlagStatus, ...]] = _default_status_provider,
     read_topology_v2: PathAwareDiagnosticsProvider = _default_path_aware_diagnostics,
+    read_maintenance: MaintenanceDiagnosticsProvider = _default_maintenance_diagnostics,
 ) -> int:
     """Entry point for ``kairix features``.
 
@@ -207,8 +343,18 @@ def main(
     if getattr(args, "emit_topology_v2", False):
         diag = read_topology_v2(args.db_path)
 
+    maint: MaintenanceDiagnostics | None = None
+    if getattr(args, "emit_maintenance", False):
+        maint = read_maintenance(args.db_path)
+
     if args.emit_json:
-        print(format_json_envelope_with_topology(entries, diag))
+        payload = json.loads(format_json_envelope_with_topology(entries, diag))
+        if maint is not None:
+            payload["maintenance"] = render_maintenance_json(maint)
+        print(json.dumps(payload, indent=2, sort_keys=True))
     else:
-        print(format_table_with_topology(entries, diag))
+        rendered = format_table_with_topology(entries, diag)
+        if maint is not None:
+            rendered = rendered + "\n\n" + render_maintenance_human(maint)
+        print(rendered)
     return 0

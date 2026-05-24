@@ -26,6 +26,8 @@ from kairix.paths import (
     connector_sync_disabled,
     data_dir,
     document_root,
+    maintenance_interval_seconds,
+    maintenance_retention_days,
     maintenance_skip_noop_threshold,
     preflight_strict,
     worker_pause_flag_path,
@@ -817,6 +819,144 @@ def dispatch_sharepoint_sync(
     return off_branch()
 
 
+# ---------------------------------------------------------------------------
+# KFEAT-021 Phase 1 — maintenance scheduler wiring (behind the
+# ``maintenance_loop`` feature flag). When the flag is OFF the
+# :func:`maybe_run_maintenance_loop_tick` helper is a structural no-op
+# (no DB open, no scheduler instantiated) — bit-for-bit pre-KFEAT-021
+# behaviour is preserved.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MaintenanceLoopDeps:
+    """Injectable dependencies for :func:`run_maintenance_loop_tick`.
+
+    F6-clean: every field has a ``default_factory`` so production
+    callers omit the Deps and get the real boundary calls; tests pass
+    fakes to drive the OFF / ON / failure branches without monkey-
+    patching kairix internals.
+
+    Fields:
+      * ``flag_reader`` — returns the effective value of the named
+        feature flag. Default :func:`_default_flag_value`. Tests pass
+        a lambda returning a deterministic bool to pin the gate.
+      * ``db_factory`` — opens the SQLite connection the scheduler
+        prunes through; default :func:`_open_db_default`.
+      * ``retention_days_resolver`` — returns the retention window in
+        days; default :func:`maintenance_retention_days` (reads
+        ``KAIRIX_MAINTENANCE_RETENTION_DAYS``).
+      * ``scheduler_factory`` — builds a
+        :class:`~kairix.core.maintenance.MaintenanceScheduler` for the
+        given connection + retention window. Default constructs the
+        production scheduler with default Deps; tests pass a factory
+        that returns a Fake with pre-canned tick results.
+    """
+
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
+    db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
+    retention_days_resolver: Callable[[], int] = field(default_factory=lambda: maintenance_retention_days)
+    scheduler_factory: Callable[[sqlite3.Connection, int], Any] = field(
+        default_factory=lambda: _default_scheduler_factory
+    )
+
+
+def _default_scheduler_factory(db: sqlite3.Connection, retention_days: int) -> Any:
+    """Production seam — build a :class:`MaintenanceScheduler` with prod Deps.
+
+    Lazy import keeps the worker importable on hosts that haven't yet
+    landed the maintenance module (defensive — Phase 1 is forward-only
+    but we keep the boundary tidy).
+    """
+    from kairix.core.maintenance import MaintenanceScheduler
+
+    return MaintenanceScheduler(db, retention_days=retention_days)
+
+
+def run_maintenance_loop_tick(deps: MaintenanceLoopDeps | None = None) -> Any:
+    """Run one ``MaintenanceScheduler.tick`` (flag-gated).
+
+    Returns the :class:`MaintenanceTickResult` envelope when the flag
+    is ON, or ``None`` when the flag is OFF (structural no-op). The
+    structured ``maintenance_tick_completed`` log line carries the
+    same envelope fields so log-only consumers see the cadence
+    without parsing the return value.
+
+    Per the KFEAT-021 brief: when the flag is OFF this MUST be a
+    bit-for-bit no-op so flipping the flag in / out is reversible.
+
+    ``deps`` is the F6-clean injection seam — production callers omit
+    it; the BDD + integration tests pass a :class:`MaintenanceLoopDeps`
+    with the flag pinned through a :class:`FakeFeatureFlagResolver` so
+    each branch is exercised against the real scheduler.
+    """
+    deps = deps if deps is not None else MaintenanceLoopDeps()
+    if not deps.flag_reader("maintenance_loop"):
+        # Flag OFF — log nothing (avoid spamming on every loop iter)
+        # and return None so the worker treats the tick as skipped.
+        return None
+
+    retention = deps.retention_days_resolver()
+    db = deps.db_factory()
+    try:
+        from kairix.core.db.schema import create_schema
+
+        create_schema(db)
+        scheduler = deps.scheduler_factory(db, retention)
+        result = scheduler.tick(db)
+    except Exception as exc:
+        logger.warning("worker: maintenance tick raised — %s", exc)
+        return None
+    finally:
+        db.close()
+    return result
+
+
+def maybe_run_maintenance_loop_tick(
+    *,
+    deps: MaintenanceLoopDeps | None,
+    transition: Callable[[WorkerPhase], None],
+    state: WorkerState,
+    state_path: Path,
+    write_state_fn: Callable[[WorkerState, Path], None],
+    now: float,
+    last_tick_at: float,
+    interval_seconds: int,
+) -> float:
+    """Run a maintenance tick when due; persist state; return the new ``last_tick_at``.
+
+    When the flag is OFF, this is a structural no-op — the scheduler
+    is never instantiated and the DB is never opened (the flag check
+    inside :func:`run_maintenance_loop_tick` short-circuits). The
+    ``last_tick_at`` value flows back unchanged so the worker loop's
+    next-due calculation is unaffected.
+
+    Cadence: a tick is due when ``now - last_tick_at >= interval`` OR
+    when ``last_tick_at == 0`` (first cycle post-flag-flip / restart).
+    The flag check is the OUTER gate; the cadence is the inner gate.
+    """
+    from kairix.core.maintenance import is_tick_due
+
+    if not is_tick_due(now, last_tick_at, interval_seconds):
+        return last_tick_at
+
+    transition(WorkerPhase.MAINTENANCE)
+    result = run_maintenance_loop_tick(deps)
+    transition(WorkerPhase.IDLE)
+    if result is None:
+        # Flag OFF — no tick fired. Don't advance the timestamp so the
+        # next loop iter re-checks (the OFF→ON flip should fire
+        # immediately rather than wait an interval).
+        return last_tick_at
+
+    state.last_maintenance_tick_at = now
+    state.last_maintenance_orphans_pruned = int(getattr(result, "orphans_pruned", 0))
+    state.last_maintenance_pruned_table_size = int(getattr(result, "pruned_table_size", 0))
+    state.last_maintenance_elapsed_ms = int(getattr(result, "elapsed_ms", 0))
+    write_state_fn(state, state_path)
+    return now
+
+
 @dataclass
 class WorkerDeps:
     """Injectable dependencies for the worker loop and its task helpers.
@@ -861,6 +1001,11 @@ class WorkerDeps:
     write_state_fn: Callable[[WorkerState, Path], None] = field(default_factory=lambda: write_state)
     read_state_fn: Callable[[Path], WorkerState | None] = field(default_factory=lambda: read_state)
     pause_flag_path: Path = field(default_factory=worker_pause_flag_path)
+    # KFEAT-021 Phase 1 — maintenance-loop tick deps. F6-clean: a real
+    # MaintenanceLoopDeps default; tests pass a substitute with the flag
+    # pinned via FakeFeatureFlagResolver so the flag-OFF / flag-ON
+    # branches are exercised against the real scheduler.
+    maintenance_loop_deps: MaintenanceLoopDeps = field(default_factory=MaintenanceLoopDeps)
 
 
 @dataclass(frozen=True)
@@ -1527,6 +1672,11 @@ def main(
     last_health = 0.0
     last_wikilinks = 0.0
     last_connector_sync = 0.0
+    # KFEAT-021 — last maintenance tick. Carried in WorkerState across
+    # restarts so the cadence survives a container bounce; mirror it
+    # into a local for the in-loop is_tick_due comparison.
+    last_maintenance_tick = state.last_maintenance_tick_at
+    maintenance_interval = maintenance_interval_seconds()
 
     # #224 idle backoff: extend the embed interval after consecutive
     # no-op runs to avoid steady CPU/I/O pressure on idle vaults.
@@ -1595,6 +1745,21 @@ def main(
             last_wikilinks=last_wikilinks,
             last_connector_sync=last_connector_sync,
             schedule=schedule,
+        )
+
+        # KFEAT-021 — maintenance-loop tick after the sync cycle. The
+        # flag check is the OUTER gate (no DB open when OFF); cadence
+        # is the INNER gate. Bit-for-bit pre-KFEAT-021 behaviour when
+        # the flag is OFF.
+        last_maintenance_tick = maybe_run_maintenance_loop_tick(
+            deps=deps.maintenance_loop_deps,
+            transition=_transition,
+            state=state,
+            state_path=deps.state_path,
+            write_state_fn=deps.write_state_fn,
+            now=time.time(),
+            last_tick_at=last_maintenance_tick,
+            interval_seconds=maintenance_interval,
         )
 
         # Sleep 60 seconds between checks

@@ -91,6 +91,15 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
             confidence REAL NOT NULL,
             sensitivity TEXT NOT NULL
         );
+        -- KFEAT-021 Phase 1 — soft-delete staging table for orphan content_vectors.
+        CREATE TABLE IF NOT EXISTS content_vectors_pruned (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hash TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            pos INTEGER NOT NULL,
+            pruned_at TEXT NOT NULL,
+            UNIQUE(hash, seq)
+        );
         -- Topology v2 Wave A tables — minimal shapes so validate_schema accepts the DB.
         CREATE TABLE IF NOT EXISTS topology_connectors (id INTEGER PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS topology_credentials (id INTEGER PRIMARY KEY);

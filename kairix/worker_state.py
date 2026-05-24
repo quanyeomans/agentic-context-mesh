@@ -63,6 +63,14 @@ class WorkerState:
     recall_alerts_total: int = 0
     restart_count: int = 0
     next_scheduled_embed_at: float = 0.0
+    # KFEAT-021 Phase 1 — maintenance-tick observability fields. Persisted
+    # so ``kairix features status --maintenance`` and the
+    # ``maintenance_loop_ticking`` onboard check can read the last-tick
+    # cadence across worker restarts.
+    last_maintenance_tick_at: float = 0.0
+    last_maintenance_orphans_pruned: int = 0
+    last_maintenance_pruned_table_size: int = 0
+    last_maintenance_elapsed_ms: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-safe dict. Enum values export as strings via the ``str`` mixin."""

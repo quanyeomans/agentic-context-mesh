@@ -323,6 +323,69 @@ def maintenance_skip_noop_threshold() -> int:
         return 10
 
 
+def maintenance_retention_days() -> int:
+    """KFEAT-021 Phase 1 — how long pruned vectors stay in the soft-delete table.
+
+    The :class:`kairix.core.maintenance.MaintenanceScheduler` moves orphan
+    ``content_vectors`` rows to ``content_vectors_pruned`` before any hard
+    delete. Rows whose ``pruned_at`` timestamp is older than this many days
+    are hard-deleted on the next tick — the window is the operator's
+    recovery affordance.
+
+    Reads ``KAIRIX_MAINTENANCE_RETENTION_DAYS`` (int) — default 7. F4
+    keeps the env read centralised here in paths.py.
+    """
+    raw = os.environ.get("KAIRIX_MAINTENANCE_RETENTION_DAYS")
+    if raw is None:
+        return 7
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning(
+            "KAIRIX_MAINTENANCE_RETENTION_DAYS=%r is not an int; using default 7",
+            raw,
+        )
+        return 7
+    if parsed < 0:
+        logger.warning(
+            "KAIRIX_MAINTENANCE_RETENTION_DAYS=%r is negative; using default 7",
+            raw,
+        )
+        return 7
+    return parsed
+
+
+def maintenance_interval_seconds() -> int:
+    """KFEAT-021 Phase 1 — seconds between maintenance ticks in the worker loop.
+
+    When the ``maintenance_loop`` feature flag is ON, the worker fires a
+    :func:`kairix.core.maintenance.scheduler.MaintenanceScheduler.tick`
+    every N seconds. Default 86400 (24 h) fits low-write deployments;
+    busier ones might tune this to 4-6 hours via the env override.
+
+    Reads ``KAIRIX_MAINTENANCE_INTERVAL_S`` (int seconds) — default
+    86400. F4 keeps the env read centralised here in paths.py.
+    """
+    raw = os.environ.get("KAIRIX_MAINTENANCE_INTERVAL_S")
+    if raw is None:
+        return 86400
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning(
+            "KAIRIX_MAINTENANCE_INTERVAL_S=%r is not an int; using default 86400",
+            raw,
+        )
+        return 86400
+    if parsed <= 0:
+        logger.warning(
+            "KAIRIX_MAINTENANCE_INTERVAL_S=%r is not positive; using default 86400",
+            raw,
+        )
+        return 86400
+    return parsed
+
+
 def trace_enabled() -> bool:
     """Return True when ``KAIRIX_TRACE=1`` opts into structured pipeline diagnostics.
 

@@ -143,6 +143,7 @@ retrieval:
 #   topology_v2_config: true        # parse + apply the topology_v2 block below
 #   topology_v2_obsidian: true      # per-folder containers + parent-before-child walk
 #   connector_sharepoint: true      # enable the SharePoint connector
+#   maintenance_loop: true          # KFEAT-021 Phase 1 — proactive orphan-vector cleanup
 
 # ──────────────────────────────────────────────────────────────────────────
 # topology_v2 — connectors / collections / scope profiles / skills

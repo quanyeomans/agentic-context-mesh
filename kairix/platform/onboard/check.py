@@ -55,6 +55,7 @@ _CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED = "topology_v2_cc_pairs_registered"
 _CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
     "sharepoint_credentials_loaded"  # pragma: allowlist secret — check-name string, not a credential
 )
+_CHECK_MAINTENANCE_LOOP_TICKING = "maintenance_loop_ticking"
 
 
 @dataclass
@@ -192,6 +193,14 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
         "CONNECTOR_M365_TENANT_ID etc.); pip operators set them in "
         "~/.kairix/secrets.env or as plain env vars. next: re-run "
         "`kairix onboard check sharepoint_credentials_loaded`."
+    ),
+    _CHECK_MAINTENANCE_LOOP_TICKING: (
+        "fix: confirm the kairix worker process is running (`docker ps | grep "
+        "kairix-worker`); confirm the worker state JSON is being written "
+        "(`kairix worker status`); confirm KAIRIX_MAINTENANCE_INTERVAL_S "
+        "is sensible. next: tail worker logs for `event=maintenance_tick_completed` "
+        "lines — absence means the loop isn't firing. "
+        "run: kairix worker maintenance (to fire a one-shot tick on demand)."
     ),
 }
 
@@ -1095,6 +1104,7 @@ def check_embed_cache_stats(embed_cache: Any | None = None) -> CheckResult:
 
 _TOPOLOGY_V2_CONFIG_FLAG = "topology_v2_config"
 _CONNECTOR_SHAREPOINT_FLAG = "connector_sharepoint"
+_MAINTENANCE_LOOP_FLAG = "maintenance_loop"
 # F17 — the "flag off, check is inert" detail line shows up on every
 # topology v2 / sharepoint check when the flag is off. Pull to a single
 # constant so the wording stays uniform across the three checks.
@@ -1453,6 +1463,130 @@ def _default_secret_reader(name: str) -> str | None:
     return get_secret(name, required=False)
 
 
+@dataclass
+class MaintenanceLoopCheckDeps:
+    """Injectable dependencies for :func:`check_maintenance_loop_ticking`.
+
+    F6-clean: every field has a ``default_factory`` so production callers
+    omit the Deps and get the real boundary calls; tests pass a Deps with
+    substitute callables to drive the flag-OFF / never-ticked / ticking /
+    stalled branches without touching the live worker-state JSON or the
+    feature-flag registry.
+
+    Fields:
+      * ``flag_reader`` — returns the effective value of the named flag.
+        Default :func:`_default_flag_reader` (delegates to
+        :func:`kairix.core.features.flag`).
+      * ``state_reader`` — returns a :class:`WorkerState`-shaped object
+        (or ``None`` when no state file exists). Default
+        :func:`_default_worker_state_reader` which delegates to
+        :func:`kairix.worker_state.read_state` against
+        :func:`kairix.paths.worker_state_path`.
+      * ``interval_reader`` — returns the maintenance interval in
+        seconds. Default :func:`maintenance_interval_seconds`.
+      * ``clock`` — ``time.time()``-like callable; tests pin to make
+        the jitter-window comparison deterministic.
+    """
+
+    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_reader)
+    state_reader: Callable[[], Any] = field(default_factory=lambda: _default_worker_state_reader)
+    interval_reader: Callable[[], int] = field(default_factory=lambda: _default_maintenance_interval_reader)
+    clock: Callable[[], float] = field(default_factory=lambda: _default_clock)
+
+
+def _default_worker_state_reader() -> Any:
+    """Production seam — return the persisted ``WorkerState`` or ``None``."""
+    from kairix.paths import worker_state_path
+    from kairix.worker_state import read_state
+
+    return read_state(worker_state_path())
+
+
+def _default_maintenance_interval_reader() -> int:
+    """Production seam — delegates to :func:`kairix.paths.maintenance_interval_seconds`."""
+    from kairix.paths import maintenance_interval_seconds
+
+    return maintenance_interval_seconds()
+
+
+def _default_clock() -> float:
+    """Production seam — wall-clock ``time.time()``."""
+    import time as _time
+
+    return _time.time()
+
+
+def check_maintenance_loop_ticking(deps: MaintenanceLoopCheckDeps | None = None) -> CheckResult:
+    """KFEAT-021 Phase 1 — the maintenance loop is firing within its jitter window.
+
+    When the ``maintenance_loop`` flag is OFF, returns ok=True with a
+    "skipped (flag off, default-safe)" detail.
+
+    When ON:
+      * If the worker has never ticked (``last_maintenance_tick_at == 0``),
+        report ok=False with the "no tick yet" remediation pointing at
+        the on-demand ``kairix worker maintenance`` verb.
+      * If the last tick is older than ``interval * 1.5`` (50% jitter
+        window per the brief), report ok=False with the stalled-loop
+        remediation.
+      * Otherwise report ok=True with the cadence delta in the detail.
+
+    ``deps`` is the public DI seam.
+    """
+    d = deps if deps is not None else MaintenanceLoopCheckDeps()
+    if not d.flag_reader(_MAINTENANCE_LOOP_FLAG):
+        return CheckResult(
+            name=_CHECK_MAINTENANCE_LOOP_TICKING,
+            ok=True,
+            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_MAINTENANCE_LOOP_FLAG),
+        )
+
+    state = d.state_reader()
+    last_tick = float(getattr(state, "last_maintenance_tick_at", 0.0)) if state is not None else 0.0
+    interval = max(1, int(d.interval_reader()))
+    now = float(d.clock())
+
+    if last_tick <= 0.0:
+        return CheckResult(
+            name=_CHECK_MAINTENANCE_LOOP_TICKING,
+            ok=False,
+            detail=(
+                "maintenance_loop flag is ON but no tick has been recorded yet "
+                "(WorkerState.last_maintenance_tick_at == 0)"
+            ),
+            fix=(
+                "fix: wait one maintenance interval for the first tick to fire, "
+                "OR run `kairix worker maintenance` for an on-demand tick. "
+                "next: re-run `kairix onboard check maintenance_loop_ticking` "
+                "after the worker logs `event=maintenance_tick_completed`."
+            ),
+        )
+
+    delta = now - last_tick
+    jitter_cap = interval * 1.5
+    if delta > jitter_cap:
+        return CheckResult(
+            name=_CHECK_MAINTENANCE_LOOP_TICKING,
+            ok=False,
+            detail=(
+                f"maintenance loop stalled — last tick {int(delta)}s ago (interval={interval}s, "
+                f"jitter cap={int(jitter_cap)}s)"
+            ),
+            fix=(
+                "fix: confirm the kairix worker process is running and not paused. "
+                "next: tail worker logs for `event=maintenance_tick_failed` lines; "
+                "an exception in any stage skips that tick but does not crash the loop. "
+                "run: kairix worker status"
+            ),
+        )
+
+    return CheckResult(
+        name=_CHECK_MAINTENANCE_LOOP_TICKING,
+        ok=True,
+        detail=f"last tick {int(delta)}s ago (interval={interval}s, within jitter window)",
+    )
+
+
 ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_kairix_on_path,
     check_wrapper_installed,
@@ -1468,6 +1602,7 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_topology_v2_config_valid,
     check_topology_v2_cc_pairs_registered,
     check_sharepoint_credentials_loaded,
+    check_maintenance_loop_ticking,
 ]
 
 

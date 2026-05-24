@@ -155,9 +155,22 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             value TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS content_vectors_pruned (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hash TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            pos INTEGER NOT NULL,
+            model TEXT,
+            embedded_at TEXT,
+            chunk_date TEXT,
+            pruned_at TEXT NOT NULL,
+            UNIQUE(hash, seq)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(hash);
         CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection);
         CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
+        CREATE INDEX IF NOT EXISTS idx_content_vectors_pruned_at ON content_vectors_pruned(pruned_at);
     """)
 
     # Run migrations to bring legacy schemas up to current (adds agent_owner,
@@ -211,6 +224,8 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "documents",
         "content",
         _TABLE_CONTENT_VECTORS,
+        # KFEAT-021 Phase 1 — soft-delete staging table for orphan content_vectors.
+        "content_vectors_pruned",
         # Connector-framework Wave 1 (SC-4)
         _TABLE_DOCUMENTS_MEDIA,
         "document_pages",
@@ -358,6 +373,20 @@ CREATE TABLE IF NOT EXISTS entity_signals (
     pushed_to_neo4j INTEGER DEFAULT 0,
     pushed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS content_vectors_pruned (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    pos INTEGER NOT NULL,
+    model TEXT,
+    embedded_at TEXT,
+    chunk_date TEXT,
+    pruned_at TEXT NOT NULL,
+    UNIQUE(hash, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_vectors_pruned_at ON content_vectors_pruned(pruned_at);
 """
 
 
