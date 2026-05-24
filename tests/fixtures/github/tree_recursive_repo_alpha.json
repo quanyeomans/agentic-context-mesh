@@ -1,0 +1,24 @@
+{
+  "sha": "tree-sha-alpha-001",
+  "truncated": false,
+  "tree": [
+    {
+      "path": "src/main.py",
+      "sha": "blob-sha-main",
+      "type": "blob",
+      "size": 1024
+    },
+    {
+      "path": "docs/index.md",
+      "sha": "blob-sha-docs",
+      "type": "blob",
+      "size": 512
+    },
+    {
+      "path": "tests/test_main.py",
+      "sha": "blob-sha-tests",
+      "type": "blob",
+      "size": 256
+    }
+  ]
+}

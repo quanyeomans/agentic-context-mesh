@@ -1,0 +1,4 @@
+{
+  "message": "You have triggered an abuse detection mechanism. Please wait a few minutes before you try again.",
+  "documentation_url": "https://docs.github.com/rest/overview/resources-in-the-rest-api#secondary-rate-limits"
+}

@@ -175,6 +175,7 @@ m365_email_headers = "kairix.connectors.m365_email_headers:make_connector"
 m365_calendar      = "kairix.connectors.m365_calendar:make_connector"
 sharepoint         = "kairix.connectors.sharepoint:make_connector"
 notion             = "kairix.connectors.notion:make_connector"
+github             = "kairix.connectors.github:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and

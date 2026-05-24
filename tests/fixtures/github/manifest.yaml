@@ -1,0 +1,114 @@
+# GitHub connector test fixture manifest per spec §6.7.
+#
+# Maps each recorded fixture to its expected (op, format, sensitivity,
+# min_score) so the gold-suite + per-format E2E tests have one source
+# of truth. Per the spec: ≤500 KB per fixture, ≤5 MB total corpus.
+#
+# Fixtures live alongside this manifest as JSON files mirroring the
+# real GitHub REST + GraphQL response shapes plus signed-webhook
+# delivery samples.
+
+fixtures:
+  # REST — installation repos enumeration.
+  installation_repositories.json:
+    purpose: "GET /installation/repositories happy-path envelope; two-repo installation"
+    api: rest
+    endpoint: /installation/repositories
+    expected_record_count: 2
+    sensitivity_tier: client-confidential
+
+  # REST — commits-since for one repo.
+  commits_since_repo_alpha.json:
+    purpose: "GET /repos/{owner}/{repo}/commits?since=... for a tracked repo"
+    api: rest
+    endpoint: /repos/agent-alpha-org/repo-alpha/commits
+    expected_record_count: 1
+    sensitivity_tier: client-confidential
+
+  # REST — issues + PRs merged via the issues endpoint.
+  issues_since_repo_alpha.json:
+    purpose: "GET /repos/{owner}/{repo}/issues?since=... yielding one issue plus one PR"
+    api: rest
+    endpoint: /repos/agent-alpha-org/repo-alpha/issues
+    expected_record_count: 2
+    sensitivity_tier: client-confidential
+
+  # REST — tree walk for one repo.
+  tree_recursive_repo_alpha.json:
+    purpose: "GET /repos/{owner}/{repo}/git/trees/HEAD?recursive=1 truncated=false"
+    api: rest
+    endpoint: /repos/agent-alpha-org/repo-alpha/git/trees/HEAD
+    expected_record_count: 3
+    sensitivity_tier: client-confidential
+
+  # 429 / 403 abuse-detection rate-limit envelopes (negative path).
+  rate_limit_403_secondary.json:
+    purpose: "403 + Retry-After header surface for secondary/abuse rate limit"
+    api: rest
+    endpoint: /repos/agent-alpha-org/repo-alpha/commits
+    response_status: 403
+    response_headers:
+      - "Retry-After: 30"
+      - "x-github-request-id: req-throttled-1"
+    expected_exception: ContainerTransientError
+
+  rate_limit_429_primary.json:
+    purpose: "429 — primary rate limit exhausted; x-ratelimit-remaining=0"
+    api: rest
+    endpoint: /repos/agent-alpha-org/repo-alpha/issues
+    response_status: 429
+    response_headers:
+      - "x-ratelimit-remaining: 0"
+      - "x-ratelimit-reset: 1716678000"
+    expected_exception: ContainerTransientError
+
+  # Webhook deliveries with signed bodies — see signing key in webhook_secret.txt.
+  webhook_push_valid.json:
+    purpose: "Valid push event with HMAC-256 signature using webhook_secret.txt"
+    api: webhook
+    event_type: push
+    delivery_id: e2e-delivery-001
+    expected_event_count: 1
+
+  webhook_push_force_push.json:
+    purpose: "Force-push event surfaces force_push=True in ChangeEvent metadata"
+    api: webhook
+    event_type: push
+    delivery_id: e2e-delivery-002
+    expected_event_count: 1
+    expected_metadata:
+      force_push: true
+
+  webhook_signature_invalid.json:
+    purpose: "Bad HMAC signature — connector must reject with WebhookSignatureError"
+    api: webhook
+    event_type: issues
+    delivery_id: e2e-delivery-003
+    expected_exception: WebhookSignatureError
+
+  webhook_installation_repositories_removed.json:
+    purpose: "installation_repositories.removed event surfaces ACCESS_LOST"
+    api: webhook
+    event_type: installation_repositories
+    delivery_id: e2e-delivery-004
+    expected_event_count: 1
+    expected_op: access_lost
+
+# Two-tenant separation fixtures per spec §6.5 tenancy_isolation case.
+tenant_a:
+  installation_id: 12345
+  repos:
+    - agent-alpha-org/repo-alpha
+    - agent-alpha-org/repo-beta
+
+tenant_b:
+  installation_id: 67890
+  repos:
+    - other-org/repo-gamma
+
+# F-rule cross-references — what these fixtures pin.
+f_rules_pinned:
+  F39: chunk sensitivity routed from repo visibility per webhook + REST envelopes
+  F42: every API response surfaces as a frozen dataclass (GitHubRepoRef etc.)
+  F58: hierarchy.json depends on the org→repo emission order
+  F15: webhook_secret.txt is never logged; verify_and_parse consumes it via hmac.new only

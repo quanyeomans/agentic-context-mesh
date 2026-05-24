@@ -1,0 +1,17 @@
+[
+  {
+    "number": 1,
+    "title": "github connector token rotation under cc_pair lock",
+    "body": "Installation tokens TTL 1h. Rotate at 50% under per-cc_pair lock.",
+    "state": "open",
+    "updated_at": "2026-05-23T01:30:00Z"
+  },
+  {
+    "number": 7,
+    "title": "wave e github connector greenfield",
+    "body": "Implement the wave E github connector with full capability surface.",
+    "state": "open",
+    "updated_at": "2026-05-23T02:00:00Z",
+    "pull_request": {"url": "https://api.github.com/repos/agent-alpha-org/repo-alpha/pulls/7"}
+  }
+]

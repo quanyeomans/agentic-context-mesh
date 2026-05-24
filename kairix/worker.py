@@ -794,6 +794,58 @@ def run_via_sharepoint_connector() -> ConnectorSyncResult:
     return run_connector_sync_pipeline()
 
 
+def github_off_branch_noop() -> ConnectorSyncResult:
+    """OFF-branch default for :func:`dispatch_github_sync` — return zero
+    counters and emit the operator-visible signal that the GitHub
+    connector is gated off.
+
+    F6-clean: a real callable default, no ``None``. Public so the
+    feature-flag BDD steps can reach it without an internal-name
+    import (F5).
+    """
+    logger.info("worker: github connector gated off (flag OFF)")
+    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+
+def run_via_github_connector() -> ConnectorSyncResult:
+    """ON-branch default for :func:`dispatch_github_sync` — delegate to
+    the canonical :func:`run_connector_sync_pipeline` which resolves
+    the ``github`` plugin via its entry-point factory and drives the
+    standard ConnectorPipeline.
+
+    The branch log distinguishes the GitHub path from the sibling
+    sharepoint / m365_* / dex_crm / obsidian paths so operators can
+    tell which connector ran by grep-ing INFO logs.
+    """
+    logger.info("worker: github connector running (flag ON)")
+    return run_connector_sync_pipeline()
+
+
+def dispatch_github_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_github_connector,
+    off_branch: Callable[[], ConnectorSyncResult] = github_off_branch_noop,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the GitHub connector slot.
+
+    Reads the ``connector_github`` flag and routes to the ON branch
+    (the standard connector pipeline, which resolves the ``github``
+    plugin) or the OFF branch (a no-op that skips the connector
+    entirely). Mirrors :func:`dispatch_sharepoint_sync` shape — the BDD
+    + integration tests pin the flag through
+    :class:`FakeFeatureFlagResolver` and observe the branch via the
+    per-helper INFO log.
+
+    Gating happens at the connector-selection boundary — when OFF, the
+    github plugin never runs even if listed in ``kairix.config.yaml``.
+    When ON, the connector is selected via the standard config +
+    entry-point shape.
+    """
+    if read_flag("connector_github"):
+        return on_branch()
+    return off_branch()
+
+
 def dispatch_sharepoint_sync(
     read_flag: Callable[[str], bool] = _default_flag_value,
     on_branch: Callable[[], ConnectorSyncResult] = run_via_sharepoint_connector,

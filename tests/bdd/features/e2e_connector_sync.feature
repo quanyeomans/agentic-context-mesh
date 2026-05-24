@@ -37,3 +37,4 @@ Feature: End-to-end connector sync journey
       | sharepoint          | docx         |
       | notion              | passthrough  |
       | notion              | markitdown   |
+      | github              | passthrough  |

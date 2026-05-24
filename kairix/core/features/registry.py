@@ -55,6 +55,13 @@ _FLAG_INTRODUCED_IN_DISPATCH_WINDOW = "v2026.5.23"
 _FLAG_TARGET_RETIRE_IN = "v2026.7.23"
 # Topology v2 retire window is longer — 7-wave migration ramping over ~12 months.
 _TOPOLOGY_V2_TARGET_RETIRE_IN = "v2027.5.23"
+# Wave E newer-flag dispatch window (slack/github/notion/sharepoint pilots).
+_FLAG_INTRODUCED_WAVE_E_LATER = "v2026.5.24"
+_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER = "v2027.5.24"
+# Wave E flag description fragments — recurring text across per-connector pilots.
+_WAVE_E_DESC_PREFIX = "Wave E of the connector/collection/scope topology v2 migration — "
+_WAVE_E_OFF_DELEGATES = "list_changes_for_container delegates to the legacy single "
+_WAVE_E_OFF_SHIM_NOTE = "When OFF, the connector retains the Wave B shim shape — "
 
 
 # Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
@@ -82,7 +89,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Enable the Dex CRM connector — pulls Person/Org entity signals "
-            "from the Dex API into the entity_signals staging table."
+            + "from the Dex API into the entity_signals staging table."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -95,7 +102,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Enable the M365 email-headers connector — pulls From/To/CC/Subject/Date "
-            "metadata via Microsoft Graph delta query. NO body content per ADR-004."
+            + "metadata via Microsoft Graph delta query. NO body content per ADR-004."
         ),
         stage="introduce",
         # KP-2 cutover plan (per feature-flag-architecture.md §7):
@@ -111,7 +118,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Enable the M365 calendar connector — pulls event date/attendees/subject/location "
-            "via Microsoft Graph delta query. Feeds entity signals + timeline."
+            + "via Microsoft Graph delta query. Feeds entity signals + timeline."
         ),
         stage="introduce",
         # KP-3 cutover plan (per feature-flag-architecture.md §7):
@@ -128,8 +135,8 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Enable the SharePoint connector — pulls document libraries (PDF / DOCX / "
-            "PPTX / XLSX) via Microsoft Graph drive-delta query, then dispatches binaries "
-            "through the kairix extractor registry."
+            + "PPTX / XLSX) via Microsoft Graph drive-delta query, then dispatches binaries "
+            + "through the kairix extractor registry."
         ),
         stage="introduce",
         # SharePoint cutover plan (per feature-flag-architecture.md §7):
@@ -148,12 +155,12 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Wave A of the connector/collection/scope topology v2 migration — "
-            "controls whether the v2 schema tables (connectors, credentials, "
-            "cc_pairs, containers, hierarchy_nodes, collections, collection_sources, "
-            "federated_connectors, group_grants, scope_profiles, skills, task_collections) "
-            "get POPULATED. Tables exist unconditionally (CREATE IF NOT EXISTS); "
-            "the flag gates whether anything writes to them. Default-off until "
-            "Wave B Protocol shims land."
+            + "controls whether the v2 schema tables (connectors, credentials, "
+            + "cc_pairs, containers, hierarchy_nodes, collections, collection_sources, "
+            + "federated_connectors, group_grants, scope_profiles, skills, task_collections) "
+            + "get POPULATED. Tables exist unconditionally (CREATE IF NOT EXISTS); "
+            + "the flag gates whether anything writes to them. Default-off until "
+            + "Wave B Protocol shims land."
         ),
         stage="introduce",
         # Topology v2 migration plan (per docs/architecture/connector-scope-topology/ADR.md):
@@ -170,11 +177,11 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Wave B of the connector/collection/scope topology v2 migration — "
-            "controls whether the worker's connector-sync dispatch routes through "
-            "the new capability-mix-in path (using PollConnector / CheckpointedConnector "
-            "etc.) vs the legacy single-cursor SourceConnector path. Wave B lands "
-            "the Protocols + shims with the flag default-off so existing behaviour "
-            "is preserved; Wave C runtime activates the routing."
+            + "controls whether the worker's connector-sync dispatch routes through "
+            + "the new capability-mix-in path (using PollConnector / CheckpointedConnector "
+            + "etc.) vs the legacy single-cursor SourceConnector path. Wave B lands "
+            + "the Protocols + shims with the flag default-off so existing behaviour "
+            + "is preserved; Wave C runtime activates the routing."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -187,14 +194,14 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Wave D of the connector/collection/scope topology v2 migration — "
-            "controls whether the 6 operator-config blocks (connectors / credentials / "
-            "cc_pairs / collections / scope_profiles / skills) are PARSED + APPLIED. "
-            "When OFF, the parser still loads the YAML but the topology v2 surface "
-            "is inert (rows aren't written, scope profiles aren't enforced at search, "
-            "skills aren't dispatched). When ON, the worker startup + `kairix config "
-            "validate` + `kairix features status` + `kairix cc-pair *` verbs read "
-            "from the parsed surface. Default-off until the dogfood VM cutover "
-            "validates the operator-config promotion path."
+            + "controls whether the 6 operator-config blocks (connectors / credentials / "
+            + "cc_pairs / collections / scope_profiles / skills) are PARSED + APPLIED. "
+            + "When OFF, the parser still loads the YAML but the topology v2 surface "
+            + "is inert (rows aren't written, scope profiles aren't enforced at search, "
+            + "skills aren't dispatched). When ON, the worker startup + `kairix config "
+            + "validate` + `kairix features status` + `kairix cc-pair *` verbs read "
+            + "from the parsed surface. Default-off until the dogfood VM cutover "
+            + "validates the operator-config promotion path."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -207,14 +214,14 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "Wave C of the connector/collection/scope topology v2 migration — "
-            "controls whether the worker's connector-sync dispatch routes chunk "
-            "writes through CollectionRouter (per-cc_pair, per-mapping) vs the "
-            "legacy single-collection chunk writer. When ON, the runtime also "
-            "wires the ChunkerRegistry dispatch + ScopeProfileResolver + "
-            "ResultEnvelope freshness signals. When OFF, behaviour is bit-for-bit "
-            "identical to today. Default-off until the dogfood VM cutover "
-            "validates per-folder routing + chunker dispatch + HierarchyNode "
-            "emission for the obsidian-personal cc_pair."
+            + "controls whether the worker's connector-sync dispatch routes chunk "
+            + "writes through CollectionRouter (per-cc_pair, per-mapping) vs the "
+            + "legacy single-collection chunk writer. When ON, the runtime also "
+            + "wires the ChunkerRegistry dispatch + ScopeProfileResolver + "
+            + "ResultEnvelope freshness signals. When OFF, behaviour is bit-for-bit "
+            + "identical to today. Default-off until the dogfood VM cutover "
+            + "validates per-folder routing + chunker dispatch + HierarchyNode "
+            + "emission for the obsidian-personal cc_pair."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -226,19 +233,19 @@ REGISTRY: dict[str, FeatureFlag] = {
         name="topology_v2_obsidian",
         default=False,
         description=(
-            "Wave E of the connector/collection/scope topology v2 migration — "
-            "per-connector pilot for the obsidian connector. When ON, the "
-            "ObsidianConnector emits one Container per top-level vault folder "
-            "(each with its own delta cursor) instead of a single "
-            "connector-wide cursor, and load_hierarchy walks the vault "
-            "filesystem emitting one FOLDER node per directory parent-before-child. "
-            "When OFF, the connector retains the Wave B shim shape — "
-            "list_changes_for_container delegates to the legacy single "
-            "list_changes call, and load_hierarchy emits one root FOLDER node. "
-            "Default-off until the per-folder routing pattern soaks against the "
-            "dogfood vault; this pilot's shape is the template for the "
-            "dex_crm / m365_* / sharepoint / notion / slack / github "
-            "wave-E adoption."
+            _WAVE_E_DESC_PREFIX
+            + "per-connector pilot for the obsidian connector. When ON, the "
+            + "ObsidianConnector emits one Container per top-level vault folder "
+            + "(each with its own delta cursor) instead of a single "
+            + "connector-wide cursor, and load_hierarchy walks the vault "
+            + "filesystem emitting one FOLDER node per directory parent-before-child. "
+            + _WAVE_E_OFF_SHIM_NOTE
+            + _WAVE_E_OFF_DELEGATES
+            + "list_changes call, and load_hierarchy emits one root FOLDER node. "
+            + "Default-off until the per-folder routing pattern soaks against the "
+            + "dogfood vault; this pilot's shape is the template for the "
+            + "dex_crm / m365_* / sharepoint / notion / slack / github "
+            + "wave-E adoption."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -250,18 +257,18 @@ REGISTRY: dict[str, FeatureFlag] = {
         name="topology_v2_m365_email_headers",
         default=False,
         description=(
-            "Wave E of the connector/collection/scope topology v2 migration — "
-            "per-connector pilot for the m365_email_headers connector. When ON, "
-            "the connector emits one Container per configured mailbox UPN "
-            "(each with its own Graph deltaLink cursor) instead of a single "
-            "connector-wide cursor, and load_hierarchy emits one root FOLDER "
-            "node plus one FOLDER per mailbox parent-before-child per F58. "
-            "When OFF, the connector retains the Wave B shim shape — "
-            "list_changes_for_container delegates to the legacy single "
-            "list_changes call, and load_hierarchy emits one root FOLDER node. "
-            "Default-off until the per-mailbox routing pattern soaks against "
-            "the dogfood tenant; mirrors the obsidian Wave E pilot landed in "
-            "the topology_v2_obsidian flag."
+            _WAVE_E_DESC_PREFIX
+            + "per-connector pilot for the m365_email_headers connector. When ON, "
+            + "the connector emits one Container per configured mailbox UPN "
+            + "(each with its own Graph deltaLink cursor) instead of a single "
+            + "connector-wide cursor, and load_hierarchy emits one root FOLDER "
+            + "node plus one FOLDER per mailbox parent-before-child per F58. "
+            + _WAVE_E_OFF_SHIM_NOTE
+            + _WAVE_E_OFF_DELEGATES
+            + "list_changes call, and load_hierarchy emits one root FOLDER node. "
+            + "Default-off until the per-mailbox routing pattern soaks against "
+            + "the dogfood tenant; mirrors the obsidian Wave E pilot landed in "
+            + "the topology_v2_obsidian flag."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -273,20 +280,20 @@ REGISTRY: dict[str, FeatureFlag] = {
         name="topology_v2_dex_crm",
         default=False,
         description=(
-            "Wave E of the connector/collection/scope topology v2 migration — "
-            "per-connector pilot for the dex_crm connector. When ON, the "
-            "DexCrmConnector emits one Container (single-tenant Dex API has no "
-            "per-organisation delta) whose cursor_token threads through Wave C's "
-            "CollectionRouter rather than the legacy connector-wide cursor, and "
-            "load_hierarchy emits one root FOLDER (Dex CRM) with one FOLDER "
-            "child per top-level entity type (Person, Organisation, "
-            "Relationship) parent-before-child per F58. When OFF, the connector "
-            "retains the Wave B shim shape — list_changes_for_container "
-            "delegates to the legacy single list_changes call, and "
-            "load_hierarchy emits one root FOLDER node. "
-            "Default-off until the per-container routing pattern soaks against "
-            "the dogfood Dex tenant; mirrors the topology_v2_obsidian pilot "
-            "for the dex_crm wave-E adoption."
+            _WAVE_E_DESC_PREFIX
+            + "per-connector pilot for the dex_crm connector. When ON, the "
+            + "DexCrmConnector emits one Container (single-tenant Dex API has no "
+            + "per-organisation delta) whose cursor_token threads through Wave C's "
+            + "CollectionRouter rather than the legacy connector-wide cursor, and "
+            + "load_hierarchy emits one root FOLDER (Dex CRM) with one FOLDER "
+            + "child per top-level entity type (Person, Organisation, "
+            + "Relationship) parent-before-child per F58. When OFF, the connector "
+            + "retains the Wave B shim shape — list_changes_for_container "
+            + "delegates to the legacy single list_changes call, and "
+            + "load_hierarchy emits one root FOLDER node. "
+            + "Default-off until the per-container routing pattern soaks against "
+            + "the dogfood Dex tenant; mirrors the topology_v2_obsidian pilot "
+            + "for the dex_crm wave-E adoption."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -316,25 +323,74 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/notion.md",
     ),
+    "connector_github": FeatureFlag(
+        name="connector_github",
+        default=False,
+        description=(
+            "Enable the GitHub connector — pulls code (commits + blobs), "
+            + "issues, and pull requests via the REST + GraphQL APIs and "
+            + "drives webhook (push / issues / pull_request / "
+            + "installation_repositories) signal ingest under per-cc_pair "
+            + "installation-token rotation."
+        ),
+        stage="introduce",
+        # GitHub Wave-E cutover plan (per docs/architecture/feature-flag-architecture.md §7):
+        # The connector is greenfield (no legacy slice to preserve) so the
+        # introduce-stage soak focuses on the proactive failure modes —
+        # secondary-rate-limit backoff, installation-token rotation under
+        # cc_pair lock, and force-push full-container reconcile (Break #7).
+        # Target retire 12 months ahead matches the topology_v2_* fleet so
+        # retirement batches roll together once Wave F chunker plugins
+        # land across every connector.
+        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/connector-scope-topology/connector-design-specs/github.md",
+    ),
+    "topology_v2_github": FeatureFlag(
+        name="topology_v2_github",
+        default=False,
+        description=(
+            _WAVE_E_DESC_PREFIX
+            + "per-connector slice for the github connector. When ON, the "
+            + "GitHubConnector emits one Container per installation-accessible "
+            + "repository (each carrying its own per-repo SHA + issues since= "
+            + "cursor pair), list_changes_for_container scopes the drain to "
+            + "that single repo, and load_hierarchy walks Org → repo → "
+            + "top-level-directory parent-before-child per F58. When OFF, "
+            + "the connector retains the Wave B shim shape — "
+            + _WAVE_E_OFF_DELEGATES
+            + "list_changes call (which drains every repo as one flat batch), "
+            + "and load_hierarchy emits one root ORG node. "
+            + "Default-off until the per-repo routing pattern soaks against "
+            + "the dogfood GitHub installation; mirrors the topology_v2_obsidian "
+            + "pilot shape for the github wave-E adoption."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
     "topology_v2_m365_calendar": FeatureFlag(
         name="topology_v2_m365_calendar",
         default=False,
         description=(
-            "Wave E of the connector/collection/scope topology v2 migration — "
-            "per-connector slice for the m365_calendar connector. When ON, the "
-            "M365CalendarConnector emits one Container per configured calendar "
-            "(per UPN, e.g. dan@example.com) with each carrying its own Graph "
-            "@odata.deltaLink as cursor_token, and list_changes_for_container "
-            "scopes the Graph delta query to that calendar only. When OFF, the "
-            "connector retains the Wave B shim shape — list_changes_for_container "
-            "delegates to the legacy single-cursor list_changes call that uses "
-            "one shared deltaLink across every configured calendar. "
-            "load_hierarchy emits a root FOLDER node plus one child FOLDER per "
-            "configured calendar on both branches (single calendar-as-folder "
-            "depth; per-calendar sub-folder hierarchy is a Wave-E+1 enhancement). "
-            "Default-off until per-calendar isolation soaks against the dogfood "
-            "tenant; mirrors the obsidian Wave E pilot's shape and shares the "
-            "Azure AD app registration with the m365_email_headers sibling."
+            _WAVE_E_DESC_PREFIX
+            + "per-connector slice for the m365_calendar connector. When ON, the "
+            + "M365CalendarConnector emits one Container per configured calendar "
+            + "(per UPN, e.g. dan@example.com) with each carrying its own Graph "
+            + "@odata.deltaLink as cursor_token, and list_changes_for_container "
+            + "scopes the Graph delta query to that calendar only. When OFF, the "
+            + "connector retains the Wave B shim shape — list_changes_for_container "
+            + "delegates to the legacy single-cursor list_changes call that uses "
+            + "one shared deltaLink across every configured calendar. "
+            + "load_hierarchy emits a root FOLDER node plus one child FOLDER per "
+            + "configured calendar on both branches (single calendar-as-folder "
+            + "depth; per-calendar sub-folder hierarchy is a Wave-E+1 enhancement). "
+            + "Default-off until per-calendar isolation soaks against the dogfood "
+            + "tenant; mirrors the obsidian Wave E pilot's shape and shares the "
+            + "Azure AD app registration with the m365_email_headers sibling."
         ),
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
@@ -375,13 +431,13 @@ REGISTRY: dict[str, FeatureFlag] = {
         default=False,
         description=(
             "KFEAT-021 Phase 1 — when ON, the worker runs a periodic "
-            "MaintenanceScheduler.tick that prunes orphan content_vectors "
-            "rows (moved into content_vectors_pruned with a 7-day soft-delete "
-            "retention), rebuilds the usearch index, and heals FTS5 orphans. "
-            "Default-off until the dogfood VM cutover validates the prune + "
-            "rebuild cadence — flipping ON cleans up the 4,370-row leak the "
-            "KFEAT-020 preflight surfaced. Cadence default 24h, tunable via "
-            "KAIRIX_MAINTENANCE_INTERVAL_S."
+            + "MaintenanceScheduler.tick that prunes orphan content_vectors "
+            + "rows (moved into content_vectors_pruned with a 7-day soft-delete "
+            + "retention), rebuilds the usearch index, and heals FTS5 orphans. "
+            + "Default-off until the dogfood VM cutover validates the prune + "
+            + "rebuild cadence — flipping ON cleans up the 4,370-row leak the "
+            + "KFEAT-020 preflight surfaced. Cadence default 24h, tunable via "
+            + "KAIRIX_MAINTENANCE_INTERVAL_S."
         ),
         stage="introduce",
         # KFEAT-021 cutover plan (per docs/architecture/feature-flag-architecture.md §7):
@@ -389,8 +445,8 @@ REGISTRY: dict[str, FeatureFlag] = {
         # 12-month target_retire_in matches the topology_v2_* fleet so retirement
         # batches can roll together once Phase 2 (connector-side delete
         # propagation) lands across every connector wave.
-        introduced_in="v2026.5.24",
-        target_retire_in="v2027.5.24",
+        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/features/KFEAT-021-automated-orphan-cleanup/BRIEF.md",
     ),

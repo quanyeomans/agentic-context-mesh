@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/main",
+  "forced": true,
+  "repository": {
+    "id": 100,
+    "full_name": "agent-alpha-org/repo-alpha",
+    "visibility": "private"
+  },
+  "commits": [
+    {
+      "id": "force-pushed-sha-001",
+      "message": "Force-pushed; history rewritten",
+      "timestamp": "2026-05-23T04:00:00Z",
+      "author": {"name": "agent-alpha"}
+    }
+  ]
+}

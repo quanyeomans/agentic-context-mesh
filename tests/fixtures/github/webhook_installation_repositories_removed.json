@@ -1,0 +1,11 @@
+{
+  "action": "removed",
+  "installation": {"id": 12345},
+  "repositories_removed": [
+    {
+      "id": 102,
+      "full_name": "agent-alpha-org/repo-gamma",
+      "visibility": "private"
+    }
+  ]
+}
