@@ -29,7 +29,7 @@ plaintext; diagnostic logs name the endpoint or record kind only.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -44,12 +44,35 @@ from kairix.core.protocols import (
     ChangeEvent,
     Container,
     Cursor,
+    HierarchyNode,
     RawArtefact,
     Sensitivity,
 )
 from kairix.transport.auth.api_key import MissingCredentialsError
 
 CONNECTOR_NAME = "dex_crm"
+
+# Wave E topology v2 pilot — name of the per-connector flag that gates
+# the multi-container shape. Module-level constant so the F52 call-site
+# scan picks up exactly one verbatim reference per call site.
+TOPOLOGY_V2_DEX_CRM_FLAG = "topology_v2_dex_crm"
+
+# Hierarchy node identifiers for the Wave E ON-branch ``load_hierarchy``
+# emission. The root carries ``raw_node_id="dex"`` (the connector kind)
+# with one FOLDER child per top-level entity type the connector polls.
+# Module-level so the BDD step + integration test reference the exact
+# canonical literal — drift here would break the F58 invariant test
+# silently rather than at edit time.
+_HIERARCHY_ROOT_ID = "dex"
+_HIERARCHY_PERSON_ID = "dex/person"
+_HIERARCHY_ORG_ID = "dex/organisation"
+_HIERARCHY_RELATIONSHIP_ID = "dex/relationship"
+
+# Dex web-UI base used by both ``source_link`` (deep-link routing per
+# record) and the Wave E ``load_hierarchy`` walk (per-FOLDER link).
+# Extracted to a single F17-clean constant so a rename of the customer
+# portal hostname is a one-edit operation.
+_DEX_UI_BASE = "https://app.getdex.com/"
 
 # Dex listing endpoint names (plural — the API's wire form) and the
 # singular kind tag the connector emits in ``item_id`` / ``source_link``.
@@ -78,6 +101,25 @@ def _iso_utc(dt: datetime) -> str:
 
 def _now_iso() -> str:
     return _iso_utc(datetime.now(timezone.utc))
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production default for the topology-v2-dex_crm flag check.
+
+    Delegates to :func:`kairix.core.features.flag` so the production
+    path threads through the env-var → config-overlay → registry
+    resolution chain. Tests inject a different callable (typically one
+    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
+    branch under test is pinned without monkey-patching the resolver
+    module (F1-clean / F2-clean).
+
+    Lifted to a module-level helper so the connector's signature can
+    carry a real callable default (F6-clean) without a per-call
+    ``Optional[...] = None`` shape.
+    """
+    from kairix.core.features import flag as _prod_flag
+
+    return _prod_flag(name)
 
 
 @dataclass(frozen=True)
@@ -147,14 +189,26 @@ class DexCrmConnector:
         client: DexCrmClient | None = None,
         client_config: DexCrmClientConfig | None = None,
         sensitivity: Sensitivity = "internal",
+        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         cfg = client_config if client_config is not None else DexCrmClientConfig()
         self._client = client if client is not None else DexCrmClient(config=cfg)
         self._sensitivity: Sensitivity = sensitivity
+        self._flag_reader = flag_reader
         # Cache of last-fetched records keyed by item_id so ``fetch``
         # can return the bytes the connector already pulled in
         # ``list_changes`` without a second API roundtrip.
         self._record_cache: dict[str, DexCrmRecord] = {}
+        # Diagnostic introspection — records which Wave E branch
+        # :meth:`list_changes_for_container` took on the most recent
+        # call (``"legacy"`` = Wave B shim delegation when the
+        # ``topology_v2_dex_crm`` flag is OFF; ``"scoped"`` = the Wave E
+        # per-container helper when the flag is ON). Used by F54
+        # both-branch tests to assert the flag-OFF inertness contract
+        # without needing to observe a wire-side behavioural difference
+        # (the single-tenant Dex API makes both paths reach identical
+        # endpoints).
+        self._last_path_taken: str | None = None
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
@@ -230,14 +284,14 @@ class DexCrmConnector:
         the correct Dex page (contact / organisation / relationship).
         """
         if ":" not in item_id:
-            return f"https://app.getdex.com/{_LISTING_CONTACTS}/{quote(item_id, safe='')}"
+            return f"{_DEX_UI_BASE}{_LISTING_CONTACTS}/{quote(item_id, safe='')}"
         kind, raw_id = item_id.split(":", 1)
         path = {
             _KIND_CONTACT: _LISTING_CONTACTS,
             _KIND_ORGANISATION: _LISTING_ORGANISATIONS,
             _KIND_RELATIONSHIP: _LISTING_RELATIONSHIPS,
         }.get(kind, _LISTING_CONTACTS)
-        return f"https://app.getdex.com/{path}/{quote(raw_id, safe='')}"
+        return f"{_DEX_UI_BASE}{path}/{quote(raw_id, safe='')}"
 
     def sensitivity_for(self, _item_id: str) -> Sensitivity:
         """Return the connector's configured sensitivity tier.
@@ -259,15 +313,6 @@ class DexCrmConnector:
     # gated by the ``topology_v2_protocol`` feature flag (default-off);
     # Wave C activates the runtime path.
 
-    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
-        """PollConnector shim — delegate to :meth:`list_changes` using the container cursor.
-
-        Dex CRM has one logical container (the tenant). The shim
-        forwards ``container.cursor_token`` to the existing
-        :meth:`list_changes` so observable behaviour is identical.
-        """
-        return self.list_changes(container.cursor_token)
-
     def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
         """CredentialsConnector shim — return the input unchanged.
 
@@ -277,6 +322,140 @@ class DexCrmConnector:
         no-op for this connector.
         """
         return credentials
+
+    # ------------------------------------------------------------------
+    # Topology v2 Wave E — per-connector multi-container pilot
+    # ------------------------------------------------------------------
+    # The Dex CRM API is single-tenant single-cursor today — there is no
+    # per-organisation delta endpoint, so iter_containers emits ONE
+    # Container with ``container_id=""`` representing the connector
+    # instance as a whole. That single-container shape is still a
+    # meaningful Wave E adoption: it threads the cc_pair's persisted
+    # cursor through Wave C's CollectionRouter rather than the legacy
+    # connector-wide cursor path, which the obsidian pilot already
+    # validates.
+    #
+    # When the ``topology_v2_dex_crm`` flag is ON:
+    #   * :meth:`iter_containers` yields one Container (the tenant).
+    #   * :meth:`list_changes_for_container` reads
+    #     ``container.cursor_token`` as the per-container cursor and
+    #     threads it through :meth:`list_changes`. Each Container's
+    #     cursor is consumed independently — no shared mutable state.
+    #   * :meth:`load_hierarchy` emits one root FOLDER (``dex``) with
+    #     one FOLDER child per top-level entity type (Person, Org,
+    #     Relationship) parent-before-child per F58.
+    #
+    # When OFF:
+    #   * :meth:`list_changes_for_container` retains the Wave B shim
+    #     shape (delegate to legacy single-cursor :meth:`list_changes`
+    #     using the container's cursor).
+    #   * :meth:`load_hierarchy` emits one root FOLDER node only.
+    #
+    # The flag defaults OFF so existing operators see bit-for-bit
+    # current behaviour.
+
+    def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
+        """Yield one :class:`Container` representing the Dex tenant.
+
+        Dex's API is single-tenant single-cursor — there is no
+        per-organisation delta endpoint, so the connector emits a
+        single Container with ``container_id=""``. The Wave C
+        ``CollectionRouter`` still benefits because the cc_pair's
+        cursor now flows through the per-container Container row in
+        ``topology_containers`` rather than the legacy connector-wide
+        cursor table.
+
+        ``access_state`` is always ``"ACCESSIBLE"`` — once the API key
+        resolves, the whole tenant surface is reachable;
+        permission-denied scoping happens per-record inside the Dex
+        product, not at the listing-endpoint boundary.
+        ``cursor_token`` and ``last_synced_at`` start ``None``; the
+        framework persists subsequent values to the
+        ``topology_containers`` table.
+        """
+        yield Container(
+            cc_pair_id=cc_pair_id,
+            container_id="",
+            access_state="ACCESSIBLE",
+            cursor_token=None,
+            last_synced_at=None,
+        )
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """Stream change events for one Container's cursor horizon.
+
+        When the ``topology_v2_dex_crm`` flag is ON: reads
+        ``container.cursor_token`` as the per-container delta horizon
+        and threads it through :meth:`list_changes`. Each call uses
+        ONLY the supplied Container's cursor — no shared / cached /
+        connector-level cursor leaks across containers.
+
+        When the flag is OFF: retains the Wave B shim behaviour —
+        delegate to :meth:`list_changes` with the container's cursor so
+        the observable shape is identical to the legacy v1 path. The
+        delegation chain still reads the supplied container's cursor
+        (not a shared module-level cursor) so the OFF branch matches
+        the ON branch on isolation while preserving the single-tenant
+        single-cursor wire interaction.
+        """
+        if not self._flag_reader(TOPOLOGY_V2_DEX_CRM_FLAG):
+            self._last_path_taken = "legacy"
+            return self.list_changes(container.cursor_token)
+        self._last_path_taken = "scoped"
+        return self._list_changes_scoped(container)
+
+    def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
+        """HierarchyConnector — emit FOLDER nodes parent-before-child.
+
+        When the ``topology_v2_dex_crm`` flag is ON: emits one root
+        FOLDER (``raw_node_id="dex"``, ``raw_parent_id=None``) followed
+        by one FOLDER child per top-level Dex entity type — Person,
+        Organisation, Relationship — each carrying ``raw_parent_id="dex"``
+        so the F58 parent-before-child invariant holds. The display
+        names mirror the Dex web-UI tab labels operators see, so a
+        search-layer client surfacing the hierarchy can render
+        recognisable folder breadcrumbs.
+
+        When the flag is OFF: retains the Wave B shim behaviour — one
+        root FOLDER node only.
+
+        ``link`` references the Dex web-UI tab for the root + each
+        child; the search layer can surface a clickable affordance
+        directly to the operator's tenant. ``sensitivity_hint`` is
+        ``None`` because Dex sensitivity is connector-configured, not
+        per-folder (per ADR-005).
+        """
+        if not self._flag_reader(TOPOLOGY_V2_DEX_CRM_FLAG):
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=_HIERARCHY_ROOT_ID,
+                raw_parent_id=None,
+                display_name="Dex CRM",
+                link=None,
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+            return
+        yield from _walk_hierarchy(cc_pair_id=cc_pair_id)
+
+    # ------------------------------------------------------------------
+    # Wave E internals
+    # ------------------------------------------------------------------
+
+    def _list_changes_scoped(self, container: Container) -> Iterator[ChangeEvent]:
+        """Wave E ON-branch: thread the per-container cursor through list_changes.
+
+        Reads ``container.cursor_token`` and ONLY that container's
+        cursor — never a shared module-level cursor, never a connector-
+        instance cursor cache. The single-tenant Dex API maps to a
+        single Container today, but the per-container cursor read makes
+        the wire-call shape identical for a hypothetical multi-tenant
+        evolution where each Container carries its own ``updated_after``
+        timestamp.
+        """
+        cursor = container.cursor_token
+        return self.list_changes(cursor)
 
     # ------------------------------------------------------------------
     # Internals
@@ -307,6 +486,58 @@ class DexCrmConnector:
             modified_at=updated_at,
             raw=raw,
         )
+
+
+def _walk_hierarchy(*, cc_pair_id: int) -> Iterator[HierarchyNode]:
+    """Wave E ON-branch hierarchy walk for the Dex CRM connector.
+
+    Emits one root FOLDER node followed by one FOLDER child per top-
+    level Dex entity type (Person, Organisation, Relationship) in
+    deterministic parent-before-child order per F58. Lifted to a
+    module-level helper so the BDD step + integration test can
+    reference the canonical walk shape without reaching into the
+    connector class internals.
+    """
+    yield HierarchyNode(
+        cc_pair_id=cc_pair_id,
+        raw_node_id=_HIERARCHY_ROOT_ID,
+        raw_parent_id=None,
+        display_name="Dex CRM",
+        link=_DEX_UI_BASE,
+        node_type="FOLDER",
+        external_access_json=None,
+        sensitivity_hint=None,
+    )
+    yield HierarchyNode(
+        cc_pair_id=cc_pair_id,
+        raw_node_id=_HIERARCHY_PERSON_ID,
+        raw_parent_id=_HIERARCHY_ROOT_ID,
+        display_name="Person",
+        link=f"{_DEX_UI_BASE}{_LISTING_CONTACTS}",
+        node_type="FOLDER",
+        external_access_json=None,
+        sensitivity_hint=None,
+    )
+    yield HierarchyNode(
+        cc_pair_id=cc_pair_id,
+        raw_node_id=_HIERARCHY_ORG_ID,
+        raw_parent_id=_HIERARCHY_ROOT_ID,
+        display_name="Organisation",
+        link=f"{_DEX_UI_BASE}{_LISTING_ORGANISATIONS}",
+        node_type="FOLDER",
+        external_access_json=None,
+        sensitivity_hint=None,
+    )
+    yield HierarchyNode(
+        cc_pair_id=cc_pair_id,
+        raw_node_id=_HIERARCHY_RELATIONSHIP_ID,
+        raw_parent_id=_HIERARCHY_ROOT_ID,
+        display_name="Relationship",
+        link=f"{_DEX_UI_BASE}{_LISTING_RELATIONSHIPS}",
+        node_type="FOLDER",
+        external_access_json=None,
+        sensitivity_hint=None,
+    )
 
 
 def make_connector(config: Mapping[str, Any]) -> DexCrmConnector:

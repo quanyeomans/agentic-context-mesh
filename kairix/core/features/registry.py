@@ -264,8 +264,33 @@ REGISTRY: dict[str, FeatureFlag] = {
             "the topology_v2_obsidian flag."
         ),
         stage="introduce",
-        introduced_in="v2026.5.24",
-        target_retire_in="v2027.5.24",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
+    "topology_v2_dex_crm": FeatureFlag(
+        name="topology_v2_dex_crm",
+        default=False,
+        description=(
+            "Wave E of the connector/collection/scope topology v2 migration — "
+            "per-connector pilot for the dex_crm connector. When ON, the "
+            "DexCrmConnector emits one Container (single-tenant Dex API has no "
+            "per-organisation delta) whose cursor_token threads through Wave C's "
+            "CollectionRouter rather than the legacy connector-wide cursor, and "
+            "load_hierarchy emits one root FOLDER (Dex CRM) with one FOLDER "
+            "child per top-level entity type (Person, Organisation, "
+            "Relationship) parent-before-child per F58. When OFF, the connector "
+            "retains the Wave B shim shape — list_changes_for_container "
+            "delegates to the legacy single list_changes call, and "
+            "load_hierarchy emits one root FOLDER node. "
+            "Default-off until the per-container routing pattern soaks against "
+            "the dogfood Dex tenant; mirrors the topology_v2_obsidian pilot "
+            "for the dex_crm wave-E adoption."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),

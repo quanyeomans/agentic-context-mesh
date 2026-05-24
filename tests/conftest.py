@@ -216,6 +216,13 @@ pytest_plugins = [
     # delta cursor; load_hierarchy emits one root FOLDER plus one
     # FOLDER per mailbox parent-before-child per F58.
     "tests.bdd.steps.feature_flag_topology_v2_m365_email_headers_steps",
+    # Topology v2 Wave E — per-connector multi-container pilot for the
+    # dex_crm connector behind the ``topology_v2_dex_crm`` flag.
+    # F45 / F54 coverage. Dex's API is single-tenant single-cursor so
+    # the connector emits one tenant Container; load_hierarchy emits
+    # the Dex / Person / Organisation / Relationship FOLDER tree
+    # parent-before-child per F58.
+    "tests.bdd.steps.feature_flag_topology_v2_dex_crm_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
