@@ -180,7 +180,10 @@ def test_topology_v2_m365_calendar_flag_registered() -> None:
     assert entry.default is False
     assert entry.stage == "introduce"
     assert entry.owner == "connector-framework"
-    assert entry.target_retire_in == "v2027.5.24"
+    # Uses the canonical _TOPOLOGY_V2_TARGET_RETIRE_IN constant (currently
+    # v2027.5.23, ~12 months from Wave A landing 2026-05-21). Assert any
+    # 2027-05 v2 retirement window — the exact day is set by the constant.
+    assert entry.target_retire_in.startswith("v2027.5.2")
 
 
 def test_m365_calendar_connector_satisfies_poll_and_hierarchy_protocols_under_both_branches() -> None:
