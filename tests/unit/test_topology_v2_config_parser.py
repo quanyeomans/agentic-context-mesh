@@ -5,6 +5,10 @@ edge (empty, missing required field, wrong list/dict shape, unknown
 enum value). Sabotage-prove: see commit body for the 5 mutate→fail→
 restore proofs per validator (this file primarily covers parse shape;
 the validator file ships its own sabotage proofs).
+
+Post #305: every payload nests the six Wave D blocks under a single
+``topology_v2:`` parent key so the ``collections:`` block stops
+colliding with the legacy top-level ``collections.shared`` dict shape.
 """
 
 from __future__ import annotations
@@ -31,8 +35,20 @@ pytestmark = pytest.mark.unit
 
 
 def test_empty_dict_parses_to_all_empty_config() -> None:
-    """Backward-compat: a legacy YAML without Wave D blocks parses cleanly."""
+    """Backward-compat: a legacy YAML without a topology_v2 block parses cleanly."""
     config = parse_topology_v2({})
+    assert config == TopologyV2Config()
+
+
+def test_explicit_null_topology_v2_parses_to_all_empty_config() -> None:
+    """``topology_v2: null`` (operator declaring the key but leaving it empty) parses cleanly."""
+    config = parse_topology_v2({"topology_v2": None})
+    assert config == TopologyV2Config()
+
+
+def test_empty_topology_v2_mapping_parses_to_all_empty_config() -> None:
+    """``topology_v2: {}`` (empty mapping) parses cleanly."""
+    config = parse_topology_v2({"topology_v2": {}})
     assert config == TopologyV2Config()
 
 
@@ -40,12 +56,14 @@ def test_empty_lists_parse_to_empty_tuples() -> None:
     """All-six blocks present but empty parse to all-empty tuples."""
     config = parse_topology_v2(
         {
-            "connectors": [],
-            "credentials": [],
-            "cc_pairs": [],
-            "collections": [],
-            "scope_profiles": [],
-            "skills": [],
+            "topology_v2": {
+                "connectors": [],
+                "credentials": [],
+                "cc_pairs": [],
+                "collections": [],
+                "scope_profiles": [],
+                "skills": [],
+            }
         }
     )
     assert config.connectors == ()
@@ -56,20 +74,30 @@ def test_empty_lists_parse_to_empty_tuples() -> None:
     assert config.skills == ()
 
 
+def test_topology_v2_must_be_mapping_not_list() -> None:
+    """``topology_v2:`` as a list (operator typo) raises a structural parse error."""
+    with pytest.raises(TopologyV2ParseError) as excinfo:
+        parse_topology_v2({"topology_v2": ["connectors", "credentials"]})
+    assert "topology_v2" in str(excinfo.value)
+    assert "fix:" in str(excinfo.value)
+
+
 def test_single_connector_parses() -> None:
     """One connector block round-trips into a frozen ConnectorConfig."""
     config = parse_topology_v2(
         {
-            "connectors": [
-                {
-                    "id": "obsidian-personal",
-                    "kind": "obsidian",
-                    "name": "obsidian-personal",
-                    "connector_specific_config": {"vault_root": "/data/vault"},
-                    "refresh_freq_seconds": 300,
-                    "default_sensitivity": "internal",
-                }
-            ]
+            "topology_v2": {
+                "connectors": [
+                    {
+                        "id": "obsidian-personal",
+                        "kind": "obsidian",
+                        "name": "obsidian-personal",
+                        "connector_specific_config": {"vault_root": "/data/vault"},
+                        "refresh_freq_seconds": 300,
+                        "default_sensitivity": "internal",
+                    }
+                ]
+            }
         }
     )
     assert len(config.connectors) == 1
@@ -86,15 +114,17 @@ def test_single_credential_parses() -> None:
     """One credential block round-trips into a frozen CredentialConfig."""
     config = parse_topology_v2(
         {
-            "credentials": [
-                {
-                    "id": "ms-app-tenant",
-                    "kind": "sharepoint",
-                    "secret_name": "kv://kairix/sharepoint-app",  # pragma: allowlist secret
-                    "user_id": None,
-                    "admin_public": True,
-                }
-            ]
+            "topology_v2": {
+                "credentials": [
+                    {
+                        "id": "ms-app-tenant",
+                        "kind": "sharepoint",
+                        "secret_name": "kv://kairix/sharepoint-app",  # pragma: allowlist secret
+                        "user_id": None,
+                        "admin_public": True,
+                    }
+                ]
+            }
         }
     )
     assert len(config.credentials) == 1
@@ -108,15 +138,17 @@ def test_cc_pair_parses_with_optional_credential_none() -> None:
     """A cc_pair without a credential parses (credential=None — local FS connectors)."""
     config = parse_topology_v2(
         {
-            "cc_pairs": [
-                {
-                    "id": "obsidian-personal-default",
-                    "connector": "obsidian-personal",
-                    "credential": None,
-                    "name": "obsidian-personal-default",
-                    "access_type": "PRIVATE",
-                }
-            ]
+            "topology_v2": {
+                "cc_pairs": [
+                    {
+                        "id": "obsidian-personal-default",
+                        "connector": "obsidian-personal",
+                        "credential": None,
+                        "name": "obsidian-personal-default",
+                        "access_type": "PRIVATE",
+                    }
+                ]
+            }
         }
     )
     pair = config.cc_pairs[0]
@@ -130,15 +162,17 @@ def test_collection_with_sources_parses() -> None:
     CollectionSourceConfig tuples."""
     config = parse_topology_v2(
         {
-            "collections": [
-                {
-                    "name": "client-x-engagement",
-                    "sources": [
-                        {"cc_pair": "obsidian-personal-default", "path_filter": "01-Projects/Client-X/*"},
-                        {"cc_pair": "ms-team-sharepoint", "path_filter": "site:client-x/*"},
-                    ],
-                }
-            ]
+            "topology_v2": {
+                "collections": [
+                    {
+                        "name": "client-x-engagement",
+                        "sources": [
+                            {"cc_pair": "obsidian-personal-default", "path_filter": "01-Projects/Client-X/*"},
+                            {"cc_pair": "ms-team-sharepoint", "path_filter": "site:client-x/*"},
+                        ],
+                    }
+                ]
+            }
         }
     )
     col = config.collections[0]
@@ -153,24 +187,26 @@ def test_scope_profile_parses() -> None:
     """A scope_profile with two entries parses into the frozen aggregator."""
     config = parse_topology_v2(
         {
-            "scope_profiles": [
-                {
-                    "name": "team-shape-builder",
-                    "actor_kind": "group",
-                    "entries": [
-                        {
-                            "actor_id": "agent-shape",
-                            "collection_name": "agent-shape/private-memory",
-                            "mode": "read_write",
-                        },
-                        {
-                            "actor_id": "agent-shape",
-                            "collection_name": "client-x-engagement",
-                            "mode": "read",
-                        },
-                    ],
-                }
-            ]
+            "topology_v2": {
+                "scope_profiles": [
+                    {
+                        "name": "team-shape-builder",
+                        "actor_kind": "group",
+                        "entries": [
+                            {
+                                "actor_id": "agent-shape",
+                                "collection_name": "agent-shape/private-memory",
+                                "mode": "read_write",
+                            },
+                            {
+                                "actor_id": "agent-shape",
+                                "collection_name": "client-x-engagement",
+                                "mode": "read",
+                            },
+                        ],
+                    }
+                ]
+            }
         }
     )
     profile = config.scope_profiles[0]
@@ -185,19 +221,24 @@ def test_skill_with_task_collections_parses() -> None:
     """A skill with nested task_collections + sources parses fully."""
     config = parse_topology_v2(
         {
-            "skills": [
-                {
-                    "name": "prepare-sow",
-                    "task_collections": [
-                        {
-                            "name": "client-x-engagement",
-                            "sources": [
-                                {"cc_pair": "obsidian-personal-default", "path_filter": "01-Projects/Client-X/*"}
-                            ],
-                        }
-                    ],
-                }
-            ]
+            "topology_v2": {
+                "skills": [
+                    {
+                        "name": "prepare-sow",
+                        "task_collections": [
+                            {
+                                "name": "client-x-engagement",
+                                "sources": [
+                                    {
+                                        "cc_pair": "obsidian-personal-default",
+                                        "path_filter": "01-Projects/Client-X/*",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
         }
     )
     skill = config.skills[0]
@@ -217,7 +258,7 @@ def test_missing_required_field_raises_parse_error() -> None:
     TopologyV2ParseError raised). Restored.
     """
     with pytest.raises(TopologyV2ParseError) as excinfo:
-        parse_topology_v2({"connectors": [{"id": "c1", "kind": "obsidian"}]})
+        parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian"}]}})
     assert "name" in str(excinfo.value).lower()
     assert "fix:" in str(excinfo.value)
 
@@ -226,7 +267,11 @@ def test_invalid_sensitivity_raises() -> None:
     """A connector with ``default_sensitivity=top-secret`` is rejected."""
     with pytest.raises(TopologyV2ParseError) as excinfo:
         parse_topology_v2(
-            {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": "top-secret"}]}
+            {
+                "topology_v2": {
+                    "connectors": [{"id": "c1", "kind": "obsidian", "name": "c1", "default_sensitivity": "top-secret"}]
+                }
+            }
         )
     assert "top-secret" in str(excinfo.value) or "F39" in str(excinfo.value)
 
@@ -234,7 +279,9 @@ def test_invalid_sensitivity_raises() -> None:
 def test_invalid_access_type_raises() -> None:
     """A cc_pair with ``access_type=WIDE_OPEN`` is rejected."""
     payload = {
-        "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "p1", "access_type": "WIDE_OPEN"}]
+        "topology_v2": {
+            "cc_pairs": [{"id": "p1", "connector": "c1", "credential": None, "name": "p1", "access_type": "WIDE_OPEN"}]
+        }
     }
     with pytest.raises(TopologyV2ParseError):
         parse_topology_v2(payload)
@@ -243,7 +290,7 @@ def test_invalid_access_type_raises() -> None:
 def test_invalid_actor_kind_raises() -> None:
     """A scope_profile with ``actor_kind=robot`` is rejected."""
     with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2({"scope_profiles": [{"name": "p", "actor_kind": "robot", "entries": []}]})
+        parse_topology_v2({"topology_v2": {"scope_profiles": [{"name": "p", "actor_kind": "robot", "entries": []}]}})
 
 
 def test_invalid_mode_raises() -> None:
@@ -251,12 +298,14 @@ def test_invalid_mode_raises() -> None:
     with pytest.raises(TopologyV2ParseError):
         parse_topology_v2(
             {
-                "scope_profiles": [
-                    {
-                        "name": "p",
-                        "entries": [{"actor_id": "a", "collection_name": "c", "mode": "admin"}],
-                    }
-                ]
+                "topology_v2": {
+                    "scope_profiles": [
+                        {
+                            "name": "p",
+                            "entries": [{"actor_id": "a", "collection_name": "c", "mode": "admin"}],
+                        }
+                    ]
+                }
             }
         )
 
@@ -264,15 +313,17 @@ def test_invalid_mode_raises() -> None:
 def test_collection_filters_must_be_list() -> None:
     """``cc_pairs.*.collection_filters`` must be a list — string fails loud."""
     payload = {
-        "cc_pairs": [
-            {
-                "id": "p1",
-                "connector": "c1",
-                "credential": None,
-                "name": "p1",
-                "collection_filters": "not-a-list",
-            }
-        ]
+        "topology_v2": {
+            "cc_pairs": [
+                {
+                    "id": "p1",
+                    "connector": "c1",
+                    "credential": None,
+                    "name": "p1",
+                    "collection_filters": "not-a-list",
+                }
+            ]
+        }
     }
     with pytest.raises(TopologyV2ParseError):
         parse_topology_v2(payload)
@@ -281,14 +332,16 @@ def test_collection_filters_must_be_list() -> None:
 def test_connector_specific_config_must_be_mapping() -> None:
     """``connectors.*.connector_specific_config`` must be a mapping."""
     payload = {
-        "connectors": [
-            {
-                "id": "c1",
-                "kind": "obsidian",
-                "name": "c1",
-                "connector_specific_config": "vault_root=/x",
-            }
-        ]
+        "topology_v2": {
+            "connectors": [
+                {
+                    "id": "c1",
+                    "kind": "obsidian",
+                    "name": "c1",
+                    "connector_specific_config": "vault_root=/x",
+                }
+            ]
+        }
     }
     with pytest.raises(TopologyV2ParseError):
         parse_topology_v2(payload)
@@ -297,4 +350,17 @@ def test_connector_specific_config_must_be_mapping() -> None:
 def test_block_must_be_list_not_dict() -> None:
     """If the operator wrote ``connectors:`` as a mapping, the parser rejects."""
     with pytest.raises(TopologyV2ParseError):
-        parse_topology_v2({"connectors": {"c1": {"kind": "obsidian", "name": "c1"}}})
+        parse_topology_v2({"topology_v2": {"connectors": {"c1": {"kind": "obsidian", "name": "c1"}}}})
+
+
+def test_top_level_legacy_keys_are_ignored() -> None:
+    """Backward-compat: a legacy config with top-level ``connectors:`` AND no
+    ``topology_v2:`` parent key parses to the empty config — the worker-side
+    ``connectors:`` block (read by :mod:`kairix.worker`) is intentionally
+    distinct from the Wave D topology v2 surface."""
+    legacy_payload = {
+        "connectors": [{"name": "obsidian", "config": {"vault_root": "/x"}}],
+        "collections": {"shared": [{"name": "vault", "path": "/x"}]},
+    }
+    config = parse_topology_v2(legacy_payload)
+    assert config == TopologyV2Config()

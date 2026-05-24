@@ -60,7 +60,7 @@ def test_flag_off_parser_still_loads_yaml() -> None:
     independent steps.
     """
     resolver = FakeFeatureFlagResolver().with_flag("topology_v2_config", False)
-    config = parse_topology_v2({"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]})
+    config = parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]}})
     assert resolver.get("topology_v2_config") is False
     assert len(config.connectors) == 1
 
@@ -68,7 +68,7 @@ def test_flag_off_parser_still_loads_yaml() -> None:
 def test_flag_on_parser_loads_yaml_identically() -> None:
     """ON branch: parser shape is identical — flag only gates application."""
     resolver = FakeFeatureFlagResolver().with_flag("topology_v2_config", True)
-    config = parse_topology_v2({"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]})
+    config = parse_topology_v2({"topology_v2": {"connectors": [{"id": "c1", "kind": "obsidian", "name": "c1"}]}})
     assert resolver.get("topology_v2_config") is True
     assert len(config.connectors) == 1
 
@@ -90,7 +90,7 @@ def test_flag_off_validators_still_callable() -> None:
     edits before the cutover). Failures are advisory, not blocking.
     """
     resolver = FakeFeatureFlagResolver().with_flag("topology_v2_config", False)
-    config = parse_topology_v2({"cc_pairs": [{"id": "p1", "connector": "missing", "name": "p1"}]})
+    config = parse_topology_v2({"topology_v2": {"cc_pairs": [{"id": "p1", "connector": "missing", "name": "p1"}]}})
     failures = validate_topology_v2_references(config)
     assert resolver.get("topology_v2_config") is False
     assert any(f.rule == "cc_pair_connector_missing" for f in failures)
@@ -99,7 +99,7 @@ def test_flag_off_validators_still_callable() -> None:
 def test_flag_on_validators_still_callable() -> None:
     """ON branch: validators behave identically — flag-independent."""
     resolver = FakeFeatureFlagResolver().with_flag("topology_v2_config", True)
-    config = parse_topology_v2({"cc_pairs": [{"id": "p1", "connector": "missing", "name": "p1"}]})
+    config = parse_topology_v2({"topology_v2": {"cc_pairs": [{"id": "p1", "connector": "missing", "name": "p1"}]}})
     failures = validate_topology_v2_references(config)
     assert resolver.get("topology_v2_config") is True
     assert any(f.rule == "cc_pair_connector_missing" for f in failures)

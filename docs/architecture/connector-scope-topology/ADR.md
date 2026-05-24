@@ -506,7 +506,7 @@ Feature flag: `topology_v2_runtime` (introduce stage default-off). When OFF: beh
 
 ### Wave D — operator config promotion
 
-Add `connectors:` / `credentials:` / `cc_pairs:` / `collections:` / `scope_profiles:` / `skills:` blocks to operator config schema. Validation rules:
+Add a single `topology_v2:` parent key (#305) with six nested blocks — `connectors:` / `credentials:` / `cc_pairs:` / `collections:` / `scope_profiles:` / `skills:` — to the operator config schema. The parent namespace prevents the Wave D `collections:` block from colliding with the legacy top-level `collections.shared` dict shape and aligns the YAML surface with the `topology_v2_config` feature flag name. Validation rules:
 - `cc_pairs.*.connector` references declared connector.
 - `cc_pairs.*.credential` references declared credential.
 - `collections.*.sources.*.cc_pair` references declared cc_pair.
@@ -556,78 +556,84 @@ After all topology_v2_* flags promote to default-ON for 4 weeks of cutover-stage
 
 ## Operator-visible config example (post-migration)
 
+The six Wave D blocks nest under a single `topology_v2:` parent key
+(#305) so the Wave D `collections:` block doesn't collide with the
+legacy top-level `collections.shared` dict shape, and the YAML
+namespace aligns with the `topology_v2_config` feature flag name.
+
 ```yaml
-connectors:
-  - kind: obsidian
-    name: obsidian-personal
-    connector_specific_config: { vault_root: /data/vaults/personal }
-    refresh_freq: 5m
-    default_sensitivity: internal
+topology_v2:
+  connectors:
+    - kind: obsidian
+      name: obsidian-personal
+      connector_specific_config: { vault_root: /data/vaults/personal }
+      refresh_freq: 5m
+      default_sensitivity: internal
 
-  - kind: sharepoint
-    name: sharepoint-corp
-    connector_specific_config:
-      tenant_id: <uuid>
-      sensitivity_label_map: { abc-public: public, abc-internal: internal, abc-confidential: confidential }
-    refresh_freq: 5m
-    prune_freq: 24h
-    perm_sync_freq: 1h
-    default_sensitivity: internal
+    - kind: sharepoint
+      name: sharepoint-corp
+      connector_specific_config:
+        tenant_id: <uuid>
+        sensitivity_label_map: { abc-public: public, abc-internal: internal, abc-confidential: confidential }
+      refresh_freq: 5m
+      prune_freq: 24h
+      perm_sync_freq: 1h
+      default_sensitivity: internal
 
-credentials:
-  - kind: sharepoint
-    name: sharepoint-app-tenant
-    credential_ref: kv://kairix/sharepoint-app
-    admin_public: yes
+  credentials:
+    - kind: sharepoint
+      name: sharepoint-app-tenant
+      credential_ref: kv://kairix/sharepoint-app
+      admin_public: yes
 
-cc_pairs:
-  - connector: obsidian-personal
-    credential: null    # no credential; local FS
-    name: obsidian-personal-default
-    access_type: PRIVATE
+  cc_pairs:
+    - connector: obsidian-personal
+      credential: null    # no credential; local FS
+      name: obsidian-personal-default
+      access_type: PRIVATE
 
-  - connector: sharepoint-corp
-    credential: sharepoint-app-tenant
-    name: kairix-team-sharepoint
-    access_type: SYNC
+    - connector: sharepoint-corp
+      credential: sharepoint-app-tenant
+      name: kairix-team-sharepoint
+      access_type: SYNC
 
-collections:
-  - name: vault-projects
-    sources:
-      - { cc_pair: obsidian-personal-default, source_path_filter: "01-Projects/**" }
-    default_sensitivity: internal
+  collections:
+    - name: vault-projects
+      sources:
+        - { cc_pair: obsidian-personal-default, source_path_filter: "01-Projects/**" }
+      default_sensitivity: internal
 
-  - name: client-x-engagement
-    sources:
-      - { cc_pair: obsidian-personal-default, source_path_filter: "01-Projects/Client-X/**" }
-      - { cc_pair: kairix-team-sharepoint,    source_path_filter: "site:client-x/**" }
-    default_sensitivity: confidential
-    group_grants:
-      - { group_id: team-engagement, read: yes, write: no, max_sensitivity: confidential }
+    - name: client-x-engagement
+      sources:
+        - { cc_pair: obsidian-personal-default, source_path_filter: "01-Projects/Client-X/**" }
+        - { cc_pair: kairix-team-sharepoint,    source_path_filter: "site:client-x/**" }
+      default_sensitivity: confidential
+      group_grants:
+        - { group_id: team-engagement, read: yes, write: no, max_sensitivity: confidential }
 
-scope_profiles:
-  - actor_id: agent-shape
-    actor_kind: agent
-    inherits_from: [ team-shape-builder ]
-    entries:
-      - { collection_name: agent-shape/private-memory, read: yes, write: yes, max_sensitivity: restricted }
+  scope_profiles:
+    - actor_id: agent-shape
+      actor_kind: agent
+      inherits_from: [ team-shape-builder ]
+      entries:
+        - { collection_name: agent-shape/private-memory, read: yes, write: yes, max_sensitivity: restricted }
 
-  - actor_id: team-shape-builder
-    actor_kind: group
-    entries:
-      - { collection_name: team-shape-builder/decisions, read: yes, write: yes, max_sensitivity: confidential }
-      - { collection_name: vault-projects,               read: yes, write: no,  max_sensitivity: internal }
-      - { collection_name: client-x-engagement,          read: yes, write: no,  max_sensitivity: confidential }
+    - actor_id: team-shape-builder
+      actor_kind: group
+      entries:
+        - { collection_name: team-shape-builder/decisions, read: yes, write: yes, max_sensitivity: confidential }
+        - { collection_name: vault-projects,               read: yes, write: no,  max_sensitivity: internal }
+        - { collection_name: client-x-engagement,          read: yes, write: no,  max_sensitivity: confidential }
 
-skills:
-  - name: prepare-sow
-    task_collections:
-      - { name: client-x-engagement,         weight: 1.0 }
-      - { name: reference-superannuation-au, weight: 0.7 }
-      - { name: ai-operating-model-pattern,  weight: 0.8 }
-      - { name: team-engagement-lessons,     weight: 0.5 }
-    ranking: fuse_then_rerank_by_skill_priors
-    iteration: sequential_per_task_collection
+  skills:
+    - name: prepare-sow
+      task_collections:
+        - { name: client-x-engagement,         weight: 1.0 }
+        - { name: reference-superannuation-au, weight: 0.7 }
+        - { name: ai-operating-model-pattern,  weight: 0.8 }
+        - { name: team-engagement-lessons,     weight: 0.5 }
+      ranking: fuse_then_rerank_by_skill_priors
+      iteration: sequential_per_task_collection
 ```
 
 ---

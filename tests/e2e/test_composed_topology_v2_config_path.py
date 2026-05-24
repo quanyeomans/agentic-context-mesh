@@ -58,44 +58,46 @@ def test_composed_topology_v2_config_path_parse_validate_apply_diagnose(tmp_path
     """
     # 1. Parse a complete operator-supplied YAML dict.
     yaml_dict = {
-        "connectors": [
-            {"id": "obsidian-personal", "kind": "obsidian", "name": "obsidian-personal"},
-        ],
-        "credentials": [],
-        "cc_pairs": [
-            {
-                "id": "obsidian-personal-default",
-                "connector": "obsidian-personal",
-                "credential": None,
-                "name": "obsidian-personal-default",
-            },
-        ],
-        "collections": [
-            {
-                "name": "vault-projects",
-                "sources": [{"cc_pair": "obsidian-personal-default", "path_filter": "01-Projects/*"}],
-            },
-        ],
-        "scope_profiles": [
-            {
-                "name": "agent-alpha-profile",
-                "actor_kind": "agent",
-                "entries": [
-                    {"actor_id": "agent-alpha", "collection_name": "vault-projects", "mode": "read"},
-                ],
-            },
-        ],
-        "skills": [
-            {
-                "name": "prepare-research",
-                "task_collections": [
-                    {
-                        "name": "vault-projects",
-                        "sources": [{"cc_pair": "obsidian-personal-default"}],
-                    },
-                ],
-            },
-        ],
+        "topology_v2": {
+            "connectors": [
+                {"id": "obsidian-personal", "kind": "obsidian", "name": "obsidian-personal"},
+            ],
+            "credentials": [],
+            "cc_pairs": [
+                {
+                    "id": "obsidian-personal-default",
+                    "connector": "obsidian-personal",
+                    "credential": None,
+                    "name": "obsidian-personal-default",
+                },
+            ],
+            "collections": [
+                {
+                    "name": "vault-projects",
+                    "sources": [{"cc_pair": "obsidian-personal-default", "path_filter": "01-Projects/*"}],
+                },
+            ],
+            "scope_profiles": [
+                {
+                    "name": "agent-alpha-profile",
+                    "actor_kind": "agent",
+                    "entries": [
+                        {"actor_id": "agent-alpha", "collection_name": "vault-projects", "mode": "read"},
+                    ],
+                },
+            ],
+            "skills": [
+                {
+                    "name": "prepare-research",
+                    "task_collections": [
+                        {
+                            "name": "vault-projects",
+                            "sources": [{"cc_pair": "obsidian-personal-default"}],
+                        },
+                    ],
+                },
+            ],
+        }
     }
     config = parse_topology_v2(yaml_dict)
     assert len(config.connectors) == 1
@@ -198,12 +200,14 @@ def test_composed_topology_v2_config_path_validation_catches_dangling_reference(
     _ = _bootstrap_db(tmp_path)
     config = parse_topology_v2(
         {
-            "collections": [
-                {
-                    "name": "vault",
-                    "sources": [{"cc_pair": "never-declared", "path_filter": "*"}],
-                }
-            ],
+            "topology_v2": {
+                "collections": [
+                    {
+                        "name": "vault",
+                        "sources": [{"cc_pair": "never-declared", "path_filter": "*"}],
+                    }
+                ],
+            }
         }
     )
     failures = validate_topology_v2_references(config)
