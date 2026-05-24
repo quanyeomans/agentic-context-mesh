@@ -59,29 +59,27 @@ def validate_config(data: dict[str, Any]) -> list[str]:
 def _validate_topology_v2(data: dict[str, Any]) -> list[str]:
     """Parse + cross-reference-check the Wave D topology v2 blocks.
 
-    Default-safe: when none of the topology v2 blocks is set, returns
-    ``[]`` without touching the parser. Parse errors and validation
-    failures both render as F21-shaped operator-friendly strings.
+    Default-safe: when the ``topology_v2:`` parent key is absent (or
+    null), returns ``[]`` without touching the parser. Parse errors and
+    validation failures both render as F21-shaped operator-friendly
+    strings.
 
-    ``collections`` overlaps with the legacy ``collections.shared``
-    block (legacy is ``{shared: [...]}``); Wave D's top-level
-    ``collections`` is reserved for a future evolution where the v2
-    schema lives under a distinct key. For now, Wave D parses every
-    block EXCEPT ``collections`` so the legacy contract that requires
-    ``collections: <mapping>`` stays intact. Cross-reference rule 3
-    (collections.*.sources.*.cc_pair) is therefore inactive until the
-    Wave D top-level key resolves the name overlap — tracked in the
-    Wave D commit body.
+    Post #305: the six Wave D blocks (connectors / credentials /
+    cc_pairs / collections / scope_profiles / skills) live under a
+    single ``topology_v2:`` parent key so the Wave D ``collections:``
+    block stops colliding with the legacy top-level
+    ``collections.shared`` dict shape. With the namespace fix all five
+    cross-reference rules — including rule 3
+    (``collections.*.sources.*.cc_pair``) — now fire end-to-end against
+    the Wave D ``topology_v2.collections:`` declarations.
     """
-    topology_keys = ("connectors", "credentials", "cc_pairs", "scope_profiles", "skills")
-    if not any(data.get(k) for k in topology_keys):
+    if data.get("topology_v2") is None:
         return []
     from kairix.config import parse_topology_v2, validate_topology_v2_references
     from kairix.config.topology_v2 import TopologyV2ParseError
 
-    wave_d_view: dict[str, Any] = {k: data.get(k) for k in topology_keys}
     try:
-        parsed = parse_topology_v2(wave_d_view)
+        parsed = parse_topology_v2(data)
     except TopologyV2ParseError as exc:
         return [f"topology_v2: parse failed — {exc}"]
     failures = validate_topology_v2_references(parsed)

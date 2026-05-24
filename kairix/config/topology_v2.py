@@ -1,21 +1,29 @@
 """Topology v2 operator-config dataclasses + YAML-dict parser (Wave D).
 
-Six top-level optional blocks promoted into ``kairix.config.yaml`` per
-ADR v2 §"Wave D":
+Six nested blocks under a single ``topology_v2:`` parent key in
+``kairix.config.yaml`` per ADR v2 §"Wave D":
 
-* ``connectors:``      — connector instances (kind + name + config)
-* ``credentials:``     — credential references (secret_name etc.)
-* ``cc_pairs:``        — ConnectorCredentialPair triads
-* ``collections:``     — retrieval buckets with source filters
-* ``scope_profiles:``  — per-actor (collection, rights) entries
-* ``skills:``          — composable retrieval strategies
+.. code-block:: yaml
 
-All six are optional + permit empty lists, so existing operators see
-zero behaviour change when they upgrade. The default-safe principle
-(per the feature-flag architecture §2.1) is structurally enforced — a
-new operator deployment without any topology v2 blocks parses to an
-all-empty :class:`TopologyV2Config`, and the validator returns no
-failures.
+    topology_v2:
+      connectors:      []   # connector instances (kind + name + config)
+      credentials:     []   # credential references (secret_name etc.)
+      cc_pairs:        []   # ConnectorCredentialPair triads
+      collections:     []   # retrieval buckets with source filters
+      scope_profiles:  []   # per-actor (collection, rights) entries
+      skills:          []   # composable retrieval strategies
+
+The parent-key namespace (#305) keeps the Wave D ``collections:`` block
+from colliding with the legacy top-level ``collections.shared`` dict
+shape and aligns the YAML surface with the ``topology_v2_config``
+feature flag name.
+
+All six nested blocks are optional + permit empty lists, so existing
+operators see zero behaviour change when they upgrade. The default-safe
+principle (per the feature-flag architecture §2.1) is structurally
+enforced — a new operator deployment without a ``topology_v2:`` block
+parses to an all-empty :class:`TopologyV2Config`, and the validator
+returns no failures.
 
 Parsing is permissive at the boundary (missing optional fields default
 to None / empty tuple) but strict in shape: a dict where a list is
@@ -428,28 +436,39 @@ def _parse_one_skill(prefix: str, raw: Any) -> SkillConfig:
 def parse_topology_v2(data: dict[str, Any]) -> TopologyV2Config:
     """Parse a YAML-loaded dict into a :class:`TopologyV2Config`.
 
-    All six blocks are optional. Empty data or data without any
-    topology v2 keys parses to ``TopologyV2Config()``. Structural type
-    errors raise :exc:`TopologyV2ParseError`; cross-reference checks
-    are deferred to :func:`validate_topology_v2_references`.
+    Reads the six Wave D blocks from ``data["topology_v2"]`` (the
+    namespaced parent key landed in #305). Empty data, missing
+    ``topology_v2`` key, or an explicit ``topology_v2: null`` all parse
+    to ``TopologyV2Config()``. Structural type errors raise
+    :exc:`TopologyV2ParseError`; cross-reference checks are deferred to
+    :func:`validate_topology_v2_references`.
 
     Per the F42 boundary discipline: returns a frozen dataclass tree;
     callers never touch ``dict[str, Any]`` again after parsing.
     """
-    connectors_raw = _require_list("connectors", data.get("connectors"))
-    credentials_raw = _require_list("credentials", data.get("credentials"))
-    cc_pairs_raw = _require_list("cc_pairs", data.get("cc_pairs"))
-    collections_raw = _require_list("collections", data.get("collections"))
-    scope_profiles_raw = _require_list("scope_profiles", data.get("scope_profiles"))
-    skills_raw = _require_list("skills", data.get("skills"))
+    raw_section = data.get("topology_v2")
+    if raw_section is None:
+        return TopologyV2Config()
+    section = _require_dict("topology_v2", raw_section)
+
+    connectors_raw = _require_list("topology_v2.connectors", section.get("connectors"))
+    credentials_raw = _require_list("topology_v2.credentials", section.get("credentials"))
+    cc_pairs_raw = _require_list("topology_v2.cc_pairs", section.get("cc_pairs"))
+    collections_raw = _require_list("topology_v2.collections", section.get("collections"))
+    scope_profiles_raw = _require_list("topology_v2.scope_profiles", section.get("scope_profiles"))
+    skills_raw = _require_list("topology_v2.skills", section.get("skills"))
 
     return TopologyV2Config(
-        connectors=tuple(_parse_one_connector(f"connectors[{i}]", c) for i, c in enumerate(connectors_raw)),
-        credentials=tuple(_parse_one_credential(f"credentials[{i}]", c) for i, c in enumerate(credentials_raw)),
-        cc_pairs=tuple(_parse_one_cc_pair(f"cc_pairs[{i}]", p) for i, p in enumerate(cc_pairs_raw)),
-        collections=tuple(_parse_one_collection(f"collections[{i}]", c) for i, c in enumerate(collections_raw)),
-        scope_profiles=tuple(
-            _parse_one_scope_profile(f"scope_profiles[{i}]", s) for i, s in enumerate(scope_profiles_raw)
+        connectors=tuple(_parse_one_connector(f"topology_v2.connectors[{i}]", c) for i, c in enumerate(connectors_raw)),
+        credentials=tuple(
+            _parse_one_credential(f"topology_v2.credentials[{i}]", c) for i, c in enumerate(credentials_raw)
         ),
-        skills=tuple(_parse_one_skill(f"skills[{i}]", s) for i, s in enumerate(skills_raw)),
+        cc_pairs=tuple(_parse_one_cc_pair(f"topology_v2.cc_pairs[{i}]", p) for i, p in enumerate(cc_pairs_raw)),
+        collections=tuple(
+            _parse_one_collection(f"topology_v2.collections[{i}]", c) for i, c in enumerate(collections_raw)
+        ),
+        scope_profiles=tuple(
+            _parse_one_scope_profile(f"topology_v2.scope_profiles[{i}]", s) for i, s in enumerate(scope_profiles_raw)
+        ),
+        skills=tuple(_parse_one_skill(f"topology_v2.skills[{i}]", s) for i, s in enumerate(skills_raw)),
     )
