@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "channels": [
+    {
+      "id": "C0001",
+      "name": "engagement-public",
+      "is_channel": true,
+      "is_member": true,
+      "is_archived": false,
+      "is_private": false
+    },
+    {
+      "id": "C0002",
+      "name": "engagement-private",
+      "is_channel": true,
+      "is_member": true,
+      "is_archived": false,
+      "is_private": true
+    },
+    {
+      "id": "D0003",
+      "name": "U_PEER",
+      "is_im": true,
+      "is_member": true,
+      "is_archived": false,
+      "user": "U_PEER"
+    }
+  ],
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}

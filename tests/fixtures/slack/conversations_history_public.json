@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "messages": [
+    {
+      "type": "message",
+      "ts": "1715000000.000100",
+      "user": "U_AGENT_ALPHA",
+      "text": "engagement scope phase 2 budget review at 10am"
+    },
+    {
+      "type": "message",
+      "ts": "1715000060.000200",
+      "user": "U_AGENT_BETA",
+      "text": "added the target operating model slide to the deck",
+      "thread_ts": "1715000060.000200"
+    },
+    {
+      "type": "message",
+      "ts": "1715000120.000300",
+      "user": "U_AGENT_GAMMA",
+      "text": "GTM intelligence platform RFP draft ready",
+      "files": [
+        {"id": "F_DECK", "name": "rfp-draft.pdf"}
+      ]
+    }
+  ],
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}

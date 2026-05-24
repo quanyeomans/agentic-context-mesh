@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "messages": [
+    {
+      "type": "message",
+      "ts": "1715300000.000100",
+      "user": "U_AGENT_ALPHA",
+      "text": "see attached file",
+      "files": [
+        {"id": "F_ATTACH", "name": "ops-handover.pdf", "mimetype": "application/pdf"}
+      ]
+    }
+  ],
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}

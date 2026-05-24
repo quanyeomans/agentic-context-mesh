@@ -1,0 +1,99 @@
+meta:
+  version: '1.0'
+  generated_by: kairix eval generate (slack-gold-v1, per slack.md §6.5)
+  n_cases: 8
+  name: slack
+  description: |
+    Per-connector retrieval-quality gold suite for the Slack connector.
+    Tests the IM-6-class regressions specifically on Slack: thread-rooted
+    retrieval, channel-scoped queries, DM exclusion (the tenancy contract
+    that DMs never surface in engagement-wide retrieval), bot-message
+    filtering, file-attachment linkage. Fixture corpus lives under
+    tests/fixtures/slack/ — the suite is hermetic.
+  default_collection: slack
+  score_method: ndcg
+  threshold: 0.85
+  drift_alert_pp: 2
+  fixture_corpus: tests/fixtures/slack/
+cases:
+  - id: SLACK-THREAD-001
+    category: thread_rooted
+    query: target operating model slide
+    score_method: ndcg
+    gold_titles:
+      - title: 'C0001:1715000060.000200'
+        relevance: 2
+    notes: Thread-rooted retrieval — the top result must be the thread root, not a sibling
+
+  - id: SLACK-CHANNEL-001
+    category: channel_scoped
+    query: engagement scope phase 2 budget
+    score_method: ndcg
+    gold_titles:
+      - title: 'C0001:1715000000.000100'
+        relevance: 2
+    notes: Channel-scoped — top result must be the public-channel message, not the private-channel reply
+
+  - id: SLACK-DM-EXCLUSION-001
+    category: dm_exclusion
+    query: personal-tier DM content
+    score_method: ndcg
+    gold_titles: []
+    notes: |
+      Negative case — DM content (sensitivity=personal) MUST NOT appear in
+      engagement-scope retrieval. The expected result is zero hits unless
+      the operator's scope profile explicitly includes the personal tier.
+
+  - id: SLACK-BOT-FILTER-001
+    category: bot_message_filtering
+    query: GTM intelligence platform RFP draft
+    score_method: ndcg
+    gold_titles:
+      - title: 'C0001:1715000120.000300'
+        relevance: 2
+    notes: |
+      Bot-message filtering — messages whose subtype indicates a bot post
+      (e.g. webhook, app_mention) must not outrank human authorship for
+      operator-content queries. Top result is the human author here.
+
+  - id: SLACK-FILE-LINK-001
+    category: file_attachment_linkage
+    query: rfp draft pdf attachment
+    score_method: ndcg
+    gold_titles:
+      - title: 'C0001:1715000120.000300'
+        relevance: 2
+    notes: |
+      File-attachment linkage — the carrying message surfaces in retrieval
+      and ChangeEvent.metadata.file_ids carries the file id so the Silver
+      processor can correlate the file body with its source message.
+
+  - id: SLACK-CROSS-COLLECTION-001
+    category: cross_collection_bm25
+    query: engagement scope
+    score_method: ndcg
+    gold_titles:
+      - title: 'C0001:1715000000.000100'
+        relevance: 2
+    notes: |
+      Cross-collection BM25 — Slack chunks rank by relevance, not by
+      collection-IDF dilution (KFEAT-015 dependency surfaces here).
+
+  - id: SLACK-NEGATIVE-WRONG-WORKSPACE-001
+    category: negative_wrong_workspace
+    query: other-workspace-only-phrase-12345
+    score_method: ndcg
+    gold_titles: []
+    notes: |
+      Negative — query containing only an out-of-workspace phrase must
+      return zero results (workspace isolation contract).
+
+  - id: SLACK-NEGATIVE-ACCESS-REVOKED-001
+    category: negative_access_revoked
+    query: content from a revoked channel
+    score_method: ndcg
+    gold_titles: []
+    notes: |
+      Negative — when the bot was removed from a channel
+      (access_state=REVOKED), retrieval must return the
+      ResultEnvelope.excluded_collections hint rather than stale results.

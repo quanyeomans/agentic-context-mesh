@@ -1,0 +1,9 @@
+{
+  "sequence": [
+    {"step": 1, "kind": "open", "outcome": "ok"},
+    {"step": 2, "kind": "drain", "events": [{"envelope_id": "E1", "payload": {"event": {"type": "message", "channel": "C0001", "ts": "1715000500.000100", "user": "U_AGENT_ALPHA", "text": "first realtime hello"}}}]},
+    {"step": 3, "kind": "ws_close", "reason": "server hangup"},
+    {"step": 4, "kind": "reopen", "outcome": "ok"},
+    {"step": 5, "kind": "drain", "events": [{"envelope_id": "E2", "payload": {"event": {"type": "message", "channel": "C0001", "ts": "1715000600.000100", "user": "U_AGENT_BETA", "text": "second realtime hello after reconnect"}}}]}
+  ]
+}

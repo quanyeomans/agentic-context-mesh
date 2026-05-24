@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "messages": [
+    {
+      "type": "message",
+      "ts": "1715200000.000100",
+      "user": "U_PEER",
+      "text": "personal-tier DM content — must never leak to engagement collections"
+    }
+  ],
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}

@@ -38,3 +38,4 @@ Feature: End-to-end connector sync journey
       | notion              | passthrough  |
       | notion              | markitdown   |
       | github              | passthrough  |
+      | slack               | passthrough  |

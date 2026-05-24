@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "messages": [
+    {
+      "type": "message",
+      "ts": "1715100000.000100",
+      "user": "U_AGENT_ALPHA",
+      "text": "client BOQ data strategy 2021 walkthrough draft"
+    }
+  ],
+  "response_metadata": {
+    "next_cursor": ""
+  }
+}
