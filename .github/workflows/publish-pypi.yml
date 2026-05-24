@@ -73,20 +73,36 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Wait for PyPI propagation
-        run: sleep 60
-
       - name: Install and smoke test
         # The PyPI distribution name (kairix-agentic-knowledge-mgt) is
         # different from the Python import name (kairix). pip resolves
         # the long form; ``import kairix`` and the ``kairix`` console
         # script are unchanged for end users.
+        #
+        # PyPI alpha-tag propagation through the CDN is variable — observed
+        # 60-180s on v2026.5.24a1. The retry loop replaces the fixed sleep
+        # so verify doesn't fail when the package is genuinely there but
+        # just hasn't propagated yet. 6 attempts x 30s = 3 min upper bound,
+        # which covers every propagation latency observed to date.
         env:
           # release event provides .release.tag_name; workflow_dispatch
           # passes the tag via inputs.ref.
           TAG_NAME: ${{ github.event.release.tag_name || inputs.ref }}
         run: |
           VERSION="${TAG_NAME#v}"
-          pip install "kairix-agentic-knowledge-mgt==${VERSION}"
+          PKG="kairix-agentic-knowledge-mgt==${VERSION}"
+          for attempt in 1 2 3 4 5 6; do
+            echo "verify attempt ${attempt}/6 - pip install ${PKG}"
+            if pip install "${PKG}"; then
+              echo "verify: install succeeded on attempt ${attempt}"
+              break
+            fi
+            if [ "${attempt}" = "6" ]; then
+              echo "verify: install failed after 6 attempts x 30s"
+              exit 1
+            fi
+            echo "verify: install missed propagation; sleeping 30s before next attempt"
+            sleep 30
+          done
           python -c "import kairix; print(f'kairix {kairix.__version__} installed successfully')"
           kairix --version
