@@ -1197,7 +1197,7 @@ def test_topology_v2_cc_pairs_registered_missing_pair() -> None:
     assert result.ok is False
     assert "obsidian-personal" in result.detail
     assert result.fix is not None
-    assert "apply-config" in result.fix
+    assert "restart the worker" in result.fix
 
 
 @pytest.mark.unit
