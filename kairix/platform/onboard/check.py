@@ -178,9 +178,10 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
         "re-run the validator."
     ),
     _CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED: (
-        "fix: run `kairix worker apply-config` to write the declared topology_v2 "
-        "cc_pairs into the topology_cc_pairs table. next: re-run "
-        "`kairix onboard check` to confirm every declared cc_pair has a row."
+        "fix: restart the worker (e.g. `docker compose restart kairix-worker` or "
+        "`systemctl restart kairix-worker`) — the apply-bridge runs at boot when "
+        "`topology_v2_config` is on and materialises declared cc_pairs idempotently. "
+        "next: re-run `kairix onboard check` to confirm every declared cc_pair has a row."
     ),
     _CHECK_SHAREPOINT_CREDENTIALS_LOADED: (
         "fix: set the three M365 client-credentials secrets that the SharePoint "
@@ -1281,9 +1282,9 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
     ``kairix.config.yaml`` and cross-checks against the live
     ``topology_cc_pairs`` table (read via the production
     ``list_cc_pairs`` helper). A declared cc_pair without a matching DB
-    row means the apply-bridge hasn't run for it yet — typically a
-    missing ``kairix worker apply-config`` invocation after editing the
-    YAML.
+    row means the apply-bridge hasn't run for it yet — typically the
+    worker hasn't been restarted since the YAML edit (the apply-bridge
+    runs at boot when ``topology_v2_config`` is on).
 
     ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
     binds the production flag / config / DB readers).
@@ -1303,7 +1304,10 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
             name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
             ok=False,
             detail=f"config loader raised: {exc}",
-            fix="fix: ensure kairix.config.yaml exists and is readable. next: run `kairix worker apply-config`.",
+            fix=(
+                "fix: ensure kairix.config.yaml exists and is readable. "
+                "next: restart the worker so the apply-bridge re-runs."
+            ),
         )
     if data is None:
         return CheckResult(
@@ -1339,7 +1343,7 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
             name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
             ok=False,
             detail=f"topology_cc_pairs lookup failed: {exc}",
-            fix="fix: ensure the SQLite database is reachable. next: run `kairix worker apply-config`.",
+            fix=("fix: ensure the SQLite database is reachable. next: restart the worker so the apply-bridge re-runs."),
         )
 
     missing = sorted(declared_names - registered)
@@ -1348,7 +1352,10 @@ def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = Non
             name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
             ok=False,
             detail=(f"{len(missing)} declared cc_pair(s) not registered in topology_cc_pairs: {', '.join(missing)}"),
-            fix="fix: run `kairix worker apply-config` to materialise the declared cc_pairs.",
+            fix=(
+                "fix: restart the worker — the apply-bridge runs at boot "
+                "and materialises declared cc_pairs idempotently."
+            ),
         )
 
     return CheckResult(
