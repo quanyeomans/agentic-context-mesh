@@ -32,3 +32,6 @@ Feature: End-to-end connector sync journey
       | dex_crm             | passthrough  |
       | m365_email_headers  | passthrough  |
       | m365_calendar       | passthrough  |
+      | sharepoint          | markitdown   |
+      | sharepoint          | pptx         |
+      | sharepoint          | docx         |

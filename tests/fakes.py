@@ -2409,6 +2409,91 @@ class FakeM365CalendarConnector:
         return self._sensitivity
 
 
+class FakeSharePointConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    SharePoint plugin's contract test.
+
+    Constructor takes the drive-item envelopes to emit; the fake
+    satisfies the full Protocol surface without touching the Microsoft
+    Graph network. This is the canonical fake F43 pairs with the real
+    :class:`kairix.connectors.sharepoint.SharePointConnector` inside
+    ``tests/contracts/test_sharepoint_protocol.py``.
+
+    Default sensitivity tier is ``internal`` per the connector's
+    documented default — the constructor accepts a ``sensitivity``
+    override so contract assertions can pin both the default and a
+    confidential-tier configuration.
+    """
+
+    name: str = "sharepoint"
+
+    def __init__(
+        self,
+        *,
+        items: list[dict[str, Any]] | None = None,
+        sensitivity: str = "internal",
+        delta_link: str | None = None,
+    ) -> None:
+        self._items: list[dict[str, Any]] = list(items) if items is not None else []
+        self._sensitivity = sensitivity
+        self._delta_link = delta_link
+        self._by_id: dict[str, dict[str, Any]] = {str(item.get("id")): item for item in self._items}
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        """Yield one ``created`` ChangeEvent per seeded item."""
+        _ = cursor
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        for item in self._items:
+            events.append(
+                ChangeEvent(
+                    op="created",
+                    item_id=str(item.get("id", "")),
+                    modified_at=str(item.get("lastModifiedDateTime", "1970-01-01T00:00:00Z")),
+                    metadata={
+                        "sensitivity": self._sensitivity,
+                        "drive_id": str(item.get("driveId", "fake-drive")),
+                        "name": str(item.get("name", "")),
+                        "mime": str(item.get("mimeType", "")),
+                    },
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        item = self._by_id.get(item_id, {})
+        raw = item.get("_content", b"")
+        if not isinstance(raw, bytes):
+            raw = bytes(raw)
+        mime_raw = item.get("mimeType", "application/octet-stream")
+        mime = mime_raw if isinstance(mime_raw, str) else "application/octet-stream"
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime=mime, fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        item = self._by_id.get(item_id, {})
+        url = item.get("webUrl")
+        if isinstance(url, str) and url:
+            return url
+        return f"sharepoint://items/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Round-trip the seeded delta link as a JSON cursor map."""
+        if self._delta_link is None:
+            return None
+        import json as _json
+
+        return _json.dumps({"fake-drive": self._delta_link}, sort_keys=True)
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 

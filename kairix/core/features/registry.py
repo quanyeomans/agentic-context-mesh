@@ -123,6 +123,26 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner="connector-framework",
         related_spec="docs/architecture/connector-ingestion-architecture.md",
     ),
+    "connector_sharepoint": FeatureFlag(
+        name="connector_sharepoint",
+        default=False,
+        description=(
+            "Enable the SharePoint connector — pulls document libraries (PDF / DOCX / "
+            "PPTX / XLSX) via Microsoft Graph drive-delta query, then dispatches binaries "
+            "through the kairix extractor registry."
+        ),
+        stage="introduce",
+        # SharePoint cutover plan (per feature-flag-architecture.md §7):
+        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
+        # soak → retire. Twelve-month target accommodates per-customer
+        # AAD app-registration rollout cadence — SharePoint deployments
+        # are slower to authorise than the email-headers / calendar
+        # siblings because Sites.Read.All needs higher-tier consent.
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
+    ),
     "topology_v2_schema": FeatureFlag(
         name="topology_v2_schema",
         default=False,

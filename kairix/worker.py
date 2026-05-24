@@ -765,6 +765,58 @@ def dispatch_m365_email_headers_sync(
     return off_branch()
 
 
+def sharepoint_off_branch_noop() -> ConnectorSyncResult:
+    """OFF-branch default for :func:`dispatch_sharepoint_sync` —
+    return zero counters and emit the operator-visible signal that the
+    SharePoint connector is gated off.
+
+    F6-clean: a real callable default, no ``None``. Public so the
+    feature-flag BDD steps can reach it without an internal-name
+    import (F5).
+    """
+    logger.info("worker: sharepoint connector gated off (flag OFF)")
+    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+
+def run_via_sharepoint_connector() -> ConnectorSyncResult:
+    """ON-branch default for :func:`dispatch_sharepoint_sync` — delegate
+    to the canonical :func:`run_connector_sync_pipeline` which resolves
+    the ``sharepoint`` plugin via its entry-point factory and drives the
+    standard ConnectorPipeline.
+
+    The branch log distinguishes the SharePoint path from the sibling
+    M365 / obsidian paths so operators can tell which connector ran by
+    grep-ing INFO logs.
+    """
+    logger.info("worker: sharepoint connector running (flag ON)")
+    return run_connector_sync_pipeline()
+
+
+def dispatch_sharepoint_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_sharepoint_connector,
+    off_branch: Callable[[], ConnectorSyncResult] = sharepoint_off_branch_noop,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the SharePoint connector slot.
+
+    Reads the ``connector_sharepoint`` flag and routes to the ON branch
+    (the standard connector pipeline, which resolves the ``sharepoint``
+    plugin) or the OFF branch (a no-op that skips the connector
+    entirely). Mirrors :func:`dispatch_connector_sync` shape — the BDD
+    + integration tests pin the flag through
+    :class:`FakeFeatureFlagResolver` and observe the branch via the
+    per-helper INFO log.
+
+    Gating happens at the connector-selection boundary — when OFF, the
+    sharepoint plugin never runs even if listed in
+    ``kairix.config.yaml``. When ON, the connector is selected via the
+    standard config + entry-point shape.
+    """
+    if read_flag("connector_sharepoint"):
+        return on_branch()
+    return off_branch()
+
+
 @dataclass
 class WorkerDeps:
     """Injectable dependencies for the worker loop and its task helpers.

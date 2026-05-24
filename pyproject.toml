@@ -173,6 +173,7 @@ obsidian           = "kairix.connectors.obsidian:make_connector"
 dex_crm            = "kairix.connectors.dex_crm:make_connector"
 m365_email_headers = "kairix.connectors.m365_email_headers:make_connector"
 m365_calendar      = "kairix.connectors.m365_calendar:make_connector"
+sharepoint         = "kairix.connectors.sharepoint:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and
