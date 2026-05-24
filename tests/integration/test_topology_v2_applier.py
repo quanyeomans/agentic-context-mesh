@@ -97,7 +97,7 @@ def _open_sqlite(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_flag_off_apply_at_boot_is_noop(tmp_path: Path) -> None:
-    """Flag OFF: apply_topology_v2_at_boot returns True without opening the DB.
+    """Flag OFF: apply_topology_v2_at_boot returns None without opening the DB.
 
     Default-safe principle — when the operator hasn't promoted the
     ``topology_v2_config`` flag yet, the worker boot path is bit-for-bit
@@ -117,8 +117,8 @@ def test_flag_off_apply_at_boot_is_noop(tmp_path: Path) -> None:
         config_path_resolver=lambda: config_path,
         db_factory=_fake_db_factory,
     )
-    ok = apply_topology_v2_at_boot(deps)
-    assert ok is True
+    result = apply_topology_v2_at_boot(deps)
+    assert result is None
     # The flag-off branch must never open the DB.
     assert db_factory_calls == []
 
@@ -133,8 +133,8 @@ def test_flag_on_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
         config_path_resolver=lambda: config_path,
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
-    ok = apply_topology_v2_at_boot(deps)
-    assert ok is True
+    result = apply_topology_v2_at_boot(deps)
+    assert result is None
 
     # Read back via a fresh connection — the applier committed.
     db = sqlite3.connect(str(db_path))
