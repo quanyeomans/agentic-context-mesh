@@ -15,8 +15,13 @@ from pathlib import Path
 
 import pytest
 
+from kairix.connectors.m365_email_headers.connector import (
+    M365Credentials,
+    M365EmailHeadersConnector,
+)
 from kairix.connectors.obsidian.connector import ObsidianConnector
 from kairix.core.protocols import HierarchyConnector
+from tests.fakes import FakeFeatureFlagResolver
 
 
 @pytest.mark.contract
@@ -30,6 +35,43 @@ def test_obsidian_hierarchy_parent_before_child(tmp_path: Path) -> None:
     connector = ObsidianConnector(vault_root=tmp_path)
     assert isinstance(connector, HierarchyConnector)
     nodes = list(connector.load_hierarchy(cc_pair_id=1))
+    seen: set[str] = set()
+    for node in nodes:
+        if node.raw_parent_id is not None:
+            assert node.raw_parent_id in seen, (
+                f"orphan emission: {node.raw_node_id} references parent {node.raw_parent_id!r} not yet emitted"
+            )
+        seen.add(node.raw_node_id)
+
+
+@pytest.mark.contract
+def test_m365_email_headers_hierarchy_parent_before_child() -> None:
+    """M365 email-headers HierarchyConnector emits root before per-mailbox FOLDER nodes.
+
+    Wave E pilot — when the ``topology_v2_m365_email_headers`` flag is ON,
+    the connector emits one synthetic root FOLDER node followed by one
+    FOLDER per configured mailbox UPN. The root is emitted FIRST so
+    every per-mailbox node's ``raw_parent_id`` references a
+    previously-emitted root (parent-before-child per F58).
+
+    Sabotage proof: flipping the loop order in ``load_hierarchy`` so the
+    per-mailbox FOLDER yield runs ahead of the root yield makes this
+    assertion fail — each mailbox node references the unseen root.
+    """
+    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_m365_email_headers", True)
+    connector = M365EmailHeadersConnector(
+        user_principal_name="agent-alpha@example.com",
+        credentials=M365Credentials(
+            tenant_id="fake-tenant",
+            client_id="fake-client",
+            client_secret="fake-secret-value",  # pragma: allowlist secret — test fixture
+        ),
+        mailboxes=["agent-beta@example.com", "agent-gamma@example.com"],
+        flag_reader=resolver.get,
+    )
+    assert isinstance(connector, HierarchyConnector)
+    nodes = list(connector.load_hierarchy(cc_pair_id=1))
+    assert nodes, "Wave E pilot: load_hierarchy must emit at least the root + per-mailbox FOLDER nodes"
     seen: set[str] = set()
     for node in nodes:
         if node.raw_parent_id is not None:

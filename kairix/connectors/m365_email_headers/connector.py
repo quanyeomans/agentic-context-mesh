@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -51,6 +51,7 @@ from kairix.core.protocols import (
     ChangeEvent,
     Container,
     Cursor,
+    HierarchyNode,
     RawArtefact,
     Sensitivity,
 )
@@ -80,6 +81,23 @@ GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 # RFC822.
 HEADER_ARTEFACT_MIME = "application/json"
 
+# Wave E topology v2 pilot — name of the per-connector flag that gates
+# the multi-container (per-mailbox) shape. Module-level constant so the
+# F52 call-site scan picks up exactly one verbatim reference per call
+# site. Mirrors the ``TOPOLOGY_V2_OBSIDIAN_FLAG`` shape in the obsidian
+# Wave E pilot.
+TOPOLOGY_V2_M365_EMAIL_HEADERS_FLAG = "topology_v2_m365_email_headers"
+
+# Stable identifier for the synthetic root hierarchy node. Each mailbox
+# FOLDER node hangs off this single root so the receiver builds the
+# tree in one pass (F58 parent-before-child).
+_HIERARCHY_ROOT_ID = "m365-email-headers"
+
+# F17 — extract the ``"sensitivity"`` metadata key (used in legacy +
+# Wave E ChangeEvent emission + make_connector config validation) so
+# the literal lives in one place.
+_SENSITIVITY_METADATA_KEY = "sensitivity"
+
 
 def _now_iso() -> str:
     """Return a current ISO-8601 UTC timestamp matching the connector
@@ -102,6 +120,35 @@ class M365Credentials:
     tenant_id: str
     client_id: str
     client_secret: str
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production default for the topology-v2-m365_email_headers flag check.
+
+    Delegates to :func:`kairix.core.features.flag` so the production
+    path threads through the env-var → config-overlay → registry
+    resolution chain. Tests inject a different callable (typically one
+    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
+    branch under test is pinned without monkey-patching the resolver
+    module (F1-clean / F2-clean).
+
+    Lifted to a module-level helper so the connector's signature can
+    carry a real callable default (F6-clean) without a per-call
+    ``Optional[...] = None`` shape.
+    """
+    from kairix.core.features import flag as _prod_flag
+
+    return _prod_flag(name)
+
+
+def _default_client_builder(auth: OAuth2ClientCredsAuth, upn: str) -> M365GraphClient:
+    """Production default for constructing a per-mailbox Graph client.
+
+    Lifted to module-level so the connector's constructor can carry a
+    real callable default (F6-clean) — tests pass a stub builder that
+    returns an :class:`httpx.MockTransport`-backed client.
+    """
+    return M365GraphClient(user_principal_name=upn, auth=auth)
 
 
 def _resolve_credentials_from_secrets() -> M365Credentials:
@@ -150,6 +197,8 @@ class M365EmailHeadersConnector:
         credentials: M365Credentials | None = None,
         client_builder: Callable[[OAuth2ClientCredsAuth, str], M365GraphClient] | None = None,
         auth: OAuth2ClientCredsAuth | None = None,
+        mailboxes: Sequence[str] | None = None,
+        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         if not user_principal_name:
             raise ValueError(
@@ -158,6 +207,19 @@ class M365EmailHeadersConnector:
                 "next: see docs/architecture/connector-ingestion-architecture.md §8."
             )
         self._upn = user_principal_name
+
+        # Wave E topology v2 — each configured mailbox is a Container with
+        # its own delta cursor. The primary ``user_principal_name`` is
+        # always included so the legacy single-mailbox config keeps
+        # working without an explicit ``mailboxes`` block. Sorted for
+        # deterministic ``iter_containers`` / ``load_hierarchy`` order
+        # (mirrors the obsidian Wave E pilot's sort behaviour).
+        all_mailboxes: list[str] = [user_principal_name]
+        if mailboxes is not None:
+            for extra in mailboxes:
+                if extra and extra not in all_mailboxes:
+                    all_mailboxes.append(extra)
+        self._mailboxes: tuple[str, ...] = tuple(sorted(all_mailboxes))
 
         resolved_auth: OAuth2ClientCredsAuth
         if auth is not None:
@@ -171,14 +233,24 @@ class M365EmailHeadersConnector:
                 scope=GRAPH_DEFAULT_SCOPE,
             )
         self._auth = resolved_auth
+        # Hold the client_builder so per-mailbox Graph clients can be
+        # lazily constructed for the Wave E ON branch
+        # (``list_changes_for_container``). Each mailbox needs its own
+        # client because the UPN is baked into the Graph URL template;
+        # caching keeps per-tick construction cheap.
+        self._client_builder: Callable[[OAuth2ClientCredsAuth, str], M365GraphClient] = (
+            client_builder if client_builder is not None else _default_client_builder
+        )
+        self._flag_reader = flag_reader
 
-        if client_builder is not None:
-            self._graph = client_builder(resolved_auth, user_principal_name)
-        else:
-            self._graph = M365GraphClient(
-                user_principal_name=user_principal_name,
-                auth=resolved_auth,
-            )
+        # The legacy single-mailbox Graph client — used by ``list_changes``
+        # for the OFF branch and by ``fetch`` after either branch has
+        # primed the per-tick cache.
+        self._graph = self._client_builder(resolved_auth, user_principal_name)
+        # Per-mailbox Graph clients keyed by UPN. Populated lazily on the
+        # first Wave E ``list_changes_for_container`` call for each
+        # mailbox so the OFF branch pays nothing.
+        self._per_mailbox_graph: dict[str, M365GraphClient] = {user_principal_name: self._graph}
         # Cache for last-fetched messages so ``fetch`` can return the
         # already-acquired header envelope without a second Graph call.
         # Bronze-write happens once per item per tick.
@@ -186,6 +258,10 @@ class M365EmailHeadersConnector:
         # The next-tick cursor — populated after a successful
         # ``list_changes`` drain.
         self._next_cursor: str | None = None
+        # Per-container next-cursors — populated by
+        # ``list_changes_for_container`` so the framework can persist a
+        # distinct deltaLink per mailbox to ``topology_containers.cursor_token``.
+        self._next_cursor_by_container: dict[str, str | None] = {}
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
@@ -210,7 +286,7 @@ class M365EmailHeadersConnector:
                     op="created",
                     item_id=message.message_id,
                     modified_at=_event_modified_at(message),
-                    metadata={"sensitivity": LOCKED_SENSITIVITY},
+                    metadata={_SENSITIVITY_METADATA_KEY: LOCKED_SENSITIVITY},
                 )
             )
         self._next_cursor = self._graph.last_delta_link()
@@ -293,6 +369,219 @@ class M365EmailHeadersConnector:
         per-container routing).
         """
         return self.list_changes(checkpoint)
+
+    # ------------------------------------------------------------------
+    # Topology v2 Wave E — per-mailbox multi-container pilot
+    # ------------------------------------------------------------------
+    # Wave B landed shim implementations of the capability Protocols
+    # (PollConnector / CheckpointedConnector / HierarchyConnector). Wave E
+    # adds real implementations behind the
+    # ``topology_v2_m365_email_headers`` flag:
+    #
+    #   * :meth:`iter_containers` — one :class:`Container` per configured
+    #     mailbox UPN, each with its own per-mailbox Graph delta cursor.
+    #   * :meth:`list_changes_for_container` — when flag ON, drives a
+    #     :meth:`M365GraphClient.iter_messages` call against
+    #     ``container.container_id`` ONLY using ``container.cursor_token``
+    #     as the per-mailbox deltaLink. When flag OFF, retains the Wave B
+    #     shim shape (delegate to :meth:`list_changes`).
+    #   * :meth:`load_hierarchy` — when flag ON, emits one root FOLDER
+    #     node + one FOLDER per configured mailbox (parent-before-child
+    #     per F58). When flag OFF, retains the Wave B shim shape (one
+    #     root FOLDER node only).
+    #
+    # The flag defaults OFF so existing operators see bit-for-bit
+    # current behaviour. The ON branch is the per-mailbox pattern that
+    # unlocks independent per-mailbox sync cadence and isolated cursor
+    # state per ADR v2 §Wave E.
+
+    def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
+        """Yield one :class:`Container` per configured mailbox.
+
+        Topology v2 §4: each Container has its own delta cursor — the
+        Wave E pilot maps each configured mailbox UPN to its own
+        Container so the operator can sync different mailboxes at
+        different cadences and scope retrieval per-mailbox via the
+        topology v2 collection mapping.
+
+        Calling convention: the framework's lifecycle layer (see
+        ``kairix/core/connectors/cc_pair.py``) passes ``cc_pair_id`` so
+        the connector can construct the Container without reaching back
+        into the cc_pair store. Mirrors the dispatch shape the
+        ``HierarchyConnector.load_hierarchy(cc_pair_id)`` Protocol
+        method already uses.
+
+        ``access_state`` is always ``ACCESSIBLE`` — Graph permission
+        checks happen downstream at the request layer (a permission-
+        denied response surfaces as a typed error to the framework,
+        which flips the Container's state to ``REVOKED`` via the
+        topology v2 access lifecycle). ``cursor_token`` and
+        ``last_synced_at`` start ``None``; the framework persists
+        subsequent values to the ``topology_containers`` table.
+        """
+        for mailbox in self._mailboxes:
+            yield Container(
+                cc_pair_id=cc_pair_id,
+                container_id=mailbox,
+                access_state="ACCESSIBLE",
+                cursor_token=None,
+                last_synced_at=None,
+            )
+
+    def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
+        """Stream changes for one mailbox Container.
+
+        When the ``topology_v2_m365_email_headers`` flag is ON: drives a
+        Graph ``/users/{container.container_id}/messages/delta`` query
+        starting from ``container.cursor_token`` (the previous tick's
+        deltaLink for that mailbox). Emits ChangeEvents only for
+        messages in that mailbox; per-container deltaLink is recorded
+        via :meth:`next_cursor_for_container` so the framework can
+        persist it independently from sibling containers.
+
+        When the flag is OFF: retains the Wave B shim shape — delegate
+        to :meth:`list_changes` with the container's cursor so the
+        observable shape is identical to the legacy v1 path.
+        """
+        if not self._flag_reader(TOPOLOGY_V2_M365_EMAIL_HEADERS_FLAG):
+            return self.list_changes(container.cursor_token)
+        return self._list_changes_scoped(container)
+
+    def retrieve_all_slim_docs(self, _container: Container) -> Iterator[str]:
+        """SlimConnector shim — Graph delta is ID-only friendly via iter_messages.
+
+        The Graph delta endpoint already returns header-only envelopes
+        (no body content per ADR-004) — this shim drains the per-
+        mailbox iterator and yields only ``message_id`` strings for
+        the prune cycle's diff against ``documents.item_id``. Uses the
+        container's own cursor so prune walks observe the same horizon
+        as :meth:`list_changes_for_container`.
+        """
+        mailbox = _container.container_id or self._upn
+        graph = self._per_mailbox_client(mailbox)
+        for message in graph.iter_messages(start_url=_container.cursor_token):
+            yield message.message_id
+
+    def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
+        """HierarchyConnector — emit one root FOLDER + one FOLDER per mailbox.
+
+        When the ``topology_v2_m365_email_headers`` flag is ON: emits a
+        synthetic root FOLDER node (``raw_node_id="m365-email-headers"``,
+        ``raw_parent_id=None``) followed by one FOLDER per configured
+        mailbox as children of root. Order is root-first then mailboxes
+        in sorted UPN order so parent-before-child per F58 holds
+        trivially in a single pass.
+
+        When the flag is OFF: retains the Wave B shim shape — one root
+        FOLDER node only.
+
+        ``raw_node_id`` for the per-mailbox FOLDER is the mailbox UPN
+        itself (e.g. ``alice@contoso.com``) so the topology v2 hierarchy
+        store can round-trip without further mapping. ``link`` is an
+        Outlook on the Web inbox URL for that mailbox so the search
+        layer can surface a clickable affordance. ``sensitivity_hint``
+        is ``"personal"`` — the connector's locked tier per ADR-004 +
+        ADR-005.
+
+        Inbox / Sent / other Graph mail folders are NOT walked at this
+        slice — that's a Wave-E+1 enhancement that would emit one
+        FOLDER per Graph mail folder under each mailbox.
+        """
+        # Root node first — F58 parent-before-child invariant.
+        yield HierarchyNode(
+            cc_pair_id=cc_pair_id,
+            raw_node_id=_HIERARCHY_ROOT_ID,
+            raw_parent_id=None,
+            display_name="M365 Email (Headers)",
+            link=None,
+            node_type="FOLDER",
+            external_access_json=None,
+            sensitivity_hint=None,
+        )
+        if not self._flag_reader(TOPOLOGY_V2_M365_EMAIL_HEADERS_FLAG):
+            return
+        # ``sensitivity_hint`` uses the F39 tier vocabulary
+        # (public/internal/confidential/restricted) which doesn't include
+        # the legacy ``personal`` literal. Map the connector's locked
+        # personal tier onto ``restricted`` — the F39 tier that conveys
+        # "tightest engagement-scope access" — so the hint surfaces
+        # something meaningful at the hierarchy boundary. The connector
+        # boundary continues to tag chunks with the legacy ``personal``
+        # tier via ``sensitivity_for`` per ADR-004 + ADR-005.
+        for mailbox in self._mailboxes:
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=mailbox,
+                raw_parent_id=_HIERARCHY_ROOT_ID,
+                display_name=mailbox,
+                link=f"https://outlook.office.com/mail/{quote(mailbox, safe='@')}/inbox",
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint="restricted",
+            )
+
+    def next_cursor_for_container(self, container_id: str) -> str | None:
+        """Return the deltaLink the framework should persist for one mailbox.
+
+        Populated by :meth:`list_changes_for_container` on the Wave E ON
+        branch; ``None`` if that mailbox has not yet been drained this
+        process lifetime or if Graph returned no terminal deltaLink.
+
+        Distinct from :meth:`next_cursor` because Wave E persists one
+        cursor per :class:`Container` (per mailbox) rather than a single
+        connector-wide cursor.
+        """
+        return self._next_cursor_by_container.get(container_id)
+
+    def _list_changes_scoped(self, container: Container) -> Iterator[ChangeEvent]:
+        """Wave E ON-branch: drain Graph delta against one mailbox only.
+
+        Reads ``container.cursor_token`` as the per-mailbox deltaLink
+        (None for cold-start), drives a Graph
+        ``/users/{container.container_id}/messages/delta`` iteration via
+        the per-mailbox Graph client, emits one ``created`` ChangeEvent
+        per envelope, primes the per-tick fetch cache, and records the
+        terminal deltaLink in ``_next_cursor_by_container`` so the
+        framework can persist a distinct cursor per mailbox.
+
+        Per-mailbox isolation is structural: each mailbox owns its
+        Graph client (UPN baked in), its cursor read (the container's
+        ``cursor_token`` only), and its next-cursor write (keyed by
+        ``container.container_id`` in ``_next_cursor_by_container``).
+        """
+        mailbox = container.container_id
+        graph = self._per_mailbox_client(mailbox)
+        cursor = container.cursor_token
+        events: list[ChangeEvent] = []
+        for message in graph.iter_messages(start_url=cursor):
+            self._cache[message.message_id] = message
+            events.append(
+                ChangeEvent(
+                    op="created",
+                    item_id=message.message_id,
+                    modified_at=_event_modified_at(message),
+                    metadata={_SENSITIVITY_METADATA_KEY: LOCKED_SENSITIVITY, "mailbox": mailbox},
+                )
+            )
+        self._next_cursor_by_container[mailbox] = graph.last_delta_link()
+        return iter(events)
+
+    def _per_mailbox_client(self, mailbox: str) -> M365GraphClient:
+        """Resolve (or lazily build) the Graph client for one mailbox.
+
+        The primary ``user_principal_name`` mailbox's client is created
+        in ``__init__`` so the OFF branch pays the same construction
+        cost it did pre-Wave-E. Additional mailboxes get their client
+        built on first ON-branch access via the injected
+        ``client_builder``, then cached for the rest of the process
+        lifetime.
+        """
+        cached = self._per_mailbox_graph.get(mailbox)
+        if cached is not None:
+            return cached
+        built = self._client_builder(self._auth, mailbox)
+        self._per_mailbox_graph[mailbox] = built
+        return built
 
     def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
         """CredentialsConnector shim — return the input unchanged.
@@ -393,7 +682,7 @@ def make_connector(config: Mapping[str, Any]) -> M365EmailHeadersConnector:
             "next: see docs/architecture/connector-ingestion-architecture.md §8."
         )
 
-    declared_sensitivity = config.get("sensitivity")
+    declared_sensitivity = config.get(_SENSITIVITY_METADATA_KEY)
     if declared_sensitivity is not None and declared_sensitivity != LOCKED_SENSITIVITY:
         raise ValueError(
             f"m365_email_headers: sensitivity is locked to {LOCKED_SENSITIVITY!r} "
@@ -403,4 +692,18 @@ def make_connector(config: Mapping[str, Any]) -> M365EmailHeadersConnector:
             "next: see docs/architecture/adrs/ADR-004-email-headers-only.md."
         )
 
-    return M365EmailHeadersConnector(user_principal_name=upn)
+    raw_mailboxes = config.get("mailboxes")
+    mailboxes: list[str] | None
+    if raw_mailboxes is None:
+        mailboxes = None
+    else:
+        if not isinstance(raw_mailboxes, list | tuple) or not all(isinstance(m, str) and m for m in raw_mailboxes):
+            raise ValueError(
+                "m365_email_headers: 'mailboxes' must be a list of UPN strings. "
+                "fix: write `mailboxes: [alice@contoso.com, bob@contoso.com]` "
+                "under the m365_email_headers connector block. "
+                "next: see docs/architecture/connector-scope-topology/ADR.md Wave E."
+            )
+        mailboxes = list(raw_mailboxes)
+
+    return M365EmailHeadersConnector(user_principal_name=upn, mailboxes=mailboxes)
