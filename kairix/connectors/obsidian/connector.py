@@ -70,6 +70,11 @@ CONNECTOR_NAME = "obsidian"
 # long enough to amortise the walk on a large vault.
 DEFAULT_RECONCILE_EVERY = 10
 
+# Wave E topology v2 pilot — name of the per-connector flag that gates
+# the multi-container shape. Module-level constant so the F52 call-site
+# scan picks up exactly one verbatim reference per call site.
+TOPOLOGY_V2_OBSIDIAN_FLAG = "topology_v2_obsidian"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -86,6 +91,25 @@ def _default_known_state(_cursor: Cursor | None) -> Mapping[str, str]:
     literal. F6-clean: the default is a real callable, not ``None``.
     """
     return {}
+
+
+def _default_flag_reader(name: str) -> bool:
+    """Production default for the topology-v2-obsidian flag check.
+
+    Delegates to :func:`kairix.core.features.flag` so the production
+    path threads through the env-var → config-overlay → registry
+    resolution chain. Tests inject a different callable (typically one
+    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
+    branch under test is pinned without monkey-patching the resolver
+    module (F1-clean / F2-clean).
+
+    Lifted to a module-level helper so the connector's signature can
+    carry a real callable default (F6-clean) without a per-call
+    ``Optional[...] = None`` shape.
+    """
+    from kairix.core.features import flag as _prod_flag
+
+    return _prod_flag(name)
 
 
 class ObsidianConnector:
@@ -120,6 +144,7 @@ class ObsidianConnector:
         known_state_resolver: Callable[[Cursor | None], Mapping[str, str]] = _default_known_state,
         watcher_factory: Callable[[Path], WatchdogSource] | None = None,
         reconcile_every: int = DEFAULT_RECONCILE_EVERY,
+        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         self._vault_root = vault_root.resolve()
         self._collections: tuple[CollectionConfig, ...] = tuple(
@@ -129,6 +154,7 @@ class ObsidianConnector:
         self._known_state_resolver = known_state_resolver
         self._watcher_factory: Callable[[Path], WatchdogSource] = watcher_factory or WatchdogSource
         self._reconcile_every = max(1, reconcile_every)
+        self._flag_reader = flag_reader
 
         self._call_count = 0
         self._watcher: WatchdogSource | None = None
@@ -215,23 +241,91 @@ class ObsidianConnector:
         return self._sensitivity
 
     # ------------------------------------------------------------------
-    # Topology v2 Wave B — capability mix-in shims (no behavioural change)
+    # Topology v2 Wave E — per-connector multi-container pilot
     # ------------------------------------------------------------------
-    # The shims below let the connector satisfy the new capability
-    # Protocols (PollConnector, SlimConnector, HierarchyConnector) by
-    # delegating to existing methods. Production routing through these
-    # methods is gated by the ``topology_v2_protocol`` feature flag
-    # (default-off); Wave C activates the runtime path.
+    # Wave B landed shim implementations of the capability Protocols
+    # (PollConnector / SlimConnector / HierarchyConnector). Wave E adds
+    # real implementations behind the ``topology_v2_obsidian`` flag:
+    #
+    #   * :meth:`iter_containers` — one :class:`Container` per top-level
+    #     vault folder, each with its own per-cc_pair delta cursor.
+    #   * :meth:`list_changes_for_container` — when flag ON, scopes the
+    #     watchdog drain + reconciler walk to the container's subtree
+    #     and uses ``container.cursor_token`` as the per-container ISO
+    #     timestamp cursor. When flag OFF, retains the Wave B shim
+    #     behaviour (delegate to :meth:`list_changes`).
+    #   * :meth:`load_hierarchy` — when flag ON, walks the vault
+    #     filesystem emitting one FOLDER node per directory parent-
+    #     before-child (per F58). When flag OFF, retains the Wave B
+    #     shim behaviour (one root FOLDER node).
+    #
+    # The flag defaults OFF so existing operators see bit-for-bit
+    # current behaviour. The ON branch is the per-container pattern
+    # that subagents follow for dex_crm / m365_* / sharepoint / notion /
+    # slack / github wave-E adoption.
+
+    def iter_containers(self, cc_pair_id: int) -> Iterator[Container]:
+        """Yield one :class:`Container` per top-level vault folder.
+
+        Topology v2 §4: each Container has its own delta cursor — the
+        Wave E pilot maps each top-level folder of the vault to its own
+        Container so the operator can sync different folders at
+        different cadences and scope retrieval per-folder via the
+        topology v2 collection mapping.
+
+        Calling convention: the framework's lifecycle layer (see
+        ``kairix/core/connectors/cc_pair.py``) passes ``cc_pair_id`` so
+        the connector can construct the Container without reaching back
+        into the cc_pair store. Mirrors the dispatch shape the
+        ``HierarchyConnector.load_hierarchy(cc_pair_id)`` Protocol
+        method already uses.
+
+        ``access_state`` is always ``ACCESSIBLE`` — Obsidian vaults are
+        single-user filesystem mounts with no per-folder permission
+        story. ``cursor_token`` and ``last_synced_at`` start ``None``;
+        the framework persists subsequent values to the
+        ``topology_containers`` table.
+
+        Empty-vault fallback: if no top-level folders exist, yield one
+        Container with ``container_id=""`` representing the root itself
+        so the connector still works on a flat vault.
+        """
+        top_level = _top_level_folders(self._vault_root)
+        if not top_level:
+            yield Container(
+                cc_pair_id=cc_pair_id,
+                container_id="",
+                access_state="ACCESSIBLE",
+                cursor_token=None,
+                last_synced_at=None,
+            )
+            return
+        for folder in top_level:
+            yield Container(
+                cc_pair_id=cc_pair_id,
+                container_id=folder,
+                access_state="ACCESSIBLE",
+                cursor_token=None,
+                last_synced_at=None,
+            )
 
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
-        """PollConnector shim — delegate to :meth:`list_changes` using the container cursor.
+        """Stream changes for one Container's subtree.
 
-        ``container.cursor_token`` carries the per-cc_pair delta cursor
-        (replacing the legacy single-cursor-per-connector). The shim
-        forwards the token to the existing :meth:`list_changes` so the
-        observable behaviour is identical to the v1 path.
+        When the ``topology_v2_obsidian`` flag is ON: scopes the
+        watchdog drain + reconciler walk to ``vault_root /
+        container.container_id`` and uses ``container.cursor_token`` as
+        the per-container ISO timestamp cursor. Files outside the
+        container's subtree are filtered out so a per-folder cc_pair
+        only sees its own changes.
+
+        When the flag is OFF: retains the Wave B shim behaviour —
+        delegate to :meth:`list_changes` with the container's cursor so
+        the observable shape is identical to the legacy v1 path.
         """
-        return self.list_changes(container.cursor_token)
+        if not self._flag_reader(TOPOLOGY_V2_OBSIDIAN_FLAG):
+            return self.list_changes(container.cursor_token)
+        return self._list_changes_scoped(container)
 
     def retrieve_all_slim_docs(self, _container: Container) -> Iterator[str]:
         """SlimConnector shim — enumerate item_ids only via the reconciler walk.
@@ -249,24 +343,40 @@ class ObsidianConnector:
         return iter(ev.item_id for ev in events)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
-        """HierarchyConnector shim — emit one root FOLDER node.
+        """HierarchyConnector — emit FOLDER nodes parent-before-child.
 
-        Obsidian vaults are filesystem-flat at the Hierarchy level — the
-        vault itself is the only "folder" the search layer needs to know
-        about. A future ADR can extend this to emit per-subdirectory
-        FOLDER nodes if operators want folder-scoped collections; the
-        current shim yields one root node with ``display_name``=vault
-        root basename.
+        When the ``topology_v2_obsidian`` flag is ON: walks the vault
+        filesystem with :func:`os.walk` and emits one FOLDER node per
+        directory, parent-before-child per F58. The root folder is
+        emitted first (``raw_parent_id=None``), then every descendant
+        directory with ``raw_parent_id`` referencing the
+        previously-emitted parent's ``raw_node_id``.
+
+        When the flag is OFF: retains the Wave B shim behaviour — one
+        root FOLDER node only.
+
+        ``raw_node_id`` is the vault-root-relative POSIX path of the
+        directory (e.g. ``"02-Areas/00-Clients/Inpex"``); for the root
+        it is the vault basename. ``link`` is an ``obsidian://`` deep
+        link to the folder so the search layer can surface a clickable
+        affordance. ``sensitivity_hint`` is ``None`` — the operator
+        overrides per-folder via the collection mapping.
         """
-        yield HierarchyNode(
+        if not self._flag_reader(TOPOLOGY_V2_OBSIDIAN_FLAG):
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=self._vault_root.name,
+                raw_parent_id=None,
+                display_name=self._vault_root.name,
+                link=None,
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+            return
+        yield from _walk_hierarchy(
+            vault_root=self._vault_root,
             cc_pair_id=cc_pair_id,
-            raw_node_id=self._vault_root.name,
-            raw_parent_id=None,
-            display_name=self._vault_root.name,
-            link=None,
-            node_type="FOLDER",
-            external_access_json=None,
-            sensitivity_hint=None,
         )
 
     # ------------------------------------------------------------------
@@ -303,6 +413,54 @@ class ObsidianConnector:
             self._watcher = self._watcher_factory(self._vault_root)
         self._watcher.start()
 
+    def _list_changes_scoped(self, container: Container) -> Iterator[ChangeEvent]:
+        """Wave E ON-branch: scope change detection to one Container's subtree.
+
+        Drains the watchdog queue but filters to file events whose
+        ``item_id`` is under the container's path. Reconciles by
+        constructing a per-container :class:`FullScanReconciler` rooted
+        at the configured collection narrowed to the container's
+        subtree. The cursor is ``container.cursor_token`` so each
+        per-container cc_pair gets its own delta horizon.
+
+        Note: drains and reconciler walks happen on every call (no
+        ``reconcile_every`` cadence) because the per-container pilot
+        owns its own reconciliation schedule via the framework's
+        cc_pair lifecycle — the connector itself stays stateless
+        across containers within a single call.
+        """
+        self._ensure_watcher_started()
+        cursor = container.cursor_token
+        container_prefix = container.container_id
+
+        # Drain watchdog events; keep only those under this container.
+        drained = self._watcher.drain() if self._watcher is not None else []
+        watchdog_events = _to_change_events(_filter_to_container(drained, container_prefix))
+
+        # Build a per-container reconciler scoped to this container's
+        # subtree only. Empty known-state forces the reconciler to emit
+        # one event per file under the container; the framework's
+        # known-state resolver populates this from the documents table.
+        container_specs = _scoped_specs_for_container(self._collections, container_prefix)
+        reconciler = FullScanReconciler(
+            vault_root=self._vault_root,
+            collections=container_specs,
+        )
+        known = self._known_state_resolver(cursor)
+        reconcile_events = reconciler.reconcile(known)
+
+        # De-duplicate by item_id; watchdog wins when both fire.
+        seen: set[str] = set()
+        merged: list[ChangeEvent] = []
+        for ev in watchdog_events + reconcile_events:
+            if ev.item_id in seen:
+                continue
+            seen.add(ev.item_id)
+            if cursor is not None and ev.modified_at <= cursor:
+                continue
+            merged.append(ev)
+        return iter(merged)
+
     def _safe_resolve(self, item_id: str) -> Path:
         """Resolve ``vault_root / item_id`` and reject path traversal.
 
@@ -338,6 +496,155 @@ def _to_change_events(changes: list[FileChange]) -> list[ChangeEvent]:
     :class:`ChangeEvent` shape.
     """
     return [ChangeEvent(op=c.op, item_id=c.item_id, modified_at=c.observed_at) for c in changes]
+
+
+def _top_level_folders(vault_root: Path) -> list[str]:
+    """Return sorted vault-root-relative names of top-level directories.
+
+    Used by :meth:`ObsidianConnector.iter_containers` to map each
+    top-level folder of the vault to its own :class:`Container`.
+    Hidden directories (``.`` prefix — ``.obsidian/``, ``.git/``,
+    ``.trash/``) are skipped because they're either editor state or
+    operator-private and never represent indexable content.
+
+    Returns an empty list when the vault has no top-level directories
+    (a flat vault); the caller handles that as the root-Container
+    fallback.
+    """
+    if not vault_root.exists() or not vault_root.is_dir():
+        return []
+    folders: list[str] = []
+    for entry in sorted(vault_root.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir():
+            continue
+        if entry.name.startswith("."):
+            continue
+        folders.append(entry.name)
+    return folders
+
+
+def _filter_to_container(changes: list[FileChange], container_prefix: str) -> list[FileChange]:
+    """Keep only the file changes whose item_id is under ``container_prefix``.
+
+    Empty ``container_prefix`` means "root container" — every change
+    passes through. Non-empty prefix matches the vault-root-relative
+    POSIX-path prefix; the trailing-slash check stops
+    ``"01-Projects-Old/"`` matching when the container is
+    ``"01-Projects"``.
+    """
+    if container_prefix == "":
+        return list(changes)
+    prefix_with_slash = container_prefix.rstrip("/") + "/"
+    return [c for c in changes if c.item_id.startswith(prefix_with_slash)]
+
+
+def _scoped_specs_for_container(
+    collections: tuple[CollectionConfig, ...],
+    container_prefix: str,
+) -> list[CollectionScanSpec]:
+    """Narrow the configured collections to the container's subtree.
+
+    For each :class:`CollectionConfig`, if its ``path`` is already
+    inside the container (or the container is the root, in which case
+    every collection passes through) keep it as-is. Otherwise, re-root
+    its ``path`` at the container so the reconciler walks only the
+    container's subtree.
+
+    Falls back to a single spec covering the container's path when no
+    configured collection overlaps the container — this keeps the
+    Wave E ON branch working on a vault that has only the default
+    "whole vault" collection.
+    """
+    if container_prefix == "":
+        return _to_scan_specs(collections)
+    container_norm = container_prefix.rstrip("/")
+    specs: list[CollectionScanSpec] = []
+    for c in collections:
+        collection_norm = c.path.rstrip("/") if c.path not in ("", ".") else ""
+        is_root = collection_norm == ""
+        equals_container = container_norm == collection_norm
+        inside_container = _path_is_under(collection_norm, container_norm)
+        if is_root or equals_container or inside_container:
+            # Collection already inside (or equal to) container — keep as-is when inside;
+            # narrow to container when at-or-above container root.
+            scoped_path = collection_norm if inside_container else container_norm
+            specs.append(CollectionScanSpec(path=scoped_path, glob=c.glob, exclude=tuple(c.exclude)))
+    if not specs:
+        # No configured collection overlaps the container. Default to a
+        # whole-container walk with the standard ``**/*.md`` glob.
+        specs.append(CollectionScanSpec(path=container_norm, glob="**/*.md"))
+    return specs
+
+
+def _path_is_under(child: str, parent: str) -> bool:
+    """True when ``child`` is at or beneath ``parent`` in the vault tree."""
+    if parent == "" or child == parent:
+        return True
+    return child.startswith(parent.rstrip("/") + "/")
+
+
+def _walk_hierarchy(*, vault_root: Path, cc_pair_id: int) -> Iterator[HierarchyNode]:
+    """Walk the vault filesystem emitting one FOLDER node per directory.
+
+    Emission order is parent-before-child per F58: the root folder is
+    yielded first, then every descendant directory in
+    breadth-first-friendly :func:`os.walk` order — :func:`os.walk` with
+    ``topdown=True`` always visits a directory before its children.
+    Hidden directories (``.obsidian/``, ``.git/``, ``.trash/``) are
+    pruned from the walk so editor state doesn't pollute the hierarchy.
+
+    Each emitted :class:`HierarchyNode` carries:
+
+    * ``raw_node_id`` — the vault-root-relative POSIX path of the
+      directory; the root uses the vault's basename.
+    * ``raw_parent_id`` — ``None`` for the root, else the parent
+      directory's ``raw_node_id``.
+    * ``link`` — an ``obsidian://`` deep link to the folder.
+    * ``sensitivity_hint`` — ``None``; operators override per-folder
+      via the topology v2 collection mapping.
+    """
+    vault_name = vault_root.name
+    # Root node first — F58 parent-before-child invariant.
+    yield HierarchyNode(
+        cc_pair_id=cc_pair_id,
+        raw_node_id=vault_name,
+        raw_parent_id=None,
+        display_name=vault_name,
+        link=_obsidian_folder_link(vault_name=vault_name, folder_rel=""),
+        node_type="FOLDER",
+        external_access_json=None,
+        sensitivity_hint=None,
+    )
+    for dirpath, dirnames, _filenames in os.walk(vault_root, topdown=True):
+        # Prune hidden directories in-place so os.walk doesn't descend.
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        for dirname in dirnames:
+            abs_child = Path(dirpath) / dirname
+            rel_child = abs_child.relative_to(vault_root).as_posix()
+            rel_parent = Path(dirpath).relative_to(vault_root).as_posix()
+            parent_id = vault_name if rel_parent in (".", "") else rel_parent
+            yield HierarchyNode(
+                cc_pair_id=cc_pair_id,
+                raw_node_id=rel_child,
+                raw_parent_id=parent_id,
+                display_name=dirname,
+                link=_obsidian_folder_link(vault_name=vault_name, folder_rel=rel_child),
+                node_type="FOLDER",
+                external_access_json=None,
+                sensitivity_hint=None,
+            )
+
+
+def _obsidian_folder_link(*, vault_name: str, folder_rel: str) -> str:
+    """Build an ``obsidian://`` deep link for a folder.
+
+    The vault name and folder path are URL-encoded so spaces and
+    unicode pass through to the editor cleanly. Empty ``folder_rel``
+    addresses the vault root.
+    """
+    encoded_vault = quote(vault_name, safe="")
+    encoded_folder = quote(folder_rel, safe="/")
+    return f"obsidian://open?vault={encoded_vault}&file={encoded_folder}"
 
 
 def make_connector(config: Mapping[str, Any]) -> ObsidianConnector:
