@@ -120,8 +120,8 @@ REGISTRY: dict[str, FeatureFlag] = {
         # introduce-stage landing (current 2026-05 dispatch window).
         introduced_in="v2026.5.23",
         target_retire_in="v2026.7.23",
-        owner="connector-framework",
-        related_spec="docs/architecture/connector-ingestion-architecture.md",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
     "connector_sharepoint": FeatureFlag(
         name="connector_sharepoint",
@@ -245,6 +245,30 @@ REGISTRY: dict[str, FeatureFlag] = {
         target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
+    ),
+    "maintenance_loop": FeatureFlag(
+        name="maintenance_loop",
+        default=False,
+        description=(
+            "KFEAT-021 Phase 1 — when ON, the worker runs a periodic "
+            "MaintenanceScheduler.tick that prunes orphan content_vectors "
+            "rows (moved into content_vectors_pruned with a 7-day soft-delete "
+            "retention), rebuilds the usearch index, and heals FTS5 orphans. "
+            "Default-off until the dogfood VM cutover validates the prune + "
+            "rebuild cadence — flipping ON cleans up the 4,370-row leak the "
+            "KFEAT-020 preflight surfaced. Cadence default 24h, tunable via "
+            "KAIRIX_MAINTENANCE_INTERVAL_S."
+        ),
+        stage="introduce",
+        # KFEAT-021 cutover plan (per docs/architecture/feature-flag-architecture.md §7):
+        # 2 weeks dogfood UAT at introduce stage → 2 weeks cutover-stage soak → retire.
+        # 12-month target_retire_in matches the topology_v2_* fleet so retirement
+        # batches can roll together once Phase 2 (connector-side delete
+        # propagation) lands across every connector wave.
+        introduced_in="v2026.5.24",
+        target_retire_in="v2027.5.24",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/features/KFEAT-021-automated-orphan-cleanup/BRIEF.md",
     ),
 }
 

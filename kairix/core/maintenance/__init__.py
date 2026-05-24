@@ -1,0 +1,56 @@
+"""KFEAT-021 Phase 1 — background maintenance scheduler.
+
+Public surface:
+
+* :class:`MaintenanceScheduler` — owns the per-tick cleanup logic.
+* :class:`MaintenanceTickResult` — frozen-dataclass envelope returned
+  from :func:`MaintenanceScheduler.tick` (F39 / F42 boundary shape).
+* :class:`MaintenanceSchedulerDeps` — injection seam for usearch +
+  fts-rebuild boundaries; production callers omit it.
+
+See ``kairix-pro-platform/docs/features/KFEAT-021-automated-orphan-cleanup/BRIEF.md``
+for the design rationale (Phase 1 — proactive cleanup behind the
+``maintenance_loop`` feature flag).
+"""
+
+from __future__ import annotations
+
+from kairix.core.maintenance.scheduler import (
+    EVENT_TICK_COMPLETED,
+    EVENT_TICK_FAILED,
+    EVENT_TICK_STARTED,
+    STAGE_FTS,
+    STAGE_GC,
+    STAGE_PRUNE,
+    STAGE_USEARCH,
+    MaintenanceScheduler,
+    MaintenanceSchedulerDeps,
+    MaintenanceTickResult,
+    compute_next_tick_at,
+    count_current_orphans,
+    count_pruned_rows,
+    is_tick_due,
+    render_iso,
+    tick_to_dict,
+    tick_within_jitter_window,
+)
+
+__all__ = [
+    "EVENT_TICK_COMPLETED",
+    "EVENT_TICK_FAILED",
+    "EVENT_TICK_STARTED",
+    "STAGE_FTS",
+    "STAGE_GC",
+    "STAGE_PRUNE",
+    "STAGE_USEARCH",
+    "MaintenanceScheduler",
+    "MaintenanceSchedulerDeps",
+    "MaintenanceTickResult",
+    "compute_next_tick_at",
+    "count_current_orphans",
+    "count_pruned_rows",
+    "is_tick_due",
+    "render_iso",
+    "tick_to_dict",
+    "tick_within_jitter_window",
+]
