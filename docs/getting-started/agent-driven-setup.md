@@ -41,6 +41,43 @@ For the SharePoint drive id, ask the user to run `kairix sharepoint list-sites` 
 
 For Notion, after the integration token is set, the user has to share each page or database with the integration via the Notion UI before it can be indexed. The integration name appears in Notion's share dialog.
 
+### Connector privileges — single-page reference
+
+When the user is provisioning a connector, walk them through these grants in the source platform's admin UI. Each entry is the minimum permission set the connector needs to function — kairix is read-only by design and asks for no write capability.
+
+**SharePoint** — Azure Portal → App registrations → your app → API Permissions → Add → Microsoft Graph → Application Permissions:
+- `Sites.Read.All` (enumerate sites + drives)
+- `Files.Read.All` (read file content)
+
+Both require admin consent ("Grant admin consent for your-tenant") after they're added. Shares one app registration with the M365 email-headers + calendar connectors.
+
+**Slack** — Slack admin → Apps → your app → OAuth & Permissions → Bot Token Scopes:
+- `channels:history`, `channels:read` (public channels)
+- `groups:history` (private channels the bot is in)
+- `im:history`, `mpim:history` (DMs the bot is in)
+- `users:read` (resolve user ids to display names)
+- `files:read` (file metadata for sensitivity routing)
+- `chat:write` (stable message permalinks — read path only)
+
+For Socket Mode live events, also create an app-level token with `connections:write`. Without Socket Mode the connector polls.
+
+After granting, the user must invite the bot to each channel they want indexed (`/invite @bot-name`). Slack doesn't let the bot read history from a channel it isn't a member of.
+
+**GitHub** — Settings → Developer settings → GitHub Apps → your app → Permissions and events → Repository permissions:
+- Contents: Read (repo trees + blob content)
+- Issues: Read (issues + bodies)
+- Pull requests: Read (PR metadata + diffs)
+- Metadata: Read (always granted automatically)
+
+Webhook events (Subscribe to events): `push`, `issues`, `pull_request`, `installation_repositories`.
+
+The PAT path uses the same permissions with the equivalent scope names (`repo`, `read:org`); the App path needs explicit installation on the repos to be indexed (your app → Install → "Only select repositories").
+
+**Notion** — Notion → Settings & members → Integrations → New integration → Capabilities:
+- Read content (only — leave Update and Insert OFF, the connector is read-only)
+
+Then for each page or database to index: open it → Share → search for the integration by name → Invite. Sharing a parent page grants access to its children.
+
 ---
 
 ## 2. The declarative path — write a kairix.config.yaml directly
