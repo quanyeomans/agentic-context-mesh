@@ -20,10 +20,10 @@ Plus four cross-cutting additions every spec carries:
 | Connector | Spec | Status | Wave E status |
 |---|---|---|---|
 | SharePoint | [`sharepoint.md`](sharepoint.md) | ✅ canonical (the bar) | scoped — slice landed v2026.5.24a1, Wave E target this spec |
-| Slack | (next) | — | backlog |
-| GitHub | (next+1) | — | backlog |
-| Google Drive | (next+2) | — | backlog |
-| Notion | (next+3) | — | backlog |
+| Slack | [`slack.md`](slack.md) | ✅ design spec | scoped — from-scratch build, design contract this spec |
+| GitHub | [`github.md`](github.md) | ✅ design spec | scoped — from-scratch build, design contract this spec |
+| Notion | [`notion.md`](notion.md) | ✅ design spec | scoped — from-scratch build, design contract this spec |
+| Google Drive | (next) | — | backlog — spec when prior three implementations validate the proactive-failure-mode patterns |
 | Jira | (last — needs `01-source-analysis` profile first) | — | backlog |
 
 ## Ordering rationale
