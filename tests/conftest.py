@@ -172,6 +172,11 @@ pytest_plugins = [
     # Wave 5 KP-3 — M365 calendar connector + flag.
     "tests.bdd.steps.connector_m365_calendar_steps",
     "tests.bdd.steps.feature_flag_connector_m365_calendar_steps",
+    # Wave 5 SharePoint — document-library connector + flag. Shares the
+    # M365 AAD app registration (Sites.Read.All + Files.Read.All on the
+    # same client-credentials triple).
+    "tests.bdd.steps.connector_sharepoint_steps",
+    "tests.bdd.steps.feature_flag_connector_sharepoint_steps",
     # Topology v2 Wave A — schema additions + new dataclasses behind
     # ``topology_v2_schema`` flag. F54 both-branch coverage. See
     # docs/architecture/connector-scope-topology/ADR.md.
