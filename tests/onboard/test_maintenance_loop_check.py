@@ -133,3 +133,37 @@ def test_default_interval_reader_returns_positive_int() -> None:
     value = deps.interval_reader()
     assert isinstance(value, int)
     assert value > 0
+
+
+def test_default_clock_returns_current_wall_time() -> None:
+    """The default factory wires a real clock that returns the current wall time.
+
+    Exercises the ``_default_clock`` production seam through the
+    public Deps default. Calling the bound clock should return a
+    monotonically-recent epoch second (within a 5-second tolerance to
+    survive any test-suite parallelism noise).
+    """
+    import time as _time
+
+    deps = MaintenanceLoopCheckDeps()
+    before = _time.time()
+    value = deps.clock()
+    after = _time.time()
+    assert isinstance(value, float)
+    assert before - 5 <= value <= after + 5
+
+
+def test_default_state_reader_returns_none_or_worker_state() -> None:
+    """The default factory wires a real state reader that returns ``WorkerState | None``.
+
+    Exercises the ``_default_worker_state_reader`` production seam
+    through the public Deps default. In a fresh test environment the
+    worker state file does not exist, so the reader returns ``None``;
+    when it exists (live VM), it returns a ``WorkerState``-shaped object
+    (we test only the type, not the contents).
+    """
+    from kairix.worker_state import WorkerState
+
+    deps = MaintenanceLoopCheckDeps()
+    value = deps.state_reader()
+    assert value is None or isinstance(value, WorkerState)
