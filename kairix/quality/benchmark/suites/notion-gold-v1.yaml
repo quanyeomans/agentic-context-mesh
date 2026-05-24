@@ -1,0 +1,125 @@
+# Notion gold-suite v1 — per-connector retrieval-quality contract
+#
+# Per docs/architecture/connector-scope-topology/connector-design-specs/notion.md
+# §6.5, this YAML is the per-connector eval surface for the Notion plugin.
+# Drift > ±2pp from the previous alpha fires a regression alert; the
+# threshold is a weighted score ≥ 0.85 on every alpha cut that touches
+# notion code.
+#
+# Each query class names the retrieval behaviour the Wave E + Wave F
+# work must preserve. Fixtures live under tests/fixtures/notion/
+# (manifest.yaml maps fixture ids to expected outcomes); the gold suite
+# references those fixtures so the suite is hermetic (no real-workspace
+# dependency in CI).
+#
+# Notion-specific query classes per the spec brief:
+#   - page-hierarchy retrieval (parent page surfaces with child pages)
+#   - database-row retrieval (rows surface individually, not collapsed)
+#   - property-field filtering (database queries against property values)
+#   - block-aware chunking precursor (Wave F MarkdownStructuralChunker
+#     v2 seed — caught here pre-Wave-F as a regression baseline)
+#
+# The suite stays vacuous-query at landing — Wave F's chunker plugin
+# is the cutover dependency for the per-block retrieval scoring; this
+# file pins the contract surface so the chunker work has a measurable
+# target.
+
+suite:
+  name: notion-gold-v1
+  connector: notion
+  related_spec: docs/architecture/connector-scope-topology/connector-design-specs/notion.md
+  threshold:
+    weighted_score_min: 0.85
+    drift_pp_max: 2.0
+  fixture_corpus: tests/fixtures/notion/manifest.yaml
+
+queries:
+  - id: page-body-content
+    query: "engagement scope phase 2 ingest pipeline"
+    description: |
+      Markdown page body retrieval — the top-3 results must include
+      the chunk carrying that phrase; snippet shows the matching
+      paragraph. Pins the passthrough extractor + default chunker
+      behaviour on a Notion page rendering.
+    expected:
+      top_k: 3
+      must_include_fixture_id: page-engagement-brief
+      min_score: 0.80
+
+  - id: database-row-retrieval
+    query: "Risk register row id RISK-001 mitigation owner"
+    description: |
+      Database-row retrieval — a database row must surface as its own
+      chunk (not collapsed into the parent database). Sabotage proof
+      #4 (database vs page differentiation) is the connector-level
+      contract; this gold-suite row is the retrieval-quality
+      counterpart. Wave F TabularRowChunker is the cutover dependency.
+    expected:
+      top_k: 3
+      must_include_fixture_id: db-row-risk-001
+      min_score: 0.75
+
+  - id: page-hierarchy-traversal
+    query: "subpage under Engagement scope phase 2"
+    description: |
+      Parent page surfaces with child pages — when an operator asks
+      about a subpage by reference to its parent, the hierarchy walk
+      lets the search layer answer "children of this page" without
+      re-parsing source_uri prefixes (Break point #16 in the topology
+      ADR). Hierarchy must emit parent-before-child per F58.
+    expected:
+      top_k: 5
+      must_include_fixture_id: page-subpage-meeting-notes
+      min_score: 0.70
+
+  - id: property-field-filter
+    query: "Risk register entries where status is open"
+    description: |
+      Database property filtering — Notion database rows carry typed
+      property fields (status, owner, date). The gold suite tests
+      that property-aware queries return the rows matching the
+      property value, not every row in the database. Wave F
+      property-aware chunking is the cutover dependency.
+    expected:
+      top_k: 5
+      must_include_fixture_id: db-row-risk-001
+      min_score: 0.65
+
+  - id: block-aware-chunking-precursor
+    query: "Section 4.2 risk mitigation strategy paragraph"
+    description: |
+      Block-aware chunking precursor — Wave F MarkdownStructuralChunker
+      v2 chunks on markdown block boundaries; the gold suite tests
+      that retrieval lands on the matching block, not the whole page.
+      Caught here pre-Wave-F as a regression baseline; the chunker's
+      version bump promotes this row to a hard gate.
+    expected:
+      top_k: 3
+      must_include_fixture_id: page-engagement-brief
+      min_score: 0.60
+
+  - id: cross-format-retrieval
+    query: "engagement project documentation overview"
+    description: |
+      Cross-format retrieval — Notion content surfaces alongside
+      reference-library and obsidian content in mixed-collection
+      searches; rank by relevance, not by collection-IDF dilution
+      (KFEAT-015 dependency surfaces here). Pins multi-collection
+      composition behaviour for the Notion-loaded collection.
+    expected:
+      top_k: 10
+      must_include_fixture_id: page-engagement-brief
+      min_score: 0.50
+
+  - id: negative-access-revoked
+    query: "content from a revoked page subtree"
+    description: |
+      When an integration loses access to a page subtree (Notion
+      object_not_found per spec §2 op mapping), the search returns
+      ``excluded_collections`` envelope rather than stale results
+      (proactive failure surfaces per spec §5 + ADR). The gold suite
+      reserves this row as a behaviour pin; the actual envelope
+      shape lands with the Wave-E+1 webhook + reconcile-sweep code.
+    expected:
+      top_k: 0
+      must_emit_excluded_collections: true

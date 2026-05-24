@@ -1,0 +1,65 @@
+# Notion fixture corpus — recorded Notion API responses + expected outcomes
+#
+# Per docs/architecture/connector-scope-topology/connector-design-specs/notion.md
+# §6.7, this manifest maps each recorded fixture to (expected_op,
+# expected_parent_type, expected_sensitivity, expected_min_score) so
+# the gold suite (suites/notion-gold-v1.yaml) and the per-format E2Es
+# can both reference one source of truth.
+#
+# Per-fixture cap: ≤500 KB each, ≤5 MB total (mirrors sharepoint).
+# Fixtures here are JSON envelopes of Notion REST responses — no real
+# workspace data, no real personal data. Operator names use generic
+# agent-* labels per CLAUDE.md naming guidance.
+
+corpus:
+  name: notion-v1
+  total_size_bytes_max: 5_242_880
+  per_fixture_bytes_max: 524_288
+
+fixtures:
+  - id: search-pages-two-roots
+    path: search_pages_two_roots.json
+    description: |
+      POST /v1/search response with two top-level pages parented to
+      the workspace. Drives iter_containers (emits two Containers)
+      and load_hierarchy (root + two PAGE nodes parent-before-child).
+    expected:
+      page_count: 2
+      parent_type: workspace
+      sensitivity: internal
+
+  - id: page-engagement-brief
+    path: page_engagement_brief.json
+    description: |
+      Single page envelope — top-level workspace-parented page used
+      as the "engagement scope" gold-suite query target. Body markdown
+      carries the phrase the search query matches.
+    expected:
+      page_id: page-engagement-brief
+      parent_type: workspace
+      sensitivity: internal
+
+  - id: page-subpage-meeting-notes
+    path: page_subpage_meeting_notes.json
+    description: |
+      Subpage envelope parented to page-engagement-brief — drives
+      the hierarchy-traversal gold-suite query (children of a page).
+      Demonstrates that subpages surface as their own ChangeEvents
+      and inherit the parent's container via the root-id walk.
+    expected:
+      page_id: page-subpage-meeting-notes
+      parent_type: page_id
+      sensitivity: internal
+
+  - id: db-row-risk-001
+    path: db_row_risk_001.json
+    description: |
+      Database-row envelope — parent.type=database_id; the database
+      itself is db-risk-register. The connector's _dispatch_page
+      adds item_kind=database_row + database_id to the ChangeEvent
+      metadata (sabotage proof #4 covers this dispatch).
+    expected:
+      page_id: db-row-risk-001
+      parent_type: database_id
+      database_id: db-risk-register
+      sensitivity: internal

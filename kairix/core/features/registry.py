@@ -294,6 +294,28 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "connector_notion": FeatureFlag(
+        name="connector_notion",
+        default=False,
+        description=(
+            "Enable the Notion connector — pulls pages + database rows from "
+            "the configured workspace via POST /v1/search + GET /v1/blocks/{id}/children, "
+            "renders block trees to Markdown, then dispatches the markdown bytes "
+            "through the kairix extractor registry (passthrough / markitdown)."
+        ),
+        stage="introduce",
+        # Notion cutover plan (per feature-flag-architecture.md §7 and
+        # docs/architecture/connector-scope-topology/connector-design-specs/notion.md):
+        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
+        # soak → retire. Twelve-month target accommodates the multi-step §6.6
+        # implementation sequence (Steps 1-3 land here; Steps 4-7 — slim-perms,
+        # Resolver, sensitivity routing, webhooks — land as separate commits
+        # behind the same flag with per-step cutover discipline).
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/connector-scope-topology/connector-design-specs/notion.md",
+    ),
     "topology_v2_m365_calendar": FeatureFlag(
         name="topology_v2_m365_calendar",
         default=False,

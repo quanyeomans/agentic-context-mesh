@@ -177,6 +177,10 @@ pytest_plugins = [
     # same client-credentials triple).
     "tests.bdd.steps.connector_sharepoint_steps",
     "tests.bdd.steps.feature_flag_connector_sharepoint_steps",
+    # Wave E Notion — workspace-pages connector + flag. See
+    # docs/architecture/connector-scope-topology/connector-design-specs/notion.md.
+    "tests.bdd.steps.connector_notion_steps",
+    "tests.bdd.steps.feature_flag_connector_notion_steps",
     # Topology v2 Wave A — schema additions + new dataclasses behind
     # ``topology_v2_schema`` flag. F54 both-branch coverage. See
     # docs/architecture/connector-scope-topology/ADR.md.
