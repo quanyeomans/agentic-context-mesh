@@ -15,6 +15,10 @@ from pathlib import Path
 
 import pytest
 
+from kairix.connectors.m365_calendar.connector import (
+    M365CalendarConfig,
+    M365CalendarConnector,
+)
 from kairix.connectors.m365_email_headers.connector import (
     M365Credentials,
     M365EmailHeadersConnector,
@@ -72,6 +76,35 @@ def test_m365_email_headers_hierarchy_parent_before_child() -> None:
     assert isinstance(connector, HierarchyConnector)
     nodes = list(connector.load_hierarchy(cc_pair_id=1))
     assert nodes, "Wave E pilot: load_hierarchy must emit at least the root + per-mailbox FOLDER nodes"
+    seen: set[str] = set()
+    for node in nodes:
+        if node.raw_parent_id is not None:
+            assert node.raw_parent_id in seen, (
+                f"orphan emission: {node.raw_node_id} references parent {node.raw_parent_id!r} not yet emitted"
+            )
+        seen.add(node.raw_node_id)
+
+
+@pytest.mark.contract
+def test_m365_calendar_hierarchy_parent_before_child() -> None:
+    """M365Calendar's Wave E HierarchyConnector yields nodes parent-before-child.
+
+    Wave E emits a root FOLDER node (``m365-calendar``) plus one child
+    FOLDER per configured calendar (per UPN). Test sabotage-proves the
+    F58 invariant — swapping the yield order so children emit before
+    the root fails the orphan assertion.
+    """
+    config = M365CalendarConfig(
+        user_id="alice@example.com",
+        tenant_id="tenant-placeholder",
+        client_id="client-placeholder",
+        client_secret="secret-placeholder",  # pragma: allowlist secret
+        user_ids=("alice@example.com", "bob@example.com"),
+    )
+    connector = M365CalendarConnector(config, flag_reader=lambda _name: True)
+    assert isinstance(connector, HierarchyConnector)
+    nodes = list(connector.load_hierarchy(cc_pair_id=1))
+    assert len(nodes) == 3, f"expected root + 2 calendar children, got {len(nodes)}"
     seen: set[str] = set()
     for node in nodes:
         if node.raw_parent_id is not None:

@@ -223,6 +223,13 @@ pytest_plugins = [
     # the Dex / Person / Organisation / Relationship FOLDER tree
     # parent-before-child per F58.
     "tests.bdd.steps.feature_flag_topology_v2_dex_crm_steps",
+    # Topology v2 Wave E — per-connector slice for the m365_calendar
+    # connector behind the ``topology_v2_m365_calendar`` flag. Sibling
+    # to the obsidian pilot. Each configured calendar (per UPN) becomes
+    # its own Container with its own Graph @odata.deltaLink cursor;
+    # load_hierarchy emits a root FOLDER node plus one child per
+    # configured calendar parent-before-child per F58.
+    "tests.bdd.steps.feature_flag_topology_v2_m365_calendar_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
