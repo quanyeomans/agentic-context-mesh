@@ -421,6 +421,33 @@ def _deserialise_cursor(cursor: Cursor | None) -> dict[str, str]:
     return {str(k): str(v) for k, v in parsed.items() if isinstance(v, str)}
 
 
+def _parse_drive_entry(entry: object) -> SharePointDriveSpec:
+    """Parse one operator-config drive entry into a typed spec.
+
+    Extracted from ``_drive_specs_from_config`` to keep that function
+    under F16's cognitive-complexity ceiling — the per-entry isinstance
+    branching pushed the parent function over 15.
+    """
+    if isinstance(entry, str) and entry:
+        return SharePointDriveSpec(drive_id=entry)
+    if isinstance(entry, dict):
+        drive_id = entry.get("drive_id")
+        if not isinstance(drive_id, str) or not drive_id:
+            raise ValueError(
+                "sharepoint: drive block missing 'drive_id'. "
+                "fix: every drive entry must declare drive_id as a non-empty string. "
+                "next: see docs/architecture/connector-ingestion-architecture.md §8."
+            )
+        site_id = entry.get("site_id") if isinstance(entry.get("site_id"), str) else None
+        display = entry.get("display_name") if isinstance(entry.get("display_name"), str) else None
+        return SharePointDriveSpec(drive_id=drive_id, site_id=site_id, display_name=display)
+    raise ValueError(
+        f"sharepoint: drive entry {entry!r} is not a string or dict. "
+        "fix: each drive entry must be a drive_id string or a block with drive_id. "
+        "next: see docs/architecture/connector-ingestion-architecture.md §8."
+    )
+
+
 def _drive_specs_from_config(raw: object) -> list[SharePointDriveSpec]:
     """Translate operator config drive entries to typed specs.
 
@@ -436,29 +463,7 @@ def _drive_specs_from_config(raw: object) -> list[SharePointDriveSpec]:
             "next: see docs/architecture/connector-ingestion-architecture.md §8 "
             "for the SharePoint connector config shape."
         )
-    specs: list[SharePointDriveSpec] = []
-    for entry in raw:
-        if isinstance(entry, str) and entry:
-            specs.append(SharePointDriveSpec(drive_id=entry))
-            continue
-        if isinstance(entry, dict):
-            drive_id = entry.get("drive_id")
-            if not isinstance(drive_id, str) or not drive_id:
-                raise ValueError(
-                    "sharepoint: drive block missing 'drive_id'. "
-                    "fix: every drive entry must declare drive_id as a non-empty string. "
-                    "next: see docs/architecture/connector-ingestion-architecture.md §8."
-                )
-            site_id = entry.get("site_id") if isinstance(entry.get("site_id"), str) else None
-            display = entry.get("display_name") if isinstance(entry.get("display_name"), str) else None
-            specs.append(SharePointDriveSpec(drive_id=drive_id, site_id=site_id, display_name=display))
-            continue
-        raise ValueError(
-            f"sharepoint: drive entry {entry!r} is not a string or dict. "
-            "fix: each drive entry must be a drive_id string or a block with drive_id. "
-            "next: see docs/architecture/connector-ingestion-architecture.md §8."
-        )
-    return specs
+    return [_parse_drive_entry(entry) for entry in raw]
 
 
 def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
