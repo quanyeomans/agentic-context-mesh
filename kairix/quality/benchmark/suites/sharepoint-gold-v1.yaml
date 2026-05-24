@@ -1,0 +1,115 @@
+meta:
+  version: '1.0'
+  generated_by: kairix eval generate
+  name: sharepoint
+  description: |
+    SharePoint per-connector gold suite — IM-6-class regression catcher.
+    Covers the 8 query classes from
+    docs/architecture/connector-scope-topology/connector-design-specs/sharepoint.md
+    §6.5. Hermetic via the tests/fixtures/sharepoint/ corpus (per §6.7);
+    no real-tenant calls in CI. Threshold: weighted score >= 0.85 on every
+    alpha cut that touches SharePoint code; drift > +/-2pp from the
+    previous alpha fires a regression alert.
+  default_collection: sharepoint
+  categories:
+  - pdf_body
+  - docx_heading
+  - pptx_slide_title
+  - xlsx_row
+  - cross_format
+  - tenancy_isolation
+  - access_revoked
+  - cross_collection_bm25
+  score_method: ndcg
+  threshold_weighted: 0.85
+  drift_pp_alert: 2.0
+
+# Per §6.5 — one canonical query per class. Bodies are anchored to the
+# fixture corpus in tests/fixtures/sharepoint/ (see §6.7); each fixture
+# carries the matching content so retrieval can pass without a real
+# tenant. Wave F (per-format chunkers) lifts the slide / row classes;
+# this gold suite acts as the pre-Wave-F baseline for that lift.
+cases:
+- id: SP-PDF-001
+  category: pdf_body
+  query: engagement scope phase 2 budget
+  score_method: ndcg
+  gold_titles:
+  - title: pdf_engagement
+    relevance: 2
+  fixture: tests/fixtures/sharepoint/pdf_engagement.pdf
+  expected_behaviour: Top-3 results include the PDF chunk carrying that phrase; snippet shows the matching paragraph.
+
+- id: SP-DOCX-001
+  category: docx_heading
+  query: section 4.2 risk register
+  score_method: ndcg
+  gold_titles:
+  - title: docx_risk_register
+    relevance: 2
+  fixture: tests/fixtures/sharepoint/docx_risk_register.docx
+  expected_behaviour: Top result is the DOCX chunk under heading "Section 4.2 -- Risk Register" (heading-aware chunking lift).
+
+- id: SP-PPTX-001
+  category: pptx_slide_title
+  query: target operating model slide
+  score_method: ndcg
+  gold_titles:
+  - title: pptx_target_op_model
+    relevance: 2
+  fixture: tests/fixtures/sharepoint/pptx_target_op_model.pptx
+  expected_behaviour: Slide title outranks slide body for title queries (Wave F SlideChunker prerequisite -- caught here pre-Wave-F as a regression baseline).
+
+- id: SP-XLSX-001
+  category: xlsx_row
+  query: client BOQ data strategy 2021
+  score_method: ndcg
+  gold_titles:
+  - title: xlsx_client_data
+    relevance: 2
+  fixture: tests/fixtures/sharepoint/xlsx_client_data.xlsx
+  expected_behaviour: Top result is the matching row chunk, not the whole sheet (Wave F TabularRowChunker prerequisite).
+
+- id: SP-CROSS-001
+  category: cross_format
+  query: GTM intelligence platform
+  score_method: ndcg
+  gold_titles:
+  - title: pdf_engagement
+    relevance: 1
+  - title: docx_risk_register
+    relevance: 1
+  - title: pptx_target_op_model
+    relevance: 1
+  expected_behaviour: Multiple formats represented in top-10 (PDF + PPTX + DOCX); no single-format domination.
+
+- id: SP-TENANCY-001
+  category: tenancy_isolation
+  query: other-tenant only phrase
+  score_method: ndcg
+  gold_titles: []
+  fixture_root: tests/fixtures/sharepoint/tenant_a
+  expected_behaviour: Zero results from this tenant's drives (tenancy isolation contract).
+
+- id: SP-ACCESS-001
+  category: access_revoked
+  query: content on a revoked drive
+  score_method: ndcg
+  gold_titles: []
+  expected_envelope: excluded_collections
+  expected_behaviour: |
+    Returns excluded_collections envelope rather than stale results (proactive failure
+    surfaces). Operator-facing escalation_hint accompanies for Sites.Selected
+    re-grant.
+
+- id: SP-CROSSCOLL-001
+  category: cross_collection_bm25
+  query: engagement scope
+  score_method: ndcg
+  gold_titles:
+  - title: pdf_engagement
+    relevance: 2
+  expected_behaviour: |
+    SharePoint chunks rank by relevance, not by collection-IDF dilution
+    (KFEAT-015 dependency surfaces here). Asked while reference-library also
+    has chunks containing the same phrase.

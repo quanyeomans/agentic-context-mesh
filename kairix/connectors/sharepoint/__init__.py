@@ -55,12 +55,24 @@ from kairix.connectors.sharepoint.graph_client import (
 # F56 capability declaration — SharePoint satisfies the base
 # SourceConnector plus CheckpointedConnector (Graph delta tokens are
 # the canonical Onyx CheckpointedConnector pattern), CredentialsConnector
-# (client-credentials triple loads as a plain mapping), and
-# OAuthConnector (the classmethods raise to signal "client-credentials
-# only" for any framework path that tries to route through the
-# three-legged flow).
+# (client-credentials triple loads as a plain mapping), OAuthConnector
+# (the classmethods raise to signal "client-credentials only" for any
+# framework path that tries to route through the three-legged flow),
+# plus the Wave E capabilities — PollConnector (per-container delta
+# query via ``list_changes_for_container``), SlimConnector (id-only
+# enumeration for prune), Resolver (per-item failure replay), and
+# HierarchyConnector (Site / Drive node tree parent-before-child).
 CAPABILITIES: frozenset[str] = frozenset(
-    {"SourceConnector", "CheckpointedConnector", "CredentialsConnector", "OAuthConnector"}
+    {
+        "SourceConnector",
+        "CheckpointedConnector",
+        "CredentialsConnector",
+        "OAuthConnector",
+        "PollConnector",
+        "SlimConnector",
+        "Resolver",
+        "HierarchyConnector",
+    }
 )
 
 __all__ = [
