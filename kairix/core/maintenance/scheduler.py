@@ -76,6 +76,13 @@ STAGE_GC = "gc"
 # edit site.
 _FAILURE_LOG_FORMAT = "event=%s pid=%d stage=%s error=%s"
 
+# Python's datetime.isoformat() emits "+00:00" for UTC; SQLite-stored
+# timestamps and structured logs use the "Z" suffix instead. Module
+# constants for both ends of the substitution keep F17 happy across
+# the three call sites that do this conversion.
+_ISO_UTC_SUFFIX = "+00:00"
+_ISO_Z_SUFFIX = "Z"
+
 
 @dataclass(frozen=True)
 class MaintenanceTickResult:
@@ -482,14 +489,14 @@ class MaintenanceScheduler:
         """
         epoch = self._deps.clock()
         dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
-        return dt.isoformat().replace("+00:00", "Z")
+        return dt.isoformat().replace(_ISO_UTC_SUFFIX, _ISO_Z_SUFFIX)
 
     def _cutoff_iso(self) -> str:
         """Return the ISO timestamp for the GC retention cutoff."""
         epoch = self._deps.clock()
         cutoff_epoch = epoch - (self._retention_days * 86400)
         dt = datetime.fromtimestamp(cutoff_epoch, tz=timezone.utc)
-        return dt.isoformat().replace("+00:00", "Z")
+        return dt.isoformat().replace(_ISO_UTC_SUFFIX, _ISO_Z_SUFFIX)
 
     @staticmethod
     def _pid() -> int:
@@ -604,7 +611,7 @@ def render_iso(epoch: float) -> str:
     if epoch <= 0.0:
         return ""
     dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
-    return dt.isoformat().replace("+00:00", "Z")
+    return dt.isoformat().replace(_ISO_UTC_SUFFIX, _ISO_Z_SUFFIX)
 
 
 # Re-exported below so the worker can read ``timedelta`` for the
