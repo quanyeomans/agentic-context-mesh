@@ -517,7 +517,7 @@ Add a single `topology_v2:` parent key (#305) with six nested blocks — `connec
 
 ### Wave E — per-connector opt-in to multi-container
 
-For each connector kind that benefits (sharepoint, notion, slack, github, google_drive, teams, jira, confluence), implement per-container path:
+For each connector kind that benefits, implement per-container path:
 - `iter_containers()` enumerates real containers
 - `load_from_checkpoint(container, checkpoint)` for CheckpointedConnector
 - `retrieve_all_slim_docs(container, start, end)` for SlimConnector
@@ -525,7 +525,24 @@ For each connector kind that benefits (sharepoint, notion, slack, github, google
 - Default sensitivity hint emission per kind
 - Typed-exception emission per failure mode
 
-Per-connector flag (`topology_v2_sharepoint`, `topology_v2_notion`, etc.) so each plugin's adoption is independent. F54 both-branch tests per flag.
+Per-connector flag (`topology_v2_<connector>`) so each plugin's adoption is independent. F54 both-branch tests per flag.
+
+#### Wave E adoption status
+
+| Connector | Flag | Status | Landed |
+|---|---|---|---|
+| `obsidian` | `topology_v2_obsidian` | ✅ Pilot | v2026.5.24a1 |
+| `dex_crm` | `topology_v2_dex_crm` | 🟡 In flight | v2026.5.24a2 |
+| `m365_email_headers` | `topology_v2_m365_email_headers` | 🟡 In flight | v2026.5.24a2 |
+| `m365_calendar` | `topology_v2_m365_calendar` | 🟡 In flight | v2026.5.24a2 |
+| `sharepoint` | `topology_v2_sharepoint` | 🔴 Scoped | next slice (uses Wave B shims via SharePoint connector ship at v2026.5.24a1) |
+| `notion` | `topology_v2_notion` | 🔴 Backlog | future Wave 5 connector wave |
+| `slack` | `topology_v2_slack` | 🔴 Backlog | future Wave 5 connector wave |
+| `github` | `topology_v2_github` | 🔴 Backlog | future Wave 5 connector wave |
+| `google_drive` | `topology_v2_google_drive` | 🔴 Backlog | future Wave 5 connector wave |
+| `teams` | `topology_v2_teams` | 🔴 Backlog | future Wave 5 connector wave |
+| `jira` | `topology_v2_jira` | 🔴 Backlog | future Wave 5 connector wave |
+| `confluence` | `topology_v2_confluence` | 🔴 Backlog | future Wave 5 connector wave |
 
 ### Wave F — chunker plugins per source kind
 
