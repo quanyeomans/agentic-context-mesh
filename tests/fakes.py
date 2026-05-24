@@ -2494,6 +2494,85 @@ class FakeSharePointConnector:
         return _json.dumps({"fake-drive": self._delta_link}, sort_keys=True)
 
 
+class FakeNotionConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    Notion plugin's contract test.
+
+    Constructor takes the Notion page envelopes to emit; the fake
+    satisfies the full Protocol surface without touching the Notion
+    REST API. This is the canonical fake F43 pairs with the real
+    :class:`kairix.connectors.notion.NotionConnector` inside
+    ``tests/contracts/test_notion_protocol.py``.
+
+    Default sensitivity tier is ``internal`` per the connector's
+    documented default — the constructor accepts a ``sensitivity``
+    override so contract assertions can pin both the default and a
+    confidential-tier configuration.
+    """
+
+    name: str = "notion"
+
+    def __init__(
+        self,
+        *,
+        pages: list[dict[str, Any]] | None = None,
+        sensitivity: str = "internal",
+    ) -> None:
+        self._pages: list[dict[str, Any]] = list(pages) if pages is not None else []
+        self._sensitivity = sensitivity
+        self._by_id: dict[str, dict[str, Any]] = {str(page.get("id")): page for page in self._pages}
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        """Yield one ``modified`` ChangeEvent per seeded page."""
+        _ = cursor
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        for page in self._pages:
+            archived = bool(page.get("archived", False))
+            op = "archived" if archived else "modified"
+            events.append(
+                ChangeEvent(
+                    op=op,  # type: ignore[arg-type]  # F3-rationale: op is one of "archived"/"modified" from the fixed string set above; mypy doesn't narrow.
+                    item_id=str(page.get("id", "")),
+                    modified_at=str(page.get("last_edited_time", "1970-01-01T00:00:00Z")),
+                    metadata={
+                        "sensitivity": self._sensitivity,
+                        "parent_type": str(page.get("parent_type", "workspace")),
+                        "name": str(page.get("title", "")),
+                        "mime": "text/markdown",
+                    },
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        page = self._by_id.get(item_id, {})
+        raw_body = page.get("body_markdown", "")
+        if isinstance(raw_body, str):
+            raw_bytes = raw_body.encode("utf-8")
+        elif isinstance(raw_body, bytes):
+            raw_bytes = raw_body
+        else:
+            raw_bytes = b""
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw_bytes, mime="text/markdown", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        page = self._by_id.get(item_id, {})
+        url = page.get("url")
+        if isinstance(url, str) and url:
+            return url
+        return f"notion://pages/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 

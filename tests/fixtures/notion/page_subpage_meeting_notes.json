@@ -1,0 +1,24 @@
+{
+  "object": "page",
+  "id": "page-subpage-meeting-notes",
+  "created_time": "2026-05-21T09:00:00.000Z",
+  "last_edited_time": "2026-05-22T12:00:00.000Z",
+  "archived": false,
+  "url": "https://www.notion.so/your-team/page-subpage-meeting-notes",
+  "parent": {
+    "type": "page_id",
+    "page_id": "page-engagement-brief"
+  },
+  "properties": {
+    "title": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "plain_text": "Sprint planning meeting notes"
+        }
+      ]
+    }
+  }
+}

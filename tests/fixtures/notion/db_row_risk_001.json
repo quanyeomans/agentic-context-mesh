@@ -1,0 +1,42 @@
+{
+  "object": "page",
+  "id": "db-row-risk-001",
+  "created_time": "2026-05-19T09:00:00.000Z",
+  "last_edited_time": "2026-05-22T13:00:00.000Z",
+  "archived": false,
+  "url": "https://www.notion.so/your-team/db-row-risk-001",
+  "parent": {
+    "type": "database_id",
+    "database_id": "db-risk-register"
+  },
+  "properties": {
+    "Name": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "plain_text": "RISK-001 - Ingest pipeline downtime"
+        }
+      ]
+    },
+    "Status": {
+      "id": "status",
+      "type": "select",
+      "select": {
+        "name": "open",
+        "color": "red"
+      }
+    },
+    "Owner": {
+      "id": "owner",
+      "type": "rich_text",
+      "rich_text": [
+        {
+          "type": "text",
+          "plain_text": "agent-alpha"
+        }
+      ]
+    }
+  }
+}
