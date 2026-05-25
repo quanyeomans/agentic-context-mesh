@@ -71,6 +71,7 @@ STAGE_USEARCH = "usearch"
 STAGE_FTS = "fts"
 STAGE_GC = "gc"
 STAGE_BRONZE_REAP = "bronze_reap"
+STAGE_BRONZE_TTL_GC = "bronze_ttl_gc"
 
 # F17 — the failure-event format string appears in every _safe_*
 # wrapper; extracting it keeps the structured-log shape in a single
@@ -110,6 +111,10 @@ class MaintenanceTickResult:
         ``bronze_records`` row that this tick deleted. Closes the
         post-fsync-pre-commit window in the bronze write contract
         (the 2026-05-25 incident left 36 GB of these on SharePoint).
+      * ``bronze_ttl_gc_deleted`` — bronze_records rows + raw blobs
+        deleted by the TTL GC pass this tick (#316). Always 0 unless
+        the ``bronze_ttl_gc`` flag is ON. Bounds bronze growth long-
+        term — without this, correctly-registered blobs never expire.
 
     The shape is the F39 / F42 boundary contract the worker logs as a
     one-line completion event and the ``kairix worker preflight --json``
@@ -124,6 +129,7 @@ class MaintenanceTickResult:
     current_orphan_count: int
     elapsed_ms: int
     bronze_orphans_reaped: int = 0
+    bronze_ttl_gc_deleted: int = 0
 
 
 def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production boundary
@@ -228,6 +234,48 @@ def _default_bronze_reaper() -> int:  # pragma: no cover — production boundary
         return 0
 
 
+def _default_bronze_ttl_gc() -> int:  # pragma: no cover — production boundary
+    """Production seam — TTL-based bronze garbage collector across every source.
+
+    Flag-gated: when ``bronze_ttl_gc`` is OFF, returns 0 immediately
+    without touching disk or DB. When ON, walks every immediate
+    subdirectory of the bronze root and calls
+    :meth:`FilesystemBronzeStore.gc_aged` with the configured TTL.
+    Returns the total count of (bronze_records row + raw blob) pairs
+    deleted across all sources.
+
+    TTL is resolved from ``KAIRIX_BRONZE_TTL_DAYS`` via
+    :func:`kairix.paths.bronze_ttl_days` (default 7); operators can
+    override per deploy.
+    """
+    try:
+        from kairix.core.connectors.bronze import FilesystemBronzeStore
+        from kairix.core.features.resolver import flag as resolve_flag
+        from kairix.paths import bronze_ttl_days, data_dir
+        from kairix.paths import db_path as get_db_path
+
+        if not resolve_flag("bronze_ttl_gc"):
+            return 0
+        bronze_root = data_dir() / "bronze"
+        if not bronze_root.is_dir():
+            return 0
+        ttl_days = bronze_ttl_days()
+        db = sqlite3.connect(str(get_db_path()))
+        try:
+            store = FilesystemBronzeStore(db, bronze_root)
+            total = 0
+            for source_dir in bronze_root.iterdir():
+                if source_dir.is_dir():
+                    total += store.gc_aged(source_dir.name, older_than_days=ttl_days)
+            db.commit()
+            return total
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("maintenance: bronze TTL GC failed")
+        return 0
+
+
 def _default_fts_healer(db: sqlite3.Connection) -> int:  # pragma: no cover — production boundary
     """Production seam — heal FTS5 orphans when the integrity check sees drift.
 
@@ -280,6 +328,11 @@ class MaintenanceSchedulerDeps:
     # don't wire a real bronze store; the worker.py production seam
     # passes a real reaper closure bound to the configured bronze root.
     bronze_reaper: Callable[[], int] = field(default_factory=lambda: _default_bronze_reaper)
+    # Bronze TTL garbage collector — flag-gated closure that deletes
+    # bronze_records rows + raw blobs older than the configured TTL.
+    # The closure itself reads the flag + TTL; the scheduler always
+    # invokes it. Default no-op for unit-test sandboxes.
+    bronze_ttl_gc: Callable[[], int] = field(default_factory=lambda: _default_bronze_ttl_gc)
 
 
 class MaintenanceScheduler:
@@ -348,6 +401,7 @@ class MaintenanceScheduler:
 
         fts_healed = self._safe_fts_heal(active_db, pid)
         bronze_orphans_reaped = self._safe_bronze_reap(pid)
+        bronze_ttl_gc_deleted = self._safe_bronze_ttl_gc(pid)
 
         # Commit ONCE at the end so the whole tick is atomic from a
         # crash-recovery standpoint. Each stage uses execute() without
@@ -368,11 +422,12 @@ class MaintenanceScheduler:
             current_orphan_count=current_orphan_count,
             elapsed_ms=elapsed_ms,
             bronze_orphans_reaped=bronze_orphans_reaped,
+            bronze_ttl_gc_deleted=bronze_ttl_gc_deleted,
         )
         logger.info(
             "event=%s pid=%d orphans_pruned=%d pruned_table_size=%d usearch_rebuilt=%s "
             "fts_orphans_healed=%d current_orphan_count=%d elapsed_ms=%d "
-            "bronze_orphans_reaped=%d",
+            "bronze_orphans_reaped=%d bronze_ttl_gc_deleted=%d",
             EVENT_TICK_COMPLETED,
             pid,
             result.orphans_pruned,
@@ -382,6 +437,7 @@ class MaintenanceScheduler:
             result.current_orphan_count,
             result.elapsed_ms,
             result.bronze_orphans_reaped,
+            result.bronze_ttl_gc_deleted,
         )
         return result
 
@@ -461,6 +517,26 @@ class MaintenanceScheduler:
                 EVENT_TICK_FAILED,
                 pid,
                 STAGE_BRONZE_REAP,
+                type(exc).__name__,
+            )
+            return 0
+
+    def _safe_bronze_ttl_gc(self, pid: int) -> int:
+        """Stage 6 — bronze TTL GC boundary, swallows failures into the log.
+
+        Bounds bronze growth long-term (#316). The closure itself reads
+        the ``bronze_ttl_gc`` feature flag and short-circuits to 0 when
+        OFF, so this stage is structurally a no-op until the operator
+        flips the flag.
+        """
+        try:
+            return int(self._deps.bronze_ttl_gc())
+        except Exception as exc:
+            logger.warning(
+                _FAILURE_LOG_FORMAT,
+                EVENT_TICK_FAILED,
+                pid,
+                STAGE_BRONZE_TTL_GC,
                 type(exc).__name__,
             )
             return 0
@@ -595,6 +671,7 @@ def tick_to_dict(result: MaintenanceTickResult) -> dict[str, Any]:
         "current_orphan_count": result.current_orphan_count,
         "elapsed_ms": result.elapsed_ms,
         "bronze_orphans_reaped": result.bronze_orphans_reaped,
+        "bronze_ttl_gc_deleted": result.bronze_ttl_gc_deleted,
     }
 
 

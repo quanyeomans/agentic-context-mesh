@@ -88,6 +88,7 @@ def _deps(
     usearch_ok: bool = True,
     fts_healed: int = 0,
     bronze_reaped: int = 0,
+    bronze_ttl_deleted: int = 0,
 ) -> MaintenanceSchedulerDeps:
     """Build a Deps with deterministic clock + no-op usearch/fts/bronze seams."""
     return MaintenanceSchedulerDeps(
@@ -95,6 +96,7 @@ def _deps(
         fts_healer=lambda _db: fts_healed,
         clock=lambda: epoch,
         bronze_reaper=lambda: bronze_reaped,
+        bronze_ttl_gc=lambda: bronze_ttl_deleted,
     )
 
 
@@ -359,6 +361,7 @@ def test_tick_to_dict_exports_every_field() -> None:
         current_orphan_count=0,
         elapsed_ms=42,
         bronze_orphans_reaped=7,
+        bronze_ttl_gc_deleted=11,
     )
     d = tick_to_dict(result)
     assert d == {
@@ -369,6 +372,7 @@ def test_tick_to_dict_exports_every_field() -> None:
         "current_orphan_count": 0,
         "elapsed_ms": 42,
         "bronze_orphans_reaped": 7,
+        "bronze_ttl_gc_deleted": 11,
     }
 
 
@@ -548,3 +552,43 @@ def test_tick_default_deps_carry_bronze_reaper() -> None:
     production scheduler doesn't NPE when no Deps are passed."""
     deps = MaintenanceSchedulerDeps()
     assert callable(deps.bronze_reaper)
+
+
+def test_tick_runs_bronze_ttl_gc_stage_and_reports_count() -> None:
+    """Stage 6: the injected bronze_ttl_gc callable runs every tick and the
+    returned count surfaces on MaintenanceTickResult.bronze_ttl_gc_deleted."""
+    db = _fresh_db()
+    scheduler = MaintenanceScheduler(
+        db,
+        retention_days=7,
+        scheduler_deps=_deps(epoch=1_000_000.0, bronze_ttl_deleted=17),
+    )
+    result = scheduler.tick(db)
+    assert result.bronze_ttl_gc_deleted == 17
+
+
+def test_tick_swallows_bronze_ttl_gc_exception() -> None:
+    """A failing TTL GC must not poison the tick — count drops to 0."""
+    db = _fresh_db()
+
+    def _failing_ttl() -> int:
+        raise RuntimeError("ttl gc boom")
+
+    deps = MaintenanceSchedulerDeps(
+        usearch_rebuilder=lambda: True,
+        fts_healer=lambda _db: 0,
+        clock=lambda: 1_000_000.0,
+        bronze_reaper=lambda: 0,
+        bronze_ttl_gc=_failing_ttl,
+    )
+    scheduler = MaintenanceScheduler(db, retention_days=7, scheduler_deps=deps)
+    result = scheduler.tick(db)
+    assert result.bronze_ttl_gc_deleted == 0
+    assert result.orphans_pruned == 0
+
+
+def test_tick_default_deps_carry_bronze_ttl_gc() -> None:
+    """Default Deps wire a callable bronze_ttl_gc — the production
+    scheduler doesn't NPE when no Deps are passed."""
+    deps = MaintenanceSchedulerDeps()
+    assert callable(deps.bronze_ttl_gc)

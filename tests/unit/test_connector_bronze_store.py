@@ -261,6 +261,103 @@ def test_reap_orphans_scopes_to_named_source(tmp_path: Path) -> None:
         db.close()
 
 
+def test_gc_aged_deletes_blobs_older_than_ttl(tmp_path: Path) -> None:
+    """#316 — TTL GC drops blobs whose fetched_at is older than the cutoff."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        ref = store.write("agent-alpha", "old-item", b"old-bytes", "text/plain")
+        db.commit()
+
+        # Backdate the fetched_at well past any reasonable TTL.
+        db.execute(
+            "UPDATE bronze_records SET fetched_at = '2020-01-01T00:00:00Z' "
+            "WHERE source_name = 'agent-alpha' AND item_id = 'old-item'"
+        )
+        db.commit()
+
+        deleted = store.gc_aged("agent-alpha", older_than_days=7)
+        db.commit()
+
+        assert deleted == 1
+        # Blob is gone; bronze_records row is gone.
+        assert not (tmp_path / "bronze" / ref.raw_path).exists()
+        rows = db.execute("SELECT count(*) FROM bronze_records WHERE source_name = 'agent-alpha'").fetchone()[0]
+        assert rows == 0
+    finally:
+        db.close()
+
+
+def test_gc_aged_preserves_blobs_within_ttl(tmp_path: Path) -> None:
+    """A blob written 'now' (within the TTL window) must survive."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        ref = store.write("agent-alpha", "fresh-item", b"fresh", "text/plain")
+        db.commit()
+
+        deleted = store.gc_aged("agent-alpha", older_than_days=7)
+        assert deleted == 0
+        assert (tmp_path / "bronze" / ref.raw_path).is_file()
+    finally:
+        db.close()
+
+
+def test_gc_aged_zero_ttl_deletes_everything(tmp_path: Path) -> None:
+    """older_than_days=0 means cutoff = now; every row qualifies."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        store.write("agent-alpha", "item-1", b"one", "text/plain")
+        store.write("agent-alpha", "item-2", b"two", "text/plain")
+        db.commit()
+
+        # Backdate both rows so even a 0-day TTL catches them.
+        db.execute("UPDATE bronze_records SET fetched_at = '2020-01-01T00:00:00Z' WHERE source_name = 'agent-alpha'")
+        db.commit()
+
+        deleted = store.gc_aged("agent-alpha", older_than_days=0)
+        db.commit()
+        assert deleted == 2
+    finally:
+        db.close()
+
+
+def test_gc_aged_refuses_negative_ttl(tmp_path: Path) -> None:
+    """Negative TTL is operator error; refuse with an actionable message."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        with pytest.raises(ValueError, match="older_than_days must be >= 0"):
+            store.gc_aged("agent-alpha", older_than_days=-1)
+    finally:
+        db.close()
+
+
+def test_gc_aged_scopes_to_named_source(tmp_path: Path) -> None:
+    """GC for one source must not touch blobs in another."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        ref_beta = store.write("agent-beta", "beta-item", b"beta", "text/plain")
+        store.write("agent-alpha", "alpha-item", b"alpha", "text/plain")
+        db.commit()
+
+        # Backdate everything; cull only agent-alpha.
+        db.execute("UPDATE bronze_records SET fetched_at = '2020-01-01T00:00:00Z'")
+        db.commit()
+
+        deleted = store.gc_aged("agent-alpha", older_than_days=0)
+        db.commit()
+        assert deleted == 1
+
+        # agent-beta survives.
+        assert (tmp_path / "bronze" / ref_beta.raw_path).is_file()
+        assert db.execute("SELECT count(*) FROM bronze_records WHERE source_name = 'agent-beta'").fetchone()[0] == 1
+    finally:
+        db.close()
+
+
 def test_replay_scopes_to_source_name(tmp_path: Path) -> None:
     db = _open_db(tmp_path)
     try:

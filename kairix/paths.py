@@ -356,6 +356,39 @@ def maintenance_retention_days() -> int:
     return parsed
 
 
+def bronze_ttl_days() -> int:
+    """#316 — TTL for bronze raw blobs when ``bronze_ttl_gc`` flag is ON.
+
+    The :class:`kairix.core.connectors.bronze.FilesystemBronzeStore`
+    :meth:`gc_aged` step deletes bronze_records rows + raw blobs older
+    than this many days on every maintenance tick (when the
+    ``bronze_ttl_gc`` flag is ON). Bounds bronze growth — without it,
+    the SharePoint dogfood corpus accumulated 36 GB of correctly-
+    registered blobs that the orphan reaper (#318) couldn't touch.
+
+    Reads ``KAIRIX_BRONZE_TTL_DAYS`` (int) — default 7. F4 keeps the
+    env read centralised here in paths.py.
+    """
+    raw = os.environ.get("KAIRIX_BRONZE_TTL_DAYS")
+    if raw is None:
+        return 7
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning(
+            "KAIRIX_BRONZE_TTL_DAYS=%r is not an int; using default 7",
+            raw,
+        )
+        return 7
+    if parsed < 0:
+        logger.warning(
+            "KAIRIX_BRONZE_TTL_DAYS=%r is negative; using default 7",
+            raw,
+        )
+        return 7
+    return parsed
+
+
 def maintenance_interval_seconds() -> int:
     """KFEAT-021 Phase 1 — seconds between maintenance ticks in the worker loop.
 

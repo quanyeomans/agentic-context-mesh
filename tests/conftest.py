@@ -160,6 +160,9 @@ pytest_plugins = [
     # #318 added the @orphan scenario after the 2026-05-25 SharePoint
     # incident left 36 GB of unreferenced blobs.
     "tests.bdd.steps.connector_bronze_steps",
+    # #316 — bronze_ttl_gc feature flag (default OFF). F54 both-branch
+    # coverage drives the TTL GC stage through a scheduler-shaped closure.
+    "tests.bdd.steps.feature_flag_bronze_ttl_gc_steps",
     # PR-2 — feature-flag scaffold (kairix features status CLI + MCP tool).
     # See docs/architecture/feature-flag-architecture.md.
     "tests.bdd.steps.cli_features_steps",

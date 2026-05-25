@@ -954,3 +954,43 @@ class TestAgentMemoryGlob:
         from kairix.paths import agent_memory_glob
 
         assert agent_memory_glob(config={"agent_memory_glob": "*/memory/*.md"}) == "*/memory/*.md"
+
+
+class TestBronzeTtlDays:
+    """`bronze_ttl_days()` — #316 TTL for bronze raw blobs."""
+
+    @pytest.mark.unit
+    def test_default_is_seven_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kairix.paths import bronze_ttl_days
+
+        monkeypatch.delenv("KAIRIX_BRONZE_TTL_DAYS", raising=False)
+        assert bronze_ttl_days() == 7
+
+    @pytest.mark.unit
+    def test_parses_integer_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kairix.paths import bronze_ttl_days
+
+        monkeypatch.setenv("KAIRIX_BRONZE_TTL_DAYS", "14")
+        assert bronze_ttl_days() == 14
+
+    @pytest.mark.unit
+    def test_non_integer_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from kairix.paths import bronze_ttl_days
+
+        monkeypatch.setenv("KAIRIX_BRONZE_TTL_DAYS", "not-an-int")
+        with caplog.at_level("WARNING"):
+            assert bronze_ttl_days() == 7
+        assert any("not an int" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.unit
+    def test_negative_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from kairix.paths import bronze_ttl_days
+
+        monkeypatch.setenv("KAIRIX_BRONZE_TTL_DAYS", "-1")
+        with caplog.at_level("WARNING"):
+            assert bronze_ttl_days() == 7
+        assert any("negative" in r.getMessage() for r in caplog.records)

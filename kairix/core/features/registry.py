@@ -453,6 +453,27 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/slack.md",
     ),
+    "bronze_ttl_gc": FeatureFlag(
+        name="bronze_ttl_gc",
+        default=False,
+        description=(
+            "#316 — when ON, the maintenance scheduler runs a TTL-based "
+            "garbage collector that deletes bronze raw blobs (and their "
+            "bronze_records rows) older than KAIRIX_BRONZE_TTL_DAYS "
+            "(default 7). Bounds bronze growth long-term — without this, "
+            "the SharePoint dogfood corpus accumulated 36 GB of raw "
+            "blobs that the orphan reaper (#318) couldn't touch because "
+            "they were correctly registered. Default-off until each "
+            "deploy validates that re-fetch from source is reliable for "
+            "every configured connector; flipping ON makes raw-bytes "
+            "retention a window, not forever."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
+    ),
     "maintenance_loop": FeatureFlag(
         name="maintenance_loop",
         default=False,

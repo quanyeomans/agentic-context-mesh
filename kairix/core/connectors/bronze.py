@@ -29,7 +29,7 @@ import hashlib
 import sqlite3
 import time
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kairix.core.protocols import BronzeRef, MimeType
@@ -110,29 +110,95 @@ class FilesystemBronzeStore:
         source_dir = self._bronze_root / source_name
         if not source_dir.is_dir():
             return 0
-        registered = {
+        registered = self._registered_raw_paths(source_name)
+        now = time.time()
+        reaped = 0
+        for prefix_dir in source_dir.iterdir():
+            if prefix_dir.is_dir():
+                reaped += self._reap_in_prefix(prefix_dir, source_name, registered, now, min_age_seconds)
+        return reaped
+
+    def _registered_raw_paths(self, source_name: str) -> set[str]:
+        """Return the set of bronze_records.raw_path values for ``source_name``."""
+        return {
             str(row[0])
             for row in self._db.execute(
                 "SELECT raw_path FROM bronze_records WHERE source_name = ?",
                 (source_name,),
             )
         }
-        now = time.time()
+
+    def _reap_in_prefix(
+        self,
+        prefix_dir: Path,
+        source_name: str,
+        registered: set[str],
+        now: float,
+        min_age_seconds: float,
+    ) -> int:
+        """Reap every orphan file in one prefix directory; return the count."""
         reaped = 0
-        for prefix_dir in source_dir.iterdir():
-            if not prefix_dir.is_dir():
-                continue
-            for blob in prefix_dir.iterdir():
-                if not blob.is_file():
-                    continue
-                rel_path = f"{source_name}/{prefix_dir.name}/{blob.name}"
-                if rel_path in registered:
-                    continue
-                if min_age_seconds > 0.0 and (now - blob.stat().st_mtime) < min_age_seconds:
-                    continue
-                blob.unlink()
+        for blob in prefix_dir.iterdir():
+            if self._reap_one(blob, prefix_dir.name, source_name, registered, now, min_age_seconds):
                 reaped += 1
         return reaped
+
+    @staticmethod
+    def _reap_one(
+        blob: Path,
+        prefix_name: str,
+        source_name: str,
+        registered: set[str],
+        now: float,
+        min_age_seconds: float,
+    ) -> bool:
+        """Delete ``blob`` if it's an unreferenced file old enough to be safe."""
+        if not blob.is_file():
+            return False
+        rel_path = f"{source_name}/{prefix_name}/{blob.name}"
+        if rel_path in registered:
+            return False
+        if min_age_seconds > 0.0 and (now - blob.stat().st_mtime) < min_age_seconds:
+            return False
+        blob.unlink()
+        return True
+
+    def gc_aged(self, source_name: str, *, older_than_days: int) -> int:
+        """Delete every ``bronze_records`` row + on-disk blob for
+        ``source_name`` whose ``fetched_at`` is older than the cutoff.
+        Returns the count deleted.
+
+        TTL garbage collection — the bound on bronze growth long-term.
+        After ``older_than_days`` the raw bytes are dropped; if a future
+        re-extraction needs them, the connector re-fetches from source.
+
+        Does NOT commit; caller owns the transaction (matches the
+        existing ``write`` / ``read`` / ``replay`` contract on this
+        store). Refuses negative TTLs with a clear actionable message
+        per F21.
+        """
+        if older_than_days < 0:
+            raise ValueError(
+                f"older_than_days must be >= 0; got {older_than_days!r}. "
+                "fix: pass a non-negative int; "
+                "run: KAIRIX_BRONZE_TTL_DAYS=7 (default)"
+            )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat().replace("+00:00", "Z")
+        rows = self._db.execute(
+            "SELECT item_id, raw_path FROM bronze_records WHERE source_name = ? AND fetched_at < ?",
+            (source_name, cutoff),
+        ).fetchall()
+        deleted = 0
+        for item_id, raw_path in rows:
+            blob = self._bronze_root / str(raw_path)
+            if blob.is_file():
+                blob.unlink()
+            self._db.execute(
+                "DELETE FROM bronze_records WHERE source_name = ? AND item_id = ?",
+                (source_name, item_id),
+            )
+            deleted += 1
+        return deleted
 
     def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]:
         """Yield :class:`BronzeRef` rows for ``source_name``, oldest first.
