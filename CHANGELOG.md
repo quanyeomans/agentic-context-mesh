@@ -7,6 +7,33 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.24a4] - 2026-05-25 — SharePoint per-drive path filtering (alpha)
+
+> **Upgrading?** Straight pull from a3 — the new behaviour is purely additive. Set `include_paths` / `exclude_paths` on a SharePoint drive entry only when you want to scope a drive by folder. Full notes: [`docs/upgrades/v2026.5.24a4.md`](docs/upgrades/v2026.5.24a4.md).
+
+### New for operators
+
+- **Per-drive folder filtering for the SharePoint connector.** Two new optional lists on each drive entry — `include_paths` and `exclude_paths`. Empty = whole drive walked (current behaviour). Non-empty `include_paths` = only items whose path starts with one of the listed paths land. `exclude_paths` drops matching items even when an include matched. Segment-boundary prefix match, case-insensitive. Unblocks pointing at SharePoint drives that mix curated content and bulk material (Microsoft partner libraries, archived projects, draft folders) without splitting content across drives in SharePoint itself.
+- **Startup probe for missing include paths.** When `include_paths` is set, the connector calls Graph once per path at startup to confirm the folder exists. Missing folders surface as `sharepoint_probe_missing_folder` log warnings — the connector continues syncing the present paths so a typo doesn't silently drop your data.
+- **Parse-time refusal of exact include/exclude overlap.** `include_paths: ["/Foo"]` + `exclude_paths: ["/Foo"]` (almost always a copy-paste typo) is refused at `kairix config validate` with a fix pointer. Strict children (e.g. include `/Foo` + exclude `/Foo/draft`) remain legal — that's the intended use case.
+- **Auto-synthesised cc_pair labels** for filter-active drives without an operator-set `display_name`. Two cc_pairs against the same drive with different `include_paths` now surface as distinguishable labels in `kairix features status`, `tool_features_status`, and structured logs — instead of two identical opaque drive ids.
+
+### Behaviour changes worth noting
+
+- **Backward-compatible by default.** Existing SharePoint deployments that don't set `include_paths` / `exclude_paths` see no change. The filter is a per-tick view, not persisted state — operators can change `include_paths` between syncs without invalidating the per-drive deltaLink.
+- **First sync still walks the full delta stream.** The filter is client-side post-processing — Graph's delta endpoint doesn't take a path filter. Only the extract + embed + index work is reduced for filtered items, not the upstream listing cost. Per-folder delta optimisation is a noted future enhancement.
+
+### Internal
+
+- **KFEAT-022 prerequisite.** Per-folder scoping is the first piece of the guided-configuration epic — without it, `kairix sharepoint discover` would surface drives the operator can choose but not their internal folder structure. Path filtering unblocks the discovery surface walking one level deeper. See [`docs/architecture/guided-configuration.md`](docs/architecture/guided-configuration.md).
+- **23 new tests across unit / contract / integration / E2E / BDD layers** following the spec in [`docs/architecture/sharepoint-path-filtering.md`](docs/architecture/sharepoint-path-filtering.md). All green; pre-existing SharePoint test suites continue to pass (purely additive change).
+
+### Things that haven't changed
+
+- The Graph API permissions you grant — `Sites.Read.All` + `Files.Read.All` still cover this.
+- Every other connector. Slack, GitHub, Notion, M365, Obsidian, Dex unchanged. Path-filter generalisation to those connectors is part of KFEAT-022.
+- The cursor format, the connector's Protocol surface, the chunk-write contract.
+
 ## [2026.5.24a3] - 2026-05-24 — Configurable agent-knowledge layout for onboard check (alpha)
 
 > **Upgrading?** Straight pull from a2 — no config change required. The default glob is broader than earlier alphas, so vaults that previously failed `agent_knowledge_populated` will now pass it. Full notes: [`docs/upgrades/v2026.5.24a3.md`](docs/upgrades/v2026.5.24a3.md).

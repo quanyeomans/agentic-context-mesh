@@ -393,3 +393,24 @@ relax any of them:
 4. **Delegated vs app-only default** — `../01` describes three auth shapes; current code is
    app-only client-creds only. Delegated ("ingest what I can see") is a different `OAuthConnector`
    path — defer or add?
+
+## 10. Path filtering (shipped 2026-05-25)
+
+Per-drive `include_paths` and `exclude_paths` scope which folders within a configured drive get indexed. Default-empty preserves whole-drive walks (back-compat).
+
+**Operator config:**
+```yaml
+connector_specific_config:
+  drives:
+    - drive_id: "b!a0rph..."
+      include_paths: ["/Curated-Content", "/Shared Documents"]
+      exclude_paths: ["/Curated-Content/draft"]
+```
+
+**Semantics:** segment-boundary prefix match (case-insensitive), exclude wins on overlap, exact-overlap of include + exclude refused at parse time. Items with missing `parentReference.path` are dropped when a filter is active (logged at DEBUG). Startup probe issues one Graph call per include_path and warns on 404s without failing init.
+
+**Implementation:** `kairix/connectors/sharepoint/connector.py` — `path_passes_filter` pure helper + `_item_passes_spec_filter` method + `_probe_include_paths` startup hook. Display name auto-synthesises from first include_path when operator hasn't set one explicitly, so multiple cc_pairs against the same drive are distinguishable in status surfaces.
+
+**Full spec:** [`docs/architecture/sharepoint-path-filtering.md`](../../sharepoint-path-filtering.md) — design, test contract, implementation contract, four open questions with resolution rationale.
+
+**Known v1 limitation:** no per-folder delta optimisation — we walk the full drive delta and post-filter. Sub-optimal on huge drives with small includes (~10× wasted listing on a 100 GB drive with a 1 GB include). Future enhancement: switch to per-folder walks when the include set is small.

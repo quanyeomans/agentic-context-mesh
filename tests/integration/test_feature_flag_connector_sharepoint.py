@@ -115,3 +115,140 @@ def test_sharepoint_flag_on_branch_runs(caplog: pytest.LogCaptureFixture) -> Non
     )
     assert off_calls["n"] == 0, "OFF branch must not run when flag is ON"
     assert result.synced == 1, f"ON branch must have run and returned its result; got {result}"
+
+
+# ---------------------------------------------------------------------------
+# Path filtering — both filter-state branches against the same flag-ON setup
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_filter_active_drops_items_outside_include_paths_when_flag_on() -> None:
+    """Flag ON + include_paths set → only matching items emit. Verifies the
+    filter integrates correctly with the worker's connector wiring."""
+    import httpx
+
+    from kairix.connectors.sharepoint import (
+        SharePointConnector,
+        SharePointCredentials,
+        SharePointDriveSpec,
+        SharePointGraphClient,
+    )
+    from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
+
+    drive_id = "b!integration-filter"
+
+    def _envelope(item_id: str, parent_path: str, name: str) -> dict:
+        return {
+            "id": item_id,
+            "name": name,
+            "size": 100,
+            "lastModifiedDateTime": "2026-05-22T10:00:00Z",
+            "webUrl": f"https://contoso.sharepoint.com/sites/team/Documents{parent_path}/{name}",
+            "file": {"mimeType": "text/markdown"},
+            "parentReference": {"driveId": drive_id, "path": f"/drives/{drive_id}/root:{parent_path}"},
+        }
+
+    body = {
+        "@odata.context": f"https://graph.microsoft.com/v1.0/$metadata#drives/{drive_id}/root/delta",
+        "value": [
+            _envelope("a", "/Curated-Content", "a.md"),
+            _envelope("b", "/Vendor-Bulk-Materials", "b.pptx"),
+        ],
+        "@odata.deltaLink": f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/delta?$deltatoken=tok",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/oauth2/v2.0/token" in url:
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600, "token_type": "Bearer"})
+        if "/root:" in url and "delta" not in url:
+            return httpx.Response(200, json={"id": "folder-id"})
+        return httpx.Response(200, json=body)
+
+    shared = httpx.Client(transport=httpx.MockTransport(handler))
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — integration test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    connector = SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id=drive_id, include_paths=("/Curated-Content",))],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — integration test fixture
+        ),
+        auth=auth,
+        client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+    )
+    events = list(connector.list_changes(cursor=None))
+    assert {e.item_id for e in events} == {"a"}, f"include_paths filter not applied end-to-end: {events!r}"
+
+
+@pytest.mark.integration
+def test_filter_inactive_preserves_prior_behaviour_when_flag_on() -> None:
+    """Flag ON + empty include_paths → every emission-eligible item lands.
+
+    Pins backward-compat: existing deployments that don't set include_paths
+    see no behaviour change after pulling the filter feature.
+    """
+    import httpx
+
+    from kairix.connectors.sharepoint import (
+        SharePointConnector,
+        SharePointCredentials,
+        SharePointDriveSpec,
+        SharePointGraphClient,
+    )
+    from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
+
+    drive_id = "b!integration-no-filter"
+
+    def _envelope(item_id: str, parent_path: str, name: str) -> dict:
+        return {
+            "id": item_id,
+            "name": name,
+            "size": 100,
+            "lastModifiedDateTime": "2026-05-22T10:00:00Z",
+            "webUrl": f"https://contoso.sharepoint.com/sites/team/Documents{parent_path}/{name}",
+            "file": {"mimeType": "text/markdown"},
+            "parentReference": {"driveId": drive_id, "path": f"/drives/{drive_id}/root:{parent_path}"},
+        }
+
+    body = {
+        "@odata.context": f"https://graph.microsoft.com/v1.0/$metadata#drives/{drive_id}/root/delta",
+        "value": [
+            _envelope("a", "/Curated-Content", "a.md"),
+            _envelope("b", "/Vendor-Bulk-Materials", "b.pptx"),
+        ],
+        "@odata.deltaLink": f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root/delta?$deltatoken=tok",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "/oauth2/v2.0/token" in str(request.url):
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600, "token_type": "Bearer"})
+        return httpx.Response(200, json=body)
+
+    shared = httpx.Client(transport=httpx.MockTransport(handler))
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — integration test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    connector = SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id=drive_id)],  # no filter
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — integration test fixture
+        ),
+        auth=auth,
+        client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+    )
+    events = list(connector.list_changes(cursor=None))
+    assert {e.item_id for e in events} == {"a", "b"}, f"empty filter should pass every item: {events!r}"

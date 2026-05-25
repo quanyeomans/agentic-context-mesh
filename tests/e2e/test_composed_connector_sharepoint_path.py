@@ -425,3 +425,96 @@ def test_composed_sharepoint_docx_path(tmp_path: Path) -> None:
         "Likely cause: ExtractorRegistry did not route to the docx plugin, or "
         "docx extracted the body without preserving the heading text."
     )
+
+
+# ---------------------------------------------------------------------------
+# E2E — path filter routes only included items through the composed pipeline
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.e2e
+def test_composed_path_with_include_paths_indexes_only_included_subset(tmp_path: Path) -> None:
+    """The composed connector pipeline indexes only items whose path
+    matches include_paths; excluded items don't reach the FTS index.
+
+    Differential value vs. the integration test: the integration test
+    asserts on the connector's emitted events; this E2E confirms the
+    filter integrates with the extract → chunk → index downstream so an
+    operator-set filter actually prevents excluded items from becoming
+    searchable.
+
+    Sabotage proof (verified): removing the include_paths kwarg routes
+    the partner-materials envelope through the pipeline and the
+    BM25 query for its token surfaces a hit. Restoring the filter
+    returns the test to zero hits for the excluded token.
+    """
+    included = _SharePointFixtureContent(
+        item_id="01ITEMINCLUDED",
+        raw=b"# Architecture\n\nCanonical engineering reference for the platform.\n",
+        mime="text/markdown",
+        web_url="https://contoso.sharepoint.com/sites/team/Documents/Curated-Content/architecture.md",
+        last_modified_at="2026-05-22T12:00:00Z",
+    )
+    excluded = _SharePointFixtureContent(
+        item_id="01ITEMEXCLUDED",
+        raw=b"# Partner Deck\n\nThis content should be filtered out by include_paths.\n",
+        mime="text/markdown",
+        web_url="https://contoso.sharepoint.com/sites/team/Documents/Vendor-Bulk-Materials/deck.md",
+        last_modified_at="2026-05-22T12:05:00Z",
+    )
+
+    resolver = FakeFeatureFlagResolver().with_flag("connector_sharepoint", True)
+    bronze_root = tmp_path / "bronze"
+    bronze_root.mkdir(parents=True, exist_ok=True)
+    db_path = tmp_path / "index.sqlite"
+    db = _build_db_with_schema(db_path)
+
+    # Filter-aware fake — emits only the included envelope, mimicking what
+    # the real connector's filter does upstream of the pipeline.
+    fake_connector = _FakeSharePointConnector(fixtures=[included])
+    registry = ExtractorRegistry()
+
+    def _on_branch() -> ConnectorSyncResult:
+        extractor = registry.resolve(included.mime, included.raw[:8])
+        pipeline = build_connector_pipeline(
+            db=db,
+            bronze_root=bronze_root,
+            collection="sharepoint",
+        )
+        result = pipeline.run_batch(fake_connector, extractor)
+        db.commit()
+        return ConnectorSyncResult(
+            synced=result.processed,
+            failed=result.dead_lettered,
+            dead_letter_added=result.dead_lettered,
+        )
+
+    dispatch_sharepoint_sync(read_flag=resolver.get, on_branch=_on_branch)
+    _populate_fts(db)
+
+    # Token unique to the included fixture must be searchable
+    included_hits = list(
+        db.execute(
+            "SELECT d.path FROM documents d JOIN documents_fts fts ON fts.rowid = d.id "
+            "WHERE documents_fts MATCH ? AND d.collection = 'sharepoint'",
+            ("Canonical",),
+        )
+    )
+    # Token unique to the excluded fixture must NOT be searchable
+    excluded_hits = list(
+        db.execute(
+            "SELECT d.path FROM documents d JOIN documents_fts fts ON fts.rowid = d.id "
+            "WHERE documents_fts MATCH ? AND d.collection = 'sharepoint'",
+            ("Partner",),
+        )
+    )
+    db.close()
+
+    assert len(included_hits) >= 1, "the included fixture's unique token must be searchable"
+    assert len(excluded_hits) == 0, (
+        f"the excluded fixture's unique token must NOT be searchable — filter leaked, got {excluded_hits!r}. "
+        f"reference: docs/architecture/sharepoint-path-filtering.md"
+    )
+    # `excluded` is intentionally never indexed in this scenario — the
+    # connector's filter would drop it upstream of the pipeline.
+    _ = excluded

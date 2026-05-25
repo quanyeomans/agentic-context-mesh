@@ -191,3 +191,84 @@ def test_connector_default_sensitivity_is_internal(name: str, factory: Callable[
     connector = factory()
     tier = connector.sensitivity_for("01ITEMALPHA")
     assert tier == DEFAULT_SENSITIVITY == "internal", f"{name!r} returned unexpected sensitivity: {tier!r}"
+
+
+# ---------------------------------------------------------------------------
+# Path filtering — Protocol surface holds with filter active
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.contract
+def test_real_connector_with_path_filter_still_satisfies_protocol() -> None:
+    """SharePointConnector with include_paths set still satisfies the
+    SourceConnector Protocol shape — the filter is pure post-processing,
+    no Protocol surface changes.
+
+    The canonical Fake doesn't need to model filtering (filter is a
+    real-connector implementation detail); the real connector must
+    structurally satisfy the Protocol regardless of whether a filter is
+    active. This test pins the contract.
+    """
+    transport = httpx.MockTransport(_handler_returning_one_envelope())
+    shared = httpx.Client(transport=transport)
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — contract test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    connector = SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Curated-Content",))],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — contract test fixture
+        ),
+        auth=auth,
+        client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+    )
+    # Same Protocol assertions as the no-filter case — none of these
+    # depend on whether items get filtered.
+    assert isinstance(connector, SourceConnector)
+    events = list(connector.list_changes(cursor=None))
+    assert isinstance(events, list)
+    for e in events:
+        assert isinstance(e.item_id, str) and e.item_id
+        assert isinstance(e.op, str) and e.op in ("created", "modified", "deleted")
+        assert isinstance(e.modified_at, str) and e.modified_at
+
+
+def _handler_returning_one_envelope():
+    """Stub Graph endpoint that returns one envelope in /Curated-Content."""
+    body = {
+        "@odata.context": f"https://graph.microsoft.com/v1.0/$metadata#drives/{_DRIVE_ID}/root/delta",
+        "value": [
+            {
+                "id": "contract-item",
+                "name": "doc.md",
+                "size": 50,
+                "lastModifiedDateTime": "2026-05-22T10:00:00Z",
+                "webUrl": "https://contoso.sharepoint.com/sites/team/Documents/Curated-Content/doc.md",
+                "file": {"mimeType": "text/markdown"},
+                "parentReference": {
+                    "driveId": _DRIVE_ID,
+                    "path": f"/drives/{_DRIVE_ID}/root:/Curated-Content",
+                },
+            }
+        ],
+        "@odata.deltaLink": _DELTA_LINK,
+    }
+
+    def handler(request):
+        url = str(request.url)
+        if "/oauth2/v2.0/token" in url:
+            return httpx.Response(
+                200,
+                json={"access_token": "tok", "expires_in": 3600, "token_type": "Bearer"},
+            )
+        if "/root:" in url and "delta" not in url:
+            return httpx.Response(200, json={"id": "folder-id"})
+        return httpx.Response(200, json=body)
+
+    return handler

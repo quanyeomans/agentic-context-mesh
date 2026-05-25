@@ -141,6 +141,8 @@ Next milestone in this thread is **Wave F (chunker plugins)** — each connector
 
 **KFEAT-022 — guided configuration for connectors.** Three new CLI subcommands per connector (`discover`, `configure`, `status`) so operators (and agents) pick what to index from a plain-English list instead of pasting raw IDs into YAML. Adds pre-ingest volumetric estimates (file count, disk impact, expected ingest time) so a 1 TB SharePoint pick surfaces its cost before the worker starts; adds during-ingest progress so the operator sees when kairix is fully operationalised on the new collection. SharePoint pilot lands first behind `guided_configuration_sharepoint`; Slack / GitHub / Notion inherit the pattern. See [`docs/architecture/guided-configuration.md`](../architecture/guided-configuration.md).
 
+**SharePoint per-drive path filtering.** Operators can now scope a SharePoint drive by include / exclude paths instead of indexing the whole drive (shipped v2026.5.24a4). Prerequisite for KFEAT-022's discovery surface walking one level deeper than drives. See [`docs/architecture/sharepoint-path-filtering.md`](../architecture/sharepoint-path-filtering.md).
+
 ---
 
 ## Near-term
