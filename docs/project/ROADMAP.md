@@ -139,6 +139,8 @@ Behind default-off feature flags — reversible until each cutover soak validate
 
 Next milestone in this thread is **Wave F (chunker plugins)** — each connector picks its chunker by config rather than baked-in choice. Plus the per-connector cutover soak that promotes each `topology_v2_<name>` flag from introduce → cutover → retire over the next several releases.
 
+**KFEAT-022 — guided configuration for connectors.** Three new CLI subcommands per connector (`discover`, `configure`, `status`) so operators (and agents) pick what to index from a plain-English list instead of pasting raw IDs into YAML. Adds pre-ingest volumetric estimates (file count, disk impact, expected ingest time) so a 1 TB SharePoint pick surfaces its cost before the worker starts; adds during-ingest progress so the operator sees when kairix is fully operationalised on the new collection. SharePoint pilot lands first behind `guided_configuration_sharepoint`; Slack / GitHub / Notion inherit the pattern. See [`docs/architecture/guided-configuration.md`](../architecture/guided-configuration.md).
+
 ---
 
 ## Near-term
