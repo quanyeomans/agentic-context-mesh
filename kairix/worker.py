@@ -1674,32 +1674,45 @@ def _maybe_run_maintenance_cycle(
 ) -> tuple[float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
-    Several near-identical "if interval elapsed → run task → record timestamp"
-    blocks collapsed into a dispatch loop to keep ``main``'s cognitive
-    complexity under the F16 / S3776 limit (#250 follow-up). SC-6 added
-    the ``connector_sync`` slot — it inherits the same maintenance-skip
-    gating because a long-idle vault implies quiet upstream sources too.
-    """
-    if not maintenance_active:
-        return (last_entity, last_health, last_wikilinks, last_connector_sync)
+    Two buckets (#312):
 
-    tasks = (
-        ("entity", schedule.entity, last_entity, run_entity_seed),
-        ("health", schedule.health, last_health, run_health_check),
-        ("wikilinks", schedule.wikilinks, last_wikilinks, run_wikilinks_inject),
-        (_CONNECTOR_SYNC_KEY, schedule.connector_sync, last_connector_sync, run_connector_sync),
-    )
-    new_times: dict[str, float] = {
-        "entity": last_entity,
-        "health": last_health,
-        "wikilinks": last_wikilinks,
-        _CONNECTOR_SYNC_KEY: last_connector_sync,
-    }
-    for name, interval, last_run, task in tasks:
-        if now - last_run >= interval:
-            _run_maintenance_task(deps, transition, task)
-            new_times[name] = now
-    return (new_times["entity"], new_times["health"], new_times["wikilinks"], new_times[_CONNECTOR_SYNC_KEY])
+    * **Local-content-dependent** (entity, health, wikilinks) — gated by
+      ``maintenance_active``. When the local vault has been idle long
+      enough to set the embed-noop streak above the threshold, none of
+      these have anything to do and the maintenance scan is wasted work.
+
+    * **External-source-discovery** (connector_sync) — ALWAYS runs on
+      its interval regardless of ``maintenance_active``. A quiet local
+      vault does NOT imply quiet upstream sources; SharePoint /
+      GitHub / Slack can produce fresh content while the local vault
+      sits idle. The original SC-6 coupling assumption was wrong and
+      blocked external-source sync for the duration of any idle period
+      on the production VM (#312).
+    """
+    new_entity, new_health, new_wikilinks = last_entity, last_health, last_wikilinks
+    if maintenance_active:
+        local_tasks = (
+            ("entity", schedule.entity, last_entity, run_entity_seed),
+            ("health", schedule.health, last_health, run_health_check),
+            ("wikilinks", schedule.wikilinks, last_wikilinks, run_wikilinks_inject),
+        )
+        new_local: dict[str, float] = {
+            "entity": last_entity,
+            "health": last_health,
+            "wikilinks": last_wikilinks,
+        }
+        for name, interval, last_run, task in local_tasks:
+            if now - last_run >= interval:
+                _run_maintenance_task(deps, transition, task)
+                new_local[name] = now
+        new_entity, new_health, new_wikilinks = new_local["entity"], new_local["health"], new_local["wikilinks"]
+
+    new_connector_sync = last_connector_sync
+    if now - last_connector_sync >= schedule.connector_sync:
+        _run_maintenance_task(deps, transition, run_connector_sync)
+        new_connector_sync = now
+
+    return (new_entity, new_health, new_wikilinks, new_connector_sync)
 
 
 def main(

@@ -1606,18 +1606,18 @@ def test_main_loop_calls_connector_sync_at_interval(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_main_loop_skips_connector_sync_above_maintenance_threshold(tmp_path: Path) -> None:
-    """When the no-op streak is at/above MAINTENANCE_SKIP_NOOP_THRESHOLD,
-    the connector sync inherits the maintenance-skip gating — same as
-    entity_seed / health_check / wikilinks_inject.
+def test_main_loop_runs_connector_sync_above_maintenance_threshold(tmp_path: Path) -> None:
+    """connector_sync MUST run regardless of the embed-noop streak (#312).
 
-    Sabotage proof: remove the ``connector_sync`` tuple's
-    membership in the maintenance dispatch loop and the assertion below
-    still passes (because it would never have been called) — so we
-    additionally assert the embed-resumes case in the companion test.
-    The real proof is: drop the ``if not maintenance_active`` early
-    return in ``_maybe_run_maintenance_cycle`` and connector_sync DOES
-    fire even with the high streak — this test then fails.
+    A quiet local vault doesn't imply quiet upstream sources;
+    SharePoint / Slack / GitHub can produce fresh content while the
+    local vault sits idle. The original SC-6 coupling assumed
+    coupled idleness and blocked external-source sync for the entire
+    duration of any local idle period on the production VM.
+
+    Sabotage proof: restore the ``if not maintenance_active`` early
+    return in ``_maybe_run_maintenance_cycle`` and connector_sync_calls
+    drops to 0 — this assertion fails.
     """
     import os
 
@@ -1658,10 +1658,73 @@ def test_main_loop_skips_connector_sync_above_maintenance_threshold(tmp_path: Pa
         connector_sync_interval=0,
     )
 
-    assert connector_sync_calls["n"] == 0, (
-        f"connector_sync must not run when streak ({seed_streak}+) >= threshold ({MAINTENANCE_SKIP_NOOP_THRESHOLD}); "
-        f"got {connector_sync_calls['n']} call(s)"
+    assert connector_sync_calls["n"] >= 1, (
+        f"connector_sync MUST still run even when streak ({seed_streak}+) >= threshold "
+        f"({MAINTENANCE_SKIP_NOOP_THRESHOLD}) — external sources can produce fresh "
+        f"content while the local vault is idle; got {connector_sync_calls['n']} call(s)"
     )
+
+
+@pytest.mark.unit
+def test_main_loop_skips_local_maintenance_above_noop_threshold(tmp_path: Path) -> None:
+    """Locks the OTHER half of #312: entity_seed / health_check /
+    wikilinks_inject ARE still gated by the embed-noop threshold.
+    Connector_sync is the only task that crosses the gate.
+
+    Sabotage proof: drop the ``maintenance_active`` guard around the
+    local_tasks loop in _maybe_run_maintenance_cycle and these
+    counters jump above 0 with the high streak.
+    """
+    import os
+
+    from kairix.worker import MAINTENANCE_SKIP_NOOP_THRESHOLD
+
+    state_path = tmp_path / "worker-state.json"
+    embed_calls = {"n": 0}
+    entity_calls = {"n": 0}
+    health_calls = {"n": 0}
+    wikilinks_calls = {"n": 0}
+
+    def _embed_noop_then_shutdown() -> None:
+        embed_calls["n"] += 1
+        if embed_calls["n"] >= 2:
+            os.kill(os.getpid(), signal.SIGTERM)  # NOSONAR — self-signal to exit worker loop.
+
+    def _entity_seed() -> None:
+        entity_calls["n"] += 1
+
+    def _health() -> list[str]:
+        health_calls["n"] += 1
+        return []
+
+    def _wikilinks() -> None:
+        wikilinks_calls["n"] += 1
+
+    seed_streak = MAINTENANCE_SKIP_NOOP_THRESHOLD + 1
+    deps = WorkerDeps(
+        embed=_embed_noop_then_shutdown,
+        entity_seed=_entity_seed,
+        health_check=_health,
+        wikilinks=_wikilinks,
+        connector_sync_fn=lambda: ConnectorSyncResult(),
+        sleep=lambda _s: None,
+        state=WorkerState(consecutive_embed_noops=seed_streak),
+        state_path=state_path,
+        write_state_fn=lambda *_: None,
+    )
+
+    main(
+        deps=deps,
+        embed_interval=0,
+        entity_seed_interval=0,
+        health_check_interval=0,
+        wikilinks_interval=0,
+        connector_sync_interval=0,
+    )
+
+    assert entity_calls["n"] == 0, "entity_seed must skip above the noop threshold"
+    assert health_calls["n"] == 0, "health_check must skip above the noop threshold"
+    assert wikilinks_calls["n"] == 0, "wikilinks must skip above the noop threshold"
 
 
 @pytest.mark.unit
