@@ -451,3 +451,45 @@ def test_path_exists_returns_true_on_200_false_on_404() -> None:
     client = SharePointGraphClient(auth=auth, http_client=httpx.Client(transport=httpx.MockTransport(handler)))
     assert client.path_exists("drive-x", "/Curated-Content") is True
     assert client.path_exists("drive-x", "/Does-Not-Exist") is False
+
+
+@pytest.mark.unit
+def test_fetch_item_content_follows_302_redirect_to_blob_url() -> None:
+    """Graph returns 302 → time-limited Azure Blob URL for /content; the
+    client MUST follow the redirect to get the binary, not return the 302
+    response itself.
+
+    Regression for the bug surfaced 2026-05-25 on the dogfood VM: every
+    SharePoint binary fetch was dead-lettering because httpx.Client
+    defaults to follow_redirects=False, so the 302 raise_for_status()'d
+    and the bronze write never landed.
+    """
+    real_bytes = b"%PDF-1.4 fake binary content for the test\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/oauth2/v2.0/token" in url:
+            return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600, "token_type": "Bearer"})
+        if "/items/item-x/content" in url:
+            # Graph's /content endpoint emits a 302 to a time-limited Azure Blob URL
+            return httpx.Response(302, headers={"Location": "https://example-blob.example.com/download/abc123"})
+        if "example-blob.example.com" in url:
+            return httpx.Response(200, content=real_bytes)
+        return httpx.Response(404)
+
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    client = SharePointGraphClient(
+        auth=auth,
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    body = client.fetch_item_content("drive-x", "item-x")
+    assert body == real_bytes, (
+        "fetch_item_content must follow Graph's 302 redirect to the Azure Blob URL "
+        "and return the actual bytes; got something else (possibly the 302 response body)."
+    )

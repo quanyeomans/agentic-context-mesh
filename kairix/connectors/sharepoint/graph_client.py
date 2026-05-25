@@ -324,13 +324,22 @@ class SharePointGraphClient:
     def _do_get(self, url: str, token: str, *, timeout: float | None = None) -> httpx.Response:
         """Single HTTP GET. The bearer string is composed into the
         Authorization header here ONLY; never logged, never returned.
+
+        ``follow_redirects=True`` is critical for the ``/content`` endpoint:
+        Graph returns a 302 redirect to a time-limited Azure Blob URL
+        rather than the bytes inline. Without this flag the binary fetch
+        returns the 302 response itself + ``raise_for_status()`` errors,
+        which dead-letters every SharePoint item. Caller-injected clients
+        should also enable redirects (the test fixtures shipped before
+        2026-05-25 returned 200 inline so the bug never surfaced —
+        production Graph behaviour differs).
         """
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         effective_timeout = timeout if timeout is not None else _GRAPH_REQUEST_TIMEOUT_S
         client = self._http_client
         if client is not None:
-            return client.get(url, headers=headers, timeout=effective_timeout)
-        with httpx.Client(timeout=effective_timeout) as owned:
+            return client.get(url, headers=headers, timeout=effective_timeout, follow_redirects=True)
+        with httpx.Client(timeout=effective_timeout, follow_redirects=True) as owned:
             return owned.get(url, headers=headers)
 
 
