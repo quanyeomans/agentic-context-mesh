@@ -59,6 +59,11 @@ services:
     mem_limit: 3g
     mem_reservation: 1500m
     cpus: 4.0
+    # Bound /tmp on tmpfs so connector fetches (e.g. SharePoint binary
+    # downloads, markitdown PDF conversions) cannot spill onto the host
+    # root filesystem and fill the OS disk.
+    tmpfs:
+      - /tmp:size=2G,mode=1777
 
   kairix-worker:
     image: ghcr.io/three-cubes/kairix:latest
@@ -85,6 +90,11 @@ services:
     mem_limit: 1g
     mem_reservation: 256m
     cpus: 2.0
+    # Same /tmp tmpfs rationale as kairix above — connector binary
+    # fetches and extractor temp files stay bounded by RAM, never the OS
+    # disk. 2 GB sized for SharePoint single-file extraction headroom.
+    tmpfs:
+      - /tmp:size=2G,mode=1777
 
   neo4j:
     image: neo4j:5-community

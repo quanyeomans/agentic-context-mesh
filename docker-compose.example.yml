@@ -134,6 +134,12 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512Mi
+    # Bound /tmp on tmpfs so connector fetches (SharePoint binary
+    # downloads, markitdown PDF / PPTX conversions) cannot spill onto
+    # the host root filesystem. Without this, a backfill can fill the
+    # OS disk and OOM-kill co-located services (the v2026.5.24 incident).
+    tmpfs:
+      - /tmp:size=2G,mode=1777
 
   kairix-worker:
     image: ghcr.io/three-cubes/kairix:latest
@@ -180,6 +186,10 @@ services:
         reservations:
           cpus: "0.25"
           memory: 256Mi
+    # Same /tmp tmpfs rationale as the kairix service — worker is the
+    # heavier consumer (extractor temp files, batch downloads).
+    tmpfs:
+      - /tmp:size=2G,mode=1777
 
   neo4j:
     image: neo4j:5-community
