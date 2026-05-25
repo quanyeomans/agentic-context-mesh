@@ -214,12 +214,27 @@ topology_v2:
       kind: sharepoint
       name: "Corporate SharePoint Document Library"
       default_sensitivity: internal
-      # For SharePoint: the Graph drive id (run
-      # ``kairix sharepoint list-sites`` to enumerate). Pin by id — not
-      # by URL — so the sync stays deterministic across site renames.
+      # For SharePoint: the Graph drive id. Until ``kairix sharepoint
+      # discover`` lands (KFEAT-022), enumerate drives via
+      # ``az rest --method get --url 'https://graph.microsoft.com/v1.0/sites?search=*'``
+      # then ``/sites/<site-id>/drives``. Pin by id — not by URL — so the
+      # sync stays deterministic across site renames.
+      #
+      # ``include_paths`` / ``exclude_paths`` (optional) scope which
+      # folders within the drive get indexed. Empty = whole drive walked.
+      # Prefix-match with segment boundary: ``/Curated-Content`` matches
+      # ``/Curated-Content/foo.md`` but not ``/Curated-Content-Backup``.
+      # Exclude wins on overlap. Case-insensitive. See
+      # docs/architecture/sharepoint-path-filtering.md.
       connector_specific_config:
-        drive_id: "b!exampleDriveIdReplaceWithRealOne"
-        site_id: "contoso.sharepoint.com,xxxx,yyyy"
+        drives:
+          - drive_id: "b!exampleDriveIdReplaceWithRealOne"
+            site_id: "contoso.sharepoint.com,xxxx,yyyy"
+            include_paths:
+              - "/Curated-Content"
+              - "/Shared Documents"
+            exclude_paths:
+              - "/Curated-Content/draft"
 
     - id: slack-workspace-conn
       kind: slack

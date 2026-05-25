@@ -117,6 +117,7 @@ class DriveItemRef:
     size: int | None
     last_modified_at: str | None
     removed: bool
+    parent_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -283,6 +284,25 @@ class SharePointGraphClient:
         """
         return self._last_delta_link_by_drive.get(drive_id)
 
+    def path_exists(self, drive_id: str, path: str) -> bool:
+        """Return True when ``path`` (relative to the drive root) resolves.
+
+        Calls ``GET /drives/{drive-id}/root:{path}``. Returns True on 200,
+        False on 404. Any other status (5xx, transient network) propagates
+        the underlying httpx exception — callers (typically the connector's
+        startup probe) wrap in their own try/except so a transient Graph
+        outage at boot doesn't kill connector init.
+        """
+        normalised = path if path.startswith("/") else "/" + path
+        url = f"{self._graph_base}/drives/{drive_id}/root:{normalised}"
+        try:
+            response = self._authorised_get(url)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return False
+            raise
+        return response.status_code == 200
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -378,11 +398,13 @@ def _drive_item_from(entry: dict[str, Any], *, drive_id: str) -> DriveItemRef:
         if isinstance(mime_candidate, str) and mime_candidate:
             mime = mime_candidate
     parent_drive = drive_id
+    parent_path: str | None = None
     parent = entry.get("parentReference")
     if isinstance(parent, dict):
         parent_drive_candidate = parent.get("driveId")
         if isinstance(parent_drive_candidate, str) and parent_drive_candidate:
             parent_drive = parent_drive_candidate
+        parent_path = _normalise_parent_path(parent.get("path"))
     size_raw = entry.get("size")
     size: int | None = size_raw if isinstance(size_raw, int) else None
     return DriveItemRef(
@@ -394,7 +416,27 @@ def _drive_item_from(entry: dict[str, Any], *, drive_id: str) -> DriveItemRef:
         size=size,
         last_modified_at=_string_or_none(entry.get("lastModifiedDateTime")),
         removed=removed,
+        parent_path=parent_path,
     )
+
+
+def _normalise_parent_path(raw: object) -> str | None:
+    """Strip Graph's ``/drives/<id>/root:`` prefix from a parentReference.path.
+
+    Graph returns ``/drives/<drive-id>/root:/Curated-Content/foo`` for an
+    item under ``/Curated-Content/foo``. The operator-facing form is the
+    suffix after ``root:`` — the part they wrote in include_paths /
+    exclude_paths. Returns ``None`` for missing or malformed input (the
+    filter treats ``None`` as "no path known" and applies the safe rule).
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    marker = "/root:"
+    idx = raw.find(marker)
+    if idx == -1:
+        return None
+    suffix = raw[idx + len(marker) :]
+    return suffix or "/"
 
 
 def _is_folder_entry(entry: dict[str, Any]) -> bool:

@@ -86,7 +86,7 @@ TOPOLOGY_V2_SHAREPOINT_FLAG = "topology_v2_sharepoint"
 
 # Wave E hierarchy root node id. Each configured drive becomes a DRIVE-
 # typed child FOLDER under this root SITE node.
-_HIERARCHY_ROOT_ID = "sharepoint"
+_HIERARCHY_ROOT_ID = CONNECTOR_NAME
 _HIERARCHY_ROOT_DISPLAY = "SharePoint"
 
 # F17 — metadata key for the sensitivity tier carried on every emitted
@@ -128,11 +128,18 @@ class SharePointDriveSpec:
     :meth:`SharePointGraphClient.list_sites`) and pins it in
     ``kairix.config.yaml``. Pinning by id (not by URL) makes the sync
     deterministic across site renames.
+
+    ``include_paths`` and ``exclude_paths`` scope which folders within
+    the drive get indexed. Empty include_paths = whole drive. See
+    ``docs/architecture/sharepoint-path-filtering.md`` for the semantics
+    (segment-boundary prefix match, exclude wins, case-insensitive).
     """
 
     drive_id: str
     site_id: str | None = None
     display_name: str | None = None
+    include_paths: tuple[str, ...] = ()
+    exclude_paths: tuple[str, ...] = ()
 
 
 def _default_flag_reader(name: str) -> bool:
@@ -216,6 +223,7 @@ class SharePointConnector:
                 "for the SharePoint connector config shape."
             )
         self._drives: tuple[SharePointDriveSpec, ...] = tuple(drives)
+        self._spec_by_drive_id: dict[str, SharePointDriveSpec] = {spec.drive_id: spec for spec in self._drives}
         self._default_sensitivity: Sensitivity = default_sensitivity
         self._flag_reader = flag_reader
 
@@ -247,6 +255,12 @@ class SharePointConnector:
         # through the orchestrator's cursor_store.
         self._next_cursor: str | None = None
 
+        # Probe each include_path against the live drive at startup so
+        # missing folders surface proactively (not silently, the first
+        # time a tick rejects every item). One-shot per process; transient
+        # Graph errors don't kill init.
+        self._probe_include_paths()
+
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
     # ------------------------------------------------------------------
@@ -266,6 +280,8 @@ class SharePointConnector:
             drive_id = spec.drive_id
             start_url = per_drive_cursor.get(drive_id)
             for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
+                if not self._item_passes_spec_filter(item, spec=spec):
+                    continue
                 event = self._item_to_event(item, drive_id=drive_id)
                 if event is None:
                     continue
@@ -526,7 +542,7 @@ class SharePointConnector:
                 cc_pair_id=cc_pair_id,
                 raw_node_id=spec.drive_id,
                 raw_parent_id=_HIERARCHY_ROOT_ID,
-                display_name=spec.display_name or spec.drive_id,
+                display_name=self._effective_display_name(spec),
                 link=None,
                 node_type="DRIVE",
                 external_access_json=None,
@@ -550,8 +566,11 @@ class SharePointConnector:
         """
         drive_id = container.container_id
         start_url = container.cursor_token
+        spec = self._spec_by_drive_id.get(drive_id)
         for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
             if not item.item_id or item.removed:
+                continue
+            if spec is not None and not self._item_passes_spec_filter(item, spec=spec):
                 continue
             yield item.item_id
 
@@ -639,14 +658,99 @@ class SharePointConnector:
         """
         drive_id = container.container_id
         start_url = container.cursor_token
+        spec = self._spec_by_drive_id.get(drive_id)
         events: list[ChangeEvent] = []
         for item in self._graph.iter_drive_items(drive_id, start_url=start_url):
+            if spec is not None and not self._item_passes_spec_filter(item, spec=spec):
+                continue
             event = self._item_to_event(item, drive_id=drive_id)
             if event is None:
                 continue
             self._cache[event.item_id] = item
             events.append(event)
         return iter(events)
+
+    def _effective_display_name(self, spec: SharePointDriveSpec) -> str:
+        """Return the operator-facing label for a drive spec.
+
+        Resolution order:
+          1. Operator-provided ``display_name`` — used verbatim
+          2. Spec with non-empty ``include_paths`` → synthesise
+             ``"<drive-id-prefix> [<first-include-path>]"`` so two specs
+             against the same drive but different include paths are
+             distinguishable in status surfaces (`kairix features status`,
+             `tool_features_status`, structured logs)
+          3. Fall back to ``drive_id`` (legacy behaviour preserved when
+             the operator hasn't set a name and hasn't applied a filter)
+
+        The drive-id prefix is the first 8 chars + ellipsis — Graph drive
+        ids are 60+ chars of base64 and unreadable in full; the prefix
+        gives a stable handle without overwhelming the label. Operators
+        who want the actual SharePoint drive name set ``display_name``
+        explicitly.
+        """
+        if spec.display_name:
+            return spec.display_name
+        if spec.include_paths:
+            short = (spec.drive_id[:8] + "…") if len(spec.drive_id) > 8 else spec.drive_id
+            return f"{short} [{spec.include_paths[0]}]"
+        return spec.drive_id
+
+    def _item_passes_spec_filter(self, item: DriveItemRef, *, spec: SharePointDriveSpec) -> bool:
+        """True when the item should pass through the spec's path filter.
+
+        When include / exclude paths are both empty, this is a no-op
+        (returns True for every item). When either is set, items whose
+        Graph envelope omitted ``parentReference.path`` are dropped and
+        a debug log emitted so surprise misses are grep-able.
+        """
+        if not spec.include_paths and not spec.exclude_paths:
+            return True
+        item_path = _full_item_path(item)
+        if item_path is None:
+            logger.debug(
+                "event=sharepoint_filter_dropped_no_path drive=%s item_id=%s name=%s",
+                spec.drive_id,
+                item.item_id,
+                item.name,
+            )
+            return False
+        return path_passes_filter(
+            item_path,
+            include_paths=spec.include_paths,
+            exclude_paths=spec.exclude_paths,
+        )
+
+    def _probe_include_paths(self) -> None:
+        """Warn at startup for any include_path the drive doesn't actually contain.
+
+        One Graph call per include_path per drive. Transient errors
+        (network, Graph 5xx) get logged as warnings but never raise —
+        connector init must succeed even if the source is briefly
+        unavailable so the next tick can retry the drain.
+        """
+        for spec in self._drives:
+            for path in spec.include_paths:
+                try:
+                    exists = self._graph.path_exists(spec.drive_id, path)
+                except Exception as exc:
+                    logger.warning(
+                        "event=sharepoint_probe_error drive=%s path=%s error=%s "
+                        "(connector init continues; next tick will retry)",
+                        spec.drive_id,
+                        path,
+                        exc,
+                    )
+                    continue
+                if not exists:
+                    logger.warning(
+                        "event=sharepoint_probe_missing_folder drive=%s path=%s. "
+                        "fix: confirm the folder exists in SharePoint, or remove "
+                        "the entry from include_paths. next: re-run "
+                        "`kairix worker apply-config` after editing the YAML.",
+                        spec.drive_id,
+                        path,
+                    )
 
     def _item_to_event(self, item: DriveItemRef, *, drive_id: str) -> ChangeEvent | None:
         """Translate one envelope to a typed :class:`ChangeEvent`.
@@ -678,6 +782,79 @@ class SharePointConnector:
         )
 
 
+_PATH_FILTER_DOCS_HINT = "next: see docs/architecture/sharepoint-path-filtering.md."
+
+# F17 — error-message prefix repeated across path-list parse + overlap
+# validation; extracted so the literal has one edit site.
+_DRIVE_ERROR_PREFIX = "sharepoint: drive "
+
+
+def path_passes_filter(
+    item_path: str | None,
+    *,
+    include_paths: tuple[str, ...],
+    exclude_paths: tuple[str, ...],
+) -> bool:
+    """Return True when the item's full path should be emitted.
+
+    Segment-boundary prefix match — ``/Foo`` matches ``/Foo`` itself and
+    ``/Foo/bar/baz.docx`` but NOT ``/Foo-Backup/...``. Case-insensitive
+    (SharePoint paths are case-preserving but case-insensitive in API).
+
+    Empty ``include_paths`` means "include everything". Non-empty
+    ``include_paths`` means "include only items matching at least one
+    entry". ``exclude_paths`` drops matches regardless of include —
+    exclude wins.
+
+    ``item_path`` of ``None`` (Graph envelope omitted parentReference.path)
+    is treated as "no path known": included only when ``include_paths``
+    is empty; otherwise dropped (we can't tell whether it matches, and an
+    operator who set a strict scope clearly intended the boundary).
+    Callers can emit a debug log on the drop so surprise misses are
+    grep-able.
+    """
+    if not include_paths and not exclude_paths:
+        return True
+    if item_path is None:
+        return not include_paths
+    lowered = item_path.lower()
+    if include_paths:
+        if not any(_path_prefix_match(lowered, p.lower()) for p in include_paths):
+            return False
+    if exclude_paths:
+        if any(_path_prefix_match(lowered, p.lower()) for p in exclude_paths):
+            return False
+    return True
+
+
+def _path_prefix_match(item_path: str, candidate: str) -> bool:
+    """Segment-boundary prefix match.
+
+    ``/Foo`` matches the exact path ``/Foo`` and any descendant
+    ``/Foo/bar/...`` but not the sibling ``/Foo-Backup/...``. Both inputs
+    must already be lower-cased and the candidate must not have a
+    trailing slash (the parser strips trailing slashes).
+    """
+    if item_path == candidate:
+        return True
+    return item_path.startswith(candidate + "/")
+
+
+def _full_item_path(item: DriveItemRef) -> str | None:
+    """Compose the operator-facing absolute path for a drive item.
+
+    ``parent_path`` is the suffix after Graph's ``root:`` marker (e.g.
+    ``/Curated-Content`` or ``/`` for items at the drive root); the
+    item's ``name`` is the leaf. Returns ``None`` when the parent path
+    was absent from the Graph envelope.
+    """
+    if item.parent_path is None:
+        return None
+    if item.parent_path in ("", "/"):
+        return f"/{item.name}"
+    return f"{item.parent_path}/{item.name}"
+
+
 def _serialise_cursor(per_drive: Mapping[str, str]) -> str:
     """Encode per-drive cursors as a deterministic JSON string."""
     return json.dumps(dict(per_drive), sort_keys=True, ensure_ascii=False)
@@ -701,7 +878,70 @@ def _deserialise_cursor(cursor: Cursor | None) -> dict[str, str]:
     return {str(k): str(v) for k, v in parsed.items() if isinstance(v, str)}
 
 
-def _parse_drive_entry(entry: object) -> SharePointDriveSpec:
+def _parse_path_list(raw: object, field_name: str, drive_id: str) -> tuple[str, ...]:
+    """Parse and validate an include_paths / exclude_paths list.
+
+    Every entry must be a non-empty string starting with ``/``. Empty list
+    or absent → empty tuple (no filtering). Raises with the standard
+    fix-pointer shape on malformed input.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(
+            _DRIVE_ERROR_PREFIX
+            + f"{drive_id!r} {field_name} must be a list of path strings (got {type(raw).__name__}). "
+            + f"fix: write {field_name} as a YAML list of strings starting with '/'. "
+            + _PATH_FILTER_DOCS_HINT
+        )
+    out: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str) or not entry:
+            raise ValueError(
+                _DRIVE_ERROR_PREFIX
+                + f"{drive_id!r} {field_name} entry {entry!r} is not a non-empty string. "
+                + f"fix: every {field_name} entry must be a non-empty string starting with '/'. "
+                + _PATH_FILTER_DOCS_HINT
+            )
+        if not entry.startswith("/"):
+            raise ValueError(
+                _DRIVE_ERROR_PREFIX
+                + f"{drive_id!r} {field_name} entry {entry!r} must start with '/'. "
+                + "fix: prefix the path with a leading slash (e.g. '/Curated-Content'). "
+                + _PATH_FILTER_DOCS_HINT
+            )
+        out.append(entry.rstrip("/") or "/")
+    return tuple(out)
+
+
+def _validate_no_exact_overlap(
+    drive_id: str,
+    include_paths: tuple[str, ...],
+    exclude_paths: tuple[str, ...],
+) -> None:
+    """Refuse a config that has the exact same path in include and exclude.
+
+    Strict children (e.g. include ``/Foo`` + exclude ``/Foo/draft``) are
+    the intended use case and stay legal. Only exact equality triggers —
+    that shape is almost always operator typo (copy-paste of a path into
+    the wrong field) and refusing at parse time gives a fix-pointer
+    instead of a silent "nothing indexed" outcome.
+    """
+    incl = {p.lower() for p in include_paths}
+    excl = {p.lower() for p in exclude_paths}
+    overlap = sorted(incl & excl)
+    if overlap:
+        raise ValueError(
+            f"sharepoint: drive {drive_id!r} include_paths and exclude_paths both contain "
+            f"the same path(s): {', '.join(repr(p) for p in overlap)}. "
+            "fix: remove the duplicate from one of the lists, or split into separate "
+            "connector instances if you wanted different sensitivity tiers per path. "
+            "next: re-run `kairix config validate`. "
+            "run: see docs/architecture/sharepoint-path-filtering.md."
+        )
+
+
+def parse_drive_entry(entry: object) -> SharePointDriveSpec:
     """Parse one operator-config drive entry into a typed spec.
 
     Extracted from ``_drive_specs_from_config`` to keep that function
@@ -720,7 +960,16 @@ def _parse_drive_entry(entry: object) -> SharePointDriveSpec:
             )
         site_id = entry.get("site_id") if isinstance(entry.get("site_id"), str) else None
         display = entry.get("display_name") if isinstance(entry.get("display_name"), str) else None
-        return SharePointDriveSpec(drive_id=drive_id, site_id=site_id, display_name=display)
+        include_paths = _parse_path_list(entry.get("include_paths"), "include_paths", drive_id)
+        exclude_paths = _parse_path_list(entry.get("exclude_paths"), "exclude_paths", drive_id)
+        _validate_no_exact_overlap(drive_id, include_paths, exclude_paths)
+        return SharePointDriveSpec(
+            drive_id=drive_id,
+            site_id=site_id,
+            display_name=display,
+            include_paths=include_paths,
+            exclude_paths=exclude_paths,
+        )
     raise ValueError(
         f"sharepoint: drive entry {entry!r} is not a string or dict. "
         "fix: each drive entry must be a drive_id string or a block with drive_id. "
@@ -743,7 +992,7 @@ def _drive_specs_from_config(raw: object) -> list[SharePointDriveSpec]:
             "next: see docs/architecture/connector-ingestion-architecture.md §8 "
             "for the SharePoint connector config shape."
         )
-    return [_parse_drive_entry(entry) for entry in raw]
+    return [parse_drive_entry(entry) for entry in raw]
 
 
 def make_connector(config: Mapping[str, Any]) -> SharePointConnector:

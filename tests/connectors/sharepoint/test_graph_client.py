@@ -352,3 +352,102 @@ def test_graph_client_falls_through_to_owned_http_client_when_none_injected() ->
     client = SharePointGraphClient(auth=auth)
     # Just constructing without raising proves the fallback path is reachable.
     assert client.initial_delta_url("drive-x").endswith("/drives/drive-x/root/delta")
+
+
+@pytest.mark.unit
+def test_drive_item_carries_parent_path_normalised_from_graph_envelope() -> None:
+    """`parentReference.path` is stripped to the operator-facing form.
+
+    Graph returns ``/drives/<drive-id>/root:/Curated-Content/foo``; the
+    connector and its filter compare against ``/Curated-Content/foo``.
+    """
+    body = {
+        "value": [
+            {
+                "id": "item-a",
+                "name": "doc.md",
+                "file": {"mimeType": "text/markdown"},
+                "parentReference": {
+                    "driveId": "drive-x",
+                    "path": "/drives/drive-x/root:/Curated-Content/sub",
+                },
+            }
+        ],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for(request)
+        if token is not None:
+            return token
+        return httpx.Response(200, json=body)
+
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    client = SharePointGraphClient(auth=auth, http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    items = list(client.iter_drive_items("drive-x"))
+    assert len(items) == 1
+    assert items[0].parent_path == "/Curated-Content/sub"
+
+
+@pytest.mark.unit
+def test_drive_item_parent_path_none_when_envelope_omits_field() -> None:
+    """No parentReference.path → parent_path is None (filter treats as 'unknown')."""
+    body = {
+        "value": [
+            {
+                "id": "item-b",
+                "name": "doc.md",
+                "file": {"mimeType": "text/markdown"},
+                "parentReference": {"driveId": "drive-x"},
+            }
+        ],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for(request)
+        if token is not None:
+            return token
+        return httpx.Response(200, json=body)
+
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    client = SharePointGraphClient(auth=auth, http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    items = list(client.iter_drive_items("drive-x"))
+    assert len(items) == 1
+    assert items[0].parent_path is None
+
+
+@pytest.mark.unit
+def test_path_exists_returns_true_on_200_false_on_404() -> None:
+    """The probe maps HTTP status to a simple bool the connector consumes."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for(request)
+        if token is not None:
+            return token
+        if "/Curated-Content" in str(request.url):
+            return httpx.Response(200, json={"id": "folder-id"})
+        if "/Does-Not-Exist" in str(request.url):
+            return httpx.Response(404, json={"error": {"code": "itemNotFound"}})
+        return httpx.Response(200, json={"value": []})
+
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    client = SharePointGraphClient(auth=auth, http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.path_exists("drive-x", "/Curated-Content") is True
+    assert client.path_exists("drive-x", "/Does-Not-Exist") is False

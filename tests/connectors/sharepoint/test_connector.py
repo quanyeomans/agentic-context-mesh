@@ -541,3 +541,379 @@ def test_list_changes_preserves_prior_cursor_when_no_delta_link_yielded() -> Non
     parsed = json.loads(cursor)
     assert _DRIVE_ID in parsed
     assert "deltatoken=prior" in parsed[_DRIVE_ID]
+
+
+# ---------------------------------------------------------------------------
+# Path filtering — pure helpers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def testpath_passes_filter_empty_filter_admits_everything() -> None:
+    """No include + no exclude → every item passes (current behaviour)."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    assert path_passes_filter("/anything.md", include_paths=(), exclude_paths=()) is True
+    assert path_passes_filter(None, include_paths=(), exclude_paths=()) is True
+
+
+@pytest.mark.unit
+def testpath_passes_filter_include_segment_boundary_match() -> None:
+    """`/Foo` matches `/Foo/bar` and `/Foo` itself but NOT `/Foo-Backup`."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    inc = ("/Curated-Content",)
+    assert path_passes_filter("/Curated-Content", include_paths=inc, exclude_paths=()) is True
+    assert path_passes_filter("/Curated-Content/nested/file.md", include_paths=inc, exclude_paths=()) is True
+    assert path_passes_filter("/Curated-Content-Backup/file.md", include_paths=inc, exclude_paths=()) is False
+    assert path_passes_filter("/Other/file.md", include_paths=inc, exclude_paths=()) is False
+
+
+@pytest.mark.unit
+def testpath_passes_filter_multiple_includes_form_union() -> None:
+    """Multiple include paths combine — match any one wins."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    inc = ("/A", "/B")
+    assert path_passes_filter("/A/x.md", include_paths=inc, exclude_paths=()) is True
+    assert path_passes_filter("/B/y.md", include_paths=inc, exclude_paths=()) is True
+    assert path_passes_filter("/C/z.md", include_paths=inc, exclude_paths=()) is False
+
+
+@pytest.mark.unit
+def testpath_passes_filter_exclude_overrides_include() -> None:
+    """Exclude wins when both include and exclude prefix match."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    inc = ("/Curated-Content",)
+    exc = ("/Curated-Content/draft",)
+    assert path_passes_filter("/Curated-Content/architecture.md", include_paths=inc, exclude_paths=exc) is True
+    assert path_passes_filter("/Curated-Content/draft/spike.md", include_paths=inc, exclude_paths=exc) is False
+    assert path_passes_filter("/Curated-Content/draft", include_paths=inc, exclude_paths=exc) is False
+
+
+@pytest.mark.unit
+def testpath_passes_filter_standalone_exclude_drops_matches() -> None:
+    """Exclude without an include still filters — everything else passes."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    exc = ("/Vendor-Bulk-Materials",)
+    assert path_passes_filter("/Curated-Content/a.md", include_paths=(), exclude_paths=exc) is True
+    assert path_passes_filter("/Vendor-Bulk-Materials/deck.pptx", include_paths=(), exclude_paths=exc) is False
+
+
+@pytest.mark.unit
+def testpath_passes_filter_none_item_path_dropped_when_filter_active() -> None:
+    """Item with no path is dropped when include is set — safe default."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    assert path_passes_filter(None, include_paths=("/Foo",), exclude_paths=()) is False
+    # Exclude-only with no path: pass (we don't know it matches anything to exclude)
+    assert path_passes_filter(None, include_paths=(), exclude_paths=("/Foo",)) is True
+
+
+@pytest.mark.unit
+def testpath_passes_filter_is_case_insensitive() -> None:
+    """SharePoint paths are case-preserving but case-insensitive — match accordingly."""
+    from kairix.connectors.sharepoint.connector import path_passes_filter
+
+    inc = ("/Curated-Content",)
+    assert path_passes_filter("/curated-content/a.md", include_paths=inc, exclude_paths=()) is True
+    assert path_passes_filter("/CURATED-CONTENT/B.MD", include_paths=inc, exclude_paths=()) is True
+
+
+# ---------------------------------------------------------------------------
+# Path filtering — parser + overlap validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def testparse_drive_entry_accepts_include_and_exclude_paths() -> None:
+    """include_paths + exclude_paths flow through parse_drive_entry as tuples."""
+    from kairix.connectors.sharepoint.connector import parse_drive_entry
+
+    spec = parse_drive_entry(
+        {
+            "drive_id": "b!d",
+            "include_paths": ["/Curated-Content", "/Shared Documents"],
+            "exclude_paths": ["/Curated-Content/draft"],
+        }
+    )
+    assert spec.include_paths == ("/Curated-Content", "/Shared Documents")
+    assert spec.exclude_paths == ("/Curated-Content/draft",)
+
+
+@pytest.mark.unit
+def testparse_drive_entry_strips_trailing_slashes_in_paths() -> None:
+    """Trailing slashes are stripped so /Foo and /Foo/ behave identically."""
+    from kairix.connectors.sharepoint.connector import parse_drive_entry
+
+    spec = parse_drive_entry({"drive_id": "b!d", "include_paths": ["/Foo/"]})
+    assert spec.include_paths == ("/Foo",)
+
+
+@pytest.mark.unit
+def testparse_drive_entry_rejects_path_without_leading_slash() -> None:
+    """A path missing the leading slash gets a fix-pointer error."""
+    from kairix.connectors.sharepoint.connector import parse_drive_entry
+
+    with pytest.raises(ValueError, match="must start with '/'"):
+        parse_drive_entry({"drive_id": "b!d", "include_paths": ["Curated-Content"]})
+
+
+@pytest.mark.unit
+def testparse_drive_entry_rejects_exact_overlap_between_include_and_exclude() -> None:
+    """include + exclude pointing at the same exact path is almost always a typo."""
+    from kairix.connectors.sharepoint.connector import parse_drive_entry
+
+    with pytest.raises(ValueError, match="include_paths and exclude_paths both contain"):
+        parse_drive_entry(
+            {
+                "drive_id": "b!d",
+                "include_paths": ["/Foo"],
+                "exclude_paths": ["/Foo"],
+            }
+        )
+
+
+@pytest.mark.unit
+def testparse_drive_entry_allows_exclude_inside_include() -> None:
+    """Exclude as a strict child of include is the intended use case."""
+    from kairix.connectors.sharepoint.connector import parse_drive_entry
+
+    spec = parse_drive_entry(
+        {
+            "drive_id": "b!d",
+            "include_paths": ["/Foo"],
+            "exclude_paths": ["/Foo/draft"],
+        }
+    )
+    assert spec.include_paths == ("/Foo",)
+    assert spec.exclude_paths == ("/Foo/draft",)
+
+
+# ---------------------------------------------------------------------------
+# display_name synthesis
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_effective_display_name_uses_explicit_value_when_set() -> None:
+    """An operator-supplied display_name wins over any synthesis."""
+    handler = _make_handler_returning_empty_delta()
+    connector = _build_connector_with_spec(
+        handler,
+        SharePointDriveSpec(drive_id=_DRIVE_ID, display_name="My Custom Label", include_paths=("/Foo",)),
+    )
+    assert connector._effective_display_name(connector._drives[0]) == "My Custom Label"
+
+
+@pytest.mark.unit
+def test_effective_display_name_synthesises_from_include_path_when_unset() -> None:
+    """No display_name + include_paths → '<drive-id-prefix> [<first-include>]'."""
+    handler = _make_handler_returning_empty_delta()
+    connector = _build_connector_with_spec(
+        handler,
+        SharePointDriveSpec(drive_id="b!a0rphFH2longopaqueidentifier", include_paths=("/Curated-Content",)),
+    )
+    label = connector._effective_display_name(connector._drives[0])
+    assert "Curated-Content" in label
+    assert "b!a0rphF" in label  # short prefix preserved
+
+
+@pytest.mark.unit
+def test_effective_display_name_falls_back_to_drive_id_when_no_filter() -> None:
+    """No display_name + no include_paths → legacy drive_id label (back-compat)."""
+    handler = _make_handler_returning_empty_delta()
+    connector = _build_connector_with_spec(
+        handler,
+        SharePointDriveSpec(drive_id="b!short"),
+    )
+    assert connector._effective_display_name(connector._drives[0]) == "b!short"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end through list_changes — filter active
+# ---------------------------------------------------------------------------
+
+
+def _file_envelope_with_path(item_id: str, *, parent_path: str, name: str = "doc.md") -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "name": name,
+        "size": 100,
+        "lastModifiedDateTime": "2026-05-22T10:00:00Z",
+        "webUrl": f"https://contoso.sharepoint.com/sites/team/Documents{parent_path}/{name}",
+        "file": {"mimeType": "text/markdown"},
+        "parentReference": {
+            "driveId": _DRIVE_ID,
+            "path": f"/drives/{_DRIVE_ID}/root:{parent_path}",
+        },
+    }
+
+
+def _make_handler_returning_empty_delta() -> Any:
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token:
+            return token
+        return httpx.Response(200, json=_delta_response([]))
+
+    return handler
+
+
+def _build_connector_with_spec(handler: Any, spec: SharePointDriveSpec) -> SharePointConnector:
+    transport = httpx.MockTransport(handler)
+    shared = httpx.Client(transport=transport)
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    return SharePointConnector(
+        drives=[spec],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — test fixture
+        ),
+        auth=auth,
+        client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+    )
+
+
+@pytest.mark.unit
+def test_list_changes_with_include_path_drops_items_outside_scope() -> None:
+    """Items whose parent path doesn't match include_paths are skipped end-to-end."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token:
+            return token
+        # Probe call for the include path — return 200 so startup is clean
+        if "/root:/Curated-Content" in str(request.url) and "delta" not in str(request.url):
+            return httpx.Response(200, json={"id": "folder-id", "name": "Curated-Content"})
+        return httpx.Response(
+            200,
+            json=_delta_response(
+                [
+                    _file_envelope_with_path("item-1", parent_path="/Curated-Content", name="a.md"),
+                    _file_envelope_with_path("item-2", parent_path="/Vendor-Bulk-Materials", name="b.pptx"),
+                    _file_envelope_with_path("item-3", parent_path="/Curated-Content/nested", name="c.md"),
+                ]
+            ),
+        )
+
+    connector = _build_connector_with_spec(
+        handler,
+        SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Curated-Content",)),
+    )
+    events = list(connector.list_changes(None))
+    assert len(events) == 2
+    emitted_ids = {e.item_id for e in events}
+    assert emitted_ids == {"item-1", "item-3"}
+
+
+@pytest.mark.unit
+def test_list_changes_with_exclude_path_drops_matching_items() -> None:
+    """exclude_paths drops items even when no include is set."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token:
+            return token
+        return httpx.Response(
+            200,
+            json=_delta_response(
+                [
+                    _file_envelope_with_path("keep-1", parent_path="/Curated-Content", name="a.md"),
+                    _file_envelope_with_path("drop-1", parent_path="/Vendor-Bulk-Materials", name="b.pptx"),
+                ]
+            ),
+        )
+
+    connector = _build_connector_with_spec(
+        handler,
+        SharePointDriveSpec(drive_id=_DRIVE_ID, exclude_paths=("/Vendor-Bulk-Materials",)),
+    )
+    events = list(connector.list_changes(None))
+    assert {e.item_id for e in events} == {"keep-1"}
+
+
+@pytest.mark.unit
+def test_list_changes_unfiltered_preserves_prior_behaviour() -> None:
+    """Empty include+exclude — every emitted-eligible item lands (regression check)."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token:
+            return token
+        return httpx.Response(
+            200,
+            json=_delta_response(
+                [
+                    _file_envelope_with_path("a", parent_path="/Curated-Content", name="x.md"),
+                    _file_envelope_with_path("b", parent_path="/Vendor-Bulk-Materials", name="y.pptx"),
+                ]
+            ),
+        )
+
+    connector = _build_connector_with_spec(handler, SharePointDriveSpec(drive_id=_DRIVE_ID))
+    events = list(connector.list_changes(None))
+    assert len(events) == 2
+
+
+# ---------------------------------------------------------------------------
+# Startup probe — warns on missing include_path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_init_probe_warns_when_include_path_returns_404(caplog: pytest.LogCaptureFixture) -> None:
+    """Connector __init__ probes each include path; 404 logs a warning."""
+    import logging
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token:
+            return token
+        if "/root:/Does-Not-Exist" in str(request.url):
+            return httpx.Response(404, json={"error": {"code": "itemNotFound"}})
+        if "/root:/Curated-Content" in str(request.url):
+            return httpx.Response(200, json={"id": "ok"})
+        return httpx.Response(200, json=_delta_response([]))
+
+    with caplog.at_level(logging.WARNING, logger="kairix.connectors.sharepoint.connector"):
+        _build_connector_with_spec(
+            handler,
+            SharePointDriveSpec(
+                drive_id=_DRIVE_ID,
+                include_paths=("/Curated-Content", "/Does-Not-Exist"),
+            ),
+        )
+
+    warning_records = [r for r in caplog.records if "sharepoint_probe_missing_folder" in r.getMessage()]
+    assert len(warning_records) == 1
+    assert "/Does-Not-Exist" in warning_records[0].getMessage()
+
+
+@pytest.mark.unit
+def test_init_probe_swallows_transient_errors_without_failing_init() -> None:
+    """Network failure during probe must not block connector construction."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token:
+            return token
+        if "/root:" in str(request.url) and "delta" not in str(request.url):
+            return httpx.Response(503, json={"error": {"code": "serviceUnavailable"}})
+        return httpx.Response(200, json=_delta_response([]))
+
+    # Constructor must not raise even when the probe call fails
+    connector = _build_connector_with_spec(
+        handler,
+        SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Foo",)),
+    )
+    assert connector is not None
