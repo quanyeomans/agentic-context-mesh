@@ -222,6 +222,48 @@ Kairix expects:
 - `$KAIRIX_DATA_DIR/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `$KAIRIX_WORKSPACE_ROOT/<agent>/memory/` — agent memory logs (required for briefing pipeline)
 
+### 6. Data on a data disk, not the OS disk
+
+**Do not** rely on the default Docker named volumes (`kairix-data`, `neo4j-data`) when a real connector corpus is attached. The Docker default puts them under `/var/lib/docker/volumes/` on the OS disk, which is typically the smallest partition. On the v2026.5.24 production VM, a SharePoint backfill grew the bronze tree to 36 GB on a 64 GB OS disk, filled the root filesystem, and OOM-killed co-located services.
+
+**Recommended layout:** attach a separate data disk (e.g. `/data`), bind-mount the kairix data dir into the container, and let Neo4j live on the same data disk.
+
+```yaml
+# docker-compose.override.yml
+services:
+  kairix:
+    volumes:
+      # Bind-mount onto the data disk, NOT a Docker named volume.
+      - /data/kairix:/data/kairix
+      - /data/documents:/data/documents
+  kairix-worker:
+    volumes:
+      - /data/kairix:/data/kairix
+      - /data/documents:/data/documents
+  neo4j:
+    volumes:
+      - /data/neo4j:/data
+```
+
+Prepare the host paths once:
+
+```bash
+sudo mkdir -p /data/kairix /data/documents /data/neo4j
+sudo chown -R 1000:1000 /data/kairix /data/documents /data/neo4j
+```
+
+**What ends up on the data disk vs. the OS disk:**
+
+| Lives on `/data` | Lives on `/` (OS disk) |
+|---|---|
+| Bronze raw blobs (`/data/kairix/bronze/`) | Container images |
+| SQLite (`index.sqlite`, `kairix.db`) | Container overlay (only `/tmp` and other ephemeral writes) |
+| Vector index (`vectors.usearch`) | systemd, Docker engine |
+| Neo4j graph | |
+| Document tree | |
+
+The 2 GB `/tmp` tmpfs default in the shipped compose (v2026.5.25 onward) keeps connector binary downloads and PDF/PPTX conversions off the OS disk even when an operator forgets the bind mount. Bronze TTL GC behind the `bronze_ttl_gc` flag (also v2026.5.25) bounds long-term bronze growth — see [`docs/upgrades/v2026.5.25.md`](../upgrades/v2026.5.25.md).
+
 ---
 
 ## Installation

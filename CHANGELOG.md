@@ -7,6 +7,29 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.25a1] - 2026-05-25 — Disk pressure, bronze hygiene, version-drift fixes (alpha)
+
+> **Upgrading?** Five fixes from the 2026-05-24 SharePoint dogfood. No config change required; flags ship OFF. If you set `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD=999999` as a band-aid, drop it after upgrading. Full notes: [`docs/upgrades/v2026.5.25a1.md`](docs/upgrades/v2026.5.25a1.md).
+
+### Fixed
+
+- **`/tmp` no longer fills the host root filesystem (#317).** Both `kairix` and `kairix-worker` ship a 2 GB tmpfs `/tmp` mount in the canonical compose files. SharePoint binary downloads and markitdown PDF/PPTX conversions stay bounded by RAM instead of spilling onto the OS disk. Operators with custom override files inherit the default unless they explicitly remove it.
+- **Bronze raw blobs no longer accumulate forever as orphans (#318).** The maintenance scheduler ships a new stage that walks every connector's bronze tree on each tick and deletes any file with no `bronze_records` row. A 5-minute grace period skips files mid-fsync. The 2026-05-24 dogfood reaped 36 GB of orphan SharePoint blobs accumulated over a single backfill.
+- **`connector_sync` no longer freezes when the local vault is idle (#312).** Local-only maintenance tasks (`entity_seed`, `health_check`, `wikilinks_inject`) still skip after the configured embed-noop streak, but external-source discovery now runs on its own interval regardless. A quiet local vault doesn't imply quiet upstream sources.
+- **Worker no longer silently downgrades to `:latest` after a manual `docker compose up` (#313).** The alpha-deploy webhook now writes `KAIRIX_IMAGE_TAG=<version>` to `/opt/kairix/app/.env`. Subsequent ad-hoc `docker compose up -d --force-recreate` commands interpolate the same tag instead of picking up whatever was last pulled.
+
+### Added
+
+- **`bronze_ttl_gc` feature flag (default OFF) for long-term bronze growth bounds (#316).** When ON, the maintenance scheduler deletes bronze raw blobs and their `bronze_records` rows older than `KAIRIX_BRONZE_TTL_DAYS` (default 7). Default OFF until each deploy validates that re-fetch from source is reliable for every configured connector.
+- **Operator guidance for data-on-data-disk layout** in [`docs/operations/OPERATIONS.md` §5.6](docs/operations/OPERATIONS.md). The default Docker named volumes live under `/var/lib/docker/volumes/` on the OS disk; this section walks through the bind-mount layout that survives a real backfill.
+- **Meta-issue #319 for test discipline gaps**: F45 / F48 force scenarios for new capabilities but not for failure modes or lifecycle of accumulating state. Three production defects in this release (#312, #316, #318) had zero BDD/E2E coverage before they shipped because the discipline didn't require it. Proposed F62 / F63 / F64 to close the gap; will land as separate baseline-building work.
+
+### Things that haven't changed
+
+- Default behaviour for any operator who isn't using connectors. The orphan reaper and TTL GC stages run inside the `maintenance_loop` flag-gated tick — both are no-ops when that flag is OFF.
+- The bronze write contract itself. Atomicity was already correct (filesystem first, then SQL; caller commits) — the gap was the missing sweeper for the crash-window orphans the docstring already anticipated.
+- Every connector's Protocol surface, cursor format, or chunk-write contract.
+
 ## [2026.5.24a4] - 2026-05-25 — SharePoint per-drive path filtering (alpha)
 
 > **Upgrading?** Straight pull from a3 — the new behaviour is purely additive. Set `include_paths` / `exclude_paths` on a SharePoint drive entry only when you want to scope a drive by folder. Full notes: [`docs/upgrades/v2026.5.24a4.md`](docs/upgrades/v2026.5.24a4.md).
