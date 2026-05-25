@@ -72,6 +72,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.sha }}
         run: |
+          # Defers to scripts/ci/check_release_gate.py which mirrors
+          # ci.yml's paths-ignore exactly. Old strict-equality check
+          # failed every time a docs-only commit landed on main between
+          # the last code change and the alpha cut. The Python gate
+          # walks LAST_SUCCESS_SHA..HEAD and accepts the gap only if
+          # every commit there is docs-only. Regression-locked by
+          # tests/scripts/test_check_release_gate.py.
           LAST_SUCCESS_SHA="$(gh run list \
               --workflow=ci.yml \
               --branch=main \
@@ -79,18 +86,9 @@ jobs:
               --limit=1 \
               --json headSha \
               --jq '.[0].headSha // empty')"
-          if [ -z "$LAST_SUCCESS_SHA" ]; then
-            echo "::error::no successful CI gate run found on main"
-            echo "::error::next: push a fix to main, wait for CI to go green, then re-run this workflow"
-            exit 1
-          fi
-          if [ "$LAST_SUCCESS_SHA" != "$HEAD_SHA" ]; then
-            echo "::error::main HEAD ($HEAD_SHA) has not passed the CI gate"
-            echo "::error::last green SHA: $LAST_SUCCESS_SHA"
-            echo "::error::next: wait for CI to complete on $HEAD_SHA (or push the missing commits), then re-run"
-            exit 1
-          fi
-          echo "CI gate verified green on $HEAD_SHA"
+          python3 scripts/ci/check_release_gate.py \
+              --head-sha "$HEAD_SHA" \
+              --last-success-sha "$LAST_SUCCESS_SHA"
 
       - name: Tag main HEAD
         env:
