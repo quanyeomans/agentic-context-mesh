@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,6 +91,48 @@ class FilesystemBronzeStore:
         """
         abs_path = self._bronze_root / ref.raw_path
         return abs_path.read_bytes(), ref.mime
+
+    def reap_orphans(self, source_name: str, *, min_age_seconds: float = 0.0) -> int:
+        """Delete blobs under ``<bronze_root>/<source_name>/`` that no
+        ``bronze_records`` row references. Returns the count deleted.
+
+        Closes the post-fsync-pre-commit window the module docstring
+        anticipates: a blob landed on disk but the SQL row never
+        committed (process crash, OOM-kill, container restart), so the
+        blob is unreachable garbage that no replay can ever serve.
+
+        ``min_age_seconds`` skips files newer than the cutoff so an
+        in-flight write isn't reaped mid-fsync. The 2026-05-25 incident
+        reaped 522 fully-orphaned SharePoint blobs plus 309 ``.tmp``
+        leftovers totalling 36 GB; the maintenance-scheduler call site
+        runs every tick so the same accumulation cannot recur.
+        """
+        source_dir = self._bronze_root / source_name
+        if not source_dir.is_dir():
+            return 0
+        registered = {
+            str(row[0])
+            for row in self._db.execute(
+                "SELECT raw_path FROM bronze_records WHERE source_name = ?",
+                (source_name,),
+            )
+        }
+        now = time.time()
+        reaped = 0
+        for prefix_dir in source_dir.iterdir():
+            if not prefix_dir.is_dir():
+                continue
+            for blob in prefix_dir.iterdir():
+                if not blob.is_file():
+                    continue
+                rel_path = f"{source_name}/{prefix_dir.name}/{blob.name}"
+                if rel_path in registered:
+                    continue
+                if min_age_seconds > 0.0 and (now - blob.stat().st_mtime) < min_age_seconds:
+                    continue
+                blob.unlink()
+                reaped += 1
+        return reaped
 
     def replay(self, source_name: str, since: datetime | None = None) -> Iterator[BronzeRef]:
         """Yield :class:`BronzeRef` rows for ``source_name``, oldest first.

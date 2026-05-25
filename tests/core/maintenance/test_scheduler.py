@@ -82,12 +82,19 @@ def _seed_active_document_and_vector(db: sqlite3.Connection, *, hash_: str = "do
     db.commit()
 
 
-def _deps(*, epoch: float = 0.0, usearch_ok: bool = True, fts_healed: int = 0) -> MaintenanceSchedulerDeps:
-    """Build a Deps with deterministic clock + no-op usearch/fts seams."""
+def _deps(
+    *,
+    epoch: float = 0.0,
+    usearch_ok: bool = True,
+    fts_healed: int = 0,
+    bronze_reaped: int = 0,
+) -> MaintenanceSchedulerDeps:
+    """Build a Deps with deterministic clock + no-op usearch/fts/bronze seams."""
     return MaintenanceSchedulerDeps(
         usearch_rebuilder=lambda: usearch_ok,
         fts_healer=lambda _db: fts_healed,
         clock=lambda: epoch,
+        bronze_reaper=lambda: bronze_reaped,
     )
 
 
@@ -351,6 +358,7 @@ def test_tick_to_dict_exports_every_field() -> None:
         fts_orphans_healed=2,
         current_orphan_count=0,
         elapsed_ms=42,
+        bronze_orphans_reaped=7,
     )
     d = tick_to_dict(result)
     assert d == {
@@ -360,6 +368,7 @@ def test_tick_to_dict_exports_every_field() -> None:
         "fts_orphans_healed": 2,
         "current_orphan_count": 0,
         "elapsed_ms": 42,
+        "bronze_orphans_reaped": 7,
     }
 
 
@@ -498,3 +507,44 @@ def test_full_tick_with_matched_and_orphan_rows() -> None:
     assert result.orphans_pruned == 2
     survivor = db.execute("SELECT COUNT(*) FROM content_vectors WHERE hash = 'doc-survivor'").fetchone()[0]
     assert survivor == 1
+
+
+def test_tick_runs_bronze_reaper_and_reports_count() -> None:
+    """Stage 5: the injected bronze_reaper callable runs every tick and the
+    returned count surfaces on MaintenanceTickResult.bronze_orphans_reaped."""
+    db = _fresh_db()
+    scheduler = MaintenanceScheduler(
+        db,
+        retention_days=7,
+        scheduler_deps=_deps(epoch=1_000_000.0, bronze_reaped=42),
+    )
+    result = scheduler.tick(db)
+    assert result.bronze_orphans_reaped == 42
+
+
+def test_tick_swallows_bronze_reaper_exception() -> None:
+    """A failing reaper must not poison the rest of the tick — other stages
+    still produce their normal outputs and the count drops to 0."""
+    db = _fresh_db()
+
+    def _failing_reaper() -> int:
+        raise RuntimeError("bronze reaper boom")
+
+    deps = MaintenanceSchedulerDeps(
+        usearch_rebuilder=lambda: True,
+        fts_healer=lambda _db: 0,
+        clock=lambda: 1_000_000.0,
+        bronze_reaper=_failing_reaper,
+    )
+    scheduler = MaintenanceScheduler(db, retention_days=7, scheduler_deps=deps)
+    result = scheduler.tick(db)
+    assert result.bronze_orphans_reaped == 0
+    # Tick still completes cleanly — the envelope reflects the no-prune state.
+    assert result.orphans_pruned == 0
+
+
+def test_tick_default_deps_carry_bronze_reaper() -> None:
+    """The Deps default factory must wire a callable bronze_reaper so the
+    production scheduler doesn't NPE when no Deps are passed."""
+    deps = MaintenanceSchedulerDeps()
+    assert callable(deps.bronze_reaper)

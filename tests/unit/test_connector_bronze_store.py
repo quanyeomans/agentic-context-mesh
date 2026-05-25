@@ -165,6 +165,102 @@ def test_replay_filters_by_since(tmp_path: Path) -> None:
         db.close()
 
 
+def test_reap_orphans_deletes_unreferenced_blobs(tmp_path: Path) -> None:
+    """Orphan = on-disk file under <bronze_root>/<source>/ with no row in
+    bronze_records pointing at it. The post-fsync-pre-commit crash window
+    (module docstring §"Atomicity") produces these; the reaper closes it.
+    """
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        ref = store.write("agent-alpha", "tracked", b"tracked-bytes", "text/plain")
+        db.commit()
+
+        orphan_hash = "f" * 64
+        orphan_dir = tmp_path / "bronze" / "agent-alpha" / orphan_hash[:2]
+        orphan_dir.mkdir(parents=True, exist_ok=True)
+        orphan_path = orphan_dir / orphan_hash
+        orphan_path.write_bytes(b"unreferenced")
+
+        reaped = store.reap_orphans("agent-alpha")
+        assert reaped == 1
+        assert not orphan_path.exists()
+        # Tracked blob survives — the registry row points to it.
+        assert (tmp_path / "bronze" / ref.raw_path).is_file()
+    finally:
+        db.close()
+
+
+def test_reap_orphans_returns_zero_on_clean_store(tmp_path: Path) -> None:
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        store.write("agent-alpha", "tracked", b"tracked-bytes", "text/plain")
+        db.commit()
+        assert store.reap_orphans("agent-alpha") == 0
+    finally:
+        db.close()
+
+
+def test_reap_orphans_returns_zero_when_source_dir_absent(tmp_path: Path) -> None:
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        assert store.reap_orphans("never-fetched-source") == 0
+    finally:
+        db.close()
+
+
+def test_reap_orphans_min_age_protects_in_flight_writes(tmp_path: Path) -> None:
+    """min_age_seconds protects blobs newer than the cutoff so an
+    in-flight write isn't reaped mid-fsync."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        # Create a fresh orphan; mtime is "now".
+        orphan_hash = "a" * 64
+        orphan_dir = tmp_path / "bronze" / "agent-alpha" / orphan_hash[:2]
+        orphan_dir.mkdir(parents=True, exist_ok=True)
+        orphan_path = orphan_dir / orphan_hash
+        orphan_path.write_bytes(b"recent")
+
+        # A huge min_age cutoff leaves the recent orphan in place.
+        reaped = store.reap_orphans("agent-alpha", min_age_seconds=3600.0)
+        assert reaped == 0
+        assert orphan_path.exists()
+
+        # No cutoff reaps it.
+        reaped = store.reap_orphans("agent-alpha")
+        assert reaped == 1
+        assert not orphan_path.exists()
+    finally:
+        db.close()
+
+
+def test_reap_orphans_scopes_to_named_source(tmp_path: Path) -> None:
+    """Orphans under one source must not affect blobs under another."""
+    db = _open_db(tmp_path)
+    try:
+        store = FilesystemBronzeStore(db, tmp_path / "bronze")
+        ref_beta = store.write("agent-beta", "beta-tracked", b"beta-bytes", "text/plain")
+        db.commit()
+
+        # Create an orphan under agent-alpha only.
+        orphan_hash = "b" * 64
+        orphan_dir = tmp_path / "bronze" / "agent-alpha" / orphan_hash[:2]
+        orphan_dir.mkdir(parents=True, exist_ok=True)
+        (orphan_dir / orphan_hash).write_bytes(b"alpha-orphan")
+
+        # Reaping agent-beta finds no orphans there.
+        assert store.reap_orphans("agent-beta") == 0
+        assert (tmp_path / "bronze" / ref_beta.raw_path).is_file()
+
+        # Reaping agent-alpha reaps the orphan.
+        assert store.reap_orphans("agent-alpha") == 1
+    finally:
+        db.close()
+
+
 def test_replay_scopes_to_source_name(tmp_path: Path) -> None:
     db = _open_db(tmp_path)
     try:

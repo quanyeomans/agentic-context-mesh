@@ -1,4 +1,4 @@
-@connector @bronze @wave-1-stub
+@connector @bronze
 Feature: Bronze store for raw connector payloads
   As an operator running a connector pipeline
   I want every fetched payload to be persisted verbatim before processing
@@ -17,3 +17,12 @@ Feature: Bronze store for raw connector payloads
     Given the bronze store holds three records for "alpha-source" written in order "a", "b", "c"
     When the operator replays the bronze records for "alpha-source"
     Then the replay yields the records in the order "a", "b", "c"
+
+  @atomicity @orphan @lifecycle
+  Scenario: Bronze orphan reaper deletes on-disk blobs with no registry row
+    Given the bronze store has a registered blob for "tracked-item" under "alpha-source"
+    And an orphan blob exists on disk under "alpha-source" with no registry row
+    When the maintenance scheduler runs the bronze orphan reaper for "alpha-source"
+    Then the orphan blob is deleted from disk
+    And the tracked-item blob is still present
+    And the bronze_records row for "tracked-item" is unchanged

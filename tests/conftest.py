@@ -156,6 +156,10 @@ pytest_plugins = [
     # connector (obsidian). Future connectors (sharepoint, dex_crm, ...)
     # append a sibling entry per F36.
     "tests.bdd.steps.connector_obsidian_steps",
+    # Bronze store framework BDD — write/replay/orphan-reap scenarios.
+    # #318 added the @orphan scenario after the 2026-05-25 SharePoint
+    # incident left 36 GB of unreferenced blobs.
+    "tests.bdd.steps.connector_bronze_steps",
     # PR-2 — feature-flag scaffold (kairix features status CLI + MCP tool).
     # See docs/architecture/feature-flag-architecture.md.
     "tests.bdd.steps.cli_features_steps",

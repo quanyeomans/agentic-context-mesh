@@ -70,6 +70,7 @@ STAGE_PRUNE = "prune"
 STAGE_USEARCH = "usearch"
 STAGE_FTS = "fts"
 STAGE_GC = "gc"
+STAGE_BRONZE_REAP = "bronze_reap"
 
 # F17 — the failure-event format string appears in every _safe_*
 # wrapper; extracting it keeps the structured-log shape in a single
@@ -105,10 +106,15 @@ class MaintenanceTickResult:
         constraint collisions).
       * ``elapsed_ms`` — wall-clock duration of the tick, useful for
         operator latency histograms.
+      * ``bronze_orphans_reaped`` — on-disk bronze blobs with no
+        ``bronze_records`` row that this tick deleted. Closes the
+        post-fsync-pre-commit window in the bronze write contract
+        (the 2026-05-25 incident left 36 GB of these on SharePoint).
 
     The shape is the F39 / F42 boundary contract the worker logs as a
     one-line completion event and the ``kairix worker preflight --json``
-    envelope embeds verbatim.
+    envelope embeds verbatim. New fields carry defaults so legacy
+    callers and serialised envelopes from prior versions keep parsing.
     """
 
     orphans_pruned: int
@@ -117,6 +123,7 @@ class MaintenanceTickResult:
     fts_orphans_healed: int
     current_orphan_count: int
     elapsed_ms: int
+    bronze_orphans_reaped: int = 0
 
 
 def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production boundary
@@ -183,6 +190,44 @@ def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production bou
         return False
 
 
+def _default_bronze_reaper() -> int:  # pragma: no cover — production boundary
+    """Production seam — reap orphan bronze blobs across every connector source.
+
+    Walks every immediate subdirectory of the configured bronze root
+    (each is a connector source name per the
+    ``<root>/<source>/<hash[:2]>/<hash>`` layout the
+    :class:`FilesystemBronzeStore` lays down) and calls ``reap_orphans``
+    per source. Returns the total count deleted across all sources.
+
+    Skips the reap (returns 0) when the bronze root or DB is missing —
+    fresh hosts and ephemeral test sandboxes shouldn't crash the tick.
+    """
+    try:
+        from kairix.core.connectors.bronze import FilesystemBronzeStore
+        from kairix.paths import data_dir
+        from kairix.paths import db_path as get_db_path
+
+        bronze_root = data_dir() / "bronze"
+        if not bronze_root.is_dir():
+            return 0
+        db = sqlite3.connect(str(get_db_path()))
+        try:
+            store = FilesystemBronzeStore(db, bronze_root)
+            total = 0
+            for source_dir in bronze_root.iterdir():
+                if source_dir.is_dir():
+                    # 5-minute grace period — protects in-flight writes
+                    # whose fsync just landed but whose SQL row hasn't
+                    # committed yet from a same-tick reap.
+                    total += store.reap_orphans(source_dir.name, min_age_seconds=300.0)
+            return total
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("maintenance: bronze orphan reap failed")
+        return 0
+
+
 def _default_fts_healer(db: sqlite3.Connection) -> int:  # pragma: no cover — production boundary
     """Production seam — heal FTS5 orphans when the integrity check sees drift.
 
@@ -229,6 +274,12 @@ class MaintenanceSchedulerDeps:
     usearch_rebuilder: Callable[[], bool] = field(default_factory=lambda: _default_usearch_rebuilder)
     fts_healer: Callable[[sqlite3.Connection], int] = field(default_factory=lambda: _default_fts_healer)
     clock: Callable[[], float] = field(default_factory=lambda: time.time)
+    # Bronze orphan reaper — closure that walks the bronze root and
+    # deletes on-disk blobs with no bronze_records row pointing at
+    # them. Default no-op keeps the scheduler usable in unit tests that
+    # don't wire a real bronze store; the worker.py production seam
+    # passes a real reaper closure bound to the configured bronze root.
+    bronze_reaper: Callable[[], int] = field(default_factory=lambda: _default_bronze_reaper)
 
 
 class MaintenanceScheduler:
@@ -296,6 +347,7 @@ class MaintenanceScheduler:
             usearch_rebuilt = self._safe_usearch_rebuild(pid)
 
         fts_healed = self._safe_fts_heal(active_db, pid)
+        bronze_orphans_reaped = self._safe_bronze_reap(pid)
 
         # Commit ONCE at the end so the whole tick is atomic from a
         # crash-recovery standpoint. Each stage uses execute() without
@@ -315,10 +367,12 @@ class MaintenanceScheduler:
             fts_orphans_healed=fts_healed,
             current_orphan_count=current_orphan_count,
             elapsed_ms=elapsed_ms,
+            bronze_orphans_reaped=bronze_orphans_reaped,
         )
         logger.info(
             "event=%s pid=%d orphans_pruned=%d pruned_table_size=%d usearch_rebuilt=%s "
-            "fts_orphans_healed=%d current_orphan_count=%d elapsed_ms=%d",
+            "fts_orphans_healed=%d current_orphan_count=%d elapsed_ms=%d "
+            "bronze_orphans_reaped=%d",
             EVENT_TICK_COMPLETED,
             pid,
             result.orphans_pruned,
@@ -327,6 +381,7 @@ class MaintenanceScheduler:
             result.fts_orphans_healed,
             result.current_orphan_count,
             result.elapsed_ms,
+            result.bronze_orphans_reaped,
         )
         return result
 
@@ -386,6 +441,26 @@ class MaintenanceScheduler:
                 EVENT_TICK_FAILED,
                 pid,
                 STAGE_FTS,
+                type(exc).__name__,
+            )
+            return 0
+
+    def _safe_bronze_reap(self, pid: int) -> int:
+        """Stage 5 — bronze orphan reaper boundary, swallows failures into the log.
+
+        Closes the post-fsync-pre-commit window the bronze module
+        docstring documents but never had a sweeper for. The 2026-05-25
+        incident left 36 GB of orphans across SharePoint; this stage
+        prevents the accumulation from recurring.
+        """
+        try:
+            return int(self._deps.bronze_reaper())
+        except Exception as exc:
+            logger.warning(
+                _FAILURE_LOG_FORMAT,
+                EVENT_TICK_FAILED,
+                pid,
+                STAGE_BRONZE_REAP,
                 type(exc).__name__,
             )
             return 0
@@ -519,6 +594,7 @@ def tick_to_dict(result: MaintenanceTickResult) -> dict[str, Any]:
         "fts_orphans_healed": result.fts_orphans_healed,
         "current_orphan_count": result.current_orphan_count,
         "elapsed_ms": result.elapsed_ms,
+        "bronze_orphans_reaped": result.bronze_orphans_reaped,
     }
 
 
