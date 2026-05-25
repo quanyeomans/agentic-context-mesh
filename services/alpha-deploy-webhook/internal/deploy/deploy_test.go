@@ -54,9 +54,23 @@ NDCG@10:       0.947
 func onboardOK() []byte  { return []byte(`{"passed":9,"total":9,"fully_passed":true,"failures":[]}`) }
 func onboardBad() []byte { return []byte(`{"passed":7,"total":9,"fully_passed":false,"failures":[]}`) }
 
+// persistEnvKey returns the exact fakeRunner key for the persistImageTag
+// step (#313). Keeping the construction in one place means a change to
+// the persist command shape only touches deploy.go + this helper, not
+// every test fixture.
+func persistEnvKey(imageTag string) string {
+	return fmt.Sprintf(
+		"sh -c touch .env && (grep -q '^KAIRIX_IMAGE_TAG=' .env && "+
+			"sed -i 's|^KAIRIX_IMAGE_TAG=.*|KAIRIX_IMAGE_TAG=%s|' .env || "+
+			"echo 'KAIRIX_IMAGE_TAG=%s' >> .env)",
+		"'"+imageTag+"'", "'"+imageTag+"'",
+	)
+}
+
 func TestServiceRunHappyPath(t *testing.T) {
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
@@ -82,6 +96,7 @@ func TestServiceRunHappyPath(t *testing.T) {
 func TestServiceRunRegressionExceedsTolerance(t *testing.T) {
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
@@ -107,6 +122,7 @@ func TestServiceRunRegressionExceedsTolerance(t *testing.T) {
 func TestServiceRunOnboardFailure(t *testing.T) {
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardBad()},
@@ -124,6 +140,7 @@ func TestServiceRunOnboardFailure(t *testing.T) {
 func TestServiceRunPullFailure(t *testing.T) {
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker": {out: []byte("error"), err: errors.New("network down")},
 	})
 	s := &Service{Runner: r, ComposeDir: "/opt/kairix/app", Logger: newSilentLogger()}
@@ -145,6 +162,7 @@ func TestServiceRunRefreshSecretsCalledBeforeCompose(t *testing.T) {
 	// strict-order assertion below.
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
@@ -177,6 +195,7 @@ func TestServiceRunContinuesWhenFetchSecretsUnitMissing(t *testing.T) {
 	// "secrets refresh failed" instead of continuing.
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Unit not found"), err: errors.New("exit 5")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
@@ -199,6 +218,7 @@ func TestServiceRunContinuesWhenFetchSecretsUnitMissing(t *testing.T) {
 func TestServiceRunBenchmarkParseFailure(t *testing.T) {
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
@@ -227,6 +247,7 @@ func TestServiceRunComposeUpWaitsForHealthcheck(t *testing.T) {
 	// pullAndUp and the fakeRunner key stops matching, failing the deploy.
 	r := newFakeRunner(map[string]fakeResponse{
 		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.15a1"):                     {out: []byte("persisted")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
 		"sh -c KAIRIX_IMAGE_TAG='2026.5.15a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
 		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
@@ -289,5 +310,61 @@ func TestTruncate(t *testing.T) {
 	}
 	if got := truncate([]byte("0123456789ABCDEF"), 8); !strings.HasSuffix(got, "...[truncated]") {
 		t.Errorf("over-limit suffix: got %q", got)
+	}
+}
+
+// TestServiceRunPersistsImageTagBeforePullAndUp pins the ordering: the
+// .env persist step (#313) MUST run BEFORE docker compose pull/up so
+// any subsequent ad-hoc compose call on the VM picks up the same tag
+// instead of falling back to :latest.
+func TestServiceRunPersistsImageTagBeforePullAndUp(t *testing.T) {
+	r := newFakeRunner(map[string]fakeResponse{
+		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.25a1"):                     {out: []byte("persisted")},
+		"sh -c KAIRIX_IMAGE_TAG='2026.5.25a1' docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker":                                            {out: []byte("Pulled")},
+		"sh -c KAIRIX_IMAGE_TAG='2026.5.25a1' docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker": {out: []byte("Started")},
+		"docker exec app-kairix-1 sh -c kairix onboard check --json 2>/dev/null":                                                                                                        {out: onboardOK()},
+		"docker exec app-kairix-1 sh -c cd /opt/kairix && kairix benchmark run --suite reflib":                                                                                          {out: benchmarkOutput(0.901)},
+	})
+	s := &Service{
+		Runner:                r,
+		ComposeDir:            "/opt/kairix/app",
+		BenchmarkSuite:        "reflib",
+		RegressionTolerance:   0.05,
+		BaselineWeightedTotal: 0.901,
+		Logger:                newSilentLogger(),
+	}
+	got := s.Run(context.Background(), "v2026.5.25a1")
+	if !got.Success {
+		t.Fatalf("Success: got false (summary=%q, details=%q), want true", got.Summary, got.Details)
+	}
+	// Ordering: refreshSecrets[0] → persistImageTag[1] → pull[2] → up[3].
+	// Anything else breaks the #313 fix.
+	if len(r.calls) < 4 {
+		t.Fatalf("expected >= 4 calls; got %d (%v)", len(r.calls), r.calls)
+	}
+	if !strings.Contains(r.calls[1], "KAIRIX_IMAGE_TAG=") || !strings.Contains(r.calls[1], ".env") {
+		t.Errorf("second call should be the .env persist step; got %q", r.calls[1])
+	}
+	if !strings.Contains(r.calls[2], "compose") || !strings.Contains(r.calls[2], "pull") {
+		t.Errorf("third call should be docker compose pull; got %q", r.calls[2])
+	}
+}
+
+// TestServiceRunPersistImageTagFailureShortCircuits proves the deploy
+// fails loud when the .env persist fails — operators must not get
+// silently-passed deploys whose .env is stale.
+func TestServiceRunPersistImageTagFailureShortCircuits(t *testing.T) {
+	r := newFakeRunner(map[string]fakeResponse{
+		"systemctl restart kairix-fetch-secrets.service": {out: []byte("Started")},
+		persistEnvKey("2026.5.25a1"):                     {out: []byte("disk full"), err: errors.New("exit 1")},
+	})
+	s := &Service{Runner: r, ComposeDir: "/opt/kairix/app", Logger: newSilentLogger()}
+	got := s.Run(context.Background(), "v2026.5.25a1")
+	if got.Success {
+		t.Errorf("Success: got true, want false (persist failure must short-circuit)")
+	}
+	if !strings.Contains(got.Summary, "image-tag persist failed") {
+		t.Errorf("Summary: got %q, want 'image-tag persist failed' substring", got.Summary)
 	}
 }

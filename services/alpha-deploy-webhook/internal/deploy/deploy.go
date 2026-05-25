@@ -87,6 +87,9 @@ func (s *Service) Run(ctx context.Context, version string) Result {
 	if err := s.refreshSecrets(ctx); err != nil {
 		return Result{Success: false, Summary: "secrets refresh failed", Details: err.Error()}
 	}
+	if err := s.persistImageTag(ctx, version); err != nil {
+		return Result{Success: false, Summary: "image-tag persist failed", Details: err.Error()}
+	}
 	if err := s.pullAndUp(ctx, version); err != nil {
 		return Result{Success: false, Summary: "docker pull/up failed", Details: err.Error()}
 	}
@@ -142,6 +145,42 @@ func (s *Service) refreshSecrets(ctx context.Context) error {
 			slog.String("error", err.Error()),
 			slog.String("output", truncate(out, 200)))
 		return nil
+	}
+	return nil
+}
+
+// persistImageTag writes the current image tag to /opt/kairix/app/.env
+// so any subsequent ad-hoc `docker compose` command on the VM
+// interpolates the same tag — eliminating the version-drift failure
+// mode where a `docker compose up -d --force-recreate kairix-worker`
+// without the env var set falls back to `:latest` (the previous tag
+// pulled to disk), silently downgrading the worker while the kairix
+// container stays on the new alpha (#313).
+//
+// Idempotent: replaces the existing KAIRIX_IMAGE_TAG line in .env when
+// present, appends when absent. Other env vars in .env are preserved.
+// Atomic via the tmp-then-rename pattern; a crash mid-write leaves
+// the previous .env intact.
+func (s *Service) persistImageTag(ctx context.Context, version string) error {
+	imageTag := strings.TrimPrefix(version, "v")
+	quoted := shellQuote(imageTag)
+	s.Logger.Info("persist KAIRIX_IMAGE_TAG to .env",
+		slog.String("image_tag", imageTag),
+		slog.String("dir", s.ComposeDir),
+	)
+	// touch .env so grep doesn't error on a fresh host. Then either
+	// in-place rewrite the existing KAIRIX_IMAGE_TAG line, or append a
+	// new one. Single short shell line keeps the fakeRunner fixture
+	// keys tractable in deploy_test.go.
+	persistCmd := fmt.Sprintf(
+		"touch .env && (grep -q '^KAIRIX_IMAGE_TAG=' .env && "+
+			"sed -i 's|^KAIRIX_IMAGE_TAG=.*|KAIRIX_IMAGE_TAG=%s|' .env || "+
+			"echo 'KAIRIX_IMAGE_TAG=%s' >> .env)",
+		quoted, quoted,
+	)
+	out, err := s.Runner.Run(ctx, s.ComposeDir, "sh", "-c", persistCmd)
+	if err != nil {
+		return fmt.Errorf("persist image-tag: %w (output: %s)", err, truncate(out, 500))
 	}
 	return nil
 }
