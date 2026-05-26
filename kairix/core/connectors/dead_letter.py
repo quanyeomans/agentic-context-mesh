@@ -122,3 +122,21 @@ class DeadLetterStore:
             )
             for row in rows
         )
+
+    def clear(self, source_name: str, item_id: str) -> bool:
+        """Delete the dead-letter row for ``(source_name, item_id)``.
+
+        Returns ``True`` when a row was deleted, ``False`` when no row
+        existed (idempotent). Used by the re-extract path
+        (``kairix worker reextract``) to mark a previously-poisoned
+        item as successfully recovered.
+
+        Does NOT commit — the caller's per-item transaction owns the
+        commit so a clear() that lands alongside a successful chunk
+        write commits atomically.
+        """
+        cur = self._db.execute(
+            "DELETE FROM connector_deadletter WHERE source_name = ? AND item_id = ?",
+            (source_name, item_id),
+        )
+        return cur.rowcount > 0

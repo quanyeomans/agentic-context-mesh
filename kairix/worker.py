@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
+
 from kairix.paths import (
     connector_sync_disabled,
     data_dir,
@@ -343,9 +345,8 @@ def _run_one_connector_batch(
     connector_factory = resolve_connector(name)
     extractor_factory = resolve_extractor(extractor_name)
     connector = connector_factory(entry.get("config", {}))
-    extractor = (
-        extractor_factory() if not entry.get("extractor_config") else extractor_factory(**entry["extractor_config"])
-    )
+    ex_config = entry.get("extractor_config")
+    extractor = extractor_factory(**ex_config) if ex_config else extractor_factory()
     chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
     pipeline = ConnectorPipeline(
         db=db,
@@ -578,6 +579,231 @@ def run_via_connector_pipeline(deps: ConnectorSyncDeps | None = None) -> Connect
     """
     logger.info("worker: connector sync routing via obsidian connector pipeline (flag ON)")
     return run_connector_sync_pipeline(deps)
+
+
+@dataclass(frozen=True)
+class ReextractResult:
+    """Outcome of :func:`run_reextract_dead_letter`.
+
+    Frozen per F42. Fields:
+
+    * ``recovered`` — items where extract+silver+writer succeeded;
+      dead_letter row deleted.
+    * ``still_failing`` — items that raised again; dead_letter row
+      kept with bumped failure_count.
+    * ``skipped_no_bronze`` — items whose bronze_records row was
+      absent (typical after the 2026-05-25 orphan-prune recovery
+      where some dead_letter rows pre-date the surviving bronze).
+    * ``skipped_no_connector`` — items whose source_name isn't
+      configured in the current kairix.config.yaml (operator removed
+      the connector but old dead_letter rows remain).
+    """
+
+    recovered: int
+    still_failing: int
+    skipped_no_bronze: int
+    skipped_no_connector: int
+
+
+def run_reextract_dead_letter(
+    *,
+    source_name: str,
+    db: sqlite3.Connection | None = None,
+    bronze_root: Path | None = None,
+    config_path: Path | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+) -> ReextractResult:
+    """Re-extract every dead-lettered item for ``source_name``.
+
+    Recovers from past extract failures (e.g. missing libraries fixed
+    in a later release) without requiring the source to re-emit the
+    items. Walks ``DeadLetterStore.list(source_name)`` and for each
+    entry:
+
+    1. Looks up the ``bronze_records`` row for ``(source_name, item_id)``.
+       Missing → skipped_no_bronze.
+    2. Reads the raw bytes via ``bronze.read(ref)``.
+    3. Resolves the connector from the live config so
+       ``source_link(item_id)`` and ``sensitivity_for(item_id)`` come
+       from the same connector instance that wrote bronze originally.
+       Missing connector entry → skipped_no_connector.
+    4. Runs ``extractor.extract(raw, mime)`` (whatever extractor is
+       currently registered — picks up fixes like #322 markitdown
+       extras). Failure → still_failing (row stays in dead_letter,
+       failure_count incremented).
+    5. Runs silver → chunk_writer → entity_graph_sink.
+    6. Clears the dead_letter row.
+    7. Commits per item (chunked-commit principle from #321).
+
+    Used after a Dockerfile / connector fix lands. Example:
+    v2026.5.26a1 dogfood left 122 items dead-lettered before the
+    markitdown extras hotfix; ``kairix worker reextract --source-name
+    sharepoint`` recovers them.
+
+    ``dry_run`` walks the same logic but commits nothing — useful for
+    sizing the recovery before committing to it. ``limit`` caps the
+    number of items processed (None = all).
+    """
+    from kairix.core.connectors import DeadLetterStore, FilesystemBronzeStore
+    from kairix.core.db import open_db
+    from kairix.core.db.schema import create_schema
+
+    db_owned = False
+    if db is None:
+        db = open_db()
+        db_owned = True
+    try:
+        create_schema(db)
+        bronze_root_resolved = bronze_root if bronze_root is not None else _bronze_root_default()
+        bronze = FilesystemBronzeStore(db, bronze_root_resolved)
+        dead_letter = DeadLetterStore(db)
+
+        entry = _load_connector_entry(source_name, config_path)
+        if entry is None:
+            rows_no_conn = dead_letter.list(source_name)
+            return ReextractResult(
+                recovered=0,
+                still_failing=0,
+                skipped_no_bronze=0,
+                skipped_no_connector=len(rows_no_conn),
+            )
+
+        connector, extractor, silver, chunk_writer, entity_graph_sink = _build_reextract_components(
+            source_name=source_name,
+            entry=entry,
+            db=db,
+        )
+        rows = dead_letter.list(source_name)
+        if limit is not None:
+            rows = rows[:limit]
+        return _reextract_rows(
+            rows=rows,
+            db=db,
+            bronze=bronze,
+            extractor=extractor,
+            silver=silver,
+            chunk_writer=chunk_writer,
+            entity_graph_sink=entity_graph_sink,
+            connector=connector,
+            dead_letter=dead_letter,
+            dry_run=dry_run,
+        )
+    finally:
+        if db_owned:
+            db.close()
+
+
+def _load_connector_entry(source_name: str, config_path: Path | None) -> dict[str, Any] | None:
+    """Load the YAML connector entry matching ``source_name``.
+
+    Returns ``None`` when the config file is absent or the named source
+    isn't declared — both shapes map to ``skipped_no_connector`` at the
+    caller, so the caller doesn't need to distinguish.
+    """
+    resolved = config_path if config_path is not None else _resolve_config_path_default()
+    if resolved is None:
+        return None
+    try:
+        cfg = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
+    except Exception:  # pragma: no cover — defensive
+        return None
+    entries = cfg.get("connectors", []) if isinstance(cfg, dict) else []
+    return next((e for e in entries if e.get("name") == source_name), None)
+
+
+def _build_reextract_components(
+    *,
+    source_name: str,
+    entry: dict[str, Any],
+    db: sqlite3.Connection,
+) -> tuple[Any, Any, Any, Any, Any]:
+    """Wire connector + extractor + silver + chunk_writer + entity-graph sink.
+
+    Mirrors ``_run_one_connector_batch``'s resolution shape so re-extract
+    sees identical wiring to the original sync.
+    """
+    from kairix.core.connectors import DefaultSilverProcessor, resolve_connector, resolve_extractor
+    from kairix.core.connectors.collection_router import legacy_chunk_writer
+
+    extractor_name = entry.get("extractor", "passthrough")
+    connector = resolve_connector(source_name)(entry.get("config", {}))
+    extractor_factory = resolve_extractor(extractor_name)
+    ex_config = entry.get("extractor_config")
+    extractor = extractor_factory(**ex_config) if ex_config else extractor_factory()
+    silver = DefaultSilverProcessor()
+    chunk_writer = legacy_chunk_writer(db, collection=entry.get("collection", "default"))
+    entity_graph_sink = _SqliteEntityGraphSink(db)
+    return connector, extractor, silver, chunk_writer, entity_graph_sink
+
+
+def _reextract_rows(
+    *,
+    rows: tuple[Any, ...],
+    db: sqlite3.Connection,
+    bronze: Any,
+    extractor: Any,
+    silver: Any,
+    chunk_writer: Any,
+    entity_graph_sink: Any,
+    connector: Any,
+    dead_letter: Any,
+    dry_run: bool,
+) -> ReextractResult:
+    """Inner loop of :func:`run_reextract_dead_letter` — split out so the
+    outer function's setup stays under F16 cognitive complexity."""
+    from kairix.core.protocols import BronzeRef
+
+    recovered = 0
+    still_failing = 0
+    skipped_no_bronze = 0
+
+    for entry in rows:
+        # Look up the bronze_records row.
+        row = db.execute(
+            "SELECT raw_path, mime, fetched_at FROM bronze_records WHERE source_name = ? AND item_id = ?",
+            (entry.source_name, entry.item_id),
+        ).fetchone()
+        if row is None:
+            skipped_no_bronze += 1
+            continue
+        ref = BronzeRef(
+            source_name=entry.source_name,
+            item_id=entry.item_id,
+            raw_path=str(row[0]),
+            mime=str(row[1]),
+            fetched_at=str(row[2]),
+        )
+        try:
+            raw, mime = bronze.read(ref)
+            doc = extractor.extract(raw, mime)
+            silver_out = silver.process(
+                ref,
+                doc,
+                source_uri=connector.source_link(entry.item_id),
+                source_modified_at=str(row[2]),  # bronze fetched_at as proxy when ChangeEvent.modified_at is gone
+                sensitivity=connector.sensitivity_for(entry.item_id),
+            )
+            chunk_writer.upsert(silver_out.chunks)
+            entity_graph_sink.stage(silver_out.entity_signals)
+            dead_letter.clear(entry.source_name, entry.item_id)
+            if not dry_run:
+                db.commit()
+            else:
+                db.rollback()
+            recovered += 1
+        except Exception:
+            db.rollback()
+            still_failing += 1
+            # Don't bump failure_count in dead_letter — the operator
+            # explicitly asked for re-extract; treating their attempt
+            # as another poisoning would defeat the recovery.
+    return ReextractResult(
+        recovered=recovered,
+        still_failing=still_failing,
+        skipped_no_bronze=skipped_no_bronze,
+        skipped_no_connector=0,
+    )
 
 
 @dataclass

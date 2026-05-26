@@ -155,3 +155,92 @@ def test_worker_status_subprocess_exits_non_zero_on_missing_state(tmp_path: Path
     assert "kairix worker:" in proc.stderr, f"stderr missing error prefix: {proc.stderr!r}"
     assert "no state file" in proc.stderr.lower(), f"stderr missing 'no state file': {proc.stderr!r}"
     assert proc.stdout == "", f"stdout should be empty on missing state, got: {proc.stdout!r}"
+
+
+def test_worker_reextract_subprocess_envelope_outcome(tmp_path: Path) -> None:
+    """``kairix worker reextract --source-name <src> --db-path <db> --json``
+    drives the real binary against a tmp DB and asserts on the JSON envelope.
+
+    Seeds a fresh DB with no dead_letter rows for the named source — the
+    envelope should report all-zero counts (the no-op shape) with
+    skipped_no_connector matching the empty config. F30: subprocess +
+    stdout/JSON-envelope assertion, not internal call-counts.
+    """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+
+    db_path = tmp_path / "reextract.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+    finally:
+        db.close()
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "worker",
+            "reextract",
+            "--source-name",
+            "no-such-connector",
+            "--db-path",
+            str(db_path),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, (
+        f"reextract exited {proc.returncode}\n--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
+    )
+    envelope = json.loads(proc.stdout)
+    assert envelope["source_name"] == "no-such-connector"
+    assert envelope["recovered"] == 0
+    assert envelope["still_failing"] == 0
+    assert envelope["skipped_no_bronze"] == 0
+    # Source name has no connector and no dead_letter rows → all-zero envelope.
+    assert envelope["skipped_no_connector"] == 0
+    assert envelope["dry_run"] is False
+
+
+def test_worker_reextract_dry_run_does_not_commit(tmp_path: Path) -> None:
+    """``--dry-run`` walks the same logic but commits nothing. With an
+    empty DB the envelope still parses + reports the dry_run=True flag."""
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+
+    db_path = tmp_path / "reextract-dry.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+    finally:
+        db.close()
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "worker",
+            "reextract",
+            "--source-name",
+            "no-such-connector",
+            "--db-path",
+            str(db_path),
+            "--dry-run",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, f"dry-run exited {proc.returncode}; stderr={proc.stderr!r}"
+    envelope = json.loads(proc.stdout)
+    assert envelope["dry_run"] is True

@@ -452,6 +452,73 @@ def _maintenance_verb_fts_healer(db: sqlite3.Connection) -> int:
         return 0
 
 
+def reextract(
+    *,
+    source_name: str,
+    db_path: Path | None = None,
+    limit: int | None = None,
+    dry_run: bool = False,
+    out: TextIO | None = None,
+    err: TextIO | None = None,
+    as_json: bool = False,
+) -> int:
+    """``kairix worker reextract --source-name <src>`` — operator recovery.
+
+    Re-extracts every dead-lettered item for ``source_name`` through the
+    currently-registered extractor. Recovers from past extract failures
+    (e.g. missing extras fixed in a later release) without requiring
+    the source to re-emit the items.
+
+    The v2026.5.26a1 dogfood landed 122 SharePoint items in dead_letter
+    before the markitdown extras hotfix; ``kairix worker reextract
+    --source-name sharepoint`` recovers them now that markitdown
+    converters import cleanly.
+    """
+    out = out if out is not None else sys.stdout
+    err = err if err is not None else sys.stderr
+    db = _open_db_for_preflight(db_path)
+    try:
+        from kairix.worker import run_reextract_dead_letter
+
+        try:
+            result = run_reextract_dead_letter(
+                source_name=source_name,
+                db=db,
+                limit=limit,
+                dry_run=dry_run,
+            )
+        except Exception as exc:  # pragma: no cover — production boundary
+            err.write(f"kairix worker reextract: raised — {exc}\n")
+            return 1
+    finally:
+        db.close()
+
+    if as_json:
+        out.write(
+            json.dumps(
+                {
+                    "source_name": source_name,
+                    "recovered": result.recovered,
+                    "still_failing": result.still_failing,
+                    "skipped_no_bronze": result.skipped_no_bronze,
+                    "skipped_no_connector": result.skipped_no_connector,
+                    "dry_run": dry_run,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+    else:
+        prefix = "[dry-run] " if dry_run else ""
+        out.write(
+            f"{prefix}reextract source={source_name} "
+            f"recovered={result.recovered} still_failing={result.still_failing} "
+            f"skipped_no_bronze={result.skipped_no_bronze} "
+            f"skipped_no_connector={result.skipped_no_connector}\n"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Argparse for ``kairix worker [run|status|pause|resume]``."""
     parser = argparse.ArgumentParser(
@@ -562,6 +629,42 @@ def build_parser() -> argparse.ArgumentParser:
         action=_STORE_TRUE,
         help="Emit the MaintenanceTickResult as JSON on stdout (machine-readable).",
     )
+    reextract_p = sub.add_parser(
+        "reextract",
+        help=(
+            "Re-extract dead-lettered items for a source using the currently-"
+            "registered extractor. Recovers from past extract failures (e.g. "
+            "missing extras fixed in a later release) without requiring the "
+            "source to re-emit the items."
+        ),
+    )
+    reextract_p.add_argument(
+        "--source-name",
+        required=True,
+        help="connector source name (e.g. sharepoint, obsidian)",
+    )
+    reextract_p.add_argument(
+        "--db-path",
+        default=None,
+        help="Re-extract against this SQLite index instead of the default resolution chain.",
+    )
+    reextract_p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Cap the number of items processed (default: all dead-lettered items for the source).",
+    )
+    reextract_p.add_argument(
+        "--dry-run",
+        action=_STORE_TRUE,
+        help="Walk the same logic but commit nothing — useful for sizing the recovery first.",
+    )
+    reextract_p.add_argument(
+        "--json",
+        dest="as_json",
+        action=_STORE_TRUE,
+        help="Emit the ReextractResult as JSON on stdout (machine-readable).",
+    )
     return parser
 
 
@@ -625,6 +728,15 @@ def main(
         return maintenance(
             db_path=resolved_db,
             retention_days=getattr(args, "retention_days", None),
+            as_json=getattr(args, "as_json", False),
+        )
+    if args.cmd == "reextract":
+        resolved_db = _resolve_db_path_arg(getattr(args, "db_path", None), db_path)
+        return reextract(
+            source_name=args.source_name,
+            db_path=resolved_db,
+            limit=getattr(args, "limit", None),
+            dry_run=getattr(args, "dry_run", False),
             as_json=getattr(args, "as_json", False),
         )
 
