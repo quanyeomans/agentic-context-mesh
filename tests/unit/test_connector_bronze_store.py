@@ -411,6 +411,38 @@ def test_phase2_write_populates_content_hash_with_sha256(tmp_path: Path) -> None
         db.close()
 
 
+def test_phase3_filesystem_read_raises_on_none_raw_path(tmp_path: Path) -> None:
+    """Phase 3: FilesystemBronzeStore.read raises with a fix-pointer when
+    asked to read a BronzeRef whose raw_path is None (a streaming-bronze
+    row that arrived at the wrong store).
+
+    Sabotage proof: remove the ``if ref.raw_path is None`` guard; the
+    test fails with a TypeError attempting to join Path / None.
+    """
+    import sqlite3
+
+    from kairix.core.connectors.bronze import FilesystemBronzeStore
+    from kairix.core.db.schema import create_schema
+    from kairix.core.protocols import BronzeRef
+
+    db = sqlite3.connect(":memory:")
+    try:
+        create_schema(db)
+        store = FilesystemBronzeStore(db, tmp_path)
+        streaming_ref = BronzeRef(
+            source_name="src",
+            item_id="item-1",
+            raw_path=None,
+            mime="text/plain",
+            fetched_at="2026-05-27T00:00:00Z",
+            content_hash=None,
+        )
+        with pytest.raises(ValueError, match="streaming-bronze row"):
+            store.read(streaming_ref)
+    finally:
+        db.close()
+
+
 def test_phase2_replay_surfaces_content_hash(tmp_path: Path) -> None:
     """Replay yields BronzeRefs whose content_hash matches what write() persisted."""
     import hashlib

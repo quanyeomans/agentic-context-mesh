@@ -65,12 +65,17 @@ class BronzeNotPersistedError(RuntimeError):
 
 
 # Sentinel value written into ``bronze_records.raw_path`` for streaming
-# rows. Phase 3 makes the column properly nullable; for Phase 1 the
-# empty string distinguishes streaming rows from FilesystemBronzeStore
-# rows (which always contain a path like "source/ab/abc123..."). Public
-# so callers (Bug D re-extract path in Phase 5) can compare against the
-# sentinel without reaching into module-private state.
-STREAMING_RAW_PATH = ""
+# rows. The column stays NOT NULL at the SQLite layer (avoiding a
+# table-rebuild migration); the empty string distinguishes streaming
+# rows from FilesystemBronzeStore rows (which always contain a path
+# like "source/ab/abc123...").
+#
+# Phase 3 of the streaming-bronze rollout: replay() converts the
+# empty-string DB value to Python ``None`` so consumers can pattern
+# on ``if ref.raw_path is None:`` rather than checking truthiness.
+# The DB sentinel + the Python-visible None are equivalent — the
+# conversion happens in the read path.
+_STREAMING_DB_SENTINEL = ""
 
 
 class StreamingBronzeStore:
@@ -118,12 +123,12 @@ class StreamingBronzeStore:
             "INSERT OR REPLACE INTO bronze_records "
             "(source_name, item_id, raw_path, mime, fetched_at, content_hash) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (source_name, item_id, STREAMING_RAW_PATH, mime, fetched_at, digest),
+            (source_name, item_id, _STREAMING_DB_SENTINEL, mime, fetched_at, digest),
         )
         return BronzeRef(
             source_name=source_name,
             item_id=item_id,
-            raw_path=STREAMING_RAW_PATH,
+            raw_path=None,  # Python-visible signal that this is a streaming row
             mime=mime,
             fetched_at=fetched_at,
             content_hash=digest,
@@ -170,10 +175,13 @@ class StreamingBronzeStore:
                 (source_name, since.isoformat()),
             ).fetchall()
         for row in rows:
+            db_raw_path = str(row[2])
             yield BronzeRef(
                 source_name=str(row[0]),
                 item_id=str(row[1]),
-                raw_path=str(row[2]),
+                # Phase 3: convert the empty-string DB sentinel to None
+                # so Python consumers can pattern on ``if ref.raw_path is None:``.
+                raw_path=db_raw_path if db_raw_path else None,
                 mime=str(row[3]),
                 fetched_at=str(row[4]),
                 content_hash=str(row[5]) if row[5] is not None else None,

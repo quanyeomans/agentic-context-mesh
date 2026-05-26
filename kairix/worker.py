@@ -767,10 +767,16 @@ def _reextract_rows(
         if row is None:
             skipped_no_bronze += 1
             continue
+        # Phase 3 — normalise empty-string DB sentinel to Python None so the
+        # downstream bronze.read raises the streaming-row ValueError with
+        # its fix-pointer (rather than falling through to an opaque
+        # IsADirectoryError trying to read bronze_root + ""). Phase 5
+        # replaces this branch with a re-fetch via connector.fetch.
+        db_raw_path = str(row[0])
         ref = BronzeRef(
             source_name=entry.source_name,
             item_id=entry.item_id,
-            raw_path=str(row[0]),
+            raw_path=db_raw_path if db_raw_path else None,
             mime=str(row[1]),
             fetched_at=str(row[2]),
         )

@@ -232,8 +232,8 @@ class TestConnectorImplementationsExist:
             assert ref.source_name == "src"
             assert ref.item_id == "item-1"
             assert ref.mime == "text/plain"
-            # Streaming-specific: raw_path is the empty sentinel
-            assert ref.raw_path == ""
+            # Phase 3: streaming write returns ref.raw_path is None
+            assert ref.raw_path is None
         finally:
             db.close()
 
@@ -270,10 +270,11 @@ class TestConnectorImplementationsExist:
             assert fs_refs[0].source_name == st_refs[0].source_name
             assert fs_refs[0].item_id == st_refs[0].item_id
             assert fs_refs[0].mime == st_refs[0].mime
-            # raw_path intentionally differs: filesystem has a path,
-            # streaming has the empty sentinel
+            # Phase 3 raw_path normalisation: filesystem yields the on-disk
+            # relative path (non-empty string); streaming yields Python None.
+            assert fs_refs[0].raw_path is not None
             assert fs_refs[0].raw_path != ""
-            assert st_refs[0].raw_path == ""
+            assert st_refs[0].raw_path is None
         finally:
             db_a.close()
             db_b.close()

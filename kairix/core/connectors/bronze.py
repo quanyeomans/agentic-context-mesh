@@ -91,7 +91,20 @@ class FilesystemBronzeStore:
 
         Raises :class:`FileNotFoundError` if the blob is missing on
         disk (caller's responsibility to surface).
+
+        Raises ``ValueError`` with a fix pointer if ``ref.raw_path`` is
+        ``None`` — that's a streaming-bronze row that must be recovered
+        via ``connector.fetch(item_id)`` instead of ``bronze.read(ref)``.
+        Phase 5 of the streaming-bronze rollout wires this routing in
+        the re-extract path automatically.
         """
+        if ref.raw_path is None:
+            raise ValueError(
+                f"BronzeRef for ({ref.source_name}, {ref.item_id}) has no raw_path — "
+                "this is a streaming-bronze row, FilesystemBronzeStore cannot read it. "
+                "fix: route through ``connector.fetch(item_id)`` to re-fetch from source. "
+                "next: see docs/architecture/streaming-bronze-plan.md § 5."
+            )
         abs_path = self._bronze_root / ref.raw_path
         return abs_path.read_bytes(), ref.mime
 
@@ -225,10 +238,14 @@ class FilesystemBronzeStore:
                 (source_name, since.isoformat()),
             ).fetchall()
         for row in rows:
+            db_raw_path = str(row[2])
             yield BronzeRef(
                 source_name=str(row[0]),
                 item_id=str(row[1]),
-                raw_path=str(row[2]),
+                # Phase 3: normalise the empty-string streaming-mode sentinel
+                # to None so consumers can pattern on ``ref.raw_path is None``
+                # regardless of which BronzeStore impl wrote the row.
+                raw_path=db_raw_path if db_raw_path else None,
                 mime=str(row[3]),
                 fetched_at=str(row[4]),
                 content_hash=str(row[5]) if row[5] is not None else None,

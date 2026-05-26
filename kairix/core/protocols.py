@@ -921,23 +921,28 @@ class ExtractedDocument:
 class BronzeRef:
     """Pointer to a Bronze record.
 
-    The historical storage model is filesystem-with-pointer (per
-    kairix-pro-platform ADR-018): ``raw_path`` is the relative-to-
-    ``paths.bronze_root()`` location of the on-disk blob. Phase 1+
-    of the streaming-bronze rollout introduces a sibling
-    ``StreamingBronzeStore`` impl that doesn't persist raw bytes; its
-    rows surface here with ``raw_path = ""`` (the empty-string sentinel)
-    until Phase 3 makes the field properly nullable.
+    Two storage shapes coexist:
+
+    * **FilesystemBronzeStore** writes the raw bytes to
+      ``<bronze_root>/<raw_path>`` and surfaces a ``BronzeRef`` whose
+      ``raw_path`` is the relative on-disk location of the blob.
+    * **StreamingBronzeStore** (Phase 1+ of the streaming-bronze rollout)
+      writes no on-disk blob and surfaces a ``BronzeRef`` whose
+      ``raw_path`` is ``None``. Re-extract paths recover the bytes via
+      ``connector.fetch(item_id)`` instead of ``bronze.read(ref)``.
+
+    Consumers MUST handle ``raw_path is None`` by routing through the
+    connector re-fetch path; ``FilesystemBronzeStore.read`` raises a
+    fix-pointer error if asked to read a streaming-shape ref.
 
     ``content_hash`` is the SHA-256 of the raw bytes at write time,
-    populated by both impls in Phase 2. Older rows (written before
-    Phase 2) carry ``None`` until they're re-written; consumers
-    handle that gracefully.
+    populated by both impls in Phase 2. Rows written before Phase 2
+    carry ``None`` until re-written; consumers handle that gracefully.
     """
 
     source_name: str
     item_id: str
-    raw_path: str
+    raw_path: str | None
     mime: MimeType
     fetched_at: str
     content_hash: str | None = None

@@ -13,12 +13,17 @@ from datetime import datetime, timezone
 import pytest
 
 from kairix.core.connectors.streaming_bronze import (
-    STREAMING_RAW_PATH,
     BronzeNotPersistedError,
     StreamingBronzeStore,
 )
 from kairix.core.db.schema import create_schema
 from kairix.core.protocols import BronzeRef
+
+# DB layer stores empty string; Python layer surfaces None (Phase 3 contract).
+# Observable through the bronze_records column directly — tests use this
+# constant rather than importing the underscore-prefixed module-private
+# from streaming_bronze.py (F5-clean).
+_DB_SENTINEL = ""
 
 pytestmark = pytest.mark.unit
 
@@ -54,23 +59,23 @@ def test_write_inserts_metadata_row_without_touching_disk(db: sqlite3.Connection
         "SELECT source_name, item_id, raw_path, mime FROM bronze_records WHERE item_id=?",
         ("note.md",),
     ).fetchone()
-    assert row == ("obsidian", "note.md", STREAMING_RAW_PATH, "text/markdown")
+    assert row == ("obsidian", "note.md", _DB_SENTINEL, "text/markdown")
     assert isinstance(ref, BronzeRef)
 
 
-def test_write_returns_bronzeref_with_streaming_sentinel(db: sqlite3.Connection) -> None:
-    """The returned BronzeRef carries the streaming sentinel raw_path so
-    callers (re-extract) can detect streaming-mode rows.
+def test_write_returns_bronzeref_with_none_raw_path(db: sqlite3.Connection) -> None:
+    """Phase 3: write() returns a BronzeRef whose raw_path is Python None.
+    The DB row carries the empty-string sentinel; the Python value is
+    normalised to None for the consumer-facing API.
 
-    Sabotage proof: change ``raw_path=STREAMING_RAW_PATH`` to
-    ``raw_path="abc"`` in write(); the assertion ``ref.raw_path == STREAMING_RAW_PATH``
-    fails.
+    Sabotage proof: change ``raw_path=None`` to ``raw_path=""`` in
+    write(); the assertion ``ref.raw_path is None`` fails.
     """
     store = StreamingBronzeStore(db)
     ref = store.write("obsidian", "note.md", b"raw bytes", "text/markdown")
     assert ref.source_name == "obsidian"
     assert ref.item_id == "note.md"
-    assert ref.raw_path == STREAMING_RAW_PATH
+    assert ref.raw_path is None  # Python-visible signal of streaming row
     assert ref.mime == "text/markdown"
     assert ref.fetched_at  # populated, non-empty
 
@@ -124,7 +129,7 @@ def test_read_raises_bronze_not_persisted_with_fix_pointer(db: sqlite3.Connectio
     ref = BronzeRef(
         source_name="obsidian",
         item_id="note.md",
-        raw_path=STREAMING_RAW_PATH,
+        raw_path=None,
         mime="text/markdown",
         fetched_at="2026-05-27T10:00:00Z",
     )
@@ -144,7 +149,7 @@ def test_read_error_message_names_connector_fetch_as_alternative(db: sqlite3.Con
     ref = BronzeRef(
         source_name="x",
         item_id="y",
-        raw_path=STREAMING_RAW_PATH,
+        raw_path=None,
         mime="text/plain",
         fetched_at="2026-05-27T10:00:00Z",
     )
@@ -176,7 +181,8 @@ def test_replay_yields_all_rows_oldest_first(db: sqlite3.Connection) -> None:
     refs = list(store.replay("obsidian"))
     assert len(refs) == 3
     # All have empty raw_path (streaming sentinel)
-    assert all(r.raw_path == STREAMING_RAW_PATH for r in refs)
+    # All replay-yielded refs have raw_path=None (Phase 3 normalisation)
+    assert all(r.raw_path is None for r in refs)
     # fetched_at is monotonic ascending (within sub-second resolution
     # they're equal — SQL ORDER BY honours insertion order on ties)
     assert refs[0].fetched_at <= refs[1].fetched_at <= refs[2].fetched_at
@@ -193,7 +199,7 @@ def test_replay_with_since_filters_by_fetched_at(db: sqlite3.Connection) -> None
     old_ts = "2020-01-01T00:00:00Z"
     db.execute(
         "INSERT INTO bronze_records (source_name, item_id, raw_path, mime, fetched_at) VALUES (?, ?, ?, ?, ?)",
-        ("obsidian", "old.md", STREAMING_RAW_PATH, "text/markdown", old_ts),
+        ("obsidian", "old.md", _DB_SENTINEL, "text/markdown", old_ts),
     )
     store.write("obsidian", "new.md", b"", "text/markdown")
     cutoff = datetime(2025, 1, 1, tzinfo=timezone.utc)
