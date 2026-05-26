@@ -919,12 +919,20 @@ class ExtractedDocument:
 
 @dataclass(frozen=True)
 class BronzeRef:
-    """Pointer to a Bronze record — raw bytes preserved on disk plus a SQLite row.
+    """Pointer to a Bronze record.
 
-    Storage model is filesystem-with-pointer (per kairix-pro-platform
-    ADR-018): ``raw_path`` is the relative-to-``paths.bronze_root()``
-    location of the blob; the SQLite ``bronze_records`` table carries
-    the rest of the metadata for replayability.
+    The historical storage model is filesystem-with-pointer (per
+    kairix-pro-platform ADR-018): ``raw_path`` is the relative-to-
+    ``paths.bronze_root()`` location of the on-disk blob. Phase 1+
+    of the streaming-bronze rollout introduces a sibling
+    ``StreamingBronzeStore`` impl that doesn't persist raw bytes; its
+    rows surface here with ``raw_path = ""`` (the empty-string sentinel)
+    until Phase 3 makes the field properly nullable.
+
+    ``content_hash`` is the SHA-256 of the raw bytes at write time,
+    populated by both impls in Phase 2. Older rows (written before
+    Phase 2) carry ``None`` until they're re-written; consumers
+    handle that gracefully.
     """
 
     source_name: str
@@ -932,6 +940,7 @@ class BronzeRef:
     raw_path: str
     mime: MimeType
     fetched_at: str
+    content_hash: str | None = None
 
 
 @dataclass(frozen=True)

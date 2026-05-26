@@ -203,6 +203,72 @@ def test_replay_with_since_filters_by_fetched_at(db: sqlite3.Connection) -> None
     assert "new.md" in item_ids
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 — content_hash population
+# ---------------------------------------------------------------------------
+
+
+def test_phase2_write_populates_content_hash_with_sha256(db: sqlite3.Connection) -> None:
+    """Phase 2 of streaming-bronze: write() persists SHA-256 of raw bytes.
+
+    Sabotage proof: drop the ``digest=_content_hash(raw)`` line + remove
+    content_hash from the INSERT VALUES; the column ends up NULL and
+    the assertion against the known SHA-256 fails.
+    """
+    import hashlib
+
+    raw = b"deterministic-payload-for-hash-test"
+    expected = hashlib.sha256(raw).hexdigest()
+
+    store = StreamingBronzeStore(db)
+    ref = store.write("obsidian", "note.md", raw, "text/markdown")
+
+    assert ref.content_hash == expected
+    # And the row in the DB carries the same hash
+    row_hash = db.execute(
+        "SELECT content_hash FROM bronze_records WHERE source_name=? AND item_id=?",
+        ("obsidian", "note.md"),
+    ).fetchone()[0]
+    assert row_hash == expected
+
+
+def test_phase2_replay_yields_content_hash_in_bronze_ref(db: sqlite3.Connection) -> None:
+    """Replay surfaces the persisted hash in the BronzeRef value object.
+
+    Sabotage proof: drop the content_hash column from the SELECT in
+    replay(); the BronzeRef.content_hash assertion fails because
+    str(row[5]) raises IndexError.
+    """
+    import hashlib
+
+    store = StreamingBronzeStore(db)
+    raw = b"another-deterministic-payload"
+    store.write("obsidian", "alpha.md", raw, "text/markdown")
+
+    refs = list(store.replay("obsidian"))
+    assert len(refs) == 1
+    assert refs[0].content_hash == hashlib.sha256(raw).hexdigest()
+
+
+def test_phase2_replay_handles_legacy_null_content_hash(db: sqlite3.Connection) -> None:
+    """Rows written before Phase 2 have content_hash=NULL. Replay must
+    surface that as None on the BronzeRef rather than crashing.
+
+    Sabotage proof: change ``str(row[5]) if row[5] is not None else None``
+    to just ``str(row[5])``; the test fails with TypeError because str(None)
+    returns "None" string, not None object.
+    """
+    # Insert a row directly with content_hash NULL (pre-Phase-2 shape)
+    db.execute(
+        "INSERT INTO bronze_records (source_name, item_id, raw_path, mime, fetched_at) VALUES (?, ?, ?, ?, ?)",
+        ("obsidian", "legacy.md", "", "text/markdown", "2026-05-26T00:00:00Z"),
+    )
+    store = StreamingBronzeStore(db)
+    refs = list(store.replay("obsidian"))
+    assert len(refs) == 1
+    assert refs[0].content_hash is None  # not the string "None"
+
+
 def test_replay_returns_empty_for_unknown_source(db: sqlite3.Connection) -> None:
     """An unknown source yields no rows — no errors, just empty iterator.
 

@@ -372,3 +372,63 @@ def test_replay_scopes_to_source_name(tmp_path: Path) -> None:
         assert [r.item_id for r in beta_refs] == ["item-2"]
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — content_hash population (streaming-bronze rollout)
+# ---------------------------------------------------------------------------
+
+
+def test_phase2_write_populates_content_hash_with_sha256(tmp_path: Path) -> None:
+    """Phase 2: FilesystemBronzeStore reuses the on-disk-path digest as
+    the content_hash column value (same SHA-256, computed once).
+
+    Sabotage proof: drop ``content_hash`` from the INSERT VALUES tuple;
+    the column ends up NULL and the assertion fails.
+    """
+    import hashlib
+    import sqlite3
+
+    from kairix.core.connectors.bronze import FilesystemBronzeStore
+    from kairix.core.db.schema import create_schema
+
+    db = sqlite3.connect(":memory:")
+    try:
+        create_schema(db)
+        store = FilesystemBronzeStore(db, tmp_path)
+        raw = b"deterministic-payload-for-hash-test"
+        expected = hashlib.sha256(raw).hexdigest()
+
+        ref = store.write("agent-alpha", "item-1", raw, "text/plain")
+        assert ref.content_hash == expected
+
+        row_hash = db.execute(
+            "SELECT content_hash FROM bronze_records WHERE source_name=? AND item_id=?",
+            ("agent-alpha", "item-1"),
+        ).fetchone()[0]
+        assert row_hash == expected
+    finally:
+        db.close()
+
+
+def test_phase2_replay_surfaces_content_hash(tmp_path: Path) -> None:
+    """Replay yields BronzeRefs whose content_hash matches what write() persisted."""
+    import hashlib
+    import sqlite3
+
+    from kairix.core.connectors.bronze import FilesystemBronzeStore
+    from kairix.core.db.schema import create_schema
+
+    db = sqlite3.connect(":memory:")
+    try:
+        create_schema(db)
+        store = FilesystemBronzeStore(db, tmp_path)
+        raw = b"another-payload"
+        store.write("agent-alpha", "item-1", raw, "text/plain")
+        db.commit()
+
+        refs = list(store.replay("agent-alpha"))
+        assert len(refs) == 1
+        assert refs[0].content_hash == hashlib.sha256(raw).hexdigest()
+    finally:
+        db.close()

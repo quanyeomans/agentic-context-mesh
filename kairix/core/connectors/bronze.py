@@ -69,11 +69,13 @@ class FilesystemBronzeStore:
         tmp_path.write_bytes(raw)
         tmp_path.replace(abs_path)
         fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Phase 2: persist content_hash. We've already computed it (digest)
+        # above for the on-disk path; reuse the same value.
         self._db.execute(
             "INSERT OR REPLACE INTO bronze_records "
-            "(source_name, item_id, raw_path, mime, fetched_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (source_name, item_id, rel_path, mime, fetched_at),
+            "(source_name, item_id, raw_path, mime, fetched_at, content_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (source_name, item_id, rel_path, mime, fetched_at, digest),
         )
         return BronzeRef(
             source_name=source_name,
@@ -81,6 +83,7 @@ class FilesystemBronzeStore:
             raw_path=rel_path,
             mime=mime,
             fetched_at=fetched_at,
+            content_hash=digest,
         )
 
     def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]:
@@ -209,14 +212,14 @@ class FilesystemBronzeStore:
         """
         if since is None:
             rows = self._db.execute(
-                "SELECT source_name, item_id, raw_path, mime, fetched_at "
+                "SELECT source_name, item_id, raw_path, mime, fetched_at, content_hash "
                 "FROM bronze_records WHERE source_name = ? "
                 "ORDER BY fetched_at ASC",
                 (source_name,),
             ).fetchall()
         else:
             rows = self._db.execute(
-                "SELECT source_name, item_id, raw_path, mime, fetched_at "
+                "SELECT source_name, item_id, raw_path, mime, fetched_at, content_hash "
                 "FROM bronze_records WHERE source_name = ? AND fetched_at >= ? "
                 "ORDER BY fetched_at ASC",
                 (source_name, since.isoformat()),
@@ -228,4 +231,5 @@ class FilesystemBronzeStore:
                 raw_path=str(row[2]),
                 mime=str(row[3]),
                 fetched_at=str(row[4]),
+                content_hash=str(row[5]) if row[5] is not None else None,
             )

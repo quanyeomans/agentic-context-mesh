@@ -32,11 +32,23 @@ transaction owns the commit; this store issues SQL but never calls
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
 from kairix.core.protocols import BronzeRef, MimeType
+
+
+def _content_hash(raw: bytes) -> str:
+    """SHA-256 of the raw bytes — same shape as FilesystemBronzeStore.
+
+    Phase 2 of streaming-bronze: both impls populate bronze_records.content_hash
+    so the column has the same semantics regardless of which store wrote
+    the row. Streaming-mode rows can't be re-read from disk, but the hash
+    is still useful for re-fetch verification (Phase 5+) and dedupe.
+    """
+    return hashlib.sha256(raw).hexdigest()
 
 
 class BronzeNotPersistedError(RuntimeError):
@@ -87,24 +99,26 @@ class StreamingBronzeStore:
         """
         self._db = db
 
-    def write(self, source_name: str, item_id: str, _raw: bytes, mime: MimeType) -> BronzeRef:
-        """Record the fetch metadata; discard the raw bytes.
+    def write(self, source_name: str, item_id: str, raw: bytes, mime: MimeType) -> BronzeRef:
+        """Record the fetch metadata + content hash; discard the raw bytes.
 
-        ``_raw`` is accepted to satisfy the BronzeStore Protocol but is
-        NOT persisted (F19-prefix: underscore signals the Protocol
-        position is required but this impl ignores it) — the caller
-        has already handed the bytes to the extractor via the in-memory
-        pipeline. Idempotent on ``(source_name, item_id)`` — repeated
-        writes overwrite the metadata row.
+        Phase 2: streaming bronze persists ``content_hash`` so it's
+        queryable without retaining the raw blob. The hash is the only
+        durable fingerprint of "what was fetched" once the bytes go away.
+
+        The caller has already handed ``raw`` to the extractor via the
+        in-memory pipeline. Idempotent on ``(source_name, item_id)`` —
+        repeated writes overwrite the metadata row.
 
         Does NOT commit; caller's per-batch transaction owns the commit.
         """
         fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        digest = _content_hash(raw)
         self._db.execute(
             "INSERT OR REPLACE INTO bronze_records "
-            "(source_name, item_id, raw_path, mime, fetched_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (source_name, item_id, STREAMING_RAW_PATH, mime, fetched_at),
+            "(source_name, item_id, raw_path, mime, fetched_at, content_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (source_name, item_id, STREAMING_RAW_PATH, mime, fetched_at, digest),
         )
         return BronzeRef(
             source_name=source_name,
@@ -112,6 +126,7 @@ class StreamingBronzeStore:
             raw_path=STREAMING_RAW_PATH,
             mime=mime,
             fetched_at=fetched_at,
+            content_hash=digest,
         )
 
     def read(self, ref: BronzeRef) -> tuple[bytes, MimeType]:
@@ -142,14 +157,14 @@ class StreamingBronzeStore:
         """
         if since is None:
             rows = self._db.execute(
-                "SELECT source_name, item_id, raw_path, mime, fetched_at "
+                "SELECT source_name, item_id, raw_path, mime, fetched_at, content_hash "
                 "FROM bronze_records WHERE source_name = ? "
                 "ORDER BY fetched_at ASC",
                 (source_name,),
             ).fetchall()
         else:
             rows = self._db.execute(
-                "SELECT source_name, item_id, raw_path, mime, fetched_at "
+                "SELECT source_name, item_id, raw_path, mime, fetched_at, content_hash "
                 "FROM bronze_records WHERE source_name = ? AND fetched_at >= ? "
                 "ORDER BY fetched_at ASC",
                 (source_name, since.isoformat()),
@@ -161,4 +176,5 @@ class StreamingBronzeStore:
                 raw_path=str(row[2]),
                 mime=str(row[3]),
                 fetched_at=str(row[4]),
+                content_hash=str(row[5]) if row[5] is not None else None,
             )

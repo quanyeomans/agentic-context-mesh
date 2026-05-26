@@ -36,6 +36,7 @@ SCHEMA_VERSION = "3"
 # edit site.
 _TABLE_CONTENT_VECTORS = "content_vectors"
 _TABLE_DOCUMENTS_MEDIA = "documents_media"
+_TABLE_BRONZE_RECORDS = "bronze_records"
 
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
@@ -135,6 +136,7 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             raw_path TEXT NOT NULL,
             mime TEXT NOT NULL,
             fetched_at TEXT NOT NULL,
+            content_hash TEXT,
             PRIMARY KEY (source_name, item_id)
         );
 
@@ -231,7 +233,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "document_pages",
         "connector_cursors",
         "connector_deadletter",
-        "bronze_records",
+        _TABLE_BRONZE_RECORDS,
         "entity_signals",
         # Topology v2 Wave A — 12 net-new tables. Existence is unconditional;
         # population is gated by the `topology_v2_schema` feature flag.
@@ -359,6 +361,7 @@ CREATE TABLE IF NOT EXISTS bronze_records (
     raw_path TEXT NOT NULL,
     mime TEXT NOT NULL,
     fetched_at TEXT NOT NULL,
+    content_hash TEXT,
     PRIMARY KEY (source_name, item_id)
 );
 
@@ -605,6 +608,13 @@ def migrate(db: sqlite3.Connection) -> None:
     # Connector-framework Wave 1 (SC-4): new columns + new tables.
     _migrate_documents_connector_columns(db, tables)
     db.executescript(_CONNECTOR_TABLES_DDL)
+
+    # Streaming-bronze Phase 2: bronze_records.content_hash. SHA-256 of
+    # raw bytes computed at write time on both BronzeStore impls; used
+    # by Phase 3+ for re-fetch verification + dedupe detection.
+    # Existing rows get NULL until they're re-written.
+    if _TABLE_BRONZE_RECORDS in tables:
+        _add_column_if_missing(db, _TABLE_BRONZE_RECORDS, "content_hash", "TEXT")
 
     # Topology v2 (Wave A): additional tables + columns. Pure-additive;
     # write paths are gated by the `topology_v2_schema` feature flag.
