@@ -211,6 +211,74 @@ class TestConnectorImplementationsExist:
             db.close()
 
     @pytest.mark.contract
+    def test_streaming_bronze_store_satisfies_protocol(self) -> None:
+        """Phase 1 of streaming-bronze (#27): StreamingBronzeStore must
+        satisfy the same BronzeStore Protocol as FilesystemBronzeStore
+        so callers can swap impls without API change. Sabotage proof:
+        drop the StreamingBronzeStore.replay method → isinstance(...,
+        BronzeStore) returns False.
+        """
+        import sqlite3
+
+        from kairix.core.connectors.streaming_bronze import StreamingBronzeStore
+        from kairix.core.db.schema import create_schema
+
+        db = sqlite3.connect(":memory:")
+        try:
+            create_schema(db)
+            store = StreamingBronzeStore(db)
+            assert isinstance(store, BronzeStore)
+            ref = store.write("src", "item-1", b"hello", "text/plain")
+            assert ref.source_name == "src"
+            assert ref.item_id == "item-1"
+            assert ref.mime == "text/plain"
+            # Streaming-specific: raw_path is the empty sentinel
+            assert ref.raw_path == ""
+        finally:
+            db.close()
+
+    @pytest.mark.contract
+    def test_both_bronze_stores_yield_identical_replay_shape(self, tmp_path: Path) -> None:
+        """Caller-facing equivalence — replay() yields BronzeRefs that
+        carry the same (source_name, item_id, mime, fetched_at) fields
+        regardless of which impl wrote them. Only ``raw_path`` differs
+        (sentinel vs real path). This is the contract that lets the
+        Bug D re-extract path handle both impls with one code path
+        (Phase 5 of streaming-bronze).
+
+        Sabotage proof: change StreamingBronzeStore.replay to yield
+        BronzeRefs with item_id=None → field-equality check fails.
+        """
+        import sqlite3
+
+        from kairix.core.connectors.bronze import FilesystemBronzeStore
+        from kairix.core.connectors.streaming_bronze import StreamingBronzeStore
+        from kairix.core.db.schema import create_schema
+
+        db_a = sqlite3.connect(":memory:")
+        db_b = sqlite3.connect(":memory:")
+        try:
+            create_schema(db_a)
+            create_schema(db_b)
+            fs_store = FilesystemBronzeStore(db_a, tmp_path)
+            st_store = StreamingBronzeStore(db_b)
+            fs_store.write("src", "item-1", b"hello", "text/plain")
+            st_store.write("src", "item-1", b"hello", "text/plain")
+            fs_refs = list(fs_store.replay("src"))
+            st_refs = list(st_store.replay("src"))
+            assert len(fs_refs) == len(st_refs) == 1
+            assert fs_refs[0].source_name == st_refs[0].source_name
+            assert fs_refs[0].item_id == st_refs[0].item_id
+            assert fs_refs[0].mime == st_refs[0].mime
+            # raw_path intentionally differs: filesystem has a path,
+            # streaming has the empty sentinel
+            assert fs_refs[0].raw_path != ""
+            assert st_refs[0].raw_path == ""
+        finally:
+            db_a.close()
+            db_b.close()
+
+    @pytest.mark.contract
     def test_default_silver_processor_returns_chunks(self) -> None:
         from kairix.core.connectors.silver import DefaultSilverProcessor
 

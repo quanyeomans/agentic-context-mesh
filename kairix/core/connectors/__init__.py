@@ -41,9 +41,11 @@ from kairix.core.connectors.scope_profile_resolver import (
     ScopeProfileResolver,
 )
 from kairix.core.connectors.silver import DefaultSilverProcessor
+from kairix.core.connectors.streaming_bronze import BronzeNotPersistedError, StreamingBronzeStore
 
 __all__ = [
     "BatchResult",
+    "BronzeNotPersistedError",
     "ChunkWriter",
     "ChunkerRegistry",
     "CollectionRouter",
@@ -63,6 +65,7 @@ __all__ = [
     "RouteResult",
     "ScopeProfileResolver",
     "SourceFreshness",
+    "StreamingBronzeStore",
     "build_envelope",
     "build_freshness",
     "create_cc_pair",
