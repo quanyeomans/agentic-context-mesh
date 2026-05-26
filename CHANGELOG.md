@@ -7,23 +7,36 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
-## [2026.5.26a1] - 2026-05-26 — Per-chunk commit in ConnectorPipeline closes #321 (alpha)
+## [2026.5.26a1] - 2026-05-26 — Per-chunk commit + cold-start fix + OSS evaluation outcome (alpha)
 
-> **Upgrading?** Straight pull from a25a1 — purely internal change. No config edits required. Full notes: [`docs/upgrades/v2026.5.26a1.md`](docs/upgrades/v2026.5.26a1.md). The reasoning behind picking chunking over a dlt migration for the bronze layer is recorded in [`docs/architecture/ADR-018-dlt-connector-framework.md`](docs/architecture/ADR-018-dlt-connector-framework.md) (Wave 1 section).
+> **Upgrading?** Straight pull from a25a1 — purely internal changes. No config edits required. Full notes: [`docs/upgrades/v2026.5.26a1.md`](docs/upgrades/v2026.5.26a1.md). Architectural decisions recorded in [`docs/architecture/ADR-018-dlt-connector-framework.md`](docs/architecture/ADR-018-dlt-connector-framework.md) (Wave 1 chunking outcome) and [`docs/architecture/connector-oss-library-evaluation.md`](docs/architecture/connector-oss-library-evaluation.md) (post-ADR-018 reset; 4 OSS frameworks evaluated, all rejected on raw-blob fit).
 
 ### Fixed
 
 - **`ConnectorPipeline` no longer orphans a whole batch's bronze writes on a single mid-batch failure (#321).** Previously the pipeline ran the entire batch as one SQLite transaction; a Silver / writer / sink failure rolled back every uncommitted `bronze_records` row but left the on-disk blobs already fsynced. SharePoint backfills of ~6000 items leaked thousands of orphans on every worker restart. The pipeline now commits every `chunk_size` items (default 50); a failure rolls back only the current chunk; previous chunks stay committed and the cursor advances per chunk.
 
+- **MCP cold-start no longer hands agents an opaque `fetch failed` (#320).** The MCP server used to run the warm sequence (7–30 s) synchronously BEFORE binding the HTTP port. During that window agents got connection-refused at the OS network layer, which JavaScript `fetch()` reports as the opaque string `"fetch failed"`. The fix moves warm to a background daemon thread so uvicorn binds the port immediately; the existing `ColdStartMiddleware` then returns a structured 503 + `ColdStart` envelope for every call during warm.
+
+- **Cold-start envelope rewritten for positive-action affordance (#320).** The previous `agent_instruction` was three stacked prohibitions (`"Do not answer from memory, do not use a lower-quality fallback, do not treat this as a completed retrieval"`). The new shape leads with positive `next:` and `fix:` actions per `feedback_agent_prompts_positive_assertion`: `"next: pause retry_after_ms then call this same tool again. fix: if the second call still returns ColdStart, surface 'kairix still warming after ~8s' to the user and ask whether to proceed without retrieval — this is a transient process-boot state, not a hard failure."` Anti-pattern guards added in tests so the prohibition stacking can't regress.
+
 ### Changed
 
+- **`dex_crm` connector retry now uses `tenacity` instead of a hand-rolled loop.** Replaces ~30 LoC of `while True` retry with `tenacity.Retrying(retry_if_result(...), wait_exponential, stop_after_attempt)`. Same observable behaviour (the 12 existing dex_crm tests pass unchanged including the 429-retry-with-backoff scenario); the change is the reference shape future connectors should copy when they need HTTP retry with backoff. Rationale recorded in `connector-oss-library-evaluation.md` §7.
+
 - **Operator guidance for the runtime disk choice (`docs/operations/OPERATIONS.md` §5.6).** The previous v2026.5.25 note said "data on the data disk." That assumed a deploy shape where the data disk is the largest one. The revised guidance is "kairix runtime on whichever disk is largest" with a `df -h` check — the dogfood VM has a 256 GB OS disk and a 64 GB data disk, so kairix runtime lives on `/var/lib/kairix-runtime` not `/data`.
+
+### Added
+
+- **`tenacity>=8,<10` as a base dependency.** One new dep, no transitives. Used today by the `dex_crm` connector retry; available to any future connector that needs HTTP retry with exponential backoff.
+
+- **OSS connector library evaluation (`docs/architecture/connector-oss-library-evaluation.md`).** Four candidates (dlt, Airbyte Python CDK, Meltano Singer SDK, PyAirbyte) evaluated in parallel against hard requirements derived from kairix's architecture. All four rejected on H1 (raw binary blobs as first-class output). Recommendation: stay homegrown + adopt tenacity. The methodology is the reference shape for future "should we adopt OSS library X" decisions — requirements first, parallel research, evidence converges. The previous ADR-018 cost ~2 days of failed pivots to reach the same conclusion; this evaluation took ~3 hours.
 
 ### Things that haven't changed
 
 - Default behaviour for connectors whose batches stay under 50 items (Obsidian, typical Slack/GitHub deltas) — the chunking is invisible at the API surface.
 - The bronze write contract itself. Per-chunk commits are an internal transaction-granularity change; `BronzeStore` Protocol is unchanged.
 - Every per-connector cursor, dead-letter, and Protocol shape.
+- The MCP cold-start envelope's machine-readable fields (`status`, `error_code`, `retry_after_ms`, `estimated_seconds_remaining`, `tool`). Only the human-facing `guidance` and `agent_instruction` strings changed shape.
 
 ## [2026.5.25a1] - 2026-05-25 — Disk pressure, bronze hygiene, version-drift fixes (alpha)
 

@@ -32,6 +32,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from tenacity import (
+    RetryError,
+    Retrying,
+    retry_if_result,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from kairix.transport.auth.api_key import ApiKeyAuth, BearerHeaders, MissingCredentialsError
 
@@ -213,31 +220,46 @@ class DexCrmClient:
         Retries up to ``config.max_retries`` times. Non-429 4xx/5xx
         responses raise via ``response.raise_for_status()`` so the
         caller's exception handler can map them to dead-letter rows.
+
+        Per docs/architecture/connector-oss-library-evaluation.md §7 the
+        retry loop uses ``tenacity`` (one dep, no transitives) — earlier
+        connectors had hand-rolled while-True loops which fragmented the
+        retry semantics. This file is the reference shape future
+        connectors should copy when they need HTTP retry with backoff.
         """
         client = self._ensure_client()
-        attempt = 0
-        while True:
-            attempt += 1
-            response = client.get(url, headers=headers, params=params)
-            if response.status_code != httpx.codes.TOO_MANY_REQUESTS:
-                response.raise_for_status()
-                return response
-            if attempt >= self.config.max_retries:
-                logger.warning(
-                    "dex_crm: rate-limited after %d attempts on path %s",
-                    attempt,
-                    self._safe_path_for_log(url),
-                )
-                response.raise_for_status()
-                return response
-            backoff = self.config.backoff_base_s * (2 ** (attempt - 1))
-            logger.info(
-                "dex_crm: rate-limited on %s — sleeping %.2fs before retry %d",
-                self._safe_path_for_log(url),
-                backoff,
-                attempt + 1,
+        safe_path = self._safe_path_for_log(url)
+
+        def _is_rate_limited(response: httpx.Response) -> bool:
+            return response.status_code == httpx.codes.TOO_MANY_REQUESTS
+
+        retrying = Retrying(
+            retry=retry_if_result(_is_rate_limited),
+            wait=wait_exponential(multiplier=self.config.backoff_base_s, exp_base=2),
+            stop=stop_after_attempt(self.config.max_retries),
+            sleep=self.sleep,
+            reraise=True,
+            before_sleep=lambda rs: logger.info(
+                "dex_crm: rate-limited on %s — sleeping before retry %d",
+                safe_path,
+                rs.attempt_number + 1,
+            ),
+        )
+        try:
+            response = retrying(client.get, url, headers=headers, params=params)
+        except RetryError as exc:  # pragma: no cover — reraise=True bypasses this path
+            wrapped = exc.last_attempt.exception()
+            if wrapped is not None:
+                raise wrapped from exc
+            raise
+        if _is_rate_limited(response):
+            logger.warning(
+                "dex_crm: rate-limited after %d attempts on path %s",
+                self.config.max_retries,
+                safe_path,
             )
-            self.sleep(backoff)
+        response.raise_for_status()
+        return response
 
     def _ensure_client(self) -> httpx.Client:
         """Lazy-build the underlying ``httpx.Client`` on first use."""

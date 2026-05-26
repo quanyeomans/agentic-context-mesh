@@ -36,6 +36,15 @@ dependencies = [
     # may only be imported under ``kairix/connectors/<name>/`` or
     # ``kairix/core/connectors/``.
     "watchdog>=3.0.0,<7",
+    # tenacity (Apache-2.0) — exponential-backoff retry primitive.
+    # Adopted per docs/architecture/connector-oss-library-evaluation.md
+    # §7 recommendation: replaces ~30 LoC of hand-rolled retry in
+    # kairix/connectors/dex_crm/client.py and prevents future
+    # connectors reinventing the loop. One dep, no transitives, scoped
+    # to HTTP-client retry surfaces. The OSS evaluation rejected every
+    # full connector framework on H1 (raw binary blobs); tenacity is
+    # the sole library adoption that came out of that evaluation.
+    "tenacity>=8,<10",
 ]
 
 [project.optional-dependencies]
