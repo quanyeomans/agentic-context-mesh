@@ -335,18 +335,18 @@ def _run_one_connector_batch(
         DefaultSilverProcessor,
         FilesystemBronzeStore,
         resolve_connector,
-        resolve_extractor,
     )
     from kairix.core.connectors.collection_router import _legacy_chunk_writer
+    from kairix.core.connectors.registry import build_extractor_from_entry
     from kairix.core.features import flag
 
     name = entry["name"]
-    extractor_name = entry.get("extractor", "passthrough")
     connector_factory = resolve_connector(name)
-    extractor_factory = resolve_extractor(extractor_name)
     connector = connector_factory(entry.get("config", {}))
-    ex_config = entry.get("extractor_config")
-    extractor = extractor_factory(**ex_config) if ex_config else extractor_factory()
+    # Builds either a single extractor or an EscalatingExtractor depending
+    # on whether the entry sets ``extractor_chain: [...]`` or the legacy
+    # ``extractor: <name>``. Backward compatible — existing configs unchanged.
+    extractor = build_extractor_from_entry(entry)
     chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
     pipeline = ConnectorPipeline(
         db=db,
@@ -723,14 +723,14 @@ def _build_reextract_components(
     Mirrors ``_run_one_connector_batch``'s resolution shape so re-extract
     sees identical wiring to the original sync.
     """
-    from kairix.core.connectors import DefaultSilverProcessor, resolve_connector, resolve_extractor
+    from kairix.core.connectors import DefaultSilverProcessor, resolve_connector
     from kairix.core.connectors.collection_router import legacy_chunk_writer
+    from kairix.core.connectors.registry import build_extractor_from_entry
 
-    extractor_name = entry.get("extractor", "passthrough")
     connector = resolve_connector(source_name)(entry.get("config", {}))
-    extractor_factory = resolve_extractor(extractor_name)
-    ex_config = entry.get("extractor_config")
-    extractor = extractor_factory(**ex_config) if ex_config else extractor_factory()
+    # Builds either a single extractor or an EscalatingExtractor depending
+    # on whether the entry sets ``extractor_chain: [...]`` or ``extractor: <name>``.
+    extractor = build_extractor_from_entry(entry)
     silver = DefaultSilverProcessor()
     chunk_writer = legacy_chunk_writer(db, collection=entry.get("collection", "default"))
     entity_graph_sink = _SqliteEntityGraphSink(db)

@@ -92,6 +92,53 @@ def resolve_extractor(name: str) -> Callable[..., Extractor]:
     )
 
 
+def build_extractor_from_entry(entry: dict[str, Any]) -> Extractor:
+    """Construct the right extractor shape from a connector config entry.
+
+    Precedence (highest to lowest):
+
+    1. ``extractor_chain: [name1, name2, ...]`` — opt-in escalation chain.
+       Resolves each name and wraps in :class:`EscalatingExtractor` so
+       :meth:`Extractor.quality_ok` drives fall-through.
+
+    2. ``extractor: <name>`` — single-extractor (backward compatible).
+       Existing operator configs work unchanged.
+
+    3. Neither field set — defaults to ``passthrough``.
+
+    Per-extractor kwargs go through ``extractor_config`` (single) or
+    ``extractor_chain_configs: {name: {...}}`` (per-chain-member).
+
+    Used by both ``_run_one_connector_batch`` (regular sync) and
+    ``_build_reextract_components`` (Bug D recovery) so both paths
+    benefit from escalation when configured.
+    """
+    from kairix.core.connectors.escalation import EscalatingExtractor
+
+    chain_names = entry.get("extractor_chain")
+    if chain_names:
+        if not isinstance(chain_names, list) or not all(isinstance(n, str) for n in chain_names):
+            raise ValueError(
+                f"extractor_chain must be a list of strings, got {chain_names!r}. "
+                f"fix: set 'extractor_chain: [markitdown, pdf_fallback, ocr]' in "
+                f"kairix.config.yaml. "
+                f"next: see docs/architecture/connector-ingestion-architecture.md § 4 "
+                f"for the escalation chain pattern."
+            )
+        per_member_configs = entry.get("extractor_chain_configs") or {}
+        members: list[Extractor] = []
+        for name in chain_names:
+            factory = resolve_extractor(name)
+            member_kwargs = per_member_configs.get(name, {})
+            members.append(factory(**member_kwargs) if member_kwargs else factory())
+        return EscalatingExtractor(members)
+
+    name = entry.get("extractor", "passthrough")
+    factory = resolve_extractor(name)
+    ex_config = entry.get("extractor_config")
+    return factory(**ex_config) if ex_config else factory()
+
+
 class ConnectorRegistry:
     """Resolves a :class:`~kairix.core.protocols.SourceConnector` by name.
 

@@ -149,16 +149,11 @@ class EscalatingExtractor:
                 "(markitdown → pdf_fallback → ocr)."
             )
         self._members: tuple[Extractor, ...] = tuple(members)
-
-    @property
-    def name(self) -> str:
-        """Chain-aware name surfaced through ``documents_media.extractor_name``."""
-        return f"escalating({','.join(m.name for m in self._members)})"
-
-    @property
-    def version(self) -> str:
-        """Composite version so F40 re-extracts fire on any tier's version bump."""
-        return "|".join(f"{m.name}@{m.version}" for m in self._members)
+        # Plain attributes (not @property) so the Extractor Protocol's
+        # settable-variable shape matches — mypy strict catches @property
+        # returning read-only attributes as a Protocol incompatibility.
+        self.name: str = f"escalating({','.join(m.name for m in self._members)})"
+        self.version: str = "|".join(f"{m.name}@{m.version}" for m in self._members)
 
     def can_extract(self, mime: MimeType, magic_bytes: bytes) -> bool:
         """Chain claims a mime if any member claims it."""
