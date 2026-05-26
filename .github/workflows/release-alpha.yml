@@ -114,9 +114,15 @@ jobs:
               --prerelease \
               --verify-tag
 
-      - name: Fan out to docker-publish + publish-pypi (alpha mode)
-        # Both downstream workflows receive is_alpha=true so they skip
-        # the :latest Docker tag and the stable PyPI index respectively.
+      - name: Fan out to docker-publish + publish-pypi + vm-deploy (alpha mode)
+        # All three downstream workflows are triggered explicitly because
+        # GitHub deliberately won't fire ``release: types: [prereleased]``
+        # for releases created via GITHUB_TOKEN (the safety that breaks
+        # self-fan-out from inside a workflow). docker-publish and
+        # publish-pypi were already explicit; release-vm-deploy was
+        # missing, so every alpha had to be manually kicked from the UI
+        # or the deploy never happened — caught when v2026.5.25a1's
+        # webhook never fired despite the prerelease being marked.
         env:
           GH_TOKEN: ${{ github.token }}
           DATE_VERSION: ${{ inputs.date_version }}
@@ -125,6 +131,7 @@ jobs:
           TAG="v${DATE_VERSION}a${ALPHA_N}"
           gh workflow run docker-publish.yml --ref main -f ref="$TAG" -f is_alpha=true
           gh workflow run publish-pypi.yml   --ref main -f ref="$TAG" -f is_alpha=true
+          gh workflow run release-vm-deploy.yml --ref main -f tag="$TAG"
 
       - name: Summary
         env:
