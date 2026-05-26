@@ -45,7 +45,14 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # - tesseract-ocr: the C++ engine pytesseract wraps (the ocr extractor's
 #   python deps are installed via the [ocr] extra above; without the
 #   tesseract binary, pytesseract.image_to_string raises TesseractNotFoundError)
-RUN mkdir -p /data/documents /data/kairix /data/kairix/workspaces /opt/kairix/bin /opt/kairix/cron /opt/kairix/plugins \
+# - /data/kairix/tmp: scratch dir for extractor tempfiles. The compose
+#   files mount /tmp as a 2GB tmpfs (#317), but on the v2026.5.27a1
+#   dogfood a single pathological PPTX expansion filled it and every
+#   subsequent extraction failed with ENOSPC (8,090 dead-letter rows).
+#   Routing tempfiles to /data/kairix/tmp uses the bind-mounted runtime
+#   volume (typically tens of GB available, vs 2GB tmpfs). Python's
+#   tempfile honours TMPDIR so this requires no per-call change.
+RUN mkdir -p /data/documents /data/kairix /data/kairix/tmp /data/kairix/workspaces /opt/kairix/bin /opt/kairix/cron /opt/kairix/plugins \
     && apt-get update && apt-get install -y --no-install-recommends curl tesseract-ocr && rm -rf /var/lib/apt/lists/*
 
 # Expose the kairix-bundled openclaw plugins at a stable path (#246 W5).
@@ -76,7 +83,8 @@ ENV KAIRIX_DB_PATH=/data/kairix/index.sqlite \
     KAIRIX_DATA_DIR=/data/kairix \
     KAIRIX_CONFIG_PATH=/opt/kairix/kairix.config.yaml \
     KAIRIX_EVAL_CORPORA_ROOT=/opt/kairix/reference-library/conversations \
-    KAIRIX_PERF_BUDGETS=/opt/kairix/suites/perf/budgets.json
+    KAIRIX_PERF_BUDGETS=/opt/kairix/suites/perf/budgets.json \
+    TMPDIR=/data/kairix/tmp
 # KAIRIX_EVAL_CORPORA_ROOT and KAIRIX_PERF_BUDGETS are documented stable
 # paths for operators running ``docker exec <container> kairix eval ...``
 # (Plan B-parity Week 5 Stream C). They are not read by the eval CLI today;

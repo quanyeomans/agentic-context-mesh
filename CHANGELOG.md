@@ -7,6 +7,30 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.27a2] - 2026-05-27 — Disk-space cascade fix + escalation framework class (alpha)
+
+> **Upgrading?** Urgent fix for the disk-space cascade observed on the v2026.5.27a1 dogfood — 8,090 of 8,396 SharePoint reextract attempts failed with `[Errno 28] No space left on device` because one pathological PPTX expanded to fill the 2GB tmpfs and every subsequent extraction leaked an empty tmpfile stub (8,087 placeholders accumulated). Two fixes ship together: the leak is sealed, AND extractor scratch moves off tmpfs onto the bind-mounted runtime disk so a single bad file can't exhaust capacity. Full notes: [`docs/upgrades/v2026.5.27a2.md`](docs/upgrades/v2026.5.27a2.md).
+
+### Fixed
+
+- **Markitdown extractor no longer leaks empty tmpfile stubs on write failure.** Pre-fix the `tmp.write(raw)` step lived inside `with tempfile.NamedTemporaryFile(delete=False)` but outside the try/finally that called `tmp_path.unlink()`. A write failure (e.g. ENOSPC because tmpfs was already near-full) left the empty placeholder on disk; over a single sync cycle 8,087 of these accumulated, filling tmpfs further. The fix moves the write step inside the try block so the finally clause unlinks the placeholder on write failure too. Structural assertion test locks the line order so a future refactor that re-inverts the shape trips a clear regression message.
+
+- **Onboard healthcheck no longer reports unhealthy on the v2026.5.27a1 image** — the new `check_extractor_libraries_importable` step (from #322) correctly caught that the `ocr` extractor's `pytesseract` library wasn't installed in the runtime image. The Dockerfile now installs the `[ocr]` extra (`pytesseract`, `opencv-python-headless`, `Pillow`, `pdfplumber`) and the tesseract-ocr system binary (the C++ engine pytesseract wraps).
+
+### Changed
+
+- **Extractor scratch moved off tmpfs onto the bind-mounted runtime disk** — `TMPDIR=/data/kairix/tmp` ships in the image. Python's `tempfile` honours this so every extractor's tempfile lands on the disk-backed volume (typically tens of GB available) instead of the 2GB tmpfs at `/tmp`. A pathological extraction can no longer exhaust scratch capacity on a single file. The 2GB `/tmp` tmpfs from #317 stays in compose for general OS scratch, but the high-volume kairix path no longer fights for that 2GB.
+
+### Added
+
+- **`EscalatingExtractor` framework class** (`kairix.core.connectors.escalation.EscalatingExtractor`) — ordered chain orchestration over the Extractor Protocol. Wraps a sequence of extractors, walks the chain via `quality_ok`, returns the first member whose output is good enough. Exhaustion (every member returns False) surfaces the longest-markdown attempt with a `trace.exhausted=True` marker so operators still get something indexable + the observability to see degradation. Exceptions in one tier don't kill the chain — logged and the next tier runs. This is part 1 of #23; the wiring into `_run_one_connector_batch` and `_build_reextract_components` (via `extractor_chain: [a,b,c]` opt-in config field) ships in a later release alongside BDD + F30 outcome tests.
+
+### Things that haven't changed
+
+- Single-extractor `extractor: <name>` config — fully unchanged. The escalation chain is opt-in via `extractor_chain: [...]` in a later release.
+- Connector Protocol surface, on-disk bronze layout, chunk-writer contract.
+- The 2GB tmpfs at `/tmp` (compose `tmpfs:` block from #317) — still there for general OS use; just no longer the default for kairix's own extractor scratch.
+
 ## [2026.5.27a1] - 2026-05-27 — Markitdown converters, oversized-chunk split, dead-letter recovery (alpha)
 
 > **Upgrading?** Three fixes from the v2026.5.26a1 SharePoint dogfood. No config edits required. If you have dead-letter rows from a pre-upgrade run, the new `kairix worker reextract` recovers them in-place — see the upgrade notes. Full notes: [`docs/upgrades/v2026.5.27a1.md`](docs/upgrades/v2026.5.27a1.md).
