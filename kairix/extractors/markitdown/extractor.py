@@ -16,7 +16,9 @@ and §4 ("Three failures map to three behaviours") for the
 
 from __future__ import annotations
 
+import logging
 import tempfile
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -26,6 +28,16 @@ from kairix.extractors import (
     ExtractedDocument,
     MimeType,
 )
+
+# Silence noisy third-party informational logging at module import time.
+# Markitdown drives openpyxl (xlsx), python-docx, python-pptx, and
+# pdfminer (via its PDF converter); each emits per-document warnings
+# for unsupported features that kairix doesn't extract anyway. The
+# noise floods worker logs during SharePoint backfills without changing
+# behaviour. ERROR keeps real load failures visible.
+for _noisy in ("pdfminer", "openpyxl", "pdfminer.psparser", "pdfminer.pdfinterp"):
+    logging.getLogger(_noisy).setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", module="openpyxl.*")
 
 #: Canonical plugin name surfaced by the extractor registry.
 PLUGIN_NAME = "markitdown"

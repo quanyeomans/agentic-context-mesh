@@ -36,6 +36,7 @@ map to three behaviours") for ``quality_ok`` semantics, and §10
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -47,6 +48,17 @@ from kairix.extractors import (
     MimeType,
     Page,
 )
+
+# Silence pdfminer's informational chatter at module import time. The
+# library emits a WARNING for every PDF whose /Encrypt /P bit-5 flag
+# declares "no text extraction" (Microsoft partner content, Adobe
+# Restrict-Editing exports, vendor whitepapers), plus codec-fallback
+# and font-substitution notes. We already ignore the extraction-denied
+# flag by design — pdfplumber's default behaviour is to extract anyway —
+# and the warning floods the worker logs without changing behaviour.
+# Lifting the level to ERROR keeps real failures visible while dropping
+# the per-PDF noise.
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 
 #: Canonical plugin name surfaced by the extractor registry.
 PLUGIN_NAME = "pdf_fallback"

@@ -21,7 +21,9 @@ monkeypatching).
 
 from __future__ import annotations
 
+import logging
 import tempfile
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -32,6 +34,16 @@ from kairix.extractors import (
     MimeType,
     Page,
 )
+
+# Silence openpyxl's informational chatter at module import time. The
+# library emits per-feature UserWarnings for every workbook with
+# Conditional Formatting / Data Validation / Unknown extension / Cannot
+# parse header or footer — all features kairix doesn't extract anyway.
+# Lifting the level to ERROR keeps real load failures visible while
+# dropping the per-cell-feature noise that floods worker logs during
+# SharePoint backfills.
+logging.getLogger("openpyxl").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", module="openpyxl.*")
 
 if TYPE_CHECKING:
     from openpyxl.workbook.workbook import Workbook
