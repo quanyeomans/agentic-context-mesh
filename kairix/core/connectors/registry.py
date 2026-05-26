@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from importlib import metadata
-from typing import Any
+from typing import Any, cast
 
 from kairix.core.protocols import Extractor, SourceConnector
 
@@ -131,7 +131,12 @@ def build_extractor_from_entry(entry: dict[str, Any]) -> Extractor:
             factory = resolve_extractor(name)
             member_kwargs = per_member_configs.get(name, {})
             members.append(factory(**member_kwargs) if member_kwargs else factory())
-        return EscalatingExtractor(members)
+        # Cast widens the EscalatingExtractor concrete type to the Extractor
+        # Protocol so Sonar's S5886 narrowing check sees the contract the
+        # function signature declares — EscalatingExtractor satisfies the
+        # Protocol structurally but Sonar tracks the concrete class. Both
+        # branches return something callers consume identically.
+        return cast(Extractor, EscalatingExtractor(members))
 
     name = entry.get("extractor", "passthrough")
     factory = resolve_extractor(name)

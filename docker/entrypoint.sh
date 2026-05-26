@@ -1,6 +1,18 @@
 #!/bin/bash
 set -e
 
+# Ensure TMPDIR exists at runtime. The image's Dockerfile mkdir of
+# /data/kairix/tmp is masked when /data/kairix is bind-mounted from
+# the host runtime volume — so the env var TMPDIR points at a path
+# that may not exist on a fresh deploy. Python's tempfile silently
+# falls back to /tmp (the 2GB tmpfs from #317), defeating the
+# v2026.5.27a2 fix that routes extractor scratch onto the disk-backed
+# volume. mkdir here guarantees the directory exists on every boot
+# regardless of bind-mount layout.
+if [[ -n "${TMPDIR}" ]]; then
+    mkdir -p "${TMPDIR}"
+fi
+
 # Load secrets if available (Docker secrets or sidecar pattern)
 if [[ -f /run/secrets/kairix.env ]]; then
     set -a && . /run/secrets/kairix.env && set +a
