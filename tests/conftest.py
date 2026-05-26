@@ -146,6 +146,7 @@ pytest_plugins = [
     "tests.bdd.steps.extractor_pdf_fallback_steps",
     # Wave-3 MM-2 OCR extractor — Tesseract default.
     "tests.bdd.steps.extractor_ocr_steps",
+    "tests.bdd.steps.extractor_chain_escalation_steps",
     # Wave-4 OF-1 slide-aware extractor — python-pptx-backed.
     "tests.bdd.steps.extractor_pptx_steps",
     # Wave-4 OF-2 docx extractor — python-docx, heading-hierarchy-aware.
