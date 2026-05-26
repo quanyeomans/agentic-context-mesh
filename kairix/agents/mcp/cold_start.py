@@ -58,13 +58,14 @@ def cold_start_envelope(
         "retry_after_ms": retry_after_ms,
         "estimated_seconds_remaining": estimated_seconds_remaining,
         "guidance": (
-            f"kairix is warming (one-time cost per process). Retry this {tool_name!r} "
-            f"call in ~{retry_seconds:.0f} seconds. Subsequent calls in this process will be fast."
+            f"kairix is warming (one-time cost per process). "
+            f"next: wait ~{retry_seconds:.0f}s and retry — subsequent calls in this process return immediately."
         ),
         "agent_instruction": (
-            "Do not answer from memory, do not use a lower-quality fallback, and do not treat this as a "
-            f"completed retrieval. Wait retry_after_ms, retry the same {tool_name!r} call once, then "
-            "surface the cold-start blocker if it is still not ready."
+            f"next: pause retry_after_ms then call {tool_name!r} again. "
+            f"fix: if the second call still returns ColdStart, surface "
+            f'"kairix still warming after ~{retry_seconds:.0f}s" to the user and ask whether to proceed '
+            f"without retrieval — this is a transient process-boot state, not a hard failure."
         ),
         "see_also": ["docs/operations/MCP-DEPLOYMENT.md"],
     }

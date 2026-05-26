@@ -175,6 +175,27 @@ def _default_uvicorn_run() -> Callable[..., Any]:
     return uvicorn.run
 
 
+def _default_warm_runner(warm_body: Callable[[], None]) -> None:
+    """Production seam — spawn ``warm_body`` in a daemon thread so the
+    main thread proceeds to ``uvicorn.run`` without blocking on warm.
+
+    The thread is named so operators can see it in ``threading.enumerate()``
+    or a pyspy dump. Daemon=True so a SIGTERM to the worker doesn't hang
+    waiting for warm to complete. ColdStartMiddleware in transport.py
+    returns the structured 503 + ColdStart envelope for every call
+    until ``gate.mark_ready()`` fires from the warm thread.
+
+    Per #320: this replaces the pre-fix synchronous warm that blocked
+    ``main()`` for 7-30s before uvicorn bound the port — during which
+    MCP clients saw the opaque OS-level "fetch failed" string instead
+    of the F21-compliant ColdStart affordance.
+    """
+    import threading
+
+    thread = threading.Thread(target=warm_body, daemon=True, name="kairix-mcp-warm")
+    thread.start()
+
+
 @dataclass
 class McpCliDeps:
     """Injection seam for the MCP CLI so tests can drive it without binding ports.
@@ -196,6 +217,12 @@ class McpCliDeps:
     find_available_port_fn: Callable[..., int] = field(default_factory=lambda: find_available_port)
     warm_retrieval_stack_fn: Callable[[], dict[str, Any]] = warm_retrieval_stack
     warm_flag_path_fn: Callable[[], Path] = field(default_factory=lambda: _default_warm_flag_path)
+    # #320 — pluggable warm-execution strategy. Production default spawns
+    # warm in a daemon thread so uvicorn binds the port immediately.
+    # Tests pass ``lambda fn: fn()`` to run warm synchronously when they
+    # want deterministic stderr / readiness ordering (e.g. existing
+    # warm-up-complete assertions).
+    warm_runner: Callable[[Callable[[], None]], None] = field(default_factory=lambda: _default_warm_runner)
 
 
 def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> None:
@@ -339,19 +366,32 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
         readiness_check=gate.is_ready,
         capability_probe=capability_probe,
     )
-    warm_result = deps.warm_retrieval_stack_fn()
-    _emit_warm_outcome(warm_result)
-    if warm_result.get("ready") is True:
-        gate.mark_ready()
-        print(
-            f"warm-up complete — elapsed_ms={warm_result.get(_KEY_ELAPSED_MS, 'unknown')}",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            f"WARNING: kairix warm-up incomplete; tools will return KAIRIX_COLD_START until ready: {warm_result}",
-            file=sys.stderr,
-        )
+
+    # #320 — warm runs in a background thread so uvicorn binds the port
+    # FIRST. Previously warm ran synchronously here (~7-30s blocking),
+    # then uvicorn.run was called — so during the warm window the port
+    # wasn't open and MCP clients got connection-refused at the OS
+    # network layer, which JS fetch() reports as the opaque string
+    # "fetch failed". With warm in the background, the port binds
+    # immediately and ColdStartMiddleware (transport.py) returns a
+    # structured 503 + ColdStart envelope for every call during warm —
+    # agents get the affordance, not an opaque failure.
+    def _warm_and_mark_ready() -> None:
+        warm_result = deps.warm_retrieval_stack_fn()
+        _emit_warm_outcome(warm_result)
+        if warm_result.get("ready") is True:
+            gate.mark_ready()
+            print(
+                f"warm-up complete — elapsed_ms={warm_result.get(_KEY_ELAPSED_MS, 'unknown')}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"WARNING: kairix warm-up incomplete; tools will return KAIRIX_COLD_START until ready: {warm_result}",
+                file=sys.stderr,
+            )
+
+    deps.warm_runner(_warm_and_mark_ready)
 
     sse_status = "+ /sse legacy" if not args.no_sse else "(no /sse)"
     print(

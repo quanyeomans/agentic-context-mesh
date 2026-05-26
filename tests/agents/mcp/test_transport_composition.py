@@ -364,7 +364,11 @@ def test_cold_start_middleware_returns_503_when_not_ready() -> None:
     assert body["error_code"] == "KAIRIX_COLD_START"
     assert body["retry_after_ms"] == 8000
     assert body["tool"] == "/mcp"
-    assert "Retry this call" in body["guidance"]
+    # Affordance pattern: positive-action `next:` marker, no stacked "do not"s.
+    assert "next:" in body["guidance"]
+    assert "Do not" not in body["agent_instruction"]
+    assert "next:" in body["agent_instruction"]
+    assert "fix:" in body["agent_instruction"]
 
 
 @pytest.mark.unit

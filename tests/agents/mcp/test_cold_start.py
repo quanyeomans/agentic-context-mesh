@@ -20,8 +20,14 @@ def test_cold_start_envelope_is_machine_actionable_and_prescriptive() -> None:
     assert payload["error_code"] == "KAIRIX_COLD_START"
     assert payload["retry_after_ms"] == 7000
     assert payload["estimated_seconds_remaining"] == 7.0
-    assert "Do not answer from memory" in payload["agent_instruction"]
-    assert "retry the same 'search' call" in payload["agent_instruction"]
+    # Affordance pattern (feedback_agent_prompts_positive_assertion):
+    # leads with `next:` and `fix:` positive actions, not stacked prohibitions.
+    assert "next:" in payload["agent_instruction"]
+    assert "fix:" in payload["agent_instruction"]
+    assert "'search'" in payload["agent_instruction"]
+    # Anti-pattern guard: prohibitions ("do not X, do not Y") should not appear
+    assert "Do not" not in payload["agent_instruction"]
+    assert "do not" not in payload["agent_instruction"]
 
 
 def test_is_cold_start_envelope_recognises_canonical_shape() -> None:

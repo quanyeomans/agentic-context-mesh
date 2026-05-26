@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import sys
+from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, field
 from typing import Any
@@ -96,6 +97,13 @@ def _build_deps(
         build_server_factory=lambda: _fake_build_server,
         uvicorn_runner_factory=lambda: fake_runner,
         warm_retrieval_stack_fn=lambda: warm_result or {"ready": True, "elapsed_ms": 1},
+        # #320 — existing tests run warm SYNCHRONOUSLY so stderr /
+        # readiness assertions stay deterministic. The production
+        # default spawns warm in a daemon thread; the new
+        # test_serve_http_binds_uvicorn_before_warm_completes test
+        # pins the production thread-spawn order explicitly via its
+        # own warm_runner override.
+        warm_runner=lambda fn: fn(),
     )
     return deps, build_calls, fake_runner
 
@@ -262,3 +270,66 @@ def test_resolve_port_auto_detect_falls_back_when_default_in_use(monkeypatch, _n
     assert callable(build_calls[0]["readiness_check"])
     assert "Port 8080 is in use" in stderr
     assert "KAIRIX_MCP_PORT=19100" in stderr
+
+
+# ---------------------------------------------------------------------------
+# #320 — port-bind order regression-lock (ADR-018 lesson: characterize first)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_serve_http_binds_uvicorn_before_warm_completes(monkeypatch) -> None:
+    """#320 regression-lock: when the PRODUCTION warm_runner (daemon thread)
+    is wired, uvicorn.run is invoked BEFORE warm_retrieval_stack_fn
+    completes. Pre-fix this fails because warm ran synchronously.
+
+    The test thread blocks warm via an Event until after uvicorn has
+    been recorded — proving the main thread reached uvicorn.run
+    without waiting on warm. Uses a local thread-spawning warm_runner
+    that mirrors the production default shape (a daemon thread) so the
+    test doesn't import the private _default_warm_runner helper and
+    stay F5-clean.
+    """
+    import threading
+
+    def _thread_spawning_warm_runner(warm_body: Callable[[], None]) -> None:
+        threading.Thread(target=warm_body, daemon=True, name="kairix-mcp-warm-test").start()
+
+    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18095"])
+
+    warm_may_proceed = threading.Event()
+    warm_completed = threading.Event()
+    call_order: list[str] = []
+
+    def _warm_blocking() -> dict[str, Any]:
+        # Will NOT return until the test releases warm_may_proceed.
+        # If main() were calling warm synchronously (pre-fix), the test
+        # would hang here forever because nothing releases the event
+        # before main() proceeds to uvicorn — proving the bug.
+        warm_may_proceed.wait(timeout=5.0)
+        call_order.append("warm")
+        warm_completed.set()
+        return {"ready": True, "elapsed_ms": 1}
+
+    fake_runner = _RunRecorder()
+
+    def _runner_recording(*args: Any, **kwargs: Any) -> None:
+        call_order.append("uvicorn")
+        fake_runner.calls.append((args, kwargs))
+        # Now release warm so it can complete and the daemon thread exits.
+        warm_may_proceed.set()
+        warm_completed.wait(timeout=5.0)
+
+    deps, _build_calls, _runner = _build_deps()
+    deps.warm_retrieval_stack_fn = _warm_blocking
+    deps.uvicorn_runner_factory = lambda: _runner_recording
+    deps.warm_runner = _thread_spawning_warm_runner  # mirrors production thread-spawning default
+
+    _stdout, _stderr, code = _drive(["serve", "--transport", "http", "--port", "18095"], deps)
+
+    assert code == 0
+    # The fix's contract: uvicorn binds first, then warm.
+    assert call_order == ["uvicorn", "warm"], (
+        f"#320: uvicorn must bind BEFORE warm completes; got call_order={call_order}. "
+        f"Pre-fix this assertion FAILS because warm runs synchronously before uvicorn."
+    )

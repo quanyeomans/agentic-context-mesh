@@ -183,15 +183,14 @@ def _build_cold_start_body(path: str) -> dict[str, Any]:
         "retry_after_ms": _RETRY_AFTER_SECONDS * 1000,
         "estimated_seconds_remaining": float(_RETRY_AFTER_SECONDS),
         "guidance": (
-            f"kairix is warming (one-time cost per process). Retry this call "
-            f"in ~{_RETRY_AFTER_SECONDS} seconds. Subsequent calls in this "
-            "process will be fast — the warm-up is amortised."
+            f"kairix is warming (one-time cost per process). "
+            f"next: wait ~{_RETRY_AFTER_SECONDS}s and retry — subsequent calls in this process return immediately."
         ),
         "agent_instruction": (
-            "Do not answer from memory, do not use a lower-quality fallback, "
-            "and do not treat this as a completed retrieval. Wait "
-            "retry_after_ms, retry the same call once, then surface the "
-            "cold-start blocker if it is still not ready."
+            f"next: pause retry_after_ms then call this same tool again. "
+            f"fix: if the second call still returns ColdStart, surface "
+            f'"kairix still warming after ~{_RETRY_AFTER_SECONDS}s" to the user and ask whether to proceed '
+            f"without retrieval — this is a transient process-boot state, not a hard failure."
         ),
         "see_also": ["docs/operations/MCP-DEPLOYMENT.md"],
     }
