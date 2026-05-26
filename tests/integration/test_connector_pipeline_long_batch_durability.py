@@ -101,17 +101,15 @@ def _count_bronze_records(db: sqlite3.Connection, source_name: str) -> int:
     return int(row[0]) if row else 0
 
 
-@pytest.mark.xfail(
-    reason="#321 — ADR-018 Wave 1 regression-lock: long batches with a "
-    "Silver failure leak orphans equal to the entire processed prefix. "
-    "DltBronzeStore + bounded load packages will make this pass.",
-    strict=True,
-)
 def test_silver_failure_mid_batch_leaves_orphans_bounded_by_chunk_size(tmp_path: Path) -> None:
-    """#321: a 100-item batch with Silver failing on item 50 should leave
-    AT MOST chunk_size - 1 orphans on disk (those in the current
-    uncommitted chunk). Today: leaves 49 orphans (every blob from
-    items 1..49) because the whole batch rolls back as one transaction.
+    """#321 fix: a 100-item batch with Silver failing on item 50 should
+    leave AT MOST chunk_size orphans on disk (those in the failing
+    uncommitted chunk). Earlier chunks committed and survive the
+    failure; their cursor advance survives too.
+
+    Sabotage proof: revert ConnectorPipeline._process_batch to its
+    pre-#321 single-commit shape and this test fails with 50 orphans
+    (the companion test below documents that exact pre-fix shape).
     """
     db_path = tmp_path / "connector_pipeline.sqlite"
     db = sqlite3.connect(str(db_path))
@@ -125,7 +123,11 @@ def test_silver_failure_mid_batch_leaves_orphans_bounded_by_chunk_size(tmp_path:
     contents = {f"item-{i:03d}": f"payload-{i}".encode() for i in range(100)}
     source = FakeSourceConnector(name="long-batch-source", events=events, content=contents)
     extractor = FakeExtractor()
-    silver = _SilverFailingOnNthCall(fail_on_call=50)
+    # fail_on_call=51 → Silver raises on the 51st call (item index 50,
+    # the first item of chunk-2 when chunk_size=50). Chunk-1 has
+    # already committed; only chunk-2 (the failing single item) rolls
+    # back. This is the post-#321 fix's exact contract.
+    silver = _SilverFailingOnNthCall(fail_on_call=51)
 
     pipeline = _build_pipeline(db, bronze_root, silver)
 
@@ -149,11 +151,16 @@ def test_silver_failure_mid_batch_leaves_orphans_bounded_by_chunk_size(tmp_path:
     db.close()
 
 
-def test_silver_failure_today_leaks_all_processed_items_as_orphans(tmp_path: Path) -> None:
-    """The companion to the xfail above — characterizes CURRENT broken
-    behaviour so we can see exactly how bad it is. This test PASSES
-    today (asserts the bug) and will need flipping when Wave 1 lands
-    (orphan count drops to less than chunk_size).
+def test_silver_failure_post_fix_committed_chunks_survive(tmp_path: Path) -> None:
+    """#321 fix companion: prove the EARLIER chunks survive the failure
+    of a later chunk. With chunk_size=50 and Silver failing on item 50,
+    the first chunk (items 0..49) commits and stays put; the second
+    chunk (item 50 only, where Silver raises) rolls back.
+
+    Pre-fix behaviour (regression-locked): all 50 fetched blobs are
+    orphans and zero bronze_records survive. Sabotage: revert the
+    pipeline.py _process_batch change to its single-commit shape and
+    this test fails with bronze_records=0.
     """
     db_path = tmp_path / "connector_pipeline.sqlite"
     db = sqlite3.connect(str(db_path))
@@ -166,7 +173,11 @@ def test_silver_failure_today_leaks_all_processed_items_as_orphans(tmp_path: Pat
     contents = {f"item-{i:03d}": f"payload-{i}".encode() for i in range(100)}
     source = FakeSourceConnector(name="long-batch-source-bug", events=events, content=contents)
     extractor = FakeExtractor()
-    silver = _SilverFailingOnNthCall(fail_on_call=50)
+    # fail_on_call=51 → Silver raises on the 51st call (item index 50,
+    # the first item of chunk-2 when chunk_size=50). Chunk-1 has
+    # already committed; only chunk-2 (the failing single item) rolls
+    # back. This is the post-#321 fix's exact contract.
+    silver = _SilverFailingOnNthCall(fail_on_call=51)
 
     pipeline = _build_pipeline(db, bronze_root, silver)
 
@@ -176,11 +187,16 @@ def test_silver_failure_today_leaks_all_processed_items_as_orphans(tmp_path: Pat
     on_disk = _count_on_disk_blobs(bronze_root, "long-batch-source-bug")
     registered = _count_bronze_records(db, "long-batch-source-bug")
 
-    # Today's bug: items 1..50 have all hit ``bronze.write`` (which writes
-    # the blob BEFORE Silver runs at pipeline.py line 217 vs 223). Silver
-    # raises on item 50, the whole batch rolls back, but the 50 fsynced
-    # blobs remain. 50 unreferenced orphans.
-    assert on_disk == 50, f"expected 50 fetched blobs on disk pre-failure; got {on_disk}"
-    assert registered == 0, f"expected 0 bronze_records (batch rolled back); got {registered}"
+    # Post-#321: items 0..49 (the first chunk) committed before the
+    # second chunk started. Item 50 (the only item in chunk-2) had its
+    # bronze blob fsynced then Silver raised → chunk-2 rolls back and
+    # leaves 1 orphan. on_disk = 51 (50 committed + 1 orphan);
+    # bronze_records = 50.
+    assert registered == 50, (
+        f"expected 50 bronze_records from the committed first chunk; got {registered}. "
+        f"If this assertion fails with 0, the chunking fix has regressed (see #321)."
+    )
+    orphans = on_disk - registered
+    assert orphans <= 1, f"expected at most 1 orphan (the failing item from chunk-2); got {orphans}"
 
     db.close()

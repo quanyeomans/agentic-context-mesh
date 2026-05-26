@@ -67,6 +67,40 @@ _OUTCOME_PROCESSED = "processed"
 _OUTCOME_DEAD_LETTERED = "dead_lettered"
 
 
+@dataclass
+class _BatchTotals:
+    """Cross-chunk counters for one ``run_batch`` invocation."""
+
+    processed: int = 0
+    dead_lettered: int = 0
+    poisoned_skipped: int = 0
+
+
+@dataclass
+class _ChunkAccumulator:
+    """In-flight counters for the current uncommitted chunk."""
+
+    processed: int = 0
+    dead_lettered: int = 0
+    latest_modified_at: str | None = None
+
+    @property
+    def size(self) -> int:
+        return self.processed + self.dead_lettered
+
+    def record(self, outcome: str, modified_at: str) -> None:
+        self.latest_modified_at = modified_at
+        if outcome == _OUTCOME_PROCESSED:
+            self.processed += 1
+        elif outcome == _OUTCOME_DEAD_LETTERED:
+            self.dead_lettered += 1
+
+    def reset(self) -> None:
+        self.processed = 0
+        self.dead_lettered = 0
+        self.latest_modified_at = None
+
+
 @runtime_checkable
 class ChunkWriter(Protocol):
     """Where :class:`~kairix.core.protocols.Chunk` records land.
@@ -128,7 +162,14 @@ class ConnectorPipeline:
         cursor_store: CursorStore,
         dead_letter: DeadLetterStore,
         dead_letter_threshold: int = 3,
+        chunk_size: int = 50,
     ) -> None:
+        if chunk_size < 1:
+            raise ValueError(
+                f"chunk_size must be >= 1; got {chunk_size!r}. "
+                "fix: pass a positive int; default is 50. "
+                "run: KAIRIX_CONNECTOR_CHUNK_SIZE=50 (env override resolved upstream)"
+            )
         self._db = db
         self._bronze = bronze
         self._silver = silver
@@ -137,22 +178,33 @@ class ConnectorPipeline:
         self._cursor_store = cursor_store
         self._dead_letter = dead_letter
         self._dead_letter_threshold = dead_letter_threshold
+        self._chunk_size = chunk_size
 
     def run_batch(self, connector: SourceConnector, extractor: Extractor) -> BatchResult:
-        """Drive one batch of changes through the per-batch transaction.
+        """Drive one batch of changes through chunked per-commit transactions.
 
-        See module docstring for the canonical sequence. Returns a
-        :class:`BatchResult` carrying the counts. Re-raises any
-        batch-level failure (silver / writer / sink) AFTER rolling
-        back the transaction so the worker can log it; per-item
-        failures are absorbed into dead_letter and do not propagate.
+        Pre-#321: the entire batch ran in ONE SQLite transaction; a
+        Silver / writer / sink failure mid-batch rolled back every
+        bronze_records row written so far, but the on-disk blobs
+        already fsynced by ``BronzeStore.write`` stayed put. On a
+        6000-item SharePoint backfill, a single failure leaked
+        thousands of orphan files.
+
+        Post-#321: the batch commits every ``chunk_size`` items (and
+        again at the end if a partial chunk remains). A failure now
+        rolls back at most one chunk's worth of bronze_records rows;
+        the on-disk orphans from that chunk are reaped by the
+        maintenance scheduler's bronze-orphan stage (#318). Previous
+        chunks stay committed and the cursor advances per chunk so the
+        next batch resumes after the last committed item.
+
+        Per-item failures (fetch / extract raised) are still absorbed
+        into dead_letter and do not propagate. Silver / writer / sink
+        failures within a chunk still trigger a rollback — but only of
+        that chunk, not the whole batch.
         """
         cursor = self._cursor_store.read(connector.name)
-        try:
-            return self._process_batch(connector, extractor, cursor)
-        except Exception:
-            self._db.rollback()
-            raise
+        return self._process_batch(connector, extractor, cursor)
 
     def _process_batch(
         self,
@@ -160,34 +212,65 @@ class ConnectorPipeline:
         extractor: Extractor,
         cursor: str | None,
     ) -> BatchResult:
-        """Inner per-batch loop, executed inside the SQLite transaction."""
-        processed = 0
-        dead_lettered = 0
-        poisoned_skipped = 0
-        latest_modified_at: str | None = None
+        """Iterate changes and commit every ``chunk_size`` items.
 
-        for change in connector.list_changes(cursor):
-            latest_modified_at = change.modified_at
-            if self._dead_letter.is_poisoned(connector.name, change.item_id, threshold=self._dead_letter_threshold):
-                poisoned_skipped += 1
-                continue
-            item_outcome = self._process_item(connector, extractor, change)
-            if item_outcome == _OUTCOME_PROCESSED:
-                processed += 1
-            elif item_outcome == _OUTCOME_DEAD_LETTERED:
-                dead_lettered += 1
-
-        # Advance the cursor to the latest observed modified_at (the
-        # connector's resumption-token convention). If no changes were
-        # seen this batch, leave the cursor unchanged.
-        if latest_modified_at is not None:
-            self._cursor_store.write(connector.name, latest_modified_at)
-        self._db.commit()
+        Returns the cumulative BatchResult across all chunks. Re-raises
+        the first chunk-level exception AFTER rolling back the failing
+        chunk (so earlier-committed chunks survive) so the worker can
+        log it.
+        """
+        totals = _BatchTotals()
+        chunk = _ChunkAccumulator()
+        try:
+            for change in connector.list_changes(cursor):
+                self._process_change(connector, extractor, change, totals, chunk)
+        except Exception:
+            # Roll back the failing partial chunk only; earlier chunks
+            # are already committed and their bronze rows + cursor
+            # advance survive.
+            self._db.rollback()
+            raise
+        # Final partial chunk (if any items processed since last commit).
+        if chunk.latest_modified_at is not None:
+            self._commit_and_flush(connector.name, totals, chunk)
         return BatchResult(
-            processed=processed,
-            dead_lettered=dead_lettered,
-            poisoned_skipped=poisoned_skipped,
+            processed=totals.processed,
+            dead_lettered=totals.dead_lettered,
+            poisoned_skipped=totals.poisoned_skipped,
         )
+
+    def _process_change(
+        self,
+        connector: SourceConnector,
+        extractor: Extractor,
+        change: object,
+        totals: _BatchTotals,
+        chunk: _ChunkAccumulator,
+    ) -> None:
+        """One change → poison-check, then process, then maybe-flush the chunk."""
+        item_id = change.item_id  # type: ignore[attr-defined]  # F3-rationale: ChangeEvent attr from connector.list_changes
+        modified_at = change.modified_at  # type: ignore[attr-defined]  # F3-rationale: same as item_id above
+        if self._dead_letter.is_poisoned(connector.name, item_id, threshold=self._dead_letter_threshold):
+            totals.poisoned_skipped += 1
+            return
+        outcome = self._process_item(connector, extractor, change)
+        chunk.record(outcome, modified_at)
+        if chunk.size >= self._chunk_size:
+            self._commit_and_flush(connector.name, totals, chunk)
+
+    def _commit_and_flush(
+        self,
+        source_name: str,
+        totals: _BatchTotals,
+        chunk: _ChunkAccumulator,
+    ) -> None:
+        """Cursor-advance + commit; fold chunk counts into totals; reset chunk."""
+        assert chunk.latest_modified_at is not None, "_commit_and_flush called with empty chunk"
+        self._cursor_store.write(source_name, chunk.latest_modified_at)
+        self._db.commit()
+        totals.processed += chunk.processed
+        totals.dead_lettered += chunk.dead_lettered
+        chunk.reset()
 
     def _process_item(
         self,
