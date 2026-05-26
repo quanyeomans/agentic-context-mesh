@@ -221,3 +221,94 @@ def test_real_pdf_fixture_byte_recovery_above_threshold() -> None:
     # for a tiny PDF with a text content stream the recovery ratio
     # sits comfortably above the 10% escalation floor.
     assert doc.confidence >= 0.10
+
+
+# ---------------------------------------------------------------------------
+# Tmpfile cleanup discipline — guards against the 2026-05-26 dogfood
+# incident where 8,087 zero-byte tmpfile stubs accumulated in the
+# container's tmpfs because tmp.write(raw) failed BEFORE the original
+# try/finally entered, leaving placeholders un-unlinked. Sabotage proof
+# (executed): revert the cleanup move so write() lives outside the
+# try block — these tests fail because tmp_path still exists after
+# the OSError propagates.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_unlinks_tmp_file_on_converter_failure(tmp_path: Path) -> None:
+    """When the converter raises (e.g. corrupt PDF), the temp file is
+    unlinked. Drives the F6 ``scratch_dir`` seam — no monkeypatch.
+
+    Sabotage proof: remove the ``finally: tmp_path.unlink()`` block in
+    extractor.py; this test fails because tmp_path persists after the
+    RuntimeError propagates.
+    """
+
+    class _BoomConverter:
+        def convert(self, source: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("scripted converter failure")
+
+    extractor = MarkitdownExtractor(
+        version=version,
+        converter_factory=lambda: _BoomConverter(),
+        scratch_dir=tmp_path,
+    )
+    before = set(tmp_path.iterdir())
+    with pytest.raises(RuntimeError, match="scripted converter failure"):
+        extractor.extract(b"%PDF-1.7 fake bytes", "application/pdf")
+    after = set(tmp_path.iterdir())
+    leaked = after - before
+    assert not leaked, f"converter failure should unlink tmp file; leaked: {leaked}"
+
+
+def test_extract_unlinks_tmp_file_on_happy_path(tmp_path: Path) -> None:
+    """The happy path leaves no leaked tmp file — sibling to the
+    converter-failure case. With the F6 scratch_dir seam, before/after
+    iterdir is the cleanest assertion."""
+    stub = _StubConverter(markdown="hello markdown happy")
+    extractor = MarkitdownExtractor(
+        version=version,
+        converter_factory=lambda: stub,
+        scratch_dir=tmp_path,
+    )
+    before = set(tmp_path.iterdir())
+    extractor.extract(b"%PDF-1.7 fake bytes", "application/pdf")
+    after = set(tmp_path.iterdir())
+    assert after == before, f"happy path should leave no leaked tmp file; leaked: {after - before}"
+
+
+def test_extract_structural_guarantee_write_inside_try_block() -> None:
+    """Structural regression for the 2026-05-26 dogfood incident.
+
+    The bug: ``tmp.write(raw)`` lived INSIDE the ``with
+    NamedTemporaryFile(delete=False) as tmp`` block but OUTSIDE the
+    try/finally that unlinked the file. When write() raised ENOSPC
+    (tmpfs full), the empty placeholder created by NamedTemporaryFile
+    leaked. 8,087 zero-byte stubs accumulated in the dogfood VM
+    tmpfs over a single SharePoint backfill cycle.
+
+    The fix: move the write step INSIDE the try block so the finally
+    clause unlinks the placeholder on write failure too. Locked here
+    via a source-string assertion so a future refactor that re-inverts
+    the order trips a clear regression message.
+
+    Sabotage proof: in ``MarkitdownExtractor.extract`` move
+    ``tmp_path.write_bytes(raw)`` back inside the ``with`` block (the
+    pre-2026-05-27 shape); this test fails with the structural
+    assertion message that names the dogfood incident.
+    """
+    import inspect
+
+    from kairix.extractors.markitdown import extractor as ext_mod
+
+    source = inspect.getsource(ext_mod.MarkitdownExtractor.extract)
+    try_idx = source.index("try:")
+    write_idx = source.index("write_bytes")
+    finally_idx = source.index("finally:")
+    assert try_idx < write_idx < finally_idx, (
+        "MarkitdownExtractor.extract must call write_bytes INSIDE the try/finally "
+        "block that unlinks tmp_path. Otherwise a write failure (e.g. ENOSPC) leaks "
+        "the empty placeholder NamedTemporaryFile created. See 2026-05-26 dogfood "
+        "incident — 8,087 zero-byte tmpfile stubs accumulated in the dogfood VM "
+        "tmpfs. fix: move the write_bytes call into the try block alongside the "
+        "converter call."
+    )

@@ -133,6 +133,7 @@ class MarkitdownExtractor:
         *,
         version: str,
         converter_factory: Callable[[], _MarkitdownConverter] = _default_converter_factory,
+        scratch_dir: Path | None = None,
     ) -> None:
         """Construct the extractor with explicit ``version`` + factory.
 
@@ -140,10 +141,19 @@ class MarkitdownExtractor:
         ``markitdown.MarkItDown`` constructor wrapped in an
         ImportError-mapping shim; tests pass a lambda returning a
         fake converter.
+
+        ``scratch_dir`` controls where the per-extract temp file lives.
+        Default ``None`` lets :mod:`tempfile` pick the platform default
+        (``$TMPDIR`` / ``/tmp``). Tests pass an explicit ``tmp_path`` so
+        the cleanup-on-failure regression tests can list the directory
+        before and after :meth:`extract` to prove no placeholder
+        leaks. F6-clean seam: production callers omit ``scratch_dir``
+        and get the platform default.
         """
         self.name: str = PLUGIN_NAME
         self.version: str = version
         self._converter_factory = converter_factory
+        self._scratch_dir = scratch_dir
 
     def can_extract(self, mime: MimeType, magic_bytes: bytes) -> bool:
         """``True`` for any mime markitdown handles, with a magic-byte fallback.
@@ -180,13 +190,24 @@ class MarkitdownExtractor:
         only.
         """
         suffix = _MIME_TO_EXTENSION.get(mime, "")
-        # tempfile.NamedTemporaryFile cleans up on context exit; we
-        # pass delete=False because some platforms (Windows) refuse
-        # to re-open a still-open NamedTemporaryFile by path.
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        # tempfile.NamedTemporaryFile creates the file on disk BEFORE
+        # we get a path back, so a write() that fails (e.g. ENOSPC on
+        # a full tmpfs) leaves an empty placeholder on disk if
+        # delete=False is used. We need delete=False because some
+        # platforms (Windows) refuse to re-open a still-open
+        # NamedTemporaryFile by path, but the cleanup must wrap the
+        # write step too. The outer try/finally below covers BOTH the
+        # write-to-tmp step and the convert step so a failure at
+        # either point unlinks the file rather than orphaning it.
+        # Without this, a 2GB pathological PPTX expansion fills tmpfs
+        # and every subsequent extraction fails with ENOSPC on the
+        # write step itself (observed 2026-05-26 on the dogfood VM:
+        # 8,087 zero-byte tmpfile stubs + one 2GB orphan).
+        scratch_dir = str(self._scratch_dir) if self._scratch_dir is not None else None
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir) as tmp:
             tmp_path = Path(tmp.name)
-            tmp.write(raw)
         try:
+            tmp_path.write_bytes(raw)
             converter = self._converter_factory()
             result = converter.convert(str(tmp_path))
             markdown = _result_markdown(result)
