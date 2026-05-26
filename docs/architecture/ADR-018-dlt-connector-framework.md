@@ -2,7 +2,7 @@
 type: adr
 id: ADR-018
 title: Adopt dlt as the connector ingestion framework (phased, Protocol-gated)
-status: accepted (Wave 1 shipped; Waves 2-3 in flight)
+status: superseded by outcome — Wave 1 shipped; Waves 2-3 abandoned after three negative dlt-fit findings (see "Wave 2 outcome" below). The original "adopt dlt" thesis is rejected; the productive scope was the in-process chunking that closes #321.
 date: 2026-05-26
 related:
   - connector-ingestion-architecture
@@ -188,30 +188,49 @@ Net: keeping `CursorStore` + `DeadLetterStore` as the existing ~150-line SQLite-
 
 dlt's actual value lands at the per-connector resource layer (Wave 3), where structured pagination + cursor + state is exactly the shape `@dlt.resource` is designed for.
 
-### Wave 2 (revised; was Wave 3) — SharePoint connector as `@dlt.resource`
+### Wave 2 outcome — ABANDONED — SharePoint dlt reshape doesn't fit either
 
-Scope per user direction: SharePoint only for now. Other connectors stay on the existing implementation; they get added in future ADR-018 follow-up work once SharePoint validates the pattern.
+Genuine implementation attempt (uncommitted code: `kairix/connectors/sharepoint/dlt_connector.py`, reverted after design check) surfaced the **third structural finding** that dlt isn't the right OSS library for kairix connectors:
 
-1. Add `dlt` as a project dependency (with the `sql` extra for SQLite cursor-state storage)
-2. Add a thin `DltSourceAdapter` that wraps a `@dlt.resource` as a `SourceConnector` so the existing `ConnectorPipeline` consumes it through the same Protocol
-3. Reshape `kairix/connectors/sharepoint/connector.py` as a `@dlt.resource` with `dlt.sources.incremental("source_modified_at")` for delta cursor management. The connector's existing fetch / list_changes logic moves into the resource function
-4. New feature flag `sharepoint_dlt` (default OFF) — `connector_sharepoint` flag stays as the "is SharePoint enabled at all" gate; `sharepoint_dlt` picks the implementation (homegrown vs dlt-backed)
-5. F54 OFF/ON coverage: BDD feature `feature_flag_sharepoint_dlt.feature`, integration `test_feature_flag_sharepoint_dlt.py`, E2E `test_composed_sharepoint_dlt_path.py`
-6. Soak in dogfood behind the flag; cutover only after a successful full-corpus walk
+- **dlt's resource state is bound to its pipeline lifecycle.** `dlt.current.resource_state()` is only meaningful when called from a resource that dlt's `pipeline.run()` is currently executing. Outside that context the state primitive is unavailable.
+- **dlt is end-to-end or nothing.** dlt is designed to OWN the data flow from source to destination. Using only its state primitive (and discarding its data output by routing to a `/dev/null` destination) is fighting the framework, not adopting it.
+- **SharePoint's deltaLink is opaque, not a timestamp.** dlt's `dlt.sources.incremental("field")` works on numeric/timestamp values for cursor advance. The SharePoint Graph API uses opaque deltaLink URLs. The fit is wrong at the cursor-shape level too, even before the state-primitive issue.
 
-### Wave 3 (revised) — Alpha cut + retirement decision
+The three negative findings together (Wave 1 bronze, Wave 2 cursor/dead-letter, Wave 2-revised SharePoint connector) are a pattern. **dlt is the wrong OSS library for kairix's connector framework**, given kairix's architectural constraints:
+- Raw binary blobs as a first-class output (not rows-into-tables)
+- Per-chunk transactional coupling between bronze writes and cursor advance
+- Opaque per-connector cursor shapes (deltaLink, RTM event positions, watermarks, OAuth state)
 
-Once Wave 2 has soaked successfully:
+### Final decision — Wave 1 is the productive scope; abandon the rest
 
-1. CHANGELOG + upgrade note for the SharePoint-dlt cutover
-2. Alpha cut (per user gate: no alpha until Waves 1+2+3 complete)
-3. Reflection on whether to extend the dlt pattern to other connectors (Obsidian, Slack, GitHub, Notion, M365). This is an explicit decision point — not auto-applied — because each connector's complexity profile is different and the homegrown shape may be the right answer for the local-filesystem ones (Obsidian)
+The original "adopt dlt" thesis is REJECTED. The four production issues that motivated this ADR are addressed as follows:
 
-### Future work (not in this ADR)
+| Issue | Final resolution |
+|---|---|
+| #316 — bronze TTL GC | Shipped in v2026.5.25a1 (homegrown TTL behind `bronze_ttl_gc` flag). Not dlt. |
+| #317 — `/tmp` overflow | Shipped in v2026.5.25a1 (tmpfs default in compose). Not dlt. |
+| #318 — bronze orphan reaper | Shipped in v2026.5.25a1 (homegrown reaper as scheduler stage). Not dlt. |
+| #321 — single-transaction-per-batch | Shipped in v2026.5.26a1 (chunked commits inside `ConnectorPipeline`, ~50 LoC). Not dlt. |
 
-If the dlt pattern proves out via Wave 2 SharePoint soak, an ADR-019 follow-up can scope:
-- Migrating M365 calendar / email-headers / Slack / GitHub / Notion connectors as `@dlt.resource`
-- Retiring homegrown framework code where it's been fully superseded
+Total: four production issues closed by ~200 lines of new kairix code + one new feature flag. **Zero dlt code shipped.** The investigation cost (research + ADR + abandoned prototype) was real but bounded; the alternative (forcing dlt into a misfit) would have been worse.
+
+### Future work (intentionally limited)
+
+This ADR does NOT recommend a follow-up dlt evaluation. If a future ADR-019 wants to explore connector-framework consolidation against an OSS library, the candidates worth evaluating are:
+
+- **Airbyte Python CDK** — designed for connector cursor diversity (OAuth state, deltas, watermarks). Heavier than dlt; closer fit for SaaS connectors with opaque cursors.
+- **Singer specification** — JSON-pipe protocol with ecosystem of taps/targets. Heavy ops infrastructure (separate processes per connector).
+- **Meltano** — Singer-based orchestrator.
+
+The recommendation if any of these is explored: **start with a single existing connector and prove the fit before any ADR commitment**. The ADR-018 lesson is that a multi-wave commitment ahead of fit-validation costs investigation time on multiple negative findings.
+
+### Engineering pattern recorded for the future
+
+The right shape for "should we adopt OSS library X for layer Y?" decisions:
+
+1. **Spike first, ADR second.** Implement the smallest meaningful integration (one resource, one Protocol implementation) against the real test surface. If it fits, write the ADR with the spike's evidence. If it doesn't fit, the negative finding is the artefact and the ADR is unnecessary.
+2. **Three negative findings is a stop signal.** If the first integration attempt surfaces a design mismatch, evaluate carefully before pivoting to a different layer. Two failed pivots within the same library are a strong signal the library is wrong for the use case.
+3. **Architectural constraints first, library second.** kairix's constraints (raw blobs, transactional coupling, opaque cursors) are real and not negotiable. Libraries that fight them aren't a fit even if they're best-in-class for other use cases.
 
 ---
 
