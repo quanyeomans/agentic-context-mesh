@@ -56,6 +56,7 @@ _CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
     "sharepoint_credentials_loaded"  # pragma: allowlist secret — check-name string, not a credential
 )
 _CHECK_MAINTENANCE_LOOP_TICKING = "maintenance_loop_ticking"
+_CHECK_EXTRACTOR_LIBRARIES_IMPORTABLE = "extractor_libraries_importable"
 
 
 @dataclass
@@ -203,6 +204,13 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
         "is sensible. next: tail worker logs for `event=maintenance_tick_completed` "
         "lines — absence means the loop isn't firing. "
         "run: kairix worker maintenance (to fire a one-shot tick on demand)."
+    ),
+    _CHECK_EXTRACTOR_LIBRARIES_IMPORTABLE: (
+        "fix: install the missing extras into the runtime image — "
+        "`pip install 'Kairix-agentic-knowledge-mgt[markitdown,pdf_fallback,docx,pptx,xlsx]'`. "
+        "next: rebuild the Docker image with the extras in the Dockerfile install "
+        "line, then redeploy. run: docker exec app-kairix-1 python3 -c "
+        "'import markitdown.converters; print(\"ok\")' to verify."
     ),
 }
 
@@ -1622,6 +1630,78 @@ def check_maintenance_loop_ticking(deps: MaintenanceLoopCheckDeps | None = None)
     )
 
 
+# Map every declared kairix extractor plugin to the libraries its
+# converters need at runtime. If markitdown is registered but its
+# per-format converter libraries (python-docx, openpyxl, etc.) aren't
+# installed, extraction silently fails at extract() time with a
+# MissingDependencyException — the v2026.5.26a1 dogfood incident
+# (#322) where 8,785 SharePoint items dead-lettered because the
+# production Docker image was missing every binary-doc converter.
+#
+# The check_extractor_libraries_importable check below imports each
+# of these at onboard time so the failure surfaces BEFORE the worker
+# starts processing items.
+_EXTRACTOR_LIBRARY_DEPS: dict[str, tuple[str, ...]] = {
+    "markitdown": ("markitdown", "markitdown.converters", "docx", "openpyxl", "pptx", "olefile"),
+    "passthrough": (),  # passthrough has no library deps
+    "pdf_fallback": ("pdfplumber",),
+    "docx": ("docx",),
+    "pptx": ("pptx",),
+    "xlsx": ("openpyxl",),
+    "ocr": ("pytesseract", "PIL"),
+}
+
+
+def check_extractor_libraries_importable() -> CheckResult:
+    """Every declared extractor plugin's runtime libraries import cleanly.
+
+    Kairix's extractor framework uses pip entry points — declaring an
+    extractor in pyproject.toml's ``[project.entry-points."kairix.extractors"]``
+    table makes it discoverable by name, but the library it depends on
+    (e.g. python-docx for the markitdown DOCX converter) is loaded
+    lazily at extract() time. If the runtime image doesn't install the
+    matching extra (e.g. ``markitdown[docx]``), the entry-point
+    registration succeeds while every extract() call raises
+    ``MissingDependencyException``. The failure mode landed on the
+    v2026.5.26a1 production VM (#322) — 8,785 SharePoint items
+    dead-lettered because the Docker image was missing all five
+    binary-doc converter extras.
+
+    This check walks ``kairix.extractors.<name>.CAPABILITIES`` / entry
+    points and tries to import each declared library at startup so the
+    missing-extras failure surfaces in ``kairix onboard check`` BEFORE
+    the worker starts processing.
+    """
+    import importlib
+
+    missing: dict[str, list[str]] = {}
+    checked_count = 0
+    for extractor_name, libraries in _EXTRACTOR_LIBRARY_DEPS.items():
+        for lib in libraries:
+            checked_count += 1
+            try:
+                importlib.import_module(lib)
+            except ImportError:
+                missing.setdefault(extractor_name, []).append(lib)
+    if missing:
+        per_extractor = "; ".join(f"{name}={','.join(libs)}" for name, libs in missing.items())
+        return CheckResult(
+            name=_CHECK_EXTRACTOR_LIBRARIES_IMPORTABLE,
+            ok=False,
+            detail=f"missing converter libraries: {per_extractor}",
+            fix=(
+                "Install the missing extras into the runtime image: "
+                "`pip install 'Kairix-agentic-knowledge-mgt[markitdown,pdf_fallback,docx,pptx,xlsx]'`. "
+                "On Docker, edit the Dockerfile install line to include the extras + rebuild."
+            ),
+        )
+    return CheckResult(
+        name=_CHECK_EXTRACTOR_LIBRARIES_IMPORTABLE,
+        ok=True,
+        detail=f"all {checked_count} declared extractor library imports succeeded",
+    )
+
+
 ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_kairix_on_path,
     check_wrapper_installed,
@@ -1638,6 +1718,7 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_topology_v2_cc_pairs_registered,
     check_sharepoint_credentials_loaded,
     check_maintenance_loop_ticking,
+    check_extractor_libraries_importable,
 ]
 
 

@@ -1463,3 +1463,67 @@ def test_run_onboard_check_unknown_and_no_fix_surfaces_bug_hint() -> None:
     assert len(result.failures) == 1
     assert result.failures[0].remediation
     assert "bug" in result.failures[0].remediation.lower()
+
+
+# ---------------------------------------------------------------------------
+# #322 — extractor library import check (v2026.5.26a1 dogfood)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_check_extractor_libraries_importable_passes_when_all_present() -> None:
+    """Happy path — the test environment installs every declared extractor
+    library extras, so the check should return ok=True with the count."""
+    from kairix.platform.onboard.check import check_extractor_libraries_importable
+
+    result = check_extractor_libraries_importable()
+    assert result.ok is True
+    assert "all" in result.detail.lower()
+    assert "succeeded" in result.detail.lower()
+
+
+@pytest.mark.unit
+def test_check_extractor_libraries_importable_fails_when_library_missing(monkeypatch) -> None:
+    """Sabotage proof for #322: when a required library is missing the
+    check returns ok=False with the per-extractor + per-library breakdown
+    and an actionable fix string naming the exact pip-install command.
+
+    Drives the check with a fake import that raises ImportError for one
+    specific library so we don't have to actually uninstall production
+    deps from the test environment.
+    """
+    import importlib
+
+    from kairix.platform.onboard import check as check_mod
+
+    real_import = importlib.import_module
+
+    def _fake_import(name: str, package: str | None = None) -> object:
+        if name == "olefile":
+            raise ImportError(f"No module named '{name}'")
+        return real_import(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import)
+
+    result = check_mod.check_extractor_libraries_importable()
+    assert result.ok is False
+    assert "markitdown" in result.detail
+    assert "olefile" in result.detail
+    assert result.fix is not None
+    assert "pip install" in result.fix
+    assert "markitdown" in result.fix
+
+
+@pytest.mark.unit
+def test_check_extractor_libraries_importable_is_registered_in_all_checks() -> None:
+    """The new check must be wired into ALL_CHECKS so it runs as part of
+    ``kairix onboard check``. Sabotage: drop the registration line from
+    ALL_CHECKS and this test fails — preventing the new check from being
+    a tree-falling-in-the-forest."""
+    from kairix.platform.onboard.check import ALL_CHECKS, check_extractor_libraries_importable
+
+    assert check_extractor_libraries_importable in ALL_CHECKS, (
+        "check_extractor_libraries_importable must be in ALL_CHECKS or "
+        "the v2026.5.26a1 #322 failure mode (extras-missing-in-Docker-image) "
+        "can ship silently again."
+    )

@@ -85,10 +85,16 @@ markitdown = [
     # plugin's converter factory; module import succeeds without the
     # extra, only ``extract()`` raises a typed error when the upstream is
     # absent. Floor pinned at 0.1.5 (current stable on PyPI, MIT-licensed).
-    # The ``[pdf]`` extra pulls pdfminer-six + pdfplumber so the PDF
-    # path works out-of-the-box; without it markitdown raises a typed
-    # ``MissingDependencyException`` on PDF input.
-    "markitdown[pdf]>=0.1.5,<1",
+    # The ``[pdf,docx,xlsx,pptx,outlook]`` extras pull every per-format
+    # converter dependency markitdown's PER-CONVERTER plugins need —
+    # pdfminer-six + pdfplumber for PDF, python-docx for Word,
+    # openpyxl for Excel, python-pptx for PowerPoint, olefile for
+    # Outlook .msg. Without these sub-extras markitdown registers the
+    # converters but each raises ``MissingDependencyException`` at
+    # ``extract()`` time. v2026.5.26a1 dogfood (#322) — the production
+    # Docker image was missing all five and every binary-doc fetch
+    # dead-lettered.
+    "markitdown[pdf,docx,xlsx,pptx,outlook]>=0.1.5,<1",
 ]
 pdf_fallback = [
     # pdfplumber (MIT, Jeremy Singer-Vine) — fallback PDF extractor used

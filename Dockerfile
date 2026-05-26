@@ -24,7 +24,7 @@ COPY kairix/ /opt/kairix/src/kairix/
 
 # Install PyTorch CPU-only first (prevents pulling ~5GB CUDA libs on GPU-less servers)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir "/opt/kairix/src[neo4j,agents,nlp,rerank]" \
+    && pip install --no-cache-dir "/opt/kairix/src[neo4j,agents,nlp,rerank,markitdown,pdf_fallback,docx,pptx,xlsx]" \
     && python -m spacy download en_core_web_sm || true
 
 # ── Runtime stage: slim image with only installed packages ───────────────────
