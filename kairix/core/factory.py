@@ -524,14 +524,17 @@ def build_connector_pipeline(
     db: Any,
     bronze_root: Any,
     collection: str,
+    silver: Any = None,
+    chunk_writer: Any = None,
+    entity_graph_sink: Any = None,
 ) -> Any:
     """Construct a production-shape ConnectorPipeline against ``db``.
 
     Composes the shipped Bronze + Silver + chunk-writer + entity-graph-sink
     + cursor + dead-letter stores using the same wiring the worker uses
-    via ``run_connector_sync_pipeline``. F46-sanctioned entry point so BDD
-    step impls exercising connector-ingest behaviour don't construct
-    ``ConnectorPipeline(...)`` directly.
+    via ``run_connector_sync_pipeline``. F46/F47-sanctioned entry point so
+    BDD step impls + integration tests exercising connector-ingest
+    behaviour don't construct ``ConnectorPipeline(...)`` directly.
 
     The chunk-writer is bound to ``collection`` (single-collection routing,
     matching today's worker shape; the topology-v2 runtime flag's ON
@@ -542,6 +545,12 @@ def build_connector_pipeline(
     helper, so the construction stays inside ``kairix/core/connectors/``
     per F61. The factory itself never constructs ``_SqliteChunkWriter``
     directly.
+
+    Optional ``silver`` / ``chunk_writer`` / ``entity_graph_sink``
+    overrides let integration tests inject scripted-failure stand-ins
+    (e.g. ADR-018 Wave 1 long-batch-durability characterization needs
+    a Silver that raises on the N-th call). Production callers omit
+    them and get the canonical wiring.
     """
     from kairix.core.connectors import (
         ConnectorPipeline,
@@ -556,9 +565,9 @@ def build_connector_pipeline(
     return ConnectorPipeline(
         db=db,
         bronze=FilesystemBronzeStore(db, bronze_root),
-        silver=DefaultSilverProcessor(),
-        chunk_writer=legacy_chunk_writer(db, collection=collection),
-        entity_graph_sink=_SqliteEntityGraphSink(db),
+        silver=silver if silver is not None else DefaultSilverProcessor(),
+        chunk_writer=chunk_writer if chunk_writer is not None else legacy_chunk_writer(db, collection=collection),
+        entity_graph_sink=entity_graph_sink if entity_graph_sink is not None else _SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
         dead_letter=DeadLetterStore(db),
     )
