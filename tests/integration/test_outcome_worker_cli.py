@@ -244,3 +244,93 @@ def test_worker_reextract_dry_run_does_not_commit(tmp_path: Path) -> None:
     assert proc.returncode == 0, f"dry-run exited {proc.returncode}; stderr={proc.stderr!r}"
     envelope = json.loads(proc.stdout)
     assert envelope["dry_run"] is True
+
+
+def test_worker_reextract_envelope_includes_skipped_source_unavailable_counter(tmp_path: Path) -> None:
+    """Phase 6 of streaming-bronze (#27, F30 outcome test): the JSON envelope
+    surfaces the ``skipped_source_unavailable`` counter introduced by Phase 5
+    re-extract dual-mode handling.
+
+    Even on an empty DB the field must be present (zero), so operators can
+    write monitoring against the field without it sometimes being absent.
+
+    Sabotage proof: remove ``skipped_source_unavailable`` from the json.dumps
+    dict in worker_cli.reextract; this test fails with KeyError.
+    """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+
+    db_path = tmp_path / "reextract-sourceunav.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+    finally:
+        db.close()
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "worker",
+            "reextract",
+            "--source-name",
+            "no-such-connector",
+            "--db-path",
+            str(db_path),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"exit {proc.returncode}; stderr={proc.stderr!r}"
+    envelope = json.loads(proc.stdout)
+    assert "skipped_source_unavailable" in envelope, (
+        f"Phase 6 contract: envelope must include skipped_source_unavailable; got keys: {sorted(envelope.keys())}"
+    )
+    assert envelope["skipped_source_unavailable"] == 0
+
+
+def test_worker_reextract_human_output_includes_skipped_source_unavailable(tmp_path: Path) -> None:
+    """Human-readable (non-JSON) output also surfaces the new counter.
+    Operators reading the terminal output for a recovery run see all
+    five counters consistently.
+
+    Sabotage proof: remove the skipped_source_unavailable= from the
+    f-string in worker_cli.reextract's else branch; this test fails
+    because the substring isn't in stdout.
+    """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+
+    db_path = tmp_path / "reextract-human.sqlite"
+    db = sqlite3.connect(str(db_path))
+    try:
+        create_schema(db)
+    finally:
+        db.close()
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kairix.cli",
+            "worker",
+            "reextract",
+            "--source-name",
+            "no-such-connector",
+            "--db-path",
+            str(db_path),
+            # no --json — human output
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0
+    assert "skipped_source_unavailable=0" in proc.stdout, (
+        f"human output should include the new counter; got: {proc.stdout!r}"
+    )
