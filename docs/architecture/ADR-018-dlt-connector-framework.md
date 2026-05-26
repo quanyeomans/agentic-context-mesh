@@ -174,23 +174,44 @@ Wave 1 actual delivery (ff5472a4, 2026-05-26):
 
 The dlt evaluation isn't wasted: Waves 2-3 still benefit from dlt for the layers where rows-into-tables IS the natural shape.
 
-### Wave 2 — Cursor + Dead-letter, ~2-3 days
+### Wave 2 — SKIPPED — cursor + dead-letter layers don't fit dlt
 
-Same shape as Wave 1 for `DltCursorStore` and `DltDeadLetterStore`. These piggyback on dlt's `_dlt_pipeline_state` + `_dlt_loads` tables, so the implementation is thin adapters.
+**Pivot from the original ADR proposal**, recorded for the audit trail:
 
-### Wave 3 — Per-connector reshape, ~1-2 days each (8 connectors)
+The original Wave 2 proposed `DltCursorStore` and `DltDeadLetterStore` adapters. Closer reading of the existing code surfaced two reasons this doesn't fit:
 
-In priority order: sharepoint (broken first) → obsidian → m365_email_headers → m365_calendar → slack → github → notion → dex_crm.
+1. **Transactional coupling.** `CursorStore.write` and `DeadLetterStore.record` issue SQL against the **same `sqlite3.Connection`** that `FilesystemBronzeStore.write` uses. The per-chunk commit in `ConnectorPipeline` commits cursor + dead-letter + bronze pointer rows in ONE transaction. dlt operates with its own connection + load-package lifecycle and would split this atomicity, opening a new class of bug (cursor advances but bronze didn't, or vice versa).
 
-Each connector:
-1. Reshape as `@dlt.resource` returning the existing frozen dataclasses
-2. Existing contract / BDD / integration / E2E tests pass unchanged (Protocol seam absorbs the change)
-3. Flag `connector_<name>_dlt` for OFF/ON branches
-4. Soak + cutover per-connector
+2. **dlt's cursor primitives are per-resource, not per-store.** `dlt.sources.incremental("modified_at")` lives inside a `@dlt.resource` function — it's how a connector's iterator tracks its position. It's not a swap-in for the `CursorStore` Protocol that the pipeline composes. Same for `_dlt_loads` — it tracks dlt's load packages, not the per-item retry semantics our `DeadLetterStore` records.
 
-### Wave 4 — Retire homegrown framework, ~1 day
+Net: keeping `CursorStore` + `DeadLetterStore` as the existing ~150-line SQLite-backed implementations is the right call. They do one thing well and the transactional coupling with chunked commits is a feature.
 
-Delete the old implementations; close #316, #318, #319, #321; update fitness functions; CHANGELOG entry.
+dlt's actual value lands at the per-connector resource layer (Wave 3), where structured pagination + cursor + state is exactly the shape `@dlt.resource` is designed for.
+
+### Wave 2 (revised; was Wave 3) — SharePoint connector as `@dlt.resource`
+
+Scope per user direction: SharePoint only for now. Other connectors stay on the existing implementation; they get added in future ADR-018 follow-up work once SharePoint validates the pattern.
+
+1. Add `dlt` as a project dependency (with the `sql` extra for SQLite cursor-state storage)
+2. Add a thin `DltSourceAdapter` that wraps a `@dlt.resource` as a `SourceConnector` so the existing `ConnectorPipeline` consumes it through the same Protocol
+3. Reshape `kairix/connectors/sharepoint/connector.py` as a `@dlt.resource` with `dlt.sources.incremental("source_modified_at")` for delta cursor management. The connector's existing fetch / list_changes logic moves into the resource function
+4. New feature flag `sharepoint_dlt` (default OFF) — `connector_sharepoint` flag stays as the "is SharePoint enabled at all" gate; `sharepoint_dlt` picks the implementation (homegrown vs dlt-backed)
+5. F54 OFF/ON coverage: BDD feature `feature_flag_sharepoint_dlt.feature`, integration `test_feature_flag_sharepoint_dlt.py`, E2E `test_composed_sharepoint_dlt_path.py`
+6. Soak in dogfood behind the flag; cutover only after a successful full-corpus walk
+
+### Wave 3 (revised) — Alpha cut + retirement decision
+
+Once Wave 2 has soaked successfully:
+
+1. CHANGELOG + upgrade note for the SharePoint-dlt cutover
+2. Alpha cut (per user gate: no alpha until Waves 1+2+3 complete)
+3. Reflection on whether to extend the dlt pattern to other connectors (Obsidian, Slack, GitHub, Notion, M365). This is an explicit decision point — not auto-applied — because each connector's complexity profile is different and the homegrown shape may be the right answer for the local-filesystem ones (Obsidian)
+
+### Future work (not in this ADR)
+
+If the dlt pattern proves out via Wave 2 SharePoint soak, an ADR-019 follow-up can scope:
+- Migrating M365 calendar / email-headers / Slack / GitHub / Notion connectors as `@dlt.resource`
+- Retiring homegrown framework code where it's been fully superseded
 
 ---
 
