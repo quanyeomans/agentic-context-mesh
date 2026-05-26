@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 
 from kairix.core.protocols import (
     BronzeRef,
@@ -60,6 +61,13 @@ def _chunk_markdown(markdown: str) -> tuple[str, ...]:
     paragraphs into the current chunk until adding the next one would
     push it past ``_TARGET_CHUNK_CHARS``; then we flush and start a new
     chunk. Empty input yields an empty tuple.
+
+    Bug B fix (v2026.5.26a1 dogfood): paragraphs longer than
+    ``_TARGET_CHUNK_CHARS`` are pre-split at sentence boundaries (then
+    word, then char) BEFORE the greedy-glue loop runs. Previously a
+    32,595-char paragraph from a SharePoint backfill landed as one
+    chunk regardless of the 1000-char target — sabotage-proof in
+    ``tests/unit/test_silver.py``.
     """
     text = markdown.strip()
     if not text:
@@ -68,9 +76,20 @@ def _chunk_markdown(markdown: str) -> tuple[str, ...]:
     if not paragraphs:
         return ()
 
+    # Expand any oversized paragraph into sub-paragraphs that fit the
+    # target before the greedy-glue loop runs. Each sub-paragraph
+    # carries the same paragraph-boundary semantics so the glue loop
+    # treats them as siblings.
+    expanded: list[str] = []
+    for para in paragraphs:
+        if len(para) <= _TARGET_CHUNK_CHARS:
+            expanded.append(para)
+        else:
+            expanded.extend(_split_long_paragraph(para, _TARGET_CHUNK_CHARS))
+
     chunks: list[str] = []
     current = ""
-    for para in paragraphs:
+    for para in expanded:
         if not current:
             current = para
             continue
@@ -82,6 +101,70 @@ def _chunk_markdown(markdown: str) -> tuple[str, ...]:
     if current:
         chunks.append(current)
     return tuple(chunks)
+
+
+def _split_long_paragraph(paragraph: str, target: int) -> list[str]:
+    """Split ``paragraph`` (longer than ``target``) at sentence boundaries.
+
+    Greedy glue: combine sentences into the current chunk until adding
+    the next would push past ``target``, then flush. A sentence that
+    is itself longer than ``target`` falls through to word-boundary
+    splitting via :func:`_split_long_sentence`.
+    """
+    # Sentence-boundary regex: split AFTER terminal punctuation followed
+    # by whitespace. Lookbehind keeps the punctuation with the sentence.
+    sentences = re.split(r"(?<=[.!?])\s+", paragraph)
+    return _greedy_glue(sentences, target, separator=" ", split_oversize=_split_long_sentence)
+
+
+def _split_long_sentence(sentence: str, target: int) -> list[str]:
+    """Split ``sentence`` (longer than ``target``) at word boundaries.
+
+    A single word longer than ``target`` (e.g. a long URL) falls
+    through to hard char-boundary chunks of exactly ``target``.
+    """
+    return _greedy_glue(sentence.split(), target, separator=" ", split_oversize=_split_long_word)
+
+
+def _split_long_word(word: str, target: int) -> list[str]:
+    """Hard char-boundary fallback for a single token longer than ``target``."""
+    return [word[i : i + target] for i in range(0, len(word), target)]
+
+
+def _greedy_glue(
+    pieces: list[str],
+    target: int,
+    *,
+    separator: str,
+    split_oversize: Callable[[str, int], list[str]],
+) -> list[str]:
+    """Greedy-glue ``pieces`` with ``separator`` up to ``target`` chars.
+
+    If a single piece exceeds ``target``, delegate to ``split_oversize``
+    to break it down further. Output chunks are all ``<= target`` (or
+    ``<= target`` after the recursive split for the oversize case).
+    """
+    chunks: list[str] = []
+    current = ""
+    sep_len = len(separator)
+    for piece in pieces:
+        if len(piece) > target:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(split_oversize(piece, target))
+            continue
+        if not current:
+            current = piece
+            continue
+        if len(current) + len(piece) + sep_len <= target:
+            current = current + separator + piece
+        else:
+            chunks.append(current)
+            current = piece
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _chunk_pages(pages: tuple[Page, ...]) -> tuple[tuple[str, int], ...]:
