@@ -2,7 +2,7 @@
 type: adr
 id: ADR-018
 title: Adopt dlt as the connector ingestion framework (phased, Protocol-gated)
-status: proposed
+status: accepted (Wave 1 shipped; Waves 2-3 in flight)
 date: 2026-05-26
 related:
   - connector-ingestion-architecture
@@ -151,16 +151,28 @@ The migration is only safe because the existing test discipline (BDD → E2E →
 
 ## Wave plan
 
-Each wave: characterize → swap behind flag → soak → cutover → retire homegrown. Tests stay green at every step; the only "red phase" is when we INTENTIONALLY add a failing characterization test (e.g. the long-batch-durability test) that the new implementation will make green.
+Each wave: characterize → swap → soak → cutover. Tests stay green at every step; the only "red phase" is when we INTENTIONALLY add a failing characterization test (e.g. the long-batch-durability test) that the new implementation will make green.
 
-### Wave 1 — Bronze (closes #316 + #318 + #321), ~3-5 days
+### Wave 1 — Closes #321 by chunked-commit inside ConnectorPipeline (NOT dlt) — DONE 2026-05-26
 
-1. **Characterization (day 1):** Add the long-batch-durability test (described in Wave 1 gaps above) — it FAILS against `FilesystemBronzeStore`. This is the regression-lock for #321; it proves the bug exists before we fix it.
-2. **Implementation (day 2-3):** `DltBronzeStore` implementing `BronzeStore` Protocol; uses dlt's load packages internally; SQLite as dlt destination (same DB).
-3. **Equivalence (day 3-4):** New `tests/contracts/test_bronze_store_equivalence.py` parametrises across both implementations. All existing tests pass.
-4. **Flag-gate (day 4):** `bronze_backend` flag (`filesystem` default, `dlt` opt-in). F54 OFF/ON BDD + integration + E2E coverage.
-5. **Soak (day 4-5):** Flip ON in dogfood; observe one full ingest cycle.
-6. **Cutover (day 5):** Flip default to `dlt` in next alpha. `FilesystemBronzeStore` stays as fallback for one release, then deleted in Wave 4.
+**Pivot from the original ADR proposal**, recorded here for the audit trail:
+
+The original Wave 1 proposed a `DltBronzeStore` adapter. A focused dlt evaluation (research notes in this ADR's commit history) showed that raw binary blobs + filesystem pointer rows are a **poor fit for dlt's row-into-table model**:
+
+- dlt's `filesystem` destination only accepts `jsonl / insert_values / parquet / csv / model / reference` loader formats — there is no "raw bytes passthrough" path ([filesystem destination capabilities](https://dlthub.com/docs/dlt-ecosystem/destinations/filesystem))
+- The custom `@dlt.destination` decorator's docs are explicit: *"Keeping the batch atomicity is on you ... you can still get duplicated data if you committed half of the batch"* ([destination.md atomic-loads section](https://dlthub.com/docs/dlt-ecosystem/destinations/destination#adjust-batch-size-and-retry-policy-for-atomic-loads))
+- We would have written a custom dlt destination JUST to own the file+row atomicity, while bypassing every part of dlt that earns its keep (schema inference, evolution, normalization)
+
+The actual root cause of #321 was simpler: `ConnectorPipeline._process_batch` ran the entire batch inside ONE SQLite transaction. The fix is to commit every `chunk_size` items inside the same pipeline. ~50 LoC. Closes #321 directly; #318 orphan reaper still handles the bounded per-chunk orphans.
+
+Wave 1 actual delivery (ff5472a4, 2026-05-26):
+
+1. **Characterization** — `tests/integration/test_connector_pipeline_long_batch_durability.py` two paired tests pinning #321. The xfail test became live PASS as soon as chunking shipped.
+2. **Implementation** — `ConnectorPipeline.__init__(chunk_size=50)`; `_process_batch` extracted into `_process_change` + `_commit_and_flush` helpers under `_BatchTotals` + `_ChunkAccumulator` dataclasses. Cognitive complexity stays ≤15 per F16.
+3. **Equivalence** — all 7969 existing unit/bdd/contract/integration tests green against the chunked code without modification. The chunking change is invisible to the API surface; only the transaction granularity changed.
+4. **Soak** — VM deploy of the chunking fix lands in the next alpha cut following this ADR revision.
+
+The dlt evaluation isn't wasted: Waves 2-3 still benefit from dlt for the layers where rows-into-tables IS the natural shape.
 
 ### Wave 2 — Cursor + Dead-letter, ~2-3 days
 

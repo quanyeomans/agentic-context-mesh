@@ -222,47 +222,58 @@ Kairix expects:
 - `$KAIRIX_DATA_DIR/logs/` — optional query logs (`KAIRIX_LOG_QUERIES=1`)
 - `$KAIRIX_WORKSPACE_ROOT/<agent>/memory/` — agent memory logs (required for briefing pipeline)
 
-### 6. Data on a data disk, not the OS disk
+### 6. Kairix runtime data lives on the largest disk you have
 
-**Do not** rely on the default Docker named volumes (`kairix-data`, `neo4j-data`) when a real connector corpus is attached. The Docker default puts them under `/var/lib/docker/volumes/` on the OS disk, which is typically the smallest partition. On the v2026.5.24 production VM, a SharePoint backfill grew the bronze tree to 36 GB on a 64 GB OS disk, filled the root filesystem, and OOM-killed co-located services.
+**Do not** rely on the default Docker named volumes (`kairix-data`, `neo4j-data`) when a real connector corpus is attached. The Docker default puts them under `/var/lib/docker/volumes/` on whichever disk holds the Docker root — typically the OS disk. If that disk runs out, the entire host falls over (OOM-kill cascade, systemd misbehaviour).
 
-**Recommended layout:** attach a separate data disk (e.g. `/data`), bind-mount the kairix data dir into the container, and let Neo4j live on the same data disk.
+**Bind-mount kairix runtime onto your largest partition.** The right path depends on your VM's disk shape — `/data` if you have an attached data disk that's the largest; `/var/lib/kairix-runtime` (or similar) on root if the OS disk is the largest one. The 2026-05-26 dogfood VM has a 256 GB OS disk and a 64 GB data disk, so kairix-runtime lives on `/`. A different VM might have the opposite shape.
+
+**Compose override pattern (pick the right host path):**
 
 ```yaml
-# docker-compose.override.yml
+# docker-compose.override.yml — replace HOST_PATH with the right
+# directory for YOUR disk layout. The container side stays /data/kairix.
 services:
   kairix:
     volumes:
-      # Bind-mount onto the data disk, NOT a Docker named volume.
-      - /data/kairix:/data/kairix
-      - /data/documents:/data/documents
+      - <HOST_PATH>:/data/kairix    # e.g. /var/lib/kairix-runtime OR /data/kairix
+      - <DOCS_PATH>:/data/documents # docs tree is usually small; either disk works
   kairix-worker:
     volumes:
-      - /data/kairix:/data/kairix
-      - /data/documents:/data/documents
+      - <HOST_PATH>:/data/kairix
+      - <DOCS_PATH>:/data/documents
   neo4j:
     volumes:
-      - /data/neo4j:/data
+      - <NEO4J_PATH>:/data          # Neo4j is ~1 GB for typical graphs; small disk fine
 ```
 
-Prepare the host paths once:
+Prepare the host paths once (replace `<HOST_PATH>` etc. with your chosen directories):
 
 ```bash
-sudo mkdir -p /data/kairix /data/documents /data/neo4j
-sudo chown -R 1000:1000 /data/kairix /data/documents /data/neo4j
+sudo mkdir -p <HOST_PATH> <DOCS_PATH> <NEO4J_PATH>
+sudo chown -R 1000:1000 <HOST_PATH> <DOCS_PATH> <NEO4J_PATH>
 ```
 
-**What ends up on the data disk vs. the OS disk:**
+**Pick the right disk by checking which is biggest:**
 
-| Lives on `/data` | Lives on `/` (OS disk) |
-|---|---|
-| Bronze raw blobs (`/data/kairix/bronze/`) | Container images |
-| SQLite (`index.sqlite`, `kairix.db`) | Container overlay (only `/tmp` and other ephemeral writes) |
-| Vector index (`vectors.usearch`) | systemd, Docker engine |
-| Neo4j graph | |
-| Document tree | |
+```bash
+df -h /         # OS disk
+df -h /data     # data disk (if attached)
+# Pick the one with the most free space for HOST_PATH (the kairix runtime).
+```
 
-The 2 GB `/tmp` tmpfs default in the shipped compose (v2026.5.25 onward) keeps connector binary downloads and PDF/PPTX conversions off the OS disk even when an operator forgets the bind mount. Bronze TTL GC behind the `bronze_ttl_gc` flag (also v2026.5.25) bounds long-term bronze growth — see [`docs/upgrades/v2026.5.25.md`](../upgrades/v2026.5.25.md).
+**What ends up where:**
+
+| Component | Size guide | Suggested disk |
+|---|---|---|
+| Bronze raw blobs (binary connector fetches) | grows with corpus; bounded by `bronze_ttl_gc` (#316) and orphan reaper (#318) and now per-chunk commits (#321) | **largest disk** |
+| SQLite (`index.sqlite`, `kairix.db`) | grows with index size; ~1 GB / million chunks | largest disk |
+| Vector index (`vectors.usearch`) | grows with `embed_dims × chunk_count` | largest disk |
+| Neo4j graph | typically ≤1 GB for a single-team corpus | small disk fine |
+| Document tree | depends on your source corpus | small disk fine |
+| `/tmp` (binary downloads, extractor scratch) | bounded by 2 GB tmpfs default since v2026.5.25 | tmpfs (RAM) |
+
+The 2 GB `/tmp` tmpfs default in the shipped compose (v2026.5.25 onward) keeps connector binary downloads and PDF/PPTX conversions off the host disk even if an operator forgets the bind mount. Bronze TTL GC behind the `bronze_ttl_gc` flag (also v2026.5.25) bounds long-term bronze growth. Per-chunk commits in `ConnectorPipeline` (v2026.5.26) bound the orphan blast radius on a worker restart mid-batch — see [`docs/upgrades/v2026.5.26.md`](../upgrades/v2026.5.26.md).
 
 ---
 

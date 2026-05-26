@@ -7,6 +7,24 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.26a1] - 2026-05-26 — Per-chunk commit in ConnectorPipeline closes #321 (alpha)
+
+> **Upgrading?** Straight pull from a25a1 — purely internal change. No config edits required. Full notes: [`docs/upgrades/v2026.5.26a1.md`](docs/upgrades/v2026.5.26a1.md). The reasoning behind picking chunking over a dlt migration for the bronze layer is recorded in [`docs/architecture/ADR-018-dlt-connector-framework.md`](docs/architecture/ADR-018-dlt-connector-framework.md) (Wave 1 section).
+
+### Fixed
+
+- **`ConnectorPipeline` no longer orphans a whole batch's bronze writes on a single mid-batch failure (#321).** Previously the pipeline ran the entire batch as one SQLite transaction; a Silver / writer / sink failure rolled back every uncommitted `bronze_records` row but left the on-disk blobs already fsynced. SharePoint backfills of ~6000 items leaked thousands of orphans on every worker restart. The pipeline now commits every `chunk_size` items (default 50); a failure rolls back only the current chunk; previous chunks stay committed and the cursor advances per chunk.
+
+### Changed
+
+- **Operator guidance for the runtime disk choice (`docs/operations/OPERATIONS.md` §5.6).** The previous v2026.5.25 note said "data on the data disk." That assumed a deploy shape where the data disk is the largest one. The revised guidance is "kairix runtime on whichever disk is largest" with a `df -h` check — the dogfood VM has a 256 GB OS disk and a 64 GB data disk, so kairix runtime lives on `/var/lib/kairix-runtime` not `/data`.
+
+### Things that haven't changed
+
+- Default behaviour for connectors whose batches stay under 50 items (Obsidian, typical Slack/GitHub deltas) — the chunking is invisible at the API surface.
+- The bronze write contract itself. Per-chunk commits are an internal transaction-granularity change; `BronzeStore` Protocol is unchanged.
+- Every per-connector cursor, dead-letter, and Protocol shape.
+
 ## [2026.5.25a1] - 2026-05-25 — Disk pressure, bronze hygiene, version-drift fixes (alpha)
 
 > **Upgrading?** Five fixes from the 2026-05-24 SharePoint dogfood. No config change required; flags ship OFF. If you set `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD=999999` as a band-aid, drop it after upgrading. Full notes: [`docs/upgrades/v2026.5.25a1.md`](docs/upgrades/v2026.5.25a1.md).
