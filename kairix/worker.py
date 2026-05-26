@@ -333,11 +333,10 @@ def _run_one_connector_batch(
         CursorStore,
         DeadLetterStore,
         DefaultSilverProcessor,
-        FilesystemBronzeStore,
         resolve_connector,
     )
     from kairix.core.connectors.collection_router import _legacy_chunk_writer
-    from kairix.core.connectors.registry import build_extractor_from_entry
+    from kairix.core.connectors.registry import build_bronze_from_entry, build_extractor_from_entry
     from kairix.core.features import flag
 
     name = entry["name"]
@@ -347,10 +346,14 @@ def _run_one_connector_batch(
     # on whether the entry sets ``extractor_chain: [...]`` or the legacy
     # ``extractor: <name>``. Backward compatible — existing configs unchanged.
     extractor = build_extractor_from_entry(entry)
+    # Phase 4: bronze impl selection via 'bronze_mode' config field.
+    # Default 'filesystem' (current production behaviour); 'streaming'
+    # opts into metadata-only persistence with re-fetch-based recovery.
+    bronze_store = build_bronze_from_entry(entry, db=db, bronze_root=bronze_root)
     chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
     pipeline = ConnectorPipeline(
         db=db,
-        bronze=FilesystemBronzeStore(db, bronze_root),
+        bronze=bronze_store,
         silver=DefaultSilverProcessor(),
         chunk_writer=chunk_writer,
         entity_graph_sink=_SqliteEntityGraphSink(db),
@@ -645,7 +648,7 @@ def run_reextract_dead_letter(
     sizing the recovery before committing to it. ``limit`` caps the
     number of items processed (None = all).
     """
-    from kairix.core.connectors import DeadLetterStore, FilesystemBronzeStore
+    from kairix.core.connectors import DeadLetterStore
     from kairix.core.db import open_db
     from kairix.core.db.schema import create_schema
 
@@ -656,7 +659,6 @@ def run_reextract_dead_letter(
     try:
         create_schema(db)
         bronze_root_resolved = bronze_root if bronze_root is not None else _bronze_root_default()
-        bronze = FilesystemBronzeStore(db, bronze_root_resolved)
         dead_letter = DeadLetterStore(db)
 
         entry = _load_connector_entry(source_name, config_path)
@@ -668,6 +670,15 @@ def run_reextract_dead_letter(
                 skipped_no_bronze=0,
                 skipped_no_connector=len(rows_no_conn),
             )
+
+        # Phase 4: bronze impl matches the operator's bronze_mode config so
+        # streaming-mode rows are read by StreamingBronzeStore (and fail to
+        # read with the fix-pointer) while filesystem-mode rows are read by
+        # FilesystemBronzeStore. Phase 5 wires the streaming-mode re-fetch
+        # via connector.fetch.
+        from kairix.core.connectors.registry import build_bronze_from_entry
+
+        bronze = build_bronze_from_entry(entry, db=db, bronze_root=bronze_root_resolved)
 
         connector, extractor, silver, chunk_writer, entity_graph_sink = _build_reextract_components(
             source_name=source_name,

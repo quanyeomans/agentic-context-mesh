@@ -144,6 +144,52 @@ def build_extractor_from_entry(entry: dict[str, Any]) -> Extractor:
     return factory(**ex_config) if ex_config else factory()
 
 
+def build_bronze_from_entry(
+    entry: dict[str, Any],
+    *,
+    db: Any,
+    bronze_root: Any,
+) -> Any:
+    """Construct the right BronzeStore impl from a connector config entry.
+
+    Precedence:
+
+    1. ``bronze_mode: streaming`` — opt-in streaming bronze. Metadata-only
+       persistence; raw bytes discarded after extract. Disk usage drops
+       ~6000x vs filesystem mode. Re-extract routes through
+       ``connector.fetch(item_id)`` instead of on-disk replay (Phase 5).
+
+    2. ``bronze_mode: filesystem`` OR absent — default. Raw bytes persisted
+       to ``<bronze_root>/<source>/<hash[:2]>/<hash>`` and indexed in
+       ``bronze_records``. The pre-streaming-bronze shape; backward-compatible.
+
+    3. Any other value — fails fast with a fix-pointer error per F21.
+
+    Used by both ``_run_one_connector_batch`` (regular sync) and
+    ``_build_reextract_components`` (Bug D recovery) so both paths
+    pick up the operator's bronze-mode choice from the same source.
+
+    Phase 4 of the streaming-bronze rollout. Phase 7 flips the default
+    to streaming + removes the filesystem branch once dogfood validates.
+    """
+    from kairix.core.connectors.bronze import FilesystemBronzeStore
+    from kairix.core.connectors.streaming_bronze import StreamingBronzeStore
+
+    mode = entry.get("bronze_mode", "filesystem")
+    if mode == "streaming":
+        return StreamingBronzeStore(db)
+    if mode == "filesystem":
+        return FilesystemBronzeStore(db, bronze_root)
+    raise ValueError(
+        f"bronze_mode must be 'streaming' or 'filesystem', got {mode!r}. "
+        f"fix: set 'bronze_mode: streaming' (recommended; metadata-only "
+        f"persistence) or 'bronze_mode: filesystem' (legacy; persistent raw "
+        f"blobs) in kairix.config.yaml. "
+        f"next: see docs/architecture/streaming-bronze-plan.md § 2 for the "
+        f"trade-off matrix."
+    )
+
+
 class ConnectorRegistry:
     """Resolves a :class:`~kairix.core.protocols.SourceConnector` by name.
 
