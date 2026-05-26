@@ -205,24 +205,39 @@ connectors:
 - Envelope shape includes the new `skipped_source_unavailable` counter
 - Sabotage proof per F30: mutate the production handler to emit wrong field names → outcome assertion fails
 
-### Phase 7 — Default `bronze_mode` to streaming + deprecation path (1 commit, separate release)
+### Phase 7 — Default `bronze_mode` to streaming + remove FilesystemBronzeStore (1 commit)
 
-**Targeted release:** v2026.6.0 or later — defer until phases 1-6 ship and operators have validated streaming on dogfood
+**When this fires:** as soon as dogfood validation confirms streaming bronze is equivalent on the four observable axes:
+1. **Ingest correctness** — full SharePoint sync produces the same chunks (count + content hash) under streaming vs filesystem on a small N-item slice
+2. **Re-extract works** — Bug D path executes via re-fetch and produces equivalent ExtractedDocument output
+3. **Disk usage drops as projected** — ~6000× reduction visible on `df` post-sync
+4. **No source-API surprise** — re-fetch latency stays inside source rate limits
+
+This is **not** a calendar-driven deprecation. kairix is pre-release; there's no installed user base running FilesystemBronzeStore in production that needs a migration window. Validation is fast (one dogfood cycle), so default-flip + legacy removal land in the same commit once the four signals are green.
 
 **Files:**
-- `kairix/core/connectors/registry.py` — `build_bronze_from_entry` default changes from "filesystem" to "streaming"
-- `kairix.example.config.yaml` — comment update flagging the default change
-- `docs/upgrades/v2026.6.0.md` — operator-facing migration note
-- `CHANGELOG.md` — explicit deprecation timeline for FilesystemBronzeStore
+- `kairix/core/connectors/registry.py` — `build_bronze_from_entry` defaults to streaming; the `bronze_mode: filesystem` opt-out branch is removed (along with the `FilesystemBronzeStore` reference)
+- `kairix/core/connectors/bronze.py` — **deleted** (FilesystemBronzeStore removed)
+- `kairix/core/connectors/__init__.py` — drop the `FilesystemBronzeStore` export
+- `tests/unit/test_filesystem_bronze*.py` — **deleted** (no longer the production path)
+- `tests/contracts/test_connector_protocols.py` — drop the FilesystemBronzeStore-specific contract tests (StreamingBronzeStore's Protocol-compliance tests remain)
+- `kairix.example.config.yaml` — drop the `bronze_mode` field entirely (streaming is just how it works)
+- `docs/architecture/connector-ingestion-architecture.md` — update §2 + §3 to reflect streaming-only bronze
+- `docs/upgrades/v<next>.md` — operator note: peak disk savings + re-extract latency tradeoff
+- `CHANGELOG.md` — entry covering both the default change and the legacy removal
 
 **Acceptance:**
-- Existing configs that pin `bronze_mode: filesystem` keep working
-- Configs with no `bronze_mode` get streaming
-- Upgrade note covers: peak disk savings, re-extract trade-offs, opt-out instructions
+- Operators with `bronze_mode: filesystem` in config get a fix-pointer error at startup ("`bronze_mode` is no longer accepted — streaming bronze is the only path; remove this line from your config")
+- All other configs work unchanged
+- No FilesystemBronzeStore references remain in the codebase
+- Upgrade note honestly describes the re-extract latency change
 
-### Phase 8 — FilesystemBronzeStore deprecation + removal (separate release, ~3 months later)
-
-After enough deploys have run on streaming, mark FilesystemBronzeStore deprecated. Remove it one release later. F51 (feature-flag retirement) doesn't apply directly (this isn't a flag) but the discipline does — declare a retirement date in the deprecation note.
+**Validation gate (what must be green before merging Phase 7):**
+- Phase 4 has been live on the dogfood VM for at least 24h with `bronze_mode: streaming` configured for SharePoint
+- Disk usage on the dogfood VM has dropped substantially (the 112GB bronze finding from v2026.5.27a2 should be ~MB after a full sync under streaming)
+- A `kairix worker reextract --source-name sharepoint --dry-run --limit 10` against streaming-bronze rows returns successful recovery
+- The eval suite (`bash scripts/run-evals.sh` or equivalent) shows no regression in recall/precision metrics
+- Bronze write latency hasn't increased (streaming should be FASTER — no fsync of the raw blob)
 
 ## 6. Test discipline
 
