@@ -7,6 +7,30 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.27a1] - 2026-05-27 — Markitdown converters, oversized-chunk split, dead-letter recovery (alpha)
+
+> **Upgrading?** Three fixes from the v2026.5.26a1 SharePoint dogfood. No config edits required. If you have dead-letter rows from a pre-upgrade run, the new `kairix worker reextract` recovers them in-place — see the upgrade notes. Full notes: [`docs/upgrades/v2026.5.27a1.md`](docs/upgrades/v2026.5.27a1.md).
+
+### Fixed
+
+- **Markitdown's DOCX, XLSX, PPTX, and Outlook MSG converters are now installed in the production image (#322).** v2026.5.26a1 shipped with `markitdown[pdf]` only; every Office document failed extraction with `MissingDependencyException`. The SharePoint dogfood produced 8,785 dead-lettered items on first run because of this. The Dockerfile now installs `markitdown[pdf,docx,xlsx,pptx,outlook]` so every documented format works out of the box.
+
+- **Silver chunker no longer leaves oversized paragraphs as one giant chunk (Bug B).** A single 2,000-character paragraph used to land as one chunk that overshot the target. The chunker now splits at sentence boundaries first, then word boundaries if a sentence is still oversized, then character boundaries as a last resort — every chunk stays under the target without breaking semantic boundaries unnecessarily. Three new helpers (`_split_long_paragraph`, `_split_long_sentence`, `_split_long_word`) plus a pre-expansion step in `_chunk_markdown`.
+
+### Added
+
+- **`kairix worker reextract --source-name <name>` for dead-letter recovery (Bug D).** Walks `DeadLetterStore.list(source_name)`, looks up each item's `bronze_records` row, re-runs `extractor.extract(raw, mime)` through the currently-registered extractor, runs silver → chunk_writer → entity-graph sink, then clears the dead-letter row. Commits per item so partial recovery is durable. `--dry-run` walks the same logic without committing (useful for sizing the recovery first). `--limit N` caps the number of items processed. Recovers the 122 SharePoint items still in dead-letter after #322 shipped without forcing operators to delete + re-ingest the whole source.
+
+- **`DeadLetterStore.clear(source_name, item_id)`** — caller-owned transaction (matches the rest of the store), idempotent (returns False when no row existed). Used by the reextract path so a clear() that lands alongside a successful chunk write commits atomically.
+
+- **`check_extractor_libraries_importable` onboard check.** Imports every library each registered extractor declares as a dependency, at startup. Missing libraries fail the check with the install command in the remediation. Catches the same regression class as #322 before items hit the dead-letter table.
+
+### Things that haven't changed
+
+- Connector Protocol surface, on-disk bronze layout, chunk-writer contract — all three fixes are purely additive at the API surface.
+- Existing chunks written by v2026.5.26a1 silver remain valid; the chunker change adds splits for oversized paragraphs but doesn't re-shape chunks that were already within target.
+- `DeadLetterStore.record` / `is_poisoned` / `list` — `clear()` is additive.
+
 ## [2026.5.26a1] - 2026-05-26 — Per-chunk commit + cold-start fix + OSS evaluation outcome (alpha)
 
 > **Upgrading?** Straight pull from a25a1 — purely internal changes. No config edits required. Full notes: [`docs/upgrades/v2026.5.26a1.md`](docs/upgrades/v2026.5.26a1.md). Architectural decisions recorded in [`docs/architecture/ADR-018-dlt-connector-framework.md`](docs/architecture/ADR-018-dlt-connector-framework.md) (Wave 1 chunking outcome) and [`docs/architecture/connector-oss-library-evaluation.md`](docs/architecture/connector-oss-library-evaluation.md) (post-ADR-018 reset; 4 OSS frameworks evaluated, all rejected on raw-blob fit).
