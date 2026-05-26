@@ -502,6 +502,7 @@ def reextract(
                     "still_failing": result.still_failing,
                     "skipped_no_bronze": result.skipped_no_bronze,
                     "skipped_no_connector": result.skipped_no_connector,
+                    "skipped_source_unavailable": result.skipped_source_unavailable,
                     "dry_run": dry_run,
                 },
                 indent=2,
@@ -514,7 +515,8 @@ def reextract(
             f"{prefix}reextract source={source_name} "
             f"recovered={result.recovered} still_failing={result.still_failing} "
             f"skipped_no_bronze={result.skipped_no_bronze} "
-            f"skipped_no_connector={result.skipped_no_connector}\n"
+            f"skipped_no_connector={result.skipped_no_connector} "
+            f"skipped_source_unavailable={result.skipped_source_unavailable}\n"
         )
     return 0
 

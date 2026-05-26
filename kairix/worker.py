@@ -600,12 +600,17 @@ class ReextractResult:
     * ``skipped_no_connector`` — items whose source_name isn't
       configured in the current kairix.config.yaml (operator removed
       the connector but old dead_letter rows remain).
+    * ``skipped_source_unavailable`` — Phase 5: streaming-mode rows
+      where ``connector.fetch(item_id)`` raised (item deleted from
+      source, auth failed, source HTTP 5xx, etc.). The dead_letter row
+      is kept for operator triage.
     """
 
     recovered: int
     still_failing: int
     skipped_no_bronze: int
     skipped_no_connector: int
+    skipped_source_unavailable: int = 0  # added in Phase 5
 
 
 def run_reextract_dead_letter(
@@ -671,14 +676,10 @@ def run_reextract_dead_letter(
                 skipped_no_connector=len(rows_no_conn),
             )
 
-        # Phase 4: bronze impl matches the operator's bronze_mode config so
-        # streaming-mode rows are read by StreamingBronzeStore (and fail to
-        # read with the fix-pointer) while filesystem-mode rows are read by
-        # FilesystemBronzeStore. Phase 5 wires the streaming-mode re-fetch
-        # via connector.fetch.
-        from kairix.core.connectors.registry import build_bronze_from_entry
-
-        bronze = build_bronze_from_entry(entry, db=db, bronze_root=bronze_root_resolved)
+        # Phase 5: re-extract reads bronze per-row, not per-config — old
+        # filesystem-shape rows + new streaming-shape rows can coexist in
+        # the same dead_letter table. _read_raw_for_reextract dispatches
+        # on ref.raw_path. No bronze store is constructed at this level.
 
         connector, extractor, silver, chunk_writer, entity_graph_sink = _build_reextract_components(
             source_name=source_name,
@@ -691,7 +692,7 @@ def run_reextract_dead_letter(
         return _reextract_rows(
             rows=rows,
             db=db,
-            bronze=bronze,
+            bronze_root=bronze_root_resolved,
             extractor=extractor,
             silver=silver,
             chunk_writer=chunk_writer,
@@ -748,11 +749,140 @@ def _build_reextract_components(
     return connector, extractor, silver, chunk_writer, entity_graph_sink
 
 
+# Re-extract per-row outcome bucket names. Extracted as module-level
+# constants so the duplicate-string check (F17) doesn't fire on the
+# multiple call/return sites and so the dispatch in _reextract_rows
+# becomes a string-equality switch over named buckets rather than
+# magic-string comparisons.
+_BUCKET_RECOVERED = "recovered"
+_BUCKET_STILL_FAILING = "still_failing"
+_BUCKET_SKIPPED_NO_BRONZE = "skipped_no_bronze"
+_BUCKET_SKIPPED_SOURCE_UNAVAILABLE = "skipped_source_unavailable"
+_BUCKET_OK = "ok"
+
+
+def _reextract_one(
+    *,
+    entry: Any,
+    db: sqlite3.Connection,
+    bronze_root: Path,
+    extractor: Any,
+    silver: Any,
+    chunk_writer: Any,
+    entity_graph_sink: Any,
+    connector: Any,
+    dead_letter: Any,
+    dry_run: bool,
+) -> str:
+    """Re-extract one dead-letter row; return a bucket name for the counter.
+
+    Buckets: 'recovered', 'still_failing', 'skipped_no_bronze',
+    'skipped_source_unavailable'. Extracted from the inner loop of
+    ``_reextract_rows`` to keep that function under the F16 cognitive-
+    complexity threshold.
+    """
+    from kairix.core.protocols import BronzeRef
+
+    row = db.execute(
+        "SELECT raw_path, mime, fetched_at FROM bronze_records WHERE source_name = ? AND item_id = ?",
+        (entry.source_name, entry.item_id),
+    ).fetchone()
+    if row is None:
+        return _BUCKET_SKIPPED_NO_BRONZE
+    db_raw_path = str(row[0])
+    ref = BronzeRef(
+        source_name=entry.source_name,
+        item_id=entry.item_id,
+        raw_path=db_raw_path if db_raw_path else None,
+        mime=str(row[1]),
+        fetched_at=str(row[2]),
+    )
+    raw_or_none, mime_or_none, outcome = _read_raw_for_reextract(
+        ref=ref,
+        connector=connector,
+        db=db,
+        bronze_root=bronze_root,
+        item_id=entry.item_id,
+    )
+    if outcome != _BUCKET_OK:
+        return outcome
+    assert raw_or_none is not None and mime_or_none is not None
+    try:
+        doc = extractor.extract(raw_or_none, mime_or_none)
+        silver_out = silver.process(
+            ref,
+            doc,
+            source_uri=connector.source_link(entry.item_id),
+            source_modified_at=str(row[2]),
+            sensitivity=connector.sensitivity_for(entry.item_id),
+        )
+        chunk_writer.upsert(silver_out.chunks)
+        entity_graph_sink.stage(silver_out.entity_signals)
+        dead_letter.clear(entry.source_name, entry.item_id)
+        if not dry_run:
+            db.commit()
+        else:
+            db.rollback()
+        return _BUCKET_RECOVERED
+    except Exception:
+        db.rollback()
+        return _BUCKET_STILL_FAILING
+
+
+def _read_raw_for_reextract(
+    *,
+    ref: Any,
+    connector: Any,
+    db: sqlite3.Connection,
+    bronze_root: Path,
+    item_id: str,
+) -> tuple[bytes | None, str | None, str]:
+    """Dual-mode read for the Phase 5 re-extract loop.
+
+    Returns ``(raw, mime, outcome)`` where outcome is one of:
+    - ``"ok"`` — raw + mime are populated; caller proceeds with extract
+    - ``"skipped_source_unavailable"`` — streaming-row connector.fetch raised
+    - ``"still_failing"`` — filesystem-row bronze.read raised
+
+    Extracted to keep ``_reextract_rows`` under the F16 cognitive-complexity
+    threshold. The branching logic + rollback handling lives here; the
+    outer loop only handles the counter bookkeeping.
+    """
+    if ref.raw_path is None:
+        try:
+            raw_artefact = connector.fetch(item_id)
+            return raw_artefact.raw, raw_artefact.mime, _BUCKET_OK
+        except Exception:
+            db.rollback()
+            return None, None, _BUCKET_SKIPPED_SOURCE_UNAVAILABLE
+    try:
+        raw, mime = _read_filesystem_bronze(db, bronze_root, ref)
+        return raw, mime, _BUCKET_OK
+    except Exception:
+        db.rollback()
+        return None, None, _BUCKET_STILL_FAILING
+
+
+def _read_filesystem_bronze(db: sqlite3.Connection, bronze_root: Path, ref: Any) -> tuple[bytes, str]:
+    """Read a filesystem-shape BronzeRef regardless of current bronze_mode.
+
+    Cross-mode coexistence helper for the Phase 5 re-extract path: old
+    dead-letter rows written before the operator flipped to
+    bronze_mode: streaming still have on-disk blobs. Reading them
+    requires a FilesystemBronzeStore even when the rest of the worker
+    is running streaming-mode.
+    """
+    from kairix.core.connectors import FilesystemBronzeStore
+
+    fs_store = FilesystemBronzeStore(db, bronze_root)
+    return fs_store.read(ref)
+
+
 def _reextract_rows(
     *,
     rows: tuple[Any, ...],
     db: sqlite3.Connection,
-    bronze: Any,
+    bronze_root: Path,
     extractor: Any,
     silver: Any,
     chunk_writer: Any,
@@ -763,63 +893,39 @@ def _reextract_rows(
 ) -> ReextractResult:
     """Inner loop of :func:`run_reextract_dead_letter` — split out so the
     outer function's setup stays under F16 cognitive complexity."""
-    from kairix.core.protocols import BronzeRef
 
     recovered = 0
     still_failing = 0
     skipped_no_bronze = 0
+    skipped_source_unavailable = 0
 
     for entry in rows:
-        # Look up the bronze_records row.
-        row = db.execute(
-            "SELECT raw_path, mime, fetched_at FROM bronze_records WHERE source_name = ? AND item_id = ?",
-            (entry.source_name, entry.item_id),
-        ).fetchone()
-        if row is None:
-            skipped_no_bronze += 1
-            continue
-        # Phase 3 — normalise empty-string DB sentinel to Python None so the
-        # downstream bronze.read raises the streaming-row ValueError with
-        # its fix-pointer (rather than falling through to an opaque
-        # IsADirectoryError trying to read bronze_root + ""). Phase 5
-        # replaces this branch with a re-fetch via connector.fetch.
-        db_raw_path = str(row[0])
-        ref = BronzeRef(
-            source_name=entry.source_name,
-            item_id=entry.item_id,
-            raw_path=db_raw_path if db_raw_path else None,
-            mime=str(row[1]),
-            fetched_at=str(row[2]),
+        bucket = _reextract_one(
+            entry=entry,
+            db=db,
+            bronze_root=bronze_root,
+            extractor=extractor,
+            silver=silver,
+            chunk_writer=chunk_writer,
+            entity_graph_sink=entity_graph_sink,
+            connector=connector,
+            dead_letter=dead_letter,
+            dry_run=dry_run,
         )
-        try:
-            raw, mime = bronze.read(ref)
-            doc = extractor.extract(raw, mime)
-            silver_out = silver.process(
-                ref,
-                doc,
-                source_uri=connector.source_link(entry.item_id),
-                source_modified_at=str(row[2]),  # bronze fetched_at as proxy when ChangeEvent.modified_at is gone
-                sensitivity=connector.sensitivity_for(entry.item_id),
-            )
-            chunk_writer.upsert(silver_out.chunks)
-            entity_graph_sink.stage(silver_out.entity_signals)
-            dead_letter.clear(entry.source_name, entry.item_id)
-            if not dry_run:
-                db.commit()
-            else:
-                db.rollback()
+        if bucket == _BUCKET_RECOVERED:
             recovered += 1
-        except Exception:
-            db.rollback()
+        elif bucket == _BUCKET_STILL_FAILING:
             still_failing += 1
-            # Don't bump failure_count in dead_letter — the operator
-            # explicitly asked for re-extract; treating their attempt
-            # as another poisoning would defeat the recovery.
+        elif bucket == _BUCKET_SKIPPED_NO_BRONZE:
+            skipped_no_bronze += 1
+        elif bucket == _BUCKET_SKIPPED_SOURCE_UNAVAILABLE:
+            skipped_source_unavailable += 1
     return ReextractResult(
         recovered=recovered,
         still_failing=still_failing,
         skipped_no_bronze=skipped_no_bronze,
         skipped_no_connector=0,
+        skipped_source_unavailable=skipped_source_unavailable,
     )
 
 
