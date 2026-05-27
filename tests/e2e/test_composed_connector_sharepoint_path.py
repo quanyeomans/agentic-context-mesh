@@ -196,6 +196,9 @@ class _FakeSharePointConnector:
     def sensitivity_for(self, _item_id: str) -> Sensitivity:
         return self._sensitivity
 
+    def next_cursor(self) -> str | None:
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Per-format orchestration helper

@@ -134,6 +134,9 @@ class _FakeNotionConnectorForE2E:
     def sensitivity_for(self, _item_id: str) -> Sensitivity:
         return self._sensitivity
 
+    def next_cursor(self) -> str | None:
+        return None
+
 
 def _build_db_with_schema(db_path: Path) -> sqlite3.Connection:
     db = sqlite3.connect(str(db_path), timeout=10.0)

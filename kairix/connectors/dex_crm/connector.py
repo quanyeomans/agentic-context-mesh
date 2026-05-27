@@ -258,9 +258,11 @@ class DexCrmConnector:
         # Track high-water-mark for next_cursor(); preserve prior cursor
         # on a zero-event drain so the orchestrator's commit-and-flush
         # doesn't clobber a real cursor with None.
-        self._last_max_modified_at = (
-            max(ev.modified_at for ev in events) if events else (cursor if cursor else self._last_max_modified_at)
-        )
+        if events:
+            self._last_max_modified_at = max(ev.modified_at for ev in events)
+        elif cursor:
+            self._last_max_modified_at = cursor
+        # else: keep self._last_max_modified_at as-is
         return iter(events)
 
     def next_cursor(self) -> str | None:

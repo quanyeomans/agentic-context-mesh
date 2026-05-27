@@ -188,6 +188,9 @@ class _FakeSharePointConnector:
     def sensitivity_for(self, _item_id: str) -> Sensitivity:
         return self._sensitivity
 
+    def next_cursor(self) -> str | None:
+        return None
+
 
 def _make_passthrough_extractor() -> Any:
     """Return a real production :class:`PassthroughExtractor` for the alpha path.
