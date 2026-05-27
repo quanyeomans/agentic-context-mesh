@@ -5,7 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
-## [Unreleased] — Next production release after v2026.5.18
+## [Unreleased]
+
+## [2026.5.28] - 2026-05-28 — Five new connectors, streaming storage, and bug fixes from the alpha cycle
 
 > Operator-facing changes since v2026.5.18 in one entry. Internal development history (per-alpha notes, architecture refactors not visible to operators) lives in git and `docs/upgrades/_dev/`.
 
