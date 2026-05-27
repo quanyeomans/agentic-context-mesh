@@ -163,6 +163,15 @@ python3 "${SCRIPT_DIR}/check_f58_hierarchy_parent_before_child.py" || overall=1
 # F61 — _SqliteChunkWriter constructor lives only under kairix/core/connectors/ (CollectionRouter singleton)
 python3 "${SCRIPT_DIR}/check_f61_collection_router_singleton.py" || overall=1
 
+# F62 — stateful component (tick / batch loop) requires multi-tick idempotency test
+python3 "${SCRIPT_DIR}/check_f62_stateful_multi_tick.py" || overall=1
+
+# F63 — unbounded .fetchall() requires LIMIT or rationale comment
+python3 "${SCRIPT_DIR}/check_f63_unbounded_fetchall.py" || overall=1
+
+# F64 — external HTTP client plugin requires rate-limit / Retry-After test
+python3 "${SCRIPT_DIR}/check_f64_external_api_rate_limit.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1

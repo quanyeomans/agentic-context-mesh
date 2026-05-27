@@ -1,0 +1,14 @@
+kairix/core/connectors/cc_pair.py
+kairix/core/connectors/collection_router.py
+kairix/core/connectors/dead_letter.py
+kairix/core/connectors/scope_profile_resolver.py
+kairix/core/connectors/streaming_bronze.py
+kairix/core/db/integrity.py
+kairix/core/db/repository.py
+kairix/core/embed/embed.py
+kairix/core/embed/schema.py
+kairix/core/facts/store.py
+kairix/core/features/topology_v2_status.py
+kairix/core/maintenance/scheduler.py
+kairix/core/search/vec_index.py
+kairix/quality/eval/auto_gold.py
