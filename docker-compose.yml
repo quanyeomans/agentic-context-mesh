@@ -51,14 +51,20 @@ services:
       timeout: 5s
       retries: 3
       start_period: 120s
-    # Resource limits — sized for the v2026.5.10.5 async-tool refactor
-    # which lets concurrent /mcp calls run on separate threads (#177).
-    # Steady-state RSS observed at ~1.2 GB; 3 GB allows headroom for
-    # bursts and rerank-model loading. CPU cap prevents kairix from
-    # monopolising the host when neo4j or other tenants need compute.
-    mem_limit: 3g
-    mem_reservation: 1500m
-    cpus: 4.0
+    # Resource limits — sized for a 4-vCPU / 8-GiB host (smallest deployment
+    # we test against). Sum of all service ceilings must stay below host
+    # so OS + Azure agent + cloudflared tunnel always have headroom; without
+    # this any one container can saturate the host and make the VM
+    # unreachable (#330 — two production incidents 2026-05-27).
+    # MCP-serving path keeps the largest slice so agent calls stay responsive.
+    # Operators on bigger hosts override via .env (KAIRIX_*_CPUS / *_MEM vars).
+    mem_limit: ${KAIRIX_MCP_MEM_LIMIT:-3g}
+    mem_reservation: ${KAIRIX_MCP_MEM_RESERVATION:-1500m}
+    cpus: ${KAIRIX_MCP_CPUS:-1.5}
+    # IO priority — agent-facing path gets default cgroup weight (500) so
+    # the worker (set to 100 below) can never starve MCP responses for disk.
+    blkio_config:
+      weight: 500
     # Bound /tmp on tmpfs so connector fetches (e.g. SharePoint binary
     # downloads, markitdown PDF conversions) cannot spill onto the host
     # root filesystem and fill the OS disk.
@@ -85,11 +91,20 @@ services:
       neo4j:
         condition: service_healthy
     restart: unless-stopped
-    # Worker steady-state RSS observed at ~150 MB. 1 GB cap is plenty;
-    # cpus: 2.0 lets the embed pipeline burst without saturating the host.
-    mem_limit: 1g
-    mem_reservation: 256m
-    cpus: 2.0
+    # Worker steady-state RSS observed at ~150 MB. 1 GB cap is plenty.
+    # CPU + IO ceilings sized so the worker can NEVER take down the host
+    # regardless of any code bug or unbounded workload — two production
+    # incidents on 2026-05-27 both surfaced this gap (#330).
+    # Operators on bigger hosts override via .env.
+    mem_limit: ${KAIRIX_WORKER_MEM_LIMIT:-1g}
+    mem_reservation: ${KAIRIX_WORKER_MEM_RESERVATION:-256m}
+    cpus: ${KAIRIX_WORKER_CPUS:-1.5}
+    # blkio weight 100 (default 500) puts the worker LAST for disk
+    # contention — neo4j (the worker's dependency) + kairix-1 (the
+    # agent-facing path) always win disk bandwidth when the worker is
+    # mid-ingest / mid-recovery.
+    blkio_config:
+      weight: ${KAIRIX_WORKER_IO_WEIGHT:-100}
     # Same /tmp tmpfs rationale as kairix above — connector binary
     # fetches and extractor temp files stay bounded by RAM, never the OS
     # disk. 2 GB sized for SharePoint single-file extraction headroom.
@@ -118,9 +133,14 @@ services:
     # Neo4j heap is configured via NEO4J_server_memory_heap_max_size (set
     # via env var if you tune it). Container hard cap below provides a
     # backstop so a runaway neo4j can't OOM the host.
-    mem_limit: 2g
-    mem_reservation: 512m
-    cpus: 2.0
+    # Sum across kairix (1.5) + worker (1.5) + neo4j (0.75) = 3.75 cpus
+    # on a 4-vCPU host — leaves 0.25 for OS + Azure agent + cloudflared
+    # so the host stays reachable for diagnostics under any workload.
+    mem_limit: ${KAIRIX_NEO4J_MEM_LIMIT:-2g}
+    mem_reservation: ${KAIRIX_NEO4J_MEM_RESERVATION:-512m}
+    cpus: ${KAIRIX_NEO4J_CPUS:-0.75}
+    blkio_config:
+      weight: 500
 
 volumes:
   kairix-data:
