@@ -140,7 +140,7 @@ def test_reextract_mixed_streaming_and_filesystem_rows(tmp_path: Path) -> None:
     Sabotage proof: invert the branching condition (``if ref.raw_path is not None``);
     both items fail because the wrong code path runs for each.
     """
-    from kairix.core.connectors import FilesystemBronzeStore
+    from kairix.core.connectors import StreamingBronzeStore
 
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -156,7 +156,7 @@ def test_reextract_mixed_streaming_and_filesystem_rows(tmp_path: Path) -> None:
         "obsidian", "streaming-note.md", (vault / "streaming-note.md").read_bytes(), "text/markdown"
     )
     # filesystem-note: written by FilesystemBronzeStore (raw_path = real path)
-    FilesystemBronzeStore(db, bronze_root).write(
+    StreamingBronzeStore(db).write(
         "obsidian",
         "filesystem-note.md",
         (vault / "filesystem-note.md").read_bytes(),

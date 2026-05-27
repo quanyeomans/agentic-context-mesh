@@ -50,14 +50,14 @@ def test_connector_write_then_fts_bm25_finds_chunk(in_memory_db_with_bronze: tup
     Pins the round-trip so any future writer implementation must clear
     this bar.
     """
-    db, bronze_root = in_memory_db_with_bronze
+    db, _bronze_root = in_memory_db_with_bronze
     connector_name = "obsidian"
     fake = FakeSourceConnector(
         name=connector_name,
         events=[ChangeEvent(op="created", item_id="note-a.md", modified_at=_now())],
         content={"note-a.md": b"# Architecture\n\nThe kairix architecture is layered."},
     )
-    pipeline = build_connector_pipeline(db=db, bronze_root=bronze_root, collection=connector_name)
+    pipeline = build_connector_pipeline(db=db, collection=connector_name)
     result = pipeline.run_batch(fake, FakeExtractor())
     db.commit()
 
@@ -83,7 +83,7 @@ def test_connector_write_documents_and_fts_counts_match(
 ) -> None:
     """1:1 invariant — every active document the connector wrote must have a
     corresponding FTS row. (The IM-6 gap was 68,814 docs and 0 FTS rows.)"""
-    db, bronze_root = in_memory_db_with_bronze
+    db, _bronze_root = in_memory_db_with_bronze
     fake = FakeSourceConnector(
         name="obsidian",
         events=[
@@ -97,7 +97,7 @@ def test_connector_write_documents_and_fts_counts_match(
             "c.md": b"third file content",
         },
     )
-    pipeline = build_connector_pipeline(db=db, bronze_root=bronze_root, collection="obsidian")
+    pipeline = build_connector_pipeline(db=db, collection="obsidian")
     pipeline.run_batch(fake, FakeExtractor())
     db.commit()
 

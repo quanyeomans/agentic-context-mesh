@@ -38,7 +38,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.core.connectors.bronze import FilesystemBronzeStore
+from kairix.core.connectors import StreamingBronzeStore
 from kairix.core.connectors.cursor_store import CursorStore
 from kairix.core.connectors.dead_letter import DeadLetterStore
 from kairix.core.connectors.pipeline import BatchResult, ConnectorPipeline
@@ -65,7 +65,7 @@ def _build_pipeline(
     dead_letter_threshold: int = 3,
 ) -> tuple[ConnectorPipeline, FakeChunkWriter, FakeEntityGraphSink]:
     """Construct the pipeline with real stores + capture-only fakes for the writer/sink."""
-    bronze = FilesystemBronzeStore(db, bronze_root)
+    bronze = StreamingBronzeStore(db)
     silver = DefaultSilverProcessor()
     cursor_store = CursorStore(db)
     dead_letter = DeadLetterStore(db)
@@ -253,7 +253,7 @@ def test_silver_failure_rolls_back_entire_batch(tmp_path: Path) -> None:
 
     db = _open_db(tmp_path)
     try:
-        bronze = FilesystemBronzeStore(db, tmp_path / "bronze")
+        bronze = StreamingBronzeStore(db)
         cursor_store = CursorStore(db)
         dead_letter = DeadLetterStore(db)
         chunk_writer = FakeChunkWriter()

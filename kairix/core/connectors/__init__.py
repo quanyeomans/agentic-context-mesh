@@ -7,7 +7,6 @@ ChunkerRegistry, ScopeProfileResolver, ResultEnvelope. See
 
 from __future__ import annotations
 
-from kairix.core.connectors.bronze import FilesystemBronzeStore
 from kairix.core.connectors.cc_pair import (
     create_cc_pair,
     get_cc_pair,
@@ -57,7 +56,6 @@ __all__ = [
     "DefaultSilverProcessor",
     "ExcludedCollection",
     "ExtractorRegistry",
-    "FilesystemBronzeStore",
     "ResolvedCollection",
     "ResolvedScope",
     "ResultChunk",

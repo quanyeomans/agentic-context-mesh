@@ -1,17 +1,18 @@
-"""Tests for ``build_bronze_from_entry`` — Phase 4 of streaming-bronze (#27).
+"""Tests for ``build_bronze_from_entry`` — streaming-bronze Phase 7 shape.
 
-Mirror of ``test_build_extractor_from_entry.py`` for the bronze layer.
-F1-clean (no monkeypatch) and exercises the production helper directly.
+The helper always returns a StreamingBronzeStore. Operators who keep
+the legacy ``bronze_mode`` config field get a fix-pointer error so the
+removal is obvious at deploy time rather than at first sync.
+
+F1-clean.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
 import pytest
 
-from kairix.core.connectors.bronze import FilesystemBronzeStore
 from kairix.core.connectors.registry import build_bronze_from_entry
 from kairix.core.connectors.streaming_bronze import StreamingBronzeStore
 
@@ -20,58 +21,57 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(":memory:")
     from kairix.core.db.schema import create_schema
 
+    conn = sqlite3.connect(":memory:")
     create_schema(conn)
     return conn
 
 
-def test_default_returns_filesystem_bronze_store(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """Entry with no ``bronze_mode`` field defaults to FilesystemBronzeStore.
+def test_empty_entry_returns_streaming_store(db: sqlite3.Connection) -> None:
+    """No config fields → streaming bronze (the only persistence model).
 
-    Sabotage proof: change the default ``"filesystem"`` to ``"streaming"``;
-    the isinstance check fails because StreamingBronzeStore returns instead.
+    Sabotage proof: change the return to None; the isinstance check fails.
     """
-    store = build_bronze_from_entry({}, db=db, bronze_root=tmp_path / "bronze")
-    assert isinstance(store, FilesystemBronzeStore)
-
-
-def test_explicit_filesystem_returns_filesystem_store(db: sqlite3.Connection, tmp_path: Path) -> None:
-    store = build_bronze_from_entry({"bronze_mode": "filesystem"}, db=db, bronze_root=tmp_path / "bronze")
-    assert isinstance(store, FilesystemBronzeStore)
-
-
-def test_streaming_returns_streaming_store(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """``bronze_mode: streaming`` opts into metadata-only persistence.
-
-    Sabotage proof: change the ``mode == "streaming"`` branch to return
-    FilesystemBronzeStore; this test fails because the isinstance check
-    on StreamingBronzeStore fails.
-    """
-    store = build_bronze_from_entry({"bronze_mode": "streaming"}, db=db, bronze_root=tmp_path / "bronze")
+    store = build_bronze_from_entry({}, db=db)
     assert isinstance(store, StreamingBronzeStore)
 
 
-def test_unknown_mode_raises_with_fix_pointer(db: sqlite3.Connection, tmp_path: Path) -> None:
-    """Operator typo fails fast with a fix-pointer error per F21.
+def test_entry_with_only_extractor_field_returns_streaming_store(db: sqlite3.Connection) -> None:
+    """An entry with unrelated fields (extractor, config, etc.) still
+    yields the streaming bronze — the helper ignores everything except
+    the obsolete ``bronze_mode`` field.
+    """
+    entry = {
+        "name": "obsidian",
+        "extractor": "passthrough",
+        "config": {"vault_root": "/some/path"},
+    }
+    store = build_bronze_from_entry(entry, db=db)
+    assert isinstance(store, StreamingBronzeStore)
 
-    Sabotage proof: change ``raise ValueError`` to ``return FilesystemBronzeStore(...)``;
+
+def test_legacy_bronze_mode_field_raises_with_fix_pointer(db: sqlite3.Connection) -> None:
+    """Operators with ``bronze_mode: filesystem`` or ``bronze_mode: streaming``
+    in their pre-Phase-7 config get an error at deploy time directing them
+    to remove the field. The fix-pointer message references the plan doc.
+
+    Sabotage proof: replace ``raise ValueError`` with a silent return;
     the test fails because no exception fires.
     """
-    with pytest.raises(ValueError, match="bronze_mode must be 'streaming' or 'filesystem'"):
-        build_bronze_from_entry({"bronze_mode": "potato"}, db=db, bronze_root=tmp_path / "bronze")
+    with pytest.raises(ValueError, match="'bronze_mode' config field is no longer accepted"):
+        build_bronze_from_entry({"bronze_mode": "filesystem"}, db=db)
+    with pytest.raises(ValueError, match="streaming-bronze-plan"):
+        build_bronze_from_entry({"bronze_mode": "streaming"}, db=db)
 
 
-def test_streaming_store_ignores_bronze_root(db: sqlite3.Connection) -> None:
-    """Streaming mode doesn't need a bronze_root since it writes no files.
-    The helper still accepts it (uniform call surface) but doesn't pass it
-    to StreamingBronzeStore's constructor.
-
-    Sabotage proof: change StreamingBronzeStore branch to pass bronze_root
-    as a positional arg; the test fails with TypeError (no such param).
+def test_streaming_store_writes_no_disk_blobs(db: sqlite3.Connection) -> None:
+    """End-to-end sanity: the returned store satisfies the BronzeStore
+    Protocol and writes a metadata row without touching disk.
     """
-    store = build_bronze_from_entry({"bronze_mode": "streaming"}, db=db, bronze_root=Path("/nonexistent/path"))
-    # Streaming store works fine — proves bronze_root wasn't used
-    ref = store.write("src", "item-1", b"raw", "text/plain")
-    assert ref.raw_path is None
+    store = build_bronze_from_entry({}, db=db)
+    ref = store.write("src", "item-1", b"raw bytes", "text/plain")
+    assert ref.source_name == "src"
+    assert ref.item_id == "item-1"
+    assert ref.raw_path is None  # streaming sentinel
+    assert ref.content_hash and len(ref.content_hash) == 64

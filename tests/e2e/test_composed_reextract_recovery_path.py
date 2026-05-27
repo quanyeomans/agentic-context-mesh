@@ -97,10 +97,10 @@ def test_composed_reextract_recovery_full_path(tmp_path: Path) -> None:
     # monkeypatching of the registry, which violates F1). Instead, we
     # simulate the dead-letter state by writing bronze rows + dead-letter
     # rows directly — this is the post-failure state Bug D recovers from.
-    from kairix.core.connectors import DeadLetterStore, FilesystemBronzeStore
+    from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 
     db = sqlite3.connect(str(db_path), timeout=10.0)
-    bronze = FilesystemBronzeStore(db, bronze_root)
+    bronze = StreamingBronzeStore(db)
     for i in range(3):
         path = document_root / f"note-{i}.md"
         bronze.write("obsidian", f"note-{i}.md", path.read_bytes(), "text/markdown")
@@ -153,9 +153,11 @@ def test_composed_reextract_recovery_full_path(tmp_path: Path) -> None:
 
 @pytest.mark.e2e
 def test_composed_reextract_recovery_with_mixed_failure_modes(tmp_path: Path) -> None:
-    """Reextract composition under mixed pre-states:
-      - note-0: bronze + dead_letter, raw file present (recovers cleanly)
-      - note-1: bronze + dead_letter, raw file MANUALLY UNLINKED (still_failing)
+    """Reextract composition under mixed pre-states (Phase 7 shape):
+      - note-0: streaming bronze + dead_letter, source file present
+        (recovers via connector.fetch re-fetch)
+      - note-1: streaming bronze + dead_letter, source file DELETED
+        (skipped_source_unavailable — re-fetch raises)
       - note-2: dead_letter only, no bronze row (skipped_no_bronze)
 
     Asserts the counter buckets land correctly through the real composition.
@@ -169,24 +171,21 @@ def test_composed_reextract_recovery_with_mixed_failure_modes(tmp_path: Path) ->
     db = sqlite3.connect(str(db_path), timeout=10.0)
     create_schema(db)
 
-    from kairix.core.connectors import DeadLetterStore, FilesystemBronzeStore
+    from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 
-    bronze = FilesystemBronzeStore(db, bronze_root)
-    # note-0: bronze + dead_letter, raw file present
+    bronze = StreamingBronzeStore(db)
+    # note-0: streaming bronze + dead_letter, source file present
     bronze.write("obsidian", "note-0.md", (document_root / "note-0.md").read_bytes(), "text/markdown")
     DeadLetterStore(db).record("obsidian", "note-0.md", "boot fail")
-    # note-1: bronze + dead_letter, raw file present (we delete it below)
+    # note-1: streaming bronze + dead_letter, source file present then deleted
     bronze.write("obsidian", "note-1.md", (document_root / "note-1.md").read_bytes(), "text/markdown")
     DeadLetterStore(db).record("obsidian", "note-1.md", "boot fail")
     # note-2: dead_letter only, no bronze
     DeadLetterStore(db).record("obsidian", "note-2.md", "boot fail")
     db.commit()
 
-    # Now unlink note-1's raw file
-    n1_path = db.execute(
-        "SELECT raw_path FROM bronze_records WHERE source_name='obsidian' AND item_id='note-1.md'"
-    ).fetchone()[0]
-    (bronze_root / n1_path).unlink()
+    # Delete note-1's source file → connector.fetch will fail on re-fetch
+    (document_root / "note-1.md").unlink()
 
     config_path = _write_config(tmp_path, document_root, extractor_name="passthrough")
     result = run_reextract_dead_letter(
@@ -196,7 +195,9 @@ def test_composed_reextract_recovery_with_mixed_failure_modes(tmp_path: Path) ->
         config_path=config_path,
     )
     assert result.recovered == 1, f"only note-0 should recover; got {result}"
-    assert result.still_failing == 1, f"note-1 (missing raw) should still_fail; got {result}"
+    assert result.skipped_source_unavailable == 1, (
+        f"note-1 (source deleted) should skipped_source_unavailable; got {result}"
+    )
     assert result.skipped_no_bronze == 1, f"note-2 (no bronze row) should skip_no_bronze; got {result}"
 
     db.close()

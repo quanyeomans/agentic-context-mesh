@@ -149,7 +149,7 @@ def test_flag_on_off_branch_factory_pipeline_unchanged(tmp_path: Path) -> None:
     db = _build_db(tmp_path)
     bronze_root = tmp_path / "bronze"
     bronze_root.mkdir()
-    pipeline: Any = build_connector_pipeline(db=db, bronze_root=bronze_root, collection="obsidian-personal")
+    pipeline: Any = build_connector_pipeline(db=db, collection="obsidian-personal")
     assert pipeline is not None
     # Pipeline carries a chunk_writer attribute exposing .upsert.
     assert hasattr(pipeline, "_chunk_writer") or hasattr(pipeline, "chunk_writer")

@@ -21,7 +21,6 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Iterator, Sequence
 from datetime import datetime
-from pathlib import Path
 
 import pytest
 
@@ -192,23 +191,9 @@ class TestConnectorImplementationsExist:
     with a NotImplementedError stub fails here at the contract gate.
     """
 
-    @pytest.mark.contract
-    def test_filesystem_bronze_store_constructs(self, tmp_path: Path) -> None:
-        import sqlite3
-
-        from kairix.core.connectors.bronze import FilesystemBronzeStore
-        from kairix.core.db.schema import create_schema
-
-        db = sqlite3.connect(":memory:")
-        try:
-            create_schema(db)
-            store = FilesystemBronzeStore(db, tmp_path)
-            ref = store.write("src", "item-1", b"hello", "text/plain")
-            assert ref.source_name == "src"
-            assert ref.item_id == "item-1"
-            assert ref.mime == "text/plain"
-        finally:
-            db.close()
+    # Phase 7 of streaming-bronze (#27) removed FilesystemBronzeStore;
+    # the streaming-bronze-store-satisfies-protocol test below covers
+    # the only remaining BronzeStore implementation.
 
     @pytest.mark.contract
     def test_streaming_bronze_store_satisfies_protocol(self) -> None:
@@ -237,47 +222,11 @@ class TestConnectorImplementationsExist:
         finally:
             db.close()
 
-    @pytest.mark.contract
-    def test_both_bronze_stores_yield_identical_replay_shape(self, tmp_path: Path) -> None:
-        """Caller-facing equivalence — replay() yields BronzeRefs that
-        carry the same (source_name, item_id, mime, fetched_at) fields
-        regardless of which impl wrote them. Only ``raw_path`` differs
-        (sentinel vs real path). This is the contract that lets the
-        Bug D re-extract path handle both impls with one code path
-        (Phase 5 of streaming-bronze).
-
-        Sabotage proof: change StreamingBronzeStore.replay to yield
-        BronzeRefs with item_id=None → field-equality check fails.
-        """
-        import sqlite3
-
-        from kairix.core.connectors.bronze import FilesystemBronzeStore
-        from kairix.core.connectors.streaming_bronze import StreamingBronzeStore
-        from kairix.core.db.schema import create_schema
-
-        db_a = sqlite3.connect(":memory:")
-        db_b = sqlite3.connect(":memory:")
-        try:
-            create_schema(db_a)
-            create_schema(db_b)
-            fs_store = FilesystemBronzeStore(db_a, tmp_path)
-            st_store = StreamingBronzeStore(db_b)
-            fs_store.write("src", "item-1", b"hello", "text/plain")
-            st_store.write("src", "item-1", b"hello", "text/plain")
-            fs_refs = list(fs_store.replay("src"))
-            st_refs = list(st_store.replay("src"))
-            assert len(fs_refs) == len(st_refs) == 1
-            assert fs_refs[0].source_name == st_refs[0].source_name
-            assert fs_refs[0].item_id == st_refs[0].item_id
-            assert fs_refs[0].mime == st_refs[0].mime
-            # Phase 3 raw_path normalisation: filesystem yields the on-disk
-            # relative path (non-empty string); streaming yields Python None.
-            assert fs_refs[0].raw_path is not None
-            assert fs_refs[0].raw_path != ""
-            assert st_refs[0].raw_path is None
-        finally:
-            db_a.close()
-            db_b.close()
+    # Phase 7 of streaming-bronze removed FilesystemBronzeStore so
+    # cross-impl equivalence is no longer a meaningful contract — the
+    # single StreamingBronzeStore impl is covered by the Protocol
+    # conformance test above + the unit tests in
+    # tests/unit/test_streaming_bronze.py.
 
     @pytest.mark.contract
     def test_default_silver_processor_returns_chunks(self) -> None:

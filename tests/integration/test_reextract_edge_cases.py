@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kairix.core.connectors import DeadLetterStore, FilesystemBronzeStore
+from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 from kairix.core.db.schema import create_schema
 from kairix.worker import ReextractResult, run_reextract_dead_letter
 
@@ -55,21 +55,19 @@ def _write_obsidian_config(tmp_path: Path, vault: Path, extractor_name: str = "p
 # ---------------------------------------------------------------------------
 
 
-def test_reextract_when_bronze_row_present_but_raw_file_missing(tmp_path: Path) -> None:
-    """Pre-state: a bronze_records row + dead_letter row both exist,
-    but the raw file on disk was deleted (e.g. by external sweep, by
-    operator mistake, by #316 bronze_ttl_gc deleting a still-poisoned
-    item). Re-extract must surface this gracefully via still_failing
-    counter, NOT crash with FileNotFoundError.
+def test_reextract_streaming_row_when_source_file_missing(tmp_path: Path) -> None:
+    """Pre-state: a streaming bronze_records row + dead_letter row exist,
+    but the source file no longer exists (operator deleted from source,
+    SharePoint removed, etc.). Re-extract must surface this gracefully
+    via the skipped_source_unavailable counter, NOT crash.
 
-    Current behaviour assertion: the FilesystemBronzeStore.read raises
-    FileNotFoundError; the reextract loop's try/except catches Exception
-    and increments still_failing. Verifies the catch-all in
-    ``_reextract_rows`` is wide enough.
+    Phase 7 contract: streaming bronze has no on-disk bytes; the
+    equivalent failure mode is connector.fetch failing during re-fetch.
 
-    Sabotage proof: narrow the except in _reextract_rows to
+    Sabotage proof: narrow the except in _read_raw_for_reextract to
     ``except KeyError``; this test fails because FileNotFoundError
-    escapes the loop and aborts the whole reextract.
+    escapes and the test sees still_failing=1 instead of
+    skipped_source_unavailable=1.
     """
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -79,19 +77,12 @@ def test_reextract_when_bronze_row_present_but_raw_file_missing(tmp_path: Path) 
 
     db = sqlite3.connect(":memory:")
     create_schema(db)
-    # Write bronze + dead_letter row
-    bronze = FilesystemBronzeStore(db, bronze_root)
-    bronze.write("obsidian", "alpha.md", note.read_bytes(), "text/markdown")
+    StreamingBronzeStore(db).write("obsidian", "alpha.md", note.read_bytes(), "text/markdown")
     DeadLetterStore(db).record("obsidian", "alpha.md", "boot failure")
     db.commit()
 
-    # Sabotage the disk: delete the raw file but leave the bronze_records row
-    rel_path = db.execute(
-        "SELECT raw_path FROM bronze_records WHERE source_name='obsidian' AND item_id='alpha.md'"
-    ).fetchone()[0]
-    abs_path = bronze_root / rel_path
-    abs_path.unlink()
-    assert not abs_path.exists()
+    # Now delete the source file — connector.fetch will fail on re-fetch
+    note.unlink()
 
     config_path = _write_obsidian_config(tmp_path, vault)
     result = run_reextract_dead_letter(
@@ -101,10 +92,12 @@ def test_reextract_when_bronze_row_present_but_raw_file_missing(tmp_path: Path) 
         config_path=config_path,
     )
 
-    # Production should still_failing (not crash); the row remains for operator triage
     assert isinstance(result, ReextractResult)
-    assert result.still_failing == 1, f"missing raw file should count as still_failing, got {result}"
+    assert result.skipped_source_unavailable == 1, (
+        f"deleted source should count as skipped_source_unavailable, got {result}"
+    )
     assert result.recovered == 0
+    assert result.still_failing == 0
 
     db.close()
 
@@ -133,7 +126,7 @@ def test_reextract_uses_currently_registered_extractor(tmp_path: Path) -> None:
 
     db = sqlite3.connect(":memory:")
     create_schema(db)
-    bronze = FilesystemBronzeStore(db, bronze_root)
+    bronze = StreamingBronzeStore(db)
     bronze.write("obsidian", "alpha.md", note.read_bytes(), "text/markdown")
     DeadLetterStore(db).record("obsidian", "alpha.md", "first-pass extractor failed (now fixed)")
     db.commit()
@@ -204,7 +197,7 @@ def test_reextract_with_limit_larger_than_available_processes_all(tmp_path: Path
 
     db = sqlite3.connect(":memory:")
     create_schema(db)
-    bronze = FilesystemBronzeStore(db, bronze_root)
+    bronze = StreamingBronzeStore(db)
     for i in range(3):
         path = vault / f"note-{i}.md"
         path.write_text(f"# Note {i}\n\nbody\n", encoding="utf-8")
@@ -246,7 +239,7 @@ def test_reextract_dry_run_does_not_clear_dead_letter_on_success(tmp_path: Path)
 
     db = sqlite3.connect(":memory:")
     create_schema(db)
-    bronze = FilesystemBronzeStore(db, bronze_root)
+    bronze = StreamingBronzeStore(db)
     bronze.write("obsidian", "alpha.md", note.read_bytes(), "text/markdown")
     DeadLetterStore(db).record("obsidian", "alpha.md", "first-pass failed")
     db.commit()

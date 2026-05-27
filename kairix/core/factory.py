@@ -522,7 +522,7 @@ def build_search_pipeline(
 def build_connector_pipeline(
     *,
     db: Any,
-    bronze_root: Any,
+    bronze_root: Any = None,
     collection: str,
     silver: Any = None,
     chunk_writer: Any = None,
@@ -536,35 +536,35 @@ def build_connector_pipeline(
     BDD step impls + integration tests exercising connector-ingest
     behaviour don't construct ``ConnectorPipeline(...)`` directly.
 
-    The chunk-writer is bound to ``collection`` (single-collection routing,
-    matching today's worker shape; the topology-v2 runtime flag's ON
-    branch wraps this in :class:`CollectionRouter` per cc_pair).
-
-    Topology v2 Wave C: the writer is built via the framework-internal
-    :func:`kairix.core.connectors.collection_router._legacy_chunk_writer`
-    helper, so the construction stays inside ``kairix/core/connectors/``
-    per F61. The factory itself never constructs ``_SqliteChunkWriter``
-    directly.
+    Phase 7 of streaming-bronze: the pipeline uses StreamingBronzeStore
+    exclusively — no on-disk blobs. The ``bronze_root`` parameter is
+    accepted for backward-compat signature but ignored; new code should
+    omit it.
 
     Optional ``silver`` / ``chunk_writer`` / ``entity_graph_sink``
-    overrides let integration tests inject scripted-failure stand-ins
-    (e.g. ADR-018 Wave 1 long-batch-durability characterization needs
-    a Silver that raises on the N-th call). Production callers omit
-    them and get the canonical wiring.
+    overrides let integration tests inject scripted-failure stand-ins.
     """
+    # Phase 7: streaming bronze writes no files; bronze_root is accepted
+    # for backward-compat call-signature but unused. New callers should
+    # omit it. Logged at debug if passed so the deprecation is visible.
+    if bronze_root is not None:
+        logger.debug(
+            "build_connector_pipeline: bronze_root parameter is unused since "
+            "Phase 7 (streaming bronze writes no files); omit it from the call."
+        )
     from kairix.core.connectors import (
         ConnectorPipeline,
         CursorStore,
         DeadLetterStore,
         DefaultSilverProcessor,
-        FilesystemBronzeStore,
+        StreamingBronzeStore,
     )
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.worker import _SqliteEntityGraphSink
 
     return ConnectorPipeline(
         db=db,
-        bronze=FilesystemBronzeStore(db, bronze_root),
+        bronze=StreamingBronzeStore(db),
         silver=silver if silver is not None else DefaultSilverProcessor(),
         chunk_writer=chunk_writer if chunk_writer is not None else legacy_chunk_writer(db, collection=collection),
         entity_graph_sink=entity_graph_sink if entity_graph_sink is not None else _SqliteEntityGraphSink(db),

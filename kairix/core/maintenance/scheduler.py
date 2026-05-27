@@ -197,83 +197,29 @@ def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production bou
 
 
 def _default_bronze_reaper() -> int:  # pragma: no cover — production boundary
-    """Production seam — reap orphan bronze blobs across every connector source.
+    """Phase 7 of streaming-bronze: no-op.
 
-    Walks every immediate subdirectory of the configured bronze root
-    (each is a connector source name per the
-    ``<root>/<source>/<hash[:2]>/<hash>`` layout the
-    :class:`FilesystemBronzeStore` lays down) and calls ``reap_orphans``
-    per source. Returns the total count deleted across all sources.
+    Streaming bronze writes no on-disk blobs, so there are no orphans
+    to reap. Pre-Phase-7 on-disk bronze blobs (from upgrades) are
+    operator-managed cleanup: ``rm -rf $bronze_root`` after the final
+    Bug D recovery pass against pre-existing filesystem-mode rows.
 
-    Skips the reap (returns 0) when the bronze root or DB is missing —
-    fresh hosts and ephemeral test sandboxes shouldn't crash the tick.
+    The function returns 0 to keep the maintenance tick counter shape
+    consistent for monitoring dashboards.
     """
-    try:
-        from kairix.core.connectors.bronze import FilesystemBronzeStore
-        from kairix.paths import data_dir
-        from kairix.paths import db_path as get_db_path
-
-        bronze_root = data_dir() / "bronze"
-        if not bronze_root.is_dir():
-            return 0
-        db = sqlite3.connect(str(get_db_path()))
-        try:
-            store = FilesystemBronzeStore(db, bronze_root)
-            total = 0
-            for source_dir in bronze_root.iterdir():
-                if source_dir.is_dir():
-                    # 5-minute grace period — protects in-flight writes
-                    # whose fsync just landed but whose SQL row hasn't
-                    # committed yet from a same-tick reap.
-                    total += store.reap_orphans(source_dir.name, min_age_seconds=300.0)
-            return total
-        finally:
-            db.close()
-    except Exception:
-        logger.exception("maintenance: bronze orphan reap failed")
-        return 0
+    return 0
 
 
 def _default_bronze_ttl_gc() -> int:  # pragma: no cover — production boundary
-    """Production seam — TTL-based bronze garbage collector across every source.
+    """Phase 7 of streaming-bronze: no-op.
 
-    Flag-gated: when ``bronze_ttl_gc`` is OFF, returns 0 immediately
-    without touching disk or DB. When ON, walks every immediate
-    subdirectory of the bronze root and calls
-    :meth:`FilesystemBronzeStore.gc_aged` with the configured TTL.
-    Returns the total count of (bronze_records row + raw blob) pairs
-    deleted across all sources.
-
-    TTL is resolved from ``KAIRIX_BRONZE_TTL_DAYS`` via
-    :func:`kairix.paths.bronze_ttl_days` (default 7); operators can
-    override per deploy.
+    With streaming bronze there are no on-disk blobs and no TTL-based
+    growth bound to enforce. The ``bronze_ttl_gc`` feature flag remains
+    in the registry as a vestigial backward-compat surface but has no
+    effect; the upgrade note for Phase 7 instructs operators to remove
+    it from their config.
     """
-    try:
-        from kairix.core.connectors.bronze import FilesystemBronzeStore
-        from kairix.core.features.resolver import flag as resolve_flag
-        from kairix.paths import bronze_ttl_days, data_dir
-        from kairix.paths import db_path as get_db_path
-
-        if not resolve_flag("bronze_ttl_gc"):
-            return 0
-        bronze_root = data_dir() / "bronze"
-        if not bronze_root.is_dir():
-            return 0
-        ttl_days = bronze_ttl_days()
-        db = sqlite3.connect(str(get_db_path()))
-        try:
-            store = FilesystemBronzeStore(db, bronze_root)
-            total = 0
-            for source_dir in bronze_root.iterdir():
-                if source_dir.is_dir():
-                    total += store.gc_aged(source_dir.name, older_than_days=ttl_days)
-            db.commit()
-            return total
-        finally:
-            db.close()
-    except Exception:
-        logger.exception("maintenance: bronze TTL GC failed")
-        return 0
+    return 0
 
 
 def _default_fts_healer(db: sqlite3.Connection) -> int:  # pragma: no cover — production boundary

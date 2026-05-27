@@ -1,12 +1,8 @@
-"""Integration test for streaming-bronze mode through the production
-worker pipeline — Phase 4 of streaming-bronze (#27).
+"""Integration test for streaming-bronze pipeline (post-Phase-7 #27).
 
-Drives a real obsidian sync end-to-end with ``bronze_mode: streaming``
-in the config. Asserts:
-  - No on-disk blobs land under bronze_root
-  - bronze_records rows have raw_path = "" (DB sentinel)
-  - documents rows persist with the same shape as filesystem-mode
-  - content_hash is populated on every bronze_records row (Phase 2 contract)
+Drives a real obsidian sync end-to-end. Streaming bronze is the only
+persistence model — no on-disk blobs ever land, bronze_records rows
+carry the empty raw_path sentinel + populated content_hash.
 
 F47-clean: drives through ``run_via_connector_pipeline`` (real
 production helper).
@@ -35,7 +31,7 @@ def _seed_vault(document_root: Path, count: int) -> None:
         )
 
 
-def _write_streaming_config(tmp_path: Path, vault_root: Path) -> Path:
+def _write_obsidian_config(tmp_path: Path, vault_root: Path) -> Path:
     cfg = tmp_path / "kairix.config.yaml"
     cfg.write_text(
         yaml.safe_dump(
@@ -43,7 +39,6 @@ def _write_streaming_config(tmp_path: Path, vault_root: Path) -> Path:
                 "connectors": [
                     {
                         "name": "obsidian",
-                        "bronze_mode": "streaming",
                         "extractor": "passthrough",
                         "config": {"vault_root": str(vault_root)},
                     }
@@ -56,12 +51,11 @@ def _write_streaming_config(tmp_path: Path, vault_root: Path) -> Path:
 
 
 def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
-    """Phase 4 integration: configured streaming-mode connector sync
-    completes without writing any on-disk bronze blobs.
+    """Phase 7 contract: connector sync writes zero on-disk bronze blobs.
 
-    Sabotage proof: remove the ``bronze_mode == "streaming"`` branch in
-    build_bronze_from_entry (falls through to filesystem); this test
-    fails because bronze_root accumulates 10 on-disk blobs.
+    Sabotage proof: re-introduce FilesystemBronzeStore in worker.py
+    and route bronze writes through it; this test fails because
+    bronze_root accumulates 10 on-disk blobs.
     """
     document_root = tmp_path / "vault"
     bronze_root = tmp_path / "bronze"
@@ -73,7 +67,7 @@ def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
     create_schema(db)
     db.close()
 
-    config_path = _write_streaming_config(tmp_path, document_root)
+    config_path = _write_obsidian_config(tmp_path, document_root)
     deps = ConnectorSyncDeps(
         disabled_fn=lambda: False,
         config_path_resolver=lambda: config_path,
@@ -84,13 +78,12 @@ def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
     assert result.synced == 10, f"all 10 items should sync; got {result}"
     assert result.failed == 0
 
-    # No on-disk blobs landed (streaming-mode)
+    # No on-disk blobs land (streaming bronze is the only mode)
     if bronze_root.exists():
-        on_disk = list(bronze_root.rglob("*"))
-        files_only = [p for p in on_disk if p.is_file()]
-        assert files_only == [], f"streaming bronze must not touch disk; files: {files_only}"
+        files_only = [p for p in bronze_root.rglob("*") if p.is_file()]
+        assert files_only == [], f"Phase 7: streaming bronze must not touch disk; files: {files_only}"
 
-    # bronze_records rows present with DB sentinel + content_hash populated
+    # bronze_records rows present with the empty-string DB sentinel + content_hash
     db = sqlite3.connect(str(db_path), timeout=10.0)
     try:
         rows = db.execute(
@@ -106,12 +99,14 @@ def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
         )
 
 
-def test_filesystem_bronze_pipeline_still_writes_disk_blobs(tmp_path: Path) -> None:
-    """Backward-compat assertion: configs without bronze_mode (or with
-    bronze_mode: filesystem) still write on-disk blobs as before.
+def test_legacy_bronze_mode_field_fails_fast(tmp_path: Path) -> None:
+    """Phase 7 removed the bronze_mode config field. Configs that still
+    carry it must surface a fix-pointer error at first connector
+    resolution so operators see the failure at deploy time.
 
-    Sabotage proof: change the default in build_bronze_from_entry from
-    'filesystem' to 'streaming'; this test fails because no blobs land.
+    Sabotage proof: drop the ``raise ValueError`` from build_bronze_from_entry;
+    this test fails because the sync proceeds instead of failing with the
+    fix-pointer message.
     """
     document_root = tmp_path / "vault"
     bronze_root = tmp_path / "bronze"
@@ -123,7 +118,7 @@ def test_filesystem_bronze_pipeline_still_writes_disk_blobs(tmp_path: Path) -> N
     create_schema(db)
     db.close()
 
-    # NO bronze_mode field → defaults to filesystem
+    # Legacy config with the obsolete bronze_mode field
     cfg = tmp_path / "kairix.config.yaml"
     cfg.write_text(
         yaml.safe_dump(
@@ -131,6 +126,7 @@ def test_filesystem_bronze_pipeline_still_writes_disk_blobs(tmp_path: Path) -> N
                 "connectors": [
                     {
                         "name": "obsidian",
+                        "bronze_mode": "filesystem",
                         "extractor": "passthrough",
                         "config": {"vault_root": str(document_root)},
                     }
@@ -146,9 +142,8 @@ def test_filesystem_bronze_pipeline_still_writes_disk_blobs(tmp_path: Path) -> N
         db_factory=lambda: sqlite3.connect(str(db_path), timeout=10.0),
         bronze_root_resolver=lambda: bronze_root,
     )
+    # Worker absorbs per-connector failures (logs warning, returns zero
+    # synced for the failed connector). Sync reports 0 synced and 0 failed
+    # because the failure happened at resolution before any item was processed.
     result = run_via_connector_pipeline(deps)
-    assert result.synced == 3
-
-    # 3 on-disk blobs
-    files_only = [p for p in bronze_root.rglob("*") if p.is_file()]
-    assert len(files_only) == 3, f"filesystem mode (default) should write 3 blobs; got {len(files_only)}"
+    assert result.synced == 0, f"legacy bronze_mode field should prevent sync; got {result}"

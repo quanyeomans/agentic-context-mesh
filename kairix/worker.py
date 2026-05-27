@@ -340,16 +340,22 @@ def _run_one_connector_batch(
     from kairix.core.features import flag
 
     name = entry["name"]
+    # Phase 7: bronze_root no longer drives any write path; kept for
+    # backward-compat call signature. Logged at debug if a non-None root
+    # was passed so the deprecation is visible.
+    if bronze_root is not None:
+        logger.debug(
+            "_run_one_connector_batch: bronze_root parameter is unused since "
+            "Phase 7 (streaming bronze writes no files)."
+        )
     connector_factory = resolve_connector(name)
     connector = connector_factory(entry.get("config", {}))
     # Builds either a single extractor or an EscalatingExtractor depending
     # on whether the entry sets ``extractor_chain: [...]`` or the legacy
     # ``extractor: <name>``. Backward compatible — existing configs unchanged.
     extractor = build_extractor_from_entry(entry)
-    # Phase 4: bronze impl selection via 'bronze_mode' config field.
-    # Default 'filesystem' (current production behaviour); 'streaming'
-    # opts into metadata-only persistence with re-fetch-based recovery.
-    bronze_store = build_bronze_from_entry(entry, db=db, bronze_root=bronze_root)
+    # Phase 7: streaming bronze is the only persistence model.
+    bronze_store = build_bronze_from_entry(entry, db=db)
     chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
     pipeline = ConnectorPipeline(
         db=db,
@@ -863,19 +869,17 @@ def _read_raw_for_reextract(
         return None, None, _BUCKET_STILL_FAILING
 
 
-def _read_filesystem_bronze(db: sqlite3.Connection, bronze_root: Path, ref: Any) -> tuple[bytes, str]:
-    """Read a filesystem-shape BronzeRef regardless of current bronze_mode.
+def _read_filesystem_bronze(_db: sqlite3.Connection, bronze_root: Path, ref: Any) -> tuple[bytes, str]:
+    """Read a legacy on-disk bronze blob (pre-Phase-7 filesystem-mode rows).
 
-    Cross-mode coexistence helper for the Phase 5 re-extract path: old
-    dead-letter rows written before the operator flipped to
-    bronze_mode: streaming still have on-disk blobs. Reading them
-    requires a FilesystemBronzeStore even when the rest of the worker
-    is running streaming-mode.
+    Phase 7 removed FilesystemBronzeStore as a writeable class, but old
+    dead-letter rows on existing deploys still point at on-disk blobs.
+    This helper reads them via raw filesystem I/O so Bug D re-extract
+    can still recover those items. Operators who've never run a
+    pre-Phase-7 build never hit this branch.
     """
-    from kairix.core.connectors import FilesystemBronzeStore
-
-    fs_store = FilesystemBronzeStore(db, bronze_root)
-    return fs_store.read(ref)
+    abs_path = bronze_root / ref.raw_path
+    return abs_path.read_bytes(), ref.mime
 
 
 def _reextract_rows(

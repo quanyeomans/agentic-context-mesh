@@ -78,7 +78,6 @@ def _build_pipeline(
     the pipeline composition matches production wiring."""
     return build_connector_pipeline(
         db=db,
-        bronze_root=bronze_root,
         collection="default",
         silver=silver,
         chunk_writer=FakeChunkWriter(),

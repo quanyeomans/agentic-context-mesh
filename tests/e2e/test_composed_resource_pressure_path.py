@@ -166,15 +166,8 @@ def test_composed_pipeline_bronze_records_match_documents_count(tmp_path: Path) 
     assert doc_count == item_count, f"documents count mismatch: expected {item_count} distinct paths, got {doc_count}"
     assert dead_letter_count == 0, f"no items should dead-letter on a clean sync; got {dead_letter_count}"
 
-    # On-disk bronze blob count
-    on_disk_blobs = sum(
-        1
-        for prefix in (bronze_root / "obsidian").iterdir()
-        if prefix.is_dir()
-        for blob in prefix.iterdir()
-        if blob.is_file()
-    )
-    assert on_disk_blobs == item_count, (
-        f"on-disk bronze blobs ({on_disk_blobs}) should equal bronze_records "
-        f"({bronze_count}) — pre-fix #318 orphans would surface as on_disk > bronze_count"
-    )
+    # Phase 7: streaming bronze writes zero on-disk blobs. bronze_root either
+    # doesn't exist or is empty.
+    if bronze_root.exists():
+        on_disk_files = [p for p in bronze_root.rglob("*") if p.is_file()]
+        assert on_disk_files == [], f"Phase 7: streaming bronze must write zero on-disk blobs; found: {on_disk_files}"

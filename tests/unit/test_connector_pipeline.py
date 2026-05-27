@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from kairix.core.connectors.bronze import FilesystemBronzeStore
+from kairix.core.connectors import StreamingBronzeStore
 from kairix.core.connectors.cursor_store import CursorStore
 from kairix.core.connectors.dead_letter import DeadLetterStore
 from kairix.core.connectors.pipeline import BatchResult, ChunkWriter, ConnectorPipeline
@@ -39,9 +39,10 @@ def _open_db(tmp_path: Path) -> sqlite3.Connection:
 
 
 def _build_pipeline(db: sqlite3.Connection, tmp_path: Path) -> ConnectorPipeline:
+    del tmp_path  # Phase 7: streaming bronze writes no files
     return ConnectorPipeline(
         db=db,
-        bronze=FilesystemBronzeStore(db, tmp_path / "bronze"),
+        bronze=StreamingBronzeStore(db),
         silver=DefaultSilverProcessor(),
         chunk_writer=FakeChunkWriter(),
         entity_graph_sink=FakeEntityGraphSink(),
@@ -207,7 +208,7 @@ def test_batch_level_failure_rolls_back(tmp_path: Path) -> None:
 
         pipeline = ConnectorPipeline(
             db=db,
-            bronze=FilesystemBronzeStore(db, tmp_path / "bronze"),
+            bronze=StreamingBronzeStore(db),
             silver=_ExplodingSilver(),  # type: ignore[arg-type]  # F3-rationale: synthetic Protocol-compliant stand-in for negative-path test.
             chunk_writer=FakeChunkWriter(),
             entity_graph_sink=FakeEntityGraphSink(),

@@ -229,5 +229,5 @@ def test_factory_pipeline_builds_against_applied_topology(tmp_path: Path) -> Non
     )
     bronze_root = paths.workspace_root / "bronze"
     bronze_root.mkdir(parents=True, exist_ok=True)
-    pipeline = build_connector_pipeline(db=db, bronze_root=bronze_root, collection="obsidian-personal")
+    pipeline = build_connector_pipeline(db=db, collection="obsidian-personal")
     assert pipeline is not None

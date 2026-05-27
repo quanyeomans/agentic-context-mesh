@@ -7,6 +7,29 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.28a1] - 2026-05-27 — Streaming bronze (default + only model); FilesystemBronzeStore removed (alpha)
+
+> **Upgrading?** Bronze persistence changed shape — raw bytes are no longer kept on disk after extract. Disk usage drops dramatically (the v2026.5.27a2 dogfood went from 112 GB → ~MB of bronze data on the same corpus). Operators with `bronze_mode` in their config must remove that line (the field is no longer accepted). Existing on-disk bronze blobs from pre-upgrade syncs become unused — operators can `rm -rf $bronze_root` once they've run any final `kairix worker reextract` to recover items. Full notes: [`docs/upgrades/v2026.5.28a1.md`](docs/upgrades/v2026.5.28a1.md).
+
+### Removed
+
+- **`FilesystemBronzeStore` class (`kairix/core/connectors/bronze.py`).** The whole module is deleted. Streaming bronze is the only persistence model.
+- **`bronze_mode` config field.** Operators with `bronze_mode: filesystem` or `bronze_mode: streaming` in their `kairix.config.yaml` get a fix-pointer error at config load — remove the line.
+- **`bronze_ttl_gc` feature flag's effect.** The flag still exists in the registry as a vestigial backward-compat surface but has no effect — streaming bronze has nothing to GC. Removable in the next minor release.
+- **Bronze orphan reaper stage** in the maintenance loop. Streaming bronze writes no on-disk blobs so no orphans can accumulate. The maintenance tick still reports the counter (now permanently 0) for monitoring shape continuity.
+
+### Changed
+
+- **`build_connector_pipeline` factory.** `bronze_root` parameter accepted for backward-compat call-signature but ignored. New code should omit it.
+- **`build_bronze_from_entry` helper.** Always returns `StreamingBronzeStore`. Raises with a fix-pointer if the obsolete `bronze_mode` field is present.
+- **`BronzeRef.raw_path`.** Always `None` for new writes. Existing rows with a non-None raw_path are still readable through the worker's legacy-blob helper (`_read_filesystem_bronze` in `kairix/worker.py`) so `kairix worker reextract` can recover pre-Phase-7 dead-lettered items.
+
+### Things that haven't changed
+
+- `StreamingBronzeStore` Protocol surface — same `write` / `read` / `replay` shape introduced in Phases 1-6.
+- `BronzeRef.content_hash` field semantics (SHA-256 of raw bytes at write time).
+- Re-extract recovery path through `kairix worker reextract` — for pre-Phase-7 filesystem rows reads on-disk blob directly; for streaming rows routes through `connector.fetch(item_id)`.
+
 ## [2026.5.27a2] - 2026-05-27 — Disk-space cascade fix + escalation framework class (alpha)
 
 > **Upgrading?** Urgent fix for the disk-space cascade observed on the v2026.5.27a1 dogfood — 8,090 of 8,396 SharePoint reextract attempts failed with `[Errno 28] No space left on device` because one pathological PPTX expanded to fill the 2GB tmpfs and every subsequent extraction leaked an empty tmpfile stub (8,087 placeholders accumulated). Two fixes ship together: the leak is sealed, AND extractor scratch moves off tmpfs onto the bind-mounted runtime disk so a single bad file can't exhaust capacity. Full notes: [`docs/upgrades/v2026.5.27a2.md`](docs/upgrades/v2026.5.27a2.md).

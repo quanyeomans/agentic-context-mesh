@@ -49,7 +49,6 @@ def _build_pipeline(
     """F47-compliant factory construction with optional overrides."""
     return build_connector_pipeline(
         db=db,
-        bronze_root=bronze_root,
         collection="default",
         silver=silver,
         chunk_writer=chunk_writer if chunk_writer is not None else FakeChunkWriter(),

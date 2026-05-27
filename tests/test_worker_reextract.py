@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kairix.core.connectors import DeadLetterStore, FilesystemBronzeStore
+from kairix.core.connectors import DeadLetterStore, StreamingBronzeStore
 from kairix.core.db.schema import create_schema
 from kairix.worker import ReextractResult, run_reextract_dead_letter
 from kairix.worker_cli import main as worker_main
@@ -38,7 +38,7 @@ def _seed_bronze_and_dead_letter(
     bronze_records row pointing at ``raw_path`` + a dead_letter row that
     re-extract should later clear."""
     raw_path.parent.mkdir(parents=True, exist_ok=True)
-    bronze = FilesystemBronzeStore(db, bronze_root)
+    bronze = StreamingBronzeStore(db)
     raw_bytes = raw_path.read_bytes()
     bronze.write(source_name, item_id, raw_bytes, mime)
     dead_letter = DeadLetterStore(db)
