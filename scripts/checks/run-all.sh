@@ -172,6 +172,12 @@ python3 "${SCRIPT_DIR}/check_f63_unbounded_fetchall.py" || overall=1
 # F64 — external HTTP client plugin requires rate-limit / Retry-After test
 python3 "${SCRIPT_DIR}/check_f64_external_api_rate_limit.py" || overall=1
 
+# F65 — every connector plugin implements metadata_for() + ships propagation test (ADR-021)
+python3 "${SCRIPT_DIR}/check_f65_connector_metadata.py" || overall=1
+
+# F66 — every connector + tick-driven component declares per_tick_max_items + disk_watermark (ADR-020)
+python3 "${SCRIPT_DIR}/check_f66_connector_tick_budget.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
