@@ -26,9 +26,23 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ### Operational hardening
 
+- **Connector cursor write now uses the connector's opaque token.** `ConnectorPipeline` now persists `connector.next_cursor()` (the Graph deltaLink for SharePoint, ISO high-water-mark for Obsidian-shape connectors, etc.) instead of per-item `modified_at`. Fixes a regression where every worker tick re-fetched the entire source corpus from the start because the cursor value was a per-item timestamp the source's delta API couldn't deserialise. Also guarantees the cursor write fires after every successful drain — including quiet ticks — so a cursor that advances server-side without new items isn't clobbered.
+- **SharePoint Graph client honours `Retry-After` on HTTP 429 / 503.** The client now retries with respect to the `Retry-After` header (or exponential backoff fallback) instead of raising immediately and dead-lettering every item on a throttled drive. Up to 5 attempts per request before raising.
+- **Maintenance orphan-prune is now per-tick bounded.** `MaintenanceScheduler._prune_orphans` honours a configurable cap (default 1,000 rows per tick) so the first maintenance tick on a large production database doesn't saturate disk I/O. Backlogs converge over multiple ticks; the soft-delete table is idempotent on `(hash, seq)` so multi-tick drain produces the same end state as a single sweep would.
 - **Per-chunk commits in `ConnectorPipeline`.** A failure mid-batch rolls back only the failing chunk (default 50 items); earlier chunks survive the failure. Bounded orphan blast radius on worker restart mid-sync.
+- **`connector_sync` decoupled from the embed-noop maintenance gate.** External source connectors (SharePoint / Slack / GitHub / Notion / M365) now fire on their own 15-minute interval regardless of local-vault idleness. The legacy gate that suppressed maintenance work when embed was a no-op never should have included `connector_sync` — fixes the case where an idle local vault prevented external connectors from picking up upstream changes.
 - **MCP cold-start handoff.** The HTTP port binds before the warm sequence runs, so agents see a structured 503 + `ColdStart` envelope (with `retry_after_ms` + `next:` action instructions) instead of OS-level `fetch failed` errors during the 7-30 s warm window.
 - **Markitdown image bundles every converter extra.** DOCX, XLSX, PPTX, Outlook MSG converters all ship in the production image, plus the `tesseract-ocr` system binary for the OCR extractor's runtime.
+
+### Engineering guard rails
+
+Three new architecture fitness functions block the regression classes the v2026.5.28 work surfaced. These are blocking gates wired into `safe-commit.sh`, `pre-commit`, and CI Stage 0:
+
+- **F62 — multi-tick idempotency test required.** Every stateful component under `kairix/core/connectors/` or `kairix/core/maintenance/` (anything exposing `tick` / `run_batch` / `step` / `process_batch`) must have a matching `tests/integration/test_*_advance|_multi_tick|_idempotency.py` that runs the component at least twice and asserts tick 2 performs zero or minimal work when no input has changed.
+- **F63 — unbounded `.fetchall()` requires `LIMIT` or rationale.** Any `.fetchall()` call in `kairix/**` must include `LIMIT` within 12 lines preceding the call, or carry a `# F63-bounded: <rationale>` comment.
+- **F64 — external HTTP client requires rate-limit test.** Any plugin under `kairix/connectors/<name>/` or `kairix/providers/<name>/` that imports `httpx` / `requests` / `msgraph` / `notion_client` / `slack_sdk` / `openai` etc. must ship `tests/integration/test_<name>_rate_limit.py` or `tests/bdd/features/<name>_rate_limit.feature` asserting 429 / 503 + `Retry-After` is honoured.
+
+See [`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md) for the full F-rule canon.
 
 ### Configuration migration from v2026.5.18
 
