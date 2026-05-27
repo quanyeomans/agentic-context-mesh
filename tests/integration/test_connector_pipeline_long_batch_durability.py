@@ -60,8 +60,11 @@ class _SilverFailingOnNthCall:
         source_uri: str,
         source_modified_at: str,
         sensitivity: Any,
+        connector_metadata: Any = None,
+        extractor_metadata: Any = None,
     ) -> SilverOutput:
         del raw, extracted, source_uri, source_modified_at, sensitivity
+        del connector_metadata, extractor_metadata
         self.calls += 1
         if self.calls == self._fail_on_call:
             raise RuntimeError(f"silver-failing-on-call: simulated failure at item {self._fail_on_call}")

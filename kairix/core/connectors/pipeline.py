@@ -279,7 +279,7 @@ class ConnectorPipeline:
         immediately with ``BatchResult(skipped_low_disk=True)``. The
         cursor row is untouched; the next tick re-checks.
         """
-        watermark = connector.disk_watermark_min_free_bytes
+        watermark = getattr(connector, "disk_watermark_min_free_bytes", None)
         if watermark is not None:
             free_bytes = self._disk_free_resolver()
             if free_bytes < watermark:
@@ -329,7 +329,7 @@ class ConnectorPipeline:
         totals = _BatchTotals()
         chunk = _ChunkAccumulator()
         budget_yielded = False
-        budget = connector.per_tick_max_items
+        budget = getattr(connector, "per_tick_max_items", 500)
         items_seen = 0
         try:
             for change in connector.list_changes(cursor):
