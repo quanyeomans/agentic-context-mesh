@@ -266,14 +266,17 @@ df -h /data     # data disk (if attached)
 
 | Component | Size guide | Suggested disk |
 |---|---|---|
-| Bronze raw blobs (binary connector fetches) | grows with corpus; bounded by `bronze_ttl_gc` (#316) and orphan reaper (#318) and now per-chunk commits (#321) | **largest disk** |
 | SQLite (`index.sqlite`, `kairix.db`) | grows with index size; ~1 GB / million chunks | largest disk |
 | Vector index (`vectors.usearch`) | grows with `embed_dims × chunk_count` | largest disk |
 | Neo4j graph | typically ≤1 GB for a single-team corpus | small disk fine |
 | Document tree | depends on your source corpus | small disk fine |
-| `/tmp` (binary downloads, extractor scratch) | bounded by 2 GB tmpfs default since v2026.5.25 | tmpfs (RAM) |
+| Extractor scratch (`/data/kairix/tmp`) | bounded by per-extraction file size; cleaned on every call | small disk fine |
 
-The 2 GB `/tmp` tmpfs default in the shipped compose (v2026.5.25 onward) keeps connector binary downloads and PDF/PPTX conversions off the host disk even if an operator forgets the bind mount. Bronze TTL GC behind the `bronze_ttl_gc` flag (also v2026.5.25) bounds long-term bronze growth. Per-chunk commits in `ConnectorPipeline` (v2026.5.26) bound the orphan blast radius on a worker restart mid-batch — see [`docs/upgrades/v2026.5.26.md`](../upgrades/v2026.5.26.md).
+Since v2026.5.28a1, bronze is **streaming-only** — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata (`source_uri`, `content_hash`, `fetched_at`) at ~kB per item. There are no on-disk bronze blobs. A 50,000-item corpus that would have needed ~650 GB of bronze under the pre-v2026.5.28 model now needs ~50 MB.
+
+Extractor scratch (the per-call tmpfile that markitdown/pdfplumber etc. use) was moved off the 2 GB `/tmp` tmpfs in v2026.5.27a2 to the disk-backed `/data/kairix/tmp` mount via `TMPDIR=/data/kairix/tmp` in the image. The entrypoint mkdir's it at boot so bind-mount masking can't defeat the relocation. Cleanup-on-failure was hardened in the same release; sustained extraction loads no longer leak placeholder tmpfiles.
+
+**Operators upgrading from v2026.5.27 or earlier**: existing on-disk bronze blobs under `<bronze_root>` become unused once you've run any final `kairix worker reextract` to recover pre-upgrade dead-letter items via the legacy on-disk read path. After recovery, `rm -rf $bronze_root` reclaims that disk. See [`docs/upgrades/v2026.5.28a1.md`](../upgrades/v2026.5.28a1.md).
 
 ---
 

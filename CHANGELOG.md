@@ -9,7 +9,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [2026.5.28a1] - 2026-05-27 — Streaming bronze (default + only model); FilesystemBronzeStore removed (alpha)
 
-> **Upgrading?** Bronze persistence changed shape — raw bytes are no longer kept on disk after extract. Disk usage drops dramatically (the v2026.5.27a2 dogfood went from 112 GB → ~MB of bronze data on the same corpus). Operators with `bronze_mode` in their config must remove that line (the field is no longer accepted). Existing on-disk bronze blobs from pre-upgrade syncs become unused — operators can `rm -rf $bronze_root` once they've run any final `kairix worker reextract` to recover items. Full notes: [`docs/upgrades/v2026.5.28a1.md`](docs/upgrades/v2026.5.28a1.md).
+> **Upgrading?** Bronze persistence changed shape — raw bytes are no longer kept on disk after extract. Disk usage drops dramatically (the v2026.5.27a2 production instance went from 112 GB → ~MB of bronze data on the same corpus). Operators with `bronze_mode` in their config must remove that line (the field is no longer accepted). Existing on-disk bronze blobs from pre-upgrade syncs become unused — operators can `rm -rf $bronze_root` once they've run any final `kairix worker reextract` to recover items. Full notes: [`docs/upgrades/v2026.5.28a1.md`](docs/upgrades/v2026.5.28a1.md).
 
 ### Removed
 
@@ -32,7 +32,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [2026.5.27a2] - 2026-05-27 — Disk-space cascade fix + escalation framework class (alpha)
 
-> **Upgrading?** Urgent fix for the disk-space cascade observed on the v2026.5.27a1 dogfood — 8,090 of 8,396 SharePoint reextract attempts failed with `[Errno 28] No space left on device` because one pathological PPTX expanded to fill the 2GB tmpfs and every subsequent extraction leaked an empty tmpfile stub (8,087 placeholders accumulated). Two fixes ship together: the leak is sealed, AND extractor scratch moves off tmpfs onto the bind-mounted runtime disk so a single bad file can't exhaust capacity. Full notes: [`docs/upgrades/v2026.5.27a2.md`](docs/upgrades/v2026.5.27a2.md).
+> **Upgrading?** Urgent fix for the disk-space cascade observed on the v2026.5.27a1 production — 8,090 of 8,396 SharePoint reextract attempts failed with `[Errno 28] No space left on device` because one pathological PPTX expanded to fill the 2GB tmpfs and every subsequent extraction leaked an empty tmpfile stub (8,087 placeholders accumulated). Two fixes ship together: the leak is sealed, AND extractor scratch moves off tmpfs onto the bind-mounted runtime disk so a single bad file can't exhaust capacity. Full notes: [`docs/upgrades/v2026.5.27a2.md`](docs/upgrades/v2026.5.27a2.md).
 
 ### Fixed
 
@@ -56,11 +56,11 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [2026.5.27a1] - 2026-05-27 — Markitdown converters, oversized-chunk split, dead-letter recovery (alpha)
 
-> **Upgrading?** Three fixes from the v2026.5.26a1 SharePoint dogfood. No config edits required. If you have dead-letter rows from a pre-upgrade run, the new `kairix worker reextract` recovers them in-place — see the upgrade notes. Full notes: [`docs/upgrades/v2026.5.27a1.md`](docs/upgrades/v2026.5.27a1.md).
+> **Upgrading?** Three fixes from the v2026.5.26a1 SharePoint production run. No config edits required. If you have dead-letter rows from a pre-upgrade run, the new `kairix worker reextract` recovers them in-place — see the upgrade notes. Full notes: [`docs/upgrades/v2026.5.27a1.md`](docs/upgrades/v2026.5.27a1.md).
 
 ### Fixed
 
-- **Markitdown's DOCX, XLSX, PPTX, and Outlook MSG converters are now installed in the production image (#322).** v2026.5.26a1 shipped with `markitdown[pdf]` only; every Office document failed extraction with `MissingDependencyException`. The SharePoint dogfood produced 8,785 dead-lettered items on first run because of this. The Dockerfile now installs `markitdown[pdf,docx,xlsx,pptx,outlook]` so every documented format works out of the box.
+- **Markitdown's DOCX, XLSX, PPTX, and Outlook MSG converters are now installed in the production image (#322).** v2026.5.26a1 shipped with `markitdown[pdf]` only; every Office document failed extraction with `MissingDependencyException`. The SharePoint production run produced 8,785 dead-lettered items on first run because of this. The Dockerfile now installs `markitdown[pdf,docx,xlsx,pptx,outlook]` so every documented format works out of the box.
 
 - **Silver chunker no longer leaves oversized paragraphs as one giant chunk (Bug B).** A single 2,000-character paragraph used to land as one chunk that overshot the target. The chunker now splits at sentence boundaries first, then word boundaries if a sentence is still oversized, then character boundaries as a last resort — every chunk stays under the target without breaking semantic boundaries unnecessarily. Three new helpers (`_split_long_paragraph`, `_split_long_sentence`, `_split_long_word`) plus a pre-expansion step in `_chunk_markdown`.
 
@@ -94,7 +94,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 - **`dex_crm` connector retry now uses `tenacity` instead of a hand-rolled loop.** Replaces ~30 LoC of `while True` retry with `tenacity.Retrying(retry_if_result(...), wait_exponential, stop_after_attempt)`. Same observable behaviour (the 12 existing dex_crm tests pass unchanged including the 429-retry-with-backoff scenario); the change is the reference shape future connectors should copy when they need HTTP retry with backoff. Rationale recorded in `connector-oss-library-evaluation.md` §7.
 
-- **Operator guidance for the runtime disk choice (`docs/operations/OPERATIONS.md` §5.6).** The previous v2026.5.25 note said "data on the data disk." That assumed a deploy shape where the data disk is the largest one. The revised guidance is "kairix runtime on whichever disk is largest" with a `df -h` check — the dogfood VM has a 256 GB OS disk and a 64 GB data disk, so kairix runtime lives on `/var/lib/kairix-runtime` not `/data`.
+- **Operator guidance for the runtime disk choice (`docs/operations/OPERATIONS.md` §5.6).** The previous v2026.5.25 note said "data on the data disk." That assumed a deploy shape where the data disk is the largest one. The revised guidance is "kairix runtime on whichever disk is largest" with a `df -h` check — the production instance has a 256 GB OS disk and a 64 GB data disk, so kairix runtime lives on `/var/lib/kairix-runtime` not `/data`.
 
 ### Added
 
@@ -111,12 +111,12 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [2026.5.25a1] - 2026-05-25 — Disk pressure, bronze hygiene, version-drift fixes (alpha)
 
-> **Upgrading?** Five fixes from the 2026-05-24 SharePoint dogfood. No config change required; flags ship OFF. If you set `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD=999999` as a band-aid, drop it after upgrading. Full notes: [`docs/upgrades/v2026.5.25a1.md`](docs/upgrades/v2026.5.25a1.md).
+> **Upgrading?** Five fixes from the 2026-05-24 SharePoint production run. No config change required; flags ship OFF. If you set `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD=999999` as a band-aid, drop it after upgrading. Full notes: [`docs/upgrades/v2026.5.25a1.md`](docs/upgrades/v2026.5.25a1.md).
 
 ### Fixed
 
 - **`/tmp` no longer fills the host root filesystem (#317).** Both `kairix` and `kairix-worker` ship a 2 GB tmpfs `/tmp` mount in the canonical compose files. SharePoint binary downloads and markitdown PDF/PPTX conversions stay bounded by RAM instead of spilling onto the OS disk. Operators with custom override files inherit the default unless they explicitly remove it.
-- **Bronze raw blobs no longer accumulate forever as orphans (#318).** The maintenance scheduler ships a new stage that walks every connector's bronze tree on each tick and deletes any file with no `bronze_records` row. A 5-minute grace period skips files mid-fsync. The 2026-05-24 dogfood reaped 36 GB of orphan SharePoint blobs accumulated over a single backfill.
+- **Bronze raw blobs no longer accumulate forever as orphans (#318).** The maintenance scheduler ships a new stage that walks every connector's bronze tree on each tick and deletes any file with no `bronze_records` row. A 5-minute grace period skips files mid-fsync. The 2026-05-24 production reaped 36 GB of orphan SharePoint blobs accumulated over a single backfill.
 - **`connector_sync` no longer freezes when the local vault is idle (#312).** Local-only maintenance tasks (`entity_seed`, `health_check`, `wikilinks_inject`) still skip after the configured embed-noop streak, but external-source discovery now runs on its own interval regardless. A quiet local vault doesn't imply quiet upstream sources.
 - **Worker no longer silently downgrades to `:latest` after a manual `docker compose up` (#313).** The alpha-deploy webhook now writes `KAIRIX_IMAGE_TAG=<version>` to `/opt/kairix/app/.env`. Subsequent ad-hoc `docker compose up -d --force-recreate` commands interpolate the same tag instead of picking up whatever was last pulled.
 
@@ -367,7 +367,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 - **Worker pause/resume (#224 phase 4).** `kairix worker pause` / `kairix worker resume` toggle a touch-file in the data dir. The running worker enters PAUSED at the next loop iteration (within 5s) and stops doing task work until the flag is removed. Decoupled from the worker process — a stuck worker can still be paused, and the pause survives restarts.
 - **`kairix worker status` (#224 phase 5).** Reads the persisted `WorkerState` JSON (atomic temp+rename writes) and prints phase, embedded total, failed chunks, recall alerts, restart count, uptime. Exit 0 if state file present, 1 if missing.
 - **Worker skip-on-idle maintenance (#224 phase 2).** When `consecutive_embed_noops` ≥ 10 (env `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD`), the worker stops running `entity_seed` / `health_check` / `wikilinks`. Resumes on the next embed that does work. Friendlier to shared hosts.
-- **`kairix benchmark run <name>` resolves bundled suites by name (#222).** `kairix benchmark run reflib` finds the bundled `reflib-gold-v3.yaml`, reads `default_collection` from suite metadata, and runs scoped correctly — no more `--collection reference-library` tax for dogfooding. `kairix benchmark list` enumerates bundled suites with their default_collection and one-line description. Unknown suite name → exit 1 with `did you mean: kairix benchmark list?` hint.
+- **`kairix benchmark run <name>` resolves bundled suites by name (#222).** `kairix benchmark run reflib` finds the bundled `reflib-gold-v3.yaml`, reads `default_collection` from suite metadata, and runs scoped correctly — no more `--collection reference-library` tax for production validation. `kairix benchmark list` enumerates bundled suites with their default_collection and one-line description. Unknown suite name → exit 1 with `did you mean: kairix benchmark list?` hint.
 - **F14 — `sonar.issue.ignore` entries require rationale comment.** Mirrors F3 for SonarCloud suppressions.
 - **Scheduled baseline audit (`.github/workflows/baseline-audit.yml`).** Mondays 08:00 UTC + workflow_dispatch. Fails if any baseline entry is stale.
 - **`scripts/checks/audit_baselines.py`** — local invocation of the audit logic.
@@ -434,7 +434,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ### Fixed
 
-- **Worker no longer dies on recall-gate alerts.** The worker called the embed CLI, which used `sys.exit(1)` to signal a recall-gate degradation. `SystemExit` is not caught by `except Exception`, so every gate alert killed the worker container — Docker restart-looped it forever. The worker now calls `run_incremental_embed_pipeline()` (a new use case in `kairix/core/embed/use_cases.py`) directly, receives a structured `EmbedPipelineResult` dataclass, and treats recall-gate failures as logged alerts rather than fatal exits. Failed chunks, gate alerts, and unexpected exceptions are all logged; the worker continues to the next interval. (resolves the v2026.5.9 dogfood report)
+- **Worker no longer dies on recall-gate alerts.** The worker called the embed CLI, which used `sys.exit(1)` to signal a recall-gate degradation. `SystemExit` is not caught by `except Exception`, so every gate alert killed the worker container — Docker restart-looped it forever. The worker now calls `run_incremental_embed_pipeline()` (a new use case in `kairix/core/embed/use_cases.py`) directly, receives a structured `EmbedPipelineResult` dataclass, and treats recall-gate failures as logged alerts rather than fatal exits. Failed chunks, gate alerts, and unexpected exceptions are all logged; the worker continues to the next interval. (resolves the v2026.5.9 production report)
 - **Recall canary queries now persist across runs.** Pre-fix, the recall gate sampled five random documents per run and compared the new score to the previous run's — but the previous run had sampled five different documents. The "delta -60%" alerts were comparing apples to oranges. Queries are now persisted to `~/.cache/kairix/recall-canaries.json` on first build and reused on every subsequent run, so the run-over-run delta is meaningful. Operators can force a re-sample with `kairix embed --rebuild-canaries` after a major corpus change.
 
 ### Added
@@ -526,7 +526,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ### Migration
 
-Drop-in upgrade. To benefit from `in_default`, set `in_default: false` on collections you want excluded from default search and restart the kairix containers. The deploy was UAT'd on the dogfood VM before this release tag was cut.
+Drop-in upgrade. To benefit from `in_default`, set `in_default: false` on collections you want excluded from default search and restart the kairix containers. The deploy was UAT'd on the production instance before this release tag was cut.
 
 ## [2026.5.3] - 2026-05-04 — MCP availability, agent bug closure, scope semantics
 

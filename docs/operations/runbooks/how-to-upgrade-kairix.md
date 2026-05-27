@@ -4,6 +4,22 @@
 
 ---
 
+## Migration to v2026.5.28a1: streaming bronze (default + only model)
+
+v2026.5.28a1 removes on-disk bronze entirely — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata. Disk usage drops dramatically (~6000x reduction). One config change required: remove any `bronze_mode:` line from `kairix.config.yaml`. Existing on-disk bronze blobs become unused; `rm -rf $bronze_root` reclaims that disk once any final reextract for pre-upgrade dead-letter items has run.
+
+The cumulative upgrade path from the v2026.5.24a-series:
+
+- [v2026.5.25a1](../../upgrades/v2026.5.25a1.md) — disk pressure fixes, bronze hygiene, version-drift fixes
+- [v2026.5.26a1](../../upgrades/v2026.5.26a1.md) — per-chunk commit, MCP cold-start handoff, tenacity adoption
+- [v2026.5.27a1](../../upgrades/v2026.5.27a1.md) — markitdown converter extras + `kairix worker reextract`
+- [v2026.5.27a2](../../upgrades/v2026.5.27a2.md) — tmpfile cleanup + scratch off tmpfs
+- [v2026.5.28a1](../../upgrades/v2026.5.28a1.md) — streaming bronze (default + only model)
+
+If you skip from an earlier release directly to v2026.5.28a1, read each note in order — the bronze cleanup discipline + scratch relocation in v2026.5.27a2 is a prerequisite for the streaming-bronze read path.
+
+---
+
 ## Migration to v2026.5.24a-series: alpha track with new connectors + maintenance loop
 
 The v2026.5.24 alpha series (a1 → a3) adds the topology v2 operator-config surface, four new connectors (SharePoint, Slack, GitHub, Notion), a background maintenance loop, and a configurable `agent_knowledge_populated` onboard check. Every behaviour is gated by a default-off feature flag — pulling the alpha doesn't change anything until you flip a flag.
