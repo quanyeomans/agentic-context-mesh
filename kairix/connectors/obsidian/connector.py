@@ -162,6 +162,13 @@ class ObsidianConnector:
             vault_root=self._vault_root,
             collections=_to_scan_specs(self._collections),
         )
+        # Tracks the max ``modified_at`` observed across all events
+        # emitted from the most recent :meth:`list_changes` drain. The
+        # orchestrator reads this via :meth:`next_cursor` to persist
+        # the cursor after each chunk-commit. Obsidian's cursor IS an
+        # ISO-8601 timestamp (see :meth:`list_changes` docstring), so
+        # the per-drain high-water-mark is the correct token.
+        self._last_max_modified_at: str | None = None
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
@@ -202,7 +209,22 @@ class ObsidianConnector:
             if cursor is not None and ev.modified_at <= cursor:
                 continue
             merged.append(ev)
+        # Track the max modified_at observed so next_cursor() can return
+        # the high-water-mark to persist. When the drain yields no
+        # events but cursor was non-None, preserve cursor so the next
+        # tick doesn't regress to a full scan.
+        self._last_max_modified_at = _max_modified_at(merged, fallback=cursor)
         return iter(merged)
+
+    def next_cursor(self) -> str | None:
+        """Return the ISO-8601 high-water-mark from the most recent drain.
+
+        Obsidian's cursor IS an ISO-8601 timestamp — the orchestrator
+        persists this between ticks so the next :meth:`list_changes`
+        call filters events with ``modified_at <= cursor``. ``None``
+        before the first :meth:`list_changes` call.
+        """
+        return self._last_max_modified_at
 
     def fetch(self, item_id: str) -> RawArtefact:
         """Read the file at ``vault_root / item_id``.
@@ -459,6 +481,10 @@ class ObsidianConnector:
             if cursor is not None and ev.modified_at <= cursor:
                 continue
             merged.append(ev)
+        # High-water-mark tracking matches the legacy list_changes path
+        # so next_cursor() returns the correct token regardless of
+        # which path was taken last.
+        self._last_max_modified_at = _max_modified_at(merged, fallback=cursor)
         return iter(merged)
 
     def _safe_resolve(self, item_id: str) -> Path:
@@ -484,6 +510,19 @@ class ObsidianConnector:
                 "next: investigate the upstream call that produced this id."
             ) from exc
         return candidate
+
+
+def _max_modified_at(events: list[ChangeEvent], *, fallback: str | None) -> str | None:
+    """Return the max ``modified_at`` across ``events``, or ``fallback`` if empty.
+
+    Used by :meth:`ObsidianConnector.list_changes` to track the cursor
+    high-water-mark per drain. On a zero-event drain the prior cursor
+    is preserved so the orchestrator doesn't clobber a real cursor
+    position with ``None``.
+    """
+    if not events:
+        return fallback
+    return max(ev.modified_at for ev in events)
 
 
 def _to_scan_specs(collections: Iterable[CollectionConfig]) -> list[CollectionScanSpec]:

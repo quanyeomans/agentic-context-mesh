@@ -288,6 +288,14 @@ class SlackConnector:
         # drain. Mirrors the m365_email_headers per-mailbox cursor map.
         self._next_cursor_by_container: dict[str, str | None] = {}
 
+        # Aggregate single-cursor token for the legacy :meth:`list_changes`
+        # path — populated as the max ``ts`` observed across every
+        # channel drained by the most recent legacy call. Returned by
+        # :meth:`next_cursor` so the orchestrator persists a real Slack
+        # ``ts`` (not a per-item ``modified_at``). None before the
+        # first drain; preserves the prior value on a zero-event tick.
+        self._last_legacy_cursor: str | None = None
+
         # cc_pair-level invalid signal — set when the Slack edge surfaces
         # ``app_uninstalled`` / ``token_revoked`` so the framework's
         # next status read can route the cc_pair through F57 to INVALID.
@@ -316,7 +324,27 @@ class SlackConnector:
         events: list[ChangeEvent] = []
         for channel in self._enumerate_member_channels(web):
             events.extend(self._drain_channel(web, channel, oldest=cursor))
+        # High-water-mark across all channels — the cursor token Slack
+        # uses is a ``ts`` string (lexicographically comparable). On a
+        # zero-event drain we preserve the prior cursor so the
+        # orchestrator doesn't clobber a real position with None.
+        if events:
+            self._last_legacy_cursor = max(ev.modified_at for ev in events)
+        elif cursor:
+            self._last_legacy_cursor = cursor
         return iter(events)
+
+    def next_cursor(self) -> str | None:
+        """Return the legacy single-cursor token (max ``ts`` across channels).
+
+        Slack's cursor IS a ``ts`` string per channel; the legacy
+        :meth:`list_changes` aggregates across channels so the single
+        token returned here is the max ``ts`` observed in the last
+        drain. ``None`` before the first drain. Per-channel cursors
+        for the Wave E multi-container path live in
+        :meth:`next_cursor_for_container`.
+        """
+        return self._last_legacy_cursor
 
     def fetch(self, item_id: str) -> RawArtefact:
         """Return the cached message envelope for ``item_id`` as JSON.

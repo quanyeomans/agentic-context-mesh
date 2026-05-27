@@ -492,6 +492,17 @@ class M365CalendarConnector:
         """
         return self._last_delta_link
 
+    def next_cursor(self) -> str | None:
+        """Return the Graph deltaLink to persist after the last drain.
+
+        m365_calendar's cursor IS the opaque Graph ``@odata.deltaLink``
+        URL — NOT a per-item ``modified_at`` (that would force a
+        full-window resync every tick). Delegates to the
+        :attr:`last_delta_link` property which is set on every
+        :meth:`list_changes` drain.
+        """
+        return self._last_delta_link
+
     def seed_known_ids(self, ids: Iterable[str]) -> None:
         """Pre-populate the known-id set used to distinguish created vs modified.
 

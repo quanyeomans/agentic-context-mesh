@@ -109,6 +109,7 @@ def test_happy_path_advances_cursor(tmp_path: Path) -> None:
             name="fake-source",
             events=_three_events(),
             content=_three_event_content(),
+            track_modified_at=True,
         )
         extractor = FakeExtractor()
 
@@ -167,6 +168,7 @@ def test_per_item_failure_isolation_dead_letters(tmp_path: Path) -> None:
             events=_three_events(),
             content=_three_event_content(),
             fail_on_fetch={"note-2.md"},
+            track_modified_at=True,
         )
         extractor = FakeExtractor()
 
@@ -211,6 +213,7 @@ def test_persistent_failure_becomes_poisoned_and_skips(tmp_path: Path) -> None:
                 events=events,
                 content=content,
                 fail_on_fetch={"note-2.md"},
+                track_modified_at=True,
             )
             result = pipeline.run_batch(connector, FakeExtractor())
             assert result.dead_lettered == 1, f"attempt {attempt}: expected one dead-letter"
@@ -225,6 +228,7 @@ def test_persistent_failure_becomes_poisoned_and_skips(tmp_path: Path) -> None:
             events=events,
             content=content,
             fail_on_fetch={"note-2.md"},
+            track_modified_at=True,
         )
         result = pipeline.run_batch(connector, FakeExtractor())
         assert result.poisoned_skipped == 1
@@ -275,6 +279,7 @@ def test_silver_failure_rolls_back_entire_batch(tmp_path: Path) -> None:
             name="fake-source",
             events=_three_events(),
             content=_three_event_content(),
+            track_modified_at=True,
         )
 
         with pytest.raises(RuntimeError, match="silver: simulated batch-level failure"):

@@ -101,6 +101,9 @@ class _SyntheticSourceConnector:
     def sensitivity_for(self, item_id: str) -> Sensitivity:
         raise NotImplementedError
 
+    def next_cursor(self) -> str | None:
+        raise NotImplementedError
+
 
 class _SyntheticExtractor:
     """Minimal :class:`Extractor` impl for Wave 1 shape verification."""

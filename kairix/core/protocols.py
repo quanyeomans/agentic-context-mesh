@@ -1033,6 +1033,30 @@ class SourceConnector(Protocol):
         """Return the configured sensitivity tier for the given item."""
         ...
 
+    def next_cursor(self) -> str | None:
+        """Return the cursor token to persist after the most recent ``list_changes`` drain.
+
+        Populated by the connector during :meth:`list_changes` and read
+        by the orchestration layer (``ConnectorPipeline._commit_and_flush``)
+        once per chunk-commit. ``None`` means "no cursor advance this
+        tick" — the orchestrator MUST NOT clobber a previously-persisted
+        cursor when ``next_cursor()`` returns ``None``.
+
+        Why this is on the Protocol: per-item ``modified_at`` is NOT a
+        valid cursor for connectors whose change-detection API uses
+        opaque continuation tokens (Graph ``@odata.deltaLink``, Slack
+        ``ts``, Notion ``last_edited_time`` map, GitHub ``Last-Event-ID``).
+        Writing ``modified_at`` for those connectors corrupts the cursor
+        and forces a full resync on every tick — see the deltaLink
+        clobber incident in ``docs/runbooks/`` for the failure mode.
+
+        Connectors whose cursor IS an ISO-8601 timestamp (Obsidian,
+        Dex CRM, m365_calendar single-cursor path) should track the
+        max ``modified_at`` observed in the last drain and return it
+        here.
+        """
+        ...
+
 
 @runtime_checkable
 class Extractor(Protocol):

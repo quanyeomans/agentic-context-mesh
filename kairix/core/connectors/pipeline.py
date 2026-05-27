@@ -218,6 +218,14 @@ class ConnectorPipeline:
         the first chunk-level exception AFTER rolling back the failing
         chunk (so earlier-committed chunks survive) so the worker can
         log it.
+
+        After ``list_changes`` drains successfully, always commit the
+        terminal chunk so the connector-supplied ``next_cursor()`` is
+        persisted — even on a zero-event tick where the connector
+        advanced its server-side delta cursor without surfacing items.
+        Skipping the terminal commit on quiet ticks is the bug that
+        forced full Graph resync every 15 min (deltaLink clobber, see
+        :meth:`SourceConnector.next_cursor` docstring).
         """
         totals = _BatchTotals()
         chunk = _ChunkAccumulator()
@@ -230,9 +238,11 @@ class ConnectorPipeline:
             # advance survive.
             self._db.rollback()
             raise
-        # Final partial chunk (if any items processed since last commit).
-        if chunk.latest_modified_at is not None:
-            self._commit_and_flush(connector.name, totals, chunk)
+        # Always flush after a clean drain — the connector's next_cursor()
+        # may have advanced even when no items were emitted (server-side
+        # delta cursor moved forward on a quiet tick). _commit_and_flush
+        # is a no-op for cursor write when next_cursor() returns None.
+        self._commit_and_flush(connector, totals, chunk)
         return BatchResult(
             processed=totals.processed,
             dead_lettered=totals.dead_lettered,
@@ -256,17 +266,27 @@ class ConnectorPipeline:
         outcome = self._process_item(connector, extractor, change)
         chunk.record(outcome, modified_at)
         if chunk.size >= self._chunk_size:
-            self._commit_and_flush(connector.name, totals, chunk)
+            self._commit_and_flush(connector, totals, chunk)
 
     def _commit_and_flush(
         self,
-        source_name: str,
+        connector: SourceConnector,
         totals: _BatchTotals,
         chunk: _ChunkAccumulator,
     ) -> None:
-        """Cursor-advance + commit; fold chunk counts into totals; reset chunk."""
-        assert chunk.latest_modified_at is not None, "_commit_and_flush called with empty chunk"
-        self._cursor_store.write(source_name, chunk.latest_modified_at)
+        """Cursor-advance + commit; fold chunk counts into totals; reset chunk.
+
+        Writes the connector-supplied ``next_cursor()`` token (NOT the
+        per-item ``modified_at`` — that breaks connectors whose cursor
+        is an opaque API continuation token). When ``next_cursor()``
+        returns ``None`` the cursor write is skipped so a previously-
+        persisted cursor isn't clobbered with ``None``. The chunk-level
+        accumulators are always reset and folded into totals so the
+        in-flight state stays consistent across ticks.
+        """
+        next_cursor_token = connector.next_cursor()
+        if next_cursor_token is not None:
+            self._cursor_store.write(connector.name, next_cursor_token)
         self._db.commit()
         totals.processed += chunk.processed
         totals.dead_lettered += chunk.dead_lettered

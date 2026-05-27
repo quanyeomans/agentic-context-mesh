@@ -2172,6 +2172,12 @@ class FakeObsidian:
     def sensitivity_for(self, _item_id: str) -> Any:
         return self._sensitivity
 
+    def next_cursor(self) -> str | None:
+        """Return the max ``modified_at`` across seeded events (ISO timestamp cursor)."""
+        if not self._events:
+            return None
+        return max(ev.modified_at for ev in self._events)
+
 
 class FakeDexCrmConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
@@ -2232,6 +2238,12 @@ class FakeDexCrmConnector:
         del item_id
         return self._sensitivity
 
+    def next_cursor(self) -> str | None:
+        """Return the max ``modified_at`` across seeded events (ISO timestamp cursor)."""
+        if not self._events:
+            return None
+        return max(ev.modified_at for ev in self._events)
+
 
 # ---------------------------------------------------------------------------
 # Connector-pipeline orchestration fakes (Wave 2 — IM-2)
@@ -2254,6 +2266,14 @@ class FakeSourceConnector:
     Used by ``tests/integration/test_connector_pipeline.py`` to drive
     the per-batch orchestration through the real Bronze + Silver + Cursor
     + DeadLetter surfaces.
+
+    The fake's :meth:`next_cursor` returns the configurable
+    ``cursor_token`` so integration tests can assert the orchestrator
+    persisted the connector-supplied token (not the per-item
+    ``modified_at``). Pass ``track_modified_at=True`` to simulate the
+    Obsidian/Dex-style "max modified_at observed in last drain"
+    behaviour; pass ``cursor_token=...`` for the SharePoint/Graph-style
+    "opaque token unrelated to modified_at" shape.
     """
 
     def __init__(
@@ -2264,6 +2284,8 @@ class FakeSourceConnector:
         content: dict[str, bytes] | None = None,
         fail_on_fetch: set[str] | None = None,
         sensitivity: str = "internal",
+        cursor_token: str | None = None,
+        track_modified_at: bool = False,
     ) -> None:
         from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
 
@@ -2273,8 +2295,24 @@ class FakeSourceConnector:
         self._fail_on_fetch: set[str] = set(fail_on_fetch) if fail_on_fetch is not None else set()
         self._sensitivity = sensitivity
         self.fetch_calls: list[str] = []
+        # next_cursor() shapes:
+        #   - cursor_token=<str>: returned verbatim (opaque-token shape;
+        #     mirrors SharePoint/Graph/Slack deltaLink behaviour).
+        #   - track_modified_at=True: returns max ``modified_at`` seen on
+        #     the last list_changes drain (Obsidian/Dex shape).
+        #   - both None: returns None (simulates "no cursor advance").
+        self._cursor_token = cursor_token
+        self._track_modified_at = track_modified_at
+        self._last_max_modified_at: str | None = None
+        # list_changes_calls captures the cursor argument each call
+        # received so tests can assert the orchestrator passed the
+        # stored cursor (not None) on the second tick.
+        self.list_changes_calls: list[Any] = []
 
-    def list_changes(self, _cursor: Any | None) -> Any:
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        self.list_changes_calls.append(cursor)
+        if self._track_modified_at and self._events:
+            self._last_max_modified_at = max(ev.modified_at for ev in self._events)
         return iter(self._events)
 
     def fetch(self, item_id: str) -> Any:
@@ -2295,6 +2333,27 @@ class FakeSourceConnector:
 
     def sensitivity_for(self, _item_id: str) -> Any:
         return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Return the cursor token the orchestrator should persist.
+
+        Three shapes (mirrors the real-connector taxonomy):
+
+          * If ``cursor_token`` was supplied at construction, return
+            it verbatim — simulates SharePoint deltaLink / Graph
+            ``@odata.deltaLink`` opaque-token cursors.
+          * If ``track_modified_at=True``, return the max
+            ``modified_at`` observed in the last :meth:`list_changes`
+            drain — simulates Obsidian / Dex CRM ISO timestamp cursors.
+          * Otherwise return ``None`` — simulates "no cursor advance
+            this tick" so tests can assert the orchestrator does NOT
+            clobber a prior cursor with None.
+        """
+        if self._cursor_token is not None:
+            return self._cursor_token
+        if self._track_modified_at:
+            return self._last_max_modified_at
+        return None
 
 
 class FakeM365EmailHeadersConnector:
@@ -2366,6 +2425,12 @@ class FakeM365EmailHeadersConnector:
     def sensitivity_for(self, _item_id: str) -> Any:
         return "personal"
 
+    def next_cursor(self) -> str | None:
+        """Return a synthetic Graph-style deltaLink for the most recent drain."""
+        if not self._envelopes:
+            return None
+        return f"https://graph.microsoft.com/v1.0/users/{self._upn}/messages/delta?token=fake-token"
+
 
 class FakeM365CalendarConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
@@ -2407,6 +2472,10 @@ class FakeM365CalendarConnector:
 
     def sensitivity_for(self, _item_id: str) -> Any:
         return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Return the seeded deltaLink (Graph opaque-token cursor shape)."""
+        return self.last_delta_link
 
 
 class FakeSharePointConnector:
@@ -2572,6 +2641,12 @@ class FakeNotionConnector:
     def sensitivity_for(self, _item_id: str) -> Any:
         return self._sensitivity
 
+    def next_cursor(self) -> str | None:
+        """Return the max ``last_edited_time`` across seeded pages (Notion cursor shape)."""
+        if not self._pages:
+            return None
+        return max(str(p.get("last_edited_time", "")) for p in self._pages)
+
 
 class FakeGitHubConnector:
     """Scripted GitHub :class:`kairix.core.protocols.SourceConnector`.
@@ -2658,6 +2733,10 @@ class FakeGitHubConnector:
 
     def sensitivity_for(self, _item_id: str) -> Any:
         return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Fake GitHub connector cursor — returns the configurable test token or None."""
+        return getattr(self, "_next_cursor_token", None)
 
     def load_from_checkpoint(self, _container: Any, _checkpoint: Any) -> Any:
         return self.list_changes(None)
@@ -2889,6 +2968,10 @@ class FakeSlackConnector:
             "mpim": "client-confidential",
             "im": "personal",
         }.get(kind, "personal")
+
+    def next_cursor(self) -> str | None:
+        """Fake Slack connector cursor — returns the configurable test token or None."""
+        return getattr(self, "_next_cursor_token", None)
 
 
 class FakeExtractor:

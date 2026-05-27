@@ -199,6 +199,12 @@ class DexCrmConnector:
         # can return the bytes the connector already pulled in
         # ``list_changes`` without a second API roundtrip.
         self._record_cache: dict[str, DexCrmRecord] = {}
+        # High-water-mark ISO timestamp from the most recent
+        # :meth:`list_changes` drain — returned by :meth:`next_cursor`
+        # so the orchestrator persists the correct cursor token. None
+        # before the first drain; preserves the prior value on a
+        # zero-event tick so we don't clobber a real cursor with None.
+        self._last_max_modified_at: str | None = None
         # Diagnostic introspection — records which Wave E branch
         # :meth:`list_changes_for_container` took on the most recent
         # call (``"legacy"`` = Wave B shim delegation when the
@@ -249,7 +255,23 @@ class DexCrmConnector:
                         modified_at=record.modified_at,
                     )
                 )
+        # Track high-water-mark for next_cursor(); preserve prior cursor
+        # on a zero-event drain so the orchestrator's commit-and-flush
+        # doesn't clobber a real cursor with None.
+        self._last_max_modified_at = (
+            max(ev.modified_at for ev in events) if events else (cursor if cursor else self._last_max_modified_at)
+        )
         return iter(events)
+
+    def next_cursor(self) -> str | None:
+        """Return the ISO-8601 high-water-mark from the most recent drain.
+
+        Dex CRM's cursor is the ``updated_after`` ISO timestamp passed
+        to its REST API; the orchestrator persists this between ticks
+        via :meth:`ConnectorPipeline._commit_and_flush`. ``None``
+        before the first :meth:`list_changes` call.
+        """
+        return self._last_max_modified_at
 
     def fetch(self, item_id: str) -> RawArtefact:
         """Return the raw record bytes for ``item_id``.
