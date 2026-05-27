@@ -156,6 +156,9 @@ class NotionConnector:
     """
 
     name: str = CONNECTOR_NAME
+    per_tick_max_items: int = 500
+    # F66-watermark-exempt: Notion pages stream as small block envelopes; no large disk writes
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,

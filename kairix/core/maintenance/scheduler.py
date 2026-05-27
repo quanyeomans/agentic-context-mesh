@@ -302,6 +302,7 @@ class MaintenanceSchedulerDeps:
     bronze_ttl_gc: Callable[[], int] = field(default_factory=lambda: _default_bronze_ttl_gc)
 
 
+# F66-exempt: scheduler orchestrates ticks; no per-tick budget of its own
 class MaintenanceScheduler:
     """Per-tick orphan-vector pruner + usearch rebuilder + FTS healer.
 

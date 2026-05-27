@@ -45,9 +45,13 @@ Three failure modes map to three behaviours (spec doc §4):
 
 from __future__ import annotations
 
+import logging
+import shutil
 import sqlite3
-from collections.abc import Sequence
+import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from kairix.core.connectors.cursor_store import CursorStore
@@ -60,6 +64,8 @@ from kairix.core.protocols import (
     SilverProcessor,
     SourceConnector,
 )
+
+logger = logging.getLogger(__name__)
 
 # Per-item outcome tags returned by ``_process_item`` and consumed by
 # ``_process_batch`` to bump the right :class:`BatchResult` counter.
@@ -132,13 +138,56 @@ class BatchResult:
     entries that incremented). ``poisoned_skipped`` counts items that
     were already at ``failure_count >= threshold`` at batch start and
     were skipped past.
+
+    ADR-020 additions:
+
+    * ``skipped_low_disk`` — True when the tick was skipped because
+      :meth:`SourceConnector.disk_watermark_min_free_bytes` was set and
+      the resolved free-bytes count fell below it. Cursor + bronze are
+      untouched; operator sees a ``watermark_skip`` log line.
+    * ``budget_yielded`` — True when the tick reached
+      :meth:`SourceConnector.per_tick_max_items` before the source
+      drained. The partial cursor is committed; the next tick resumes
+      from there. The operator's signal that a backlog is converging
+      over many ticks.
     """
 
     processed: int
     dead_lettered: int
     poisoned_skipped: int
+    skipped_low_disk: bool = False
+    budget_yielded: bool = False
 
 
+_BUDGET_EXHAUSTED_SENTINEL = "F66:budget_exhausted"
+
+
+class _BudgetExhaustedError(Exception):
+    """Internal marker raised when the per-tick budget cap is hit.
+
+    Caught by :meth:`ConnectorPipeline._process_batch` so the partial
+    chunk is committed (cursor advances) before returning a
+    ``budget_yielded=True`` result. The exception is NEVER surfaced to
+    callers — it is a control-flow signal local to the pipeline.
+    """
+
+
+def _default_disk_free_resolver() -> int:
+    """Default disk-free resolver — queries ``/data`` if present, else returns ``sys.maxsize``.
+
+    Production deploys mount the engagement-scope volume at ``/data``;
+    local dev / CI runs without that mount see ``sys.maxsize`` so the
+    watermark gate is effectively disabled (any positive watermark <
+    maxsize, so the gate never trips). Tests inject a deterministic
+    resolver via ``disk_free_resolver=lambda: <byte_count>``.
+    """
+    data_dir = Path("/data")
+    if data_dir.exists():
+        return shutil.disk_usage(str(data_dir)).free
+    return sys.maxsize
+
+
+# F66-exempt: orchestrator reads per_tick_max_items from the connector; no budget of its own
 class ConnectorPipeline:
     """Production connector orchestrator.
 
@@ -149,6 +198,20 @@ class ConnectorPipeline:
     transaction boundary — every Bronze / cursor / dead-letter /
     chunk write happens against the same connection so the per-batch
     commit / rollback is atomic across all stores.
+
+    ADR-020 — per-tick budget + disk-watermark gate. Each tick:
+
+    1. Checks the connector's :attr:`SourceConnector.disk_watermark_min_free_bytes`
+       against the configured ``disk_free_resolver`` (default queries
+       ``/data``). If free bytes < watermark, the tick yields
+       immediately with ``BatchResult(skipped_low_disk=True)`` — cursor
+       and bronze untouched.
+    2. Drains :meth:`SourceConnector.list_changes` up to
+       :attr:`SourceConnector.per_tick_max_items` items, commits the
+       partial cursor, and returns ``BatchResult(budget_yielded=True)``.
+       The next tick resumes from the persisted cursor — many small
+       ticks accrete progress so a 100k-item first-sync converges over
+       ~50 hours of 15-min ticks instead of one 50-hour single-tick run.
     """
 
     def __init__(
@@ -163,6 +226,7 @@ class ConnectorPipeline:
         dead_letter: DeadLetterStore,
         dead_letter_threshold: int = 3,
         chunk_size: int = 50,
+        disk_free_resolver: Callable[[], int] | None = None,
     ) -> None:
         if chunk_size < 1:
             raise ValueError(
@@ -179,6 +243,11 @@ class ConnectorPipeline:
         self._dead_letter = dead_letter
         self._dead_letter_threshold = dead_letter_threshold
         self._chunk_size = chunk_size
+        # ADR-020 — explicit-None means "use the production resolver";
+        # tests inject a deterministic resolver via this kwarg.
+        self._disk_free_resolver: Callable[[], int] = (
+            disk_free_resolver if disk_free_resolver is not None else _default_disk_free_resolver
+        )
 
     def run_batch(self, connector: SourceConnector, extractor: Extractor) -> BatchResult:
         """Drive one batch of changes through chunked per-commit transactions.
@@ -202,7 +271,29 @@ class ConnectorPipeline:
         into dead_letter and do not propagate. Silver / writer / sink
         failures within a chunk still trigger a rollback — but only of
         that chunk, not the whole batch.
+
+        ADR-020 — before the cursor read, the watermark gate runs: if
+        the connector declares a ``disk_watermark_min_free_bytes`` and
+        the resolved free-bytes count falls below it, the tick yields
+        immediately with ``BatchResult(skipped_low_disk=True)``. The
+        cursor row is untouched; the next tick re-checks.
         """
+        watermark = connector.disk_watermark_min_free_bytes
+        if watermark is not None:
+            free_bytes = self._disk_free_resolver()
+            if free_bytes < watermark:
+                logger.info(
+                    "watermark_skip name=%s free=%d min=%d",
+                    connector.name,
+                    free_bytes,
+                    watermark,
+                )
+                return BatchResult(
+                    processed=0,
+                    dead_lettered=0,
+                    poisoned_skipped=0,
+                    skipped_low_disk=True,
+                )
         cursor = self._cursor_store.read(connector.name)
         return self._process_batch(connector, extractor, cursor)
 
@@ -226,27 +317,52 @@ class ConnectorPipeline:
         Skipping the terminal commit on quiet ticks is the bug that
         forced full Graph resync every 15 min (deltaLink clobber, see
         :meth:`SourceConnector.next_cursor` docstring).
+
+        ADR-020 — the per-tick budget cap. After ``per_tick_max_items``
+        events have been processed (any outcome), the inner loop raises
+        :class:`_BudgetExhaustedError`. The handler commits the partial
+        chunk (cursor advances), then returns ``BatchResult(budget_yielded=True)``.
+        Many small ticks accrete progress so a 100k-item first-sync
+        converges without a single 50-hour tick.
         """
         totals = _BatchTotals()
         chunk = _ChunkAccumulator()
+        budget_yielded = False
+        budget = connector.per_tick_max_items
+        items_seen = 0
         try:
             for change in connector.list_changes(cursor):
                 self._process_change(connector, extractor, change, totals, chunk)
+                items_seen += 1
+                if items_seen >= budget:
+                    raise _BudgetExhaustedError(_BUDGET_EXHAUSTED_SENTINEL)
+        except _BudgetExhaustedError:
+            # Commit the partial chunk so the cursor advances; the next
+            # tick resumes from here. NOT a rollback — the work done
+            # in this tick is real and must be persisted.
+            budget_yielded = True
+            logger.info(
+                "tick_yielded_at_budget name=%s items=%d",
+                connector.name,
+                items_seen,
+            )
+            self._commit_and_flush(connector, totals, chunk)
         except Exception:
             # Roll back the failing partial chunk only; earlier chunks
             # are already committed and their bronze rows + cursor
             # advance survive.
             self._db.rollback()
             raise
-        # Always flush after a clean drain — the connector's next_cursor()
-        # may have advanced even when no items were emitted (server-side
-        # delta cursor moved forward on a quiet tick). _commit_and_flush
-        # is a no-op for cursor write when next_cursor() returns None.
-        self._commit_and_flush(connector, totals, chunk)
+        else:
+            # Clean drain — always flush after a clean drain so the
+            # connector's next_cursor() persists even on a zero-event
+            # tick where the server-side delta cursor moved forward.
+            self._commit_and_flush(connector, totals, chunk)
         return BatchResult(
             processed=totals.processed,
             dead_lettered=totals.dead_lettered,
             poisoned_skipped=totals.poisoned_skipped,
+            budget_yielded=budget_yielded,
         )
 
     def _process_change(

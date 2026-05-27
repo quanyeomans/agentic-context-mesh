@@ -2137,6 +2137,8 @@ class FakeObsidian:
     """
 
     name: str = "obsidian"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,
@@ -2192,6 +2194,8 @@ class FakeDexCrmConnector:
     """
 
     name: str = "dex_crm"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,
@@ -2286,10 +2290,20 @@ class FakeSourceConnector:
         sensitivity: str = "internal",
         cursor_token: str | None = None,
         track_modified_at: bool = False,
+        per_tick_max_items: int = 500,
+        disk_watermark_min_free_bytes: int | None = None,
     ) -> None:
         from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
 
         self.name = name
+        # F66 ceilings — declared on the instance so the SourceConnector
+        # Protocol attribute lookup works at the call site in
+        # ``ConnectorPipeline.run_batch``. Defaults match the Protocol
+        # defaults (500 items, no watermark) so existing tests are
+        # unaffected; tests exercising budget / watermark gating set
+        # these explicitly.
+        self.per_tick_max_items = per_tick_max_items
+        self.disk_watermark_min_free_bytes = disk_watermark_min_free_bytes
         self._events: list[ChangeEvent] = list(events) if events is not None else []
         self._content: dict[str, bytes] = dict(content) if content is not None else {}
         self._fail_on_fetch: set[str] = set(fail_on_fetch) if fail_on_fetch is not None else set()
@@ -2374,6 +2388,8 @@ class FakeM365EmailHeadersConnector:
     """
 
     name: str = "m365_email_headers"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,
@@ -2438,6 +2454,8 @@ class FakeM365CalendarConnector:
     """
 
     name: str = "m365_calendar"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = 5 * 1024**3
 
     def __init__(
         self,
@@ -2495,6 +2513,8 @@ class FakeSharePointConnector:
     """
 
     name: str = "sharepoint"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = 5 * 1024**3
 
     def __init__(
         self,
@@ -2580,6 +2600,8 @@ class FakeNotionConnector:
     """
 
     name: str = "notion"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,
@@ -2668,6 +2690,8 @@ class FakeGitHubConnector:
     """
 
     name: str = "github"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = 5 * 1024**3
 
     def __init__(
         self,
@@ -2909,6 +2933,8 @@ class FakeSlackConnector:
     """
 
     name: str = "slack"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,

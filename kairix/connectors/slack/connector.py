@@ -260,6 +260,9 @@ class SlackConnector:
     """
 
     name: str = CONNECTOR_NAME
+    per_tick_max_items: int = 500
+    # F66-watermark-exempt: Slack messages are small (~8 KB envelopes); no large disk writes
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,

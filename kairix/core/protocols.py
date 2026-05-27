@@ -1016,6 +1016,8 @@ class SourceConnector(Protocol):
     """
 
     name: str
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]:
         """Yield ChangeEvents observed since ``cursor`` (None = full enumeration)."""

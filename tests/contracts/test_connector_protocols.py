@@ -88,6 +88,8 @@ class _SyntheticSourceConnector:
     """Minimal :class:`SourceConnector` impl for Wave 1 shape verification."""
 
     name: str = "synthetic"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
 
     def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]:
         raise NotImplementedError

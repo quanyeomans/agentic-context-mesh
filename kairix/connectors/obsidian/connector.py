@@ -134,6 +134,9 @@ class ObsidianConnector:
     """
 
     name: str = CONNECTOR_NAME
+    per_tick_max_items: int = 500
+    # F66-watermark-exempt: reads local FS only; no remote-fetch disk pressure
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,

@@ -182,6 +182,9 @@ class DexCrmConnector:
     """
 
     name: str = CONNECTOR_NAME
+    per_tick_max_items: int = 500
+    # F66-watermark-exempt: Dex CRM emits small JSON envelopes; no large fetched payloads
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,

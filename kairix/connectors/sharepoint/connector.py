@@ -204,6 +204,8 @@ class SharePointConnector:
     """
 
     name: str = CONNECTOR_NAME
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = 5 * 1024**3  # 5 GiB — SharePoint blobs can be large
 
     def __init__(
         self,

@@ -180,6 +180,8 @@ pytest_plugins = [
     "tests.bdd.steps.sharepoint_rate_limit_steps",
     # F63 reference test — maintenance scale-bound per-tick row cap.
     "tests.bdd.steps.maintenance_scale_bound_steps",
+    # ADR-020 / F66 — connector per-tick budget + disk-watermark gate.
+    "tests.bdd.steps.per_tick_budget_steps",
     # Wave 5 KP-2 — M365 email-headers connector (header-only per ADR-004).
     "tests.bdd.steps.connector_m365_email_headers_steps",
     "tests.bdd.steps.feature_flag_connector_m365_email_headers_steps",

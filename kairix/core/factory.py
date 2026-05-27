@@ -527,6 +527,7 @@ def build_connector_pipeline(
     silver: Any = None,
     chunk_writer: Any = None,
     entity_graph_sink: Any = None,
+    disk_free_resolver: Any = None,
 ) -> Any:
     """Construct a production-shape ConnectorPipeline against ``db``.
 
@@ -543,6 +544,12 @@ def build_connector_pipeline(
 
     Optional ``silver`` / ``chunk_writer`` / ``entity_graph_sink``
     overrides let integration tests inject scripted-failure stand-ins.
+
+    ``disk_free_resolver`` injects a deterministic free-bytes resolver
+    so integration / BDD tests can exercise the ADR-020 watermark gate
+    without touching the host filesystem. Default ``None`` keeps the
+    pipeline's production default (queries ``/data``; falls back to
+    ``sys.maxsize`` when ``/data`` isn't mounted).
     """
     # Phase 7: streaming bronze writes no files; bronze_root is accepted
     # for backward-compat call-signature but unused. New callers should
@@ -570,4 +577,5 @@ def build_connector_pipeline(
         entity_graph_sink=entity_graph_sink if entity_graph_sink is not None else _SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
         dead_letter=DeadLetterStore(db),
+        disk_free_resolver=disk_free_resolver,
     )

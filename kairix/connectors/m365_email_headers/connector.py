@@ -189,6 +189,9 @@ class M365EmailHeadersConnector:
     """
 
     name: str = CONNECTOR_NAME
+    per_tick_max_items: int = 500
+    # F66-watermark-exempt: headers-only fetch; no message bodies persisted to disk
+    disk_watermark_min_free_bytes: int | None = None
 
     def __init__(
         self,

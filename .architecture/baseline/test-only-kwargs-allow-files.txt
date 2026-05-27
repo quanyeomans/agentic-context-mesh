@@ -69,3 +69,13 @@ kairix.use_cases.prep::default_chat_callable::chat_backend_factory
 #   - kairix/use_cases/eval_suite.py:287 (_resolve_search_pipeline)
 kairix.use_cases.eval_suite::_resolve_production_fact_extractor::factory_loader
 kairix.use_cases.eval_suite::_resolve_search_pipeline::builder_loader
+
+# ADR-020 — connector tick budget + disk-watermark gate. Production
+# default resolves via shutil.disk_usage("/data").free (the standard
+# engagement-scope volume); operators on non-/data layouts override
+# via this kwarg, and integration / BDD tests inject a deterministic
+# resolver to exercise the watermark-skip path without touching host
+# disk. The seam is the documented composition swap point between
+# the worker / factory and the pipeline's free-bytes probe, not a
+# test-only reach-in. See docs/architecture/ADR-020-connector-tick-budget-watermark.md.
+kairix.core.factory::build_connector_pipeline::disk_free_resolver
