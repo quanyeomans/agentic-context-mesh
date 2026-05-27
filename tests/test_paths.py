@@ -784,6 +784,49 @@ class TestTraceEnabled:
         assert trace_enabled() is False
 
 
+class TestWorkerWritesVecIndex:
+    """Round-trip tests for ``worker_writes_vec_index`` (#335 OOM gate)."""
+
+    @pytest.mark.unit
+    def test_default_off(self, monkeypatch) -> None:
+        """Unset env → worker skips usearch writes (default safe)."""
+        from kairix.paths import worker_writes_vec_index
+
+        monkeypatch.delenv("KAIRIX_WORKER_WRITES_VEC_INDEX", raising=False)
+        assert worker_writes_vec_index() is False
+
+    @pytest.mark.unit
+    def test_one_opts_in(self, monkeypatch) -> None:
+        """``KAIRIX_WORKER_WRITES_VEC_INDEX=1`` opts in to the legacy write path."""
+        from kairix.paths import worker_writes_vec_index
+
+        monkeypatch.setenv("KAIRIX_WORKER_WRITES_VEC_INDEX", "1")
+        assert worker_writes_vec_index() is True
+
+    @pytest.mark.unit
+    def test_true_and_yes_also_opt_in(self, monkeypatch) -> None:
+        """Accept the conventional truthy spellings, case-insensitive."""
+        from kairix.paths import worker_writes_vec_index
+
+        for value in ("true", "True", "TRUE", "yes", "Yes"):
+            monkeypatch.setenv("KAIRIX_WORKER_WRITES_VEC_INDEX", value)
+            assert worker_writes_vec_index() is True, f"expected True for {value!r}"
+
+    @pytest.mark.unit
+    def test_falsey_strings_stay_off(self, monkeypatch) -> None:
+        """``0`` / ``false`` / ``no`` / empty stay OFF.
+
+        Sabotage: relax the truthy set to ``bool(value)`` and
+        ``KAIRIX_WORKER_WRITES_VEC_INDEX=0`` would re-enable the OOM
+        path. Pinning the explicit-truthy contract here.
+        """
+        from kairix.paths import worker_writes_vec_index
+
+        for value in ("0", "false", "no", "", "off"):
+            monkeypatch.setenv("KAIRIX_WORKER_WRITES_VEC_INDEX", value)
+            assert worker_writes_vec_index() is False, f"expected False for {value!r}"
+
+
 class TestFeatureFlagOverride:
     """Round-trip tests for ``feature_flag_override`` (PR-2 feature-flag scaffold).
 

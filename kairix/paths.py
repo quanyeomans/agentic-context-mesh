@@ -919,6 +919,27 @@ def connector_sync_disabled() -> bool:
     return os.environ.get("KAIRIX_CONNECTOR_SYNC_DISABLED", "").strip().lower() in {"1", "true", "yes"}
 
 
+def worker_writes_vec_index() -> bool:
+    """Return True when the embed-loop worker should write to the usearch ANN index.
+
+    Default is **False** because the in-process usearch writer rebuilds the
+    full HNSW graph in RAM on first write per cycle (see issue #335 — the
+    1.27M-vector rebuild needs ~7.8 GB resident, blowing past any sane
+    worker mem_limit). With the default, the worker writes only to
+    ``content_vectors`` in SQLite; the usearch on-disk index is brought
+    up to date by ``kairix index-rebuild`` run out-of-band (manual or
+    scheduled subprocess with appropriate RAM ceiling).
+
+    Operators who run on hosts where the worker can spare 10+ GiB during
+    embed cycles can opt in with ``KAIRIX_WORKER_WRITES_VEC_INDEX=1``;
+    everywhere else, treat the usearch index as eventually consistent
+    against ``content_vectors``.
+
+    Accepted truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    """
+    return os.environ.get("KAIRIX_WORKER_WRITES_VEC_INDEX", "").strip().lower() in {"1", "true", "yes"}
+
+
 def noninteractive_mode() -> bool:
     """Return True when ``KAIRIX_NONINTERACTIVE=1`` is set in the environment.
 

@@ -299,7 +299,26 @@ def _open_usearch_index() -> Any:  # pragma: no cover  # prod lazy default; deps
     ``VectorIndex.load()`` requires a writable on-disk path and embedded
     vectors that match the current schema, neither of which is available
     in unit tests.
+
+    Returns ``None`` (skipping the usearch open + per-batch add) when
+    ``worker_writes_vec_index()`` is False — the default. See issue #335:
+    the HNSW rebuild on first per-cycle write needs ~7.8 GB resident for
+    a 1.27M-vector corpus, which OOM-kills any sane worker mem_limit.
+    The SQLite ``content_vectors`` (metadata) write path remains
+    independent; the usearch on-disk index goes stale against new
+    embeddings until rebuilt out-of-band (#335 tracks the rebuild path —
+    requires either a sidecar with 10+ GiB or the schema-change /
+    delta-segments architectural follow-up).
     """
+    from kairix.paths import worker_writes_vec_index
+
+    if not worker_writes_vec_index():
+        logger.info(
+            "vec_index: worker write disabled (KAIRIX_WORKER_WRITES_VEC_INDEX!=1) — "
+            "SQLite content_vectors continues to advance; usearch on-disk index will "
+            "drift (see #335 for rebuild plan)."
+        )
+        return None
     try:
         from kairix.core.search.vec_index import VectorIndex
         from kairix.paths import db_path as get_db_path
