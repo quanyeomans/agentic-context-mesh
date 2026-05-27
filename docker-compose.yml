@@ -104,7 +104,7 @@ services:
     # agent-facing path) always win disk bandwidth when the worker is
     # mid-ingest / mid-recovery.
     blkio_config:
-      weight: ${KAIRIX_WORKER_IO_WEIGHT:-100}
+      weight: 100
     # Same /tmp tmpfs rationale as kairix above — connector binary
     # fetches and extractor temp files stay bounded by RAM, never the OS
     # disk. 2 GB sized for SharePoint single-file extraction headroom.
