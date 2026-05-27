@@ -7,42 +7,31 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased] — Next production release after v2026.5.18
 
-> **This entry consolidates the user-facing delta of the v2026.5.23a → v2026.5.28a alpha cycles into the shape an operator upgrading from v2026.5.18 will see.** Internal per-alpha development history lives in git (`git log v2026.5.18..main`) and in archived per-alpha upgrade notes under `docs/upgrades/_dev/` — those records are for kairix engineering, not operator consumption.
+> Operator-facing changes since v2026.5.18 in one entry. Internal development history (per-alpha notes, architecture refactors not visible to operators) lives in git and `docs/upgrades/_dev/`.
 
-### Headline capabilities
+### What's new
 
-- **Five new source connectors.** SharePoint (with per-drive `include_paths` / `exclude_paths` filtering), Slack, GitHub, Notion, and Microsoft 365 (calendar + email headers). Each connector ships with a per-source extractor chain configurable in `kairix.config.yaml`.
-- **Topology v2 operator config.** Connectors, credentials, cc_pairs, collections, scope profiles, and skills are now first-class config types. The legacy flat-list connector config still works for backward compat. See [`docs/architecture/connector-scope-topology/ADR.md`](docs/architecture/connector-scope-topology/ADR.md).
-- **EscalatingExtractor chain.** Operators declare an ordered fallback chain per connector (e.g. `extractor_chain: [markitdown, pdf_fallback, ocr]`). The framework walks the chain via `quality_ok` so image-only PDFs automatically escalate from text extractors to OCR without per-document operator intervention.
-- **`kairix worker reextract` recovery.** A new operator subcommand to recover dead-lettered items after a fix lands: `kairix worker reextract --source-name <name> [--dry-run] [--limit N]`. Reports `recovered` / `still_failing` / `skipped_no_bronze` / `skipped_source_unavailable` counters in a JSON envelope.
-- **Background maintenance loop.** A periodic worker tick that prunes orphan `content_vectors` rows, rebuilds the usearch index, and heals FTS5 drift. Default off; flip the `maintenance_loop` feature flag to opt in.
+- **Five new source connectors** — SharePoint, Slack, GitHub, Notion, and Microsoft 365 (calendar + email headers). Each can be configured per-source in `kairix.config.yaml`. SharePoint also supports per-folder include / exclude filtering so you can pick which parts of a drive to index.
+- **Pick what to retrieve from your config file** — connectors, credentials, collections, and per-agent scope profiles are now declared in `kairix.config.yaml` instead of code. Your existing config keeps working unchanged; the new options are opt-in.
+- **Documents try the best extractor automatically** — for sources like SharePoint where you have a mix of text PDFs and image-only PDFs, kairix can be configured to walk an ordered list of extractors (e.g. fast-text first, OCR as fallback) and pick the best output per document, with no per-document operator intervention.
+- **Recover items that failed to extract** — when an extractor fix lands, `kairix worker reextract --source-name <name>` walks every item that failed at extract time, re-runs it through the fixed extractor, and clears the failure record on success. Includes `--dry-run` to size the recovery first.
+- **Periodic index hygiene** — a new background tick prunes orphan search-index rows and heals search-index drift. Default off; turn on with the `maintenance_loop` feature flag.
 
-### Storage model: streaming bronze (default + only model)
+### Disk usage drops by about 6,000x
 
-- Bronze persistence is now metadata-only — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only `(source_name, item_id, content_hash, mime, fetched_at)`. **Disk usage drops by ~6,000x** vs the previous on-disk-blob model. A 50,000-item corpus that would have needed ~650 GB now needs ~50 MB.
-- Re-extract recovery routes through `connector.fetch(item_id)` to re-pull the raw bytes from source instead of reading a persisted on-disk blob.
-- Extractor scratch moved off the 2 GB `/tmp` tmpfs onto the disk-backed `/data/kairix/tmp` mount, with cleanup-on-failure hardened so sustained extraction loads don't leak placeholder tmpfiles.
-- **Removed for streaming bronze**: `FilesystemBronzeStore` class, `bronze_mode` config field (was previously undocumented), `bronze_ttl_gc` feature flag, bronze orphan reaper maintenance stage. None of these were part of any prior production release — they were internal alpha surfaces.
+Source documents are now extracted in-memory and discarded immediately — kairix stores only the chunks, vectors, and a small metadata row per source item. A 50,000-item corpus that would have needed ~650 GB on the previous model now needs about ~50 MB.
 
-### Operational hardening
+Recovery is unchanged from the operator's perspective — `kairix worker reextract` will re-pull the raw bytes from the source on demand.
 
-- **Connector cursor write now uses the connector's opaque token.** `ConnectorPipeline` now persists `connector.next_cursor()` (the Graph deltaLink for SharePoint, ISO high-water-mark for Obsidian-shape connectors, etc.) instead of per-item `modified_at`. Fixes a regression where every worker tick re-fetched the entire source corpus from the start because the cursor value was a per-item timestamp the source's delta API couldn't deserialise. Also guarantees the cursor write fires after every successful drain — including quiet ticks — so a cursor that advances server-side without new items isn't clobbered.
-- **SharePoint Graph client honours `Retry-After` on HTTP 429 / 503.** The client now retries with respect to the `Retry-After` header (or exponential backoff fallback) instead of raising immediately and dead-lettering every item on a throttled drive. Up to 5 attempts per request before raising.
-- **Maintenance orphan-prune is now per-tick bounded.** `MaintenanceScheduler._prune_orphans` honours a configurable cap (default 1,000 rows per tick) so the first maintenance tick on a large production database doesn't saturate disk I/O. Backlogs converge over multiple ticks; the soft-delete table is idempotent on `(hash, seq)` so multi-tick drain produces the same end state as a single sweep would.
-- **Per-chunk commits in `ConnectorPipeline`.** A failure mid-batch rolls back only the failing chunk (default 50 items); earlier chunks survive the failure. Bounded orphan blast radius on worker restart mid-sync.
-- **`connector_sync` decoupled from the embed-noop maintenance gate.** External source connectors (SharePoint / Slack / GitHub / Notion / M365) now fire on their own 15-minute interval regardless of local-vault idleness. The legacy gate that suppressed maintenance work when embed was a no-op never should have included `connector_sync` — fixes the case where an idle local vault prevented external connectors from picking up upstream changes.
-- **MCP cold-start handoff.** The HTTP port binds before the warm sequence runs, so agents see a structured 503 + `ColdStart` envelope (with `retry_after_ms` + `next:` action instructions) instead of OS-level `fetch failed` errors during the 7-30 s warm window.
-- **Markitdown image bundles every converter extra.** DOCX, XLSX, PPTX, Outlook MSG converters all ship in the production image, plus the `tesseract-ocr` system binary for the OCR extractor's runtime.
+### Things that work better
 
-### Engineering guard rails
-
-Three new architecture fitness functions block the regression classes the v2026.5.28 work surfaced. These are blocking gates wired into `safe-commit.sh`, `pre-commit`, and CI Stage 0:
-
-- **F62 — multi-tick idempotency test required.** Every stateful component under `kairix/core/connectors/` or `kairix/core/maintenance/` (anything exposing `tick` / `run_batch` / `step` / `process_batch`) must have a matching `tests/integration/test_*_advance|_multi_tick|_idempotency.py` that runs the component at least twice and asserts tick 2 performs zero or minimal work when no input has changed.
-- **F63 — unbounded `.fetchall()` requires `LIMIT` or rationale.** Any `.fetchall()` call in `kairix/**` must include `LIMIT` within 12 lines preceding the call, or carry a `# F63-bounded: <rationale>` comment.
-- **F64 — external HTTP client requires rate-limit test.** Any plugin under `kairix/connectors/<name>/` or `kairix/providers/<name>/` that imports `httpx` / `requests` / `msgraph` / `notion_client` / `slack_sdk` / `openai` etc. must ship `tests/integration/test_<name>_rate_limit.py` or `tests/bdd/features/<name>_rate_limit.feature` asserting 429 / 503 + `Retry-After` is honoured.
-
-See [`docs/architecture/fitness-functions.md`](docs/architecture/fitness-functions.md) for the full F-rule canon.
+- **Source connectors stay in sync after every tick.** Each connector now persists its own resume token between syncs. Fixes a class of bugs where a worker tick re-fetched the entire source corpus from scratch every 15 minutes because the saved resume point couldn't be read back. After this release, a quiet 15-minute sync against an unchanged SharePoint drive does a single round-trip; before, it could be thousands.
+- **SharePoint sync survives Microsoft Graph throttling.** When Microsoft asks the client to back off (HTTP 429 or 503 with `Retry-After`), kairix now waits the requested time and retries instead of giving up and marking every in-flight item as failed.
+- **Cleanup doesn't saturate disk on big databases.** The maintenance tick now processes a bounded number of rows per call (default 1,000) and resumes on the next tick. Production-scale databases stay responsive while cleanup catches up over a few ticks.
+- **External connectors keep syncing while your local vault is idle.** Previously, an idle local vault could pause the entire maintenance schedule, which silently stopped external connectors from picking up upstream changes. They now run on their own 15-minute interval regardless of local activity.
+- **Failures mid-batch only roll back the failing chunk.** A failure 5,000 items into a 6,000-item sync now keeps the first chunks committed and resumes after the failure, instead of starting over from the beginning.
+- **Agents see a structured retry signal during warm-up.** When kairix is mid-startup, MCP tool calls return a structured "cold start, retry in N seconds" response with explicit retry guidance, rather than a low-level transport error agents can't reason about. (Partial fix for [#320](https://github.com/three-cubes/kairix/issues/320) — full fix continues next cycle.)
+- **Image now ships every document converter** — DOCX, XLSX, PPTX, Outlook MSG converters plus the `tesseract-ocr` system binary all install by default. No more "extractor missing" failures on the first run against a mixed-format SharePoint corpus.
 
 ### Configuration migration from v2026.5.18
 

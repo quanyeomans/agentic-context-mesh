@@ -26,6 +26,7 @@ Design
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
@@ -35,6 +36,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+logger = logging.getLogger("kairix.mcp.transport")
 
 # Default Retry-After header value (seconds) returned by the cold-start
 # middleware when the readiness gate is False. Matches the existing
@@ -231,6 +234,17 @@ class ColdStartMiddleware:
         if self._readiness_check():
             await self._app(scope, receive, send)
             return
+        # Issue #320 observability — log every cold-start short-circuit with
+        # process uptime so operators can correlate post-incident with
+        # "did the middleware run?" vs "did the agent's client time out before
+        # we could respond?".
+        uptime_s = int(time.monotonic() - _ensure_started_at())
+        logger.info(
+            "cold_start_middleware_returning_503 path=%s uptime_s=%d retry_after_s=%d",
+            path,
+            uptime_s,
+            _RETRY_AFTER_SECONDS,
+        )
         response = JSONResponse(
             _build_cold_start_body(path),
             status_code=503,

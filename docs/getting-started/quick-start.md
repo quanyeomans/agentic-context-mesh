@@ -11,11 +11,12 @@ Pick the path that matches your environment and skip the other one.
 
 - **An LLM API key** — Azure OpenAI, standard OpenAI, or any OpenAI-compatible provider
 - **A folder of documents** — markdown files, text files, or structured notes
-- **Optional: connector secrets** — only the connectors you plan to enable need their secrets provisioned:
-  - SharePoint — M365 OAuth triple (`CONNECTOR_M365_*`); v2026.5.24a1+
-  - Slack — bot token (optional app token for live events); v2026.5.24a2+
-  - GitHub — personal access token OR app-installation triple + webhook secret; v2026.5.24a2+
-  - Notion — integration token; v2026.5.24a2+
+- **Optional: connector secrets** — only the connectors you plan to enable need their secrets provisioned (all available in v2026.5.28+):
+  - SharePoint — M365 OAuth triple (`CONNECTOR_M365_*`)
+  - Slack — bot token (optional app token for live events)
+  - GitHub — personal access token OR app-installation triple + webhook secret
+  - Notion — integration token
+  - Microsoft 365 calendar + email headers — same OAuth triple as SharePoint
 
 ---
 
