@@ -77,8 +77,12 @@ DEFAULT_RECONCILE_EVERY = 10
 TOPOLOGY_V2_OBSIDIAN_FLAG = "topology_v2_obsidian"
 
 
+def _iso_z(dt: datetime) -> str:
+    return dt.isoformat().replace("+00:00", "Z")
+
+
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return _iso_z(datetime.now(timezone.utc))
 
 
 def _default_known_state(_cursor: Cursor | None) -> Mapping[str, str]:
@@ -540,8 +544,8 @@ class ObsidianConnector:
             stat = abs_path.stat()
         except OSError:
             return SourceMetadata()
-        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-        created_at = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        modified_at = _iso_z(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc))
+        created_at = _iso_z(datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc))
         author: str | None = None
         tags: tuple[str, ...] = ()
         try:

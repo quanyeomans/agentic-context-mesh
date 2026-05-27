@@ -116,6 +116,20 @@ Canonical examples reference real code in this repo where available.
 - Local detector: mypy
 - Recipe: convert the argument at the call site to the declared type. If the conversion isn't possible the signature is wrong — narrow / overload the parameter type.
 
+### `python:S1192` duplicated string literal (≥10 chars, ≥3 occurrences)
+- Local detector: `scripts/checks/check_no_duplicate_string.py` (F17) — but Sonar also flags shorter literals (≥5 chars) that F17 ignores.
+- Recipe: extract the literal into a module-level constant OR, when the literal is always wrapped in the same operation, extract a small helper that hides the literal. Helpers beat bare constants when the *operation* (not just the value) is what's repeated.
+- Pattern:
+  ```python
+  def _iso_z(dt: datetime) -> str:
+      return dt.isoformat().replace("+00:00", "Z")
+
+  def _now_iso() -> str:
+      return _iso_z(datetime.now(timezone.utc))
+
+  modified_at = _iso_z(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc))
+  ```
+
 ### `python:S3358` nested conditional expression
 - Local detector: ruff (configurable)
 - Pattern:
