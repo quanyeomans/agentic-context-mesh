@@ -4,37 +4,30 @@
 
 ---
 
-## Migration to v2026.5.28a1: streaming bronze (default + only model)
+## Migration from v2026.5.18 to the current release
 
-v2026.5.28a1 removes on-disk bronze entirely — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata. Disk usage drops dramatically (~6000x reduction). One config change required: remove any `bronze_mode:` line from `kairix.config.yaml`. Existing on-disk bronze blobs become unused; `rm -rf $bronze_root` reclaims that disk once any final reextract for pre-upgrade dead-letter items has run.
+The next production release rolls up a large body of work since v2026.5.18. Operator-visible changes:
 
-The cumulative upgrade path from the v2026.5.24a-series:
+**Storage model — streaming bronze (no on-disk blobs).**
+Fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata + content hash. Disk usage drops dramatically vs the v2026.5.18 on-disk model. Recovery uses `connector.fetch(item_id)` to re-pull on demand rather than reading a persisted blob.
 
-- [v2026.5.25a1](../../upgrades/v2026.5.25a1.md) — disk pressure fixes, bronze hygiene, version-drift fixes
-- [v2026.5.26a1](../../upgrades/v2026.5.26a1.md) — per-chunk commit, MCP cold-start handoff, tenacity adoption
-- [v2026.5.27a1](../../upgrades/v2026.5.27a1.md) — markitdown converter extras + `kairix worker reextract`
-- [v2026.5.27a2](../../upgrades/v2026.5.27a2.md) — tmpfile cleanup + scratch off tmpfs
-- [v2026.5.28a1](../../upgrades/v2026.5.28a1.md) — streaming bronze (default + only model)
+- Remove any `bronze_mode:` line from `kairix.config.yaml` if you set one experimentally — the field is no longer accepted and the runtime raises a fix-pointer error if it sees one.
+- Existing on-disk bronze blobs from a v2026.5.18 deploy become unused. After upgrade, run any outstanding dead-letter recovery (`kairix worker reextract`), then `rm -rf $bronze_root` reclaims the disk.
 
-If you skip from an earlier release directly to v2026.5.28a1, read each note in order — the bronze cleanup discipline + scratch relocation in v2026.5.27a2 is a prerequisite for the streaming-bronze read path.
+**Scratch directory off tmpfs.**
+The image ships `TMPDIR=/data/kairix/tmp` so Python's `tempfile` lands on the bind-mounted runtime volume instead of the 2GB `/tmp` tmpfs. No operator action needed unless you override `TMPDIR` in your compose env — in which case point it at a disk-backed mount with tens of GB free.
 
----
+**New connectors + maintenance loop (all default-off).**
+SharePoint, Slack, GitHub, and Notion connectors plus a background maintenance loop ship in the release. Each is gated by a default-off feature flag — pulling the new image is a no-op for operators until you flip a flag. Wire credentials via your existing secrets provider (Key Vault / Secrets Manager) and enable per the connector's runbook.
 
-## Migration to v2026.5.24a-series: alpha track with new connectors + maintenance loop
+**Topology v2 operator-config surface.**
+Connector / collection / scope-profile topology is now configurable via `kairix.config.yaml`. The v2026.5.18 single-connector single-collection shape continues to work unchanged; topology v2 is opt-in via feature flag.
 
-The v2026.5.24 alpha series (a1 → a3) adds the topology v2 operator-config surface, four new connectors (SharePoint, Slack, GitHub, Notion), a background maintenance loop, and a configurable `agent_knowledge_populated` onboard check. Every behaviour is gated by a default-off feature flag — pulling the alpha doesn't change anything until you flip a flag.
+**Dead-letter recovery: `kairix worker reextract`.**
+Operator path to recover items that hit the dead-letter table after an extractor fix lands. Walks each dead-lettered row, re-runs extraction, and clears the row when it succeeds. `--dry-run` sizes the recovery before committing. See `docs/operations/runbooks/` for the recovery procedure.
 
-The cumulative upgrade path:
-
-- [v2026.5.24a1](../../upgrades/v2026.5.24a1.md) — topology v2 operator-config + SharePoint connector
-- [v2026.5.24a2](../../upgrades/v2026.5.24a2.md) — Slack, GitHub, Notion connectors + maintenance loop
-- [v2026.5.24a3](../../upgrades/v2026.5.24a3.md) — configurable `agent_knowledge_populated` glob + directory
-
-If you skip directly from a stable release to a3, read all three notes in order — each documents flags + secrets that the next builds on.
-
-### Troubleshooting: `agent_knowledge_populated` fails after upgrade
-
-The default glob (`**/*.md` under `04-Agent-Knowledge/`) matches most layouts, but vaults that use a different directory name or stricter pattern can pin both via `kairix.config.yaml`:
+**Onboard check additions.**
+The onboard check now imports every library each registered extractor declares and verifies the configurable `agent_knowledge_populated` glob. If your knowledge directory uses a non-default layout, pin via `kairix.config.yaml`:
 
 ```yaml
 paths:
@@ -42,7 +35,7 @@ paths:
   agent_memory_glob: "*/memory/*.md"           # if you want the strict <agent>/memory/<file>.md layout
 ```
 
-The check's failure detail names the directory and glob that were searched, so the mismatch is visible at a glance.
+The check's failure detail names the directory and glob that were searched, so a mismatch is visible at a glance.
 
 ---
 

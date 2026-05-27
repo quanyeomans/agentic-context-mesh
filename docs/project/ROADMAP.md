@@ -128,14 +128,15 @@ The reference-library numbers above are the upper bound for clean, well-curated 
 
 ---
 
-## Recently shipped (v2026.5.24 alpha series)
+## Recently shipped
 
-Behind default-off feature flags — reversible until each cutover soak validates parity. See [v2026.5.24a2 upgrade notes](../upgrades/v2026.5.24a2.md) and [a3 upgrade notes](../upgrades/v2026.5.24a3.md) for the operator recipe.
+Behind default-off feature flags — reversible until each cutover soak validates parity. See [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the operator recipe.
 
-- **Topology v2 operator-config surface** — declare connectors / credentials / cc_pairs / collections / scope profiles / skills in `kairix.config.yaml` instead of code. Gated by `topology_v2_config`. Shipped v2026.5.24a1.
-- **SharePoint, Slack, GitHub, and Notion connectors** — each shipped behind its own `connector_<name>` flag with a matching `topology_v2_<name>` per-source-unit Container pilot (per-drive, per-channel, per-repo, per-page-tree). Shipped v2026.5.24a1–a2.
-- **Background maintenance loop** — `maintenance_loop` flag enables periodic orphan-vector cleanup with a 7-day soft-delete retention window. Replaces the reactive preflight orphan check. Shipped v2026.5.24a2.
-- **Configurable agent-knowledge layout** — `paths.agent_knowledge_dir` + `paths.agent_memory_glob` let operators tell the `agent_knowledge_populated` onboard check where their memory files live and what shape they take. Shipped v2026.5.24a3.
+- **Topology v2 operator-config surface** — declare connectors / credentials / cc_pairs / collections / scope profiles / skills in `kairix.config.yaml` instead of code. Gated by `topology_v2_config`.
+- **SharePoint, Slack, GitHub, and Notion connectors** — each shipped behind its own `connector_<name>` flag with a matching `topology_v2_<name>` per-source-unit Container pilot (per-drive, per-channel, per-repo, per-page-tree).
+- **Background maintenance loop** — `maintenance_loop` flag enables periodic orphan-vector cleanup with a 7-day soft-delete retention window. Replaces the reactive preflight orphan check.
+- **Configurable agent-knowledge layout** — `paths.agent_knowledge_dir` + `paths.agent_memory_glob` let operators tell the `agent_knowledge_populated` onboard check where their memory files live and what shape they take.
+- **Streaming bronze** — fetched bytes are extracted in-memory and discarded; `bronze_records` holds metadata only. Disk usage drops ~6000× vs the v2026.5.18 on-disk model. Recovery uses `connector.fetch(item_id)` to re-pull on demand.
 
 Next milestone in this thread is **Wave F (chunker plugins)** — each connector picks its chunker by config rather than baked-in choice. Plus the per-connector cutover soak that promotes each `topology_v2_<name>` flag from introduce → cutover → retire over the next several releases.
 

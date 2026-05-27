@@ -186,11 +186,11 @@ kairix deployment check
 
 If any check fails the output names the next command to run.
 
-`agent_knowledge_populated` looks at `04-Agent-Knowledge/**/*.md` under your document root by default. If your vault uses a different layout, set `paths.agent_knowledge_dir` (directory name) and `paths.agent_memory_glob` (file pattern) in `kairix.config.yaml`. See [v2026.5.24a3 upgrade notes](../upgrades/v2026.5.24a3.md) for the full options.
+`agent_knowledge_populated` looks at `04-Agent-Knowledge/**/*.md` under your document root by default. If your vault uses a different layout, set `paths.agent_knowledge_dir` (directory name) and `paths.agent_memory_glob` (file pattern) in `kairix.config.yaml`. See [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the full options.
 
 ---
 
-## Topology v2 alpha (v2026.5.24a1+)
+## Topology v2
 
 Topology v2 unlocks the operator-config surface (connectors / credentials / cc_pairs / collections / scope_profiles / skills) plus four shipping connectors (SharePoint, Slack, GitHub, Notion). Every part is gated by a default-off feature flag so existing deployments stay bit-for-bit identical until you flip them.
 
@@ -218,7 +218,7 @@ To turn the alpha on:
 
 1. **Author the YAML.** Copy [`kairix.config.example.yaml`](https://github.com/three-cubes/kairix/blob/main/kairix.config.example.yaml) at the repo root into your config path (Docker overlay: `kairix.config.local.yaml`; pip: `~/.kairix/kairix.config.yaml`). The example shape parses cleanly and `kairix config validate` reports zero failures against it.
 2. **Flip the flags.** Add only the flags for the surfaces you want active. The example config's `features:` block lists every flag with a comment beside each.
-3. **Set the secrets** for each connector you enabled. See the per-connector recipe in [`docs/upgrades/v2026.5.24a2.md`](../upgrades/v2026.5.24a2.md) — each connector lists the exact env-var names + where to put them for Docker and pip.
+3. **Set the secrets** for each connector you enabled. See the per-connector recipe in [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) — each connector lists the exact env-var names + where to put them for Docker and pip.
 4. **Apply + verify.**
     ```bash
     kairix worker apply-config       # materialise declared cc_pairs into topology_cc_pairs

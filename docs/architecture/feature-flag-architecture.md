@@ -364,7 +364,7 @@ Landed across `v2026.5.24a1` → `v2026.5.24a3`. Each connector ships behind its
 | GitHub | `connector_github` | `topology_v2_github` | client-confidential |
 | Notion | `connector_notion` | `topology_v2_notion` | internal |
 
-One operational flag also lands in Wave E: `maintenance_loop` enables the background orphan-vector cleanup worker (KFEAT-021 Phase 1). Default-off; see [`docs/upgrades/v2026.5.24a2.md`](../upgrades/v2026.5.24a2.md#maintenance-loop) for the operator recipe.
+One operational flag also lands in Wave E: `maintenance_loop` enables the background orphan-vector cleanup worker (KFEAT-021 Phase 1). Default-off; see [`how-to-upgrade-kairix`](../operations/runbooks/how-to-upgrade-kairix.md) for the operator recipe.
 
 ### Wave 7 — Vision-enhanced extraction + Teams transcripts
 

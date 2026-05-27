@@ -5,252 +5,48 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
-## [Unreleased]
+## [Unreleased] — Next production release after v2026.5.18
 
-## [2026.5.28a1] - 2026-05-27 — Streaming bronze (default + only model); FilesystemBronzeStore removed (alpha)
+> **This entry consolidates the user-facing delta of the v2026.5.23a → v2026.5.28a alpha cycles into the shape an operator upgrading from v2026.5.18 will see.** Internal per-alpha development history lives in git (`git log v2026.5.18..main`) and in archived per-alpha upgrade notes under `docs/upgrades/_dev/` — those records are for kairix engineering, not operator consumption.
 
-> **Upgrading?** Bronze persistence changed shape — raw bytes are no longer kept on disk after extract. Disk usage drops dramatically (the v2026.5.27a2 production instance went from 112 GB → ~MB of bronze data on the same corpus). Operators with `bronze_mode` in their config must remove that line (the field is no longer accepted). Existing on-disk bronze blobs from pre-upgrade syncs become unused — operators can `rm -rf $bronze_root` once they've run any final `kairix worker reextract` to recover items. Full notes: [`docs/upgrades/v2026.5.28a1.md`](docs/upgrades/v2026.5.28a1.md).
+### Headline capabilities
 
-### Removed
+- **Five new source connectors.** SharePoint (with per-drive `include_paths` / `exclude_paths` filtering), Slack, GitHub, Notion, and Microsoft 365 (calendar + email headers). Each connector ships with a per-source extractor chain configurable in `kairix.config.yaml`.
+- **Topology v2 operator config.** Connectors, credentials, cc_pairs, collections, scope profiles, and skills are now first-class config types. The legacy flat-list connector config still works for backward compat. See [`docs/architecture/connector-scope-topology/ADR.md`](docs/architecture/connector-scope-topology/ADR.md).
+- **EscalatingExtractor chain.** Operators declare an ordered fallback chain per connector (e.g. `extractor_chain: [markitdown, pdf_fallback, ocr]`). The framework walks the chain via `quality_ok` so image-only PDFs automatically escalate from text extractors to OCR without per-document operator intervention.
+- **`kairix worker reextract` recovery.** A new operator subcommand to recover dead-lettered items after a fix lands: `kairix worker reextract --source-name <name> [--dry-run] [--limit N]`. Reports `recovered` / `still_failing` / `skipped_no_bronze` / `skipped_source_unavailable` counters in a JSON envelope.
+- **Background maintenance loop.** A periodic worker tick that prunes orphan `content_vectors` rows, rebuilds the usearch index, and heals FTS5 drift. Default off; flip the `maintenance_loop` feature flag to opt in.
 
-- **`FilesystemBronzeStore` class (`kairix/core/connectors/bronze.py`).** The whole module is deleted. Streaming bronze is the only persistence model.
-- **`bronze_mode` config field.** Operators with `bronze_mode: filesystem` or `bronze_mode: streaming` in their `kairix.config.yaml` get a fix-pointer error at config load — remove the line.
-- **`bronze_ttl_gc` feature flag's effect.** The flag still exists in the registry as a vestigial backward-compat surface but has no effect — streaming bronze has nothing to GC. Removable in the next minor release.
-- **Bronze orphan reaper stage** in the maintenance loop. Streaming bronze writes no on-disk blobs so no orphans can accumulate. The maintenance tick still reports the counter (now permanently 0) for monitoring shape continuity.
+### Storage model: streaming bronze (default + only model)
 
-### Changed
+- Bronze persistence is now metadata-only — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only `(source_name, item_id, content_hash, mime, fetched_at)`. **Disk usage drops by ~6,000x** vs the previous on-disk-blob model. A 50,000-item corpus that would have needed ~650 GB now needs ~50 MB.
+- Re-extract recovery routes through `connector.fetch(item_id)` to re-pull the raw bytes from source instead of reading a persisted on-disk blob.
+- Extractor scratch moved off the 2 GB `/tmp` tmpfs onto the disk-backed `/data/kairix/tmp` mount, with cleanup-on-failure hardened so sustained extraction loads don't leak placeholder tmpfiles.
+- **Removed for streaming bronze**: `FilesystemBronzeStore` class, `bronze_mode` config field (was previously undocumented), `bronze_ttl_gc` feature flag, bronze orphan reaper maintenance stage. None of these were part of any prior production release — they were internal alpha surfaces.
 
-- **`build_connector_pipeline` factory.** `bronze_root` parameter accepted for backward-compat call-signature but ignored. New code should omit it.
-- **`build_bronze_from_entry` helper.** Always returns `StreamingBronzeStore`. Raises with a fix-pointer if the obsolete `bronze_mode` field is present.
-- **`BronzeRef.raw_path`.** Always `None` for new writes. Existing rows with a non-None raw_path are still readable through the worker's legacy-blob helper (`_read_filesystem_bronze` in `kairix/worker.py`) so `kairix worker reextract` can recover pre-Phase-7 dead-lettered items.
+### Operational hardening
 
-### Things that haven't changed
+- **Per-chunk commits in `ConnectorPipeline`.** A failure mid-batch rolls back only the failing chunk (default 50 items); earlier chunks survive the failure. Bounded orphan blast radius on worker restart mid-sync.
+- **MCP cold-start handoff.** The HTTP port binds before the warm sequence runs, so agents see a structured 503 + `ColdStart` envelope (with `retry_after_ms` + `next:` action instructions) instead of OS-level `fetch failed` errors during the 7-30 s warm window.
+- **Markitdown image bundles every converter extra.** DOCX, XLSX, PPTX, Outlook MSG converters all ship in the production image, plus the `tesseract-ocr` system binary for the OCR extractor's runtime.
 
-- `StreamingBronzeStore` Protocol surface — same `write` / `read` / `replay` shape introduced in Phases 1-6.
-- `BronzeRef.content_hash` field semantics (SHA-256 of raw bytes at write time).
-- Re-extract recovery path through `kairix worker reextract` — for pre-Phase-7 filesystem rows reads on-disk blob directly; for streaming rows routes through `connector.fetch(item_id)`.
+### Configuration migration from v2026.5.18
 
-## [2026.5.27a2] - 2026-05-27 — Disk-space cascade fix + escalation framework class (alpha)
+1. **No `bronze_mode:` field.** If you've experimented with this field on alpha builds, remove it from `kairix.config.yaml`. The next-production release refuses it with a fix-pointer error.
+2. **Optional: enable the new connectors.** Add a `connectors:` block to `kairix.config.yaml` declaring SharePoint / Slack / GitHub / Notion / M365 entries with their per-source credentials. See [`kairix.example.config.yaml`](kairix.example.config.yaml) for the shape.
+3. **Optional: declare an `extractor_chain` per connector.** For SharePoint or any source with mixed text + image-only PDFs, set `extractor_chain: [markitdown, pdf_fallback, ocr]` to opt into the escalation chain.
+4. **Optional: enable the maintenance loop.** Flip the `maintenance_loop` feature flag to opt into periodic index hygiene.
 
-> **Upgrading?** Urgent fix for the disk-space cascade observed on the v2026.5.27a1 production — 8,090 of 8,396 SharePoint reextract attempts failed with `[Errno 28] No space left on device` because one pathological PPTX expanded to fill the 2GB tmpfs and every subsequent extraction leaked an empty tmpfile stub (8,087 placeholders accumulated). Two fixes ship together: the leak is sealed, AND extractor scratch moves off tmpfs onto the bind-mounted runtime disk so a single bad file can't exhaust capacity. Full notes: [`docs/upgrades/v2026.5.27a2.md`](docs/upgrades/v2026.5.27a2.md).
+### Dependencies
 
-### Fixed
-
-- **Markitdown extractor no longer leaks empty tmpfile stubs on write failure.** Pre-fix the `tmp.write(raw)` step lived inside `with tempfile.NamedTemporaryFile(delete=False)` but outside the try/finally that called `tmp_path.unlink()`. A write failure (e.g. ENOSPC because tmpfs was already near-full) left the empty placeholder on disk; over a single sync cycle 8,087 of these accumulated, filling tmpfs further. The fix moves the write step inside the try block so the finally clause unlinks the placeholder on write failure too. Structural assertion test locks the line order so a future refactor that re-inverts the shape trips a clear regression message.
-
-- **Onboard healthcheck no longer reports unhealthy on the v2026.5.27a1 image** — the new `check_extractor_libraries_importable` step (from #322) correctly caught that the `ocr` extractor's `pytesseract` library wasn't installed in the runtime image. The Dockerfile now installs the `[ocr]` extra (`pytesseract`, `opencv-python-headless`, `Pillow`, `pdfplumber`) and the tesseract-ocr system binary (the C++ engine pytesseract wraps).
-
-### Changed
-
-- **Extractor scratch moved off tmpfs onto the bind-mounted runtime disk** — `TMPDIR=/data/kairix/tmp` ships in the image. Python's `tempfile` honours this so every extractor's tempfile lands on the disk-backed volume (typically tens of GB available) instead of the 2GB tmpfs at `/tmp`. A pathological extraction can no longer exhaust scratch capacity on a single file. The 2GB `/tmp` tmpfs from #317 stays in compose for general OS scratch, but the high-volume kairix path no longer fights for that 2GB.
-
-### Added
-
-- **`EscalatingExtractor` framework class** (`kairix.core.connectors.escalation.EscalatingExtractor`) — ordered chain orchestration over the Extractor Protocol. Wraps a sequence of extractors, walks the chain via `quality_ok`, returns the first member whose output is good enough. Exhaustion (every member returns False) surfaces the longest-markdown attempt with a `trace.exhausted=True` marker so operators still get something indexable + the observability to see degradation. Exceptions in one tier don't kill the chain — logged and the next tier runs. This is part 1 of #23; the wiring into `_run_one_connector_batch` and `_build_reextract_components` (via `extractor_chain: [a,b,c]` opt-in config field) ships in a later release alongside BDD + F30 outcome tests.
+- `tenacity>=8,<10` is now a base dependency (HTTP retry backbone for connectors).
+- `markitdown[pdf,docx,xlsx,pptx,outlook]` + the `[ocr]` extra are pinned in the production image. The `tesseract-ocr` system binary is installed via `apt`.
 
 ### Things that haven't changed
 
-- Single-extractor `extractor: <name>` config — fully unchanged. The escalation chain is opt-in via `extractor_chain: [...]` in a later release.
-- Connector Protocol surface, on-disk bronze layout, chunk-writer contract.
-- The 2GB tmpfs at `/tmp` (compose `tmpfs:` block from #317) — still there for general OS use; just no longer the default for kairix's own extractor scratch.
-
-## [2026.5.27a1] - 2026-05-27 — Markitdown converters, oversized-chunk split, dead-letter recovery (alpha)
-
-> **Upgrading?** Three fixes from the v2026.5.26a1 SharePoint production run. No config edits required. If you have dead-letter rows from a pre-upgrade run, the new `kairix worker reextract` recovers them in-place — see the upgrade notes. Full notes: [`docs/upgrades/v2026.5.27a1.md`](docs/upgrades/v2026.5.27a1.md).
-
-### Fixed
-
-- **Markitdown's DOCX, XLSX, PPTX, and Outlook MSG converters are now installed in the production image (#322).** v2026.5.26a1 shipped with `markitdown[pdf]` only; every Office document failed extraction with `MissingDependencyException`. The SharePoint production run produced 8,785 dead-lettered items on first run because of this. The Dockerfile now installs `markitdown[pdf,docx,xlsx,pptx,outlook]` so every documented format works out of the box.
-
-- **Silver chunker no longer leaves oversized paragraphs as one giant chunk (Bug B).** A single 2,000-character paragraph used to land as one chunk that overshot the target. The chunker now splits at sentence boundaries first, then word boundaries if a sentence is still oversized, then character boundaries as a last resort — every chunk stays under the target without breaking semantic boundaries unnecessarily. Three new helpers (`_split_long_paragraph`, `_split_long_sentence`, `_split_long_word`) plus a pre-expansion step in `_chunk_markdown`.
-
-### Added
-
-- **`kairix worker reextract --source-name <name>` for dead-letter recovery (Bug D).** Walks `DeadLetterStore.list(source_name)`, looks up each item's `bronze_records` row, re-runs `extractor.extract(raw, mime)` through the currently-registered extractor, runs silver → chunk_writer → entity-graph sink, then clears the dead-letter row. Commits per item so partial recovery is durable. `--dry-run` walks the same logic without committing (useful for sizing the recovery first). `--limit N` caps the number of items processed. Recovers the 122 SharePoint items still in dead-letter after #322 shipped without forcing operators to delete + re-ingest the whole source.
-
-- **`DeadLetterStore.clear(source_name, item_id)`** — caller-owned transaction (matches the rest of the store), idempotent (returns False when no row existed). Used by the reextract path so a clear() that lands alongside a successful chunk write commits atomically.
-
-- **`check_extractor_libraries_importable` onboard check.** Imports every library each registered extractor declares as a dependency, at startup. Missing libraries fail the check with the install command in the remediation. Catches the same regression class as #322 before items hit the dead-letter table.
-
-### Things that haven't changed
-
-- Connector Protocol surface, on-disk bronze layout, chunk-writer contract — all three fixes are purely additive at the API surface.
-- Existing chunks written by v2026.5.26a1 silver remain valid; the chunker change adds splits for oversized paragraphs but doesn't re-shape chunks that were already within target.
-- `DeadLetterStore.record` / `is_poisoned` / `list` — `clear()` is additive.
-
-## [2026.5.26a1] - 2026-05-26 — Per-chunk commit + cold-start fix + OSS evaluation outcome (alpha)
-
-> **Upgrading?** Straight pull from a25a1 — purely internal changes. No config edits required. Full notes: [`docs/upgrades/v2026.5.26a1.md`](docs/upgrades/v2026.5.26a1.md). Architectural decisions recorded in [`docs/architecture/ADR-018-dlt-connector-framework.md`](docs/architecture/ADR-018-dlt-connector-framework.md) (Wave 1 chunking outcome) and [`docs/architecture/connector-oss-library-evaluation.md`](docs/architecture/connector-oss-library-evaluation.md) (post-ADR-018 reset; 4 OSS frameworks evaluated, all rejected on raw-blob fit).
-
-### Fixed
-
-- **`ConnectorPipeline` no longer orphans a whole batch's bronze writes on a single mid-batch failure (#321).** Previously the pipeline ran the entire batch as one SQLite transaction; a Silver / writer / sink failure rolled back every uncommitted `bronze_records` row but left the on-disk blobs already fsynced. SharePoint backfills of ~6000 items leaked thousands of orphans on every worker restart. The pipeline now commits every `chunk_size` items (default 50); a failure rolls back only the current chunk; previous chunks stay committed and the cursor advances per chunk.
-
-- **MCP cold-start no longer hands agents an opaque `fetch failed` (#320).** The MCP server used to run the warm sequence (7–30 s) synchronously BEFORE binding the HTTP port. During that window agents got connection-refused at the OS network layer, which JavaScript `fetch()` reports as the opaque string `"fetch failed"`. The fix moves warm to a background daemon thread so uvicorn binds the port immediately; the existing `ColdStartMiddleware` then returns a structured 503 + `ColdStart` envelope for every call during warm.
-
-- **Cold-start envelope rewritten for positive-action affordance (#320).** The previous `agent_instruction` was three stacked prohibitions (`"Do not answer from memory, do not use a lower-quality fallback, do not treat this as a completed retrieval"`). The new shape leads with positive `next:` and `fix:` actions per `feedback_agent_prompts_positive_assertion`: `"next: pause retry_after_ms then call this same tool again. fix: if the second call still returns ColdStart, surface 'kairix still warming after ~8s' to the user and ask whether to proceed without retrieval — this is a transient process-boot state, not a hard failure."` Anti-pattern guards added in tests so the prohibition stacking can't regress.
-
-### Changed
-
-- **`dex_crm` connector retry now uses `tenacity` instead of a hand-rolled loop.** Replaces ~30 LoC of `while True` retry with `tenacity.Retrying(retry_if_result(...), wait_exponential, stop_after_attempt)`. Same observable behaviour (the 12 existing dex_crm tests pass unchanged including the 429-retry-with-backoff scenario); the change is the reference shape future connectors should copy when they need HTTP retry with backoff. Rationale recorded in `connector-oss-library-evaluation.md` §7.
-
-- **Operator guidance for the runtime disk choice (`docs/operations/OPERATIONS.md` §5.6).** The previous v2026.5.25 note said "data on the data disk." That assumed a deploy shape where the data disk is the largest one. The revised guidance is "kairix runtime on whichever disk is largest" with a `df -h` check — the production instance has a 256 GB OS disk and a 64 GB data disk, so kairix runtime lives on `/var/lib/kairix-runtime` not `/data`.
-
-### Added
-
-- **`tenacity>=8,<10` as a base dependency.** One new dep, no transitives. Used today by the `dex_crm` connector retry; available to any future connector that needs HTTP retry with exponential backoff.
-
-- **OSS connector library evaluation (`docs/architecture/connector-oss-library-evaluation.md`).** Four candidates (dlt, Airbyte Python CDK, Meltano Singer SDK, PyAirbyte) evaluated in parallel against hard requirements derived from kairix's architecture. All four rejected on H1 (raw binary blobs as first-class output). Recommendation: stay homegrown + adopt tenacity. The methodology is the reference shape for future "should we adopt OSS library X" decisions — requirements first, parallel research, evidence converges. The previous ADR-018 cost ~2 days of failed pivots to reach the same conclusion; this evaluation took ~3 hours.
-
-### Things that haven't changed
-
-- Default behaviour for connectors whose batches stay under 50 items (Obsidian, typical Slack/GitHub deltas) — the chunking is invisible at the API surface.
-- The bronze write contract itself. Per-chunk commits are an internal transaction-granularity change; `BronzeStore` Protocol is unchanged.
-- Every per-connector cursor, dead-letter, and Protocol shape.
-- The MCP cold-start envelope's machine-readable fields (`status`, `error_code`, `retry_after_ms`, `estimated_seconds_remaining`, `tool`). Only the human-facing `guidance` and `agent_instruction` strings changed shape.
-
-## [2026.5.25a1] - 2026-05-25 — Disk pressure, bronze hygiene, version-drift fixes (alpha)
-
-> **Upgrading?** Five fixes from the 2026-05-24 SharePoint production run. No config change required; flags ship OFF. If you set `KAIRIX_MAINTENANCE_SKIP_NOOP_THRESHOLD=999999` as a band-aid, drop it after upgrading. Full notes: [`docs/upgrades/v2026.5.25a1.md`](docs/upgrades/v2026.5.25a1.md).
-
-### Fixed
-
-- **`/tmp` no longer fills the host root filesystem (#317).** Both `kairix` and `kairix-worker` ship a 2 GB tmpfs `/tmp` mount in the canonical compose files. SharePoint binary downloads and markitdown PDF/PPTX conversions stay bounded by RAM instead of spilling onto the OS disk. Operators with custom override files inherit the default unless they explicitly remove it.
-- **Bronze raw blobs no longer accumulate forever as orphans (#318).** The maintenance scheduler ships a new stage that walks every connector's bronze tree on each tick and deletes any file with no `bronze_records` row. A 5-minute grace period skips files mid-fsync. The 2026-05-24 production reaped 36 GB of orphan SharePoint blobs accumulated over a single backfill.
-- **`connector_sync` no longer freezes when the local vault is idle (#312).** Local-only maintenance tasks (`entity_seed`, `health_check`, `wikilinks_inject`) still skip after the configured embed-noop streak, but external-source discovery now runs on its own interval regardless. A quiet local vault doesn't imply quiet upstream sources.
-- **Worker no longer silently downgrades to `:latest` after a manual `docker compose up` (#313).** The alpha-deploy webhook now writes `KAIRIX_IMAGE_TAG=<version>` to `/opt/kairix/app/.env`. Subsequent ad-hoc `docker compose up -d --force-recreate` commands interpolate the same tag instead of picking up whatever was last pulled.
-
-### Added
-
-- **`bronze_ttl_gc` feature flag (default OFF) for long-term bronze growth bounds (#316).** When ON, the maintenance scheduler deletes bronze raw blobs and their `bronze_records` rows older than `KAIRIX_BRONZE_TTL_DAYS` (default 7). Default OFF until each deploy validates that re-fetch from source is reliable for every configured connector.
-- **Operator guidance for data-on-data-disk layout** in [`docs/operations/OPERATIONS.md` §5.6](docs/operations/OPERATIONS.md). The default Docker named volumes live under `/var/lib/docker/volumes/` on the OS disk; this section walks through the bind-mount layout that survives a real backfill.
-- **Meta-issue #319 for test discipline gaps**: F45 / F48 force scenarios for new capabilities but not for failure modes or lifecycle of accumulating state. Three production defects in this release (#312, #316, #318) had zero BDD/E2E coverage before they shipped because the discipline didn't require it. Proposed F62 / F63 / F64 to close the gap; will land as separate baseline-building work.
-
-### Things that haven't changed
-
-- Default behaviour for any operator who isn't using connectors. The orphan reaper and TTL GC stages run inside the `maintenance_loop` flag-gated tick — both are no-ops when that flag is OFF.
-- The bronze write contract itself. Atomicity was already correct (filesystem first, then SQL; caller commits) — the gap was the missing sweeper for the crash-window orphans the docstring already anticipated.
-- Every connector's Protocol surface, cursor format, or chunk-write contract.
-
-## [2026.5.24a4] - 2026-05-25 — SharePoint per-drive path filtering (alpha)
-
-> **Upgrading?** Straight pull from a3 — the new behaviour is purely additive. Set `include_paths` / `exclude_paths` on a SharePoint drive entry only when you want to scope a drive by folder. Full notes: [`docs/upgrades/v2026.5.24a4.md`](docs/upgrades/v2026.5.24a4.md).
-
-### New for operators
-
-- **Per-drive folder filtering for the SharePoint connector.** Two new optional lists on each drive entry — `include_paths` and `exclude_paths`. Empty = whole drive walked (current behaviour). Non-empty `include_paths` = only items whose path starts with one of the listed paths land. `exclude_paths` drops matching items even when an include matched. Segment-boundary prefix match, case-insensitive. Unblocks pointing at SharePoint drives that mix curated content and bulk material (Microsoft partner libraries, archived projects, draft folders) without splitting content across drives in SharePoint itself.
-- **Startup probe for missing include paths.** When `include_paths` is set, the connector calls Graph once per path at startup to confirm the folder exists. Missing folders surface as `sharepoint_probe_missing_folder` log warnings — the connector continues syncing the present paths so a typo doesn't silently drop your data.
-- **Parse-time refusal of exact include/exclude overlap.** `include_paths: ["/Foo"]` + `exclude_paths: ["/Foo"]` (almost always a copy-paste typo) is refused at `kairix config validate` with a fix pointer. Strict children (e.g. include `/Foo` + exclude `/Foo/draft`) remain legal — that's the intended use case.
-- **Auto-synthesised cc_pair labels** for filter-active drives without an operator-set `display_name`. Two cc_pairs against the same drive with different `include_paths` now surface as distinguishable labels in `kairix features status`, `tool_features_status`, and structured logs — instead of two identical opaque drive ids.
-
-### Behaviour changes worth noting
-
-- **Backward-compatible by default.** Existing SharePoint deployments that don't set `include_paths` / `exclude_paths` see no change. The filter is a per-tick view, not persisted state — operators can change `include_paths` between syncs without invalidating the per-drive deltaLink.
-- **First sync still walks the full delta stream.** The filter is client-side post-processing — Graph's delta endpoint doesn't take a path filter. Only the extract + embed + index work is reduced for filtered items, not the upstream listing cost. Per-folder delta optimisation is a noted future enhancement.
-
-### Internal
-
-- **KFEAT-022 prerequisite.** Per-folder scoping is the first piece of the guided-configuration epic — without it, `kairix sharepoint discover` would surface drives the operator can choose but not their internal folder structure. Path filtering unblocks the discovery surface walking one level deeper. See [`docs/architecture/guided-configuration.md`](docs/architecture/guided-configuration.md).
-- **23 new tests across unit / contract / integration / E2E / BDD layers** following the spec in [`docs/architecture/sharepoint-path-filtering.md`](docs/architecture/sharepoint-path-filtering.md). All green; pre-existing SharePoint test suites continue to pass (purely additive change).
-
-### Things that haven't changed
-
-- The Graph API permissions you grant — `Sites.Read.All` + `Files.Read.All` still cover this.
-- Every other connector. Slack, GitHub, Notion, M365, Obsidian, Dex unchanged. Path-filter generalisation to those connectors is part of KFEAT-022.
-- The cursor format, the connector's Protocol surface, the chunk-write contract.
-
-## [2026.5.24a3] - 2026-05-24 — Configurable agent-knowledge layout for onboard check (alpha)
-
-> **Upgrading?** Straight pull from a2 — no config change required. The default glob is broader than earlier alphas, so vaults that previously failed `agent_knowledge_populated` will now pass it. Full notes: [`docs/upgrades/v2026.5.24a3.md`](docs/upgrades/v2026.5.24a3.md).
-
-### New for operators
-
-- **`agent_knowledge_populated` onboard check now reads its layout from `kairix.config.yaml`.** Two new optional keys live under `paths:` — `paths.agent_knowledge_dir` (default `04-Agent-Knowledge`) names the directory; `paths.agent_memory_glob` (default `**/*.md`) is the recursive glob that identifies memory files. The new default accepts any `.md` file anywhere under the agent-knowledge tree, so vaults using `<agent>/<date>.md`, `<agent>/memory/<date>.md`, or a shared `memory/` directory all pass without operator action. Pin a stricter glob (e.g. `*/memory/*.md`) if you want the check to enforce a specific per-agent layout.
-- **The check's failure detail names the glob it searched.** When the check fails, the message includes both the directory it looked in and the pattern it applied, so the layout-vs-config mismatch is visible at a glance.
-
-### Behaviour changes worth noting
-
-- **Onboard healthcheck reliability.** This fixes a sharp edge in v2026.5.24a2 deployments where the docker compose healthcheck would mark the kairix container unhealthy if the operator's vault didn't match the previously-hard-coded `<agent>/memory/<file>.md` layout. The broader default glob accepts more layouts; the config knobs let strict layouts opt back in.
-
-### Things that haven't changed
-
-- Every other onboard check. Only `agent_knowledge_populated` is affected.
-- The briefing pipeline. It continues to read from `04-Agent-Knowledge/<agent>/memory/`; a follow-up will reconcile the briefing resolver with the same config knobs so both surfaces read from one place.
-- Every feature flag from v2026.5.24a2 — pulling this version does not flip any flag.
-
-## [2026.5.24a2] - 2026-05-24 — Slack + GitHub + Notion connectors + maintenance loop (alpha)
-
-> **Upgrading?** Nothing required — every new connector and the maintenance loop are gated by default-off feature flags. To opt into any of them, follow [`docs/upgrades/v2026.5.24a2.md`](docs/upgrades/v2026.5.24a2.md).
-
-### New for operators
-
-- **Slack connector** behind `connector_slack`. Pulls public, private, and direct-message channels via the Slack Web API, plus a Socket Mode listener for live events. Sensitivity is set per channel kind (public → internal, private → confidential, DM → personal) so the F39 routing applies without operator config. Per-cc_pair token rotation + reconnect-with-jitter on disconnect.
-- **GitHub connector** behind `connector_github`. Pulls code (commits + blobs), issues, and pull requests via REST + GraphQL, with a webhook listener for push / issues / pull_request / installation_repositories events. Personal access tokens or app installations both work — the connector picks whichever credential resolved. Abuse-detection backoff is automatic when GitHub returns secondary rate-limit responses.
-- **Notion connector** behind `connector_notion`. Pulls workspace pages plus database rows via the public API, renders block trees to Markdown, then dispatches the output to the existing kairix extractor registry (passthrough or markitdown).
-- **Per-source topology v2 pilots for the existing connector fleet.** Seven new flags — `topology_v2_dex_crm`, `topology_v2_m365_email_headers`, `topology_v2_m365_calendar`, `topology_v2_sharepoint`, `topology_v2_slack`, `topology_v2_github`, `topology_v2_notion` — each emit one Container per source-side unit (tenant, mailbox, calendar, drive, channel, repository, page tree) with its own delta cursor. Default-off; mirrors the obsidian pilot shape landed in v2026.5.24a1.
-- **Background maintenance loop** behind `maintenance_loop`. When the flag is on, the worker fires a periodic tick (default every 24 hours, tunable via `KAIRIX_MAINTENANCE_INTERVAL_S`) that prunes orphaned `content_vectors` rows into a soft-delete table with a 7-day retention window before hard-deleting. Replaces the reactive preflight orphan check — ghost search hits get cleaned up in the background instead of blocking the next ingest.
-- **New surfaces.** `kairix worker maintenance` fires a one-shot maintenance tick on demand. `kairix worker preflight --auto-heal` now prunes orphan vectors alongside its existing FTS auto-heal. `kairix features status --maintenance` shows loop cadence + last-tick timestamp + cumulative orphan count.
-- **One new onboard check.** `maintenance_loop_ticking` reports whether the worker has fired a tick within the expected interval when the flag is on, and skips with `ok=true` when the flag is off. Default deploy now reports 15 checks (was 14).
-
-### New for agents
-
-- **Connector recipes in `docs/getting-started/agent-driven-setup.md`** for each new connector — what secret to ask the user for, what env-var name to set it under, what `topology_v2.connectors:` entry to write, what flag to flip. Every recipe follows the positive-pattern affordance shape (fix + next + run) instead of a "don't do X" list.
-
-### Behaviour changes worth noting
-
-- **Default deploy reports 15 onboard checks instead of 14.** The new `maintenance_loop_ticking` check reports `ok=true` with a `"skipped — maintenance_loop flag is OFF"` detail when the flag is off. Healthchecks asserting `total == 14` will need to move to `total >= 15`; healthchecks that consume `fully_passed` are unaffected.
-- **First sync after flipping a `topology_v2_<connector>` flag re-walks the source** to emit per-source containers. Subsequent syncs ride the delta cursors and are fast.
-- **First maintenance tick can take longer than subsequent ticks** if your index has accumulated months of orphan vectors. The `orphans_pruned` counter trends to single digits once the index has settled.
-
-### Internal
-
-- **Wave E topology v2 connector adoption.** Per-connector pilots ship for all 8 connectors in the fleet; the legacy single-cursor shim stays as the default until each pilot soaks against a real corpus.
-- **KFEAT-021 Phase 1** — the proactive replacement for the reactive KFEAT-020 preflight check. Five sabotage proofs cover the orphan-vector pruning loop, retention window, flag-OFF inertness, and the stall-detection check.
-- **F-rule discipline** — every new connector ships with the canonical test discipline (contract / integration both branches / e2e composed-path / BDD both branches), the F39 sensitivity routing locked at the boundary, and F54 both-branch coverage for every new flag.
-
-### Things that haven't changed
-
-- The legacy `collections:` + `agents:` blocks. Operators using them continue to work.
-- The provider plugin selector (`provider:`). Same shape, same plugins.
-- MCP tool names + JSON schemas. The 12 tools shipped in v2026.5.18 (plus `tool_features_status` from v2026.5.24a1) are unchanged.
-
-## [2026.5.24a1] - 2026-05-23 — Topology v2 operator config + SharePoint connector + MCP cold-start fix (alpha)
-
-> **Upgrading?** Nothing required — every new behaviour sits behind a default-off feature flag, so pulling this version is a structural no-op. To opt into the alpha (topology v2 + SharePoint), follow [`docs/upgrades/v2026.5.24a1.md`](docs/upgrades/v2026.5.24a1.md).
-
-### New for operators
-
-- **A new declarative shape for connectors, collections, scope profiles, and skills.** Add a `topology_v2:` block to your `kairix.config.yaml` and declare each connector instance, credential bundle, connector-credential pair, collection, per-actor scope profile, and skill as a first-class operator entity. Same shape `kairix config validate` reads, same shape the new `topology_v2_*` onboard checks read. The canonical example is at the repo root: [`kairix.config.example.yaml`](kairix.config.example.yaml). Gated by `topology_v2_config` — flag off means the block is parsed but inert. Cutover by editing the YAML, flipping the flag, and running `kairix worker apply-config`.
-- **SharePoint connector** — pulls document libraries (PDF / DOCX / PPTX / XLSX) via Microsoft Graph drive-delta query and dispatches binaries through the existing kairix extractor registry. Reuses the M365 Azure AD app registration the email-headers + calendar siblings already use (one tenant id / client id / client secret triple, three secret names: `connector-m365-tenant-id` / `-client-id` / `-client-secret`). Gated by `connector_sharepoint` — flag off means the connector isn't loaded.
-- **Obsidian per-folder routing** behind `topology_v2_obsidian`. When on, the connector emits one Container per top-level vault folder (each with its own delta cursor), and the hierarchy walk emits one FOLDER node per directory parent-before-child. When off, the connector keeps the legacy single-cursor behaviour.
-- **Three new `kairix onboard check` checks.** `topology_v2_config_valid` parses + cross-references the `topology_v2:` block. `topology_v2_cc_pairs_registered` confirms each declared cc_pair has a row in `topology_cc_pairs`. `sharepoint_credentials_loaded` confirms the three M365 secrets resolve. Each check is gated by the same flag as the feature it covers — flag off means the check reports `ok=true` with a `"skipped"` detail, so a fresh install sees 14 checks pass (was 11) without any operator action.
-- **MCP cold-start is no longer an adoption blocker.** The HTTP server returns HTTP 503 with `Retry-After` while the search pipeline is warming, and `/healthz/ready` is the single readiness source. Structured startup logs ship the warm-up event so you can grep your log shipper for the readiness transition. The previous cold-start envelope returned through tool responses keeps working for agents already wired to parse it.
-
-### New for agents
-
-- **The declarative agent-driven setup recipe** — `docs/getting-started/agent-driven-setup.md` covers what to ask the user, the minimal-viable YAML template, the secret name → env var name map for every connector, the 4-step validation pipeline, and the failure → fix table mirroring the F21 affordance shape. Optimised for unambiguous machine instructions so an LLM agent setting kairix up on a user's behalf has a clean recipe to follow.
-- **Pip-install path lands alongside Docker** in the refreshed `docs/getting-started/quick-start.md`. Parallel sections for Docker (`docker compose up`) and pip (`pip install "kairix[agents]"` → `kairix worker run &` + `kairix mcp serve`). Each step has a verification command (`kairix onboard check`, `kairix worker preflight`, `kairix features status`) so an operator can confirm they're on the happy path.
-
-### Internal
-
-- **#305 namespace fix** — the six topology v2 blocks now nest under a single `topology_v2:` parent key instead of leaking into the top-level `collections:` namespace where they collided with the legacy v1 `collections.shared` dict.
-- **F19 / F17 / F16 paydown** — 100 entries cleared from the unused-params / duplicated-literals / cognitive-complexity baselines, all by refactor (no rule exemptions).
-- **KFEAT-018 currency check** — release-tag-gated assertion that the grandfathering paydown plan snapshot is current as of each release tag. Stops the paydown plan from drifting between releases.
-- **KFEAT-019 Phase 1** — behaviour traceability matrix (135 rows, 31% MISSING baseline) — the inventory we'll burn down across the next several releases.
-- **MCP cold-start parts 3 + 4** — structured startup logs ship the warm-up event with the readiness transition fields; the docs land in `docs/operations/MCP-DEPLOYMENT.md` with the affordance shape for log-shipper consumers.
-
-### Behaviour changes worth noting
-
-- **Default deploy reports 14 onboard checks instead of 11.** The three new checks each report `ok=true` with a `"skipped — <flag> flag is OFF"` detail when their feature flag is off. Any healthcheck that asserts `total == 11` will need to update to `total >= 14`; healthchecks that consume `fully_passed` are unaffected.
-- **Existing Obsidian deployments are unchanged.** `topology_v2_obsidian` defaults to off — single-cursor scan behaviour is preserved bit-for-bit unless you flip the flag.
-- **reflib NDCG@10 may dip 0.01–0.02** if you flip `connector_sharepoint` and point it at a real SharePoint corpus before KFEAT-015 lands per-collection ranker calibration. Re-run `kairix benchmark run` after a full embed pass to settle the new baseline.
-
-### Things that haven't changed
-
-- The legacy `collections:` + `agents:` blocks at the top level of `kairix.config.yaml`. Both continue to work; the new `topology_v2:` block is opt-in.
-- The provider plugin selector (`provider:`). Same shape, same plugins, same secret-retrieval pattern per plugin.
-- MCP tool names + JSON schemas. The 12 tools shipped in v2026.5.18 are unchanged.
-- Authentication. kairix continues to have no built-in auth; deployments that put a gateway in front stay unchanged.
+- The kairix CLI surface for search, MCP, embed, entity management, briefing, prep, eval, benchmark — operators upgrading from v2026.5.18 use the same commands they always did.
+- The vector index format (`vectors.usearch`), the SQLite schema's content + content_vectors tables, the chunk-writer contract.
+- The provider plugin selection model (`provider:` field in config) introduced in v2026.5.17.
 
 ## [2026.5.18] - 2026-05-21 — Conversational memory shipping + one benchmark CLI + machine-actionable cold-start
 

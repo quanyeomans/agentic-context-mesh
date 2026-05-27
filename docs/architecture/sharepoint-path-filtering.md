@@ -1,10 +1,10 @@
 # SharePoint connector — per-drive path filtering (design)
 
-**Status:** design checkpoint awaiting review. Feeds KFEAT-022 (guided configuration) as the prerequisite that unlocks "pick a folder, not a whole drive" for the alpha dogfood.
+**Status:** design checkpoint awaiting review. Feeds KFEAT-022 (guided configuration) as the prerequisite that unlocks "pick a folder, not a whole drive" for the production deployment.
 
 ## Why this is needed now
 
-The dogfood SharePoint discovery surfaced a 126 GB drive (`Mixed-Content-Drive / Documents`) where ~95% of the volume is Microsoft-supplied partner material (`/Vendor-Bulk-Materials`) that the operator doesn't want indexed. The remaining ~5 GB (`/Curated-Content`, `/Shared Documents`) is the actual content worth indexing. The current connector's only scope unit is the drive — pointing at this drive means ingesting all 126 GB or moving content around in SharePoint.
+The production SharePoint discovery surfaced a 126 GB drive (`Mixed-Content-Drive / Documents`) where ~95% of the volume is Microsoft-supplied partner material (`/Vendor-Bulk-Materials`) that the operator doesn't want indexed. The remaining ~5 GB (`/Curated-Content`, `/Shared Documents`) is the actual content worth indexing. The current connector's only scope unit is the drive — pointing at this drive means ingesting all 126 GB or moving content around in SharePoint.
 
 The pattern generalises: real-world drives mix curated and bulk content. Per-folder scope is the missing surface.
 
@@ -202,7 +202,7 @@ Same commit lands:
 
 - **`kairix.config.example.yaml`** — extend the SharePoint connector block with commented include_paths / exclude_paths examples.
 - **`docs/architecture/connector-scope-topology/connector-design-specs/sharepoint.md`** — new `## Path filtering` section pointing to this design doc; updates the "scope" dimension in §1.
-- **`docs/upgrades/v2026.5.24a4.md`** (or whichever alpha bundles this) — operator-facing note + the `Vendor-Bulk-Materials` exclude example.
+- **Operator-facing note + `Vendor-Bulk-Materials` exclude example** — bundled into the next production upgrade note under `docs/upgrades/`.
 
 ## Cutover
 

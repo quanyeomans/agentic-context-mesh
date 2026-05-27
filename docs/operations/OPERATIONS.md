@@ -272,11 +272,11 @@ df -h /data     # data disk (if attached)
 | Document tree | depends on your source corpus | small disk fine |
 | Extractor scratch (`/data/kairix/tmp`) | bounded by per-extraction file size; cleaned on every call | small disk fine |
 
-Since v2026.5.28a1, bronze is **streaming-only** — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata (`source_uri`, `content_hash`, `fetched_at`) at ~kB per item. There are no on-disk bronze blobs. A 50,000-item corpus that would have needed ~650 GB of bronze under the pre-v2026.5.28 model now needs ~50 MB.
+Bronze is **streaming-only** — fetched bytes are extracted in-memory and discarded; `bronze_records` carries only metadata (`source_uri`, `content_hash`, `fetched_at`) at ~kB per item. There are no on-disk bronze blobs. A 50,000-item corpus that would have needed ~650 GB of bronze under the v2026.5.18 model now needs ~50 MB.
 
-Extractor scratch (the per-call tmpfile that markitdown/pdfplumber etc. use) was moved off the 2 GB `/tmp` tmpfs in v2026.5.27a2 to the disk-backed `/data/kairix/tmp` mount via `TMPDIR=/data/kairix/tmp` in the image. The entrypoint mkdir's it at boot so bind-mount masking can't defeat the relocation. Cleanup-on-failure was hardened in the same release; sustained extraction loads no longer leak placeholder tmpfiles.
+Extractor scratch (the per-call tmpfile that markitdown/pdfplumber etc. use) lands on the disk-backed `/data/kairix/tmp` mount via `TMPDIR=/data/kairix/tmp` in the image, not the 2 GB `/tmp` tmpfs. The entrypoint mkdir's it at boot so bind-mount masking can't defeat the relocation. Cleanup-on-failure is hardened; sustained extraction loads do not leak placeholder tmpfiles.
 
-**Operators upgrading from v2026.5.27 or earlier**: existing on-disk bronze blobs under `<bronze_root>` become unused once you've run any final `kairix worker reextract` to recover pre-upgrade dead-letter items via the legacy on-disk read path. After recovery, `rm -rf $bronze_root` reclaims that disk. See [`docs/upgrades/v2026.5.28a1.md`](../upgrades/v2026.5.28a1.md).
+**Operators upgrading from v2026.5.18**: existing on-disk bronze blobs under `<bronze_root>` become unused once you've run any final `kairix worker reextract` to recover pre-upgrade dead-letter items. After recovery, `rm -rf $bronze_root` reclaims that disk. See [`how-to-upgrade-kairix`](runbooks/how-to-upgrade-kairix.md) for the full migration steps.
 
 ---
 
