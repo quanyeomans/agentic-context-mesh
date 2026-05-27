@@ -170,14 +170,21 @@ jobs:
           git tag -a "$VERSION" -m "kairix $VERSION"
           git push origin "$VERSION"
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (draft for human review)
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
+          # Release lands as a draft so an operator can review the rendered
+          # release notes (extracted from CHANGELOG.md) before clicking
+          # Publish on GitHub. The git tag + docker image + PyPI artefacts
+          # ship deterministically from the tag SHA regardless of the
+          # release draft/published state, so this gate is on the
+          # operator-facing release notes only.
           gh release create "$VERSION" \
               --title "kairix $VERSION" \
               --notes-file /tmp/release-notes.md \
+              --draft \
               --verify-tag
 
       - name: Fan out to docker-publish + publish-pypi
