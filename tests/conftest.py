@@ -176,6 +176,8 @@ pytest_plugins = [
     "tests.bdd.steps.connector_dex_crm_steps",
     # F62 reference test — multi-tick cursor persistence invariants.
     "tests.bdd.steps.connector_cursor_persistence_steps",
+    # F64 reference test — SharePoint Graph 429 / Retry-After handling.
+    "tests.bdd.steps.sharepoint_rate_limit_steps",
     # Wave 5 KP-2 — M365 email-headers connector (header-only per ADR-004).
     "tests.bdd.steps.connector_m365_email_headers_steps",
     "tests.bdd.steps.feature_flag_connector_m365_email_headers_steps",
