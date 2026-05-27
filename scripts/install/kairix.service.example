@@ -49,8 +49,36 @@ EnvironmentFile=-/run/secrets/kairix.env
 EnvironmentFile=-/opt/kairix/secrets.env
 
 # ---------------------------------------------------------------------------
-# Process
+# Process — Type=oneshot + detached `docker compose up -d`
 # ---------------------------------------------------------------------------
+# The unit's job is narrow: gate the docker stack start on
+# kairix-fetch-secrets having hydrated /run/secrets/kairix.env. Once the
+# stack is up, per-container lifecycle (restart on crash, persist
+# across host reboot) is owned by docker's `restart: unless-stopped`
+# policy — NOT by this unit. That separation prevents the "systemd
+# wrestles docker compose for ownership" failure mode (#332 — 2026-05-27
+# incident).
+#
+# Why oneshot + `-d`:
+#   - Type=oneshot means systemd doesn't treat the compose process as
+#     "the service" — once `docker compose up -d` returns, systemd marks
+#     the unit active and stops watching. Containers run detached under
+#     dockerd.
+#   - `-d` (detached) so the unit returns instead of staying attached
+#     to container logs.
+#   - RemainAfterExit=true so systemctl shows the unit as active after
+#     the one-shot completes (otherwise it would flip to inactive).
+#
+# Why NOT `--remove-orphans`:
+#   - Destructive in the presence of any other compose invocation against
+#     the same project. A separate `docker compose up -d` in the same
+#     dir (e.g. an operator running it by hand, or a deploy webhook)
+#     suddenly competes for ownership and the `--remove-orphans` here
+#     tears down containers the other invocation just brought up.
+#     10-second restart loops + saturation.
+Type=oneshot
+RemainAfterExit=true
+
 # Preflight: ensure host-side prerequisites are valid before docker compose
 # touches anything. The script exits non-zero with an actionable message
 # if .env / secrets / required env vars are missing — surfacing the
@@ -58,10 +86,11 @@ EnvironmentFile=-/opt/kairix/secrets.env
 # "permission denied" cycle.
 ExecStartPre=/opt/kairix/bin/permissions-preflight.sh
 
-ExecStart=/usr/bin/docker compose up --remove-orphans
-ExecStop=/usr/bin/docker compose down
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose stop
 
-# Restart only on actual failure (not clean shutdown). Limit retry storm.
+# Restart only on actual failure (not clean shutdown). Bounded retry —
+# 5 attempts in 5 min then give up so a broken host doesn't loop forever.
 Restart=on-failure
 RestartSec=10
 StartLimitIntervalSec=300
