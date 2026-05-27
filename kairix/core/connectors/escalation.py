@@ -34,7 +34,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from kairix.core.protocols import ExtractedDocument, Extractor, MimeType
+from kairix.core.protocols import ExtractedDocument, Extractor, MimeType, SourceMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -274,3 +274,50 @@ class EscalatingExtractor:
             if not member.quality_ok(doc):
                 return False
         return True
+
+    def metadata_for(self, raw: bytes, mime: MimeType) -> SourceMetadata:
+        """Merge body-level metadata from every member that claims ``mime``.
+
+        ADR-021 (Wave E.5): walks the escalation chain in declared
+        order and unions the metadata each member surfaces; the first
+        non-None field wins (mirrors the silver merge rule).
+        Per-member failures fall through to an empty
+        :class:`SourceMetadata` so a flaky extractor never breaks the
+        envelope path.
+        """
+        accumulator = SourceMetadata()
+        for member in self._members:
+            contribution = _safe_member_metadata(member, raw, mime)
+            if contribution is None:
+                continue
+            accumulator = SourceMetadata(
+                modified_at=accumulator.modified_at or contribution.modified_at,
+                created_at=accumulator.created_at or contribution.created_at,
+                author=accumulator.author or contribution.author,
+                author_email=accumulator.author_email or contribution.author_email,
+                tags=tuple(sorted({*accumulator.tags, *contribution.tags})),
+                properties={**contribution.properties, **accumulator.properties},
+            )
+        return accumulator
+
+
+def _safe_member_metadata(member: Extractor, raw: bytes, mime: MimeType) -> SourceMetadata | None:
+    """Return the member's metadata_for() output or ``None`` on absence / failure.
+
+    Lifted from ``EscalatingExtractor.metadata_for`` so the per-member
+    try/except stays out of the merge loop body (ruff S112). A
+    legitimately empty :class:`SourceMetadata` still contributes via
+    the field-by-field merge in the caller; ``None`` here means the
+    member raised, didn't implement the method, or returned a value
+    that wasn't a :class:`SourceMetadata`.
+    """
+    getter = getattr(member, "metadata_for", None)
+    if getter is None:
+        return None
+    try:
+        result = getter(raw, mime)
+    except Exception:
+        return None
+    if not isinstance(result, SourceMetadata):
+        return None
+    return result

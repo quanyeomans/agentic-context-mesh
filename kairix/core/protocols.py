@@ -949,6 +949,33 @@ class BronzeRef:
 
 
 @dataclass(frozen=True)
+class SourceMetadata:
+    """Per-source envelope metadata, surfaced before silver chunking.
+
+    Connectors that have envelope metadata at the source surface
+    (SharePoint drive items, GitHub commits, Notion blocks, etc.)
+    populate the relevant fields via :meth:`SourceConnector.metadata_for`.
+    Per-format extractors fill in document-body metadata (PDF authors,
+    Office properties, EXIF) via :meth:`Extractor.metadata_for`. The
+    silver merge layer combines them with connector > extractor >
+    defaults priority — see ADR-021 §"Silver merge logic".
+
+    All fields default to None / empty so connectors implement only
+    what their source surfaces. F65 blocks plugin classes that do not
+    implement ``metadata_for`` (or do not opt out via
+    ``# F65-exempt: <reason>``). Spec:
+    ``docs/architecture/ADR-021-per-source-metadata-normalisation.md``.
+    """
+
+    modified_at: str | None = None
+    created_at: str | None = None
+    author: str | None = None
+    author_email: str | None = None
+    tags: tuple[str, ...] = ()
+    properties: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Chunk:
     """One chunk written to the retrieval index.
 
@@ -964,6 +991,13 @@ class Chunk:
     ``documents_media.extractor_version``). ``None`` for legacy paths
     that pre-date the chunker registry; new emitters fill it via
     ``chunker_version=self.version`` per F55.
+
+    ADR-021 (Wave E.5): ``author`` / ``author_email`` / ``tags`` /
+    ``metadata`` surface :class:`SourceMetadata` from the connector
+    envelope and the extractor body so downstream temporal-boost,
+    entity-graph and metadata-filtered search work for every source.
+    All four default to None / empty so existing call sites stay
+    compatible.
     """
 
     text: str
@@ -974,6 +1008,10 @@ class Chunk:
     source_page: int | None
     sensitivity: Sensitivity
     chunker_version: str | None = None
+    author: str | None = None
+    author_email: str | None = None
+    tags: tuple[str, ...] = ()
+    metadata: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1059,6 +1097,22 @@ class SourceConnector(Protocol):
         """
         ...
 
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return :class:`SourceMetadata` populated from the source's envelope.
+
+        ADR-021 (Wave E.5): called per-item by Silver, BEFORE the
+        extractor runs. Connectors that surface no structured metadata
+        can return ``SourceMetadata()``. Connectors with envelope
+        metadata MUST surface it — F65 blocks connectors that don't
+        implement this method or opt out via ``# F65-exempt:``.
+
+        The orchestrator merges this with
+        :meth:`Extractor.metadata_for` (connector > extractor >
+        defaults). See ADR-021 §"Silver merge logic" for the precise
+        merge rule.
+        """
+        ...
+
 
 @runtime_checkable
 class Extractor(Protocol):
@@ -1085,6 +1139,23 @@ class Extractor(Protocol):
 
     def quality_ok(self, doc: ExtractedDocument) -> bool:
         """Return True if the extraction is good enough to skip the next escalation tier."""
+        ...
+
+    def metadata_for(self, raw: bytes, mime: MimeType) -> SourceMetadata:
+        """Return :class:`SourceMetadata` from the raw bytes.
+
+        ADR-021 (Wave E.5): for PDFs read XMP / Info dict
+        (``CreationDate`` / ``Author`` / ``Title`` / ``Keywords``); for
+        Office formats read core properties (created / modified /
+        creator / keywords / category); for markdown parse the
+        ``---`` frontmatter block. Passthrough / OCR may return
+        ``SourceMetadata()`` when the format carries no body-level
+        metadata.
+
+        The orchestrator merges this with
+        :meth:`SourceConnector.metadata_for` (connector wins on
+        collisions). See ADR-021 §"Silver merge logic".
+        """
         ...
 
 
@@ -1129,8 +1200,18 @@ class SilverProcessor(Protocol):
         source_uri: str,
         source_modified_at: str,
         sensitivity: Sensitivity,
+        connector_metadata: SourceMetadata | None = None,
+        extractor_metadata: SourceMetadata | None = None,
     ) -> SilverOutput:
-        """Return a SilverOutput (chunks + entity signals) for one extracted document."""
+        """Return a SilverOutput (chunks + entity signals) for one extracted document.
+
+        ADR-021 (Wave E.5): ``connector_metadata`` and
+        ``extractor_metadata`` carry envelope- and body-derived
+        metadata respectively; both default to ``None`` so legacy
+        callers stay back-compatible. When both are ``None`` Silver
+        falls back to the legacy single-source path (no author /
+        tags / properties).
+        """
         ...
 
 

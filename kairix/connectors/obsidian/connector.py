@@ -59,6 +59,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 
 CONNECTOR_NAME = "obsidian"
@@ -513,6 +514,84 @@ class ObsidianConnector:
                 "next: investigate the upstream call that produced this id."
             ) from exc
         return candidate
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return file-stat + frontmatter envelope metadata for ``item_id``.
+
+        ADR-021: Obsidian's envelope is the filesystem mtime + ctime
+        plus the ``---``-delimited YAML frontmatter at the top of the
+        markdown file. Tags come from the ``tags:`` frontmatter key
+        (string or list). Author comes from the ``author:`` frontmatter
+        key. Missing files / unreadable files / parse failures collapse
+        to an empty :class:`SourceMetadata` so the pipeline keeps
+        running on a corrupt vault entry.
+        """
+        try:
+            abs_path = self._safe_resolve(item_id)
+        except ValueError:
+            return SourceMetadata()
+        if not abs_path.is_file():
+            return SourceMetadata()
+        try:
+            stat = abs_path.stat()
+        except OSError:
+            return SourceMetadata()
+        modified_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        created_at = datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        author: str | None = None
+        tags: tuple[str, ...] = ()
+        try:
+            head_bytes = abs_path.read_bytes()[:4096]
+            head = head_bytes.decode("utf-8", errors="replace")
+            front = _parse_frontmatter(head)
+        except OSError:
+            front = {}
+        if front:
+            raw_author = front.get("author")
+            if isinstance(raw_author, str) and raw_author.strip():
+                author = raw_author.strip()
+            raw_tags = front.get("tags")
+            if isinstance(raw_tags, list):
+                tags = tuple(str(t) for t in raw_tags if isinstance(t, str) and t.strip())
+            elif isinstance(raw_tags, str) and raw_tags.strip():
+                tags = (raw_tags.strip(),)
+        return SourceMetadata(
+            modified_at=modified_at,
+            created_at=created_at,
+            author=author,
+            tags=tags,
+        )
+
+
+def _parse_frontmatter(head: str) -> dict[str, Any]:
+    """Parse the leading ``---`` YAML frontmatter block of ``head``.
+
+    Returns an empty dict on missing block or parse failure. Tolerant
+    of trailing newlines and the optional BOM. Frontmatter parsing is
+    best-effort — corrupt YAML never raises out of
+    :meth:`ObsidianConnector.metadata_for`.
+    """
+    text = head.lstrip("﻿").lstrip()
+    if not text.startswith("---"):
+        return {}
+    after = text[3:]
+    end_marker = after.find("\n---")
+    if end_marker == -1:
+        return {}
+    block = after[:end_marker]
+    try:
+        import yaml
+
+        parsed = yaml.safe_load(block)
+    except Exception:
+        return {}
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
 def _max_modified_at(events: list[ChangeEvent], *, fallback: str | None) -> str | None:

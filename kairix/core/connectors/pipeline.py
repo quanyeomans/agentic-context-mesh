@@ -63,6 +63,7 @@ from kairix.core.protocols import (
     Extractor,
     SilverProcessor,
     SourceConnector,
+    SourceMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -438,6 +439,13 @@ class ConnectorPipeline:
         except Exception as exc:
             self._dead_letter.record(connector.name, item_id, f"extract: {exc}")
             return _OUTCOME_DEAD_LETTERED
+        # ADR-021 (Wave E.5): surface per-source envelope + body metadata.
+        # ``metadata_for`` is a Protocol-required method (default impl
+        # returns empty SourceMetadata). Failure to surface metadata is
+        # never fatal — silver falls back to the legacy single-source
+        # shape via the connector_metadata / extractor_metadata defaults.
+        connector_metadata = _safe_connector_metadata(connector, item_id)
+        extractor_metadata = _safe_extractor_metadata(extractor, raw.raw, raw.mime)
         # Silver / writer / sink failures propagate — the batch rolls back.
         silver_out = self._silver.process(
             ref,
@@ -445,7 +453,48 @@ class ConnectorPipeline:
             source_uri=connector.source_link(item_id),
             source_modified_at=modified_at,
             sensitivity=connector.sensitivity_for(item_id),
+            connector_metadata=connector_metadata,
+            extractor_metadata=extractor_metadata,
         )
         self._chunk_writer.upsert(silver_out.chunks)
         self._entity_graph_sink.stage(silver_out.entity_signals)
         return _OUTCOME_PROCESSED
+
+
+def _safe_connector_metadata(connector: SourceConnector, item_id: str) -> SourceMetadata:
+    """Call ``connector.metadata_for`` with a fall-back to empty metadata.
+
+    ADR-021 (Wave E.5): some legacy connector test stand-ins predate
+    the Protocol method. The helper returns an empty
+    :class:`SourceMetadata` when ``metadata_for`` is absent OR raises,
+    so the pipeline never breaks on a missing implementation. F65
+    forces shipped connectors to implement the method properly; this
+    helper only protects against unforeseen runtime failures.
+    """
+    getter = getattr(connector, "metadata_for", None)
+    if getter is None:
+        return SourceMetadata()
+    try:
+        result = getter(item_id)
+    except Exception:
+        return SourceMetadata()
+    if isinstance(result, SourceMetadata):
+        return result
+    return SourceMetadata()
+
+
+def _safe_extractor_metadata(extractor: Extractor, raw: bytes, mime: str) -> SourceMetadata:
+    """Call ``extractor.metadata_for`` with a fall-back to empty metadata.
+
+    Mirrors :func:`_safe_connector_metadata` for the extractor side.
+    """
+    getter = getattr(extractor, "metadata_for", None)
+    if getter is None:
+        return SourceMetadata()
+    try:
+        result = getter(raw, mime)
+    except Exception:
+        return SourceMetadata()
+    if isinstance(result, SourceMetadata):
+        return result
+    return SourceMetadata()

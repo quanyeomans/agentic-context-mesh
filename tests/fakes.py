@@ -1663,6 +1663,13 @@ class FakePassthroughExtractor:
     def quality_ok(self, doc: Any) -> bool:
         return bool(doc.markdown.strip())
 
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakePdfFallbackExtractor:
     """Canonical fake for the pdf_fallback extractor plugin (F43 contract layer).
@@ -1731,6 +1738,13 @@ class FakePdfFallbackExtractor:
         if len(doc.markdown) < 100:
             return False
         return any(page.text.strip() for page in doc.pages)
+
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
 
 
 class FakeMarkitdownExtractor:
@@ -1804,6 +1818,13 @@ class FakeMarkitdownExtractor:
         if len(text) < 50:
             return False
         return bool(doc.confidence >= 0.10)
+
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
 
 
 class FakeOcrExtractor:
@@ -1880,6 +1901,13 @@ class FakeOcrExtractor:
             return False
         return bool(doc.confidence >= 0.6)
 
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakePptxExtractor:
     """Canonical fake for the pptx extractor plugin (F43 contract layer).
@@ -1954,6 +1982,13 @@ class FakePptxExtractor:
             return False
         return len(doc.markdown.strip()) >= 100
 
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeDocxExtractor:
     """Canonical fake for the docx extractor plugin (F43 contract layer).
@@ -2026,6 +2061,13 @@ class FakeDocxExtractor:
                 return True
         return False
 
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeXlsxExtractor:
     """Canonical fake for the xlsx extractor plugin (F43 contract layer).
@@ -2095,6 +2137,13 @@ class FakeXlsxExtractor:
         if len(doc.pages) < 1:
             return False
         return len(doc.markdown) >= 100
+
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only)."""
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
 
 
 class FakeCorpusEmbedder:
@@ -2180,6 +2229,17 @@ class FakeObsidian:
             return None
         return max(ev.modified_at for ev in self._events)
 
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`ObsidianConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeDexCrmConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
@@ -2248,6 +2308,19 @@ class FakeDexCrmConnector:
             return None
         return max(ev.modified_at for ev in self._events)
 
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): the contract-test fake exists to prove
+        Protocol-shape compliance, not behaviour. Real Dex envelope
+        metadata extraction lives on
+        :meth:`kairix.connectors.dex_crm.DexCrmConnector.metadata_for`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 # ---------------------------------------------------------------------------
 # Connector-pipeline orchestration fakes (Wave 2 — IM-2)
@@ -2292,6 +2365,7 @@ class FakeSourceConnector:
         track_modified_at: bool = False,
         per_tick_max_items: int = 500,
         disk_watermark_min_free_bytes: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         from kairix.core.protocols import ChangeEvent  # local import — avoids reordering top-of-file
 
@@ -2309,6 +2383,10 @@ class FakeSourceConnector:
         self._fail_on_fetch: set[str] = set(fail_on_fetch) if fail_on_fetch is not None else set()
         self._sensitivity = sensitivity
         self.fetch_calls: list[str] = []
+        # ADR-021 (Wave E.5): ``metadata`` maps item_id -> SourceMetadata.
+        # Missing entries return an empty SourceMetadata so tests that
+        # don't care about envelope metadata stay terse.
+        self._metadata: dict[str, Any] = dict(metadata) if metadata is not None else {}
         # next_cursor() shapes:
         #   - cursor_token=<str>: returned verbatim (opaque-token shape;
         #     mirrors SharePoint/Graph/Slack deltaLink behaviour).
@@ -2368,6 +2446,21 @@ class FakeSourceConnector:
         if self._track_modified_at:
             return self._last_max_modified_at
         return None
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Return the scripted :class:`SourceMetadata` for ``item_id``.
+
+        ADR-021 (Wave E.5): test fixtures pass a ``metadata`` mapping
+        keyed by ``item_id`` at construction time; absent keys collapse
+        to an empty :class:`SourceMetadata` so tests that don't care
+        about envelope metadata stay terse.
+        """
+        from kairix.core.protocols import SourceMetadata
+
+        value = self._metadata.get(item_id)
+        if isinstance(value, SourceMetadata):
+            return value
+        return SourceMetadata()
 
 
 class FakeM365EmailHeadersConnector:
@@ -2447,6 +2540,17 @@ class FakeM365EmailHeadersConnector:
             return None
         return f"https://graph.microsoft.com/v1.0/users/{self._upn}/messages/delta?token=fake-token"
 
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`M365EmailHeadersConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeM365CalendarConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
@@ -2494,6 +2598,17 @@ class FakeM365CalendarConnector:
     def next_cursor(self) -> str | None:
         """Return the seeded deltaLink (Graph opaque-token cursor shape)."""
         return self.last_delta_link
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real Graph event envelope extraction
+        lives on the shipped :class:`M365CalendarConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
 
 
 class FakeSharePointConnector:
@@ -2582,6 +2697,17 @@ class FakeSharePointConnector:
 
         return _json.dumps({"fake-drive": self._delta_link}, sort_keys=True)
 
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`SharePointConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeNotionConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
@@ -2668,6 +2794,17 @@ class FakeNotionConnector:
         if not self._pages:
             return None
         return max(str(p.get("last_edited_time", "")) for p in self._pages)
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`NotionConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
 
 
 class FakeGitHubConnector:
@@ -2914,6 +3051,17 @@ class FakeGitHubConnector:
         self._seen_deliveries.add(envelope.delivery_id)
         yield from translate_event(envelope)
 
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`GitHubConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeSlackConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
@@ -2999,6 +3147,17 @@ class FakeSlackConnector:
         """Fake Slack connector cursor — returns the configurable test token or None."""
         return getattr(self, "_next_cursor_token", None)
 
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`SlackConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
 
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
@@ -3013,12 +3172,16 @@ class FakeExtractor:
     name: str = "fake-extractor"
     version: str = "0.0.0"
 
-    def __init__(self) -> None:
+    def __init__(self, *, metadata: Any | None = None) -> None:
         from kairix.core.protocols import DocMetadata, ExtractedDocument
 
         self._DocMetadata = DocMetadata
         self._ExtractedDocument = ExtractedDocument
         self.extract_calls: list[tuple[bytes, str]] = []
+        # ADR-021 (Wave E.5): scripted SourceMetadata override. ``None``
+        # collapses to an empty SourceMetadata at metadata_for() call
+        # time so tests that don't care stay terse.
+        self._metadata_override = metadata
 
     def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
         del mime, magic_bytes
@@ -3043,6 +3206,21 @@ class FakeExtractor:
 
     def quality_ok(self, doc: Any) -> bool:
         return bool(doc.markdown.strip())
+
+    def metadata_for(self, raw: bytes, mime: str) -> Any:
+        """Return the scripted body-derived :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): tests pass a ``metadata=SourceMetadata(...)``
+        override at construction; the fake returns it verbatim. Missing
+        override collapses to empty :class:`SourceMetadata` (the
+        default for formats with no body metadata, e.g. plaintext).
+        """
+        del raw, mime
+        from kairix.core.protocols import SourceMetadata
+
+        if isinstance(self._metadata_override, SourceMetadata):
+            return self._metadata_override
+        return SourceMetadata()
 
 
 class FakeEntityGraphSink:

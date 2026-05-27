@@ -54,6 +54,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 from kairix.transport.auth.oauth2_client_creds import (
     OAuth2ClientCredsAuth,
@@ -638,6 +639,40 @@ class M365EmailHeadersConnector:
         response carried no final deltaLink.
         """
         return self._next_cursor
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return the cached envelope metadata for ``item_id``.
+
+        ADR-021: every Graph message envelope already carries sender +
+        received-at + cc/to recipients before the orchestrator asks
+        for ``fetch``. We surface ``from`` as author + author_email,
+        ``receivedDateTime`` as modified_at, and ``cc`` recipients as
+        tags. Cache miss collapses to an empty
+        :class:`SourceMetadata`.
+        """
+        message = self._cache.get(item_id)
+        if message is None:
+            return SourceMetadata()
+        sender = message.sender.strip() if message.sender else None
+        author = sender
+        author_email = sender if sender and "@" in sender else None
+        properties: dict[str, str] = {}
+        if message.subject:
+            properties["subject"] = message.subject
+        if message.sent_at:
+            properties["sent_at"] = message.sent_at
+        return SourceMetadata(
+            modified_at=message.received_at or message.sent_at,
+            created_at=message.sent_at,
+            author=author,
+            author_email=author_email,
+            tags=tuple(message.to_recipients),
+            properties=properties,
+        )
 
 
 def _event_modified_at(message: GraphMessage) -> str:

@@ -47,6 +47,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 from kairix.transport.auth.api_key import MissingCredentialsError
 
@@ -512,6 +513,45 @@ class DexCrmConnector:
             item_id=item_id,
             modified_at=updated_at,
             raw=raw,
+        )
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return the cached Dex record's envelope metadata.
+
+        ADR-021: the record cache populated by :meth:`list_changes`
+        already carries the raw Dex envelope; we lift
+        ``created_by`` / ``modified_by`` / ``created_at`` /
+        ``updated_at`` / ``tags`` from it. Cache miss collapses to an
+        empty :class:`SourceMetadata` — the next tick will refresh the
+        cache.
+        """
+        record = self._record_cache.get(item_id)
+        if record is None:
+            return SourceMetadata()
+        raw = record.raw
+        author_value = raw.get("modified_by") or raw.get("created_by")
+        author = author_value if isinstance(author_value, str) and author_value.strip() else None
+        created_at_value = raw.get("created_at")
+        created_at = created_at_value if isinstance(created_at_value, str) and created_at_value.strip() else None
+        modified_at_value = raw.get("updated_at") or record.modified_at
+        modified_at = modified_at_value if isinstance(modified_at_value, str) and modified_at_value.strip() else None
+        raw_tags = raw.get("tags")
+        if isinstance(raw_tags, list):
+            tags = tuple(str(t) for t in raw_tags if isinstance(t, str) and t.strip())
+        elif isinstance(raw_tags, str) and raw_tags.strip():
+            tags = (raw_tags.strip(),)
+        else:
+            tags = ()
+        return SourceMetadata(
+            modified_at=modified_at,
+            created_at=created_at,
+            author=author,
+            tags=tags,
+            properties={"kind": record.kind},
         )
 
 

@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -264,6 +265,17 @@ class MarkitdownExtractor:
         if len(text) < _QUALITY_MIN_CHARS:
             return False
         return doc.confidence >= _QUALITY_MIN_BYTE_RATIO
+
+    def metadata_for(self, _raw: bytes, _mime: MimeType) -> SourceMetadata:
+        """Return empty :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): Office core-property + PDF XMP extraction
+        lands in a follow-up commit (the markitdown library does not
+        expose them in a single round-trip; a separate openpyxl /
+        python-docx / pypdf-XMP pass is needed). The stub keeps the
+        Protocol surface satisfied so the plugin remains shippable.
+        """
+        return SourceMetadata()
 
 
 def _result_markdown(result: Any) -> str:

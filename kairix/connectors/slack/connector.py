@@ -76,6 +76,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -911,6 +912,41 @@ class SlackConnector:
     def _on_credential_expired(self) -> None:
         """Callback fired by :class:`SlackSocketModeHandler` on auth failure."""
         self._cc_pair_invalid = True
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return cached Slack message envelope metadata for ``item_id``.
+
+        ADR-021: the per-tick :class:`_ChannelCache` already carries
+        every message envelope drained on the current tick — author is
+        the message's ``user`` id (display-name resolution is a future
+        Web-API roundtrip; today the user id is the stable identifier),
+        ``ts`` is the modified_at, and the channel name becomes the
+        first tag. Cache miss collapses to an empty
+        :class:`SourceMetadata`.
+        """
+        message = self._cache.messages.get(item_id)
+        if message is None:
+            return SourceMetadata()
+        channel = self._cache.channels.get(message.channel_id)
+        tags: tuple[str, ...] = ()
+        properties: dict[str, str] = {}
+        if channel is not None:
+            tags = (channel.name,)
+            properties["channel_name"] = channel.name
+            properties["channel_kind"] = channel.kind
+        if message.thread_ts:
+            properties["thread_ts"] = message.thread_ts
+        modified_at_iso = _ts_to_iso(message.ts) if message.ts else None
+        return SourceMetadata(
+            modified_at=modified_at_iso,
+            author=message.user,
+            tags=tags,
+            properties=properties,
+        )
 
 
 def _default_web_client_factory(credentials: SlackCredentials) -> SlackWebClient:

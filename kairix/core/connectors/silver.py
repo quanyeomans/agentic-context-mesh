@@ -38,6 +38,7 @@ from kairix.core.protocols import (
     Page,
     Sensitivity,
     SilverOutput,
+    SourceMetadata,
 )
 
 # Target chunk size at paragraph boundaries (characters). Smaller than
@@ -248,11 +249,19 @@ class DefaultSilverProcessor:
         source_uri: str,
         source_modified_at: str,
         sensitivity: Sensitivity,
+        connector_metadata: SourceMetadata | None = None,
+        extractor_metadata: SourceMetadata | None = None,
     ) -> SilverOutput:
         """Split ``extracted.markdown`` into chunks; emit entity signals.
 
         Every chunk carries ``source_uri`` + ``source_modified_at`` +
-        ``sensitivity`` per F39.
+        ``sensitivity`` per F39. ADR-021 (Wave E.5) adds the merged
+        :class:`SourceMetadata` payload — author / author_email / tags /
+        properties — derived from ``connector_metadata`` and
+        ``extractor_metadata`` with connector > extractor > defaults
+        priority. When both metadata arguments are ``None`` the chunks
+        carry the legacy single-source shape (no author, empty tags,
+        empty metadata mapping).
 
         When ``extracted.pages`` is non-empty (PDF / PPTX / XLSX
         extractions), chunks are produced per-page and each chunk carries
@@ -265,6 +274,8 @@ class DefaultSilverProcessor:
         extract), chunks are produced from ``extracted.markdown`` and
         every chunk's ``source_page`` is ``None``.
         """
+        merged = _merge_metadata(connector_metadata, extractor_metadata)
+        chunk_modified_at = merged.modified_at or source_modified_at
         if extracted.pages:
             page_chunks = _chunk_pages(extracted.pages)
             chunks = tuple(
@@ -273,9 +284,13 @@ class DefaultSilverProcessor:
                     content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
                     source_name=raw.source_name,
                     source_uri=source_uri,
-                    source_modified_at=source_modified_at,
+                    source_modified_at=chunk_modified_at,
                     source_page=page_number,
                     sensitivity=sensitivity,
+                    author=merged.author,
+                    author_email=merged.author_email,
+                    tags=merged.tags,
+                    metadata=merged.properties,
                 )
                 for chunk_text, page_number in page_chunks
             )
@@ -287,16 +302,59 @@ class DefaultSilverProcessor:
                     content_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
                     source_name=raw.source_name,
                     source_uri=source_uri,
-                    source_modified_at=source_modified_at,
+                    source_modified_at=chunk_modified_at,
                     source_page=None,
                     sensitivity=sensitivity,
+                    author=merged.author,
+                    author_email=merged.author_email,
+                    tags=merged.tags,
+                    metadata=merged.properties,
                 )
                 for chunk_text in chunk_texts
             )
         signals = _extract_entity_signals(
             extracted.markdown,
             source_uri=source_uri,
-            source_modified_at=source_modified_at,
+            source_modified_at=chunk_modified_at,
             sensitivity=sensitivity,
         )
+        if merged.author:
+            signals = (
+                EntitySignal(
+                    kind="person",
+                    value=merged.author,
+                    source_uri=source_uri,
+                    modified_at=chunk_modified_at,
+                    confidence=0.95,
+                    sensitivity=sensitivity,
+                ),
+                *signals,
+            )
         return SilverOutput(chunks=chunks, entity_signals=signals)
+
+
+def _merge_metadata(
+    connector_metadata: SourceMetadata | None,
+    extractor_metadata: SourceMetadata | None,
+) -> SourceMetadata:
+    """Merge connector + extractor metadata with connector-wins precedence.
+
+    ADR-021 §"Silver merge logic": connector envelope > extractor body >
+    defaults. Tags are unioned (deduplicated, sorted for determinism).
+    Properties merge with connector entries overwriting extractor ones
+    on key collision. ``None`` inputs collapse to the empty
+    :class:`SourceMetadata`; the helper always returns a populated
+    instance so the caller can deconstruct without ``is None`` checks.
+    """
+    connector = connector_metadata or SourceMetadata()
+    extractor = extractor_metadata or SourceMetadata()
+    merged_tags = tuple(sorted({*connector.tags, *extractor.tags}))
+    merged_props: dict[str, str] = {**extractor.properties, **connector.properties}
+    return SourceMetadata(
+        modified_at=connector.modified_at or extractor.modified_at,
+        created_at=connector.created_at or extractor.created_at,
+        author=connector.author or extractor.author,
+        author_email=connector.author_email or extractor.author_email,
+        tags=merged_tags,
+        properties=merged_props,
+    )

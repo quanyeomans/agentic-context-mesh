@@ -18,6 +18,7 @@ the IM-4 wave entry that ships this extractor alongside markitdown.
 
 from __future__ import annotations
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -117,3 +118,74 @@ class PassthroughExtractor:
         has no alternate extractor to escalate to.
         """
         return bool(doc.markdown.strip())
+
+    def metadata_for(self, raw: bytes, mime: MimeType) -> SourceMetadata:
+        """Parse ``---``-delimited frontmatter when the bytes look like markdown.
+
+        ADR-021 (Wave E.5): passthrough handles markdown / plain text;
+        only markdown carries a YAML frontmatter block. Non-markdown
+        formats and unparseable frontmatter collapse to empty
+        :class:`SourceMetadata`.
+        """
+        parsed = _parse_markdown_frontmatter(raw, mime)
+        if parsed is None:
+            return SourceMetadata()
+        return SourceMetadata(
+            modified_at=_frontmatter_string(parsed.get("date")),
+            author=_frontmatter_string(parsed.get("author")),
+            tags=_frontmatter_tags(parsed.get("tags")),
+        )
+
+
+def _parse_markdown_frontmatter(raw: bytes, mime: MimeType) -> dict[str, object] | None:
+    """Return the YAML frontmatter dict for markdown bytes, or ``None``.
+
+    Extracted from :meth:`PassthroughExtractor.metadata_for` to keep
+    that method's cognitive complexity below 15 (F16). Non-markdown
+    mime, decoding failure, missing / unclosed ``---`` block, malformed
+    YAML, or YAML that doesn't parse to a dict all collapse to
+    ``None`` — the caller treats them all as "no frontmatter".
+    """
+    if not isinstance(mime, str) or "markdown" not in mime:
+        return None
+    try:
+        head = raw[:4096].decode("utf-8", errors="replace")
+    except (UnicodeDecodeError, AttributeError):
+        return None
+    text = head.lstrip("﻿").lstrip()
+    if not text.startswith("---"):
+        return None
+    after = text[3:]
+    end = after.find("\n---")
+    if end == -1:
+        return None
+    block = after[:end]
+    try:
+        import yaml
+
+        parsed = yaml.safe_load(block)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
+
+
+def _frontmatter_string(value: object) -> str | None:
+    """Return ``value`` stripped, or ``None`` for non-string / empty values."""
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _frontmatter_tags(value: object) -> tuple[str, ...]:
+    """Normalise a frontmatter ``tags:`` value into a tuple of strings.
+
+    Lists become ``(str, ...)``; single strings become ``(str,)``;
+    anything else becomes ``()``.
+    """
+    if isinstance(value, list):
+        return tuple(str(t) for t in value if isinstance(t, str) and t.strip())
+    if isinstance(value, str) and value.strip():
+        return (value.strip(),)
+    return ()

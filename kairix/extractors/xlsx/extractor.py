@@ -28,6 +28,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -215,6 +216,16 @@ class XlsxExtractor:
         if len(doc.pages) < 1:
             return False
         return len(doc.markdown) >= _QUALITY_MIN_CHARS
+
+    def metadata_for(self, _raw: bytes, _mime: MimeType) -> SourceMetadata:
+        """Return empty :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): xlsx core-property extraction (author /
+        last_modified_by / created) lands in a follow-up commit that
+        reads ``docProps/core.xml`` from the zip. Stub keeps the
+        Protocol surface satisfied.
+        """
+        return SourceMetadata()
 
 
 # ---------------------------------------------------------------------------

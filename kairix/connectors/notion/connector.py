@@ -56,6 +56,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -578,6 +579,38 @@ class NotionConnector:
             if block.plain_text:
                 lines.append(block.plain_text)
         return "\n".join(lines).rstrip() + "\n"
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return cached Notion page envelope metadata for ``item_id``.
+
+        ADR-021: surfaces ``last_edited_time`` as modified_at,
+        ``created_time`` as created_at, the
+        ``last_edited_by`` (falling back to ``created_by``) user id as
+        author, and the page title + parent_type as properties. Cache
+        miss collapses to an empty :class:`SourceMetadata`.
+        """
+        page = self._page_cache.get(item_id)
+        if page is None:
+            return SourceMetadata()
+        author = page.last_edited_by or page.created_by
+        properties: dict[str, str] = {}
+        if page.title:
+            properties["title"] = page.title
+        if page.parent_type:
+            properties["parent_type"] = page.parent_type
+        if page.url:
+            properties["url"] = page.url
+        return SourceMetadata(
+            modified_at=page.last_edited_time or None,
+            created_at=page.created_time,
+            author=author,
+            tags=(page.parent_type,) if page.parent_type else (),
+            properties=properties,
+        )
 
 
 def make_connector(config: Mapping[str, Any]) -> NotionConnector:

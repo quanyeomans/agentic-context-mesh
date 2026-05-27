@@ -50,6 +50,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 
 CONNECTOR_NAME = "m365_calendar"
@@ -240,6 +241,11 @@ class M365CalendarConnector:
         # configured calendar holds its own :class:`M365GraphCalendarClient`
         # so per-calendar requests don't share connection state.
         self._per_user_clients: dict[str, M365GraphCalendarClient] = {}
+        # ADR-021 (Wave E.5): cache per-event envelope metadata so
+        # ``metadata_for`` can return organiser + start + categories
+        # without re-hitting Graph for an item we already saw on the
+        # current tick. Keyed by event_id; populated during ``_drain``.
+        self._event_metadata_cache: dict[str, CalendarEventRecord] = {}
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
@@ -569,6 +575,10 @@ class M365CalendarConnector:
                     batch.events.append(event)
                     if not record.removed:
                         self._event_payload_cache[record.event_id] = record.raw_payload
+                        # ADR-021: cache the structured envelope so
+                        # ``metadata_for`` can return organiser + start
+                        # + categories without re-querying Graph.
+                        self._event_metadata_cache[record.event_id] = record
             if page.delta_link is not None:
                 batch.delta_link = page.delta_link
         return batch
@@ -723,6 +733,40 @@ class M365CalendarConnector:
         window_start = now - timedelta(days=self._config.window_days_back)
         window_end = now + timedelta(days=self._config.window_days_forward)
         return client.fetch_initial_delta(_iso(window_start), _iso(window_end))
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return cached Graph event envelope metadata for ``item_id``.
+
+        ADR-021: Graph events carry organiser address + start time +
+        last-modified time on the envelope; categories surface as
+        ``tags``. Cache miss collapses to an empty
+        :class:`SourceMetadata` so an unseen id never crashes the
+        pipeline.
+        """
+        record = self._event_metadata_cache.get(item_id)
+        if record is None:
+            return SourceMetadata()
+        author = record.organiser.strip() if record.organiser else None
+        author_email = author if author and "@" in author else None
+        properties: dict[str, str] = {}
+        if record.subject:
+            properties["subject"] = record.subject
+        if record.start_iso:
+            properties["start"] = record.start_iso
+        if record.location:
+            properties["location"] = record.location
+        return SourceMetadata(
+            modified_at=record.last_modified_iso or None,
+            created_at=record.start_iso or None,
+            author=author,
+            author_email=author_email,
+            tags=record.attendees,
+            properties=properties,
+        )
 
 
 def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:

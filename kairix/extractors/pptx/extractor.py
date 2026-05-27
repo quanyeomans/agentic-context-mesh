@@ -26,6 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -167,6 +168,15 @@ class PptxExtractor:
         if len(doc.pages) == 0:
             return False
         return len(doc.markdown.strip()) >= _QUALITY_MIN_CHARS
+
+    def metadata_for(self, _raw: bytes, _mime: MimeType) -> SourceMetadata:
+        """Return empty :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): pptx core-property extraction lands in a
+        follow-up commit reading ``docProps/core.xml`` from the zip.
+        Stub keeps the Protocol surface satisfied.
+        """
+        return SourceMetadata()
 
 
 class _Slide:

@@ -57,6 +57,7 @@ from kairix.core.protocols import (
     HierarchyNode,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 from kairix.transport.auth.oauth2_client_creds import (
     OAuth2ClientCredsAuth,
@@ -781,6 +782,43 @@ class SharePointConnector:
                 "name": item.name,
                 "mime": item.mime or "",
             },
+        )
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return cached SharePoint drive-item envelope metadata.
+
+        ADR-021: surfaces ``lastModifiedDateTime`` as modified_at,
+        ``createdBy.user.displayName`` (falling back to
+        ``lastModifiedBy.user.displayName``) as author,
+        ``parent_path`` segments as tags, and the ``web_url`` /
+        ``drive_id`` / ``mime`` as properties.
+        """
+        item = self._cache.get(item_id)
+        if item is None:
+            return SourceMetadata()
+        tags: tuple[str, ...] = ()
+        if item.parent_path:
+            tags = tuple(seg for seg in item.parent_path.split("/") if seg)
+        properties: dict[str, str] = {}
+        if item.name:
+            properties["name"] = item.name
+        if item.web_url:
+            properties["web_url"] = item.web_url
+        if item.drive_id:
+            properties["drive_id"] = item.drive_id
+        if item.mime:
+            properties["mime"] = item.mime
+        author = item.created_by or item.last_modified_by
+        return SourceMetadata(
+            modified_at=item.last_modified_at,
+            created_at=item.created_at,
+            author=author,
+            tags=tags,
+            properties=properties,
         )
 
 

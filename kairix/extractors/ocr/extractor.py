@@ -36,6 +36,7 @@ from typing import Protocol
 
 import numpy as np
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -265,6 +266,16 @@ class OcrExtractor:
         if len(text) < _QUALITY_MIN_CHARS:
             return False
         return doc.confidence >= _QUALITY_MIN_CONFIDENCE
+
+    def metadata_for(self, _raw: bytes, _mime: MimeType) -> SourceMetadata:
+        """Return empty :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): OCR does not surface document-body
+        metadata — the source is rasterised pixels with no envelope.
+        F65 envelope authority lives on the connector for
+        OCR-targeted sources.
+        """
+        return SourceMetadata()
 
 
 # ---------------------------------------------------------------------------

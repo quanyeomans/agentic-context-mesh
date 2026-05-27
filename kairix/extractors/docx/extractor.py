@@ -22,6 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -408,6 +409,16 @@ class DocxExtractor:
         if len(doc.markdown) < _QUALITY_MIN_CHARS:
             return False
         return _has_any_heading(doc.markdown)
+
+    def metadata_for(self, _raw: bytes, _mime: MimeType) -> SourceMetadata:
+        """Return empty :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): docx core-property extraction (author /
+        last_modified_by / created / keywords) lands in a follow-up
+        commit that reads ``docProps/core.xml`` directly. Stub keeps
+        the Protocol surface satisfied.
+        """
+        return SourceMetadata()
 
 
 def _render_document(document: _DocxDocument) -> tuple[str, bool]:

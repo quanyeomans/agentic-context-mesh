@@ -102,6 +102,13 @@ class NotionPageRef:
     url: str
     last_edited_time: str
     archived: bool
+    # ADR-021 (Wave E.5): envelope authorship fields lifted from the
+    # Notion API response. ``created_by`` / ``last_edited_by`` carry the
+    # user id only — display-name resolution requires a separate
+    # ``users.retrieve`` round-trip (deferred).
+    created_time: str | None = None
+    created_by: str | None = None
+    last_edited_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -427,6 +434,8 @@ def _page_ref_from(entry: dict[str, Any]) -> NotionPageRef:
     if parent_id_key is not None:
         parent_id = _string_or_none(parent.get(parent_id_key))
     title = _extract_page_title(entry)
+    created_by_id = _string_or_none(_user_id_from(entry.get("created_by")))
+    last_edited_by_id = _string_or_none(_user_id_from(entry.get("last_edited_by")))
     return NotionPageRef(
         page_id=_string_or_empty(entry.get("id")),
         parent_type=parent_type,
@@ -435,7 +444,27 @@ def _page_ref_from(entry: dict[str, Any]) -> NotionPageRef:
         url=_string_or_empty(entry.get("url")),
         last_edited_time=_string_or_empty(entry.get("last_edited_time")),
         archived=_bool_or_false(entry.get("archived")),
+        created_time=_string_or_none(entry.get("created_time")),
+        created_by=created_by_id,
+        last_edited_by=last_edited_by_id,
     )
+
+
+def _user_id_from(block: object) -> str | None:
+    """Extract the user id from a Notion ``created_by`` / ``last_edited_by`` block.
+
+    Notion emits ``{"object": "user", "id": "..."}``; full display-name
+    resolution requires an additional ``users.retrieve`` round-trip
+    against the resolved id (deferred — the user-id is the stable
+    identifier and downstream entity-resolution can map ids to display
+    names asynchronously).
+    """
+    if not isinstance(block, dict):
+        return None
+    raw_id = block.get("id")
+    if isinstance(raw_id, str) and raw_id.strip():
+        return raw_id.strip()
+    return None
 
 
 def _database_ref_from(entry: dict[str, Any]) -> NotionDatabaseRef:

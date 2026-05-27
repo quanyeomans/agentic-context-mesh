@@ -43,6 +43,7 @@ from kairix.core.protocols import (
     SilverOutput,
     SilverProcessor,
     SourceConnector,
+    SourceMetadata,
 )
 
 # ---------------------------------------------------------------------------
@@ -106,6 +107,9 @@ class _SyntheticSourceConnector:
     def next_cursor(self) -> str | None:
         raise NotImplementedError
 
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        raise NotImplementedError
+
 
 class _SyntheticExtractor:
     """Minimal :class:`Extractor` impl for Wave 1 shape verification."""
@@ -120,6 +124,9 @@ class _SyntheticExtractor:
         raise NotImplementedError
 
     def quality_ok(self, doc: ExtractedDocument) -> bool:
+        raise NotImplementedError
+
+    def metadata_for(self, raw: bytes, mime: MimeType) -> SourceMetadata:
         raise NotImplementedError
 
 

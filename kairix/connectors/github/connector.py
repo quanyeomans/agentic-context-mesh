@@ -68,6 +68,7 @@ from kairix.core.protocols import (
     HierarchyNodeType,
     RawArtefact,
     Sensitivity,
+    SourceMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -625,6 +626,9 @@ class GitHubConnector:
                 "sha": commit.sha,
                 "message": commit.message,
                 "committed_at": commit.committed_at,
+                "author": commit.author,
+                "repo": repo.full_name,
+                "kind": "commit",
                 "mime_hint": _MIME_APPLICATION_JSON,
                 _META_SENSITIVITY: sensitivity_from_visibility(repo.visibility),
             }
@@ -648,6 +652,8 @@ class GitHubConnector:
                 "body": issue.body,
                 "updated_at": issue.updated_at,
                 "state": issue.state,
+                "repo": repo.full_name,
+                "kind": issue.kind,
                 "mime_hint": _MIME_APPLICATION_JSON,
                 _META_SENSITIVITY: sensitivity_from_visibility(repo.visibility),
             }
@@ -776,6 +782,47 @@ class GitHubConnector:
             "deliveries_seen": len(self._seen_deliveries),
             "last_path_taken": self._last_path_taken or "",
         }
+
+    # ------------------------------------------------------------------
+    # ADR-021 (Wave E.5) — per-source envelope metadata
+    # ------------------------------------------------------------------
+
+    def metadata_for(self, item_id: str) -> SourceMetadata:
+        """Return cached GitHub envelope metadata for ``item_id``.
+
+        ADR-021: commits carry ``author`` + ``committed_at`` directly;
+        issues / PRs carry ``state`` + ``updated_at`` + (when present)
+        labels. ``repo`` lifts to the first tag so search can filter
+        by repo. Cache miss collapses to an empty
+        :class:`SourceMetadata`.
+        """
+        envelope = self._envelope_cache.get(item_id)
+        if envelope is None:
+            return SourceMetadata()
+        author_value = envelope.get("author")
+        author = author_value if isinstance(author_value, str) and author_value.strip() else None
+        modified_value = envelope.get("committed_at") or envelope.get("updated_at")
+        modified_at = modified_value if isinstance(modified_value, str) and modified_value.strip() else None
+        tags: list[str] = []
+        repo_value = envelope.get("repo")
+        if isinstance(repo_value, str) and repo_value.strip():
+            tags.append(repo_value)
+        labels_value = envelope.get("labels")
+        if isinstance(labels_value, list):
+            tags.extend(str(label) for label in labels_value if isinstance(label, str))
+        properties: dict[str, str] = {}
+        kind_value = envelope.get("kind")
+        if isinstance(kind_value, str) and kind_value:
+            properties["kind"] = kind_value
+        state_value = envelope.get("state")
+        if isinstance(state_value, str) and state_value:
+            properties["state"] = state_value
+        return SourceMetadata(
+            modified_at=modified_at,
+            author=author,
+            tags=tuple(tags),
+            properties=properties,
+        )
 
 
 # ----------------------------------------------------------------------

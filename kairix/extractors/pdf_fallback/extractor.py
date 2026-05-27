@@ -42,6 +42,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
+from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
     DocMetadata,
     ExtractedDocument,
@@ -368,6 +369,16 @@ class PdfFallbackExtractor:
         if len(doc.markdown) < _QUALITY_MIN_CHARS:
             return False
         return any(page.text.strip() for page in doc.pages)
+
+    def metadata_for(self, _raw: bytes, _mime: MimeType) -> SourceMetadata:
+        """Return empty :class:`SourceMetadata`.
+
+        ADR-021 (Wave E.5): PDF XMP / Info-dict extraction (Author /
+        Title / Keywords / CreationDate) lands in a follow-up commit
+        that reads the document trailer dictionary directly. Stub
+        keeps the Protocol surface satisfied.
+        """
+        return SourceMetadata()
 
 
 def _extract_pages(

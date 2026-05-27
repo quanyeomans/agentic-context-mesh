@@ -1,8 +1,0 @@
-kairix/connectors/dex_crm
-kairix/connectors/github
-kairix/connectors/m365_calendar
-kairix/connectors/m365_email_headers
-kairix/connectors/notion
-kairix/connectors/obsidian
-kairix/connectors/sharepoint
-kairix/connectors/slack

@@ -140,6 +140,13 @@ class DriveItemRef:
     last_modified_at: str | None
     removed: bool
     parent_path: str | None = None
+    # ADR-021 (Wave E.5): envelope-derived display names — lifted from
+    # ``createdBy.user.displayName`` and ``lastModifiedBy.user.displayName``.
+    # ``None`` when the Graph response omits the block (rare; mostly
+    # tombstones).
+    created_by: str | None = None
+    last_modified_by: str | None = None
+    created_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -557,6 +564,8 @@ def _drive_item_from(entry: dict[str, Any], *, drive_id: str) -> DriveItemRef:
         parent_path = _normalise_parent_path(parent.get("path"))
     size_raw = entry.get("size")
     size: int | None = size_raw if isinstance(size_raw, int) else None
+    created_by = _user_display_name(entry.get("createdBy"))
+    last_modified_by = _user_display_name(entry.get("lastModifiedBy"))
     return DriveItemRef(
         item_id=_string_or_empty(entry.get("id")),
         drive_id=parent_drive,
@@ -567,7 +576,30 @@ def _drive_item_from(entry: dict[str, Any], *, drive_id: str) -> DriveItemRef:
         last_modified_at=_string_or_none(entry.get("lastModifiedDateTime")),
         removed=removed,
         parent_path=parent_path,
+        created_by=created_by,
+        last_modified_by=last_modified_by,
+        created_at=_string_or_none(entry.get("createdDateTime")),
     )
+
+
+def _user_display_name(block: object) -> str | None:
+    """Extract ``user.displayName`` from a Graph ``createdBy`` / ``lastModifiedBy`` block.
+
+    Graph emits ``{"user": {"displayName": "...", "email": "..."}}``;
+    application-only tokens may surface ``{"application": {...}}``
+    instead. Returns ``None`` for missing / malformed blocks so the
+    downstream :class:`SourceMetadata` collapses author to ``None``
+    cleanly.
+    """
+    if not isinstance(block, dict):
+        return None
+    user = block.get("user")
+    if not isinstance(user, dict):
+        return None
+    name = user.get("displayName")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None
 
 
 def _normalise_parent_path(raw: object) -> str | None:
