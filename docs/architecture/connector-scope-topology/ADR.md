@@ -544,6 +544,29 @@ Per-connector flag (`topology_v2_<connector>`) so each plugin's adoption is inde
 | `jira` | `topology_v2_jira` | 🔴 Backlog | future Wave 5 connector wave |
 | `confluence` | `topology_v2_confluence` | 🔴 Backlog | future Wave 5 connector wave |
 
+### Wave E.5 — tick safety + metadata propagation (2026-05-28)
+
+Inserted between Wave E and Wave F after the 2026-05-27 morning + evening saturation incidents. Wave E.5 codifies three architectural responses landed in v2026.5.28 + this session:
+
+**ADR-019 — compose-layer resource governance (shipped v2026.5.28 hotfix).** Every long-running container declares `cpus` + `mem_limit` + `blkio_config.weight`. Sum of ceilings stays under host capacity so OS + agent + tunnel have headroom. Env-overrideable for non-default hosts.
+
+**ADR-020 — per-tick budget + disk-watermark gate (#328, shipped this session as `feat(wave-e5): #328`).** Every `SourceConnector` Protocol implementer declares `per_tick_max_items: int = 500` + `disk_watermark_min_free_bytes: int | None`. ConnectorPipeline enforces both: gates the tick when free disk falls below the watermark; persists the cursor + yields after the budget cap. F66 mechanically enforces declaration on every connector + framework tick-driven class. Recovery semantic: a 100k-item backlog at budget 500 converges over 200 ticks instead of one host-saturating drain.
+
+**ADR-021 — per-source metadata normalisation (#329, shipped this session as `feat(wave-e5): #329`).** `SourceMetadata` frozen dataclass on the connector + extractor Protocols. `SourceConnector.metadata_for(item_id)` surfaces envelope metadata (modified_at, created_at, author, author_email, tags, properties); `Extractor.metadata_for(raw, mime)` surfaces document-body metadata. Silver merges connector > extractor > defaults. `Chunk` extends with `author` / `author_email` / `tags` / `metadata`. EntityGraphSink auto-emits Person from envelope author (high-confidence) ahead of the regex heuristic. F65 enforces `metadata_for` + propagation test per connector plugin.
+
+**ADR-022 — container-level secret readiness gate (deferred to next release after Wave F).** Replaces the `kairix.service` systemd unit (eliminated post-incident in v2026.5.28's #332 fix) with a container entrypoint script that waits for `/run/secrets/kairix.env`. Phase 1 interim shape ships; Phase 2 ship deferred until Wave F to keep Wave E.5 scoped to in-flight bugs.
+
+#### Wave E.5 fitness functions
+
+| Rule | Scope | Status |
+|---|---|---|
+| F65 | every `kairix/connectors/<name>/` implements `metadata_for` + ships `tests/integration/test_<name>_metadata_propagation.py` | ✅ clean (paid down to zero this session) |
+| F66 | every connector + tick-driven framework class declares `per_tick_max_items` + `disk_watermark_min_free_bytes` (or watermark-exempt rationale) | ✅ clean (paid down to zero this session) |
+
+#### Wave E.5 retire-with-Wave-F
+
+Once Wave F's chunker plugins land, Wave E.5's per-source metadata can become part of the chunker contract (each chunker reads `Chunk.author` / `Chunk.tags` to inform chunk boundaries). Watch for opportunities to fold the F55 chunker_version assertion + F65 metadata assertion into a single per-chunker contract test.
+
 ### Wave F — chunker plugins per source kind
 
 Implement chunker plugins per `08-chunking-and-entity-strategies.md`:
