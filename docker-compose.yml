@@ -102,6 +102,16 @@ services:
     # incidents on 2026-05-27 both surfaced this gap (#330).
     # Operators on bigger hosts override via .env.
     mem_limit: ${KAIRIX_WORKER_MEM_LIMIT:-1g}
+    # memswap_limit gates how much HOST SWAP the worker's cgroup may
+    # consume. Docker default (unset) implies memswap_limit == mem_limit
+    # → ZERO swap allowed → any allocation past mem_limit is an OOM kill.
+    # Set memswap_limit > mem_limit to permit the worker to spill into
+    # host swap (e.g. during the usearch HNSW mutable-add path at
+    # 1M+ corpus scale; see #335 and ADR-023). The DIFFERENCE
+    # (memswap_limit - mem_limit) bounds swap usage. Operators on hosts
+    # with SSD swap and a 1M+ vector corpus override to e.g. 8g; the
+    # default keeps the conservative "no swap" behaviour.
+    memswap_limit: ${KAIRIX_WORKER_MEMSWAP_LIMIT:-1g}
     mem_reservation: ${KAIRIX_WORKER_MEM_RESERVATION:-256m}
     cpus: ${KAIRIX_WORKER_CPUS:-1.5}
     # blkio weight 100 (default 500) puts the worker LAST for disk
