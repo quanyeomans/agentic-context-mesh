@@ -9,6 +9,5 @@ kairix/core/embed/embed.py
 kairix/core/embed/schema.py
 kairix/core/facts/store.py
 kairix/core/features/topology_v2_status.py
-kairix/core/maintenance/scheduler.py
 kairix/core/search/vec_index.py
 kairix/quality/eval/auto_gold.py

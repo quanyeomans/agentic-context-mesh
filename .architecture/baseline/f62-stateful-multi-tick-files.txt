@@ -1,2 +1,0 @@
-kairix/core/connectors/pipeline.py
-kairix/core/maintenance/scheduler.py

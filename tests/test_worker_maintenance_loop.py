@@ -117,7 +117,7 @@ def test_run_maintenance_loop_tick_swallows_factory_exception(tmp_path: Path) ->
     """
     db_path = _seeded_db_path(tmp_path)
 
-    def _boom_factory(_db: Any, _retention: int) -> Any:
+    def _boom_factory(_db: Any, _retention: int, _cap: int) -> Any:
         raise RuntimeError("simulated scheduler-construction failure")
 
     deps = MaintenanceLoopDeps(

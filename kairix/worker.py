@@ -1308,17 +1308,23 @@ class MaintenanceLoopDeps:
         given connection + retention window. Default constructs the
         production scheduler with default Deps; tests pass a factory
         that returns a Fake with pre-canned tick results.
+      * ``prune_orphans_per_tick_cap`` — per-tick row cap forwarded to
+        :class:`MaintenanceScheduler` so its orphan scan stays bounded
+        on production-scale DBs. Operators can tune via the worker
+        deps wiring; default 1000 matches the scheduler default and
+        keeps one tick under 5s on a 2M-row table.
     """
 
     flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
     db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
     retention_days_resolver: Callable[[], int] = field(default_factory=lambda: maintenance_retention_days)
-    scheduler_factory: Callable[[sqlite3.Connection, int], Any] = field(
+    scheduler_factory: Callable[[sqlite3.Connection, int, int], Any] = field(
         default_factory=lambda: _default_scheduler_factory
     )
+    prune_orphans_per_tick_cap: int = 1000
 
 
-def _default_scheduler_factory(db: sqlite3.Connection, retention_days: int) -> Any:
+def _default_scheduler_factory(db: sqlite3.Connection, retention_days: int, prune_orphans_per_tick_cap: int) -> Any:
     """Production seam — build a :class:`MaintenanceScheduler` with prod Deps.
 
     Lazy import keeps the worker importable on hosts that haven't yet
@@ -1327,7 +1333,11 @@ def _default_scheduler_factory(db: sqlite3.Connection, retention_days: int) -> A
     """
     from kairix.core.maintenance import MaintenanceScheduler
 
-    return MaintenanceScheduler(db, retention_days=retention_days)
+    return MaintenanceScheduler(
+        db,
+        retention_days=retention_days,
+        prune_orphans_per_tick_cap=prune_orphans_per_tick_cap,
+    )
 
 
 def run_maintenance_loop_tick(deps: MaintenanceLoopDeps | None = None) -> Any:
@@ -1359,7 +1369,7 @@ def run_maintenance_loop_tick(deps: MaintenanceLoopDeps | None = None) -> Any:
         from kairix.core.db.schema import create_schema
 
         create_schema(db)
-        scheduler = deps.scheduler_factory(db, retention)
+        scheduler = deps.scheduler_factory(db, retention, deps.prune_orphans_per_tick_cap)
         result = scheduler.tick(db)
     except Exception as exc:
         logger.warning("worker: maintenance tick raised — %s", exc)

@@ -73,6 +73,23 @@ STAGE_GC = "gc"
 STAGE_BRONZE_REAP = "bronze_reap"
 STAGE_BRONZE_TTL_GC = "bronze_ttl_gc"
 
+# Default per-tick row cap for the orphan scan. At production scale
+# (~2M content_vectors x ~2M documents) the unbounded LEFT JOIN turns
+# into a full sequential scan of both tables on every tick and saturates
+# disk I/O the moment the worker comes up. Capping the scan at 1000
+# rows per tick keeps one tick well under the 5s integration budget
+# while still draining a 1M-row backlog in <20 minutes of ticks. The
+# remainder picks up on the next tick — the soft-delete table is
+# idempotent on (hash, seq), so there's no risk of double-pruning.
+DEFAULT_PRUNE_ORPHANS_PER_TICK_CAP = 1000
+
+# Default cap for the soft-delete GC pass. Same reasoning as the prune
+# cap but on the (much smaller) soft-delete table — the retention
+# window naturally bounds growth, but a one-off operator override of
+# the window down to "now" could still produce millions of GC-eligible
+# rows on a single tick.
+DEFAULT_GC_PRUNED_PER_TICK_CAP = 1000
+
 # F17 — the failure-event format string appears in every _safe_*
 # wrapper; extracting it keeps the structured-log shape in a single
 # edit site.
@@ -167,6 +184,10 @@ def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production bou
         # the canonical way to drop stale entries.
         db = sqlite3.connect(str(db_p))
         try:
+            # F63-bounded: full-rebuild of the usearch vector index requires every
+            # surviving (hash, seq) row in deterministic order; no LIMIT possible.
+            # Caller invokes this on a maintenance tick scheduled to run during low
+            # load (24h default); production scale is bounded by total chunk count.
             rows = db.execute("SELECT hash, seq FROM content_vectors ORDER BY hash, seq").fetchall()
         except sqlite3.OperationalError:
             # Fresh DB / missing table — nothing to rebuild against,
@@ -299,6 +320,8 @@ class MaintenanceScheduler:
         *,
         retention_days: int = 7,
         scheduler_deps: MaintenanceSchedulerDeps | None = None,
+        prune_orphans_per_tick_cap: int = DEFAULT_PRUNE_ORPHANS_PER_TICK_CAP,
+        gc_pruned_per_tick_cap: int = DEFAULT_GC_PRUNED_PER_TICK_CAP,
     ) -> None:
         if retention_days < 0:
             raise ValueError(
@@ -306,14 +329,38 @@ class MaintenanceScheduler:
                 "fix: pass a non-negative int; "
                 "run: KAIRIX_MAINTENANCE_RETENTION_DAYS=7 (default)"
             )
+        if prune_orphans_per_tick_cap <= 0:
+            raise ValueError(
+                f"prune_orphans_per_tick_cap must be > 0; got {prune_orphans_per_tick_cap!r}. "
+                "fix: pass a positive int (default 1000); "
+                "run: scheduler bounds the orphan scan per tick — 0/negative disables progress"
+            )
+        if gc_pruned_per_tick_cap <= 0:
+            raise ValueError(
+                f"gc_pruned_per_tick_cap must be > 0; got {gc_pruned_per_tick_cap!r}. "
+                "fix: pass a positive int (default 1000); "
+                "run: scheduler bounds the GC sweep per tick — 0/negative disables progress"
+            )
         self._db = db
         self._retention_days = retention_days
         self._deps = scheduler_deps if scheduler_deps is not None else MaintenanceSchedulerDeps()
+        self._prune_orphans_per_tick_cap = prune_orphans_per_tick_cap
+        self._gc_pruned_per_tick_cap = gc_pruned_per_tick_cap
 
     @property
     def retention_days(self) -> int:
         """Read-only view of the configured retention window."""
         return self._retention_days
+
+    @property
+    def prune_orphans_per_tick_cap(self) -> int:
+        """Read-only view of the per-tick orphan-prune row cap."""
+        return self._prune_orphans_per_tick_cap
+
+    @property
+    def gc_pruned_per_tick_cap(self) -> int:
+        """Read-only view of the per-tick soft-delete GC row cap."""
+        return self._gc_pruned_per_tick_cap
 
     def tick(self, db: sqlite3.Connection | None = None) -> MaintenanceTickResult:
         """Run one maintenance tick. Returns the structured result envelope.
@@ -389,7 +436,7 @@ class MaintenanceScheduler:
 
     # ------------------------------------------------------------------
     # Stage implementations — each one a small focused helper. Cognitive
-    # complexity stays under the F16 ≤ 15 cap by isolating each branch.
+    # complexity stays under the F16 <= 15 cap by isolating each branch.
     # ------------------------------------------------------------------
 
     def _safe_prune_orphans(self, db: sqlite3.Connection, pid: int) -> int:
@@ -488,23 +535,35 @@ class MaintenanceScheduler:
             return 0
 
     def _prune_orphans(self, db: sqlite3.Connection) -> int:
-        """Move every orphan ``content_vectors`` row into the staging table.
+        """Move up to ``prune_orphans_per_tick_cap`` orphan rows to the staging table.
 
         Idempotent: rows already present in ``content_vectors_pruned``
         (matched by the UNIQUE ``(hash, seq)`` constraint) are skipped
         via ``INSERT OR IGNORE``. The companion DELETE removes the
         original rows from ``content_vectors`` so the next tick reports
         ``orphans_pruned=0``.
+
+        Per-tick row cap (default 1000): at production scale the
+        unbounded ``LEFT JOIN`` over ``content_vectors`` x ``documents``
+        is a full sequential scan of both tables and saturates disk on
+        every tick. Capping the scan keeps each tick bounded; the
+        remainder of any orphan backlog drains on subsequent ticks. The
+        ``LIMIT`` lives on the SELECT and the DELETE walks only the
+        specific ``(hash, seq)`` tuples the SELECT returned — without
+        that pairing the DELETE would re-scan the whole table.
         """
         pruned_at = self._iso_now()
-        # Find every (hash, seq) tuple whose hash doesn't appear in
-        # documents (i.e. document was deleted or rewritten with a new
-        # hash, orphaning the old vector).
+        cap = self._prune_orphans_per_tick_cap
+        # Find at most ``cap`` (hash, seq) tuples whose hash doesn't
+        # appear in documents (i.e. document was deleted or rewritten
+        # with a new hash, orphaning the old vector).
         orphan_rows = db.execute(
             "SELECT v.hash, v.seq, v.pos, v.model, v.embedded_at, v.chunk_date "
             "FROM content_vectors v "
             "LEFT JOIN documents d ON d.hash = v.hash "
-            "WHERE d.hash IS NULL"
+            "WHERE d.hash IS NULL "
+            "LIMIT ?",
+            (cap,),
         ).fetchall()
         if not orphan_rows:
             return 0
@@ -523,15 +582,14 @@ class MaintenanceScheduler:
             if cur.rowcount > 0:
                 inserted += 1
 
-        # Drop the original orphan rows. Match on the same LEFT JOIN
-        # predicate the SELECT used so we never delete a row whose
-        # document was just re-created between SELECT and DELETE.
-        db.execute(
-            "DELETE FROM content_vectors WHERE (hash, seq) IN ("
-            "SELECT v.hash, v.seq FROM content_vectors v "
-            "LEFT JOIN documents d ON d.hash = v.hash "
-            "WHERE d.hash IS NULL"
-            ")"
+        # Drop the original orphan rows. Match on the exact (hash, seq)
+        # tuples the bounded SELECT returned so the DELETE inherits the
+        # same row cap (a re-scanning subquery would defeat the
+        # ``LIMIT`` and re-saturate disk). executemany keeps the
+        # per-row delete count bounded to ``len(orphan_rows)`` <= cap.
+        db.executemany(
+            "DELETE FROM content_vectors WHERE hash = ? AND seq = ?",
+            [(row[0], row[1]) for row in orphan_rows],
         )
         return inserted
 
@@ -541,11 +599,18 @@ class MaintenanceScheduler:
         Soft-delete is the operator's recovery affordance — the
         retention window (default 7 days, configurable) gives them
         time to notice + restore before the GC drops the row for good.
+
+        Per-tick row cap (default 1000): mirrors ``_prune_orphans``.
+        The retention window naturally bounds growth in steady state,
+        but an operator override of the window down to "now" could
+        produce millions of GC-eligible rows on a single tick.
         """
         cutoff = self._cutoff_iso()
         db.execute(
-            "DELETE FROM content_vectors_pruned WHERE pruned_at < ?",
-            (cutoff,),
+            "DELETE FROM content_vectors_pruned WHERE id IN ("
+            "SELECT id FROM content_vectors_pruned WHERE pruned_at < ? LIMIT ?"
+            ")",
+            (cutoff, self._gc_pruned_per_tick_cap),
         )
 
     def _count_pruned(self, db: sqlite3.Connection) -> int:
@@ -717,6 +782,8 @@ def render_iso(epoch: float) -> str:
 # retention window without re-importing datetime. Keeps consumer
 # surfaces tidy.
 __all__ = [
+    "DEFAULT_GC_PRUNED_PER_TICK_CAP",
+    "DEFAULT_PRUNE_ORPHANS_PER_TICK_CAP",
     "EVENT_TICK_COMPLETED",
     "EVENT_TICK_FAILED",
     "EVENT_TICK_STARTED",

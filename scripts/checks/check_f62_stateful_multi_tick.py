@@ -135,7 +135,24 @@ def _collect_stateful_classes(repo_root: Path) -> list[tuple[Path, str]]:
 
 
 def _has_matching_test(repo_root: Path, class_name: str) -> bool:
+    """Match the class to a multi-tick test by any of three shapes:
+
+    1. File stem contains snake_case classname AND ends in
+       _advance|_multi_tick|_idempotency
+       (e.g. ``test_connector_pipeline_advance.py``).
+    2. File stem ends in _advance|_multi_tick|_idempotency AND the file
+       imports/references the class
+       (e.g. ``test_connector_cursor_advance.py`` referencing
+       ``ConnectorPipeline``).
+    3. The file imports the class AND defines a test function whose
+       name contains multi_tick|advance|idempotency
+       (e.g. ``test_maintenance_scale_bound.py`` containing
+       ``test_prune_orphans_multi_tick_drains_to_zero``).
+    """
     snake = _snake_case(class_name)
+    name_match = re.compile(r"^test_.*_(advance|multi_tick|idempotency)$")
+    snake_match = re.compile(rf"^test_.*{re.escape(snake)}.*_(advance|multi_tick|idempotency)$")
+    func_match = re.compile(r"def\s+test_[A-Za-z0-9_]*(advance|multi_tick|idempotency)[A-Za-z0-9_]*\b")
     for tests_root in ("tests/integration", "tests/e2e"):
         root = repo_root / tests_root
         if not root.is_dir():
@@ -144,11 +161,18 @@ def _has_matching_test(repo_root: Path, class_name: str) -> bool:
             if "__pycache__" in path.parts:
                 continue
             stem = path.stem
-            for pattern in TEST_NAME_PATTERNS:
-                if pattern.search(stem.replace("{name}", snake)) or re.match(
-                    rf"^test_.*{snake}.*_(advance|multi_tick|idempotency)", stem
-                ):
-                    return True
+            if snake_match.match(stem):
+                return True
+            try:
+                source = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if class_name not in source:
+                continue
+            if name_match.match(stem):
+                return True
+            if func_match.search(source):
+                return True
     return False
 
 

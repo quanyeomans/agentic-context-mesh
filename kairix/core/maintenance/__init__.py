@@ -16,6 +16,8 @@ for the design rationale (Phase 1 — proactive cleanup behind the
 from __future__ import annotations
 
 from kairix.core.maintenance.scheduler import (
+    DEFAULT_GC_PRUNED_PER_TICK_CAP,
+    DEFAULT_PRUNE_ORPHANS_PER_TICK_CAP,
     EVENT_TICK_COMPLETED,
     EVENT_TICK_FAILED,
     EVENT_TICK_STARTED,
@@ -36,6 +38,8 @@ from kairix.core.maintenance.scheduler import (
 )
 
 __all__ = [
+    "DEFAULT_GC_PRUNED_PER_TICK_CAP",
+    "DEFAULT_PRUNE_ORPHANS_PER_TICK_CAP",
     "EVENT_TICK_COMPLETED",
     "EVENT_TICK_FAILED",
     "EVENT_TICK_STARTED",
