@@ -182,6 +182,10 @@ python3 "${SCRIPT_DIR}/check_f66_connector_tick_budget.py" || overall=1
 #        (GH #334 — entity_signals had 2.3M rows un-pushed because no code flipped the flag)
 python3 "${SCRIPT_DIR}/check_f67_staging_drain_symmetry.py" || overall=1
 
+# F68 — every public Protocol method has a failure-injection contract test (ADR-024 Bundle A)
+#        (Bug 2 — SharePoint 429 dead-lettered every item because no rate-limit contract test existed)
+python3 "${SCRIPT_DIR}/check_f68_protocol_failure_modes.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1

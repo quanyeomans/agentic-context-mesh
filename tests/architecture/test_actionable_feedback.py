@@ -41,7 +41,9 @@ def _load_detector():
 
 
 def test_passing_check_has_action_markers(tmp_path: Path) -> None:
-    """A synthetic check_*.py whose REMEDIATION carries ``fix:`` is clean.
+    """A synthetic check_*.py whose REMEDIATION carries ``fix:`` AND
+    ``Pass example:`` / ``Forbidden example:`` (per the ADR-024
+    extension to F21) is clean.
 
     Sabotage-proof: the same module without ``fix:`` is flagged
     (asserted by `test_failing_check_no_markers`).
@@ -49,7 +51,7 @@ def test_passing_check_has_action_markers(tmp_path: Path) -> None:
     detector = _load_detector()
     synthetic = tmp_path / "check_synthetic.py"
     synthetic.write_text(
-        'REMEDIATION = "fix: do the thing to pass."\n'
+        'REMEDIATION = "fix: do the thing to pass. Pass example: do X. Forbidden example: do Y."\n'
         "errors: list[str] = []\n"
         'errors.append("fix: append a real correction here")\n'
     )
@@ -61,9 +63,9 @@ def test_failing_check_no_markers(tmp_path: Path) -> None:
     """A synthetic check_*.py whose REMEDIATION lacks all three markers
     is flagged.
 
-    Sabotage-proof inline: the next assertion adds ``run:`` to the same
-    file and verifies the detector now passes — proving the failure was
-    marker-driven, not a confound.
+    Sabotage-proof inline: the next assertion adds ``run:`` PLUS the
+    Pass + Forbidden example markers and verifies the detector now
+    passes — proving the failure was marker-driven, not a confound.
     """
     detector = _load_detector()
     synthetic = tmp_path / "check_synthetic_bad.py"
@@ -71,9 +73,31 @@ def test_failing_check_no_markers(tmp_path: Path) -> None:
 
     assert detector._python_file_violates(synthetic) is True
 
-    # Sabotage-proof: add a marker, confirm the flag clears.
-    synthetic.write_text('REMEDIATION = "Some files violate the rule. run: bash fix.sh"\n')
+    # Sabotage-proof: add all required markers, confirm the flag clears.
+    synthetic.write_text(
+        'REMEDIATION = "Some files violate. run: bash fix.sh. Pass example: do X. Forbidden example: do Y."\n'
+    )
     assert detector._python_file_violates(synthetic) is False
+
+
+def test_extension_requires_pass_and_forbidden_examples(tmp_path: Path) -> None:
+    """ADR-024 extension to F21 — every REMEDIATION constant must carry
+    BOTH ``Pass example:`` AND ``Forbidden example:`` substrings, not
+    just the action markers.
+
+    Sabotage-proof inline: a REMEDIATION with only ``Pass example:``
+    (missing the Forbidden half) is flagged; adding ``Forbidden
+    example:`` clears it.
+    """
+    detector = _load_detector()
+    target = tmp_path / "check_examples.py"
+    # Has action marker + Pass example: but NO Forbidden example: — fails.
+    target.write_text('REMEDIATION = "fix: do X. Pass example: snippet here."\n')
+    assert detector._python_file_violates(target) is True
+
+    # Add Forbidden example: — flag clears.
+    target.write_text('REMEDIATION = "fix: do X. Pass example: snippet here. Forbidden example: anti-pattern here."\n')
+    assert detector._python_file_violates(target) is False
 
 
 def test_silent_check_with_no_remediation_is_flagged(tmp_path: Path) -> None:

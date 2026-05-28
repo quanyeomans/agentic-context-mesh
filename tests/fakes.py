@@ -2360,6 +2360,12 @@ class FakeSourceConnector:
         events: list[Any] | None = None,
         content: dict[str, bytes] | None = None,
         fail_on_fetch: set[str] | None = None,
+        timeout_on_fetch: set[str] | None = None,
+        raise_on_list_changes: Exception | None = None,
+        raise_on_source_link: set[str] | None = None,
+        raise_on_sensitivity_for: set[str] | None = None,
+        raise_on_next_cursor: Exception | None = None,
+        raise_on_metadata_for: set[str] | None = None,
         sensitivity: str = "internal",
         cursor_token: str | None = None,
         track_modified_at: bool = False,
@@ -2381,6 +2387,21 @@ class FakeSourceConnector:
         self._events: list[ChangeEvent] = list(events) if events is not None else []
         self._content: dict[str, bytes] = dict(content) if content is not None else {}
         self._fail_on_fetch: set[str] = set(fail_on_fetch) if fail_on_fetch is not None else set()
+        # F68 (ADR-024 Bundle A) — per-method failure-injection knobs.
+        # Each knob targets one Protocol method's failure surface so
+        # contract tests can drive the failure-mode behaviour
+        # (raises / times_out / unauthorized / unavailable) explicitly
+        # without monkeypatching kairix internals.
+        self._timeout_on_fetch: set[str] = set(timeout_on_fetch) if timeout_on_fetch is not None else set()
+        self._raise_on_list_changes: Exception | None = raise_on_list_changes
+        self._raise_on_source_link: set[str] = set(raise_on_source_link) if raise_on_source_link is not None else set()
+        self._raise_on_sensitivity_for: set[str] = (
+            set(raise_on_sensitivity_for) if raise_on_sensitivity_for is not None else set()
+        )
+        self._raise_on_next_cursor: Exception | None = raise_on_next_cursor
+        self._raise_on_metadata_for: set[str] = (
+            set(raise_on_metadata_for) if raise_on_metadata_for is not None else set()
+        )
         self._sensitivity = sensitivity
         self.fetch_calls: list[str] = []
         # ADR-021 (Wave E.5): ``metadata`` maps item_id -> SourceMetadata.
@@ -2403,6 +2424,8 @@ class FakeSourceConnector:
 
     def list_changes(self, cursor: Any | None = None) -> Any:
         self.list_changes_calls.append(cursor)
+        if self._raise_on_list_changes is not None:
+            raise self._raise_on_list_changes
         if self._track_modified_at and self._events:
             self._last_max_modified_at = max(ev.modified_at for ev in self._events)
         return iter(self._events)
@@ -2413,6 +2436,11 @@ class FakeSourceConnector:
         from kairix.core.protocols import RawArtefact
 
         self.fetch_calls.append(item_id)
+        if item_id in self._timeout_on_fetch:
+            # F68 ``times_out`` failure class — TimeoutError mirrors the
+            # asyncio / socket timeout shape the real HTTP-bound
+            # connectors raise.
+            raise TimeoutError(f"fake-source: simulated fetch timeout for {item_id!r}")
         if item_id in self._fail_on_fetch:
             raise RuntimeError(f"fake-source: simulated fetch failure for {item_id!r}")
         raw = self._content.get(item_id, b"")
@@ -2421,9 +2449,13 @@ class FakeSourceConnector:
         return RawArtefact(raw=raw, mime=mime, fetched_at=fetched_at)
 
     def source_link(self, item_id: str) -> str:
+        if item_id in self._raise_on_source_link:
+            raise RuntimeError(f"fake-source: simulated source_link failure for {item_id!r}")
         return f"{self.name}://item/{item_id}"
 
-    def sensitivity_for(self, _item_id: str) -> Any:
+    def sensitivity_for(self, item_id: str) -> Any:
+        if item_id in self._raise_on_sensitivity_for:
+            raise RuntimeError(f"fake-source: simulated sensitivity_for failure for {item_id!r}")
         return self._sensitivity
 
     def next_cursor(self) -> str | None:
@@ -2441,6 +2473,8 @@ class FakeSourceConnector:
             this tick" so tests can assert the orchestrator does NOT
             clobber a prior cursor with None.
         """
+        if self._raise_on_next_cursor is not None:
+            raise self._raise_on_next_cursor
         if self._cursor_token is not None:
             return self._cursor_token
         if self._track_modified_at:
@@ -2457,6 +2491,8 @@ class FakeSourceConnector:
         """
         from kairix.core.protocols import SourceMetadata
 
+        if item_id in self._raise_on_metadata_for:
+            raise RuntimeError(f"fake-source: simulated metadata_for failure for {item_id!r}")
         value = self._metadata.get(item_id)
         if isinstance(value, SourceMetadata):
             return value
@@ -3172,7 +3208,16 @@ class FakeExtractor:
     name: str = "fake-extractor"
     version: str = "0.0.0"
 
-    def __init__(self, *, metadata: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        metadata: Any | None = None,
+        raise_on_can_extract: Exception | None = None,
+        raise_on_extract: Exception | None = None,
+        raise_on_quality_ok: Exception | None = None,
+        raise_on_metadata_for: Exception | None = None,
+        quality_ok_returns: bool | None = None,
+    ) -> None:
         from kairix.core.protocols import DocMetadata, ExtractedDocument
 
         self._DocMetadata = DocMetadata
@@ -3182,13 +3227,28 @@ class FakeExtractor:
         # collapses to an empty SourceMetadata at metadata_for() call
         # time so tests that don't care stay terse.
         self._metadata_override = metadata
+        # F68 (ADR-024 Bundle A) — per-method failure-injection knobs.
+        # Each ``raise_on_*`` accepts an exception instance; when set,
+        # the next call to that method raises it. ``quality_ok_returns``
+        # overrides the default truthy-on-non-empty-markdown behaviour
+        # so tests can drive the ``returns_empty`` / partial-output
+        # branches without contorting the input.
+        self._raise_on_can_extract = raise_on_can_extract
+        self._raise_on_extract = raise_on_extract
+        self._raise_on_quality_ok = raise_on_quality_ok
+        self._raise_on_metadata_for = raise_on_metadata_for
+        self._quality_ok_returns = quality_ok_returns
 
     def can_extract(self, mime: str, magic_bytes: bytes) -> bool:
         del mime, magic_bytes
+        if self._raise_on_can_extract is not None:
+            raise self._raise_on_can_extract
         return True
 
     def extract(self, raw: bytes, mime: str) -> Any:
         self.extract_calls.append((raw, mime))
+        if self._raise_on_extract is not None:
+            raise self._raise_on_extract
         text = raw.decode("utf-8", errors="replace")
         return self._ExtractedDocument(
             markdown=text,
@@ -3205,6 +3265,10 @@ class FakeExtractor:
         )
 
     def quality_ok(self, doc: Any) -> bool:
+        if self._raise_on_quality_ok is not None:
+            raise self._raise_on_quality_ok
+        if self._quality_ok_returns is not None:
+            return self._quality_ok_returns
         return bool(doc.markdown.strip())
 
     def metadata_for(self, raw: bytes, mime: str) -> Any:
@@ -3218,6 +3282,8 @@ class FakeExtractor:
         del raw, mime
         from kairix.core.protocols import SourceMetadata
 
+        if self._raise_on_metadata_for is not None:
+            raise self._raise_on_metadata_for
         if isinstance(self._metadata_override, SourceMetadata):
             return self._metadata_override
         return SourceMetadata()
@@ -3229,15 +3295,51 @@ class FakeEntityGraphSink:
     Records every staged batch in ``staged`` (a list of tuples). Used
     by the connector-pipeline integration tests to assert that Silver
     output reaches the sink. Returns the count of signals staged.
+
+    F68 (ADR-024 Bundle A) knobs:
+
+      * ``raise_on_stage`` — when set, every call to :meth:`stage`
+        raises this exception. The connector pipeline's
+        ``_process_item`` does NOT wrap the sink call in a try/except,
+        so the exception propagates and the per-chunk transaction
+        rolls back (canonical ``raises`` failure mode).
+      * ``available`` — when False, :meth:`stage` returns 0 without
+        recording the batch (the ``unavailable`` failure class —
+        mirrors the #334 behaviour where the SQLite stage rejects the
+        write because the Curator drain is unreachable; signals stay
+        with ``pushed_to_neo4j=0`` until the sink recovers).
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        raise_on_stage: Exception | None = None,
+        available: bool = True,
+    ) -> None:
         self.staged: list[tuple[Any, ...]] = []
+        self._raise_on_stage = raise_on_stage
+        self._available = available
+        # ``unavailable_calls`` counts the times stage was invoked while
+        # the sink was unavailable — lets contract tests assert the
+        # caller did attempt the write (vs the more common "no call at
+        # all" false-positive).
+        self.unavailable_calls: int = 0
 
     def stage(self, signals: Any) -> int:
+        if self._raise_on_stage is not None:
+            raise self._raise_on_stage
+        if not self._available:
+            # Record the attempt count without recording the batch — the
+            # signals are NOT staged; the caller can re-attempt later.
+            self.unavailable_calls += 1
+            return 0
         batch = tuple(signals)
         self.staged.append(batch)
         return len(batch)
+
+    def set_available(self, value: bool) -> None:
+        """Test helper — flip the sink's availability mid-scenario."""
+        self._available = value
 
 
 class FakeDrainGraphRepository:

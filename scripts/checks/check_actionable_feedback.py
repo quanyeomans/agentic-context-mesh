@@ -71,6 +71,13 @@ CHECKS_DIR = REPO_ROOT / "scripts" / "checks"
 # variants still count — but the canonical form is lowercase).
 ACTION_MARKERS: tuple[str, ...] = ("fix:", "next:", "run:")
 
+# F21 extension (ADR-024 §"Agent UX / affordance principles"): every
+# REMEDIATION string on a fitness-function check MUST also carry both
+# of these substrings — Pass + Forbidden examples teach the agent the
+# canonical shape of the cure AND the anti-pattern to avoid. F66 /
+# F67 / F68 already follow this convention.
+EXAMPLE_MARKERS: tuple[str, ...] = ("Pass example:", "Forbidden example:")
+
 # Files inside scripts/checks/ that are NOT individual fitness checks
 # and so are exempt from F21 — they don't own per-rule remediation.
 _ALLOW_FILES: frozenset[str] = frozenset(
@@ -105,17 +112,18 @@ REMEDIATION = """F21: check-script failure output must be agent-actionable.
 
 fix: rewrite the REMEDIATION constant (or appended error string) to
 include at least one of the three lowercase markers — ``fix:``,
-``next:``, or ``run:`` — so the agent reading the failure can take the
-correction step without re-deriving it.
+``next:``, or ``run:`` — so the agent reading the failure can take
+the correction step without re-deriving it. The REMEDIATION constant
+must ALSO include both ``Pass example:`` and ``Forbidden example:``
+substrings (ADR-024 §"Agent UX / affordance principles" — Pass +
+Forbidden teach the cure AND the anti-pattern in one place).
 
 next: re-run ``python3 scripts/checks/check_actionable_feedback.py``
 to confirm the gate goes green.
 
 run: bash scripts/checks/run-all.sh
 
-Pass example (single marker satisfies the rule, but more context is
-better — F15/F16/F20 use a richer "Pass example / Forbidden example"
-extension):
+Pass example:
 
   REMEDIATION = '''Refactor to constructor-injected fakes to pass.
 
@@ -123,12 +131,26 @@ extension):
   a Fake* from tests/fakes.py.
   next: re-run pytest tests/<dir>/ to confirm green.
   run: bash scripts/safe-commit.sh "test(<area>): inject fake instead of patch"
+
+  Pass example: tests/contracts/test_source_connector_failure_modes.py
+    def test_fetch_raises_propagates_to_dead_letter():
+        source = FakeSourceConnector(fail_on_fetch={"item-001"}, ...)
+        pipeline = build_connector_pipeline(...)
+        pipeline.run_batch(source, FakeExtractor())
+        assert db.execute("SELECT COUNT(*) FROM connector_deadletter").fetchone()[0] == 1
+
+  Forbidden example: tests/contracts/test_some_thing.py
+    @patch("kairix.core.connectors.pipeline.ConnectorPipeline._process_item")
+    def test_pipeline_dead_letters(mock_process):
+        # internal patching — F1 violation AND a shape-only proof.
+        ...
   '''
 
-Forbidden example (no marker — the agent reading this knows there is
-*a* problem but not what to *do* about it):
+Forbidden example:
 
   REMEDIATION = "This check failed. Some files violate the rule."
+  # No fix:/next:/run: markers, no Pass / Forbidden example — the
+  # agent reading this knows there is a problem but not what to do.
 
 Why: a remediation that only describes the offence wastes one full
 agent loop while the action is re-derived from the description. The
@@ -160,6 +182,18 @@ def _has_action_marker(text: str) -> bool:
     (case-insensitive)."""
     lowered = text.lower()
     return any(marker in lowered for marker in ACTION_MARKERS)
+
+
+def _has_both_example_markers(text: str) -> bool:
+    """True iff ``text`` contains BOTH ``Pass example:`` and ``Forbidden example:``.
+
+    Case-insensitive match — the canonical form uses Title-cased
+    Pass / Forbidden but a lowercase variant is acceptable. Both
+    markers must appear so the remediation teaches the cure AND the
+    anti-pattern (ADR-024 §"Agent UX / affordance principles").
+    """
+    lowered = text.lower()
+    return all(marker.lower() in lowered for marker in EXAMPLE_MARKERS)
 
 
 def _remediation_constants(tree: ast.AST) -> list[tuple[int, str]]:
@@ -212,10 +246,25 @@ def _appended_error_strings(tree: ast.AST) -> list[tuple[int, str]]:
 
 def _python_file_violates(path: Path) -> bool:
     """True if any remediation/error string literal in this Python check
-    file lacks every action marker. Constants and error-list appends are
-    both inspected; a file with NO remediation strings at all is treated
-    as a violation because every fitness check is expected to emit
-    actionable failure text.
+    file lacks the required markers.
+
+    Two checks combine:
+
+    1. Every emitted remediation/error string (constants + error-list
+       appends) must carry at least one of the three lowercase action
+       markers — ``fix:`` / ``next:`` / ``run:``.
+
+    2. Every module-level REMEDIATION constant must ALSO carry both
+       ``Pass example:`` AND ``Forbidden example:`` substrings — so
+       the agent reading the failure learns both the canonical cure
+       AND the anti-pattern to avoid (ADR-024 §"Agent UX / affordance
+       principles"). Per-line appended error strings (which are
+       per-violation context, not the canonical remediation template)
+       are NOT required to carry the example markers.
+
+    A file with NO detectable remediation text at all is treated as a
+    violation — "silent" check scripts can't sneak in without an
+    action-marker-carrying message.
     """
     try:
         source = path.read_text(encoding="utf-8")
@@ -226,14 +275,15 @@ def _python_file_violates(path: Path) -> bool:
     remediations = _remediation_constants(tree)
     appends = _appended_error_strings(tree)
 
-    # Every individual emitted string must carry at least one marker.
     candidates = remediations + appends
     if not candidates:
-        # No detectable remediation text at all — treat as a violation
-        # so that "silent" check scripts can't sneak in without an
-        # action-marker-carrying message.
         return True
-    return any(not _has_action_marker(text) for _line, text in candidates)
+    if any(not _has_action_marker(text) for _line, text in candidates):
+        return True
+    # Extension: module-level REMEDIATION constants must ship Pass +
+    # Forbidden examples. The per-line appends aren't held to this
+    # bar (they're contextual flavour, not the canonical template).
+    return any(not _has_both_example_markers(text) for _line, text in remediations)
 
 
 # Pattern that lifts plausible failure-output text out of a shell

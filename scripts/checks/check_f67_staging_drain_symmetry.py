@@ -109,7 +109,7 @@ Pass example:
     kairix/core/curator/drain.py:
         db.execute("UPDATE entity_signals SET pushed_to_neo4j = 1, ...")
 
-Forbidden (this is the GH #334 anti-pattern):
+Forbidden example: (this is the GH #334 anti-pattern):
 
     kairix/core/db/schema.py:
         CREATE TABLE entity_signals (... pushed_to_neo4j INTEGER DEFAULT 0, ...);
