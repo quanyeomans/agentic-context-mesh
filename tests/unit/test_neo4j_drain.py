@@ -137,3 +137,84 @@ def test_run_neo4j_drain_tick_skips_relationship_kind_and_bumps_counter() -> Non
         assert counter == 1
     finally:
         db.close()
+
+
+def test_run_default_drain_tick_returns_unavailable_when_client_unreachable() -> None:
+    """The orchestration short-circuits to ``neo4j_available=False`` when
+    the client factory returns an unreachable client. No DB is opened,
+    no rows are touched.
+
+    Sabotage proof: remove the ``if not client.available:`` early-return
+    in ``run_default_drain_tick`` and the assertion below trips because
+    ``db_factory`` would then be called (we'd hit the AssertionError in
+    the stand-in factory).
+    """
+    from kairix.core.curator.drain import Neo4jDrainTickDeps, run_default_drain_tick
+
+    class _UnreachableClient:
+        available = False
+
+    db_factory_called = {"n": 0}
+
+    def _db_factory_should_not_run() -> sqlite3.Connection:
+        db_factory_called["n"] += 1
+        raise AssertionError("db_factory must not run when client is unreachable")
+
+    deps = Neo4jDrainTickDeps(
+        client_factory=_UnreachableClient,
+        db_factory=_db_factory_should_not_run,
+    )
+    result = run_default_drain_tick(deps=deps)
+    assert result.neo4j_available is False
+    assert result.pushed == 0
+    assert result.failed == 0
+    assert db_factory_called["n"] == 0
+
+
+def test_run_default_drain_tick_threads_components_through_drain_tick(tmp_path) -> None:
+    """When the client reports available, ``run_default_drain_tick``
+    opens the DB via the supplied factory and delegates to
+    ``run_neo4j_drain_tick`` against a Neo4jGraphRepository built from
+    the client. The returned result reflects what the underlying drain
+    tick produces.
+
+    Sabotage proof: comment out the ``db.close()`` in the ``finally``
+    block and the second run of this test (in the same process) sees
+    the SQLite file locked — the connection-leak surface this finally
+    protects.
+    """
+    from kairix.core.curator.drain import Neo4jDrainTickDeps, run_default_drain_tick
+    from tests.fakes import FakeDrainGraphRepository
+
+    db_path_local = tmp_path / "drain_default_tick.sqlite"
+
+    def _open_test_db() -> sqlite3.Connection:
+        conn = sqlite3.connect(str(db_path_local))
+        create_schema(conn)
+        # Stage one row so the drain tick has work to do — verifies
+        # we reached the underlying run_neo4j_drain_tick.
+        conn.execute(
+            "INSERT INTO entity_signals (kind, value, source_uri, modified_at, confidence, "
+            "sensitivity, pushed_to_neo4j, push_attempt_count) "
+            "VALUES ('person', 'agent-alpha', 'vault://x', '2026-05-25T10:00:00Z', 0.9, "
+            "'internal', 0, 0)"
+        )
+        conn.commit()
+        return conn
+
+    fake_repo = FakeDrainGraphRepository(available=True)
+
+    class _AvailableClient:
+        available = True
+
+    deps = Neo4jDrainTickDeps(
+        client_factory=_AvailableClient,
+        db_factory=_open_test_db,
+        repo_factory=lambda _client: fake_repo,
+    )
+    result = run_default_drain_tick(deps=deps)
+    # Verify the orchestration reached the inner drain and produced a
+    # real result against the staged row.
+    assert result.neo4j_available is True
+    assert result.pushed == 1
+    assert isinstance(result.elapsed_ms, int)
