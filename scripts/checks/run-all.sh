@@ -186,6 +186,11 @@ python3 "${SCRIPT_DIR}/check_f67_staging_drain_symmetry.py" || overall=1
 #        (Bug 2 — SharePoint 429 dead-lettered every item because no rate-limit contract test existed)
 python3 "${SCRIPT_DIR}/check_f68_protocol_failure_modes.py" || overall=1
 
+# F69 — integration tests that walk a table / connector stream need a 10⁴-row variant
+#        (Bug 3 — unbounded fetchall in MaintenanceScheduler._prune_orphans was instantaneous at
+#         N=10 fixture scale and saturated disk IO at 989k chunks; ADR-024 Bundle D)
+python3 "${SCRIPT_DIR}/check_f69_scale_bound_tests.py" || overall=1
+
 # F70 — every CREATE TABLE in schema.py has at least one INSERT writer in production code
 #        (GH #336 — documents_media shipped with no writer; ADR-024 Bundle B)
 python3 "${SCRIPT_DIR}/check_f70_schema_writer_symmetry.py" || overall=1
