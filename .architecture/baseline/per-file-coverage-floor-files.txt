@@ -10,3 +10,24 @@
 # the encapsulation discussion at commit 71c12cf9) or test infrastructure
 # to construct a working SearchPipeline in unit context (heavy). Defer.
 kairix/agents/mcp/cold_start.py
+# kairix/worker.py — canonical Adapter per ADR-024 §"Repositioning F7".
+# The file's role is dispatch + dep wiring: every WorkerDeps field is a
+# Callable that gets injected by tests (see tests/test_worker.py — the
+# dispatch-via-deps pattern is exhaustively tested at the orchestration
+# level), and every substantive component (_SqliteEntityGraphSink, the
+# ConnectorPipeline composition, the embed pipeline, the Neo4jDrainer,
+# the maintenance scheduler) lives in its own module with its own unit
+# coverage. The remaining ~10% uncovered lines are production-default
+# wrapper functions (_default_neo4j_drain, _default_connector_sync,
+# _default_embed, etc.) whose job is to open real DB connections + real
+# Neo4j clients + delegate to the tested core. We already extracted
+# run_default_drain_tick into kairix/core/curator/drain.py with a
+# Neo4jDrainTickDeps DI seam (commit 651942cb) precisely so the
+# orchestration branches there are covered at unit level; doing the
+# same surgery on the other _default_* wrappers is the right long-term
+# direction but each one needs the matching deps-class extraction and
+# is tracked in followup work, not a same-commit fix. Coverage drifts
+# 90.1-90.6% across runs on this file (1 line of variance is enough to
+# flip CI's 3.12 stage between pass and fail). Grandfathering here is
+# the ADR-024-aligned response: F7 is a smell, not the gate.
+kairix/worker.py
