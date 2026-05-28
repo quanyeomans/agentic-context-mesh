@@ -260,6 +260,12 @@ def _default_vector_store_loader() -> Any:
     return _open_usearch_index()
 
 
+# F71-truthfulness-exempt: the gap's ``count`` field carries the delta vs
+# the external usearch index length (or the raw cv_count when usearch is
+# missing/empty). Both compare a SQL aggregate to an external resource —
+# there is no single ``SELECT COUNT(*) FROM <table> WHERE <predicate>``
+# that ground-truths the reported count. The vector-store check is a
+# soft information probe, not a backlog-depth probe.
 def _check_vector_store_vs_content_vectors(
     db: sqlite3.Connection,
     vector_store_loader: Callable[[], Any] = _default_vector_store_loader,
