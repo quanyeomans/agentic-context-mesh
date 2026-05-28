@@ -1,17 +1,9 @@
-"""F73 detector tests — no private infrastructure references in committed source.
+"""Tests for the F73 pattern loader, scope filter, and exempt logic.
 
-The F73 detector (``scripts/checks/check_no_private_infra_refs.py``)
-flags specific Azure resource names (``vm-openclaw``, ``kv-tc-agents``,
-``stagents001``, ``RG-AGENTS-CORE``, ``datadisk-vm-openclaw``),
-internal hostnames (``*.threecubes.{ai,io}``), and private sibling-repo
-references (``kairix-pro-platform``, ``tc-agent-zone``).
-
-Generic placeholders (``<your-vm-name>``, ``<your-key-vault-name>``,
-``example.com``, ``alice@example.com``) must not false-positive.
-
-Sabotage proof: drop one ``vm-openclaw`` literal into ``test_pass_lines``
-input and re-run — the relevant test flips red. Restore. Executed
-during F73 landing: mutate -> red -> restore -> green.
+Patterns are loaded at runtime from the ``PRIVATE_INFRA_PATTERNS`` env
+var (CI) or a gitignored ``.private-infra-patterns`` file (local).
+These tests use synthetic patterns so the test file carries no
+operator-specific literals.
 """
 
 from __future__ import annotations
@@ -26,66 +18,94 @@ _CHECKS_DIR = _REPO_ROOT / "scripts" / "checks"
 if str(_CHECKS_DIR) not in sys.path:
     sys.path.insert(0, str(_CHECKS_DIR))
 
-# Import depends on the sys.path mutation above — the F73 detector lives
-# outside the kairix package by design (repo-fitness script, not app code).
+# Import depends on the sys.path mutation above — the detector lives
+# outside the kairix package (repo-fitness script, not app code).
 from check_no_private_infra_refs import (  # noqa: E402
-    _PATTERNS,
+    PATTERNS_ENV_VAR,
+    _compile_patterns,
     _is_in_scope,
+    _load_patterns,
     _scan_file,
 )
 
 pytestmark = pytest.mark.unit
 
 
-def test_azure_vm_pattern_matches_only_known_name() -> None:
-    pattern = dict(_PATTERNS)["azure-vm-name"]
-    assert pattern.search("the vm-openclaw VM is running") is not None
-    assert pattern.search("vm-other-name is configured") is None
-    assert pattern.search("<your-vm-name>") is None
+_SYNTHETIC_PATTERN_SOURCE = """
+# Comment lines are skipped
+azure-vm-shape: \\bsynthetic-test-vm-\\d{3}\\b
+azure-kv-shape: \\bsynthetic-test-kv-\\d{3}\\b
+
+# Blank lines + label-less patterns also work:
+\\bsynthetic-test-storage\\b
+"""
 
 
-def test_azure_kv_pattern_matches_only_known_name() -> None:
-    pattern = dict(_PATTERNS)["azure-kv-name"]
-    assert pattern.search("KAIRIX_KV_NAME=kv-tc-agents") is not None
-    assert pattern.search("KAIRIX_KV_NAME=<your-key-vault-name>") is None
-    assert pattern.search("KAIRIX_KV_NAME=kv-example") is None  # pragma: allowlist secret
+def test_compile_patterns_parses_label_prefix() -> None:
+    patterns = _compile_patterns(_SYNTHETIC_PATTERN_SOURCE)
+    labels = [label for label, _ in patterns]
+    assert "azure-vm-shape" in labels
+    assert "azure-kv-shape" in labels
 
 
-def test_internal_hostname_pattern_matches_threecubes_subdomain() -> None:
-    pattern = dict(_PATTERNS)["internal-hostname"]
-    assert pattern.search("ssh.threecubes.ai is reachable via Cloudflare") is not None
-    assert pattern.search("dan@threecubes.io is a member") is not None
-    assert pattern.search("example.com is the public placeholder") is None
+def test_compile_patterns_skips_blanks_and_comments() -> None:
+    raw = "# only comments\n\n# and blanks\n"
+    assert _compile_patterns(raw) == []
 
 
-def test_private_sibling_repo_pattern() -> None:
-    pattern = dict(_PATTERNS)["private-sibling-repo"]
-    assert pattern.search("see kairix-pro-platform ADR-017") is not None
-    assert pattern.search("cross-pollinated from tc-agent-zone") is not None
-    assert pattern.search("the two-scope architecture splits state") is None
+def test_compile_patterns_warns_on_invalid_regex(capsys: pytest.CaptureFixture[str]) -> None:
+    patterns = _compile_patterns("broken: [unclosed\nworking: \\bok\\b\n")
+    assert len(patterns) == 1
+    assert patterns[0][0] == "working"
+    captured = capsys.readouterr()
+    assert "invalid regex" in captured.err.lower()
+
+
+def test_compile_patterns_unlabelled_lines_get_synthetic_label() -> None:
+    patterns = _compile_patterns("\\bfoo\\b\n\\bbar\\b\n")
+    labels = [label for label, _ in patterns]
+    assert all(label.startswith("pattern-") for label in labels)
+    assert len(patterns) == 2
+
+
+def test_load_patterns_reads_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(PATTERNS_ENV_VAR, "from-env: \\bsynthetic-env-marker\\b")
+    patterns = _load_patterns()
+    labels = [label for label, _ in patterns]
+    assert "from-env" in labels
+
+
+def test_load_patterns_env_overrides_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(PATTERNS_ENV_VAR, "from-env: \\bonly-from-env\\b")
+    patterns = _load_patterns()
+    labels = [label for label, _ in patterns]
+    assert labels == ["from-env"]
 
 
 def test_scan_file_returns_one_hit_per_match(tmp_path: Path) -> None:
+    patterns = _compile_patterns("test-marker: \\bsynthetic-test-vm-001\\b")
     sample = tmp_path / "kairix" / "sample.py"
     sample.parent.mkdir(parents=True)
     sample.write_text(
-        "# pretend kairix module\nimport os\nNAME = 'vm-openclaw'\nKV = 'kv-tc-agents'\n",
+        "NAME = 'synthetic-test-vm-001'\nOTHER = 'synthetic-test-vm-001-prod'\n",
         encoding="utf-8",
     )
-    hits = _scan_file(sample, "kairix/sample.py")
+    hits = _scan_file(sample, "kairix/sample.py", patterns)
     assert len(hits) == 2
-    assert any("vm-openclaw" in h for h in hits)
-    assert any("kv-tc-agents" in h for h in hits)
+    assert all("test-marker" in h for h in hits)
 
 
 def test_scan_file_skips_generic_placeholders(tmp_path: Path) -> None:
+    patterns = _compile_patterns("vm-shape: \\bsynthetic-test-vm-\\d+\\b")
     sample = tmp_path / "kairix" / "sample.py"
     sample.parent.mkdir(parents=True)
     sample.write_text(
-        "NAME = '<your-vm-name>'\nKV = '<your-key-vault-name>'\nHOST = 'example.com'\n",
+        "NAME = '<your-vm-name>'\nHOST = 'example.com'\n",
         encoding="utf-8",
     )
-    assert _scan_file(sample, "kairix/sample.py") == []
+    assert _scan_file(sample, "kairix/sample.py", patterns) == []
 
 
 def test_in_scope_includes_production_code() -> None:

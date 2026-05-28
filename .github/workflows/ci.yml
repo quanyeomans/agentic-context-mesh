@@ -112,6 +112,10 @@ jobs:
           python-version: "3.12"
 
       - name: Run F1-F6 + F8 + F10-F23 + F26-F29 (no test runtime needed)
+        env:
+          # F73 loads private-infra patterns from this secret. Empty/unset
+          # = detector no-ops (forks and external contributors still pass).
+          PRIVATE_INFRA_PATTERNS: ${{ secrets.PRIVATE_INFRA_PATTERNS }}
         run: bash scripts/checks/run-all.sh --skip-coverage
 
   contracts:

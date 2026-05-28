@@ -1,56 +1,26 @@
-"""F73: No private infrastructure references in committed code, docs, or tests.
+"""Token-pattern scanner with externalised pattern source.
 
-Public-repo hygiene: specific Azure resource names, internal hostnames,
-and private sibling-repo names must not appear in kairix. Generic
-placeholders document the shape (``<your-key-vault-name>``,
-``<your-resource-group>``, ``example.com``) so external readers can
-follow the docs and operators of any deployment can swap in their own
-values.
+Pattern definitions are loaded at runtime from one of:
 
-This rule complements F32 (real first / surname / org names in fixtures);
-F73 catches infrastructure identifiers that F32's name-list shape
-doesn't fit.
+  * ``PRIVATE_INFRA_PATTERNS`` env var (CI: injected from a repo secret).
+  * ``.private-infra-patterns`` file at repo root (local-only fallback;
+    gitignored, template at ``.private-infra-patterns.example``).
 
-Detection scope:
+Each non-blank, non-comment line is one regex pattern. Optional
+``label:regex`` shape lets the failure message name the category.
+Empty pattern set = the detector is a no-op.
 
-- ``kairix/**/*.py``        — production code
-- ``scripts/**/*.{py,sh}``  — pre-commit / CI / operator scripts
-- ``tests/**/*.py``         — fixtures + assertions
-- ``tests/bdd/**/*.feature``— Gherkin scenarios
-- ``docs/**/*.md``          — user-facing documentation
-- ``CLAUDE.md``             — agent / contributor read-first guide
-- top-level ``*.yaml`` / ``*.yml`` / ``*.toml`` — repo config
+Scope: ``kairix/**/*.py``, ``scripts/**/*.{py,sh}``,
+``tests/**/*.{py,feature}``, ``docs/**/*.md``, ``CLAUDE.md``,
+``README.md``, ``CONTRIBUTING.md``.
 
-Detection signal: a curated set of compiled regex patterns covering
-historical leaks. The set is intentionally narrow — each pattern was
-either already in the source tree at the F73 introduction commit and
-paid down, or names a private resource the user has flagged for leak
-prevention.
-
-Generic placeholders that are explicitly OK:
-
-- ``<your-vm-name>`` / ``<your-key-vault-name>`` / ``<your-resource-group>``
-- ``<your-storage-account>`` / ``<your-subscription>``
-- ``example.com`` / ``alice@example.com`` / ``bob@example.com``
-- ``Acme`` / ``Example Corp``
-
-These never match ``_PATTERNS`` so they pass the filter trivially.
-
-Baseline at ``.architecture/baseline/no-private-infra-refs-files.txt``
-grandfathers pre-existing offenders so the rule lands without forcing
-a sweep. F50 blocks net-new files from accreting baseline debt.
-
-Why this rule exists: kairix is a public repository. Specific Azure
-resource names (``vm-openclaw``, ``kv-tc-agents``, ``stagents001``),
-internal hostnames (``ssh.threecubes.ai``), and private sibling-repo
-URLs (``kairix-pro-platform``, ``tc-agent-zone``) aid reconnaissance
-of the operator's deployment and leak organisational shape. Applying
-generic placeholders preserves the documentation value while removing
-the leak.
+Baseline at ``.architecture/baseline/no-private-infra-refs-files.txt``.
+F50 blocks net-new files from accreting violations.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -58,38 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE_FILE = ROOT / ".architecture" / "baseline" / "no-private-infra-refs-files.txt"
+PATTERNS_FILE = ROOT / ".private-infra-patterns"
+PATTERNS_ENV_VAR = "PRIVATE_INFRA_PATTERNS"
 
-# Compiled patterns covering the leak shapes the W1+W3 sweeps paid down.
-# Each pattern targets a specific shape; the named comment alongside the
-# pattern records what placeholder to use when refactoring.
-_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    # Specific Azure VM / Key Vault / storage account names that map to
-    # the user's private deployment. Refactor to ``<your-vm-name>`` /
-    # ``<your-key-vault-name>`` / ``<your-storage-account>``.
-    ("azure-vm-name", re.compile(r"\bvm-openclaw\b")),
-    ("azure-kv-name", re.compile(r"\bkv-tc-agents\b")),
-    ("azure-storage-account", re.compile(r"\bstagents001\b")),
-    # Azure resource group name. Refactor to ``<your-resource-group>``.
-    ("azure-resource-group", re.compile(r"\bRG-AGENTS-CORE\b")),
-    # Resource-lock / data-disk naming patterns scoped to the deployment.
-    # Refactor narratives to describe the lock SHAPE, not the specific
-    # name (``lock-nodelete-<resource>`` is the generic form).
-    ("azure-datadisk-pattern", re.compile(r"\bdatadisk-vm-openclaw\b")),
-    # Internal hostnames / subdomains / email domains. Refactor to
-    # ``example.com`` for docs / ``<your-ssh-host>`` for runbooks.
-    # Catches both ``ssh.threecubes.ai`` (subdomain) and
-    # ``dan@threecubes.io`` (bare-domain email).
-    ("internal-hostname", re.compile(r"\bthreecubes\.(?:ai|io)\b")),
-    # Private sibling-repo references. The architectural concepts they
-    # describe (two-scope architecture, Wave 0 paydown) stand alone;
-    # the cross-repo URL/issue pointers add no public-reader value.
-    ("private-sibling-repo", re.compile(r"\b(?:kairix-pro-platform|tc-agent-zone|tc-agents-zone)\b")),
-)
-
-# Self-exempt: the detector + its test file embed the patterns by
-# definition. The W3 redaction commit also threads the architectural
-# concepts through docs; any new file referenced here demands a PR-
-# description rationale.
 EXEMPT_FILES = frozenset(
     {
         "scripts/checks/check_no_private_infra_refs.py",
@@ -97,8 +38,6 @@ EXEMPT_FILES = frozenset(
     }
 )
 
-# Per-scope file selection. The detector walks every tracked file and
-# includes it only if its repo-relative path matches at least one scope.
 _SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("kairix/", (".py",)),
     ("scripts/", (".py", ".sh")),
@@ -106,34 +45,65 @@ _SCOPES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("docs/", (".md",)),
 )
 
-# Top-level files always in scope regardless of directory prefix.
 _TOP_LEVEL_FILES: frozenset[str] = frozenset({"CLAUDE.md", "README.md", "CONTRIBUTING.md"})
 
-REMEDIATION = """Refactor private infrastructure references to generic placeholders — to pass.
+REMEDIATION = """Pattern matched — refactor to a generic placeholder.
 
-fix: replace the specific Azure resource name / internal hostname /
-     private-repo reference with a generic placeholder that documents
-     the SHAPE without naming the operator's deployment:
-       - VMs:                     <your-vm-name>
-       - Key Vaults:              <your-key-vault-name>
-       - Storage accounts:        <your-storage-account>
-       - Resource groups:         <your-resource-group>
-       - Subscriptions:           <your-subscription>
-       - Hostnames / SSH targets: example.com / <your-ssh-host>
-       - Sibling repos:           drop the cross-repo URL; describe the
-                                  architectural concept by name
+fix: replace the matched string with a generic placeholder
+     (``<your-vm-name>``, ``<your-key-vault-name>``,
+     ``<your-resource-group>``, ``example.com``, etc.).
 next: re-run ``python3 scripts/checks/check_no_private_infra_refs.py``
 to confirm the gate goes green.
-run: bash scripts/safe-commit.sh "refactor(privacy): redact <what> from <where>"
+run: bash scripts/safe-commit.sh "<verb>(<scope>): <what>"
 
 Pass example:
-  # docs/operations/runbooks/how-to-resolve-secrets.md
-  Set ``KAIRIX_KV_NAME=<your-key-vault-name>`` before invoking ``kairix probe-config``.
+  Set ``KAIRIX_KV_NAME=<your-key-vault-name>`` before invoking the CLI.
 
 Forbidden example:
-  # docs/operations/runbooks/how-to-resolve-secrets.md
-  Set ``KAIRIX_KV_NAME=kv-tc-agents`` before invoking ``kairix probe-config``.
+  Set ``KAIRIX_KV_NAME=<a literal that matches the loaded pattern set>``.
 """
+
+
+def _compile_patterns(raw: str) -> list[tuple[str, re.Pattern[str]]]:
+    """Parse a newline-separated pattern source into compiled regexes.
+
+    Each non-blank, non-``#`` line is one pattern. Optional ``label:regex``
+    shape lets the failure message name the category. Lines whose regex
+    fails to compile are reported as warnings and skipped.
+    """
+    patterns: list[tuple[str, re.Pattern[str]]] = []
+    for lineno, line in enumerate(raw.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if ":" in stripped and not stripped.startswith("\\"):
+            label, _, body = stripped.partition(":")
+            label = label.strip() or f"pattern-{lineno}"
+            pattern_text = body.strip()
+        else:
+            label = f"pattern-{lineno}"
+            pattern_text = stripped
+        if not pattern_text:
+            continue
+        try:
+            patterns.append((label, re.compile(pattern_text)))
+        except re.error as exc:
+            print(
+                f"WARN [arch:no-private-infra-refs]: invalid regex on line {lineno}: {exc}",
+                file=sys.stderr,
+            )
+    return patterns
+
+
+def _read_patterns_source() -> str:
+    raw = os.environ.get(PATTERNS_ENV_VAR, "")
+    if not raw and PATTERNS_FILE.exists():
+        raw = PATTERNS_FILE.read_text(encoding="utf-8")
+    return raw
+
+
+def _load_patterns() -> list[tuple[str, re.Pattern[str]]]:
+    return _compile_patterns(_read_patterns_source())
 
 
 def _load_baseline() -> set[str]:
@@ -152,21 +122,33 @@ def _is_in_scope(rel: str) -> bool:
     return any(rel.startswith(prefix) and rel.endswith(suffixes) for prefix, suffixes in _SCOPES)
 
 
-def _scan_file(path: Path, rel: str) -> list[str]:
+def _scan_file(
+    path: Path,
+    rel: str,
+    patterns: list[tuple[str, re.Pattern[str]]],
+) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8")
     except (UnicodeDecodeError, OSError):
         return []
     hits: list[str] = []
     for lineno, line in enumerate(text.splitlines(), 1):
-        for label, pattern in _PATTERNS:
+        for label, pattern in patterns:
             match = pattern.search(line)
             if match is not None:
-                hits.append(f"{rel}:{lineno}: private-infra ref ({label}): {match.group(0)!r}")
+                hits.append(f"{rel}:{lineno}: pattern match ({label}): {match.group(0)!r}")
     return hits
 
 
 def main() -> int:
+    patterns = _load_patterns()
+    if not patterns:
+        print(
+            f"ok [arch:no-private-infra-refs] — no patterns loaded "
+            f"(set ${PATTERNS_ENV_VAR} or create {PATTERNS_FILE.name})."
+        )
+        return 0
+
     try:
         files = subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).splitlines()
     except subprocess.CalledProcessError:
@@ -185,7 +167,7 @@ def main() -> int:
         path = ROOT / rel
         if not path.is_file():
             continue
-        hits = _scan_file(path, rel)
+        hits = _scan_file(path, rel, patterns)
         if not hits:
             continue
         if rel in baseline:
@@ -215,7 +197,7 @@ def main() -> int:
         if baseline:
             print(f"ok [arch:no-private-infra-refs] — {len(baseline)} grandfathered file(s) still present in baseline.")
         else:
-            print("ok [arch:no-private-infra-refs]")
+            print(f"ok [arch:no-private-infra-refs] — {len(patterns)} pattern(s) loaded.")
     return exit_code
 
 

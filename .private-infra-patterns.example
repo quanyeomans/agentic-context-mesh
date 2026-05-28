@@ -1,0 +1,15 @@
+# Pattern source for the F73 token-pattern scanner. Copy to
+# .private-infra-patterns (gitignored) and populate; CI loads the same
+# content from the PRIVATE_INFRA_PATTERNS repo secret.
+#
+# Format: one regex per line. Optional `label:regex` shape lets the
+# failure message name the category. `#` comments + blank lines skipped.
+# Malformed regex lines are warned about and skipped — the gate stays
+# usable with a partial pattern set.
+#
+# Examples (placeholders only — replace with literal strings to match):
+
+# label-a:  \b<literal-token-a>\b
+# label-b:  \b<literal-token-b>\b
+# label-c:  \b<domain-prefix>\.(?:com|io|ai)\b
+# label-d:  \b(?:<alt-1>|<alt-2>)\b

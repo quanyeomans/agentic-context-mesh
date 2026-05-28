@@ -52,4 +52,5 @@ scripts/benchmark-path-audit.py
 PRD.md
 .claude/
 .confidential-patterns
+.private-infra-patterns
 *.DS_Store
