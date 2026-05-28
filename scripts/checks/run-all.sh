@@ -195,6 +195,12 @@ python3 "${SCRIPT_DIR}/check_f70_schema_writer_symmetry.py" || overall=1
 #         a 2.3M-row backlog read out as "small enough to ignore". ADR-024 Bundle C.)
 python3 "${SCRIPT_DIR}/check_f71_preflight_truthfulness.py" || overall=1
 
+# F72 — every registered cross-layer integrity invariant has a matching test file
+#        under tests/integrity_invariants/ with both fixture-scale and soak-scale
+#        variants. Closes the "bronze-vs-content limbo" failure mode that the
+#        existing per-layer integration tests can't see. ADR-024 Bundle E.
+python3 "${SCRIPT_DIR}/check_f72_integrity_invariants.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1

@@ -35,7 +35,10 @@ from _arch_lib import gate, python_files, repo_relative
 # ``soak`` covers the ADR-024 production-scale soak tier (tests/soak/ and
 # Bundle E's tests/integrity_invariants/*_soak variants); excluded from
 # Stage 2/3 per-commit CI, runs in soak-suite.yml on nightly + on-demand.
-KNOWN_MARKERS = frozenset({"unit", "bdd", "contract", "integration", "e2e", "slow", "soak"})
+# ``invariant`` is the F72 / ADR-024 Bundle E cross-layer integrity tier;
+# tests under ``tests/integrity_invariants/`` carry it (typically via
+# module-level ``pytestmark``).
+KNOWN_MARKERS = frozenset({"unit", "bdd", "contract", "integration", "e2e", "slow", "soak", "invariant"})
 
 REMEDIATION = """Refactor to add ONE category marker per test
 (function-level decorator, class-level decorator, or module-level
@@ -50,7 +53,7 @@ confirm the gate goes green.
 run: bash scripts/safe-commit.sh "test(<area>): add category marker to <file>"
 
 Recognised markers (per pyproject.toml): unit, bdd, contract, integration,
-e2e, slow.
+e2e, slow, invariant.
 
 Pass example:
   # module-level (covers every test in the file)

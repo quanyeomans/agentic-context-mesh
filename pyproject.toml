@@ -226,6 +226,7 @@ markers = [
     "pvt: production-verification scenarios against a live MCP server (requires KAIRIX_PVT=1; see docs/architecture/performance-testing-approach.md)",
     "slow: tests taking >5s",
     "soak: production-scale soak tests (N >= 10**4 rows). Excluded from Stage 2/3 per-commit CI; runs in soak-suite.yml on nightly + on-demand cadence. ~20-60 min wall-clock. See ADR-024 §'Soak tier' + .github/workflows/soak-suite.yml. The legacy BDD soak scenarios (tests/bdd/features/soak_fact_extractor.feature) still gate on KAIRIX_SOAK=1 at the step level.",
+    "invariant: cross-layer integrity invariant tests under tests/integrity_invariants/ — ADR-024 §F72, asserts state agreement across bronze/content/vector/dead-letter tables after composed pipeline runs",
     "docker: tests that shell out to the docker CLI against a pre-built kairix image (requires KAIRIX_DOCKER_TEST_IMAGE or a local `docker build`; skips when docker is unavailable)",
 ]
 timeout = 60  # Per-test timeout default (seconds)
