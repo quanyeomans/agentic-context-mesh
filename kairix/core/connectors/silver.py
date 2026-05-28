@@ -37,8 +37,9 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
+from typing import Any
 
 from kairix.core.protocols import (
     BronzeRef,
@@ -341,6 +342,71 @@ class SqliteDocumentsMediaWriter:
         )
 
 
+class SqliteDocumentPagesWriter:
+    """Production writer for the ``document_pages`` table (GH #338).
+
+    Mirrors :class:`SqliteDocumentsMediaWriter` (ADR-024 Bundle B) for
+    the per-page row pattern. Page-bearing extractors (PDF / PPTX /
+    DOCX) populate :attr:`ExtractedDocument.pages` with one
+    :class:`~kairix.core.protocols.Page` per page / slide / sheet; this
+    writer persists each Page as a row keyed by ``(hash, page_number)``
+    so downstream retrieval (MM-3 citation paths, per-page snippet
+    surfaces, page-bounded re-extract triage) can attribute back to a
+    specific page.
+
+    ``image_descriptions`` is intentionally left ``NULL`` at the F70
+    paydown — the schema column is forward-armed for a future vision
+    extractor that will populate per-image alt-text; today's
+    page-bearing extractors emit text only.
+
+    The writer does NOT commit — the caller's per-batch transaction
+    owns the commit so all per-document rows (documents_media,
+    document_pages, content, content_vectors) commit together or
+    roll back together.
+    """
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+
+    def write_pages(
+        self,
+        *,
+        content_hash: str,
+        pages: Sequence[Any],
+    ) -> int:
+        """INSERT or REPLACE one ``document_pages`` row per Page.
+
+        Returns the count of rows written. Caller-supplied ``pages``
+        is expected to be a sequence of objects with attributes
+        ``page_number: int``, ``text: str``, ``has_images: bool`` —
+        the :class:`~kairix.core.protocols.Page` shape. An empty
+        sequence is a no-op (non-paged extractors don't write).
+
+        Re-ingesting the same document (same ``content_hash``) updates
+        the existing rows via ``INSERT OR REPLACE`` so re-extracts
+        cleanly overwrite rather than accumulate duplicates. The
+        ``has_images`` boolean is serialised as 0/1 to match the
+        schema's INTEGER DEFAULT 0.
+        """
+        if not pages:
+            return 0
+        written = 0
+        for page in pages:
+            self._db.execute(
+                "INSERT OR REPLACE INTO document_pages ("
+                "hash, page_number, extracted_text, has_images, image_descriptions"
+                ") VALUES (?, ?, ?, ?, NULL)",
+                (
+                    content_hash,
+                    int(page.page_number),
+                    page.text,
+                    1 if page.has_images else 0,
+                ),
+            )
+            written += 1
+        return written
+
+
 class DefaultSilverProcessor:
     """Production :class:`~kairix.core.protocols.SilverProcessor` implementation.
 
@@ -360,10 +426,19 @@ class DefaultSilverProcessor:
     row per processed document so per-extractor analytics + F40
     re-extract triage work. ``None`` keeps the legacy behaviour for
     tests / callers that don't need the row.
+
+    GH #338 (F70 paydown) — when a ``document_pages_writer`` is wired
+    in, Silver also writes one ``document_pages`` row per page for
+    page-bearing extractors. ``None`` keeps the legacy behaviour.
     """
 
-    def __init__(self, documents_media_writer: SqliteDocumentsMediaWriter | None = None) -> None:
+    def __init__(
+        self,
+        documents_media_writer: SqliteDocumentsMediaWriter | None = None,
+        document_pages_writer: SqliteDocumentPagesWriter | None = None,
+    ) -> None:
         self._documents_media_writer = documents_media_writer
+        self._document_pages_writer = document_pages_writer
 
     def process(
         self,
@@ -523,6 +598,14 @@ class DefaultSilverProcessor:
             extractor_version=extractor_version,
             chunker_version=chunker_version,
         )
+        # GH #338 — per-page rows for retrieval citation paths. Silent
+        # no-op when no writer wired or extractor produced no pages
+        # (non-paged formats like markdown).
+        if self._document_pages_writer is not None and extracted.pages:
+            self._document_pages_writer.write_pages(
+                content_hash=raw.content_hash,
+                pages=extracted.pages,
+            )
 
     def write_extraction_outcome(
         self,

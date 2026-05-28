@@ -564,18 +564,21 @@ def build_connector_pipeline(
         CursorStore,
         DeadLetterStore,
         DefaultSilverProcessor,
+        SqliteDocumentPagesWriter,
         SqliteDocumentsMediaWriter,
         StreamingBronzeStore,
     )
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.worker import _SqliteEntityGraphSink
 
-    # GH #336 (ADR-024 Bundle B) — wire the documents_media writer
-    # into the default Silver processor when the caller did not
-    # override ``silver``. Caller-supplied silvers (typically a fake
-    # for integration tests that don't care about documents_media)
-    # opt out by passing their own ``silver=`` instance.
-    default_silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
+    # GH #336 (ADR-024 Bundle B) — documents_media writer.
+    # GH #338 (F70 paydown) — document_pages writer; per-page rows
+    # enable retrieval citation paths back to the source page/slide.
+    # Caller-supplied silvers opt out by passing their own ``silver=``.
+    default_silver = DefaultSilverProcessor(
+        documents_media_writer=SqliteDocumentsMediaWriter(db),
+        document_pages_writer=SqliteDocumentPagesWriter(db),
+    )
     return ConnectorPipeline(
         db=db,
         bronze=StreamingBronzeStore(db),

@@ -181,6 +181,9 @@ pytest_plugins = [
     # GH #336 / ADR-024 Bundle B — documents_media writer surfacing
     # per-extractor + per-document outcome.
     "tests.bdd.steps.documents_media_writer_steps",
+    # GH #338 / ADR-024 F70 paydown — document_pages writer for paged
+    # extractors (PDF / PPTX / DOCX); enables MM-3 citation paths.
+    "tests.bdd.steps.document_pages_writer_steps",
     # F64 reference test — SharePoint Graph 429 / Retry-After handling.
     "tests.bdd.steps.sharepoint_rate_limit_steps",
     # F63 reference test — maintenance scale-bound per-tick row cap.

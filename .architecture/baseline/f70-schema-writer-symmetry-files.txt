@@ -2,15 +2,30 @@
 # writer in production code, no ``# table-is-derived:`` rationale, and a
 # follow-up issue tracking the missing writer.
 #
-# documents_media (GH #336) is intentionally NOT in this baseline — ADR-024
-# Bundle B pays it down by adding a writer in kairix/core/connectors/silver.py
-# (this commit). F70 will fire on any future schema additions per F50.
+# documents_media (GH #336) and document_pages (GH #338) are intentionally
+# NOT in this baseline — ADR-024 Bundle B paid down documents_media
+# (kairix/core/connectors/silver.py:SqliteDocumentsMediaWriter) and the
+# F70-paydown commit paid down document_pages
+# (kairix/core/connectors/silver.py:SqliteDocumentPagesWriter). F70 will
+# fire on any future schema additions per F50.
 #
-# Sibling-pattern follow-ups (filed automatically by Bundle B's F70 sweep):
-#   - kairix/core/db/schema.py::document_pages — GH #338
-#   - kairix/core/db/schema.py::topology_*    — GH #339 (7 Wave A tables)
+# Remaining grandfathered entries (GH #339) are 7 Wave A topology v2
+# tables that are forward-armed for unshipped Wave C/D/E runtime:
+#
+#   * topology_containers, topology_hierarchy_nodes — populated by
+#     HierarchyConnector at sync time (Wave E)
+#   * topology_federated_connectors, topology_group_grants — populated
+#     by Wave C federation + grants subsystems
+#   * topology_scope_profiles, topology_scope_entries, topology_skills —
+#     populated by Wave D scope + skills runtime
+#
+# These are NOT "missing writers" — the writers belong in unshipped
+# code paths. Adding stub writers that read empty optional config blocks
+# would mechanically satisfy F70 without value. The honest position:
+# grandfather here, the matching Wave ships the writer + clears the
+# baseline entry. F50 still blocks net-new tables from accreting to
+# this list.
 
-kairix/core/db/schema.py::document_pages
 kairix/core/db/schema.py::topology_containers
 kairix/core/db/schema.py::topology_federated_connectors
 kairix/core/db/schema.py::topology_group_grants
