@@ -71,6 +71,15 @@ CONNECTOR_SYNC_INTERVAL = 900  # 15 minutes
 # timestamp dict, and the return tuple stay in lock-step (F17).
 _CONNECTOR_SYNC_KEY = "connector_sync"
 
+# GH #334 — Neo4j entity-graph drain cadence. 600s (10 min) drains
+# 3000 rows/hour at the default 500-row batch — fast enough that
+# fresh signals reach Neo4j within ~30 min, slow enough that a
+# transient Neo4j outage retries gracefully without thrashing.
+# Operators with a large historical backlog run
+# ``kairix curator drain --batch-size 5000 --max-batches 100``
+# manually; the unattended cadence below protects the worker loop.
+NEO4J_DRAIN_INTERVAL = 600  # 10 minutes
+
 # Idle backoff (#224): when embed runs find no work to do, the next-embed
 # wait extends exponentially. Cap at 4 hours so we don't go totally silent
 # on a long-idle vault but also don't churn CPU/IO every hour for nothing.
@@ -1002,6 +1011,46 @@ def run_via_legacy_document_scanner(deps: LegacyScannerDeps | None = None) -> Co
     )
 
 
+def _default_neo4j_drain() -> Any:
+    """Worker-loop dispatch slot for the Neo4j entity-graph drain (GH #334).
+
+    Wraps the production drain with the live SQLite DB + live Neo4j
+    client; returns a
+    :class:`kairix.core.curator.drain.NeoDrainResult` so the worker can
+    log structured outcomes. The lazy imports keep startup fast — only
+    the drain tick pays the cost of loading the graph layer.
+
+    Failure modes:
+      * Neo4j unreachable → :func:`run_neo4j_drain_tick` returns
+        ``NeoDrainResult(neo4j_available=False, pushed=0)`` and the
+        worker logs a single warning. The next tick retries.
+      * SQLite read fails → propagates up; the worker's
+        ``(Exception, SystemExit)`` discipline at the dispatch site
+        keeps the loop alive.
+
+    Tests inject a substitute via ``WorkerDeps(neo4j_drain_fn=fake)``;
+    production omits and gets this default.
+    """
+    from kairix.core.curator.drain import NeoDrainResult, run_neo4j_drain_tick
+    from kairix.knowledge.graph.client import get_client
+    from kairix.knowledge.graph.repository import Neo4jGraphRepository
+    from kairix.paths import db_path as _db_path
+
+    client = get_client()
+    if not client.available:
+        # Surface as a structured NeoDrainResult so the worker log
+        # line shape stays uniform whether or not the backend was
+        # reachable this tick.
+        return NeoDrainResult(pushed=0, failed=0, skipped_relationships=0, neo4j_available=False, elapsed_ms=0)
+
+    repo = Neo4jGraphRepository(client)
+    db = sqlite3.connect(str(_db_path()))
+    try:
+        return run_neo4j_drain_tick(db, repo)
+    finally:
+        db.close()
+
+
 def _default_connector_sync() -> ConnectorSyncResult:
     """Worker-loop dispatch slot for the connector-sync maintenance task.
 
@@ -1452,6 +1501,14 @@ class WorkerDeps:
     # NotImplementedError-raising default until Wave 2 swaps it for the
     # real ``kairix.core.connectors`` dispatcher.
     connector_sync_fn: Callable[[], ConnectorSyncResult] = field(default_factory=lambda: _default_connector_sync)
+    # GH #334 — Neo4j entity-graph drain dispatch slot. Same F6-clean
+    # default_factory shape as ``connector_sync_fn``. Tests pass a
+    # Fake; production omits and gets ``_default_neo4j_drain`` which
+    # wires the live SQLite + Neo4j client. The return type is
+    # ``NeoDrainResult`` (frozen dataclass) — typed as ``Any`` here so
+    # the import stays inside the function body (lazy load of the
+    # graph layer keeps worker boot fast).
+    neo4j_drain_fn: Callable[[], Any] = field(default_factory=lambda: _default_neo4j_drain)
     sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     # #224 phase 4-5 combined — observable state + pause flag.
     # ``state`` is the in-memory dataclass the loop mutates on phase changes.
@@ -1714,6 +1771,40 @@ def run_connector_sync(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: connector sync raised — %s", exc)
 
 
+def run_neo4j_drain(deps: WorkerDeps | None = None) -> None:
+    """GH #334 — drive one Neo4j entity-graph drain tick.
+
+    Invokes ``deps.neo4j_drain_fn`` (default
+    :func:`_default_neo4j_drain`) and logs the structured
+    :class:`~kairix.core.curator.drain.NeoDrainResult`. Mirrors the
+    ``(Exception, SystemExit)`` discipline of every other worker
+    maintenance helper — failures inside the drain must not bring the
+    worker process down. A graph outage shows up as
+    ``neo4j_available=false`` in the result envelope and the next tick
+    retries.
+
+    Tests construct ``WorkerDeps(neo4j_drain_fn=fake)``; production
+    omits the kwarg and the default factory wires
+    :func:`_default_neo4j_drain`.
+    """
+    deps = deps if deps is not None else WorkerDeps()
+    try:
+        logger.info("worker: starting neo4j drain")
+        result = deps.neo4j_drain_fn()
+        if not getattr(result, "neo4j_available", True):
+            logger.warning("worker: neo4j drain skipped — backend unavailable; will retry next tick")
+            return
+        logger.info(
+            "worker: neo4j drain complete — pushed=%d failed=%d skipped_relationships=%d elapsed_ms=%d",
+            getattr(result, "pushed", 0),
+            getattr(result, "failed", 0),
+            getattr(result, "skipped_relationships", 0),
+            getattr(result, "elapsed_ms", 0),
+        )
+    except (Exception, SystemExit) as exc:
+        logger.warning("worker: neo4j drain raised — %s", exc)
+
+
 @dataclass
 class _Schedule:
     """Worker task interval config — bundles the cadence ints.
@@ -1721,7 +1812,8 @@ class _Schedule:
     Scalar config (not a test-injection seam); main() builds this once
     from kwargs + module defaults so the inner loop helpers can pass a
     single value around rather than discrete ``_embed_interval`` ints.
-    SC-6 added ``connector_sync`` alongside the four maintenance cadences.
+    SC-6 added ``connector_sync`` alongside the four maintenance cadences;
+    GH #334 added ``neo4j_drain`` for the Curator-coupling boundary.
     """
 
     embed: int
@@ -1729,6 +1821,7 @@ class _Schedule:
     health: int
     wikilinks: int
     connector_sync: int
+    neo4j_drain: int
 
 
 def _resolve_schedule(
@@ -1737,6 +1830,7 @@ def _resolve_schedule(
     health_check_interval: int | None,
     wikilinks_interval: int | None,
     connector_sync_interval: int | None,
+    neo4j_drain_interval: int | None = None,
 ) -> _Schedule:
     """Fold kwargs + module defaults into a single ``_Schedule``."""
     return _Schedule(
@@ -1745,6 +1839,7 @@ def _resolve_schedule(
         health=health_check_interval if health_check_interval is not None else HEALTH_CHECK_INTERVAL,
         wikilinks=wikilinks_interval if wikilinks_interval is not None else WIKILINKS_INTERVAL,
         connector_sync=connector_sync_interval if connector_sync_interval is not None else CONNECTOR_SYNC_INTERVAL,
+        neo4j_drain=neo4j_drain_interval if neo4j_drain_interval is not None else NEO4J_DRAIN_INTERVAL,
     )
 
 
@@ -2033,8 +2128,9 @@ def _maybe_run_maintenance_cycle(
     last_health: float,
     last_wikilinks: float,
     last_connector_sync: float,
+    last_neo4j_drain: float,
     schedule: _Schedule,
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
     Two buckets (#312):
@@ -2044,13 +2140,11 @@ def _maybe_run_maintenance_cycle(
       enough to set the embed-noop streak above the threshold, none of
       these have anything to do and the maintenance scan is wasted work.
 
-    * **External-source-discovery** (connector_sync) — ALWAYS runs on
-      its interval regardless of ``maintenance_active``. A quiet local
-      vault does NOT imply quiet upstream sources; SharePoint /
-      GitHub / Slack can produce fresh content while the local vault
-      sits idle. The original SC-6 coupling assumption was wrong and
-      blocked external-source sync for the duration of any idle period
-      on the production VM (#312).
+    * **External-source-discovery** (connector_sync) AND **Curator
+      coupling boundary** (neo4j_drain, GH #334) — ALWAYS run on their
+      intervals regardless of ``maintenance_active``. A quiet local
+      vault does NOT imply quiet upstream sources or a drained
+      ``entity_signals`` queue.
     """
     new_entity, new_health, new_wikilinks = last_entity, last_health, last_wikilinks
     if maintenance_active:
@@ -2075,7 +2169,12 @@ def _maybe_run_maintenance_cycle(
         _run_maintenance_task(deps, transition, run_connector_sync)
         new_connector_sync = now
 
-    return (new_entity, new_health, new_wikilinks, new_connector_sync)
+    new_neo4j_drain = last_neo4j_drain
+    if now - last_neo4j_drain >= schedule.neo4j_drain:
+        _run_maintenance_task(deps, transition, run_neo4j_drain)
+        new_neo4j_drain = now
+
+    return (new_entity, new_health, new_wikilinks, new_connector_sync, new_neo4j_drain)
 
 
 def main(
@@ -2086,6 +2185,7 @@ def main(
     health_check_interval: int | None = None,
     wikilinks_interval: int | None = None,
     connector_sync_interval: int | None = None,
+    neo4j_drain_interval: int | None = None,
 ) -> None:
     """Run the worker loop.
 
@@ -2106,13 +2206,15 @@ def main(
         health_check_interval,
         wikilinks_interval,
         connector_sync_interval,
+        neo4j_drain_interval,
     )
 
     logger.info(
-        "kairix worker starting — embed every %ds, entity seed every %ds, wikilinks every %ds",
+        "kairix worker starting — embed every %ds, entity seed every %ds, wikilinks every %ds, neo4j drain every %ds",
         schedule.embed,
         schedule.entity,
         schedule.wikilinks,
+        schedule.neo4j_drain,
     )
 
     # Preflight integrity audit — catches the IM-6 failure mode (FTS
@@ -2152,6 +2254,10 @@ def main(
     last_health = 0.0
     last_wikilinks = 0.0
     last_connector_sync = 0.0
+    # GH #334 — last Neo4j drain tick. Starts at 0.0 so the first
+    # post-boot iteration drains immediately (matches the connector_sync
+    # bootstrap convention).
+    last_neo4j_drain = 0.0
     # KFEAT-021 — last maintenance tick. Carried in WorkerState across
     # restarts so the cadence survives a container bounce; mirror it
     # into a local for the in-loop is_tick_due comparison.
@@ -2215,7 +2321,13 @@ def main(
             maintenance_active, previously_skipping_maint, consecutive_embed_noops
         )
 
-        last_entity, last_health, last_wikilinks, last_connector_sync = _maybe_run_maintenance_cycle(
+        (
+            last_entity,
+            last_health,
+            last_wikilinks,
+            last_connector_sync,
+            last_neo4j_drain,
+        ) = _maybe_run_maintenance_cycle(
             deps=deps,
             transition=_transition,
             now=now,
@@ -2224,6 +2336,7 @@ def main(
             last_health=last_health,
             last_wikilinks=last_wikilinks,
             last_connector_sync=last_connector_sync,
+            last_neo4j_drain=last_neo4j_drain,
             schedule=schedule,
         )
 

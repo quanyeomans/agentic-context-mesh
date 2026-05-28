@@ -357,29 +357,42 @@ def _check_entity_signals_staging_not_stuck(db: sqlite3.Connection) -> Integrity
     sit here until a separate worker job drains them. Old un-pushed
     rows mean the drain stalled — operator-visible "warn" so a stuck
     Neo4j outage doesn't silently accumulate forever.
+
+    GH #334 — earlier this check used a single ``SELECT ... LIMIT 1000``
+    and reported ``count = len(rows)``, so a 2.3M-row backlog read out
+    as ``count = 1000`` and operators saw "small enough to ignore". Now
+    the count comes from ``COUNT(*)`` (true backlog size) and the
+    sample stays bounded.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=_STAGING_STUCK_DAYS)).isoformat().replace("+00:00", "Z")
     try:
-        rows = db.execute(
-            "SELECT id, kind, value FROM entity_signals WHERE pushed_to_neo4j = 0 AND modified_at < ? LIMIT 1000",
+        total_count_row = db.execute(
+            "SELECT COUNT(*) FROM entity_signals WHERE pushed_to_neo4j = 0 AND modified_at < ?",
             (cutoff,),
-        ).fetchall()
+        ).fetchone()
     except sqlite3.OperationalError:
         # entity_signals table missing — pre-Wave-1 deploy; skip.
         return None
-    if not rows:
+    total_count = int(total_count_row[0]) if total_count_row else 0
+    if total_count <= 0:
         return None
-    sample = tuple(f"id={r[0]} kind={r[1]} value={r[2]}" for r in rows[:_MAX_SAMPLE])
+    # Sample stays bounded by _MAX_SAMPLE — the preflight log line only
+    # surfaces the first few stuck rows; the count above is the truth.
+    sample_rows = db.execute(
+        "SELECT id, kind, value FROM entity_signals WHERE pushed_to_neo4j = 0 AND modified_at < ? LIMIT ?",
+        (cutoff, _MAX_SAMPLE),
+    ).fetchall()
+    sample = tuple(f"id={r[0]} kind={r[1]} value={r[2]}" for r in sample_rows)
     return IntegrityGap(
         invariant="entity-signals-staging-not-stuck",
         severity="warn",
-        count=len(rows),
+        count=total_count,
         sample=sample,
         remediation=(
             "fix: verify Neo4j is reachable and the entity-graph drain job is "
             "running; "
             "next: re-run kairix worker preflight after the drain catches up; "
-            "run: kairix store crawl"
+            "run: kairix curator drain --max-batches 10"
         ),
     )
 

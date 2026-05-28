@@ -178,6 +178,10 @@ python3 "${SCRIPT_DIR}/check_f65_connector_metadata.py" || overall=1
 # F66 — every connector + tick-driven component declares per_tick_max_items + disk_watermark (ADR-020)
 python3 "${SCRIPT_DIR}/check_f66_connector_tick_budget.py" || overall=1
 
+# F67 — every staging table with a pushed_to_<sink> column must have a drain code path
+#        (GH #334 — entity_signals had 2.3M rows un-pushed because no code flipped the flag)
+python3 "${SCRIPT_DIR}/check_f67_staging_drain_symmetry.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1

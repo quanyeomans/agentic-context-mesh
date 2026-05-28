@@ -37,6 +37,10 @@ SCHEMA_VERSION = "3"
 _TABLE_CONTENT_VECTORS = "content_vectors"
 _TABLE_DOCUMENTS_MEDIA = "documents_media"
 _TABLE_BRONZE_RECORDS = "bronze_records"
+# GH #334 — entity_signals constant referenced by the migration path
+# (column-add + the integrity-required-tables list) to satisfy F17's
+# "no string literal duplicated ≥3 times" cap.
+_TABLE_ENTITY_SIGNALS = "entity_signals"
 
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
@@ -149,7 +153,9 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             confidence REAL NOT NULL,
             sensitivity TEXT NOT NULL,
             pushed_to_neo4j INTEGER DEFAULT 0,
-            pushed_at TEXT
+            pushed_at TEXT,
+            last_push_error TEXT,
+            push_attempt_count INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS kairix_meta (
@@ -234,7 +240,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "connector_cursors",
         "connector_deadletter",
         _TABLE_BRONZE_RECORDS,
-        "entity_signals",
+        _TABLE_ENTITY_SIGNALS,
         # Topology v2 Wave A — 12 net-new tables. Existence is unconditional;
         # population is gated by the `topology_v2_schema` feature flag.
         "topology_connectors",
@@ -374,7 +380,9 @@ CREATE TABLE IF NOT EXISTS entity_signals (
     confidence REAL NOT NULL,
     sensitivity TEXT NOT NULL,
     pushed_to_neo4j INTEGER DEFAULT 0,
-    pushed_at TEXT
+    pushed_at TEXT,
+    last_push_error TEXT,
+    push_attempt_count INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS content_vectors_pruned (
@@ -615,6 +623,16 @@ def migrate(db: sqlite3.Connection) -> None:
     # Existing rows get NULL until they're re-written.
     if _TABLE_BRONZE_RECORDS in tables:
         _add_column_if_missing(db, _TABLE_BRONZE_RECORDS, "content_hash", "TEXT")
+
+    # GH #334 — Neo4j entity-graph drain. Legacy entity_signals tables
+    # gain two columns that the drain tick writes: ``last_push_error``
+    # (per-row failure message) + ``push_attempt_count`` (bounded retry
+    # counter; the drain stops re-trying past 3 attempts). Both default
+    # to NULL / 0 so unpushed rows on a legacy DB look "never attempted"
+    # to the drain on first encounter — which is the correct semantic.
+    if _TABLE_ENTITY_SIGNALS in tables:
+        _add_column_if_missing(db, _TABLE_ENTITY_SIGNALS, "last_push_error", "TEXT")
+        _add_column_if_missing(db, _TABLE_ENTITY_SIGNALS, "push_attempt_count", "INTEGER DEFAULT 0")
 
     # Topology v2 (Wave A): additional tables + columns. Pure-additive;
     # write paths are gated by the `topology_v2_schema` feature flag.

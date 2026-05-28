@@ -353,6 +353,38 @@ def test_entity_signals_recent_unpushed_not_flagged() -> None:
     assert gap is None, f"recent unpushed signals must not flag; got {gap!r}"
 
 
+def test_entity_signals_count_reports_true_backlog_not_select_limit() -> None:
+    """GH #334 — the gap's count is COUNT(*), not the (capped) SELECT row count.
+
+    Before the fix the gap reported ``count = len(rows)`` where the
+    SELECT carried ``LIMIT 1000``, so a 2.3M-row backlog read out as
+    ``count=1000``. This test stages 1500 stuck rows and asserts the
+    count truly reflects 1500 — not the previous 1000 cap.
+    """
+    db = _make_db()
+    try:
+        old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat().replace("+00:00", "Z")
+        for i in range(1500):
+            db.execute(
+                "INSERT INTO entity_signals "
+                "(kind, value, source_uri, modified_at, confidence, sensitivity, pushed_to_neo4j) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0)",
+                ("person", f"stuck-{i}", f"test://example/{i}", old, 0.9, "internal"),
+            )
+        db.commit()
+        report = check_integrity(db)
+    finally:
+        db.close()
+
+    gap = _gap_by_invariant(report, "entity-signals-staging-not-stuck")
+    assert gap is not None, f"expected staging-not-stuck gap; got {report.gaps!r}"
+    assert gap.count == 1500, (
+        f"GH #334 — expected COUNT(*) to report true backlog of 1500, "
+        f"got {gap.count}. The sample stays bounded (was 1000 cap; now MAX_SAMPLE) but "
+        f"the count is the source of truth."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Remediation contract (F21) — every gap remediation carries one marker.
 # ---------------------------------------------------------------------------

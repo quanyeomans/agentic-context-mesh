@@ -579,3 +579,35 @@ def build_connector_pipeline(
         dead_letter=DeadLetterStore(db),
         disk_free_resolver=disk_free_resolver,
     )
+
+
+# ---------------------------------------------------------------------------
+# Neo4j entity-graph drain factory — GH #334, F46/F47 sanctioned entry point
+# for BDD step impls + integration tests exercising the Curator-coupling
+# boundary that drains ``entity_signals`` into Neo4j.
+# ---------------------------------------------------------------------------
+
+
+def build_neo4j_drainer(
+    *,
+    db: Any,
+    repo: Any,
+    batch_size: int | None = None,
+) -> Any:
+    """Construct a :class:`kairix.core.curator.drain.Neo4jDrainer`.
+
+    The drain wraps the SQLite ``entity_signals`` staging table and the
+    Neo4j graph backend. Production callers pass a writable sqlite
+    Connection + a :class:`kairix.knowledge.graph.repository.Neo4jGraphRepository`;
+    tests pass an in-memory DB + a Fake repo (see
+    ``tests/fakes.py::FakeDrainGraphRepository``).
+
+    ``batch_size`` defaults to the module's
+    :data:`~kairix.core.curator.drain.DEFAULT_DRAIN_BATCH_SIZE` (500).
+    F47-sanctioned entry point so integration tests can compose the
+    drain without importing :class:`Neo4jDrainer` directly.
+    """
+    from kairix.core.curator.drain import DEFAULT_DRAIN_BATCH_SIZE, Neo4jDrainer
+
+    effective_batch = batch_size if batch_size is not None else DEFAULT_DRAIN_BATCH_SIZE
+    return Neo4jDrainer(db, repo, batch_size=effective_batch)

@@ -3240,6 +3240,55 @@ class FakeEntityGraphSink:
         return len(batch)
 
 
+class FakeDrainGraphRepository:
+    """GH #334 — Protocol-compliant fake for the Neo4j drain.
+
+    Satisfies :class:`kairix.core.curator.protocols.DrainGraphRepository`.
+    Records every ``cypher`` call in ``cypher_calls`` so tests can
+    assert which MERGE statements landed and with what parameters.
+
+    Knobs:
+      * ``available`` — controls the ``available`` property; default True.
+      * ``raise_on_value`` — when set to a string, the next ``cypher``
+        call whose ``params["value"]`` equals this string raises a
+        ``RuntimeError``. Used by the partial-failure scenarios to
+        prove the drain marks one row as failed and continues.
+      * ``raise_always`` — when True, every ``cypher`` call raises a
+        ``RuntimeError`` until cleared. Used to prove total-outage
+        handling.
+    """
+
+    def __init__(
+        self,
+        *,
+        available: bool = True,
+        raise_on_value: str | None = None,
+        raise_always: bool = False,
+    ) -> None:
+        self._available = available
+        self.raise_on_value: str | None = raise_on_value
+        self.raise_always: bool = raise_always
+        # Each entry: (cypher_query, params_dict)
+        self.cypher_calls: list[tuple[str, dict[str, Any]]] = []
+
+    @property
+    def available(self) -> bool:
+        return self._available
+
+    def set_available(self, value: bool) -> None:
+        """Test helper — flip availability mid-scenario for recovery proofs."""
+        self._available = value
+
+    def cypher(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        recorded_params: dict[str, Any] = dict(params or {})
+        self.cypher_calls.append((query, recorded_params))
+        if self.raise_always:
+            raise RuntimeError("FakeDrainGraphRepository: raise_always set")
+        if self.raise_on_value is not None and recorded_params.get("value") == self.raise_on_value:
+            raise RuntimeError(f"FakeDrainGraphRepository: scripted failure on value={self.raise_on_value!r}")
+        return []
+
+
 class FakeChunkWriter:
     """Capture-only :class:`kairix.core.connectors.pipeline.ChunkWriter`.
 
