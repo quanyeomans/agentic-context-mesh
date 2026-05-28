@@ -145,22 +145,16 @@ def _paragraph_to_markdown(style_name: str, text: str) -> str:
 
 
 def _table_row_to_markdown(cells: list[str]) -> str:
-    """Render one table row as a pipe-delimited markdown row.
-
-    Cell text is stripped + newline-collapsed so the rendered row
-    is one physical line. Empty cells render as the empty string so
-    column alignment stays consistent.
+    """Cells are stripped + newline-collapsed so each rendered row is one
+    physical line; empty cells stay empty so column alignment is preserved.
     """
     rendered = [cell.strip().replace("\n", " ") for cell in cells]
     return "| " + " | ".join(rendered) + " |"
 
 
 def _table_to_markdown(rows: list[list[str]]) -> str:
-    """Render a docx table grid as a pipe-syntax markdown table.
-
-    First row is treated as the header; a ``| --- |`` separator row
-    is injected between header and body so the result is a valid
-    GitHub-Flavored Markdown table.
+    """First row is the header; a ``| --- |`` separator row is injected
+    so the result is valid GitHub-Flavored Markdown.
     """
     if not rows:
         return ""

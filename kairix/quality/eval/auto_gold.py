@@ -216,7 +216,6 @@ def generate_template_queries(profile: CorpusProfile, n: int = 50) -> list[dict[
 
 
 def build_suite(queries: list[dict[str, Any]], output_path: str) -> None:
-    """Write queries as a kairix benchmark suite YAML file."""
     suite = {
         "meta": {
             "name": "auto-generated",

@@ -23,9 +23,8 @@ mechanically; F41 requires ``py.typed`` on every plugin subdirectory;
 F42 enforces frozen-dataclass returns at the boundary.
 
 See ``docs/architecture/connector-ingestion-architecture.md`` (§2 + §8)
-for the full architectural decision record and the
-kairix-pro-platform ADR-019 entry-points discovery pattern this package
-implements.
+for the full architectural decision record and the entry-points
+discovery pattern this package implements.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """F30 outcome test — ``kairix warm`` subprocess surface.
 
-Wave 0 paydown (kairix-pro-platform#59), Group E. Closes the F30 gap on
+Wave 0 paydown (Group E). Closes the F30 gap on
 ``kairix/platform/warm/cli.py``: existing unit + BDD tests drive
 ``run_warm()`` in-process with injected fakes; this test adds the
 F30-required subprocess outcome assertion against the real warm CLI

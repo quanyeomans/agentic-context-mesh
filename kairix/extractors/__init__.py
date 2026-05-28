@@ -6,10 +6,9 @@ their distribution's ``pyproject.toml``. Core code never imports a
 concrete extractor — only the ``Extractor`` Protocol defined here.
 
 See ``docs/architecture/connector-ingestion-architecture.md`` § 2 + § 8
-for the architectural decision record and ``kairix-pro-platform`` ADR-019
-for the plugin-boundary discipline (PEP 561 marker, frozen dataclasses
-at the boundary, mypy-strict per plugin). The F34-F37 / F40-F43 fitness
-functions enforce this split.
+for the architectural decision record and the plugin-boundary discipline
+(PEP 561 marker, frozen dataclasses at the boundary, mypy-strict per
+plugin). The F34-F37 / F40-F43 fitness functions enforce this split.
 
 Public surface (Wave 1):
 

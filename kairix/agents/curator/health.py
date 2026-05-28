@@ -224,7 +224,6 @@ def run_health_check(
 
 
 def _format_issue_section(heading: str, issues: list[HealthIssue]) -> list[str]:
-    """Render a single issue section as Markdown lines."""
     lines = ["", heading, ""]
     if issues:
         for issue in issues:
@@ -235,7 +234,6 @@ def _format_issue_section(heading: str, issues: list[HealthIssue]) -> list[str]:
 
 
 def _format_entity_counts(report: HealthReport) -> list[str]:
-    """Render the entity-count table (or empty-state line)."""
     if not report.entities_by_type:
         return ["_No entities found._"]
     lines = ["| Type | Count |", "|------|-------|"]
@@ -245,7 +243,6 @@ def _format_entity_counts(report: HealthReport) -> list[str]:
 
 
 def _format_neo4j_section(report: HealthReport) -> list[str]:
-    """Render the Neo4j availability + node-count line."""
     if not report.neo4j_available:
         return ["⚠ Unavailable."]
     if report.neo4j_node_counts:
@@ -255,7 +252,6 @@ def _format_neo4j_section(report: HealthReport) -> list[str]:
 
 
 def _format_status_footer(report: HealthReport) -> list[str]:
-    """Render the trailing status line; lists the failure dimensions when not OK."""
     if report.ok:
         return ["**Status: ✅ HEALTHY** — no issues found"]
     parts: list[str] = []
@@ -301,8 +297,8 @@ def format_report_json(report: HealthReport) -> str:
     """Format a HealthReport as indented JSON.
 
     ``dataclasses.asdict`` strips ``@property`` descriptors, so the
-    operator-visible booleans (``ok``, ``issue_count``) are added back
-    in explicitly — operators rely on them for green/red gating.
+    operator-visible booleans (``ok``, ``issue_count``) are restored
+    explicitly — operators rely on them for green/red gating.
     """
     payload = dataclasses.asdict(report)
     payload["ok"] = report.ok

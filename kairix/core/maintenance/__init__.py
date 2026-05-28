@@ -8,9 +8,9 @@ Public surface:
 * :class:`MaintenanceSchedulerDeps` — injection seam for usearch +
   fts-rebuild boundaries; production callers omit it.
 
-See ``kairix-pro-platform/docs/features/KFEAT-021-automated-orphan-cleanup/BRIEF.md``
-for the design rationale (Phase 1 — proactive cleanup behind the
-``maintenance_loop`` feature flag).
+Design rationale: Phase 1 ships proactive orphan cleanup behind the
+``maintenance_loop`` feature flag; subsequent phases expand the surface
+to vector-index compaction and FTS rebuilds.
 """
 
 from __future__ import annotations

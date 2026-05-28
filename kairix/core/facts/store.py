@@ -263,11 +263,10 @@ class SQLiteFactStore:
         Returns ``[]`` if the store is empty, the schema has not yet
         been initialised, or the query produces no matches.
 
-        Week-2 enhancement (TODO): when ``self._embedder`` is wired,
-        also run a vector search against ``self._vector_index_path``
-        and fuse via Reciprocal Rank Fusion. Plumbed for now via the
-        constructor; the fusion path is intentionally deferred per
-        the Plan B-parity Week-1 scope.
+        BM25-only today. Vector-search + RRF fusion is tracked in
+        https://github.com/three-cubes/kairix/issues/340; the
+        ``_embedder`` + ``_vector_index_path`` are plumbed through the
+        constructor so wiring the fused path is a localised change.
         """
         if not query or not query.strip():
             return []

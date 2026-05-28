@@ -432,12 +432,7 @@ class LLMJudge:
 
 
 # ---------------------------------------------------------------------------
-# Legacy free-function shims
-#
-# DEPRECATED: ``judge_batch`` and ``calibrate`` exist only for the legacy paths
-# in generate.py / gold_builder.py that haven't been refactored to construct
-# LLMJudge directly. New code should use the class. These shims are removed
-# once the legacy callers drop.
+# Free-function shims — new code should construct ``LLMJudge`` directly.
 # ---------------------------------------------------------------------------
 
 

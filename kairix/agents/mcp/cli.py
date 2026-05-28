@@ -251,7 +251,7 @@ def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> No
         choices=["stdio", "http", "sse"],
         default="stdio",
         help="Transport: stdio (default, for Claude Desktop), http (streamable "
-        "HTTP at /mcp + legacy /sse), or sse (deprecated alias for http)",
+        "HTTP at /mcp + legacy /sse), or sse (alias for http; see module docstring)",
     )
     serve_p.add_argument(
         "--no-sse",

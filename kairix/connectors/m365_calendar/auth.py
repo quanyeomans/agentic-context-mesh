@@ -1,24 +1,6 @@
-"""Local OAuth2 client-credentials helper for the M365 calendar connector.
+"""OAuth2 client-credentials helper for the M365 calendar connector.
 
-This is a local placeholder. KP-2 (``m365_email_headers`` connector,
-parallel-sibling dispatch) lands the canonical helper at
-``kairix.transport.auth.oauth2_client_creds``. Because the two
-worktrees fork from the same base, KP-3's worktree cannot import the
-sibling's helper at landing time. The local placeholder carries the
-same surface so the connector can wire through ``OAuth2ClientCredsAuth``
-today; when KP-2 lands, this module is swapped for a one-line re-export
-from the canonical location.
-
-TODO(KP-2-followup): once :mod:`kairix.transport.auth.oauth2_client_creds`
-is on ``main``, replace this module with::
-
-    from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
-
-…and delete the in-file token-cache implementation below. The cross-PR
-note in KP-3's commit body documents this swap as the explicit follow-up
-once KP-2 cherry-picks land.
-
-Surface contract (matches KP-2's planned helper):
+Surface:
 
 * :class:`OAuth2ClientCredsAuth` — :class:`httpx.Auth`-compatible
   callable that exchanges the configured tenant + client id + client
@@ -28,6 +10,13 @@ Surface contract (matches KP-2's planned helper):
   header to every outgoing request.
 * :class:`OAuth2Config` — frozen dataclass carrying the three secret
   values and the requested scope.
+
+A second client-credentials helper lives at
+:mod:`kairix.transport.auth.oauth2_client_creds` with a different
+surface shape (no ``Config`` dataclass, exposes ``get_token()`` /
+``invalidate()`` instead of the ``httpx.Auth`` interface). The two
+should be unified into one shared helper — see the matching tracking
+issue.
 
 The helper does NOT read environment variables — all three secret
 values are passed in at construction time from the connector's

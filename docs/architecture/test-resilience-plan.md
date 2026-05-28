@@ -190,7 +190,7 @@ Each commit follows safe-commit discipline. Sabotage proofs executed and recorde
 ## 7. Non-goals (explicitly excluded)
 
 - **Unit test additions.** Unit layer is already at 196 marker-decorated tests; the gap is upstream of unit. Excluded.
-- **F30 outcome test paydown.** Real gap (only 1 file today) but separate paydown stream — `kairix-pro-platform#59` Wave 0 owns it.
+- **F30 outcome test paydown.** Real gap (only 1 file today) but separate paydown stream owned by Wave 0.
 - **Backfill F43 plugin contract tests** for plugins missing them. Tracked separately via the F43 baseline file.
 - **Migrating `tests/test_*.py` (14 root-level files) into `tests/unit/`.** One-day cleanup that's orthogonal to coverage resilience.
 - **Mutation testing tooling** (e.g. mutmut, cosmic-ray). The sabotage discipline is the manual proxy; introducing automated mutation testing has its own cost/noise tradeoffs and is a separate decision.

@@ -1,8 +1,7 @@
 """F33: ``# shellcheck disable=<rule>`` directives require a rationale.
 
 Shell counterpart to F3 (which covers Python ``# noqa``, ``# type: ignore``,
-``# nosec``, ``# NOSONAR``, and ``# pragma: no cover``). Cross-pollinated
-from tc-agent-zone's ``shellcheck_disable_with_reason.py``.
+``# nosec``, ``# NOSONAR``, and ``# pragma: no cover``).
 
 Why this rule exists:
 

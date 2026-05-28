@@ -2,7 +2,7 @@
 
 > **Status**: proposed (awaiting implementation). Establishes feature flags as a first-class architectural component for every cutover that swaps production behaviour — connector swaps, ranker swaps, schema migrations, ingest-pipeline changes. Recurring need; one-off flags per cutover is the antipattern.
 >
-> Companion to: `connector-ingestion-architecture.md` (Wave 5+ uses this pattern), `test-discipline-hardening.md` (the both-branch-tested requirement extends the F46/F47/F48 principles), kairix-pro-platform ADRs 017/018/019/020.
+> Companion to: `connector-ingestion-architecture.md` (Wave 5+ uses this pattern), `test-discipline-hardening.md` (the both-branch-tested requirement extends the F46/F47/F48 principles).
 
 ## 1. Why this exists
 
@@ -90,7 +90,7 @@ class FeatureFlag:
     introduced_in: str                 # version, e.g. "v2026.5.23"
     target_retire_in: str              # version; F51 fires past this
     owner: str                         # team/squad; "connector-framework" or similar
-    related_spec: str | None = None    # path to spec doc or kairix-pro-platform issue
+    related_spec: str | None = None    # path to spec doc or tracking issue
 ```
 
 The registry is a single Python dict in `registry.py`:
@@ -439,5 +439,5 @@ Estimated wall-clock from PR-1 to PR-7 dispatch: 3–4 days with the established
 - `docs/architecture/connector-ingestion-architecture.md` — wave plan that consumes this pattern
 - `docs/architecture/test-discipline-hardening.md` — F45–F50 + the composition / real-path / new-capability principles that F54 extends
 - `docs/architecture/fitness-functions.md` — F-rule canon; F51–F54 land here in PR-3
-- kairix-pro-platform ADR-017 — per-engagement-container scope; one flag set per container; LaunchDarkly-style multi-tenant rollout doesn't apply
+- Two-scope architecture: per-engagement-container scope means one flag set per container; LaunchDarkly-style multi-tenant rollout doesn't apply
 - `feedback_deployed_config_path` memory — config-layering pattern this resolver reuses

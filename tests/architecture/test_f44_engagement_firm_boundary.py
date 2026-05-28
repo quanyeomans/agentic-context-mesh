@@ -1,9 +1,8 @@
 """Unit tests for F44 (``scripts/checks/check_f44_engagement_firm_boundary.py``).
 
 F44 forbids engagement-scope code (``kairix/**``) from importing firm-scope
-Postgres clients. The two-scope architecture (kairix-pro-platform ADR-017
-+ ADR-018) keeps cross-engagement state in a separate codebase
-(``kairix-firm/``), Postgres-only. Engagement code that imports
+Postgres clients. The two-scope architecture keeps cross-engagement state
+in a separate Postgres-only codebase; engagement code that imports
 ``psycopg`` / ``psycopg2`` / ``asyncpg`` / ``pg8000`` / ``aiopg`` has
 reached across the scope boundary.
 

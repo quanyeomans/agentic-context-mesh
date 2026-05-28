@@ -11,8 +11,7 @@ provider-plugin-architecture.md, mirrored for connectors by F35), this
 module ONLY imports from:
 
 * :mod:`httpx` (third-party transport)
-* :mod:`kairix.connectors.m365_calendar.auth` (the local OAuth2
-  placeholder — see that module's TODO for the post-KP-2 swap path)
+* :mod:`kairix.connectors.m365_calendar.auth` (the local OAuth2 helper)
 
 It does NOT import from ``kairix.transport``, ``kairix.providers``,
 ``kairix.core.connectors``, or any sibling ``kairix.connectors.*``.

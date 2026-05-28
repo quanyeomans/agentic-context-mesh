@@ -3,7 +3,6 @@
 Closes the loophole that per-file shrink-only baselines leave open: a
 brand-new file under ``kairix/**`` can land with arbitrary F-rule
 violations because the baseline doesn't yet know the file exists.
-Identified by the 2026-05-22 tc-agent-zone cross-repo audit.
 
 This check fires at pre-commit + CI Stage 0. For every file added in the
 current commit (or in HEAD's diff against the previous commit, depending

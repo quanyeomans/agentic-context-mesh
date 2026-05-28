@@ -278,9 +278,9 @@ class M365EmailHeadersConnector:
         ``None`` triggers a full sync from the seed delta URL. Each
         ``GraphMessage`` becomes one ``created`` :class:`ChangeEvent`;
         Graph itself handles the modified / deleted distinction in
-        future syncs (the delta endpoint returns ``@removed`` entries
-        for deletes — left as a forward-only TODO per ADR-004's
-        "headers only" minimal scope).
+        future syncs. Connector scope is intentionally headers-only —
+        the delta endpoint's ``@removed`` deletion stream is not yet
+        propagated.
         """
         events: list[ChangeEvent] = []
         for message in self._graph.iter_messages(start_url=cursor):

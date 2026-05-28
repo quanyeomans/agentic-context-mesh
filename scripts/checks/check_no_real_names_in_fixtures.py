@@ -2,8 +2,7 @@
 BDD scenarios, sample JSONL corpora, reference-library content, or
 user-facing docs.
 
-Cross-pollinated from tc-agent-zone's ``no_real_names_in_fixtures.py``.
-This is the mechanical version of the ``feedback_no_confidential_in_public_artefacts``
+The mechanical version of the ``feedback_no_confidential_in_public_artefacts``
 memory: public repo artefacts must use generic placeholders
 (``agent-alpha``, ``Acme``, ``your-team``), not identifiers tied to a
 specific human or client.

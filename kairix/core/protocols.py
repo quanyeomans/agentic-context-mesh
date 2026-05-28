@@ -787,8 +787,8 @@ class CorpusEmbedder(Protocol):
 # Connector framework — Wave 1 SC-1 surface.
 #
 # See ``docs/architecture/connector-ingestion-architecture.md`` §2-§4 for
-# the architecture; ADRs 017-020 in kairix-pro-platform for the
-# two-scope / storage-tiering / language-strategy context.
+# the architecture and the two-scope / storage-tiering / language-strategy
+# context that drives the layer split.
 #
 # Three-layer split (locked by F26 / F34 / F35):
 #

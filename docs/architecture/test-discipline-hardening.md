@@ -462,5 +462,5 @@ Append to the Engineering practices table:
 - `tests/integration/test_vec_index_lifecycle.py` — current canonical factory-composition shape
 - `tests/fakes.py` — canonical fakes (Protocol-compliant, no monkey-patching)
 - `.architecture/baseline/f30-operator-outcome-tests-files.txt` — the 35 entries W0-8 pays down to zero
-- kairix-pro-platform repo: ADR-017 (two-scope architecture), ADR-019 (language strategy)
-- GitHub issue: [three-cubes/kairix-pro-platform#59](https://github.com/three-cubes/kairix-pro-platform/issues/59)
+- Architectural context: the two-scope architecture (engagement vs firm)
+  and the Python-only language strategy that drive this discipline

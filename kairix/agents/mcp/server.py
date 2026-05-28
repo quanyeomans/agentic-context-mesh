@@ -607,11 +607,10 @@ def tool_features_status(
     *,
     read_db_path: Callable[[], Path] = _default_topology_v2_db_path,
 ) -> dict[str, Any]:
-    """Return the same JSON envelope as ``kairix features status --json``.
-
-    Per F53 + the feature-flag-architecture spec §3.5, agents introspect
+    """Per F53 + the feature-flag-architecture spec §3.5, agents introspect
     the live flag state through this tool. Thin adapter — delegates to
-    :func:`kairix.core.features.status` so CLI and MCP stay aligned.
+    :func:`kairix.core.features.status` so CLI and MCP stay aligned and
+    the returned envelope matches ``kairix features status --json``.
 
     ``topology_v2=True`` extends the envelope with a ``topology_v2``
     key carrying the Wave D diagnostics (declared cc_pairs +
@@ -722,7 +721,6 @@ def _operator_only_envelope(
     expected_runtime_seconds: int,
     see_also: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Canonical envelope shape for capabilities that can't be safely agent-invoked."""
     return {
         "error": "OperatorOnlyCapability",
         "capability": capability,
@@ -940,8 +938,8 @@ CAPABILITIES_TOOL_NAME = "capabilities"
 # referenced 3+ times (F17 threshold).
 CONTRADICT_TOOL_NAME = "contradict"
 
-# Capability category labels — used by tool_capabilities and the usage-guide
-# capabilities table. F25 cross-checks these for sync.
+# Capability category labels. F25 cross-checks the set against the
+# usage-guide capabilities table for sync.
 CAP_CATEGORY_RETRIEVAL = "retrieval"
 CAP_CATEGORY_SYNTHESIS = "synthesis"
 CAP_CATEGORY_DIAGNOSTIC = "diagnostic"
@@ -1611,12 +1609,13 @@ def build_server(
     Args:
         host: Bind address for SSE transport.
         port: Port for SSE transport.
-        readiness_check: Optional gate used by long-running HTTP deployments.
-                         If it returns False, retrieval tools return a
-                         canonical retryable cold-start envelope instead of
-                         executing a lower-quality or partially-initialised path.
-        mark_ready: Optional callback used by the warm tool to open the HTTP
-                    readiness gate after a successful manual warm-up.
+        readiness_check: Optional cold-start gate. When supplied and it
+                         returns False, retrieval tools return a canonical
+                         retryable envelope instead of executing a lower-
+                         quality or partially-initialised path.
+        mark_ready: Optional callback to open the readiness gate after a
+                    successful manual warm-up. Paired with ``readiness_check``
+                    in long-running HTTP deployments.
 
     Raises ImportError when the ``mcp`` package is not installed.
     Install via: pip install kairix[agents]

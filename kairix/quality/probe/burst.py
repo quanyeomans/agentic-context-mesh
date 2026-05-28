@@ -189,11 +189,10 @@ def _build_timed_tasks(
     fn: Callable[[SampledQuery], Any],
     run_start: float,
 ) -> list[Callable[[], tuple[Any, float]]]:
-    """Wrap each sampled query as a callable that returns (result, completion_offset_s).
-
-    The completion timestamp is captured INSIDE the worker, in monotonic time,
+    """The completion timestamp is captured INSIDE the worker in monotonic time,
     relative to the shared ``run_start`` perf_counter — so bucket assignment
-    is wall-time accurate regardless of as_completed ordering.
+    stays wall-time accurate regardless of as_completed ordering. Each wrapped
+    callable returns ``(result, completion_offset_s)``.
     """
 
     def _make(sq: SampledQuery) -> Callable[[], tuple[Any, float]]:

@@ -903,11 +903,9 @@ def sensitivity_from_visibility(visibility: str) -> Sensitivity:
 
 
 def f39_tier_from_visibility(visibility: str) -> F39Tier:
-    """Map GitHub visibility to the *F39Tier* literal set used by HierarchyNode.
-
-    Distinct from :func:`sensitivity_from_visibility` because HierarchyNode
-    uses the richer F39Tier vocabulary (confidential/restricted) rather than
-    the legacy Sensitivity literal (client-confidential/personal).
+    """Distinct from :func:`sensitivity_from_visibility` because HierarchyNode
+    uses the richer F39Tier vocabulary (confidential / restricted) rather
+    than the Sensitivity literal (client-confidential / personal).
     """
     if visibility == "public":
         return "public"

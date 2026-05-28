@@ -1,6 +1,6 @@
 """F30 outcome test — ``kairix onboard`` subprocess surface.
 
-Wave 0 paydown (kairix-pro-platform#59), Group E. Closes the F30 gap on
+Wave 0 paydown (Group E). Closes the F30 gap on
 ``kairix/platform/onboard/cli.py``: existing unit tests in
 ``tests/onboard/test_cli.py`` drive ``main()`` in-process via the
 ``pkg_root`` / ``document_root_override_fn`` DI seams; this test adds

@@ -138,7 +138,7 @@ This candidate is "do nothing structural; harden the existing ~1250 LoC framewor
 | #318 — orphan bronze | `reap_orphans()` (`bronze.py:95-119`) + maintenance scheduler stage | O(N) directory scan; fine to ~10⁵ files per source. |
 | #319 — test discipline gap | F30 baseline at zero; F46/F47 lock composition; F48 enforces E2E | Connector-specific contract assertions vary in rigour. |
 | #321 — single-txn batches | `ConnectorPipeline._process_batch` chunked-commit (`pipeline.py:209-240`) | `chunk_size` uniform; heavy-tailed extractors might want adaptive chunking. |
-| #320 — cold-start opaque error | Warm in daemon thread; ColdStartMiddleware returns structured 503 during warm | Connection-refused window before uvicorn binds (~1s) needs client-side retry per the downstream tc-agent-zone PR. |
+| #320 — cold-start opaque error | Warm in daemon thread; ColdStartMiddleware returns structured 503 during warm | Connection-refused window before uvicorn binds (~1s) needs client-side retry on the consumer. |
 
 **Library-by-library cost/benefit (against the homegrown baseline):**
 

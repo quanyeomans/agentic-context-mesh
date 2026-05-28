@@ -97,11 +97,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def format_table(entries: tuple[FlagStatus, ...]) -> str:
-    """Render the status entries as a fixed-width table.
-
-    Empty registry → operator-friendly "no flags registered" line so
-    the surface degrades cleanly during the PR-2 → PR-6 window when
-    the registry is empty.
+    """Empty registry → operator-friendly "no flags registered" line so
+    the surface degrades cleanly when no flags are registered.
     """
     if not entries:
         return "No feature flags registered."
@@ -121,7 +118,7 @@ def format_table(entries: tuple[FlagStatus, ...]) -> str:
 
 
 def format_json_envelope(entries: tuple[FlagStatus, ...]) -> str:
-    """Render the status entries as the JSON envelope shape (§3.5)."""
+    """``{"flags": [FlagStatus, ...]}`` — see feature-flag-architecture.md §3.5."""
     payload = {"flags": [asdict(entry) for entry in entries]}
     return json.dumps(payload, indent=2, sort_keys=True)
 

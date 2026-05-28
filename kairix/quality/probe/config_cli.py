@@ -363,7 +363,6 @@ def _render_perf_human(report: PerfReport) -> str:
 
 
 def _emit_perf_report(report: PerfReport, *, as_json: bool, output_path: str | None) -> None:
-    """Render a :class:`PerfReport` as JSON or human text to stdout / file."""
     if as_json:
         payload = json.dumps(report.to_dict(), indent=2, sort_keys=False)
     else:

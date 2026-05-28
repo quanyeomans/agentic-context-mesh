@@ -7,8 +7,7 @@ between modules.
 
 Production plugins ship under ``kairix/connectors/<name>/`` and expose
 a ``make_connector`` factory function registered via the
-``kairix.connectors`` entry-point group (see ``pyproject.toml`` +
-kairix-pro-platform ADR-019).
+``kairix.connectors`` entry-point group (see ``pyproject.toml``).
 
 The canonical definitions live in ``kairix.core.protocols``; this
 module is the published-wheel-facing import surface so plugin code

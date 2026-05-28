@@ -4,7 +4,6 @@
 # Closes the loophole that per-file shrink-only baselines leave open:
 # a brand-new file under kairix/** can land with arbitrary F-rule
 # violations because the baseline doesn't yet know the file exists.
-# Identified by the 2026-05-22 tc-agent-zone cross-repo audit.
 #
 # Default mode is staged-diff (pre-commit hook); CI invokes with
 # --mode=full-tree to compare against the previous tag.

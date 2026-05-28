@@ -298,7 +298,6 @@ def _slide_to_page(slide: _Slide) -> Page:
 
 
 def _slide_to_markdown(slide: _Slide) -> str:
-    """Render one slide as markdown — header + body + notes blockquote."""
     header_title = slide.title if slide.title else "(untitled)"
     parts = [f"## Slide {slide.index + 1}: {header_title}"]
     if slide.body:

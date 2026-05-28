@@ -1,10 +1,8 @@
 # SonarCloud API usage — auth, status filters, paydown queries
 
 Operational reference for talking to SonarCloud's REST API from scripts,
-audits, and dashboards. Cross-pollinated from tc-agent-zone's
-`feedback_sonar_api_status_filter.md` (saved 2026-05-22 cross-repo
-audit) and kept in sync with kairix's existing SonarCloud workflow at
-`.github/workflows/sonar-triage.yml`.
+audits, and dashboards. Kept in sync with kairix's existing SonarCloud
+workflow at `.github/workflows/sonar-triage.yml`.
 
 ## Authentication
 
@@ -152,7 +150,5 @@ Useful subset for kairix audits:
 ## References
 
 - SonarCloud API docs: https://sonarcloud.io/web_api
-- Cross-repo audit (2026-05-22): tc-agent-zone's
-  `feedback_sonar_api_status_filter.md`
 - `sonar-project.properties` for the kairix analysis configuration
 - F14 (sonar-ignore-rationale) for the discipline around ignore entries

@@ -219,7 +219,6 @@ def _read_entity_files(entities_dir: Path, status: dict[str, Any]) -> None:
 
 
 def _format_status_text(status: dict[str, Any]) -> str:
-    """Format status dict as human-readable text."""
     collections = status[_KEY_COLLECTIONS]
     last_modified = status[_KEY_LAST_MODIFIED]
     lines = [

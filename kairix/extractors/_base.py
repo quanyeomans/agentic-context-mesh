@@ -3,8 +3,7 @@ import from ``kairix.extractors`` rather than reaching into core.
 
 Production plugins ship under ``kairix/extractors/<name>/`` and expose a
 ``make_extractor`` factory function registered via the
-``kairix.extractors`` entry-point group (see ``pyproject.toml`` and
-``kairix-pro-platform`` ADR-019).
+``kairix.extractors`` entry-point group (see ``pyproject.toml``).
 
 The canonical definitions live in ``kairix.core.protocols``; this module
 is the published-wheel-facing import surface so plugin code doesn't reach

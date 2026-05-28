@@ -1,8 +1,6 @@
 """F44: engagement-scope code may not import firm-scope storage clients.
 
-The two-scope architecture (kairix-pro-platform
-``docs/ADRs/ADR-017-two-scope-architecture.md`` +
-``ADR-018-storage-tiering.md``) splits the world in two:
+The two-scope architecture splits the world in two:
 
   * **Engagement scope** — single-engagement state. SQLite + Neo4j +
     filesystem. Lives in this repo, under ``kairix/``.
@@ -41,8 +39,7 @@ today.
 Today: zero firm-scope code exists in ``kairix/``; the denylist
 matches nothing. F44 is preventive — it locks the boundary so the
 first attempt to ``import psycopg`` from engagement code is blocked
-at pre-commit. Closes the boundary kairix-pro-platform ADR-017 names
-architecturally.
+at pre-commit. Closes the boundary the two-scope architecture names.
 """
 
 from __future__ import annotations
@@ -75,8 +72,8 @@ _FIRM_SCOPE_CLIENT_PREFIXES: frozenset[str] = frozenset(
 
 REMEDIATION = """F44: engagement-scope code imports a firm-scope storage client (Postgres).
 fix: engagement code talks to SQLite + Neo4j + filesystem only. Firm-scope queries
-     belong in kairix-firm/ (separate codebase) — see kairix-pro-platform
-     docs/ADRs/ADR-017-two-scope-architecture.md and ADR-018-storage-tiering.md.
+     belong in the separate firm-scope codebase per the two-scope architecture
+     (engagement = SQLite + Neo4j + filesystem; firm = Postgres-only).
 next: if you need cross-engagement data, the reflection-extractor is the only sanctioned
       flow. Route through there, not via direct PG access.
 run: bash scripts/checks/check-f44-engagement-firm-boundary.sh
@@ -92,11 +89,10 @@ Forbidden example:
   from psycopg2 import connect                # F44 — same boundary violation
   import asyncpg                              # F44 — same boundary violation
 
-Why: see kairix-pro-platform docs/ADRs/ADR-017-two-scope-architecture.md.
-Firm scope (cross-engagement reflections, registry, audit) is
-Postgres-only and lives in a separate codebase. Letting engagement
-code reach into firm storage collapses the scope boundary the ADR
-exists to enforce."""
+Why: the two-scope architecture isolates firm-scope state (cross-engagement
+reflections, registry, audit envelope — Postgres-only) into a separate
+codebase. Letting engagement code reach into firm storage collapses the
+scope boundary."""
 
 
 def _imported_names(tree: ast.AST) -> list[str]:

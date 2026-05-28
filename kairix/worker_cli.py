@@ -57,7 +57,6 @@ _MAINTENANCE_SUBCOMMAND = "maintenance"
 
 
 def _format_age(seconds_ago: float) -> str:
-    """Render an epoch-delta as a short human-readable duration."""
     if seconds_ago <= 0:
         return "never"
     if seconds_ago < 60:

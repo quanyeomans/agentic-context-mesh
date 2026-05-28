@@ -2262,7 +2262,6 @@ record: see `docs/architecture/decisions/2026-05-21-plan-b-parity-remediation.md
 
 ### F31 — No hardcoded user/machine paths in committed code
 
-Cross-pollinated from tc-agent-zone's `no_hardcoded_repo_paths.py`.
 Detects literal `/Users/<dev>/` and `/home/<dev>/` patterns in tracked
 files, with `/Users/runner/` and `/home/runner/` exempt (GitHub Actions
 hosted-runner workspace).
@@ -2298,7 +2297,6 @@ Replace the hardcoded path with one of:
 
 ### F32 — No real first names or organisation/client names in fixtures + docs
 
-Cross-pollinated from tc-agent-zone's `no_real_names_in_fixtures.py`.
 The mechanical version of the `feedback_no_confidential_in_public_artefacts`
 memory: public repo artefacts must use generic placeholders
 (`agent-alpha`, `Acme`, `your-team`) rather than identifiers tied to a
@@ -2373,7 +2371,6 @@ transcript = "<real-full-name> works at <real-org>."
 
 ### F33 — `# shellcheck disable=<rule>` directives require rationale
 
-Cross-pollinated from tc-agent-zone's `shellcheck_disable_with_reason.py`.
 Shell counterpart to F3 — every `# shellcheck disable=<rule>` line must
 carry an inline rationale (after the directive on the same line) OR the
 immediately preceding line must be a substantive `#` comment that
@@ -2463,7 +2460,7 @@ pass.
 
 ### F45 — new top-level capability ships with a BDD feature
 
-Forward-only rule landed in Wave 0 (kairix-pro-platform#59). Every commit
+Forward-only rule landed in Wave 0. Every commit
 that adds a new CLI subcommand (a new row in `kairix/cli.py:COMMANDS`),
 MCP tool (a new `@server.tool()` decorated function in
 `kairix/agents/mcp/server.py`), or plugin factory (`make_provider` /
@@ -2483,7 +2480,7 @@ Baseline: `.architecture/baseline/f45-files.txt` (empty; forward-only).
 
 ### F46 — BDD step impls call factory-composed production code
 
-Wave 0 rule (kairix-pro-platform#59) locking the **composition principle**
+Wave 0 rule locking the **composition principle**
 for BDD step files. Step implementations under `tests/bdd/steps/*.py`
 must invoke (call-graph depth ≤ 2) one of:
 
@@ -2505,7 +2502,7 @@ shrinks via F49).
 
 ### F47 — integration tests build through the factory
 
-Wave 0 rule (kairix-pro-platform#59) locking the **composition principle**
+Wave 0 rule locking the **composition principle**
 for integration tests. Tests under `tests/integration/` that exercise a
 multi-component pipeline must construct it via `kairix.core.factory.build_*`
 with `paths=FakePaths(...)`. Direct construction of `*Pipeline(...)`
@@ -2522,7 +2519,7 @@ Baseline: `.architecture/baseline/f47-integration-factory-files.txt`
 
 ### F48 — composed production path E2E test exists and runs
 
-Wave 0 rule (kairix-pro-platform#59) locking the **real-path principle**.
+Wave 0 rule locking the **real-path principle**.
 `tests/e2e/test_composed_production_path.py` must exist, must carry
 `@pytest.mark.e2e` on at least one test function, must be runnable as
 `pytest -m e2e tests/e2e/test_composed_production_path.py`, and must
@@ -2539,7 +2536,7 @@ selector. No baseline — binary presence check.
 
 ### F49 — test-discipline baselines shrink per release
 
-Wave 0 rule (kairix-pro-platform#59) preventing test-debt accretion.
+Wave 0 rule preventing test-debt accretion.
 Each release tag (matching `v[0-9]*.[0-9]*.[0-9]*`) must reduce each of:
 
 - `.architecture/baseline/f30-operator-outcome-tests-files.txt`
@@ -2559,7 +2556,7 @@ Canonical reference for F45–F49 mechanics + paydown patterns:
 
 ### F34–F44 — connector framework discipline pre-arm
 
-Landed in connector-framework Wave 0 (2026-05-22, kairix-pro-platform#59
+Landed in connector-framework Wave 0 (2026-05-22
 hardening + this repo's `docs/architecture/connector-ingestion-architecture.md`
 spec). Pre-arms the discipline before Wave 1 creates `kairix/connectors/`
 and `kairix/extractors/` surfaces — all eleven checks pass vacuously
@@ -2630,7 +2627,7 @@ mix-ins these rules protect: [`connector-scope-topology/ADR.md`](connector-scope
 ### F50 — net-new files cannot accrete F-rule baseline debt
 
 Closes the per-file-shrink-only loophole identified by the 2026-05-22
-tc-agent-zone cross-repo audit. Every F-rule baseline under
+cross-repo audit. Every F-rule baseline under
 `.architecture/baseline/*-files.txt` is per-file shrink-only — pre-existing
 violators are grandfathered until F49 forces them out at release time.
 The loophole: a brand-new file under `kairix/**` (or `tests/**`) can
@@ -2672,10 +2669,9 @@ mean: the only legal motion is downward.
 
 #### Cross-repo provenance
 
-Imported from tc-agent-zone's `net_new_file_finding_cap.py` pattern
-(2026-05-22 audit). The tc-agent-zone version protected against
-SonarCloud findings on new files; kairix's variant generalises to
-*any* per-file F-rule baseline.
+Imported from a sibling repo's `net_new_file_finding_cap.py` pattern
+(2026-05-22 audit). The original protected against SonarCloud findings
+on new files; this variant generalises to *any* per-file F-rule baseline.
 
 ---
 

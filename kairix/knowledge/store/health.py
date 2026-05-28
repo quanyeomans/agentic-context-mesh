@@ -194,7 +194,7 @@ def run_store_health(
 
 
 def format_health_text(report: StoreHealthReport) -> str:
-    """Format a StoreHealthReport as human-readable text."""
+    """Render the report as vault-ready Markdown."""
     lines = [
         "# Kairix — Document Store Health Report",
         f"_Generated: {report.generated_at}_",

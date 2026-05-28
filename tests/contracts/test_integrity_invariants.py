@@ -565,11 +565,12 @@ def test_connector_cursors_empty_skipped() -> None:
 
 
 def test_connector_cursors_with_no_config_surfaces_info(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A cursor row plus no resolvable config path → info gap with TODO note.
+    """A cursor row plus no resolvable config path → info gap pointing at the
+    automated-lookup follow-up issue.
 
-    Uses ``monkeypatch.setenv`` on a non-KAIRIX env var path (it sets the
-    cwd via chdir to a directory with no ``kairix.config.yaml``) so the
-    F2 baseline isn't tripped. F2 only flags ``KAIRIX_*`` setenv calls.
+    Uses ``monkeypatch.chdir`` to land in a directory with no
+    ``kairix.config.yaml`` so the F2 baseline isn't tripped (F2 only flags
+    ``KAIRIX_*`` setenv calls).
     """
     db = _make_db()
     try:
@@ -592,11 +593,11 @@ def test_connector_cursors_with_no_config_surfaces_info(tmp_path: object, monkey
     gap = _gap_by_invariant(report, "connector-cursors-vs-bronze")
     # Behaviour depends on whether resolve_config_path found a config in
     # an ancestor dir; assert the contract softly — when it didn't find
-    # one, we get an info gap with the TODO marker.
+    # one, we get an info gap with the follow-up-issue marker.
     if gap is not None:
         assert gap.severity == "info"
         assert "orphan-source" in gap.sample
-        assert "Wave 3" in gap.remediation or "TODO" in gap.remediation
+        assert "#341" in gap.remediation
 
 
 def test_vector_store_check_no_content_vectors_skipped() -> None:

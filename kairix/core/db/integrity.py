@@ -62,8 +62,6 @@ _STAGING_STUCK_DAYS = 7
 INVARIANT_DOCUMENTS_WITHOUT_FTS = "documents-without-fts"
 INVARIANT_VECTOR_STORE = "vector-store-vs-content-vectors"
 
-# Backwards-compat private alias for the vector-store invariant; kept
-# so the in-file references stay readable.
 _VECTOR_STORE_INVARIANT = INVARIANT_VECTOR_STORE
 
 GapSeverity = Literal["error", "warn", "info"]
@@ -432,8 +430,9 @@ def _check_connector_cursors_vs_bronze(db: sqlite3.Connection) -> IntegrityGap |
             count=len(rows),
             sample=tuple(str(r[0]) for r in rows[:_MAX_SAMPLE]),
             remediation=(
-                "fix: TODO Wave 3 — wire connector-name lookup against "
-                "kairix.config.yaml; "
+                "fix: cross-reference cursor names against the configured "
+                "connectors in kairix.config.yaml — see #341 for the "
+                "automated lookup; "
                 "next: until then, manually verify cursors match configured "
                 "connectors; "
                 "run: kairix config validate"

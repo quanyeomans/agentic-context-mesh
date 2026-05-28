@@ -297,9 +297,7 @@ def _sheet_has_images(sheet: Worksheet) -> bool:
 
 
 def _render_sheet(sheet: Worksheet) -> str:
-    """Render one worksheet as a markdown section.
-
-    Layout:
+    """Output layout:
 
     .. code-block:: markdown
 
@@ -387,11 +385,8 @@ def _strip_trailing_empty_rows(rows: list[list[str]]) -> list[list[str]]:
 
 
 def _format_table(rows: list[list[str]], column_count: int) -> str:
-    """Render the collected rows as a pipe-syntax markdown table.
-
-    First row is the header; a separator row follows; remaining rows
-    are the body. If only one row is present we still emit a separator
-    so the result is a valid markdown table.
+    """First row is the header; a separator row is always emitted so even
+    a single-row table is valid markdown.
     """
     padded = [_pad_row(row, column_count) for row in rows]
     header_row = _format_row(padded[0])

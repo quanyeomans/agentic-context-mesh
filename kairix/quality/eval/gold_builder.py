@@ -324,10 +324,9 @@ class GoldBuilder:
         comes from the constructor-injected ``self._db_path`` or falls
         back to :func:`kairix.core.db.get_db_path` for production callers.
 
-        TODO(#143 Phase 5): lift this onto ``DocumentRepository`` as a
-        ``search_fts_weighted`` method so gold_builder no longer reaches
-        past the protocol into raw SQL. Inappropriate intimacy retained
-        for Phase 2b to keep this PR's blast radius small.
+        The raw-SQL path here is an inappropriate-intimacy holdover;
+        lifting onto ``DocumentRepository.search_fts_weighted`` is
+        tracked in https://github.com/three-cubes/kairix/issues/342.
         """
         from kairix.core.db import get_db_path, open_db
         from kairix.core.search.tokenizer import tokenize_fts_query

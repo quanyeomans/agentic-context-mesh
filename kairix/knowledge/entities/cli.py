@@ -44,7 +44,7 @@ def cmd_suggest(
 
 
 def format_suggest_output(out: Any, *, fmt: str) -> str:
-    """Render an EntitySuggestOutput as table-style or jsonl text."""
+    """``fmt='jsonl'`` → one JSON object per line; anything else → text table."""
     import json as _json
 
     if fmt == "jsonl":

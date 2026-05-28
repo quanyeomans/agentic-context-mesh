@@ -1,6 +1,6 @@
 """F30 outcome test — ``kairix setup`` subprocess surface.
 
-Wave 0 paydown (kairix-pro-platform#59), Group E. Closes the F30 gap on
+Wave 0 paydown (Group E). Closes the F30 gap on
 ``kairix/platform/setup/cli.py``: existing unit + BDD tests drive
 ``main()`` / ``run_setup()`` in-process via ``SetupContext`` and
 ``WizardDeps`` DI seams; this test adds the F30-required subprocess

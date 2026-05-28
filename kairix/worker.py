@@ -348,21 +348,12 @@ def _run_one_connector_batch(
     from kairix.core.features import flag
 
     name = entry["name"]
-    # Phase 7: bronze_root no longer drives any write path; kept for
-    # backward-compat call signature. Logged at debug if a non-None root
-    # was passed so the deprecation is visible.
+    # bronze_root is signature-only; streaming bronze writes no files.
     if bronze_root is not None:
-        logger.debug(
-            "_run_one_connector_batch: bronze_root parameter is unused since "
-            "Phase 7 (streaming bronze writes no files)."
-        )
+        logger.debug("_run_one_connector_batch: bronze_root parameter is unused.")
     connector_factory = resolve_connector(name)
     connector = connector_factory(entry.get("config", {}))
-    # Builds either a single extractor or an EscalatingExtractor depending
-    # on whether the entry sets ``extractor_chain: [...]`` or the legacy
-    # ``extractor: <name>``. Backward compatible — existing configs unchanged.
     extractor = build_extractor_from_entry(entry)
-    # Phase 7: streaming bronze is the only persistence model.
     bronze_store = build_bronze_from_entry(entry, db=db)
     chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
     pipeline = ConnectorPipeline(
@@ -375,11 +366,6 @@ def _run_one_connector_batch(
         dead_letter=DeadLetterStore(db),
     )
     result = pipeline.run_batch(connector, extractor)
-    # ``_legacy_chunk_writer`` is the F61-sanctioned construction surface; the
-    # local import below keeps the helper bound to this module for tests +
-    # ensures the import is reachable even when the flag-OFF branch never
-    # actually called the helper at runtime (e.g. registry miss before
-    # writer construction).
     del _legacy_chunk_writer
     return result.processed, result.dead_lettered
 
@@ -424,8 +410,6 @@ def resolve_chunk_writer_for_entry(
     return _CollectionRouterChunkWriter(router=router)
 
 
-# Underscored alias — internal call sites that pre-date Wave C keep
-# working; tests use the public ``resolve_chunk_writer_for_entry``.
 _resolve_chunk_writer_for_entry = resolve_chunk_writer_for_entry
 
 
