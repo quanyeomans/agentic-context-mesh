@@ -45,39 +45,69 @@ from _arch_lib import gate
 FLOOR = 90.0  # per-file coverage percentage threshold
 
 
-REMEDIATION = f"""Refactor to add tests that drive the public surface
-until each listed file is ≥ {FLOOR:.0f}% covered (do NOT add
-``# pragma: no cover`` to silence the gate) to pass.
+REMEDIATION = f"""Per-file coverage below {FLOOR:.0f}% — but coverage % is a
+SMELL, not the gate. Before padding tests to chase the floor, ask the
+ADR-024 question first: what DEFECT CLASS is this file's coverage
+gap actually a proxy for?
 
-fix: add tests that drive the public surface of each listed file
-through a Fake* from tests/fakes.py until coverage is ≥ {FLOOR:.0f}%.
-If a file is genuinely production-only infrastructure, extract its
-testable logic into a use-case class and reduce the file to a thin
-Adapter — do NOT silence with ``# pragma: no cover``.
+Per ADR-024 §"Repositioning F7", the right response depends on what
+the gap signals:
+
+  * Missing failure-mode coverage at a Protocol boundary
+    → see F68 (Protocol failure-injection contract). Add a test in
+      tests/contracts/test_<protocol_snake>_failure_modes.py per the
+      F68 affordance template — that's the right shape, not a unit
+      test that calls the function once to push the % up.
+
+  * Missing scale-bound coverage at an iteration / persistence boundary
+    → see F69 (scale-bound test). Add a 10**4-row variant to the
+      relevant integration test per the F69 affordance template.
+
+  * Genuinely production-only Adapter (dispatch + dep wiring; substantive
+    logic delegated to tested modules)
+    → grandfather the file in this baseline with a rationale comment
+      (see kairix/agents/mcp/cold_start.py + kairix/worker.py for the
+      pattern). F50 blocks net-new files from baseline accretion, so
+      this only applies to pre-existing files; new code must be testable
+      via a Deps DI seam from day one.
+
+fix: pick the right path above for THIS file's gap. Do NOT add a unit
+test that calls the function once just to push coverage above {FLOOR:.0f}%
+— that's the "gaming sonarcloud" anti-pattern ADR-024 names and
+rejects. If a file is genuinely production-only infrastructure,
+extract its testable logic into a use-case class per the kairix Deps
+pattern and reduce the file to a thin Adapter; never use
+``# pragma: no cover`` to silence the gate.
+
 next: re-run ``pytest --cov=kairix --cov-report=xml`` then
 ``python3 scripts/checks/check_per_file_coverage.py`` to confirm the
-gate goes green.
-run: bash scripts/safe-commit.sh "test(<area>): lift <file> per-file coverage above floor"
+gate goes green AFTER making the structural change (not coverage-padding).
+
+run: bash scripts/safe-commit.sh "<verb>(<area>): <what you actually changed>"
 
 Pass example:
-  # tests/use_cases/test_search_pipeline.py
-  def test_search_pipeline_runs_query() -> None:
-      pipeline = SearchPipeline(retriever=FakeRetriever(hits=[Hit('id', 1.0)]))
-      result = pipeline.run('q')
-      assert result == [Hit('id', 1.0)]
+  # The Neo4jDrainTickDeps DI pattern from kairix/core/curator/drain.py
+  # (commit 651942cb). Production-default factories live on a frozen
+  # dataclass; the orchestration function accepts deps=None and binds
+  # the production defaults; tests pass deps=Neo4jDrainTickDeps(
+  # client_factory=..., db_factory=..., repo_factory=...) to exercise
+  # the orchestration branches without real Neo4j or live SQLite.
+  # Reduces the orchestration to ~10 lines of branching that's fully
+  # unit-test-reachable.
 
 Forbidden example:
   # in kairix/core/search/pipeline.py — silencing the coverage gate
   def run(self, query: str) -> list[Hit]:
       ...  # <pragma: no cover>   # (with no rationale)
 
-If the file genuinely cannot be covered (it is exclusively
-production-infrastructure code that requires a live external service),
-extract the testable logic into a use-case class and reduce the
-production-only file to a thin Adapter — do not suppress.
+  # OR: gaming the floor by adding a test that calls the function
+  # once just to push the percentage up without proving any
+  # behaviour — see ADR-024 §"Repositioning F7" for why this is the
+  # wrong fix.
 
 Per-file coverage is the right unit of measurement: a 91% repo average
-can hide a file at 0%."""
+can hide a file at 0%. But coverage % is one signal; F68/F69 are the
+right gates for the failure classes coverage gaps usually proxy."""
 
 
 def parse_coverage(coverage_xml: Path) -> dict[Path, float]:
