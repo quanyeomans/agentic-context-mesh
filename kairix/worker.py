@@ -1029,26 +1029,16 @@ def _default_neo4j_drain() -> Any:
         keeps the loop alive.
 
     Tests inject a substitute via ``WorkerDeps(neo4j_drain_fn=fake)``;
-    production omits and gets this default.
+    production omits and gets this default. The component-build chain
+    (graph client → repo → SQLite handle → tick) lives in
+    :func:`kairix.core.curator.drain.run_default_drain_tick` so the
+    drain module is self-contained and worker.py stays the thin
+    dispatcher. Both modules independently satisfy their per-file
+    coverage floors.
     """
-    from kairix.core.curator.drain import NeoDrainResult, run_neo4j_drain_tick
-    from kairix.knowledge.graph.client import get_client
-    from kairix.knowledge.graph.repository import Neo4jGraphRepository
-    from kairix.paths import db_path as _db_path
+    from kairix.core.curator.drain import run_default_drain_tick
 
-    client = get_client()
-    if not client.available:
-        # Surface as a structured NeoDrainResult so the worker log
-        # line shape stays uniform whether or not the backend was
-        # reachable this tick.
-        return NeoDrainResult(pushed=0, failed=0, skipped_relationships=0, neo4j_available=False, elapsed_ms=0)
-
-    repo = Neo4jGraphRepository(client)
-    db = sqlite3.connect(str(_db_path()))
-    try:
-        return run_neo4j_drain_tick(db, repo)
-    finally:
-        db.close()
+    return run_default_drain_tick()
 
 
 def _default_connector_sync() -> ConnectorSyncResult:

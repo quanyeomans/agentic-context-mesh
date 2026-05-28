@@ -433,3 +433,49 @@ def _make_drainer(db: sqlite3.Connection, repo: Any, *, batch_size: int = DEFAUL
     (once for typing, once for ``isinstance`` checks downstream).
     """
     return Neo4jDrainer(db, repo, batch_size=batch_size)
+
+
+def run_default_drain_tick() -> NeoDrainResult:
+    """Production-default drain tick — open Neo4j client + SQLite + run.
+
+    Composition shape:
+      1. Build the live Neo4j client via :func:`get_client`
+      2. Early-return ``NeoDrainResult(neo4j_available=False, ...)`` if
+         the backend is unreachable (the worker logs a single warning;
+         the next tick retries)
+      3. Open the SQLite connection at the configured ``db_path``
+      4. Delegate to :func:`run_neo4j_drain_tick` for the row-level work
+      5. Close the SQLite connection in ``finally`` regardless of outcome
+
+    Extracted from :func:`kairix.worker._default_neo4j_drain` so the
+    composition (client + repo + DB) is owned by the drain module
+    rather than worker.py. Keeps worker.py a thin dispatcher and lets
+    each module's tests cover its own surface — drain.py owns the
+    drain composition, worker.py owns the schedule.
+
+    SQLite read failures propagate; the worker's
+    ``(Exception, SystemExit)`` discipline at the dispatch site keeps
+    the loop alive.
+    """
+    import sqlite3 as _sqlite3
+
+    from kairix.knowledge.graph.client import get_client
+    from kairix.knowledge.graph.repository import Neo4jGraphRepository
+    from kairix.paths import db_path
+
+    client = get_client()
+    if not client.available:
+        return NeoDrainResult(
+            pushed=0,
+            failed=0,
+            skipped_relationships=0,
+            neo4j_available=False,
+            elapsed_ms=0,
+        )
+
+    repo = Neo4jGraphRepository(client)
+    db = _sqlite3.connect(str(db_path()))
+    try:
+        return run_neo4j_drain_tick(db, repo)
+    finally:
+        db.close()
