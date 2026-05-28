@@ -22,13 +22,23 @@ heuristic. We scan for two-or-three-word Capitalised tokens
 (spaCy / GLiNER) is a Wave 3+ concern; the regex is sufficient to
 populate the ``entity_signals`` staging table so the Curator coupling
 boundary has a stream to consume.
+
+GH #336 (ADR-024 Bundle B) — Silver also writes a per-document row to
+the ``documents_media`` table when a :class:`DocumentsMediaWriter` is
+wired in. The writer captures extractor identity, page count,
+extraction status (``ok`` / ``failed`` / ``unsupported``), and
+ADR-021-merged envelope metadata so re-extract triage + per-extractor
+analytics work in production. The writer is optional at construction
+time so existing tests + non-pipeline callers continue to work.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
+import sqlite3
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from kairix.core.protocols import (
     BronzeRef,
@@ -39,6 +49,19 @@ from kairix.core.protocols import (
     Sensitivity,
     SilverOutput,
     SourceMetadata,
+)
+
+# Allowed values for ``documents_media.extraction_status``. ``ok`` and
+# ``failed`` mirror the legacy schema default; ``unsupported`` is new
+# (per ADR-024 Bundle B / GH #336) — set by the pipeline when no
+# extractor in the escalation chain claimed the format via
+# ``can_extract`` or when ``quality_ok`` was False across the chain.
+_EXTRACTION_STATUS_OK = "ok"
+_EXTRACTION_STATUS_FAILED = "failed"
+_EXTRACTION_STATUS_UNSUPPORTED = "unsupported"
+
+_ALLOWED_EXTRACTION_STATUSES: frozenset[str] = frozenset(
+    {_EXTRACTION_STATUS_OK, _EXTRACTION_STATUS_FAILED, _EXTRACTION_STATUS_UNSUPPORTED}
 )
 
 # Target chunk size at paragraph boundaries (characters). Smaller than
@@ -227,6 +250,97 @@ def _extract_entity_signals(
     return tuple(signals)
 
 
+def _utc_now_iso() -> str:
+    """UTC-now ISO-8601 string with the trailing ``Z`` operators expect.
+
+    Mirrors :func:`kairix.connectors.obsidian.connector._iso_z` /
+    :func:`kairix.core.curator.drain._utc_now_iso` — keeping it local
+    rather than introducing a shared ``kairix.core.timeutils`` module
+    in this commit to minimise blast radius. F70 / GH #336 lands the
+    writer; a future commit can DRY the helper.
+    """
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+class SqliteDocumentsMediaWriter:
+    """Production :class:`~kairix.core.connectors.silver.DocumentsMediaWriter`.
+
+    GH #336 (ADR-024 Bundle B) — writes one ``documents_media`` row per
+    processed document, keyed by the raw-bytes ``content_hash``. The
+    table records extractor identity + per-document status so:
+
+      * F40 re-extract triage can identify documents needing
+        re-processing when an extractor version bumps
+      * per-extractor analytics (success rate, failure rate per
+        format) are observable
+      * the canonical ``bronze_records -> documents_media -> content``
+        join for \"is this document fully processed?\" returns rows
+
+    The writer does NOT commit — the caller's per-batch transaction
+    owns the commit so the documents_media row, chunks, cursor advance,
+    and bronze row commit together or roll back together (mirrors
+    :class:`~kairix.core.connectors.pipeline.ChunkWriter`).
+    """
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self._db = db
+
+    def write(
+        self,
+        *,
+        content_hash: str,
+        path: str,
+        mime: str,
+        size_bytes: int | None,
+        page_count: int | None,
+        title: str | None,
+        author: str | None,
+        created_date: str | None,
+        language: str | None,
+        extraction_status: str,
+        extractor_name: str | None,
+        extractor_version: str | None,
+        chunker_version: str | None,
+    ) -> None:
+        """INSERT or REPLACE one ``documents_media`` row for the document.
+
+        ``content_hash`` is the PRIMARY KEY; the same document re-ingested
+        (same bytes) updates the existing row so a later re-extract on
+        an extractor version bump cleanly replaces the prior status +
+        extractor identity rather than accumulating duplicates.
+        """
+        if extraction_status not in _ALLOWED_EXTRACTION_STATUSES:
+            raise ValueError(
+                f"extraction_status must be one of {sorted(_ALLOWED_EXTRACTION_STATUSES)!r}; "
+                f"got {extraction_status!r}. "
+                "fix: pass 'ok' / 'failed' / 'unsupported' from the orchestrator. "
+                "run: bash scripts/safe-commit.sh"
+            )
+        self._db.execute(
+            "INSERT OR REPLACE INTO documents_media ("
+            "hash, path, format, size_bytes, page_count, title, author, created_date, "
+            "language, extraction_status, extraction_timestamp, extractor_name, "
+            "extractor_version, chunker_version"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                content_hash,
+                path,
+                mime,
+                size_bytes,
+                page_count,
+                title,
+                author,
+                created_date,
+                language,
+                extraction_status,
+                _utc_now_iso(),
+                extractor_name,
+                extractor_version,
+                chunker_version,
+            ),
+        )
+
+
 class DefaultSilverProcessor:
     """Production :class:`~kairix.core.protocols.SilverProcessor` implementation.
 
@@ -240,7 +354,16 @@ class DefaultSilverProcessor:
     extractors (PDF / PPTX / XLSX) populate ``extracted.pages`` and the
     chunker emits one or more chunks per page, each tagged with the
     page number so retrieval (MM-3) can cite back to a specific page.
+
+    GH #336 (ADR-024 Bundle B) — when a ``documents_media_writer`` is
+    wired in (via ``__init__``), Silver writes one ``documents_media``
+    row per processed document so per-extractor analytics + F40
+    re-extract triage work. ``None`` keeps the legacy behaviour for
+    tests / callers that don't need the row.
     """
+
+    def __init__(self, documents_media_writer: SqliteDocumentsMediaWriter | None = None) -> None:
+        self._documents_media_writer = documents_media_writer
 
     def process(
         self,
@@ -251,6 +374,9 @@ class DefaultSilverProcessor:
         sensitivity: Sensitivity,
         connector_metadata: SourceMetadata | None = None,
         extractor_metadata: SourceMetadata | None = None,
+        extractor_name: str | None = None,
+        extractor_version: str | None = None,
+        extraction_status: str = _EXTRACTION_STATUS_OK,
     ) -> SilverOutput:
         """Split ``extracted.markdown`` into chunks; emit entity signals.
 
@@ -330,7 +456,132 @@ class DefaultSilverProcessor:
                 ),
                 *signals,
             )
+        # GH #336 (ADR-024 Bundle B) — write the per-document
+        # documents_media row when a writer is wired in. The hash key
+        # is the raw-bytes content hash from BronzeRef (Phase 2 of
+        # streaming-bronze populates this on every write); a chunk-level
+        # text hash would multiply rows per document. When BronzeRef
+        # has no content_hash (legacy rows pre-Phase 2), skip the write
+        # rather than synthesise a misleading key.
+        self._maybe_write_documents_media(
+            raw=raw,
+            extracted=extracted,
+            merged=merged,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            extraction_status=extraction_status,
+            chunker_version=_first_chunker_version(chunks),
+        )
         return SilverOutput(chunks=chunks, entity_signals=signals)
+
+    def _maybe_write_documents_media(
+        self,
+        *,
+        raw: BronzeRef,
+        extracted: ExtractedDocument,
+        merged: SourceMetadata,
+        extractor_name: str | None,
+        extractor_version: str | None,
+        extraction_status: str,
+        chunker_version: str | None,
+    ) -> None:
+        """Write the per-document documents_media row when a writer is wired in.
+
+        Silent no-op when the writer is None (legacy / fake-paths-only
+        tests). Silent no-op when ``raw.content_hash`` is None (legacy
+        bronze rows pre Phase 2 of streaming-bronze; the writer cannot
+        synthesise a meaningful key without bytes). The orchestrator
+        relies on Phase 2's at-write population so the silent-skip
+        window is bounded to legacy rows that pre-date the migration.
+        """
+        if self._documents_media_writer is None:
+            return
+        if raw.content_hash is None:
+            return
+        page_count = len(extracted.pages) if extracted.pages else None
+        size_bytes = len(extracted.markdown.encode("utf-8")) if extracted.markdown else None
+        # Title preference: merged metadata (connector envelope wins
+        # per ADR-021) -> extractor DocMetadata -> None.
+        title = extracted.metadata.title if extracted.metadata else None
+        # Author / created_date: merged metadata first; fall back to
+        # the DocMetadata body extraction.
+        author = merged.author or (extracted.metadata.author if extracted.metadata else None)
+        created_date = merged.created_at or (extracted.metadata.created_date if extracted.metadata else None)
+        language = extracted.metadata.language if extracted.metadata else None
+        self._documents_media_writer.write(
+            content_hash=raw.content_hash,
+            path=str(raw.item_id),
+            mime=str(raw.mime),
+            size_bytes=size_bytes,
+            page_count=page_count,
+            title=title,
+            author=author,
+            created_date=created_date,
+            language=language,
+            extraction_status=extraction_status,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            chunker_version=chunker_version,
+        )
+
+    def write_extraction_outcome(
+        self,
+        *,
+        raw: BronzeRef,
+        _source_modified_at: str,
+        extractor_name: str | None,
+        extractor_version: str | None,
+        extraction_status: str,
+    ) -> None:
+        """Write a documents_media row WITHOUT running silver chunking.
+
+        GH #336 — the orchestrator calls this on the ``failed`` /
+        ``unsupported`` paths where extraction either raised or every
+        chain member declined ``can_extract``. The row captures the
+        outcome so dashboards + re-extract triage observe the failed
+        documents, not just the successful ones. Silent no-op when no
+        writer is wired in OR when the BronzeRef has no content_hash
+        (same constraint as the happy path).
+
+        ``_source_modified_at`` is accepted for caller-side symmetry
+        with :meth:`process` but is not stored on the row — the
+        documents_media schema records ``extraction_timestamp`` (the
+        wall-clock at write time), not the source's modify time.
+        """
+        if self._documents_media_writer is None:
+            return
+        if raw.content_hash is None:
+            return
+        self._documents_media_writer.write(
+            content_hash=raw.content_hash,
+            path=str(raw.item_id),
+            mime=str(raw.mime),
+            size_bytes=None,
+            page_count=None,
+            title=None,
+            author=None,
+            created_date=None,
+            language=None,
+            extraction_status=extraction_status,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            chunker_version=None,
+        )
+
+
+def _first_chunker_version(chunks: tuple[Chunk, ...]) -> str | None:
+    """Return the first non-None ``chunker_version`` across ``chunks``.
+
+    Today Silver constructs Chunks without ``chunker_version=`` (the
+    Wave C / F55 thread-through is partial — see CLAUDE.md F55 note).
+    The helper returns None for now; once the chunker registry is
+    plumbed in, every emitter sets ``chunker_version=self.version``
+    and this helper will surface that value to documents_media.
+    """
+    for chunk in chunks:
+        if chunk.chunker_version is not None:
+            return chunk.chunker_version
+    return None
 
 
 def _merge_metadata(

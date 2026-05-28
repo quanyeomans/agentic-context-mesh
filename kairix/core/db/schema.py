@@ -158,6 +158,7 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             push_attempt_count INTEGER DEFAULT 0
         );
 
+        -- table-is-derived: schema bookkeeping; writes owned by this module
         CREATE TABLE IF NOT EXISTS kairix_meta (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -594,6 +595,7 @@ def migrate(db: sqlite3.Connection) -> None:
     """
     # Ensure kairix_meta exists
     db.execute("""
+        -- table-is-derived: schema bookkeeping; writes owned by this module
         CREATE TABLE IF NOT EXISTS kairix_meta (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL

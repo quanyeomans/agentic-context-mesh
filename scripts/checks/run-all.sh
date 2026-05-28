@@ -186,6 +186,10 @@ python3 "${SCRIPT_DIR}/check_f67_staging_drain_symmetry.py" || overall=1
 #        (Bug 2 — SharePoint 429 dead-lettered every item because no rate-limit contract test existed)
 python3 "${SCRIPT_DIR}/check_f68_protocol_failure_modes.py" || overall=1
 
+# F70 — every CREATE TABLE in schema.py has at least one INSERT writer in production code
+#        (GH #336 — documents_media shipped with no writer; ADR-024 Bundle B)
+python3 "${SCRIPT_DIR}/check_f70_schema_writer_symmetry.py" || overall=1
+
 # F71 — every preflight check that reports a count has a paired truthfulness contract test
 #        (GH #334 — the staging preflight reported count=1000 because its SELECT had LIMIT 1000;
 #         a 2.3M-row backlog read out as "small enough to ignore". ADR-024 Bundle C.)

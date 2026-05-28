@@ -39,7 +39,7 @@ from kairix.core.connectors.scope_profile_resolver import (
     ResolvedScope,
     ScopeProfileResolver,
 )
-from kairix.core.connectors.silver import DefaultSilverProcessor
+from kairix.core.connectors.silver import DefaultSilverProcessor, SqliteDocumentsMediaWriter
 from kairix.core.connectors.streaming_bronze import BronzeNotPersistedError, StreamingBronzeStore
 
 __all__ = [
@@ -63,6 +63,7 @@ __all__ = [
     "RouteResult",
     "ScopeProfileResolver",
     "SourceFreshness",
+    "SqliteDocumentsMediaWriter",
     "StreamingBronzeStore",
     "build_envelope",
     "build_freshness",

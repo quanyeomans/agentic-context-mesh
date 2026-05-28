@@ -422,6 +422,15 @@ class ConnectorPipeline:
         / writer / sink failures are not absorbed: they propagate to
         :meth:`run_batch`'s try/except which rolls back the entire
         batch.
+
+        GH #336 (ADR-024 Bundle B) — every successful Bronze write
+        threads the extractor identity through to silver so the
+        documents_media row carries ``extractor_name`` +
+        ``extractor_version``. Extract failures and ``can_extract``-
+        declined items also write a documents_media row (via
+        :meth:`DefaultSilverProcessor.write_extraction_outcome`) so
+        per-extractor failure dashboards observe the failed documents,
+        not just the successful ones.
         """
         # Type narrowing — ``change`` is a ChangeEvent at the call-site;
         # we accept ``object`` here to keep the helper signature stable
@@ -433,10 +442,19 @@ class ConnectorPipeline:
         except Exception as exc:
             self._dead_letter.record(connector.name, item_id, f"fetch: {exc}")
             return _OUTCOME_DEAD_LETTERED
+        ref = self._bronze.write(connector.name, item_id, raw.raw, raw.mime)
         try:
-            ref = self._bronze.write(connector.name, item_id, raw.raw, raw.mime)
             doc = extractor.extract(raw.raw, raw.mime)
         except Exception as exc:
+            # GH #336 — record the failure on documents_media so the
+            # dashboard sees it, then dead-letter for retry as before.
+            _safe_outcome_write(
+                self._silver,
+                ref=ref,
+                source_modified_at=modified_at,
+                extractor=extractor,
+                extraction_status=_EXTRACTION_STATUS_FAILED,
+            )
             self._dead_letter.record(connector.name, item_id, f"extract: {exc}")
             return _OUTCOME_DEAD_LETTERED
         # ADR-021 (Wave E.5): surface per-source envelope + body metadata.
@@ -446,6 +464,19 @@ class ConnectorPipeline:
         # shape via the connector_metadata / extractor_metadata defaults.
         connector_metadata = _safe_connector_metadata(connector, item_id)
         extractor_metadata = _safe_extractor_metadata(extractor, raw.raw, raw.mime)
+        extractor_name = getattr(extractor, "name", None)
+        extractor_version = getattr(extractor, "version", None)
+        # GH #336 — derive extraction_status from quality_ok: when the
+        # extractor returned a doc but the chain reports the extraction
+        # is not good enough (every member declined or every quality_ok
+        # returned False), the orchestrator records 'unsupported' so the
+        # dashboard distinguishes "tried but couldn't" from "raised an
+        # exception". A False quality_ok with non-empty markdown still
+        # routes through silver (chunks land) — the status flags the
+        # downstream re-extract escalation surface.
+        extraction_status = (
+            _EXTRACTION_STATUS_OK if _safe_quality_ok(extractor, doc) else _EXTRACTION_STATUS_UNSUPPORTED
+        )
         # Silver / writer / sink failures propagate — the batch rolls back.
         silver_out = self._silver.process(
             ref,
@@ -455,10 +486,73 @@ class ConnectorPipeline:
             sensitivity=connector.sensitivity_for(item_id),
             connector_metadata=connector_metadata,
             extractor_metadata=extractor_metadata,
+            extractor_name=extractor_name,
+            extractor_version=extractor_version,
+            extraction_status=extraction_status,
         )
         self._chunk_writer.upsert(silver_out.chunks)
         self._entity_graph_sink.stage(silver_out.entity_signals)
         return _OUTCOME_PROCESSED
+
+
+# Imported lazily inside helper bodies above; pulled to module scope
+# so the constants are reachable for the _process_item branches.
+_EXTRACTION_STATUS_OK = "ok"
+_EXTRACTION_STATUS_FAILED = "failed"
+_EXTRACTION_STATUS_UNSUPPORTED = "unsupported"
+
+
+def _safe_quality_ok(extractor: Extractor, doc: object) -> bool:
+    """Call ``extractor.quality_ok`` with a defensive fallback to True.
+
+    Extractors that pre-date the quality-aware Protocol may not
+    implement ``quality_ok`` — older fakes / stubs default to "True"
+    so the happy path still records ``ok`` for them. Real impls are
+    F43-contract-tested so the fallback only fires on legacy/test
+    stand-ins.
+    """
+    getter = getattr(extractor, "quality_ok", None)
+    if getter is None:
+        return True
+    try:
+        return bool(getter(doc))
+    except Exception:
+        return True
+
+
+def _safe_outcome_write(
+    silver: SilverProcessor,
+    *,
+    ref: object,
+    source_modified_at: str,
+    extractor: Extractor,
+    extraction_status: str,
+) -> None:
+    """Best-effort ``documents_media`` write for the failed/unsupported branch.
+
+    Routes through :meth:`DefaultSilverProcessor.write_extraction_outcome`
+    when the wired silver implementation exposes it. Other Silver
+    impls (legacy fakes, integration-test stubs) silently skip the
+    write — F70's per-table baseline tracks the wired path.
+    """
+    writer = getattr(silver, "write_extraction_outcome", None)
+    if writer is None:
+        return
+    try:
+        writer(
+            raw=ref,
+            _source_modified_at=source_modified_at,
+            extractor_name=getattr(extractor, "name", None),
+            extractor_version=getattr(extractor, "version", None),
+            extraction_status=extraction_status,
+        )
+    except Exception:
+        # An outcome-write failure must NOT escalate the per-item
+        # dead-letter branch into a batch rollback. Silver/writer-side
+        # failures on the happy path still propagate (those are
+        # transaction-correctness signals); this is a best-effort
+        # dashboard write.
+        logger.exception("documents_media outcome write failed for status=%s", extraction_status)
 
 
 def _safe_connector_metadata(connector: SourceConnector, item_id: str) -> SourceMetadata:

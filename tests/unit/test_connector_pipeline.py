@@ -17,6 +17,7 @@ from __future__ import annotations
 import dataclasses
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -229,3 +230,115 @@ def test_batch_level_failure_rolls_back(tmp_path: Path) -> None:
             fresh.close()
     finally:
         db.close()
+
+
+# ----------------------------------------------------------------------
+# GH #336 (ADR-024 Bundle B) — _safe_quality_ok + _safe_outcome_write
+# defensive fallback branches are exercised through the public pipeline
+# surface via tests/integration/test_documents_media_writer.py. Per F5
+# we don't import the underscore-prefixed helpers directly — instead
+# the tests below drive ConnectorPipeline.run_batch with stand-in
+# extractors / silvers that hit each fallback path.
+# ----------------------------------------------------------------------
+
+
+class _ExtractorMissingQuality:
+    """Extractor stand-in with no ``quality_ok`` attribute — exercises the public fallback."""
+
+    name = "no-quality"
+    version = "v0"
+
+    def can_extract(self, _mime: str, _magic: bytes) -> bool:
+        return True
+
+    def extract(self, raw: bytes, _mime: str) -> Any:
+        from kairix.core.protocols import DocMetadata, ExtractedDocument
+
+        return ExtractedDocument(
+            markdown=raw.decode("utf-8", errors="replace") or "body",
+            pages=(),
+            images=(),
+            metadata=DocMetadata(title=None, author=None, created_date=None, language=None, page_count=None),
+            confidence=1.0,
+        )
+
+    # No ``quality_ok`` -> _safe_quality_ok's "method missing" branch
+    # fires when the pipeline calls it. The expected status the
+    # orchestrator surfaces is ``ok`` (the helper defaults to True).
+
+    def metadata_for(self, _raw: bytes, _mime: str) -> Any:
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
+
+class _ExtractorRaisingQuality:
+    """Extractor stand-in whose ``quality_ok`` raises — exercises the public swallow fallback."""
+
+    name = "raise-quality"
+    version = "v0"
+
+    def can_extract(self, _mime: str, _magic: bytes) -> bool:
+        return True
+
+    def extract(self, raw: bytes, _mime: str) -> Any:
+        from kairix.core.protocols import DocMetadata, ExtractedDocument
+
+        return ExtractedDocument(
+            markdown=raw.decode("utf-8", errors="replace") or "body",
+            pages=(),
+            images=(),
+            metadata=DocMetadata(title=None, author=None, created_date=None, language=None, page_count=None),
+            confidence=1.0,
+        )
+
+    def quality_ok(self, _doc: object) -> bool:
+        raise RuntimeError("scripted quality_ok failure")
+
+    def metadata_for(self, _raw: bytes, _mime: str) -> Any:
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
+
+def _run_one_item_through_factory_pipeline(tmp_path: Path, extractor: object) -> str | None:
+    """Drive one happy-path item through the production factory pipeline.
+
+    Returns the resulting ``documents_media.extraction_status`` so the
+    caller can assert the safe-quality-ok fallback produces ``ok``
+    (the documented default when the helper's exception/missing-method
+    fallback fires).
+    """
+    from kairix.core import factory
+    from kairix.core.db.schema import create_schema
+
+    db = sqlite3.connect(str(tmp_path / "fallback.sqlite"))
+    create_schema(db)
+    pipeline = factory.build_connector_pipeline(
+        db=db,
+        collection="safe-quality-fallback",
+        chunk_writer=FakeChunkWriter(),
+        entity_graph_sink=FakeEntityGraphSink(),
+    )
+    connector = FakeSourceConnector(
+        name="fallback-source",
+        events=[ChangeEvent(op="modified", item_id="doc.md", modified_at="2026-05-28T10:00:00Z")],
+        content={"doc.md": b"body text"},
+        cursor_token="fallback-cursor",
+    )
+    pipeline.run_batch(connector, extractor)  # type: ignore[arg-type]  # F3-rationale: synthetic stand-in satisfies the runtime-checkable Extractor Protocol
+    row = db.execute("SELECT extraction_status FROM documents_media LIMIT 1").fetchone()
+    db.close()
+    return None if row is None else str(row[0])
+
+
+def test_extractor_missing_quality_method_yields_ok_status_via_public_pipeline(tmp_path: Path) -> None:
+    """Extractor with no quality_ok method -> safe-quality-ok fallback returns True -> status='ok'."""
+    status = _run_one_item_through_factory_pipeline(tmp_path, _ExtractorMissingQuality())
+    assert status == "ok"
+
+
+def test_extractor_quality_method_raising_yields_ok_status_via_public_pipeline(tmp_path: Path) -> None:
+    """Extractor whose quality_ok raises -> safe-quality-ok swallows -> status='ok'."""
+    status = _run_one_item_through_factory_pipeline(tmp_path, _ExtractorRaisingQuality())
+    assert status == "ok"

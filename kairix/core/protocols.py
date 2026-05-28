@@ -1202,6 +1202,9 @@ class SilverProcessor(Protocol):
         sensitivity: Sensitivity,
         connector_metadata: SourceMetadata | None = None,
         extractor_metadata: SourceMetadata | None = None,
+        extractor_name: str | None = None,
+        extractor_version: str | None = None,
+        extraction_status: str = "ok",
     ) -> SilverOutput:
         """Return a SilverOutput (chunks + entity signals) for one extracted document.
 
@@ -1211,6 +1214,17 @@ class SilverProcessor(Protocol):
         callers stay back-compatible. When both are ``None`` Silver
         falls back to the legacy single-source path (no author /
         tags / properties).
+
+        GH #336 (ADR-024 Bundle B): ``extractor_name`` /
+        ``extractor_version`` / ``extraction_status`` are surfaced by
+        the orchestrator so Silver can write the per-document
+        ``documents_media`` row. All three default to None / "ok" so
+        non-pipeline callers (legacy tests) stay back-compatible. The
+        ``extraction_status`` enum is ``"ok" | "failed" | "unsupported"``;
+        the orchestrator catches the ``failed`` / ``unsupported``
+        branches before reaching :meth:`process` so those statuses
+        flow via the separate ``write_extraction_outcome`` shape on
+        :class:`~kairix.core.connectors.silver.DefaultSilverProcessor`.
         """
         ...
 

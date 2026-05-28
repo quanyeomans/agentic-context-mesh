@@ -1,0 +1,20 @@
+# F70 baseline — tables declared in kairix/core/db/schema.py with no INSERT
+# writer in production code, no ``# table-is-derived:`` rationale, and a
+# follow-up issue tracking the missing writer.
+#
+# documents_media (GH #336) is intentionally NOT in this baseline — ADR-024
+# Bundle B pays it down by adding a writer in kairix/core/connectors/silver.py
+# (this commit). F70 will fire on any future schema additions per F50.
+#
+# Sibling-pattern follow-ups (filed automatically by Bundle B's F70 sweep):
+#   - kairix/core/db/schema.py::document_pages — GH #338
+#   - kairix/core/db/schema.py::topology_*    — GH #339 (7 Wave A tables)
+
+kairix/core/db/schema.py::document_pages
+kairix/core/db/schema.py::topology_containers
+kairix/core/db/schema.py::topology_federated_connectors
+kairix/core/db/schema.py::topology_group_grants
+kairix/core/db/schema.py::topology_hierarchy_nodes
+kairix/core/db/schema.py::topology_scope_entries
+kairix/core/db/schema.py::topology_scope_profiles
+kairix/core/db/schema.py::topology_skills

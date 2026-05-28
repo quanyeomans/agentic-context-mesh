@@ -178,6 +178,9 @@ pytest_plugins = [
     "tests.bdd.steps.connector_cursor_persistence_steps",
     # GH #334 — Neo4j entity-graph drain (Curator-coupling boundary).
     "tests.bdd.steps.neo4j_drain_steps",
+    # GH #336 / ADR-024 Bundle B — documents_media writer surfacing
+    # per-extractor + per-document outcome.
+    "tests.bdd.steps.documents_media_writer_steps",
     # F64 reference test — SharePoint Graph 429 / Retry-After handling.
     "tests.bdd.steps.sharepoint_rate_limit_steps",
     # F63 reference test — maintenance scale-bound per-tick row cap.

@@ -564,15 +564,22 @@ def build_connector_pipeline(
         CursorStore,
         DeadLetterStore,
         DefaultSilverProcessor,
+        SqliteDocumentsMediaWriter,
         StreamingBronzeStore,
     )
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.worker import _SqliteEntityGraphSink
 
+    # GH #336 (ADR-024 Bundle B) — wire the documents_media writer
+    # into the default Silver processor when the caller did not
+    # override ``silver``. Caller-supplied silvers (typically a fake
+    # for integration tests that don't care about documents_media)
+    # opt out by passing their own ``silver=`` instance.
+    default_silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
     return ConnectorPipeline(
         db=db,
         bronze=StreamingBronzeStore(db),
-        silver=silver if silver is not None else DefaultSilverProcessor(),
+        silver=silver if silver is not None else default_silver,
         chunk_writer=chunk_writer if chunk_writer is not None else legacy_chunk_writer(db, collection=collection),
         entity_graph_sink=entity_graph_sink if entity_graph_sink is not None else _SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
