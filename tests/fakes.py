@@ -3601,3 +3601,160 @@ class FakeHierarchyConnector:
     def load_hierarchy(self, cc_pair_id: int) -> Any:
         del cc_pair_id
         return iter(self._nodes)
+
+
+# ---------------------------------------------------------------------------
+# Bulk-seed helpers for the soak tier (ADR-024 Bundle F).
+#
+# Soak tests seed N >= 10**4 rows through canonical fakes; the helpers
+# live here (not in per-soak-test files) so they remain reusable across
+# tests/soak/ and the F72 integrity-invariants soak variants from Bundle E.
+# ---------------------------------------------------------------------------
+
+
+def build_bulk_source_connector(
+    *,
+    name: str = "soak-source",
+    n_events: int = 10_000,
+    body_template: str = "soak body {i}\n",
+    per_tick_max_items: int | None = None,
+) -> FakeSourceConnector:
+    """Construct a :class:`FakeSourceConnector` pre-seeded with ``n_events`` items.
+
+    Each event has a deterministic item_id ``soak-item-{i:06d}``, a
+    body of ``body_template.format(i=i)`` encoded UTF-8, and a
+    monotonically increasing ``modified_at`` so cursor-tracking works
+    if the test enables it.
+
+    ``per_tick_max_items`` defaults to ``n_events`` so a single
+    ``run_batch`` drains the whole backlog without budget-yield —
+    soak tests that want to measure multi-tick progress pass a
+    smaller value.
+
+    Used by the soak tier's bronze-coverage-parity test and the
+    cross-bundle integrity invariants (F72 soak variants).
+    """
+    from kairix.core.protocols import ChangeEvent
+
+    effective_budget = per_tick_max_items if per_tick_max_items is not None else n_events
+    events: list[Any] = []
+    content: dict[str, bytes] = {}
+    for i in range(n_events):
+        item_id = f"soak-item-{i:06d}.md"
+        modified_at = f"2026-01-01T00:00:{i % 60:02d}Z" if i < 60 else f"2026-01-{(i // 60) % 28 + 1:02d}T00:00:00Z"
+        events.append(
+            ChangeEvent(
+                op="created",
+                item_id=item_id,
+                modified_at=modified_at,
+            )
+        )
+        content[item_id] = body_template.format(i=i).encode("utf-8")
+    return FakeSourceConnector(
+        name=name,
+        events=events,
+        content=content,
+        per_tick_max_items=effective_budget,
+    )
+
+
+def seed_bulk_entity_signals(
+    db: Any,
+    *,
+    n_rows: int = 10_000,
+    kind: str = "person",
+    value_template: str = "person-{i:06d}",
+    pushed_to_neo4j: int = 0,
+    push_attempt_count: int = 0,
+    base_modified_at: str = "2026-01-01T00:00:00Z",
+) -> int:
+    """Bulk-insert ``n_rows`` into the ``entity_signals`` staging table.
+
+    Returns the number of rows inserted. Uses ``executemany`` for
+    throughput so a 10k-row seed completes in ~50 ms on the soak
+    runner (the production write path is per-row to keep the
+    transactional shape narrow; soak tests bypass the writer to
+    populate state directly because they're testing the *drain*, not
+    the *stage*).
+
+    F47-friendly: the test composes ``factory.build_neo4j_drainer``
+    with a real ``db`` connection. The state under test is the rows
+    this helper inserts; the drain then advances them.
+    """
+    rows = [
+        (
+            kind,
+            value_template.format(i=i),
+            f"soak://{value_template.format(i=i)}",
+            base_modified_at,
+            0.85,
+            "internal",
+            pushed_to_neo4j,
+            push_attempt_count,
+        )
+        for i in range(n_rows)
+    ]
+    db.executemany(
+        "INSERT INTO entity_signals (kind, value, source_uri, modified_at, confidence, "
+        "sensitivity, pushed_to_neo4j, push_attempt_count) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    db.commit()
+    return n_rows
+
+
+def seed_bulk_content_rows(
+    db: Any,
+    *,
+    n_rows: int = 10_000,
+    collection: str = "soak",
+    body_template: str = "soak content body {i}\n",
+) -> int:
+    """Bulk-insert ``n_rows`` into ``documents`` + ``content``.
+
+    Used by the vector-index-drift soak test — seeds the chunks the
+    embed pipeline will pick up via ``_gather_pending_chunks``. The
+    SQL mirrors the production write surface exactly (UPSERT shape
+    on ``documents``; INSERT OR REPLACE on ``content``).
+
+    Returns the number of rows inserted (one document + one content
+    row per ``i``).
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    doc_rows = []
+    content_rows = []
+    for i in range(n_rows):
+        content_hash = f"soakhash{i:08d}"
+        path = f"soak/doc-{i:06d}.md"
+        doc_rows.append(
+            (
+                collection,
+                path,
+                content_hash,
+                "soak-source",
+                f"soak://doc-{i:06d}",
+                now,
+                None,
+                "internal",
+                now,
+                now,
+            )
+        )
+        content_rows.append((content_hash, body_template.format(i=i), now))
+    db.executemany(
+        "INSERT INTO documents "
+        "(collection, path, hash, source_name, source_uri, source_modified_at, "
+        "source_page, sensitivity, created_at, modified_at, active) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+        "ON CONFLICT (collection, path) DO UPDATE SET hash = excluded.hash",
+        doc_rows,
+    )
+    db.executemany(
+        "INSERT OR REPLACE INTO content (hash, doc, created_at) VALUES (?, ?, ?)",
+        content_rows,
+    )
+    db.commit()
+    return n_rows

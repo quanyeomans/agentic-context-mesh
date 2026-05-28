@@ -1,0 +1,131 @@
+name: "7 · Soak suite (nightly + on-demand)"
+
+# Production-scale soak tier per ADR-024 (§"Soak tier (new) — @pytest.mark.soak"
+# and §"Operational implications"). Tests carrying @pytest.mark.soak seed
+# N >= 10**4 rows and assert behaviour at scale that fixture-scale
+# integration tests (N <= 100) cannot detect — e.g. unbounded fetchall
+# saturation, vector index drift accumulation, multi-tick drain progress.
+#
+# Triggers:
+#   - schedule: nightly UTC 06:00 — runs against main HEAD without operator action
+#   - workflow_dispatch: manual `gh workflow run soak-suite.yml` for ad-hoc validation
+#
+# This workflow is intentionally NOT a branch-protection required check:
+#   - per-PR per-commit gates live in ci.yml (Stages 0-5 + e2e)
+#   - soak wall-clock is 20-60 min; running per-commit would slow feedback
+#     to unacceptable levels
+#   - the per-commit gates (F68-F72) catch the *shape* problems that would
+#     otherwise only show under soak
+#
+# Failure of this workflow does NOT block PR merge. Operators / on-call
+# read the nightly notification and triage from the workflow run log.
+#
+# No untrusted input is referenced in run: blocks — this workflow only
+# uses checkout + pytest invocation against repo-controlled paths.
+
+on:
+  schedule:
+    # 06:00 UTC nightly — runs after the typical EU/US working day so
+    # any same-day regression is visible at the start of the next day.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+# Restrict to main — soak runs are about the trunk's stability, not
+# branch-experimental code. Branch-PR validation belongs in ci.yml.
+permissions: {}
+
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  soak:
+    name: "Soak — pytest -m soak (N >= 10**4)"
+    runs-on: ubuntu-latest
+    # Only ever run on main. workflow_dispatch from a non-main branch
+    # exits without doing work so contributors can't accidentally burn
+    # 60min of runner time on a feature branch.
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      checks: write     # required to surface test results as a check
+    # 75 min wall-clock ceiling — soak target is 20-60 min per ADR-024;
+    # 75 leaves headroom for slow-runner variance without leaving a
+    # broken workflow hanging until the GitHub Actions 6h default.
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Match Stage 2's Python version exactly — soak tests run against
+      # the same production code surface unit tests do, just at
+      # production-scale fixtures.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install OCR runtime (tesseract binary)
+        # Mirrors Stage 2's OCR install; some soak fixtures touch the
+        # extractor registry transitively (markitdown/ocr) and we don't
+        # want a stray ImportError silently skipping a soak test.
+        run: sudo apt-get install -y tesseract-ocr
+
+      - name: Install dependencies
+        # Same extras as Stage 2 + Stage 3 so the import surface matches
+        # the per-commit gates exactly. Soak tests don't need extra
+        # packages — they just exercise existing production code at scale.
+        run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+
+      - name: Soak tests (pytest -m soak)
+        # F66 / ADR-024 §"Soak tier" — soak tests use injectable fakes
+        # via the factory; no Azure / Neo4j / external credentials are
+        # required. KAIRIX_LLM_ENDPOINT / KAIRIX_LLM_API_KEY are
+        # deliberately NOT set so any soak test reaching for them fails
+        # loud rather than silently bypassing the fake injection seam.
+        #
+        # --cov-fail-under=0 overrides pyproject's fail_under=88 — soak
+        # tests target scale behaviour, not coverage delta (F7 owns the
+        # per-file floor on the unit run).
+        #
+        # --durations=0 emits a per-test wall-clock line so regressions
+        # in any one soak test surface directly in the run log without
+        # needing a separate timing instrument.
+        #
+        # --maxfail=3 stops the run if three soak tests fail — by then
+        # we have enough signal for triage and don't need to burn the
+        # remaining 60+ min of runner time.
+        run: |
+          pytest tests/ \
+            -m soak \
+            --tb=short \
+            --maxfail=3 \
+            --durations=0 \
+            --cov-fail-under=0 \
+            --junitxml=results-soak.xml \
+            -v
+
+      - name: Upload soak test results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: test-results-soak
+          path: results-soak.xml
+          retention-days: 30
+
+      - name: Upload soak test results to Codecov (test analytics)
+        # Same upload pattern as Stage 2/3 — gives Codecov Test Analytics
+        # the soak-tier signal for flaky-test + slow-test tracking.
+        # fail_ci_if_error: false because soak is a diagnostic tier; a
+        # Codecov outage must never look like a soak regression.
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3 # v1
+        with:
+          files: results-soak.xml
+          flags: soak
+          fail_ci_if_error: false  # codecov outage / rate-limit must not look like a soak regression — analytics is diagnostic, not gate
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

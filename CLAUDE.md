@@ -84,6 +84,10 @@ Failing any check: send the subagent back with a `SendMessage` correction or rej
 - User-facing: grade 8 reading level, "knowledge store" not "vault"
 - Test agents: generic names (agent-alpha, agent-beta)
 
+## Soak tier (`@pytest.mark.soak`)
+
+Production-scale soak tests live under `tests/soak/` (and Bundle E's `tests/integrity_invariants/*_soak` variants) and carry `pytestmark = pytest.mark.soak`. They seed N >= 10**4 rows through the canonical fakes + `kairix.core.factory.build_*`, then assert concrete observable outcomes (row counts, wall-clock budgets, monotonicity) at production scale. Excluded from Stage 2/3 per-commit CI; the [`soak-suite.yml`](.github/workflows/soak-suite.yml) workflow runs `pytest -m soak` nightly on `main` and on-demand via `gh workflow run soak-suite.yml`. Wall-clock target 20-60 min; this workflow is NOT a branch-protection check and does NOT block PR merge. See [ADR-024 §"Soak tier (new)"](docs/architecture/ADR-024-test-pyramid-redesign.md) for the canonical spec and the three seed soak tests (`bronze_coverage_parity_at_scale`, `vector_index_drift_at_scale`, `drain_progress_at_10k`).
+
 ## Architecture fitness functions
 
 Mechanical, blocking checks encode rejected patterns into automation:

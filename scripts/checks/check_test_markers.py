@@ -32,7 +32,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _arch_lib import gate, python_files, repo_relative
 
 # Category markers from pyproject.toml's `[tool.pytest.ini_options].markers`.
-KNOWN_MARKERS = frozenset({"unit", "bdd", "contract", "integration", "e2e", "slow"})
+# ``soak`` covers the ADR-024 production-scale soak tier (tests/soak/ and
+# Bundle E's tests/integrity_invariants/*_soak variants); excluded from
+# Stage 2/3 per-commit CI, runs in soak-suite.yml on nightly + on-demand.
+KNOWN_MARKERS = frozenset({"unit", "bdd", "contract", "integration", "e2e", "slow", "soak"})
 
 REMEDIATION = """Refactor to add ONE category marker per test
 (function-level decorator, class-level decorator, or module-level
