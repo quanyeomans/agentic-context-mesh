@@ -7,6 +7,53 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.28.1a1] - 2026-05-28 — Connector safety bounds, per-source metadata in search, worker memory fixes, entity graph fills
+
+> **Upgrading?** Two new operator knobs and one runbook. Worker no longer crashes during embed cycles on large vector indexes once the runbook is applied. New per-source metadata flows through to search results automatically — no config change required. Full details below.
+
+### New for agents
+
+- **Date- and author-aware search now works across every source.** When you ask "what did agent-alpha write about X last month?", kairix can now answer using the document's actual author and modified date — pulled from SharePoint, Slack, GitHub, Notion, and Microsoft 365 envelope metadata, not just Obsidian frontmatter. Previously 98% of post-SharePoint chunks lacked the metadata that powers temporal and authorship boosts in retrieval.
+- **Person and Organisation entities now reach the entity graph.** A new background job drains entity signals (people + organisations extracted during ingestion) into Neo4j every 10 minutes. Previously the staging table accumulated forever and the graph stayed empty for kairix-extracted entities.
+
+### New for operators
+
+- **Worker no longer crashes during embed cycles on hosts with 1M+ vectors.** Two parts: a kill-switch env (`KAIRIX_WORKER_WRITES_VEC_INDEX`, default OFF — interim fix) that stops the worker touching the vector index, and an operator runbook ([`docs/operations/runbooks/worker-memory-and-swap.md`](docs/operations/runbooks/worker-memory-and-swap.md)) that walks through the proper fix: raise the worker container's memory ceiling and allow it to spill into host SSD swap. The runbook fix is a 5-minute job on the VM; the kill-switch is the emergency brake if anything misbehaves.
+- **Connector ticks are bounded to safe per-cycle limits.** Every source connector and tick-driven framework component now declares an explicit `per_tick_max_items` (default 500) and an optional `disk_watermark_min_free_bytes` gate. A backlog of 100k items now drains over many short ticks instead of one host-saturating sweep, and a tick skips entirely when free disk falls below the configured watermark. SharePoint, Microsoft 365 calendar, and GitHub default to a 5 GB watermark; the lighter sources opt out via documented rationale.
+- **New `kairix curator drain` CLI** for manual catch-up of the entity-graph staging table. `--batch-size`, `--max-batches`, `--dry-run`, and `--format text|json` for bulk drain operations or one-off diagnostics.
+- **Integrity preflight reports the true backlog size.** The `entity-signals-staging-not-stuck` warning previously capped its count at 1,000 regardless of actual depth, masking real scale problems. It now reports the real count and keeps the bounded sample separately.
+- **Compose env knob for worker memory swap.** New `KAIRIX_WORKER_MEMSWAP_LIMIT` in `docker-compose.yml` lets operators allow the worker cgroup to use host swap. Default (`1g`) preserves the historical no-swap behaviour for existing deployments; the runbook walks through opting in.
+
+### Things that work better
+
+- **Author + date now persist all the way through to retrieval.** New `SourceMetadata` envelope flows through silver chunking: each `Chunk` now carries `author`, `author_email`, `tags`, and a free-form properties bag. Downstream search ranking, temporal boost, and entity coupling all benefit without any per-source code changes.
+- **Person nodes auto-emit from envelope authors at high confidence.** When a source surfaces an author (SharePoint `lastModifiedBy.displayName`, Slack `user_profile.real_name`, GitHub commit author, etc.), the entity layer emits a `Person` signal at 0.95 confidence ahead of the regex heuristic. The graph entity is more accurate than name-extraction from prose.
+- **The previous masking of staging backlog is fixed.** The preflight count now agrees with `SELECT COUNT(*) FROM entity_signals WHERE pushed_to_neo4j = 0`.
+
+### Configuration migration from v2026.5.28
+
+1. **For hosts with 1M+ vectors (per-corpus, not per-deployment):** Follow [`docs/operations/runbooks/worker-memory-and-swap.md`](docs/operations/runbooks/worker-memory-and-swap.md). Sets three env vars (`KAIRIX_WORKER_MEM_LIMIT=8g`, `KAIRIX_WORKER_MEMSWAP_LIMIT=16g`, `KAIRIX_WORKER_WRITES_VEC_INDEX=1`) and recreates the worker container. The worker resumes vector index writes; cycle takes 2-10 min longer under swap pressure but stops dying.
+2. **For hosts with <500k vectors:** No required change. The worker memory defaults are unchanged; the new kill-switch defaults to OFF (which is fine for small corpora since the OOM never triggers).
+3. **Optional: bulk-drain the historical entity signals.** `kairix curator drain --batch-size 5000 --max-batches 100` for catch-up, OR (operator's choice) wipe `entity_signals` + re-ingest from source to repopulate cleanly. The drain mechanism handles either approach.
+
+### New architectural rules (mechanically enforced)
+
+- **F65** — every source connector implements `metadata_for()` and ships a propagation test that asserts `chunk_date` + `author` reach the indexed chunk
+- **F66** — every connector + tick-driven framework component declares `per_tick_max_items` + `disk_watermark_min_free_bytes` (or watermark-exempt rationale)
+- **F67** — every staging table with a `pushed_to_<sink>` column must have at least one code path that updates it to 1. Mechanically blocks the "schema landed, writer never built" anti-pattern that caused 2.3M entity signals to accumulate for years before being noticed.
+
+### Things that haven't changed
+
+- The kairix CLI surface for search, MCP, embed, entity management, briefing, prep, eval, benchmark, connectors.
+- The vector index format (`vectors.usearch`) and the SQLite schema's content + content_vectors tables.
+- The provider plugin selection model.
+
+### Internal
+
+- ADR-019 (compose-layer resource governance), ADR-020 (per-tick budget + disk-watermark gate), ADR-021 (per-source metadata normalisation), ADR-022 (container-level secret readiness gate, deferred to next release after Wave F), ADR-023 (vector index write architecture — primary path is operational tuning via swap; A1/A2/sqlite-vec fallbacks specified per trigger condition).
+- Wave plan ADR updated to insert Wave E.5 (tick safety + metadata propagation) between Wave E and Wave F.
+- Default-safe cutover: every architectural change in this alpha lands as default-OFF or zero-change-for-existing-operators.
+
 ## [2026.5.28] - 2026-05-28 — Five new connectors, streaming storage, and bug fixes from the alpha cycle
 
 > Operator-facing changes since v2026.5.18 in one entry. Internal development history (per-alpha notes, architecture refactors not visible to operators) lives in git and `docs/upgrades/_dev/`.
