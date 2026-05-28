@@ -352,7 +352,7 @@ _KV_NAME = os.environ.get("KAIRIX_KV_NAME")
     reason=(
         "Smoke test needs KAIRIX_KV_NAME for Azure-Foundry secret resolution. "
         "fix: source the kairix secrets file before running. "
-        "next: re-run with KAIRIX_KV_NAME=kv-tc-agents."
+        "next: re-run with KAIRIX_KV_NAME=<your-key-vault-name>."
     ),
 )
 def test_smoke_subprocess_pipeline_does_not_crash(tmp_path: Path) -> None:

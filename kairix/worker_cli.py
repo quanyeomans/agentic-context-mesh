@@ -468,11 +468,6 @@ def reextract(
     currently-registered extractor. Recovers from past extract failures
     (e.g. missing extras fixed in a later release) without requiring
     the source to re-emit the items.
-
-    The v2026.5.26a1 dogfood landed 122 SharePoint items in dead_letter
-    before the markitdown extras hotfix; ``kairix worker reextract
-    --source-name sharepoint`` recovers them now that markitdown
-    converters import cleanly.
     """
     out = out if out is not None else sys.stdout
     err = err if err is not None else sys.stderr

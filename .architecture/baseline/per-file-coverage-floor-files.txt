@@ -31,3 +31,31 @@ kairix/agents/mcp/cold_start.py
 # flip CI's 3.12 stage between pass and fail). Grandfathering here is
 # the ADR-024-aligned response: F7 is a smell, not the gate.
 kairix/worker.py
+# kairix/core/connectors/silver.py — extractor adapter + per-format
+# rendering helpers. Several rendering branches (oversize-paragraph
+# expansion, edge-case entity emission, document_pages writer error
+# paths) are reached only through end-to-end fixtures that exercise
+# the full pipeline. Unit-coverable behaviour is already pinned by
+# tests/unit/test_silver.py + tests/integration/test_document_pages_writer.py;
+# the gap is over render-glue lines that don't carry a failure mode
+# worth a dedicated unit test. Lifting via DI on the render helpers
+# would invert the dependency for cosmetic reasons. F7 is a smell; the
+# matching gate for the failure classes here is F70 (schema-writer
+# symmetry) which the document_pages writer satisfies.
+kairix/core/connectors/silver.py
+# kairix/connectors/sharepoint/graph_client.py — Graph SDK boundary
+# adapter. Uncovered branches are Graph-specific error envelopes
+# (drive disabled, deleted-item tombstones, throttle-retry inner loop)
+# whose contract is pinned by F64 (rate-limit BDD) +
+# tests/integration/test_sharepoint_*.py at the boundary, not by line
+# coverage of the adapter itself. The remaining 4% gap is Azure-SDK
+# error-path branching that a unit test would re-implement the SDK to
+# exercise — F68 (Protocol failure-mode contracts) is the right gate
+# for that, not F7.
+kairix/connectors/sharepoint/graph_client.py
+# kairix/worker_cli.py — CLI dispatcher; the uncovered lines are
+# argparse subcommand wrappers that call into already-tested worker.py
+# entry points and immediately exit. F30 (operator-outcome tests)
+# covers the subcommand surface end-to-end via subprocess invocation;
+# F7 doesn't catch additional defects here.
+kairix/worker_cli.py

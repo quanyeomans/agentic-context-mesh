@@ -87,12 +87,11 @@ def _chunk_markdown(markdown: str) -> tuple[str, ...]:
     push it past ``_TARGET_CHUNK_CHARS``; then we flush and start a new
     chunk. Empty input yields an empty tuple.
 
-    Bug B fix (v2026.5.26a1 dogfood): paragraphs longer than
-    ``_TARGET_CHUNK_CHARS`` are pre-split at sentence boundaries (then
-    word, then char) BEFORE the greedy-glue loop runs. Previously a
-    32,595-char paragraph from a SharePoint backfill landed as one
-    chunk regardless of the 1000-char target — sabotage-proof in
-    ``tests/unit/test_silver.py``.
+    Paragraphs longer than ``_TARGET_CHUNK_CHARS`` are pre-split at
+    sentence boundaries (then word, then char) BEFORE the greedy-glue
+    loop runs — otherwise a single oversized paragraph would land as
+    one chunk regardless of the target. ``tests/unit/test_silver.py``
+    pins the pathological case.
     """
     text = markdown.strip()
     if not text:

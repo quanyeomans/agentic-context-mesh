@@ -447,9 +447,7 @@ class SharePointGraphClient:
         rather than the bytes inline. Without this flag the binary fetch
         returns the 302 response itself + ``raise_for_status()`` errors,
         which dead-letters every SharePoint item. Caller-injected clients
-        should also enable redirects (the test fixtures shipped before
-        2026-05-25 returned 200 inline so the bug never surfaced —
-        production Graph behaviour differs).
+        must also enable redirects.
         """
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         effective_timeout = timeout if timeout is not None else _GRAPH_REQUEST_TIMEOUT_S

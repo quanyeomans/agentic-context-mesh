@@ -240,7 +240,7 @@ Feature: agent can replay per-doc failures without rerunning a window
 Feature: human team member's queries are scoped by team membership
 
   Scenario: human's Slack identity maps to team scope profile
-    Given a human "dan@threecubes.io" is a member of "team-shape-builder" group
+    Given a human "alice@example.com" is a member of "team-shape-builder" group
     And the team has a group_grant on "client-x-engagement"
     When the human queries via the Slack bot
     Then kairix resolves the team-shape-builder group's grants

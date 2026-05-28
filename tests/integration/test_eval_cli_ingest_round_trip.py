@@ -32,8 +32,8 @@ are absent):
   * ``KAIRIX_KV_NAME`` resolvable to a Key Vault.
   * ``az`` CLI on PATH AND the operator logged in.
 
-Sabotage proof (executed locally 2026-05-21 with KAIRIX_E2E=1 +
-KAIRIX_KV_NAME=kv-tc-agents):
+Sabotage proof (run locally with KAIRIX_E2E=1 +
+KAIRIX_KV_NAME=<your-key-vault-name>):
 
   Step 1 — confirm green on develop tip with the wiring in place:
     pytest tests/integration/test_eval_cli_ingest_round_trip.py::test_eval_cli_ingests_facts_via_production_wiring \\
@@ -225,7 +225,7 @@ def test_eval_cli_ingests_facts_via_production_wiring(tmp_path: Path) -> None:
     ``kairix/use_cases/eval_suite.py`` to ``resolved_extractor =
     fact_extractor if fact_extractor is not None else
     _NullFactExtractor()`` (the pre-wiring behaviour). Re-run with
-    ``KAIRIX_E2E=1 KAIRIX_KV_NAME=kv-tc-agents`` and the
+    ``KAIRIX_E2E=1 KAIRIX_KV_NAME=<your-key-vault-name>`` and the
     ``facts_row_count >= 1`` assertion fails because the Null extractor
     emits zero facts (the LoCoMo 5% collapse). Restore to pass.
     """

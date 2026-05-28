@@ -181,13 +181,12 @@ class _SqliteChunkWriter:
     The writer never commits — the caller's per-batch transaction owns
     the commit (matches :class:`FilesystemBronzeStore` discipline).
 
-    FTS5 invariant (post-IM-6 fix): every chunk write also lands a
-    ``documents_fts`` row so BM25 retrieval can find it. Without this,
-    the hybrid ranker silently degrades to vector-only for new-path
-    chunks (the IM-6 dogfood-VM cutover surfaced this — see
-    contract test ``tests/contracts/test_chunk_writer_fts_invariant.py``
-    and integration test
-    ``tests/integration/test_connector_search_round_trip.py``).
+    FTS5 invariant: every chunk write also lands a ``documents_fts`` row
+    so BM25 retrieval can find it. Without this, the hybrid ranker
+    silently degrades to vector-only for new-path chunks. Contract test
+    ``tests/contracts/test_chunk_writer_fts_invariant.py`` and integration
+    test ``tests/integration/test_connector_search_round_trip.py`` pin
+    the pairing.
     """
 
     def __init__(self, db: sqlite3.Connection, collection: str) -> None:
@@ -659,14 +658,11 @@ def run_reextract_dead_letter(
     6. Clears the dead_letter row.
     7. Commits per item (chunked-commit principle from #321).
 
-    Used after a Dockerfile / connector fix lands. Example:
-    v2026.5.26a1 dogfood left 122 items dead-lettered before the
-    markitdown extras hotfix; ``kairix worker reextract --source-name
-    sharepoint`` recovers them.
-
-    ``dry_run`` walks the same logic but commits nothing — useful for
-    sizing the recovery before committing to it. ``limit`` caps the
-    number of items processed (None = all).
+    Use after a Dockerfile / connector fix lands to recover items that
+    dead-lettered under the old behaviour. ``dry_run`` walks the same
+    logic but commits nothing — useful for sizing the recovery before
+    committing to it. ``limit`` caps the number of items processed
+    (None = all).
     """
     from kairix.core.connectors import DeadLetterStore
     from kairix.core.db import open_db
@@ -1643,13 +1639,10 @@ def run_entity_seed(deps: WorkerDeps | None = None) -> None:
 
     Treats every outcome as non-fatal: the underlying store-crawl CLI
     (``kairix.knowledge.store.cli``) calls ``sys.exit(0)`` on success
-    and ``sys.exit(1)`` on error. ``SystemExit`` does NOT inherit from
-    ``Exception``, so catching only ``Exception`` lets a "successful"
-    ``sys.exit(0)`` propagate out and terminate the worker process —
-    that's the #270 regression where the kairix-worker container exits
-    0 every cycle and Docker restarts it on a loop. Same
-    ``(Exception, SystemExit)`` discipline as ``run_embed`` and
-    ``run_wikilinks_inject``.
+    and ``sys.exit(1)`` on error. Catch ``(Exception, SystemExit)`` at
+    every CLI boundary so a "successful" ``sys.exit(0)`` from the
+    callee can't terminate the worker process. Same discipline as
+    ``run_embed`` and ``run_wikilinks_inject``.
 
     Args:
         deps: Injectable worker dependencies. Tests construct
@@ -1694,12 +1687,10 @@ def run_wikilinks_inject(deps: WorkerDeps | None = None) -> None:
 def run_health_check(deps: WorkerDeps | None = None) -> None:
     """Log a health check.
 
-    Treats every outcome as non-fatal — including ``SystemExit`` —
-    for the same reason as ``run_entity_seed``: a maintenance helper
-    that calls ``sys.exit`` must not terminate the worker process.
-    See #270 for the entity-seed regression and the (Exception,
-    SystemExit) tuple discipline the worker enforces at every CLI
-    boundary.
+    Treats every outcome as non-fatal — including ``SystemExit`` — for
+    the same reason as ``run_entity_seed``: a maintenance helper that
+    calls ``sys.exit`` must not terminate the worker process. Catch
+    ``(Exception, SystemExit)`` at every CLI boundary.
 
     Args:
         deps: Injectable worker dependencies. Tests construct
@@ -1862,10 +1853,8 @@ def _run_preflight_at_boot(deps: PreflightDeps | None = None) -> bool:
     Returns True iff boot should continue. Logs the report at INFO when
     healthy, WARNING-per-gap when not. In strict mode
     (``KAIRIX_PREFLIGHT_STRICT=1``) returns False on any error-severity
-    gap so the worker exits non-zero; otherwise always returns True
-    (visibility without crashloop) — the IM-6 incident proved we need
-    the warning surface more than a hard stop on slightly-degraded
-    boots.
+    gap so the worker exits non-zero; otherwise always returns True so
+    slightly-degraded boots surface as warnings instead of crashlooping.
 
     ``deps`` is the F6-clean injection seam: production callers omit
     ``deps`` and the default factory wires real boundary calls; tests
