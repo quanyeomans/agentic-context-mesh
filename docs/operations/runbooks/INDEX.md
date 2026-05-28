@@ -21,6 +21,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | Ghost search hits pointing at deleted documents, orphan vector counts climbing | Enable `maintenance_loop` in `kairix.config.yaml` — see [how-to-upgrade-kairix](how-to-upgrade-kairix.md#migration-from-v2026518-to-the-current-release) for the operator recipe |
 | Setting up MCP server for the first time | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) |
 | Migrating an existing MCP client off SSE | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) |
+| Worker container restart-loops with `vec_index: converting immutable index to mutable (...)`; vector index drifting behind `content_vectors` | [worker-memory-and-swap](worker-memory-and-swap.md) — raise mem ceiling + allow host swap; #335 |
 
 ---
 
@@ -54,6 +55,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | [fact-extractor](../fact-extractor.md) | How the LLM fact extractor works, when to enable, cost model, prompt customisation |
 | [eval-suite](../eval-suite.md) | Running `kairix eval`, picking metrics + backends, the regression-gate CI pattern |
 | [MCP-ingest-tools](../MCP-ingest-tools.md) | Agent-callable `ingest_chat` and `facts_about` — namespace fence, safety boundaries, calling patterns |
+| [worker-memory-and-swap](worker-memory-and-swap.md) | Tune worker `mem_limit` + `memswap_limit` on 1M+ vector corpora so the embed cycle's mutable-index step doesn't OOM (#335) |
 
 ---
 
