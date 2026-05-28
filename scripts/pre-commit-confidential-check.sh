@@ -12,7 +12,10 @@
 
 set -e
 
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(py|md|yaml|yml|sh|json|toml)$' | grep -v "pre-commit-confidential-check.sh" || true)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '\.(py|md|yaml|yml|sh|json|toml)$' \
+    | grep -vE '^(scripts/pre-commit-confidential-check\.sh|scripts/checks/check_no_private_infra_refs\.py|tests/checks/test_no_private_infra_refs\.py)$' \
+    || true)
 
 if [[ -z "$STAGED_FILES" ]]; then
     exit 0

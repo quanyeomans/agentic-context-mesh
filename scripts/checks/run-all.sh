@@ -206,6 +206,12 @@ python3 "${SCRIPT_DIR}/check_f71_preflight_truthfulness.py" || overall=1
 #        existing per-layer integration tests can't see. ADR-024 Bundle E.
 python3 "${SCRIPT_DIR}/check_f72_integrity_invariants.py" || overall=1
 
+# F73 — no private infrastructure references (specific Azure resource names,
+#        internal hostnames, private sibling-repo URLs) in committed code,
+#        docs, or tests. Generic placeholders document the shape without
+#        naming the operator's deployment.
+python3 "${SCRIPT_DIR}/check_no_private_infra_refs.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
