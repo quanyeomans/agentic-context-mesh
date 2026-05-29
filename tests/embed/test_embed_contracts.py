@@ -13,7 +13,11 @@ import pytest
 
 
 def _seed_documents(db: sqlite3.Connection, docs: list[tuple[str, str, str]]) -> None:
-    db.execute("CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1)")
+    # source_modified_at column added per GH #329 — embed.py falls back to
+    # it when extract_chunk_date can't find a body-derived date.
+    db.execute(
+        "CREATE TABLE documents (hash TEXT PRIMARY KEY, path TEXT, active INTEGER DEFAULT 1, source_modified_at TEXT)"
+    )
     db.execute("CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT)")
     db.execute(
         "CREATE TABLE content_vectors"
@@ -22,7 +26,7 @@ def _seed_documents(db: sqlite3.Connection, docs: list[tuple[str, str, str]]) ->
     for content_hash, doc_body, path in docs:
         db.execute("INSERT INTO content (hash, doc) VALUES (?, ?)", (content_hash, doc_body))
         db.execute(
-            "INSERT INTO documents (hash, path, active) VALUES (?, ?, 1)",
+            "INSERT INTO documents (hash, path, active, source_modified_at) VALUES (?, ?, 1, NULL)",
             (content_hash, path),
         )
     db.commit()

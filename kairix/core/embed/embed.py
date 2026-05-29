@@ -355,9 +355,19 @@ def _gather_pending_chunks(
         db.execute("DELETE FROM content_vectors")
         db.commit()
 
+    # GH #329 — pull documents.source_modified_at so we can fall back to
+    # connector-supplied envelope timestamps (SharePoint lastModifiedDateTime,
+    # GitHub commit date, etc.) when the body-text extractor can't find a
+    # frontmatter / path-derived date. Closes the 98% temporal-boost coverage
+    # gap reported by the chunk_date_populated onboard check. Older test
+    # fixtures use a minimal documents schema without this column — the
+    # PRAGMA guard keeps them working while production gets the fallback.
+    _doc_cols = {row[1] for row in db.execute("PRAGMA table_info(documents)").fetchall()}
+    smt_select = "d.source_modified_at" if "source_modified_at" in _doc_cols else "NULL AS source_modified_at"
+
     if force:
-        rows = db.execute("""
-            SELECT c.hash, c.doc, d.path
+        rows = db.execute(f"""
+            SELECT c.hash, c.doc, d.path, {smt_select}
             FROM content c
             JOIN documents d ON c.hash = d.hash
             WHERE d.active = 1
@@ -365,8 +375,8 @@ def _gather_pending_chunks(
               AND length(c.doc) > 0
         """).fetchall()
     else:
-        rows = db.execute("""
-            SELECT c.hash, c.doc, d.path
+        rows = db.execute(f"""
+            SELECT c.hash, c.doc, d.path, {smt_select}
             FROM content c
             JOIN documents d ON c.hash = d.hash
             LEFT JOIN content_vectors v ON c.hash = v.hash AND v.seq = 0
@@ -377,8 +387,10 @@ def _gather_pending_chunks(
         """).fetchall()
 
     all_chunks: list[dict[str, Any]] = []
-    for content_hash, body, path in rows:
-        doc_date = extract_chunk_date(body, path, document_root=doc_root)
+    for content_hash, body, path, source_modified_at in rows:
+        # Body-text extractor first (matches Obsidian frontmatter / path
+        # patterns); fall back to connector envelope timestamp (#329).
+        doc_date = extract_chunk_date(body, path, document_root=doc_root) or source_modified_at
         for chunk in chunk_text(body):
             all_chunks.append(
                 {
