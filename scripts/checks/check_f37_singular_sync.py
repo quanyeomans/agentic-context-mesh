@@ -44,7 +44,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from _arch_lib import REPO_ROOT
+from _fitness_rule import FitnessRule
 
 # Module names whose presence in an import statement signals
 # change-detection / sync code. Matched against the FIRST dotted
@@ -202,9 +203,22 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     return violations
 
 
+class F37(FitnessRule):
+    """F37 as a FitnessRule subclass — see module docstring."""
+
+    name = "f37"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        if not _file_imports_sync_library(path):
+            return False
+        rel = self._repo_relative(path)
+        return not _is_allowed(rel)
+
+
 def main() -> int:
-    violations = collect_violations()
-    return gate("f37", violations, REMEDIATION)
+    return F37().run()
 
 
 if __name__ == "__main__":
