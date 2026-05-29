@@ -50,7 +50,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from _arch_lib import REPO_ROOT
+from _fitness_rule import FitnessRule
 
 _PLUGIN_TREES_REL: tuple[Path, ...] = (
     Path("kairix") / "connectors",
@@ -191,9 +192,37 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     return violations
 
 
+class F41(FitnessRule):
+    """F41 as a FitnessRule subclass — see module docstring.
+
+    Overrides :meth:`enumerate_files` to yield plugin DIRECTORIES (not
+    files) because the violation unit for F41 is a plugin tree, not an
+    individual ``.py`` file. :meth:`is_in_scope` returns True
+    unconditionally since the directory enumeration is already
+    restricted to plugin trees.
+    """
+
+    name = "f41"
+    remediation = REMEDIATION
+    roots = tuple(str(p) for p in _PLUGIN_TREES_REL)
+
+    def enumerate_files(self) -> list[Path]:
+        out: list[Path] = []
+        for tree_rel in _PLUGIN_TREES_REL:
+            tree_root = self._repo_root / tree_rel
+            for plugin_dir in _discover_plugins(tree_root):
+                out.append(plugin_dir)
+        return out
+
+    def is_in_scope(self, rel: str) -> bool:
+        return True
+
+    def file_has_violation(self, path: Path) -> bool:
+        return _plugin_violates(path)
+
+
 def main() -> int:
-    violations = collect_violations()
-    return gate("f41", violations, REMEDIATION)
+    return F41().run()
 
 
 if __name__ == "__main__":
