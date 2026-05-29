@@ -1,6 +1,6 @@
 # ADR-025 — Pipeline observability + agent-actionable status surface
 
-**Status:** Phase 1A validated 2026-05-29 — see §11. Phase 1 implementation in progress.
+**Status:** Phase 1A validated 2026-05-29 — see §11. Phase 1 implementation paused pending [ADR-026 Track A](ADR-026-cross-cutting-primitive-abstractions.md) — the per-call-site `emit_for(...)` instrumentation in §4 Pattern B is superseded by `StageRunner` (one emit site, not N). Resume Phase 1 against the new abstraction once Track A's DoD is met.
 **Drives:** F74 (status_emit mandatory at every stage boundary), F75 (search envelope carries provenance).
 **Companion specs:** [connector-ingestion-architecture.md](connector-ingestion-architecture.md),
 [agent-actionable-feedback.md](../../host/docs/standards/agent-actionable-feedback.md) (F21 affordance template applied at runtime, not just commit-time),
@@ -140,6 +140,7 @@ class StatusCode(Enum):
 The list above is the **starting** taxonomy. Phase 1A reconciles against actual production failure modes; the final enum lands with ADR-025 acceptance.
 
 ### Pattern B — `status_emit` context manager
+> **SUPERSEDED by [ADR-026 Track A](ADR-026-cross-cutting-primitive-abstractions.md).** The per-call-site wrapping below creates an unacceptable blast radius: F74 then forces it to repeat across every stage entry-point. ADR-026 introduces `StageRunner` as the single emit site; subclasses of `Stage` stay telemetry-free. Pattern B remains documented here only for historical reference.
 
 ```python
 # kairix/core/observability/status_emit.py
