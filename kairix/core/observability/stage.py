@@ -179,7 +179,7 @@ class IsolatedStageRunner:
         with emit_for(ctx.source_name, ctx.item_id, self._stage.name, db=self._db) as emit:
             try:
                 outcome = self._stage.process(ctx)
-            except BaseException as exc:
+            except Exception as exc:  # NOSONAR S5754 — runner contract: absorb + route via classify_exception
                 code = self._stage.classify_exception(exc)
                 detail = _exception_detail(exc)
                 _emit_outcome(emit, code, detail)
@@ -244,7 +244,7 @@ class BatchTransactionStageRunner:
         with emit_for(ctx.source_name, ctx.item_id, self._stage.name, db=self._db) as emit:
             try:
                 outcome = self._stage.process(ctx)
-            except BaseException as exc:
+            except Exception as exc:  # NOSONAR S5754 — runner contract: absorb + dead-letter, never raise
                 code = self._stage.classify_exception(exc)
                 detail = {**_exception_detail(exc), "dead_lettered": True}
                 self._dead_letter.record(ctx.source_name, ctx.item_id, f"{self._stage.name}: {exc}")
@@ -266,7 +266,7 @@ class BatchTransactionStageRunner:
         with emit_for(ctx.source_name, ctx.item_id, self._stage.name, db=self._db) as emit:
             try:
                 outcome = self._stage.process(ctx)
-            except BaseException as exc:
+            except Exception as exc:
                 code = self._stage.classify_exception(exc)
                 detail = {**_exception_detail(exc), "rolled_back": True}
                 _emit_outcome(emit, code, detail)
