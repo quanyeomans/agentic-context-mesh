@@ -35,7 +35,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from _arch_lib import REPO_ROOT
+from _fitness_rule import FitnessRule
 
 # Name of the writer class whose construction F61 watches.
 _WRITER_CLASS_NAME = "_SqliteChunkWriter"
@@ -150,9 +151,23 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     return violations
 
 
+class F61(FitnessRule):
+    """F61 as a FitnessRule subclass — see module docstring."""
+
+    name = "f61"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        if not _file_constructs_writer(path):
+            return False
+        rel = self._repo_relative(path)
+        return not _is_in_framework(rel)
+
+
 def main() -> int:
     """Return 0 when clean / vacuous-green; 1 on net-new violations."""
-    return gate("f61", collect_violations(), REMEDIATION)
+    return F61().run()
 
 
 if __name__ == "__main__":

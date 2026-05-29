@@ -54,7 +54,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from _arch_lib import REPO_ROOT
+from _fitness_rule import FitnessRule
 
 # Regex matching a chunking function name. Anchored at both ends.
 _CHUNK_NAME_RE = re.compile(
@@ -187,9 +188,22 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     return violations
 
 
+class F38(FitnessRule):
+    """F38 as a FitnessRule subclass — see module docstring."""
+
+    name = "f38"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        if not _file_defines_chunk_function(path):
+            return False
+        rel = self._repo_relative(path)
+        return not _is_allowed(rel)
+
+
 def main() -> int:
-    violations = collect_violations()
-    return gate("f38", violations, REMEDIATION)
+    return F38().run()
 
 
 if __name__ == "__main__":
