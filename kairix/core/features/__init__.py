@@ -9,7 +9,8 @@ retirement deadlines, call-site reference integrity, operator-surface
 availability, and both-branch test coverage.
 """
 
+from kairix.core.features.capability import FlagGatedCapability
 from kairix.core.features.registry import REGISTRY, FeatureFlag
 from kairix.core.features.resolver import FlagStatus, flag, status
 
-__all__ = ["REGISTRY", "FeatureFlag", "FlagStatus", "flag", "status"]
+__all__ = ["REGISTRY", "FeatureFlag", "FlagGatedCapability", "FlagStatus", "flag", "status"]
