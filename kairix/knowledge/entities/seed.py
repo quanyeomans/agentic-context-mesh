@@ -111,17 +111,61 @@ def _title_case(s: str) -> str:
     return " ".join(result)
 
 
+def _fetch_canonical_slugs(client: Any) -> set[str]:
+    """Return the set of node IDs that have already been resolved through
+    an enrichment pipeline (iter_5 entity-modelling or any future
+    canonical-map source).
+
+    GH #343 §10.7 prerequisite — the cypher-shell deployment of iter_5
+    cleanses ~74 worker-generated minimal-property nodes. Without this
+    check, ``seed_graph`` would regenerate exactly those nodes on the
+    next worker tick (within 24h of cleanse) because the regex scanner
+    in ``scan_for_entities`` is unaware of the canonical map.
+
+    A node is "canonical" if it carries EITHER ``wikidata_qid`` OR
+    ``kairix_provenance_batch`` — both signal the node was enriched
+    through a deliberate pipeline pass and is not a candidate for
+    regex-derived re-seeding.
+
+    Returns the empty set when Neo4j is unavailable; the seed pass
+    falls back to its pre-#343 behaviour (no skip, may regenerate).
+    """
+    if not getattr(client, "available", False):
+        return set()
+    rows = client.cypher(
+        "MATCH (n) WHERE n.wikidata_qid IS NOT NULL OR n.kairix_provenance_batch IS NOT NULL RETURN n.id AS id"
+    )
+    return {r["id"] for r in rows if r.get("id")}
+
+
 def seed_graph(client: Any, candidates: list[EntityCandidate]) -> int:
     """Upsert confirmed entity candidates into Neo4j.
 
-    Returns the number of successfully upserted entities.
+    Returns the number of successfully upserted entities. Skips
+    candidates whose slug already exists as a canonical (enrichment-
+    pipeline-resolved) node — see :func:`_fetch_canonical_slugs` and
+    GH #343 §10.7.
     """
     if not getattr(client, "available", False):
         logger.warning("seed_graph: Neo4j not available — skipping")
         return 0
 
+    canonical_slugs = _fetch_canonical_slugs(client)
+    if canonical_slugs:
+        logger.info("seed_graph: %d canonical slugs loaded — will skip matching candidates", len(canonical_slugs))
+
     count = 0
+    skipped_canonical = 0
     for c in candidates:
+        if c.suggested_id in canonical_slugs:
+            # GH #343 §10.7 — the canonical node was placed by an enrichment
+            # pipeline (iter_5 cypher-shell load or future _run_entity_enrichment
+            # worker tick). Re-seeding it would either (a) be a no-op MERGE that
+            # touches no fields, or (b) drift the node's properties back toward
+            # the minimal {id, name, source_docs} shape. Skip and count.
+            skipped_canonical += 1
+            continue
+
         props: dict[str, Any] = {"name": c.name}
         if c.source_docs:
             props["source_docs"] = c.source_docs[:5]  # cap for Neo4j property size
@@ -132,5 +176,10 @@ def seed_graph(client: Any, candidates: list[EntityCandidate]) -> int:
         else:
             logger.warning("seed_graph: failed to upsert %s:%s", c.entity_type, c.suggested_id)
 
-    logger.info("seed_graph: upserted %d/%d entities", count, len(candidates))
+    logger.info(
+        "seed_graph: upserted %d/%d entities (skipped %d already-canonical)",
+        count,
+        len(candidates),
+        skipped_canonical,
+    )
     return count

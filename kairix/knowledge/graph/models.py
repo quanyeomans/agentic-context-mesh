@@ -21,7 +21,14 @@ _KEY_VAULT_PATH = "vault_path"
 
 
 class NodeLabel(str, Enum):
-    """Valid Neo4j node labels. Used to validate GraphEdge labels and prevent injection."""
+    """Valid Neo4j node labels. Used to validate GraphEdge labels and prevent injection.
+
+    The 5 labels added in 2026-05 (Place, Product, Vocation, Industry,
+    LegalCompliance) come from the iter_5 entity-modelling enrichment
+    (GH #343). They mirror the 9 pipeline classes whose enriched
+    entities land in production via the cypher-shell deployment (see
+    entity-modelling repo, docs/kairix-deployment-plan.md §4.2).
+    """
 
     Document = "Document"
     Organisation = "Organisation"
@@ -31,9 +38,25 @@ class NodeLabel(str, Enum):
     Framework = "Framework"
     Technology = "Technology"
     Publication = "Publication"
+    # iter_5 enrichment additions (GH #343, 2026-05-29)
+    Place = "Place"
+    Product = "Product"
+    Vocation = "Vocation"
+    Industry = "Industry"
+    LegalCompliance = "LegalCompliance"
 
 
 class EdgeKind(str, Enum):
+    """Valid Neo4j relationship types. Used to validate GraphEdge.kind.
+
+    The 10 edge kinds added in 2026-05 (LOCATED_IN_COUNTRY, HEADQUARTERED_IN,
+    CITIZEN_OF, OPERATES_IN, HAS_OCCUPATION, DEVELOPED_BY, FIELD_OF, RUNS_ON,
+    APPLIES_IN, CO_OCCURS_IN_CORPUS) come from the iter_5 entity-modelling
+    enrichment (GH #343). MENTIONED_IN from the pipeline output is
+    inverted to use the existing MENTIONS edge in canonical kairix
+    direction (Document → Entity).
+    """
+
     WORKS_AT = "WORKS_AT"
     KNOWS = "KNOWS"
     MENTIONS = "MENTIONS"
@@ -45,6 +68,17 @@ class EdgeKind(str, Enum):
     IMPLEMENTS = "IMPLEMENTS"
     PART_OF = "PART_OF"
     DESCRIBED_IN = "DESCRIBED_IN"
+    # iter_5 enrichment additions (GH #343, 2026-05-29)
+    LOCATED_IN_COUNTRY = "LOCATED_IN_COUNTRY"
+    HEADQUARTERED_IN = "HEADQUARTERED_IN"
+    CITIZEN_OF = "CITIZEN_OF"
+    OPERATES_IN = "OPERATES_IN"
+    HAS_OCCUPATION = "HAS_OCCUPATION"
+    DEVELOPED_BY = "DEVELOPED_BY"
+    FIELD_OF = "FIELD_OF"
+    RUNS_ON = "RUNS_ON"
+    APPLIES_IN = "APPLIES_IN"
+    CO_OCCURS_IN_CORPUS = "CO_OCCURS_IN_CORPUS"
 
 
 @dataclass
