@@ -184,6 +184,8 @@ pytest_plugins = [
     # GH #338 / ADR-024 F70 paydown — document_pages writer for paged
     # extractors (PDF / PPTX / DOCX); enables MM-3 citation paths.
     "tests.bdd.steps.document_pages_writer_steps",
+    # ADR-025 Phase 1 — pipeline_status_emit flag both-branch coverage.
+    "tests.bdd.steps.feature_flag_pipeline_status_emit_steps",
     # F64 reference test — SharePoint Graph 429 / Retry-After handling.
     "tests.bdd.steps.sharepoint_rate_limit_steps",
     # F63 reference test — maintenance scale-bound per-tick row cap.

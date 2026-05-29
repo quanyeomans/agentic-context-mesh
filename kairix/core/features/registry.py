@@ -480,6 +480,21 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/features/KFEAT-021-automated-orphan-cleanup/BRIEF.md",
     ),
+    "pipeline_status_emit": FeatureFlag(
+        name="pipeline_status_emit",
+        default=False,
+        description=(
+            "ADR-025 Phase 1: write status_emit rows to pipeline_item_status at every "
+            "stage boundary (fetch/extract/silver/chunk/embed/entity/drain). When OFF, "
+            "emit_for is a no-op context manager. When ON, the table fills per-item "
+            "per-stage and the kairix worker inspect / status-summary CLIs return data."
+        ),
+        stage="introduce",
+        introduced_in="v2026.5.29",
+        target_retire_in="v2026.11.29",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/ADR-025-pipeline-observability-and-status-surface.md",
+    ),
 }
 
 

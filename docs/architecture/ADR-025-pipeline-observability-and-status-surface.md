@@ -1,6 +1,6 @@
 # ADR-025 — Pipeline observability + agent-actionable status surface
 
-**Status:** Proposed (Phase 1A pending validation).
+**Status:** Phase 1A validated 2026-05-29 — see §11. Phase 1 implementation in progress.
 **Drives:** F74 (status_emit mandatory at every stage boundary), F75 (search envelope carries provenance).
 **Companion specs:** [connector-ingestion-architecture.md](connector-ingestion-architecture.md),
 [agent-actionable-feedback.md](../../host/docs/standards/agent-actionable-feedback.md) (F21 affordance template applied at runtime, not just commit-time),
@@ -121,6 +121,13 @@ class StatusCode(Enum):
     ENTITY_DRAIN_PUSHED         = ("drain",   Severity.OK,    False)
     ENTITY_DRAIN_FAILED         = ("drain",   Severity.ERROR, True)
     PRUNED_RETENTION            = ("audit",   Severity.OK,    False)  # tombstone for timeline retention
+    # Phase 1A additions (validated against production 2026-05-29):
+    FETCH_ZERO_BYTES            = ("fetch",   Severity.WARN,  False)  # source returned empty content
+    EXTRACT_OUTPUT_EMPTY        = ("extract", Severity.WARN,  False)  # extractor ran, returned empty markdown
+    SILVER_NO_CHUNKS_WRITTEN    = ("silver",  Severity.WARN,  False)  # chunker received empty markdown
+    INFERRED_SILENT_DROP        = ("audit",   Severity.WARN,  False)  # backfill: pre-Phase-1 silent-drop items
+    INFERRED_FROM_DEAD_LETTER   = ("audit",   Severity.WARN,  False)  # backfill: parsed from connector_deadletter
+    PIPELINE_STAGE_NO_EMIT      = ("audit",   Severity.ERROR, False)  # P1 fail-safe: stage exited without emit
 
     @property
     def stage(self) -> str:      return self.value[0]
@@ -412,9 +419,86 @@ Concrete steps (executed immediately):
 
 **Output:** an updated §4 + §9 in this ADR plus a short "Phase 1A findings" appendix (§11) documenting the histogram + the 20-item trace.
 
-## 11. Phase 1A findings
+## 11. Phase 1A findings (executed 2026-05-29)
 
-*Populated during Phase 1A execution; section reserved.*
+### 11.1 The gap is 96.5% silent
+
+```
+bronze_items_missing_from_silver        5,374
+  ALSO present in connector_deadletter    185  (3.4%)
+  SILENT (missing without dead-letter)  5,189  (96.5%)
+```
+
+This is the load-bearing finding. The 5,189 silent items have **no error record anywhere** — not in `connector_deadletter`, not in worker stdout, not in `content_vectors_pruned`. Bronze recorded that the item was fetched + a content_hash was computed; then the item vanished from the pipeline. Without status_emit, these items are structurally invisible.
+
+**Implication:** Phase 1 must include a **backfill pass** that walks `bronze_records` and emits an initial `INFERRED_SILENT_DROP` status row for every item with no other status, so the timeline isn't empty when Phase 1 ships against pre-existing pipeline state.
+
+### 11.2 Orphan-prune hypothesis rejected
+
+```
+content_vectors_pruned total rows                21,399
+sharepoint bronze hashes in pruned table              2
+```
+
+Only 2 of the 5,374 missing-silver SharePoint items appear in `content_vectors_pruned`. The maintenance orphan-cleanup is not the cause. The `SILVER_PRUNED_BY_MAINTENANCE` code stays in the taxonomy but is not the explanation for the 2026-05-29 gap.
+
+### 11.3 Gap-item state distribution (sample of 200 SharePoint bronze items)
+
+| State | Count | % | Interpretation |
+|---|---|---|---|
+| `hash-set-but-no-content` | 127 | 63.5% | Extract completed, content_hash recorded in bronze, but no `content.hash=...` row exists. The silent-drop class. |
+| `in-content` | 69 | 34.5% | Correctly landed in silver. |
+| `no-hash` (content_hash NULL or empty) | 4 | 2.0% | Bronze fetched but no hash computed. |
+
+The `no-hash` samples include items whose `raw_path` ends in the universal SHA-256 of zero bytes (`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`). That's a recognised constant — these items fetched empty bytes from the source. They're not extractor failures; they're upstream-empty-content. New code: `FETCH_ZERO_BYTES`.
+
+The `hash-set-but-no-content` class (the dominant 63.5%) had typical MIME types — `application/pdf`, `text/html`, DOCX. These extracted to a hash but silver wrote nothing. The most likely explanation is **extract returned empty markdown** → `silver._chunk_markdown("")` returned `()` → no chunks, no content rows, no dead-letter, no log line. The pipeline returns "success" while silently swallowing the item. New code: `EXTRACT_OUTPUT_EMPTY` and `SILVER_NO_CHUNKS_WRITTEN`.
+
+### 11.4 Worker log warning patterns
+
+Dominant warn signal class:
+- `preflight gap — [info] vector-store-vs-content-vectors count=N` (recurring; vectors lagging content_vectors table)
+- `preflight gap — [error] documents-without-vectors count=N` (sporadic small counts: 9, 56)
+
+These confirm the preflight machinery is working (per F71). But the granularity is wrong — they tell you "N documents lack vectors" without naming which N. The proposed `EMBED_DEFERRED` code captures this at per-item granularity.
+
+`db.scanner: Scan: N new, N updated, N removed, N unchanged` — filesystem scanner aggregate. Operates on the wrongly-pointed `/data/documents/reference-library` path noted earlier; will be removed by the reference-library config fix.
+
+### 11.5 Dead-letter shape histogram (probe-output truncated; partial)
+
+The full histogram couldn't be reliably reconstructed from the truncated probe output, but the dominant shape from the earlier sample of 10 most-recent rows was:
+
+| Shape | Approx count | Code |
+|---|---|---|
+| `extract: [Errno 28] No space left on device` | 9 of 10 sampled | `EXTRACT_DISK_FULL` |
+| `fetch: The read operation timed out` | 1 of 10 sampled | `FETCH_TIMEOUT` |
+| Total in connector_deadletter (sharepoint) | 187 | mixed |
+
+Phase 1 implementation includes a one-shot migration that reads existing `connector_deadletter.last_error` strings, parses them against a small classifier, and emits the matching `StatusCode` to populate the timeline retroactively for known-failed items.
+
+### 11.6 Revised taxonomy — additions
+
+The §4 enum sketch ships with these additions validated by Phase 1A:
+
+| Code | Stage | Severity | Retry | Phase 1A evidence |
+|---|---|---|---|---|
+| `FETCH_ZERO_BYTES` | fetch | warn | false | `no-hash` items with `raw_path` ending in SHA-256-of-empty |
+| `EXTRACT_OUTPUT_EMPTY` | extract | warn | false (without OCR change) | Hypothesis: 63.5% of gap items |
+| `SILVER_NO_CHUNKS_WRITTEN` | silver | warn | false | Paired with `EXTRACT_OUTPUT_EMPTY` |
+| `INFERRED_SILENT_DROP` | audit | warn | false | Backfill code for pre-Phase-1 items with no status entries |
+| `INFERRED_FROM_DEAD_LETTER` | audit | warn | false | Backfill from existing connector_deadletter rows |
+| `PIPELINE_STAGE_NO_EMIT` | audit | error | false | Runtime fail-safe per P1 |
+
+### 11.7 Self-healing implications
+
+For the 5,189 silent-drop items, self-healing can't trigger off `INFERRED_SILENT_DROP` alone because the inferred code doesn't tell us whether reextract would succeed. The Phase 3 self-heal pass needs to:
+
+1. Identify silent-drop items via the backfill.
+2. Schedule a single diagnostic reextract per item under low-rate-limit.
+3. Capture the *real* status code on that retry (`EXTRACT_DISK_FULL` is fixable; `EXTRACT_OUTPUT_EMPTY` likely needs OCR variant; `EXTRACT_UNSUPPORTED_MIME` needs human classification).
+4. Only after the diagnostic retry assigns a real code can auto-heal apply the retry-eligibility logic.
+
+This adds a "diagnostic retry" stage to Phase 3 — captured here so it's not forgotten when Phase 3 implementation starts.
 
 ## 12. References
 

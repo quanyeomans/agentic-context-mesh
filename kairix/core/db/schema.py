@@ -176,10 +176,30 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             UNIQUE(hash, seq)
         );
 
+        -- ADR-025 §8: append-only per-item per-stage status timeline.
+        -- Updates are forbidden (see kairix/core/observability/status_emit.py).
+        -- Maintenance retention prune writes a PRUNED_RETENTION row before DELETE.
+        CREATE TABLE IF NOT EXISTS pipeline_item_status (
+            source_name      TEXT NOT NULL,
+            item_id          TEXT NOT NULL,
+            stage            TEXT NOT NULL,
+            status_code      TEXT NOT NULL,
+            severity         TEXT NOT NULL CHECK (severity IN ('ok','warn','error')),
+            detail_json      TEXT,
+            occurred_at      TEXT NOT NULL,
+            chunker_version  TEXT,
+            extractor_version TEXT,
+            PRIMARY KEY (source_name, item_id, stage, occurred_at)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(hash);
         CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection);
         CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
         CREATE INDEX IF NOT EXISTS idx_content_vectors_pruned_at ON content_vectors_pruned(pruned_at);
+        CREATE INDEX IF NOT EXISTS idx_pipeline_status_lookup
+            ON pipeline_item_status (source_name, item_id, occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_pipeline_status_by_code
+            ON pipeline_item_status (status_code, occurred_at DESC);
     """)
 
     # Run migrations to bring legacy schemas up to current (adds agent_owner,
