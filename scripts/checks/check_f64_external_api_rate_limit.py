@@ -24,7 +24,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for direct callers
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """F64: plugin <name> talks to an external HTTP service but ships no rate-limit test.
 
@@ -116,21 +117,41 @@ def _has_rate_limit_test(repo_root: Path, plugin_name: str) -> bool:
     return expected_py.is_file() or expected_feature.is_file()
 
 
+class F64(FitnessRule):
+    """F64 as a FitnessRule subclass — see module docstring.
+
+    Overrides :meth:`enumerate_files` to yield plugin directories
+    that import HTTP clients (the test-existence check happens in
+    :meth:`file_has_violation`).
+    """
+
+    name = "f64-external-api-rate-limit"
+    remediation = REMEDIATION
+    roots = PLUGIN_ROOTS
+
+    def enumerate_files(self) -> list[Path]:
+        out: list[Path] = []
+        for plugin_root_rel in PLUGIN_ROOTS:
+            plugin_root = self._repo_root / plugin_root_rel
+            if not plugin_root.is_dir():
+                continue
+            for entry in sorted(plugin_root.iterdir()):
+                if not entry.is_dir() or entry.name.startswith("_"):
+                    continue
+                out.append(entry)
+        return out
+
+    def is_in_scope(self, rel: str) -> bool:
+        return True
+
+    def file_has_violation(self, path: Path) -> bool:
+        if not _plugin_uses_http(path):
+            return False
+        return not _has_rate_limit_test(self._repo_root, path.name)
+
+
 def main() -> int:
-    violations: set[Path] = set()
-    for plugin_root_rel in PLUGIN_ROOTS:
-        plugin_root = REPO_ROOT / plugin_root_rel
-        if not plugin_root.is_dir():
-            continue
-        for entry in sorted(plugin_root.iterdir()):
-            if not entry.is_dir() or entry.name.startswith("_"):
-                continue
-            if not _plugin_uses_http(entry):
-                continue
-            if _has_rate_limit_test(REPO_ROOT, entry.name):
-                continue
-            violations.add(repo_relative(entry))
-    return gate("f64-external-api-rate-limit", violations, REMEDIATION)
+    return F64().run()
 
 
 if __name__ == "__main__":

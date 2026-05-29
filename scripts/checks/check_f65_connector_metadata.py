@@ -31,7 +31,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for direct callers
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """F65: connector <name> does not implement metadata_for() OR lacks integration test.
 
@@ -155,21 +156,43 @@ def _is_exempt(plugin_dir: Path) -> bool:
     return False
 
 
+class F65(FitnessRule):
+    """F65 as a FitnessRule subclass — see module docstring.
+
+    Overrides :meth:`enumerate_files` to yield connector plugin
+    directories. :meth:`file_has_violation` skips exempt plugins and
+    plugins that both implement metadata_for AND ship the
+    propagation test.
+    """
+
+    name = "f65-connector-metadata"
+    remediation = REMEDIATION
+    roots = (PLUGIN_ROOT,)
+
+    def enumerate_files(self) -> list[Path]:
+        plugin_root = self._repo_root / PLUGIN_ROOT
+        if not plugin_root.is_dir():
+            return []
+        out: list[Path] = []
+        for entry in sorted(plugin_root.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("_"):
+                continue
+            out.append(entry)
+        return out
+
+    def is_in_scope(self, rel: str) -> bool:
+        return True
+
+    def file_has_violation(self, path: Path) -> bool:
+        if _is_exempt(path):
+            return False
+        if _connector_implements_metadata(path) and _has_propagation_test(self._repo_root, path.name):
+            return False
+        return True
+
+
 def main() -> int:
-    plugin_root = REPO_ROOT / PLUGIN_ROOT
-    if not plugin_root.is_dir():
-        # No plugin root yet — vacuous green.
-        return gate("f65-connector-metadata", set(), REMEDIATION)
-    violations: set[Path] = set()
-    for entry in sorted(plugin_root.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("_"):
-            continue
-        if _is_exempt(entry):
-            continue
-        if _connector_implements_metadata(entry) and _has_propagation_test(REPO_ROOT, entry.name):
-            continue
-        violations.add(repo_relative(entry))
-    return gate("f65-connector-metadata", violations, REMEDIATION)
+    return F65().run()
 
 
 if __name__ == "__main__":
