@@ -38,7 +38,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate, python_files, repo_relative
+from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
+from _fitness_rule import FitnessRule
 
 THRESHOLD = 15
 
@@ -221,9 +222,19 @@ def file_has_violation(path: Path) -> bool:
     return False
 
 
+class F16(FitnessRule):
+    """F16 as a FitnessRule subclass — see module docstring."""
+
+    name = "cognitive-complexity"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
 def main() -> int:
-    violations = {repo_relative(p) for p in python_files("kairix") if file_has_violation(p)}
-    return gate("cognitive-complexity", violations, REMEDIATION)
+    return F16().run()
 
 
 if __name__ == "__main__":
