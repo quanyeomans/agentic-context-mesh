@@ -37,7 +37,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from _arch_lib import REPO_ROOT
+from _fitness_rule import FitnessRule
 
 # Ensure the worktree's kairix package wins over any installed copy
 # regardless of cwd at invocation time. The check's whole point is to
@@ -274,10 +275,32 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     return violations
 
 
+class F56(FitnessRule):
+    """F56 as a FitnessRule subclass — see module docstring.
+
+    Overrides :meth:`enumerate_files` to yield connector plugin
+    directories (not files). Each plugin's capability declaration is
+    a whole-tree property; the violation key is the plugin dir.
+    """
+
+    name = "f56"
+    remediation = REMEDIATION
+    roots = ("kairix/connectors",)
+
+    def enumerate_files(self) -> list[Path]:
+        tree_root = self._repo_root / _CONNECTORS_TREE
+        return _discover_plugins(tree_root)
+
+    def is_in_scope(self, rel: str) -> bool:
+        return True
+
+    def file_has_violation(self, path: Path) -> bool:
+        return _plugin_violates(path)
+
+
 def main() -> int:
     """Gate entry point — returns 0 on clean, 1 on net-new violations."""
-    violations = collect_violations()
-    return gate("f56", violations, REMEDIATION)
+    return F56().run()
 
 
 if __name__ == "__main__":

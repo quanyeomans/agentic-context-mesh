@@ -41,7 +41,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative
+from _fitness_rule import FitnessRule
 
 # Root containing every Extractor plugin. ``_base.py`` / underscore-
 # prefixed module stubs are not plugins.
@@ -149,8 +150,38 @@ def collect_violations() -> set[Path]:
     return violations
 
 
+class F40(FitnessRule):
+    """F40 as a FitnessRule subclass — see module docstring.
+
+    Overrides :meth:`enumerate_files` to yield ``__init__.py`` paths
+    per Extractor plugin (the violation key is the plugin's
+    ``__init__.py``, not its directory).
+    """
+
+    name = "f40"
+    remediation = REMEDIATION
+    roots = ("kairix/extractors",)
+
+    def enumerate_files(self) -> list[Path]:
+        extractors_root = self._repo_root / "kairix" / "extractors"
+        if not extractors_root.exists():
+            return []
+        out: list[Path] = []
+        for entry in sorted(extractors_root.iterdir()):
+            if not _is_plugin_dir(entry):
+                continue
+            out.append(entry / "__init__.py")
+        return out
+
+    def is_in_scope(self, rel: str) -> bool:
+        return True
+
+    def file_has_violation(self, path: Path) -> bool:
+        return init_has_violation(path)
+
+
 def main() -> int:
-    return gate("f40", collect_violations(), REMEDIATION)
+    return F40().run()
 
 
 if __name__ == "__main__":
