@@ -94,7 +94,10 @@ markitdown = [
     # ``extract()`` time. v2026.5.26a1 dogfood (#322) — the production
     # Docker image was missing all five and every binary-doc fetch
     # dead-lettered.
-    "markitdown[pdf,docx,xlsx,pptx,outlook]>=0.1.5,<1",
+    # GH #337 — added [xls] (legacy Excel; distinct from [xlsx] modern Open XML)
+    # after production SharePoint dead-letter showed XlsConverter raising
+    # MissingDependencyException on legacy .xls files. ~10-15 items will recover.
+    "markitdown[pdf,docx,xls,xlsx,pptx,outlook]>=0.1.5,<1",
 ]
 pdf_fallback = [
     # pdfplumber (MIT, Jeremy Singer-Vine) — fallback PDF extractor used
