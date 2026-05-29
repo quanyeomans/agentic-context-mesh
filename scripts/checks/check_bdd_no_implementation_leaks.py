@@ -32,7 +32,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """Refactor to stakeholder language (no Mock / MagicMock /
 monkeypatch / pytest. / unittest. / ``kairix.<pkg>.<symbol>`` tokens
@@ -115,12 +116,20 @@ def file_has_violation(path: Path) -> bool:
     return any(_line_has_violation(line) for line in text.splitlines())
 
 
+class F13(FitnessRule):
+    """F13 as a FitnessRule subclass — see module docstring."""
+
+    name = "bdd-no-implementation-leaks"
+    remediation = REMEDIATION
+    roots = ("tests/bdd/features",)
+    extensions = (".feature",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
 def main() -> int:
-    features_dir = REPO_ROOT / "tests" / "bdd" / "features"
-    if not features_dir.exists():
-        return gate("bdd-no-implementation-leaks", set(), REMEDIATION)
-    violations = {repo_relative(p) for p in features_dir.rglob("*.feature") if file_has_violation(p)}
-    return gate("bdd-no-implementation-leaks", violations, REMEDIATION)
+    return F13().run()
 
 
 if __name__ == "__main__":

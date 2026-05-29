@@ -31,7 +31,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """Refactor to add at least one happy-path scenario per
 feature file (a scenario WITHOUT any of the negative tags @error /
@@ -124,12 +125,20 @@ def file_has_violation(path: Path) -> bool:
     return not has_happy_path
 
 
+class F12(FitnessRule):
+    """F12 as a FitnessRule subclass — see module docstring."""
+
+    name = "bdd-happy-path"
+    remediation = REMEDIATION
+    roots = ("tests/bdd/features",)
+    extensions = (".feature",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
 def main() -> int:
-    features_dir = REPO_ROOT / "tests" / "bdd" / "features"
-    if not features_dir.exists():
-        return gate("bdd-happy-path", set(), REMEDIATION)
-    violations = {repo_relative(p) for p in features_dir.rglob("*.feature") if file_has_violation(p)}
-    return gate("bdd-happy-path", violations, REMEDIATION)
+    return F12().run()
 
 
 if __name__ == "__main__":

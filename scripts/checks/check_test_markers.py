@@ -29,7 +29,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate, python_files, repo_relative
+from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
+from _fitness_rule import FitnessRule
 
 # Category markers from pyproject.toml's `[tool.pytest.ini_options].markers`.
 # ``soak`` covers the ADR-024 production-scale soak tier (tests/soak/ and
@@ -188,9 +189,19 @@ def file_has_violation(path: Path) -> bool:
     return False
 
 
+class F8(FitnessRule):
+    """F8 as a FitnessRule subclass — see module docstring."""
+
+    name = "test-markers"
+    remediation = REMEDIATION
+    roots = ("tests",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
 def main() -> int:
-    violations = {repo_relative(p) for p in python_files("tests") if file_has_violation(p)}
-    return gate("test-markers", violations, REMEDIATION)
+    return F8().run()
 
 
 if __name__ == "__main__":
