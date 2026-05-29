@@ -36,7 +36,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for collect_violations callers
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """F47: tests/integration/<file>.py constructs <Pipeline> directly.
 
@@ -156,11 +157,23 @@ def collect_violations(repo_root: Path) -> set[Path]:
     return out
 
 
+class F47(FitnessRule):
+    """F47 as a FitnessRule subclass — see module docstring.
+
+    Scope: ``tests/integration/`` only. ``file_has_violation`` further
+    filters to ``test_*.py`` files (skipping ``*_contract.py``).
+    """
+
+    name = "f47-integration-factory"
+    remediation = REMEDIATION
+    roots = ("tests/integration",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_violates(path)
+
+
 def main() -> int:
-    violations = collect_violations(REPO_ROOT)
-    # Already repo-relative; gate() accepts either shape.
-    rel = {repo_relative(REPO_ROOT / p) if (REPO_ROOT / p).is_absolute() else p for p in violations}
-    return gate("f47-integration-factory", rel, REMEDIATION)
+    return F47().run()
 
 
 if __name__ == "__main__":
