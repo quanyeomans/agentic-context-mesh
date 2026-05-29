@@ -65,7 +65,7 @@ _SNAKE_PY = re.compile(r"^(__init__|conftest|fakes|_?[a-z][a-z0-9_]*)\.py$")
 _TEST_PY = re.compile(r"^(__init__|conftest|fakes|test_[a-z0-9_]+|_?[a-z][a-z0-9_]*)\.py$")
 _SNAKE_FEATURE = re.compile(r"^[a-z][a-z0-9_]*\.feature$")
 _CHECK_SCRIPT_PY = re.compile(
-    r"^(check_[a-z0-9_]+|_arch_lib|_fitness_rule|_integrity_invariants_registry|audit_baselines|merge_coverage_xml)\.py$"
+    r"^(check_[a-z0-9_]+|_arch_lib|_fitness_rule|_rule_catalogue|_integrity_invariants_registry|audit_baselines|merge_coverage_xml)\.py$"
 )
 _CHECK_SCRIPT_SH = re.compile(r"^(check[-_][a-z0-9-]+|_lib|run-all)\.sh$")
 _RUNBOOK_MD = re.compile(r"^(INDEX|README|[a-z][a-z0-9-]*)\.md$")
