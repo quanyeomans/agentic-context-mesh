@@ -119,6 +119,27 @@ def test_runs_configured_obsidian_pipeline(tmp_path: Path) -> None:
     assert result.failed == 0
     assert result.dead_letter_added == 0
 
+    # #336 — wired-writer regression pin. The worker's _run_one_connector_batch
+    # must pass SqliteDocumentsMediaWriter to DefaultSilverProcessor; without it,
+    # silver.process() takes the "writer is None" branch and the per-document
+    # row is silently skipped (production accumulated 14.5K bronze rows + 0
+    # documents_media rows for ~2 years before this fix). Both notes should now
+    # land one row each.
+    #
+    # Sabotage proof: remove ``documents_media_writer=SqliteDocumentsMediaWriter(db)``
+    # from kairix/worker.py:_run_one_connector_batch's DefaultSilverProcessor()
+    # call; the count drops to 0 and this assertion fails.
+    db = sqlite3.connect(str(db_path))
+    try:
+        (media_count,) = db.execute("SELECT COUNT(*) FROM documents_media").fetchone()
+    finally:
+        db.close()
+    assert media_count == 2, (
+        f"expected documents_media populated for both notes (#336 regression pin); got {media_count}. "
+        "fix: confirm DefaultSilverProcessor is constructed with documents_media_writer=SqliteDocumentsMediaWriter(db) "
+        "in kairix.worker._run_one_connector_batch and _build_reextract_components."
+    )
+
 
 @pytest.mark.unit
 def test_failing_connector_logged_and_loop_continues(

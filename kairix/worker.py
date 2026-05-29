@@ -341,6 +341,7 @@ def _run_one_connector_batch(
         CursorStore,
         DeadLetterStore,
         DefaultSilverProcessor,
+        SqliteDocumentsMediaWriter,
         resolve_connector,
     )
     from kairix.core.connectors.collection_router import _legacy_chunk_writer
@@ -359,7 +360,7 @@ def _run_one_connector_batch(
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
-        silver=DefaultSilverProcessor(),
+        silver=DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db)),
         chunk_writer=chunk_writer,
         entity_graph_sink=_SqliteEntityGraphSink(db),
         cursor_store=CursorStore(db),
@@ -730,7 +731,7 @@ def _build_reextract_components(
     Mirrors ``_run_one_connector_batch``'s resolution shape so re-extract
     sees identical wiring to the original sync.
     """
-    from kairix.core.connectors import DefaultSilverProcessor, resolve_connector
+    from kairix.core.connectors import DefaultSilverProcessor, SqliteDocumentsMediaWriter, resolve_connector
     from kairix.core.connectors.collection_router import legacy_chunk_writer
     from kairix.core.connectors.registry import build_extractor_from_entry
 
@@ -738,7 +739,11 @@ def _build_reextract_components(
     # Builds either a single extractor or an EscalatingExtractor depending
     # on whether the entry sets ``extractor_chain: [...]`` or ``extractor: <name>``.
     extractor = build_extractor_from_entry(entry)
-    silver = DefaultSilverProcessor()
+    # #336 — wire SqliteDocumentsMediaWriter so re-extract writes the
+    # documents_media row that the original sync would have. Without
+    # this, re-extracted documents flow through but the per-doc row is
+    # silently skipped, leaving F40/F70 blind to recovered docs.
+    silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
     chunk_writer = legacy_chunk_writer(db, collection=entry.get("collection", "default"))
     entity_graph_sink = _SqliteEntityGraphSink(db)
     return connector, extractor, silver, chunk_writer, entity_graph_sink
