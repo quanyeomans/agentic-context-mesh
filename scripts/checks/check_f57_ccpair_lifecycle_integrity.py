@@ -49,7 +49,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate
+from _arch_lib import REPO_ROOT
+from _fitness_rule import FitnessRule
 
 # Regex matches "UPDATE topology_cc_pairs ... SET status" in a string
 # literal — order-tolerant on whitespace and case. The cc_pair table is
@@ -179,9 +180,20 @@ def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
     return violations
 
 
+class F57(FitnessRule):
+    """F57 as a FitnessRule subclass — see module docstring."""
+
+    name = "f57"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return _file_has_unguarded_status_update(path)
+
+
 def main() -> int:
     """Return 0 when clean / vacuous-green; 1 on net-new violations."""
-    return gate("f57", collect_violations(), REMEDIATION)
+    return F57().run()
 
 
 if __name__ == "__main__":
