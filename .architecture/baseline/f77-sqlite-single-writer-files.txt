@@ -1,0 +1,7 @@
+kairix/agents/curator/cli.py
+kairix/core/curator/drain.py
+kairix/core/embed/cli.py
+kairix/core/facts/store.py
+kairix/core/features/cli.py
+kairix/core/search/budget.py
+kairix/knowledge/summaries/cli.py

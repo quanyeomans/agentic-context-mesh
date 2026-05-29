@@ -688,12 +688,12 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F74",
         gate="f74-stage-runner-only",
-        check="(proposed)",
+        check="f74_stage_runner_only",
         category="observability",
         scope="per-class",
         summary="every Stage subclass is only invoked via a StageRunner — never direct .process() call",
         adr_origin="docs/architecture/ADR-026-cross-cutting-primitive-abstractions.md §A.5",
-        status="proposed",
+        status="vacuous",
     ),
     RuleEntry(
         id="F75",
@@ -708,7 +708,7 @@ _ENTRIES: tuple[RuleEntry, ...] = (
     RuleEntry(
         id="F76",
         gate="f76-pii-content-interpolation",
-        check="(proposed)",
+        check="f76_pii_content_interpolation",
         category="production-safety",
         scope="per-file",
         summary=(
@@ -716,18 +716,17 @@ _ENTRIES: tuple[RuleEntry, ...] = (
             "in log/exception/dead-letter strings"
         ),
         adr_origin="2026-05 leak audit + extends F15 to content layer",
-        status="proposed",
         tags=("security",),
     ),
     RuleEntry(
         id="F77",
         gate="f77-sqlite-single-writer",
-        check="(proposed)",
+        check="f77_sqlite_single_writer",
         category="schema-integrity",
         scope="per-file",
         summary="sqlite3.connect call sites outside the allow-list (worker/factory/scripts/tests) are flagged",
         adr_origin="ADR-026 blindspot audit — concurrency/coordinator discipline",
-        status="proposed",
+        status="proxy",
     ),
     # ----- proposed (not yet implemented) ---------------------------------
     RuleEntry(

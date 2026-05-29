@@ -212,6 +212,23 @@ python3 "${SCRIPT_DIR}/check_f72_integrity_invariants.py" || overall=1
 #        naming the operator's deployment.
 python3 "${SCRIPT_DIR}/check_no_private_infra_refs.py" || overall=1
 
+# F74 — every Stage subclass is only invoked via a StageRunner (ADR-026 §A.5).
+#        Vacuous-green until Track A.3/A.4 lands the first FetchStage etc.
+python3 "${SCRIPT_DIR}/check_f74_stage_runner_only.py" || overall=1
+
+# F76 — no f-string interpolation of content-like vars (raw/body/payload/…) in
+#        log/exception/dead-letter strings. Structural sibling of F15 catching
+#        the *content* leak path (F15 covers secret-named vars; F76 covers
+#        content-named vars).
+python3 "${SCRIPT_DIR}/check_f76_pii_content_interpolation.py" || overall=1
+
+# F77 — sqlite3.connect call sites must live in the writer-coordinator
+#        allow-list (worker / factory / db / scripts / tests). Structural
+#        proxy for the single-writer discipline (full runtime contract needs
+#        thread-boundary instrumentation; this catches the new-connection
+#        leak surface).
+python3 "${SCRIPT_DIR}/check_f77_sqlite_single_writer.py" || overall=1
+
 bash "${SCRIPT_DIR}/check-f36-connector-bdd-parity.sh" || overall=1
 
 python3 "${SCRIPT_DIR}/check_f34_core_connector_layer_imports.py" || overall=1
