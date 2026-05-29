@@ -3325,7 +3325,7 @@ class FakeEntityGraphSink:
         # all" false-positive).
         self.unavailable_calls: int = 0
 
-    def stage(self, signals: Any) -> int:
+    def buffer(self, signals: Any) -> int:
         if self._raise_on_stage is not None:
             raise self._raise_on_stage
         if not self._available:

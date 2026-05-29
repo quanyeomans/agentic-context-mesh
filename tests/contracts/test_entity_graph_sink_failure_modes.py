@@ -1,7 +1,7 @@
 """F68 (ADR-024 Bundle A) — failure-mode contract for :class:`EntityGraphSink`.
 
 :class:`kairix.core.protocols.EntityGraphSink` has a single public
-method — :meth:`stage` — but covers two distinct failure classes:
+method — :meth:`buffer` — but covers two distinct failure classes:
 
   * ``raises`` — the sink's underlying store raised (SQLite error,
     disk full, etc.). The pipeline does NOT wrap the sink call in a
@@ -61,17 +61,17 @@ def _make_event(item_id: str, modified_at: str = "2026-01-01T00:00:00Z") -> Chan
 
 
 # ---------------------------------------------------------------------------
-# EntityGraphSink.stage — raises (e.g. SQLite IntegrityError, disk full)
+# EntityGraphSink.buffer — raises (e.g. SQLite IntegrityError, disk full)
 # ---------------------------------------------------------------------------
 
 
-def test_stage_raises_propagates_and_rolls_back_chunk(tmp_path: Path) -> None:
-    """When ``entity_graph_sink.stage`` raises, the
+def test_buffer_raises_propagates_and_rolls_back_chunk(tmp_path: Path) -> None:
+    """When ``entity_graph_sink.buffer`` raises, the
     :class:`ConnectorPipeline` does NOT absorb it — the exception
     propagates from ``_process_item`` → ``_process_batch``, which
     rolls back the failing chunk (and re-raises).
 
-    Sabotage proof: in ``FakeEntityGraphSink.stage`` comment out the
+    Sabotage proof: in ``FakeEntityGraphSink.buffer`` comment out the
     ``if self._raise_on_stage is not None: raise ...`` block. Re-run:
     the test fails because ``pytest.raises`` sees no exception and the
     chunk processes cleanly. Restored.
@@ -90,7 +90,7 @@ def test_stage_raises_propagates_and_rolls_back_chunk(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="F68-sink-raises"):
         pipeline.run_batch(source, FakeExtractor())
 
-    # writer.upsert is called BEFORE sink.stage in _process_item, so it
+    # writer.upsert is called BEFORE sink.buffer in _process_item, so it
     # WILL have been invoked on the in-flight batch. The rollback is at
     # the SQLite transaction layer (bronze_records rolled back); the
     # captured FakeChunkWriter records the call but the persistent DB
@@ -107,11 +107,11 @@ def test_stage_raises_propagates_and_rolls_back_chunk(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# EntityGraphSink.stage — unavailable (mirrors #334 drain-unreachable)
+# EntityGraphSink.buffer — unavailable (mirrors #334 drain-unreachable)
 # ---------------------------------------------------------------------------
 
 
-def test_stage_unavailable_returns_zero_signals_stay_in_staging(tmp_path: Path) -> None:
+def test_buffer_unavailable_returns_zero_signals_stay_in_staging(tmp_path: Path) -> None:
     """The ``unavailable`` failure class — the sink's downstream write
     target (Curator drain → Neo4j) is unreachable. The sink returns
     0 without raising; the per-chunk transaction commits normally so
@@ -124,7 +124,7 @@ def test_stage_unavailable_returns_zero_signals_stay_in_staging(tmp_path: Path) 
     decoupled from eventual delivery. A drain outage must NOT block
     connector ingest.
 
-    Sabotage proof: in ``FakeEntityGraphSink.stage`` change the
+    Sabotage proof: in ``FakeEntityGraphSink.buffer`` change the
     ``if not self._available: ... return 0`` branch to ``return len(batch)``
     (lying about the durability). Re-run: the test fails because the
     ``unavailable_calls`` counter is 0 (no path took the unavailable
@@ -148,7 +148,7 @@ def test_stage_unavailable_returns_zero_signals_stay_in_staging(tmp_path: Path) 
     assert result.processed == 1
     assert result.dead_lettered == 0
 
-    # The sink WAS asked to stage — the call happened, the sink
+    # The sink WAS asked to buffer — the call happened, the sink
     # reported unavailable, and the durability of the staging is the
     # connector's responsibility (the SQLite ``entity_signals`` row
     # would still be written by the real ``_SqliteEntityGraphSink``;
@@ -167,7 +167,7 @@ def test_stage_unavailable_returns_zero_signals_stay_in_staging(tmp_path: Path) 
     db.close()
 
 
-def test_stage_recovers_after_unavailable_window_signals_eventually_staged(tmp_path: Path) -> None:
+def test_buffer_recovers_after_unavailable_window_signals_eventually_staged(tmp_path: Path) -> None:
     """When the sink flips from unavailable → available between two
     ticks, the second tick stages the new batch normally. Proves the
     sink's availability state is honoured per-call (not cached) — the
@@ -205,7 +205,7 @@ def test_stage_recovers_after_unavailable_window_signals_eventually_staged(tmp_p
 
     # Sink received tick 2's batch — recovery worked.
     assert sink.unavailable_calls == 1, "no further unavailable calls after recovery"
-    # The fake records every available stage call (even when the batch
+    # The fake records every available buffer call (even when the batch
     # carries zero signals — the call happened). Assert the call count
     # is consistent with the two-tick run.
     assert len(sink.staged) >= 1, f"sink should have received at least one batch after recovery; got {sink.staged!r}"

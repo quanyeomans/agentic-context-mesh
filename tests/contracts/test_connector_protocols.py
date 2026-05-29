@@ -160,7 +160,7 @@ class _SyntheticSilverProcessor:
 class _SyntheticEntityGraphSink:
     """Minimal :class:`EntityGraphSink` impl for Wave 1 shape verification."""
 
-    def stage(self, signals: Sequence[EntitySignal]) -> int:
+    def buffer(self, signals: Sequence[EntitySignal]) -> int:
         raise NotImplementedError
 
 

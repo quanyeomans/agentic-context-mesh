@@ -276,8 +276,8 @@ class _SqliteEntityGraphSink:
     def __init__(self, db: sqlite3.Connection) -> None:
         self._db = db
 
-    def stage(self, signals: Sequence[EntitySignal]) -> int:
-        """Stage entity signals into the ``entity_signals`` table."""
+    def buffer(self, signals: Sequence[EntitySignal]) -> int:
+        """Write entity signals to the ``entity_signals`` staging table."""
         staged = 0
         for sig in signals:
             self._db.execute(
@@ -812,7 +812,7 @@ def _reextract_one(
             sensitivity=connector.sensitivity_for(entry.item_id),
         )
         chunk_writer.upsert(silver_out.chunks)
-        entity_graph_sink.stage(silver_out.entity_signals)
+        entity_graph_sink.buffer(silver_out.entity_signals)
         dead_letter.clear(entry.source_name, entry.item_id)
         if not dry_run:
             db.commit()

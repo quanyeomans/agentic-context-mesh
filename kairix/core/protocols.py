@@ -1240,8 +1240,16 @@ class EntityGraphSink(Protocol):
     asynchronous, batched, and idempotent.
     """
 
-    def stage(self, signals: Sequence[EntitySignal]) -> int:
-        """Stage the given signals (SQLite) and return the count actually written."""
+    def buffer(self, signals: Sequence[EntitySignal]) -> int:
+        """Write the given signals to the SQLite staging table; return the
+        count actually inserted.
+
+        Renamed from ``stage()`` in ADR-026 A.0a pre-work — the original
+        name collided with the upcoming first-class ``Stage`` abstraction
+        for pipeline-step instrumentation. The semantics are unchanged:
+        signals land in the SQLite staging buffer, a separate worker
+        drain pushes to Neo4j asynchronously.
+        """
         ...
 
 

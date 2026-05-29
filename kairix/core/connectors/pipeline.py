@@ -18,7 +18,7 @@ Pipeline body (spec doc §4):
           sensitivity=connector.sensitivity_for(change.item_id),
       )
       documents_writer.upsert(silver_out.chunks)
-      entity_graph_sink.stage(silver_out.entity_signals)
+      entity_graph_sink.buffer(silver_out.entity_signals)
   cursor_store.write(connector.name, <latest cursor token>)
   db.commit()
 
@@ -491,7 +491,7 @@ class ConnectorPipeline:
             extraction_status=extraction_status,
         )
         self._chunk_writer.upsert(silver_out.chunks)
-        self._entity_graph_sink.stage(silver_out.entity_signals)
+        self._entity_graph_sink.buffer(silver_out.entity_signals)
         return _OUTCOME_PROCESSED
 
 

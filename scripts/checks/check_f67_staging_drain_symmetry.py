@@ -4,7 +4,7 @@ Motivation (GH #334)
 --------------------
 The ``entity_signals`` staging table shipped in Wave 2 with a
 ``pushed_to_neo4j INTEGER DEFAULT 0`` column and a sink-side
-:class:`kairix.worker._SqliteEntityGraphSink.stage` writer. The Wave-2
+:class:`kairix.worker._SqliteEntityGraphSink.buffer` writer. The Wave-2
 docstring promised "a separate worker job (Wave 3+) drains the table
 and pushes to Neo4j" — but nobody wrote that drain. Two years of
 production ingest accumulated 2.3M un-pushed rows; nothing flipped
