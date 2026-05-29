@@ -49,16 +49,15 @@ import logging
 import shutil
 import sqlite3
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 from kairix.core.connectors.cursor_store import CursorStore
 from kairix.core.connectors.dead_letter import DeadLetterStore
 from kairix.core.protocols import (
     BronzeStore,
-    Chunk,
+    ChunkWriter,
     EntityGraphSink,
     Extractor,
     SilverProcessor,
@@ -106,26 +105,6 @@ class _ChunkAccumulator:
         self.processed = 0
         self.dead_lettered = 0
         self.latest_modified_at = None
-
-
-@runtime_checkable
-class ChunkWriter(Protocol):
-    """Where :class:`~kairix.core.protocols.Chunk` records land.
-
-    The connector pipeline composes a :class:`ChunkWriter` so the
-    Silver output can be persisted to the retrieval index without
-    Silver itself knowing how the index is shaped. Production wires a
-    SQLite-backed writer (``documents`` table + FTS5 reindex);
-    integration tests use a capture-only fake.
-    """
-
-    def upsert(self, chunks: Sequence[Chunk]) -> int:
-        """Persist ``chunks``; return the count successfully written.
-
-        Must NOT commit — the caller's per-batch transaction owns the
-        commit so chunk writes, cursor advance, and Bronze writes
-        commit together or roll back together.
-        """
 
 
 @dataclass(frozen=True)

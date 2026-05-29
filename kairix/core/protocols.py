@@ -1230,6 +1230,33 @@ class SilverProcessor(Protocol):
 
 
 @runtime_checkable
+class ChunkWriter(Protocol):
+    """Where :class:`Chunk` records land.
+
+    The connector pipeline composes a :class:`ChunkWriter` so the
+    Silver output can be persisted to the retrieval index without
+    Silver itself knowing how the index is shaped. Production wires a
+    SQLite-backed writer (``documents`` table + FTS5 reindex);
+    integration tests use a capture-only fake.
+
+    Moved here from ``kairix.core.connectors.pipeline`` in ADR-026 A.0b
+    pre-work — the canonical Protocol surface lives at
+    ``kairix.core.protocols`` so the upcoming first-class ``Stage``
+    abstraction can reference :class:`ChunkWriter` without coupling to
+    the pipeline module.
+    """
+
+    def upsert(self, chunks: Sequence[Chunk]) -> int:
+        """Persist ``chunks``; return the count successfully written.
+
+        Must NOT commit — the caller's per-batch transaction owns the
+        commit so chunk writes, cursor advance, and Bronze writes
+        commit together or roll back together.
+        """
+        ...
+
+
+@runtime_checkable
 class EntityGraphSink(Protocol):
     """Where :class:`EntitySignal` records land.
 

@@ -279,7 +279,7 @@ class SqliteDocumentsMediaWriter:
     The writer does NOT commit — the caller's per-batch transaction
     owns the commit so the documents_media row, chunks, cursor advance,
     and bronze row commit together or roll back together (mirrors
-    :class:`~kairix.core.connectors.pipeline.ChunkWriter`).
+    :class:`~kairix.core.protocols.ChunkWriter`).
     """
 
     def __init__(self, db: sqlite3.Connection) -> None:

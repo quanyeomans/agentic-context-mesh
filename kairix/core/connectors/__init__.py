@@ -17,7 +17,7 @@ from kairix.core.connectors.chunker_registry import ChunkerRegistry
 from kairix.core.connectors.collection_router import CollectionRouter, RouteResult
 from kairix.core.connectors.cursor_store import CursorStore
 from kairix.core.connectors.dead_letter import DeadLetterEntry, DeadLetterStore
-from kairix.core.connectors.pipeline import BatchResult, ChunkWriter, ConnectorPipeline
+from kairix.core.connectors.pipeline import BatchResult, ConnectorPipeline
 from kairix.core.connectors.registry import (
     ConnectorRegistry,
     ExtractorRegistry,
@@ -45,6 +45,7 @@ from kairix.core.connectors.silver import (
     SqliteDocumentsMediaWriter,
 )
 from kairix.core.connectors.streaming_bronze import BronzeNotPersistedError, StreamingBronzeStore
+from kairix.core.protocols import ChunkWriter
 
 __all__ = [
     "BatchResult",

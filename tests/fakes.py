@@ -3392,7 +3392,7 @@ class FakeDrainGraphRepository:
 
 
 class FakeChunkWriter:
-    """Capture-only :class:`kairix.core.connectors.pipeline.ChunkWriter`.
+    """Capture-only :class:`kairix.core.protocols.ChunkWriter`.
 
     Records every upsert call's chunks in ``writes`` (a list of tuples).
     Returns the count of chunks written. Tests assert against ``writes``

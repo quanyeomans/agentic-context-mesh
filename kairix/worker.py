@@ -168,7 +168,7 @@ class ConnectorSyncResult:
 
 
 class _SqliteChunkWriter:
-    """Minimal in-process :class:`~kairix.core.connectors.ChunkWriter`.
+    """Minimal in-process :class:`~kairix.core.protocols.ChunkWriter`.
 
     Wave-2 IM-3 keeps the worker independent from the legacy
     ``DocumentScanner`` writer surface — there is no production
