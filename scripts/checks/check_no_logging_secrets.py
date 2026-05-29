@@ -50,7 +50,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate, python_files, repo_relative
+from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
+from _fitness_rule import FitnessRule
 
 # Identifier patterns that strongly imply a secret value. Matched against
 # the *trailing* segment of a Name/Attribute (e.g. ``self.api_key`` →
@@ -214,9 +215,19 @@ def file_has_violation(path: Path) -> bool:
     return False
 
 
+class F15(FitnessRule):
+    """F15 as a FitnessRule subclass — see module docstring."""
+
+    name = "no-logging-secrets"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
 def main() -> int:
-    violations = {repo_relative(p) for p in python_files("kairix") if file_has_violation(p)}
-    return gate("no-logging-secrets", violations, REMEDIATION)
+    return F15().run()
 
 
 if __name__ == "__main__":
