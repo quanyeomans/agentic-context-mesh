@@ -38,7 +38,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
+from _fitness_rule import FitnessRule
 
 # Module prefixes the core/connectors/ tree is forbidden from importing.
 # Anchored with a trailing dot so we don't accidentally flag a hypothetical
@@ -123,32 +124,24 @@ def file_has_violation(path: Path) -> bool:
     return False
 
 
-def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
-    """Walk every .py file under ``<repo_root>/kairix/core/connectors/`` and
-    return repo-relative paths that contain a forbidden import.
+class F34(FitnessRule):
+    """F34 as a FitnessRule subclass — see module docstring for rule semantics."""
 
-    Returns an empty set if ``kairix/core/connectors/`` does not exist or is
-    empty — the gate is a no-op on a Wave 0 checkout where the directory
-    hasn't been scaffolded yet.
-    """
-    core_connectors_dir = repo_root / "kairix" / "core" / "connectors"
-    if not core_connectors_dir.exists():
-        return set()
-    violations: set[Path] = set()
-    for path in core_connectors_dir.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        if file_has_violation(path):
-            try:
-                violations.add(path.resolve().relative_to(repo_root))
-            except ValueError:
-                violations.add(repo_relative(path))
-    return violations
+    name = "f34"
+    remediation = REMEDIATION
+    roots = ("kairix/core/connectors",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
+def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
+    """Back-compat helper for direct test imports."""
+    return F34(repo_root=repo_root).collect_violations()
 
 
 def main() -> int:
-    violations = collect_violations()
-    return gate("f34", violations, REMEDIATION)
+    return F34().run()
 
 
 if __name__ == "__main__":

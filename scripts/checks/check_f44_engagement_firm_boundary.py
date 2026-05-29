@@ -49,7 +49,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — kept for back-compat with importing tests
+from _fitness_rule import FitnessRule
 
 # Forbidden Postgres-client import-name prefixes. An import is flagged
 # if the imported module name equals one of these OR starts with one
@@ -142,30 +143,25 @@ def file_has_violation(path: Path) -> bool:
     return False
 
 
-def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
-    """Walk every ``.py`` file under ``<repo_root>/kairix/`` and
-    return repo-relative paths of files that import a denylisted
-    Postgres client. Empty set if ``kairix/`` does not exist.
-    """
-    kairix_dir = repo_root / "kairix"
-    if not kairix_dir.exists():
-        return set()
+class F44(FitnessRule):
+    """F44 as a FitnessRule subclass — see module docstring for rule semantics."""
 
-    violations: set[Path] = set()
-    for path in kairix_dir.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        if file_has_violation(path):
-            try:
-                violations.add(path.resolve().relative_to(repo_root))
-            except ValueError:
-                violations.add(repo_relative(path))
-    return violations
+    name = "f44"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
+# Public ``collect_violations`` kept for back-compat with any code that
+# imports it directly (tests, scripts). The class is the canonical entry.
+def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
+    return F44(repo_root=repo_root).collect_violations()
 
 
 def main() -> int:
-    violations = collect_violations()
-    return gate("f44", violations, REMEDIATION)
+    return F44().run()
 
 
 if __name__ == "__main__":

@@ -44,7 +44,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
+from _fitness_rule import FitnessRule
 
 # Files / directories at the top level of kairix/connectors/ that are NOT
 # plugins (they're the shared scaffolding the plugin Protocol lives in).
@@ -183,31 +184,30 @@ def file_has_violation(path: Path, connectors_root: Path) -> bool:
     return False
 
 
-def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
-    """Walk every .py file under ``<repo_root>/kairix/connectors/<plugin>/``
-    and return repo-relative paths of files that import a sibling connector
-    or any extractor. Empty set if ``kairix/connectors/`` is absent or holds
-    no plugin subdirectories yet.
+class F35(FitnessRule):
+    """F35 as a FitnessRule subclass. Overrides ``file_has_violation``
+    to thread ``connectors_root`` into the detection helper.
     """
-    connectors_root = repo_root / "kairix" / "connectors"
-    if not connectors_root.exists():
-        return set()
 
-    violations: set[Path] = set()
-    for path in connectors_root.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        if file_has_violation(path, connectors_root):
-            try:
-                violations.add(path.resolve().relative_to(repo_root))
-            except ValueError:
-                violations.add(repo_relative(path))
-    return violations
+    name = "f35"
+    remediation = REMEDIATION
+    roots = ("kairix/connectors",)
+
+    def __init__(self, repo_root: Path | None = None) -> None:
+        super().__init__(repo_root=repo_root)
+        self._connectors_root = self._repo_root / "kairix" / "connectors"
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path, self._connectors_root)
+
+
+def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
+    """Back-compat helper for direct test imports."""
+    return F35(repo_root=repo_root).collect_violations()
 
 
 def main() -> int:
-    violations = collect_violations()
-    return gate("f35", violations, REMEDIATION)
+    return F35().run()
 
 
 if __name__ == "__main__":

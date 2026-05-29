@@ -36,7 +36,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
+from _fitness_rule import FitnessRule
 
 # Module prefixes the core/ tree is forbidden from importing. Anchored
 # with a trailing dot so we don't accidentally flag a hypothetical
@@ -133,38 +134,25 @@ def file_has_violation(path: Path) -> bool:
     return False
 
 
-def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
-    """Walk every .py file under ``<repo_root>/kairix/core/`` and return
-    repo-relative paths that contain a forbidden import.
+class F26(FitnessRule):
+    """F26 as a FitnessRule subclass — see module docstring for rule semantics."""
 
-    Returns an empty set if ``kairix/core/`` does not exist or is empty
-    — the gate is a no-op on a fresh checkout where the directory
-    hasn't been scaffolded yet.
-    """
-    core_dir = repo_root / "kairix" / "core"
-    if not core_dir.exists():
-        return set()
-    violations: set[Path] = set()
-    for path in core_dir.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        try:
-            rel = path.resolve().relative_to(repo_root)
-        except ValueError:
-            continue
-        if rel.as_posix() in _ALLOWLIST_PATHS:
-            continue
-        if file_has_violation(path):
-            try:
-                violations.add(path.resolve().relative_to(repo_root))
-            except ValueError:
-                violations.add(repo_relative(path))
-    return violations
+    name = "f26"
+    remediation = REMEDIATION
+    roots = ("kairix/core",)
+    exempt_files = _ALLOWLIST_PATHS
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path)
+
+
+def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
+    """Back-compat helper for direct test imports."""
+    return F26(repo_root=repo_root).collect_violations()
 
 
 def main() -> int:
-    violations = collect_violations()
-    return gate("f26", violations, REMEDIATION)
+    return F26().run()
 
 
 if __name__ == "__main__":

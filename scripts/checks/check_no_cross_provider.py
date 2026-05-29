@@ -40,7 +40,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import REPO_ROOT, repo_relative  # noqa: F401 — back-compat for test imports
+from _fitness_rule import FitnessRule
 
 # Files / directories at the top level of kairix/providers/ that are NOT
 # plugins (they're the shared scaffolding the plugin Protocol lives in).
@@ -156,31 +157,31 @@ def file_has_violation(path: Path, providers_root: Path) -> bool:
     return False
 
 
-def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
-    """Walk every .py file under ``<repo_root>/kairix/providers/<plugin>/``
-    and return repo-relative paths of files that import a sibling
-    plugin. Empty set if ``kairix/providers/`` is absent or holds no
-    plugin subdirectories yet.
+class F27(FitnessRule):
+    """F27 as a FitnessRule subclass. Overrides ``file_has_violation``
+    because the detection logic needs the providers_root for sibling-plugin
+    name inference — supplied via instance attribute.
     """
-    providers_root = repo_root / "kairix" / "providers"
-    if not providers_root.exists():
-        return set()
 
-    violations: set[Path] = set()
-    for path in providers_root.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        if file_has_violation(path, providers_root):
-            try:
-                violations.add(path.resolve().relative_to(repo_root))
-            except ValueError:
-                violations.add(repo_relative(path))
-    return violations
+    name = "f27"
+    remediation = REMEDIATION
+    roots = ("kairix/providers",)
+
+    def __init__(self, repo_root: Path | None = None) -> None:
+        super().__init__(repo_root=repo_root)
+        self._providers_root = self._repo_root / "kairix" / "providers"
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_has_violation(path, self._providers_root)
+
+
+def collect_violations(repo_root: Path = REPO_ROOT) -> set[Path]:
+    """Back-compat helper for direct test imports."""
+    return F27(repo_root=repo_root).collect_violations()
 
 
 def main() -> int:
-    violations = collect_violations()
-    return gate("f27", violations, REMEDIATION)
+    return F27().run()
 
 
 if __name__ == "__main__":
