@@ -34,7 +34,11 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import REPO_ROOT, gate, repo_relative
+from _arch_lib import (  # noqa: F401 — back-compat for repo_relative usage in _collect_violations
+    REPO_ROOT,
+    repo_relative,
+)
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """F66: <ClassName> in <file> does not declare per_tick_max_items
 + disk_watermark_min_free_bytes.
@@ -185,9 +189,40 @@ def _collect_violations(repo_root: Path) -> set[Path]:
     return violations
 
 
+def _file_has_violation(path: Path) -> bool:
+    """Per-file predicate — True if any class in this file violates F66."""
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if _is_exempt(source, node):
+            continue
+        if not _is_tick_driven_or_connector_class(source, node, path):
+            continue
+        if not _class_declares_attr(node, "per_tick_max_items"):
+            return True
+        if not _class_declares_attr(node, "disk_watermark_min_free_bytes") and not _has_watermark_exempt(source, node):
+            return True
+    return False
+
+
+class F66(FitnessRule):
+    """F66 as a FitnessRule subclass — see module docstring."""
+
+    name = "f66-connector-tick-budget"
+    remediation = REMEDIATION
+    roots = SCANNED_ROOTS
+
+    def file_has_violation(self, path: Path) -> bool:
+        return _file_has_violation(path)
+
+
 def main() -> int:
-    violations = _collect_violations(REPO_ROOT)
-    return gate("f66-connector-tick-budget", violations, REMEDIATION)
+    return F66().run()
 
 
 if __name__ == "__main__":
