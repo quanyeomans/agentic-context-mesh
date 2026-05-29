@@ -33,7 +33,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _arch_lib import gate, python_files, repo_relative
+from _arch_lib import python_files, repo_relative  # noqa: F401 — back-compat
+from _fitness_rule import FitnessRule
 
 REMEDIATION = """F63: <file> has an unbounded ``.fetchall()`` call.
 
@@ -115,12 +116,19 @@ def file_violates(path: Path) -> bool:
     return False
 
 
+class F63(FitnessRule):
+    """F63 as a FitnessRule subclass — see module docstring."""
+
+    name = "f63-unbounded-fetchall"
+    remediation = REMEDIATION
+    roots = ("kairix",)
+
+    def file_has_violation(self, path: Path) -> bool:
+        return file_violates(path)
+
+
 def main() -> int:
-    violations: set[Path] = set()
-    for path in python_files("kairix"):
-        if file_violates(path):
-            violations.add(repo_relative(path))
-    return gate("f63-unbounded-fetchall", violations, REMEDIATION)
+    return F63().run()
 
 
 if __name__ == "__main__":
