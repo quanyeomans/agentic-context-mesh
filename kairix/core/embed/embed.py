@@ -537,6 +537,21 @@ def _save_index_checkpoint(vec_index: Any) -> None:
 # ── Main embed runner ─────────────────────────────────────────────────────────
 
 
+def _maybe_clear_vec_index_for_force(force: bool, vec_index: Any) -> None:
+    """GH #352 — under ``--force`` we already cleared SQLite content_vectors
+    in :func:`_gather_pending_chunks`. The on-disk usearch index must be
+    cleared too, otherwise the first ``add_vectors()`` call previously
+    triggered a convert-on-mutate path that loaded every existing vector
+    into memory just to discard it. ``clear()`` drops the on-disk files
+    and resets in-memory state, so the upcoming ``add_vectors`` calls
+    build a fresh mutable index from empty. Lifted out of ``run_embed``
+    to keep that function under the F16 cognitive-complexity ceiling.
+    """
+    if force and vec_index is not None and hasattr(vec_index, "clear"):
+        logger.info("--force: clearing on-disk usearch index")
+        vec_index.clear()
+
+
 def run_embed(
     db: sqlite3.Connection,
     force: bool = False,
@@ -601,16 +616,7 @@ def run_embed(
     now = int(start_time)
 
     vec_index = deps.open_usearch_index()
-    # GH #352 — under --force we already cleared SQLite content_vectors in
-    # _gather_pending_chunks. The on-disk usearch index must be cleared
-    # too, otherwise the first add_vectors() call previously triggered a
-    # convert-on-mutate path that loaded every existing vector into
-    # memory just to discard it. clear() is the fast path: drop the
-    # on-disk files, reset in-memory state, let the upcoming add_vectors
-    # calls build a fresh mutable index from empty.
-    if force and vec_index is not None and hasattr(vec_index, "clear"):
-        logger.info("--force: clearing on-disk usearch index")
-        vec_index.clear()
+    _maybe_clear_vec_index_for_force(force, vec_index)
     save_interval = 10
 
     for batch_idx, batch in enumerate(batched(all_chunks, batch_size)):
