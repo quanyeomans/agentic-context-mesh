@@ -225,6 +225,16 @@ pptx         = "kairix.extractors.pptx:make_extractor"
 docx         = "kairix.extractors.docx:make_extractor"
 xlsx         = "kairix.extractors.xlsx:make_extractor"
 
+# Chunker plugin discovery — same name-filtered Python entry-points
+# shape as kairix.extractors above. Per-(kind, mime) plugins live under
+# ``kairix/chunkers/<name>.py`` (single-file) or
+# ``kairix/chunkers/<name>/`` (subdir) and register here so the
+# ChunkerRegistry can resolve them by name at worker boot. ADR-028
+# Wave G.1 lands the first batch.
+[project.entry-points."kairix.chunkers"]
+thread         = "kairix.chunkers.thread:ThreadChunker"
+calendar_event = "kairix.chunkers.calendar_event:CalendarEventChunker"
+
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"
 Issues = "https://github.com/three-cubes/kairix/issues"

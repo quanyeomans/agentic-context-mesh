@@ -93,3 +93,15 @@ kairix/connectors/github/connector.py
 kairix/core/features/cli.py
 kairix/quality/probe/burst.py
 kairix/quality/probe/config_cli.py
+# kairix/connectors/gmail/* — boundary adapters for the Gmail API client.
+# Same shape as the m365_calendar/graph_client.py entry above — uncovered
+# branches are Gmail-SDK error envelopes (rate-limits, deleted-item
+# tombstones, OAuth refresh) whose contract is pinned by F64 (rate-limit
+# BDD) + the connector's contract tests, not by line coverage of the
+# adapter itself. The connector commit (8e92fc5b) landed flag-gated OFF
+# pending KV provisioning (#356); live-verify coverage will land with the
+# integration suite once credentials are wired. Grandfathered with the
+# same ADR-024 §"Repositioning F7" rationale as the sibling boundary
+# adapters above.
+kairix/connectors/gmail/client.py
+kairix/connectors/gmail/connector.py

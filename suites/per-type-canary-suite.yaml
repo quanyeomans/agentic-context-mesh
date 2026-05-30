@@ -1,0 +1,159 @@
+meta:
+  name: per-type-canary
+  description: >
+    ADR-028 §"Quality evaluation" #3 — boundary-spanning canary suite.
+    Every case is a deliberate atomic-unit-spanning question: the gold
+    answer crosses two chunks of one unit (slide pair, row pair, event
+    series, message thread). When a chunker regression splits an atomic
+    unit, the canary fails loudly because retrieval surfaces only half
+    the answer. Used by ``kairix.quality.benchmark.per_type_slicing.aggregate_canary``
+    to compute per-unit pass rates that surface a chunker regression
+    before it pollutes the global benchmark average.
+
+    Scaffolded with three canaries per atomic-unit type (slide, row,
+    event, message). Gold titles + queries are synthetic placeholders
+    aligned with the reflib reference corpus naming convention; bench
+    runs against the mock retrieval backend (no Azure required).
+  version: "0.1"
+  system: mock
+  n_cases: 12
+
+cases:
+  # ---------------------------------------------------------------
+  # slide canaries — PPTX boundary spans (two adjacent slides whose
+  # combined content answers the question)
+  # ---------------------------------------------------------------
+  - id: CANARY-SLIDE-001
+    category: recall
+    query: project condor test suite hardening fy26 q3 milestone slide pair
+    score_method: ndcg
+    canary: true
+    canary_unit: slide
+    gold_titles:
+      - title: project-condor-test-suite-hardening-fy26-q3
+        relevance: 2
+
+  - id: CANARY-SLIDE-002
+    category: recall
+    query: project lynx test suite hardening fy27 q3 milestone slide pair
+    score_method: ndcg
+    canary: true
+    canary_unit: slide
+    gold_titles:
+      - title: project-lynx-test-suite-hardening-fy27-q3
+        relevance: 2
+
+  - id: CANARY-SLIDE-003
+    category: recall
+    query: project otter test suite hardening short slide pair
+    score_method: ndcg
+    canary: true
+    canary_unit: slide
+    gold_titles:
+      - title: project-otter-test-suite-hardening-short
+        relevance: 2
+
+  # ---------------------------------------------------------------
+  # row canaries — XLSX row-pair boundary spans
+  # ---------------------------------------------------------------
+  - id: CANARY-ROW-001
+    category: recall
+    query: spreadsheet row pair forecast value with header relationship
+    score_method: ndcg
+    canary: true
+    canary_unit: row
+    gold_titles:
+      - title: spreadsheet-row-pair-forecast
+        relevance: 2
+
+  - id: CANARY-ROW-002
+    category: recall
+    query: spreadsheet row pair actuals value with column header context
+    score_method: ndcg
+    canary: true
+    canary_unit: row
+    gold_titles:
+      - title: spreadsheet-row-pair-actuals
+        relevance: 2
+
+  - id: CANARY-ROW-003
+    category: recall
+    query: spreadsheet row pair budget variance row span answer
+    score_method: ndcg
+    canary: true
+    canary_unit: row
+    gold_titles:
+      - title: spreadsheet-row-pair-budget
+        relevance: 2
+
+  # ---------------------------------------------------------------
+  # event canaries — calendar event spans (recurring event series
+  # where a single occurrence's body holds the answer)
+  # ---------------------------------------------------------------
+  - id: CANARY-EVENT-001
+    category: recall
+    query: calendar event series weekly product review recurrence master
+    score_method: ndcg
+    canary: true
+    canary_unit: event
+    gold_titles:
+      - title: generic-event-001
+        relevance: 2
+
+  - id: CANARY-EVENT-002
+    category: recall
+    query: calendar event series monthly architecture review recurrence master
+    score_method: ndcg
+    canary: true
+    canary_unit: event
+    gold_titles:
+      - title: generic-event-002
+        relevance: 2
+
+  - id: CANARY-EVENT-003
+    category: recall
+    query: calendar event series quarterly planning recurrence master
+    score_method: ndcg
+    canary: true
+    canary_unit: event
+    gold_titles:
+      - title: generic-event-003
+        relevance: 2
+
+  # ---------------------------------------------------------------
+  # message canaries — email / chat thread spans where the question
+  # is in one message and the answer in the reply
+  # ---------------------------------------------------------------
+  - id: CANARY-MESSAGE-001
+    category: recall
+    query: email thread question reply answer canary across two messages
+    score_method: ndcg
+    canary: true
+    canary_unit: message
+    gold_titles:
+      - title: canary-thread-msg-01
+        relevance: 2
+      - title: canary-thread-msg-02
+        relevance: 1
+
+  - id: CANARY-MESSAGE-002
+    category: recall
+    query: email thread follow-up clarification answer canary message span
+    score_method: ndcg
+    canary: true
+    canary_unit: message
+    gold_titles:
+      - title: canary-thread-msg-02
+        relevance: 2
+      - title: canary-thread-msg-03
+        relevance: 1
+
+  - id: CANARY-MESSAGE-003
+    category: recall
+    query: email thread final confirmation answer canary message span end
+    score_method: ndcg
+    canary: true
+    canary_unit: message
+    gold_titles:
+      - title: canary-thread-msg-03
+        relevance: 2

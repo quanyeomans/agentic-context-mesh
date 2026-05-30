@@ -38,6 +38,7 @@ suites/*.yaml
 !suites/example.yaml
 !suites/contract-suite.yaml
 !suites/reflib-*.yaml
+!suites/per-type-canary-suite.yaml
 
 # Operator-specific benchmark build scripts — keep in your private operator config repo
 scripts/build-eval-gold.py

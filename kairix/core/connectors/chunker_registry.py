@@ -177,3 +177,47 @@ class ChunkerRegistry:
     def registered_keys(self) -> tuple[tuple[str, str], ...]:
         """Snapshot of registered ``(kind, mime)`` keys — for tests and diagnostics."""
         return tuple(sorted(self._registry.keys()))
+
+
+# MIME literals duplicated ≥3 times across the registry-population
+# call sites (F17). Extracting to module-level constants keeps the
+# coupling explicit and the rename cost a single-edit-site change.
+_MIME_TEXT_CALENDAR = "text/calendar"
+
+
+def build_default_registry() -> ChunkerRegistry:
+    """Construct a :class:`ChunkerRegistry` with the ADR-028 Wave G.1 plugins.
+
+    Pre-registers the per-``(kind, mime)`` chunkers per ADR-028
+    §"Registry dispatch". Operators get the per-type chunking behaviour
+    by constructing the registry through this factory; bespoke wiring
+    (tests, contract proofs) constructs the bare :class:`ChunkerRegistry`
+    and registers only what the test exercises.
+
+    Wave G.1 batch 3 lands ThreadChunker + CalendarEventChunker; earlier
+    batches land MarkdownStructural / Code / EmailThread / Slide / Sheet /
+    Docx; the factory will grow as the plugins land. The fallback covers
+    every other ``(kind, mime)`` pair.
+
+    Imports are deferred to the function body so importing the registry
+    module doesn't pull in every chunker plugin's transitive imports —
+    keeps the F38 / F26 layering boundary on the bare registry surface.
+    """
+    # Deferred imports — see docstring for the rationale.
+    from kairix.chunkers.calendar_event import CalendarEventChunker
+    from kairix.chunkers.thread import ThreadChunker
+
+    registry = ChunkerRegistry()
+    thread_chunker = ThreadChunker()
+    calendar_chunker = CalendarEventChunker()
+    # Slack — both JSON envelopes (the canonical fetch shape) and
+    # text/plain (legacy or hand-shaped tests) route through
+    # ThreadChunker.
+    registry.register(kind="slack", mime="application/json", chunker=thread_chunker)
+    registry.register(kind="slack", mime="text/plain", chunker=thread_chunker)
+    # Calendar — every calendar connector emits text/calendar shape
+    # after the extractor lift; one chunker for all three sources.
+    registry.register(kind="m365_calendar", mime=_MIME_TEXT_CALENDAR, chunker=calendar_chunker)
+    registry.register(kind="google_calendar", mime=_MIME_TEXT_CALENDAR, chunker=calendar_chunker)
+    registry.register(kind="apple_caldav", mime=_MIME_TEXT_CALENDAR, chunker=calendar_chunker)
+    return registry
