@@ -3,7 +3,7 @@ Feature: topology_v2_google_calendar feature flag gates Google Calendar connecto
   As an operator running kairix while the Google Workspace OAuth credentials are still being provisioned
   I want the Google Calendar connector to be inert until the topology-v2-google-calendar flag is flipped on
   So that merging the connector code is structurally a no-op for production
-  and the cutover is a separate deliberate action once the credentials land in kv-tc-agents.
+  and the cutover is a separate deliberate action once the credentials land in the operator's Key Vault.
 
   The flag defaults OFF so existing operators see bit-for-bit current
   behaviour (the connector never runs even when listed in

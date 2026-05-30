@@ -17,7 +17,7 @@ bytes on :class:`RawArtefact`. Attachments surface as metadata only
 Auth is OAuth2 (the operator / authorised user grants the
 ``gmail.readonly`` scope once; the worker exchanges the refresh token
 for an access token at tick time). Tracked under GH #356 for the
-Workspace OAuth provisioning into ``kv-tc-agents``.
+Workspace OAuth provisioning into the operator's Key Vault.
 
 Registered via ``[project.entry-points."kairix.connectors"]`` in
 kairix's ``pyproject.toml`` — operators select it by listing ``gmail``

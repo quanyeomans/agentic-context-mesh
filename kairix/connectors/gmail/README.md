@@ -9,7 +9,7 @@ Date / Thread / Labels) — via the Gmail REST API.
 
 Behind the `connector_gmail` feature flag (introduce stage, default
 **OFF**). The connector cannot be live-verified until the Workspace
-OAuth credentials are provisioned into `kv-tc-agents` — tracked under
+OAuth credentials are provisioned into the operator's Key Vault — tracked under
 [GH #356](https://github.com/three-cubes/kairix/issues/356).
 
 ## What it does

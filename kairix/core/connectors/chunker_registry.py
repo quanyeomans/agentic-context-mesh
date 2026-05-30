@@ -42,6 +42,7 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 # ≥3 `register(...)` call sites below).
 SHAREPOINT_KIND = "sharepoint"
 GOOGLE_DRIVE_KIND = "google_drive"
+MARKDOWN_MIME = "text/markdown"
 
 # Paragraph-boundary character budget for the fallback. Same value the
 # existing F38-locked Silver path uses (kairix/core/connectors/silver.py),
@@ -235,6 +236,9 @@ def build_default_registry() -> ChunkerRegistry:
     """
     # Deferred imports — see docstring for the rationale.
     from kairix.chunkers.calendar_event import CalendarEventChunker
+    from kairix.chunkers.code import CodeChunker
+    from kairix.chunkers.email_thread import EmailThreadChunker
+    from kairix.chunkers.markdown_structural import MarkdownStructuralChunker
     from kairix.chunkers.thread import ThreadChunker
 
     registry = ChunkerRegistry()
@@ -243,6 +247,11 @@ def build_default_registry() -> ChunkerRegistry:
     slide_chunker = SlideChunker()
     sheet_row_chunker = SheetRowChunker()
     docx_heading_chunker = DocxHeadingChunker()
+    markdown_chunker = MarkdownStructuralChunker(version="0.1.0")
+    email_chunker = EmailThreadChunker(version="0.1.0")
+    python_code_chunker = CodeChunker(language="python", version="0.1.0")
+    go_code_chunker = CodeChunker(language="go", version="0.1.0")
+    typescript_code_chunker = CodeChunker(language="typescript", version="0.1.0")
 
     # Slack — both JSON envelopes (the canonical fetch shape) and
     # text/plain (legacy or hand-shaped tests) route through ThreadChunker.
@@ -263,6 +272,18 @@ def build_default_registry() -> ChunkerRegistry:
     # DOCX — heading-hierarchy split.
     registry.register(kind=SHAREPOINT_KIND, mime=DOCX_MIME, chunker=docx_heading_chunker)
     registry.register(kind=GOOGLE_DRIVE_KIND, mime=DOCX_MIME, chunker=docx_heading_chunker)
+    # Markdown — heading-aware structural split (Obsidian, Notion, GitHub READMEs).
+    registry.register(kind="obsidian", mime=MARKDOWN_MIME, chunker=markdown_chunker)
+    registry.register(kind="notion", mime=MARKDOWN_MIME, chunker=markdown_chunker)
+    registry.register(kind="github", mime=MARKDOWN_MIME, chunker=markdown_chunker)
+    registry.register(kind=GOOGLE_DRIVE_KIND, mime=MARKDOWN_MIME, chunker=markdown_chunker)
+    # Code — language-aware split for GitHub code files.
+    registry.register(kind="github", mime="text/x-python", chunker=python_code_chunker)
+    registry.register(kind="github", mime="text/x-go", chunker=go_code_chunker)
+    registry.register(kind="github", mime="text/x-typescript", chunker=typescript_code_chunker)
+    # Email — thread-aware (Gmail + M365 email headers).
+    registry.register(kind="gmail", mime="message/rfc822", chunker=email_chunker)
+    registry.register(kind="m365_email_headers", mime="message/rfc822", chunker=email_chunker)
 
     return registry
 

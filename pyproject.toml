@@ -237,6 +237,9 @@ calendar_event = "kairix.chunkers.calendar_event:CalendarEventChunker"
 slide          = "kairix.chunkers.slide:SlideChunker"
 sheet_row      = "kairix.chunkers.sheet_row:SheetRowChunker"
 docx_heading   = "kairix.chunkers.docx_heading:DocxHeadingChunker"
+markdown_structural = "kairix.chunkers.markdown_structural:MarkdownStructuralChunker"
+code           = "kairix.chunkers.code:CodeChunker"
+email_thread   = "kairix.chunkers.email_thread:EmailThreadChunker"
 
 [project.urls]
 Homepage = "https://github.com/three-cubes/kairix"
