@@ -293,6 +293,12 @@ pytest_plugins = [
     # plus one DRIVE FOLDER per configured drive parent-before-child
     # per F58; Resolver.reindex replays only the supplied failed ids.
     "tests.bdd.steps.feature_flag_topology_v2_sharepoint_steps",
+    # Wave E Google Drive — workspace-files connector + flag. See
+    # kairix/connectors/google_drive/README.md for the connector
+    # capability surface and operator-side credential provisioning
+    # (tracked under GH #356).
+    "tests.bdd.steps.connector_google_drive_steps",
+    "tests.bdd.steps.feature_flag_topology_v2_google_drive_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

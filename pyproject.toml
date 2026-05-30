@@ -196,6 +196,7 @@ notion             = "kairix.connectors.notion:make_connector"
 github             = "kairix.connectors.github:make_connector"
 slack              = "kairix.connectors.slack:make_connector"
 gmail              = "kairix.connectors.gmail:make_connector"
+google_drive       = "kairix.connectors.google_drive:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and

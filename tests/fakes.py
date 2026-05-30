@@ -2745,6 +2745,100 @@ class FakeSharePointConnector:
         return SourceMetadata()
 
 
+class FakeGoogleDriveConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    Google Drive plugin's contract test.
+
+    Constructor takes the file envelopes to emit; the fake satisfies
+    the full Protocol surface without touching the Google Drive REST
+    API. This is the canonical fake F43 pairs with the real
+    :class:`kairix.connectors.google_drive.GoogleDriveConnector`
+    inside ``tests/contracts/test_google_drive_protocol.py``.
+
+    Default sensitivity tier is ``internal`` per the connector's
+    documented default — the constructor accepts a ``sensitivity``
+    override so contract assertions can pin both the default and a
+    confidential-tier configuration.
+    """
+
+    name: str = "google_drive"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = 5_000_000_000
+
+    def __init__(
+        self,
+        *,
+        files: list[dict[str, Any]] | None = None,
+        sensitivity: str = "internal",
+        new_start_page_token: str | None = None,
+    ) -> None:
+        self._files: list[dict[str, Any]] = list(files) if files is not None else []
+        self._sensitivity = sensitivity
+        self._new_start_page_token = new_start_page_token
+        self._by_id: dict[str, dict[str, Any]] = {str(item.get("id")): item for item in self._files}
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        """Yield one ``created`` ChangeEvent per seeded file."""
+        _ = cursor
+        from kairix.core.protocols import ChangeEvent
+
+        events: list[ChangeEvent] = []
+        for entry in self._files:
+            events.append(
+                ChangeEvent(
+                    op="created",
+                    item_id=str(entry.get("id", "")),
+                    modified_at=str(entry.get("modifiedTime", "1970-01-01T00:00:00Z")),
+                    metadata={
+                        "sensitivity": self._sensitivity,
+                        "corpus_id": str(entry.get("corpus_id", "fake-corpus")),
+                        "name": str(entry.get("name", "")),
+                        "mime": str(entry.get("mimeType", "")),
+                    },
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        entry = self._by_id.get(item_id, {})
+        raw = entry.get("_content", b"")
+        if not isinstance(raw, bytes):
+            raw = bytes(raw)
+        mime_raw = entry.get("mimeType", "application/octet-stream")
+        mime = mime_raw if isinstance(mime_raw, str) else "application/octet-stream"
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime=mime, fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        entry = self._by_id.get(item_id, {})
+        url = entry.get("webViewLink")
+        if isinstance(url, str) and url:
+            return url
+        return f"gdrive://files/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Round-trip the seeded newStartPageToken."""
+        return self._new_start_page_token
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real envelope extraction lives on the
+        shipped :class:`GoogleDriveConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
+
 class FakeNotionConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
     Notion plugin's contract test.

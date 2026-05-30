@@ -40,3 +40,5 @@ Feature: End-to-end connector sync journey
       | github              | passthrough  |
       | slack               | passthrough  |
       | gmail               | passthrough  |
+      | google_drive        | markitdown   |
+      | google_drive        | passthrough  |

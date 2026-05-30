@@ -72,6 +72,7 @@ _SECRET_ENV_MAP = {
     "connector-github-app-private-key": "CONNECTOR_GITHUB_APP_PRIVATE_KEY",
     "connector-github-webhook-secret": "CONNECTOR_GITHUB_WEBHOOK_SECRET",  # pragma: allowlist secret
     "connector-notion-token": "CONNECTOR_NOTION_TOKEN",
+    "connector-google-drive-access-token": "CONNECTOR_GOOGLE_DRIVE_ACCESS_TOKEN",
 }
 
 

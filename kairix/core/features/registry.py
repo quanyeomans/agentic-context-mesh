@@ -62,6 +62,7 @@ _TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER = "v2027.5.24"
 _WAVE_E_DESC_PREFIX = "Wave E of the connector/collection/scope topology v2 migration — "
 _WAVE_E_OFF_DELEGATES = "list_changes_for_container delegates to the legacy single "
 _WAVE_E_OFF_SHIM_NOTE = "When OFF, the connector retains the Wave B shim shape — "
+_WAVE_E_OFF_HIERARCHY_NOTE = "list_changes call, and load_hierarchy emits one root FOLDER node. "
 
 
 # Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
@@ -241,7 +242,7 @@ REGISTRY: dict[str, FeatureFlag] = {
             + "filesystem emitting one FOLDER node per directory parent-before-child. "
             + _WAVE_E_OFF_SHIM_NOTE
             + _WAVE_E_OFF_DELEGATES
-            + "list_changes call, and load_hierarchy emits one root FOLDER node. "
+            + _WAVE_E_OFF_HIERARCHY_NOTE
             + "Default-off until the per-folder routing pattern soaks against the "
             + "dogfood vault; this pilot's shape is the template for the "
             + "dex_crm / m365_* / sharepoint / notion / slack / github "
@@ -265,7 +266,7 @@ REGISTRY: dict[str, FeatureFlag] = {
             + "node plus one FOLDER per mailbox parent-before-child per F58. "
             + _WAVE_E_OFF_SHIM_NOTE
             + _WAVE_E_OFF_DELEGATES
-            + "list_changes call, and load_hierarchy emits one root FOLDER node. "
+            + _WAVE_E_OFF_HIERARCHY_NOTE
             + "Default-off until the per-mailbox routing pattern soaks against "
             + "the dogfood tenant; mirrors the obsidian Wave E pilot landed in "
             + "the topology_v2_obsidian flag."
@@ -423,6 +424,34 @@ REGISTRY: dict[str, FeatureFlag] = {
         stage="introduce",
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
         target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
+    "topology_v2_google_drive": FeatureFlag(
+        name="topology_v2_google_drive",
+        default=False,
+        description=(
+            _WAVE_E_DESC_PREFIX
+            + "per-connector slice for the google_drive connector. When ON, the "
+            + "GoogleDriveConnector emits one Container per configured Drive "
+            + "corpus (each with its own newStartPageToken as cursor_token) "
+            + "instead of a single connector-wide cursor; "
+            + "list_changes_for_container scopes the Drive changes drain to "
+            + "that corpus only; load_hierarchy emits a root FOLDER plus one "
+            + "FOLDER child per configured corpus parent-before-child per F58; "
+            + "the Resolver.reindex method replays only the supplied failed "
+            + "item ids instead of re-running a changes window. "
+            + _WAVE_E_OFF_SHIM_NOTE
+            + _WAVE_E_OFF_DELEGATES
+            + _WAVE_E_OFF_HIERARCHY_NOTE
+            + "Default-off until the OAuth credential provisioning lands (GH #356) "
+            + "and the per-corpus routing pattern soaks against the dogfood "
+            + "workspace; mirrors the sharepoint / m365_calendar / "
+            + "m365_email_headers Wave E pilots."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),

@@ -1352,6 +1352,58 @@ def dispatch_gmail_sync(
     return off_branch()
 
 
+def google_drive_off_branch_noop() -> ConnectorSyncResult:
+    """OFF-branch default for :func:`dispatch_google_drive_sync` —
+    return zero counters and emit the operator-visible signal that the
+    Google Drive connector is gated off.
+
+    F6-clean: a real callable default, no ``None``. Public so the
+    feature-flag BDD steps can reach it without an internal-name
+    import (F5).
+    """
+    logger.info("worker: google_drive connector gated off (flag OFF)")
+    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+
+def run_via_google_drive_connector() -> ConnectorSyncResult:
+    """ON-branch default for :func:`dispatch_google_drive_sync` —
+    delegates to the canonical :func:`run_connector_sync_pipeline`
+    which resolves the ``google_drive`` plugin via its entry-point
+    factory and drives the standard ConnectorPipeline.
+
+    The branch log distinguishes the Google Drive path from the
+    sibling sharepoint / notion / m365 paths so operators can tell
+    which connector ran by grep-ing INFO logs.
+    """
+    logger.info("worker: google_drive connector running (flag ON)")
+    return run_connector_sync_pipeline()
+
+
+def dispatch_google_drive_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_google_drive_connector,
+    off_branch: Callable[[], ConnectorSyncResult] = google_drive_off_branch_noop,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the Google Drive connector slot.
+
+    Reads the ``topology_v2_google_drive`` flag and routes to the ON
+    branch (the standard connector pipeline, which resolves the
+    ``google_drive`` plugin) or the OFF branch (a no-op that skips the
+    connector entirely). Mirrors :func:`dispatch_sharepoint_sync` shape —
+    the BDD + integration tests pin the flag through
+    :class:`FakeFeatureFlagResolver` and observe the branch via the
+    per-helper INFO log.
+
+    Gating happens at the connector-selection boundary — when OFF, the
+    google_drive plugin never runs even if listed in
+    ``kairix.config.yaml``. When ON, the connector is selected via the
+    standard config + entry-point shape.
+    """
+    if read_flag("topology_v2_google_drive"):
+        return on_branch()
+    return off_branch()
+
+
 # ---------------------------------------------------------------------------
 # KFEAT-021 Phase 1 — maintenance scheduler wiring (behind the
 # ``maintenance_loop`` feature flag). When the flag is OFF the
