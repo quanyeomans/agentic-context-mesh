@@ -1,5 +1,2 @@
-kairix/connectors/dex_crm
-kairix/connectors/m365_calendar
-kairix/connectors/m365_email_headers
 kairix/connectors/obsidian
 kairix/providers/ollama
