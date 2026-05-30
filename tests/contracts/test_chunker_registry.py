@@ -21,9 +21,17 @@ from __future__ import annotations
 
 import pytest
 
+from kairix.chunkers.docx_heading import DocxHeadingChunker
+from kairix.chunkers.sheet_row import SheetRowChunker
+from kairix.chunkers.slide import SlideChunker
 from kairix.core.connectors.chunker_registry import (
+    DOCX_MIME,
+    LEGACY_XLS_MIME,
+    PPTX_MIME,
+    XLSX_MIME,
     ChunkerRegistry,
     ParagraphFallbackChunker,
+    build_default_chunker_registry,
 )
 from kairix.core.protocols import Chunk, Chunker
 
@@ -112,6 +120,44 @@ def test_registered_keys_snapshot() -> None:
     registry.register(kind="a", mime="b", chunker=_Dummy())
     registry.register(kind="x", mime="y", chunker=_Dummy())
     assert registry.registered_keys() == (("a", "b"), ("x", "y"))
+
+
+def test_build_default_chunker_registry_returns_chunker_registry() -> None:
+    """ADR-028 Wave G.1 factory returns a populated ChunkerRegistry."""
+    registry = build_default_chunker_registry()
+    assert isinstance(registry, ChunkerRegistry)
+
+
+def test_build_default_chunker_registry_registers_slide_chunker_for_pptx() -> None:
+    registry = build_default_chunker_registry()
+    sharepoint_pptx = registry.dispatch(kind="sharepoint", mime=PPTX_MIME, section_kind="text")
+    google_pptx = registry.dispatch(kind="google_drive", mime=PPTX_MIME, section_kind="text")
+    assert isinstance(sharepoint_pptx, SlideChunker)
+    assert isinstance(google_pptx, SlideChunker)
+
+
+def test_build_default_chunker_registry_registers_sheet_row_chunker_for_xlsx() -> None:
+    registry = build_default_chunker_registry()
+    sharepoint_xlsx = registry.dispatch(kind="sharepoint", mime=XLSX_MIME, section_kind="tabular")
+    sharepoint_legacy = registry.dispatch(kind="sharepoint", mime=LEGACY_XLS_MIME, section_kind="tabular")
+    google_xlsx = registry.dispatch(kind="google_drive", mime=XLSX_MIME, section_kind="tabular")
+    assert isinstance(sharepoint_xlsx, SheetRowChunker)
+    assert isinstance(sharepoint_legacy, SheetRowChunker)
+    assert isinstance(google_xlsx, SheetRowChunker)
+
+
+def test_build_default_chunker_registry_registers_docx_heading_for_docx() -> None:
+    registry = build_default_chunker_registry()
+    sharepoint_docx = registry.dispatch(kind="sharepoint", mime=DOCX_MIME, section_kind="text")
+    google_docx = registry.dispatch(kind="google_drive", mime=DOCX_MIME, section_kind="text")
+    assert isinstance(sharepoint_docx, DocxHeadingChunker)
+    assert isinstance(google_docx, DocxHeadingChunker)
+
+
+def test_build_default_chunker_registry_unknown_kind_falls_through_to_fallback() -> None:
+    registry = build_default_chunker_registry()
+    unknown = registry.dispatch(kind="unknown_source", mime=PPTX_MIME, section_kind="text")
+    assert unknown is registry.fallback
 
 
 def test_fallback_paragraph_split_matches_legacy_silver_shape() -> None:

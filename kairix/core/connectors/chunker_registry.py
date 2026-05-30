@@ -6,7 +6,13 @@ Wave F lands the per-kind plugins (tree-sitter / per-ticket / thread-aware /
 slide / tabular / email-thread / event / transcript / web) under
 ``kairix/chunkers/<name>/``.
 
-Until Wave F lands, every dispatch returns the fallback chunker.
+Wave G.1 (ADR-028) lands the per-type plugins:
+:class:`~kairix.chunkers.slide.SlideChunker` (PPTX),
+:class:`~kairix.chunkers.sheet_row.SheetRowChunker` (XLSX/.xls/.xlsm),
+:class:`~kairix.chunkers.docx_heading.DocxHeadingChunker` (DOCX).
+:func:`build_default_chunker_registry` wires the registrations. When
+no plugin matches a ``(kind, mime)`` pair, dispatch falls through to
+the paragraph-shaped fallback.
 
 F55 contract: every :class:`Chunker` plugin declares ``version: str`` AND
 every emitted :class:`~kairix.core.protocols.Chunk` carries
@@ -19,7 +25,23 @@ import hashlib
 import re
 from collections.abc import Sequence
 
+from kairix.chunkers.docx_heading import DocxHeadingChunker
+from kairix.chunkers.sheet_row import SheetRowChunker
+from kairix.chunkers.slide import SlideChunker
 from kairix.core.protocols import Chunk, Chunker, Sensitivity
+
+# ADR-028 Wave G.1 — MIME constants hoisted to module level so the
+# >=10 char literals don't recur (F17 — no string literal >=10 chars
+# duplicated >=3 times).
+PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+LEGACY_XLS_MIME = "application/vnd.ms-excel"
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+# Connector-kind constants — also F17 (each is ≥10 chars and appears in
+# ≥3 `register(...)` call sites below).
+SHAREPOINT_KIND = "sharepoint"
+GOOGLE_DRIVE_KIND = "google_drive"
 
 # Paragraph-boundary character budget for the fallback. Same value the
 # existing F38-locked Silver path uses (kairix/core/connectors/silver.py),
@@ -188,16 +210,24 @@ _MIME_TEXT_CALENDAR = "text/calendar"
 def build_default_registry() -> ChunkerRegistry:
     """Construct a :class:`ChunkerRegistry` with the ADR-028 Wave G.1 plugins.
 
-    Pre-registers the per-``(kind, mime)`` chunkers per ADR-028
-    §"Registry dispatch". Operators get the per-type chunking behaviour
-    by constructing the registry through this factory; bespoke wiring
-    (tests, contract proofs) constructs the bare :class:`ChunkerRegistry`
-    and registers only what the test exercises.
+    Per ADR-028 Wave G.1, each ``(connector kind, mime)`` pair routes
+    to the per-type chunker that best fits the format's natural unit:
 
-    Wave G.1 batch 3 lands ThreadChunker + CalendarEventChunker; earlier
-    batches land MarkdownStructural / Code / EmailThread / Slide / Sheet /
-    Docx; the factory will grow as the plugins land. The fallback covers
-    every other ``(kind, mime)`` pair.
+      * PPTX → :class:`~kairix.chunkers.slide.SlideChunker` — one slide per chunk.
+      * XLSX / .xls → :class:`~kairix.chunkers.sheet_row.SheetRowChunker`
+        — one row per chunk (header prepended) for tabular sheets;
+        whole sheet as one chunk for small reference sheets (<50 rows).
+      * DOCX → :class:`~kairix.chunkers.docx_heading.DocxHeadingChunker`
+        — heading-hierarchy split with tables as separate chunks.
+      * Slack threads → :class:`~kairix.chunkers.thread.ThreadChunker` —
+        thread = primary chunk; sub-split on token cap.
+      * Calendar events → :class:`~kairix.chunkers.calendar_event.CalendarEventChunker`
+        — one event per chunk; RRULE in metadata.
+
+    Operators get the per-type chunking behaviour by constructing the
+    registry through this factory; bespoke wiring (tests, contract
+    proofs) constructs the bare :class:`ChunkerRegistry` and registers
+    only what the test exercises.
 
     Imports are deferred to the function body so importing the registry
     module doesn't pull in every chunker plugin's transitive imports —
@@ -210,9 +240,12 @@ def build_default_registry() -> ChunkerRegistry:
     registry = ChunkerRegistry()
     thread_chunker = ThreadChunker()
     calendar_chunker = CalendarEventChunker()
+    slide_chunker = SlideChunker()
+    sheet_row_chunker = SheetRowChunker()
+    docx_heading_chunker = DocxHeadingChunker()
+
     # Slack — both JSON envelopes (the canonical fetch shape) and
-    # text/plain (legacy or hand-shaped tests) route through
-    # ThreadChunker.
+    # text/plain (legacy or hand-shaped tests) route through ThreadChunker.
     registry.register(kind="slack", mime="application/json", chunker=thread_chunker)
     registry.register(kind="slack", mime="text/plain", chunker=thread_chunker)
     # Calendar — every calendar connector emits text/calendar shape
@@ -220,4 +253,20 @@ def build_default_registry() -> ChunkerRegistry:
     registry.register(kind="m365_calendar", mime=_MIME_TEXT_CALENDAR, chunker=calendar_chunker)
     registry.register(kind="google_calendar", mime=_MIME_TEXT_CALENDAR, chunker=calendar_chunker)
     registry.register(kind="apple_caldav", mime=_MIME_TEXT_CALENDAR, chunker=calendar_chunker)
+    # PPTX — one chunk per slide.
+    registry.register(kind=SHAREPOINT_KIND, mime=PPTX_MIME, chunker=slide_chunker)
+    registry.register(kind=GOOGLE_DRIVE_KIND, mime=PPTX_MIME, chunker=slide_chunker)
+    # XLSX — one row per chunk (or whole sheet for small reference sheets).
+    registry.register(kind=SHAREPOINT_KIND, mime=XLSX_MIME, chunker=sheet_row_chunker)
+    registry.register(kind=SHAREPOINT_KIND, mime=LEGACY_XLS_MIME, chunker=sheet_row_chunker)
+    registry.register(kind=GOOGLE_DRIVE_KIND, mime=XLSX_MIME, chunker=sheet_row_chunker)
+    # DOCX — heading-hierarchy split.
+    registry.register(kind=SHAREPOINT_KIND, mime=DOCX_MIME, chunker=docx_heading_chunker)
+    registry.register(kind=GOOGLE_DRIVE_KIND, mime=DOCX_MIME, chunker=docx_heading_chunker)
+
     return registry
+
+
+# Backwards-compatibility alias for callers from the W3B branch that
+# expected the longer name. Both names resolve to the same factory.
+build_default_chunker_registry = build_default_registry

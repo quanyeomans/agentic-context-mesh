@@ -93,6 +93,7 @@ kairix/connectors/github/connector.py
 kairix/core/features/cli.py
 kairix/quality/probe/burst.py
 kairix/quality/probe/config_cli.py
+<<<<<<< HEAD
 # kairix/connectors/gmail/* — boundary adapters for the Gmail API client.
 # Same shape as the m365_calendar/graph_client.py entry above — uncovered
 # branches are Gmail-SDK error envelopes (rate-limits, deleted-item
@@ -103,5 +104,16 @@ kairix/quality/probe/config_cli.py
 # integration suite once credentials are wired. Grandfathered with the
 # same ADR-024 §"Repositioning F7" rationale as the sibling boundary
 # adapters above.
+=======
+# kairix/connectors/gmail/* — Gmail connector landed in 8e92fc5b
+# flag-gated OFF; live-credential test coverage is gated on #356 KV
+# provisioning (the connector intentionally raises NotImplementedError
+# in fake-only test paths until the OAuth credential plumbing lands).
+# Uncovered branches are real-IMAP / Graph SDK error envelopes whose
+# contract is pinned by F64 (rate-limit BDD) + F68 (Protocol failure-
+# mode contracts) — the same shape as the SharePoint + m365 entries
+# above. Grandfathered to unblock parallel chunker work (ADR-028
+# Wave G.1) commits; revisit when the flag is flipped ON.
+>>>>>>> 02c75ac8 (feat(chunkers): ADR-028 Wave G.1 batch 2 — SlideChunker + SheetRowChunker + DocxHeadingChunker (paged-format-aware))
 kairix/connectors/gmail/client.py
 kairix/connectors/gmail/connector.py

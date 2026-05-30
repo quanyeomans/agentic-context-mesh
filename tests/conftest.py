@@ -315,6 +315,12 @@ pytest_plugins = [
     # provisioned (GH #356).
     "tests.bdd.steps.connector_google_calendar_steps",
     "tests.bdd.steps.feature_flag_topology_v2_google_calendar_steps",
+    # ADR-028 Wave G.1 — per-type chunkers (paged / structured formats).
+    # Three chunker plugins shipping in one batch: SlideChunker (PPTX),
+    # SheetRowChunker (XLSX / .xls / .xlsm), DocxHeadingChunker (DOCX).
+    "tests.bdd.steps.chunker_slide_steps",
+    "tests.bdd.steps.chunker_sheet_row_steps",
+    "tests.bdd.steps.chunker_docx_heading_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.
