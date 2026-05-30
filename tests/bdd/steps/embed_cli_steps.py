@@ -17,7 +17,7 @@ import pytest
 from pytest_bdd import parsers, then, when
 
 _SUBCOMMANDS = ("embed", "recall-check", "status")
-_EMBED_FLAGS = ("--force", "--limit", "--batch-size", "--skip-recall-check", "--skip-summarise")
+_EMBED_FLAGS = ("--force", "--limit", "--batch-size", "--parallel", "--skip-recall-check", "--skip-summarise")
 
 
 @dataclass
@@ -72,3 +72,16 @@ def _assert_help_lists_flags(embed_cli_ctx: _EmbedCliCtx) -> None:
     out = embed_cli_ctx.stdout + embed_cli_ctx.stderr
     for flag in _EMBED_FLAGS:
         assert flag in out, f"flag {flag!r} missing from `embed --help` output:\n{out}"
+
+
+@then("the embed help output mentions the worker-memory-and-swap runbook")
+def _assert_help_mentions_runbook(embed_cli_ctx: _EmbedCliCtx) -> None:
+    out = embed_cli_ctx.stdout + embed_cli_ctx.stderr
+    # argparse word-wraps help text and may break long URLs at hyphens,
+    # inserting whitespace. Remove all whitespace before substring-checking
+    # so the runbook name matches however argparse decides to wrap the line.
+    flat = "".join(out.split())
+    assert "worker-memory-and-swap" in flat, (
+        "expected `embed --help` to reference the sizing runbook so operators "
+        "can size --parallel against their VM:\n" + out
+    )

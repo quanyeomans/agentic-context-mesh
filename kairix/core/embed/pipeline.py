@@ -35,6 +35,7 @@ class EmbedPipeline:
         force: bool = False,
         batch_size: int = 250,
         limit: int | None = None,
+        parallel: int = 1,
     ) -> dict[str, Any]:
         """Embed pending chunks and return a summary dict.
 
@@ -42,6 +43,9 @@ class EmbedPipeline:
             force:      Re-embed all chunks, not just pending.
             batch_size: Chunks per API call.
             limit:      Cap total chunks (for validation/testing).
+            parallel:   Number of batches to embed concurrently (1..10).
+                        Default 1 = serial. See
+                        docs/operations/runbooks/worker-memory-and-swap.md.
 
         Returns:
             Dict with keys: embedded, skipped, failed, duration_s,
@@ -55,4 +59,5 @@ class EmbedPipeline:
             batch_size=batch_size,
             limit=limit,
             deps=self.deps,
+            parallel=parallel,
         )

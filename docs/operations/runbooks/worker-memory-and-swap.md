@@ -193,6 +193,31 @@ The MCP-server / search-side processes use `read_only=True` and do NOT need this
 
 ADR-023 is the architectural fallback if any of those scenarios fire. Until then, the swap-first operational approach has lower risk and lower lift.
 
+## `--parallel N` — concurrent batches during catch-up cycles
+
+`kairix embed embed --parallel N` runs up to `N` Azure embed batches concurrently using a `ThreadPoolExecutor`. The Azure call (the ~1-2s/batch network wait) parallelises across threads; SQLite writes and the usearch `add_vectors` call stay serialised under a single-writer lock, so SQLite thread-safety and the single-writer usearch contract are preserved.
+
+Throughput rises roughly linearly with `N` up to Azure's per-deployment quota, then plateaus. Memory also rises linearly because each in-flight batch's text payload and returned vector array are held in process memory until the writer drains them.
+
+| `--parallel` | Throughput vs serial | Extra memory at peak | When to use |
+|---|---|---|---|
+| `1` (default) | 1x | 0 | Normal incremental embed cycles |
+| `3` | ~3x | ~2x batch payload | Recommended for the default VM size (8 GB RAM, 1.27M-vector corpus) |
+| `5` | ~4-5x | ~4x batch payload | Mid-catch-up cycle on a worker sized per "Memory budget by corpus size" table above |
+| `10` (max) | ~6-8x (Azure-quota-bound) | ~9x batch payload | Large catch-up only; verify Azure quota headroom in the portal first |
+
+`--parallel` above 10 is rejected at the CLI boundary with a pointer back here.
+
+**When to raise `--parallel`:**
+- Catch-up cycle wall-clock is unacceptable (e.g. the operator pain from 2026-05-30: a 2.18M-chunk catch-up at serial rate takes ~6 hours; `--parallel 5` brings it to ~1-1.5 hours).
+- Worker `MEM USAGE` (`docker stats`) has at least 2-3 GB headroom under its `mem_limit`.
+- Azure deployment shows < 50% TPM (tokens-per-minute) utilisation in the portal during the current run.
+
+**When NOT to raise `--parallel`:**
+- During normal incremental cycles (the queue is small enough that serial finishes in seconds).
+- When Azure is returning 429s (back off to `--parallel 1` until the deployment quota is raised).
+- When the worker is already at `mem_limit` (raise the limit first per Step 2 above).
+
 ## Related
 
 - [#335](https://github.com/three-cubes/kairix/issues/335) — root-cause issue

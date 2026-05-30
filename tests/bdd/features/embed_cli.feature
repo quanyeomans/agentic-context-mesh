@@ -17,3 +17,8 @@ Feature: kairix embed CLI
   Scenario: An unknown subcommand fails with argparse usage error
     When the operator runs the embed CLI with `not-a-subcommand`
     Then the embed CLI exits with status 2
+
+  Scenario: --parallel help text points operators at the sizing runbook
+    When the operator runs the embed CLI with `embed --help`
+    Then the embed CLI exits with status 0
+    And the embed help output mentions the worker-memory-and-swap runbook

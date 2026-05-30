@@ -162,11 +162,24 @@ def _given_dim_mismatch_preflight(_embed_state: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _run_pipeline(state: dict[str, Any], *, force: bool = False, limit: int | None = None) -> None:
+def _run_pipeline(
+    state: dict[str, Any],
+    *,
+    force: bool = False,
+    limit: int | None = None,
+    parallel: int = 1,
+) -> None:
     from kairix.core.embed.embed import run_embed
 
     try:
-        state["result"] = run_embed(state["db"], force=force, limit=limit, batch_size=10, deps=_build_deps(state))
+        state["result"] = run_embed(
+            state["db"],
+            force=force,
+            limit=limit,
+            batch_size=10,
+            deps=_build_deps(state),
+            parallel=parallel,
+        )
     except Exception as e:
         state["exception"] = e
 
@@ -184,6 +197,11 @@ def _when_run_force(_embed_state: dict[str, Any]) -> None:
 @when(parsers.parse("the operator runs the embed pipeline with limit {n:d}"))
 def _when_run_with_limit(_embed_state: dict[str, Any], n: int) -> None:
     _run_pipeline(_embed_state, limit=n)
+
+
+@when(parsers.parse("the operator runs the embed pipeline with {n:d} concurrent batches"))
+def _when_run_parallel(_embed_state: dict[str, Any], n: int) -> None:
+    _run_pipeline(_embed_state, parallel=n)
 
 
 # ---------------------------------------------------------------------------

@@ -51,3 +51,9 @@ Feature: Embedding pipeline runs against the kairix corpus
     Given a preflight check returning unexpected vector dimensions
     When the operator runs the embed pipeline
     Then the embed pipeline raises SchemaVersionError
+
+  Scenario: Concurrent batches embed every chunk and preserve the count
+    Given a corpus with 6 documents and a healthy embed backend
+    When the operator runs the embed pipeline with 3 concurrent batches
+    Then the result reports embedded as 6
+    And content_vectors contains 6 staged rows

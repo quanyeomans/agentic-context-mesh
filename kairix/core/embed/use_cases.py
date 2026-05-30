@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from kairix.core.embed.deps import EmbedDependencies
-from kairix.core.embed.embed import DEFAULT_BATCH_SIZE
+from kairix.core.embed.embed import DEFAULT_BATCH_SIZE, DEFAULT_PARALLEL_BATCHES
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +264,7 @@ def run_incremental_embed_pipeline(
     rebuild_canaries: bool = False,
     deps: EmbedDependencies | None = None,
     pipeline_deps: PipelineDeps | None = None,
+    parallel: int = DEFAULT_PARALLEL_BATCHES,
 ) -> EmbedPipelineResult:
     """Run the full incremental embed pipeline and return a structured result.
 
@@ -328,6 +329,7 @@ def run_incremental_embed_pipeline(
                 batch_size=batch_size,
                 limit=limit,
                 deps=deps,
+                parallel=parallel,
             )
             embed_result["command"] = "embed"
             embed_result["db_path"] = str(db_path)

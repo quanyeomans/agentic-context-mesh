@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 import time
 from collections.abc import Callable, Generator
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any
 
 from .date_extract import extract_chunk_date
@@ -21,6 +23,14 @@ DEFAULT_DEPLOYMENT = "text-embedding-3-large"
 DEFAULT_DIMS = EMBED_VECTOR_DIMS
 DEFAULT_BATCH_SIZE = 250  # Balanced: large enough for throughput, small enough to avoid Azure 429s
 MAX_RETRIES = 6  # used by OpenAI SDK max_retries
+
+# Parallel-batches ceiling. Above this, Azure 429 / quota-burn risk dominates the
+# throughput gain and the worker can saturate downstream search-side reads off
+# the same SQLite. Operators wanting more should re-shape the corpus or split
+# the catch-up across multiple worker hosts.
+# See docs/operations/runbooks/worker-memory-and-swap.md for sizing guidance.
+MAX_PARALLEL_BATCHES = 10
+DEFAULT_PARALLEL_BATCHES = 1  # default-safe: today's serial behaviour
 
 # F17 — chunk_date appears as a dict key in both producer and consumer paths;
 # extract so renames hit a single edit site.
@@ -410,6 +420,62 @@ def _gather_pending_chunks(
     return all_chunks, len(rows)
 
 
+def _embed_batch_only(
+    batch: list[dict[str, Any]],
+    batch_idx: int,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    dims: int,
+    embed_batch_fn: Callable[..., list[list[float]]],
+) -> tuple[list[dict[str, Any]], list[list[float]], list[dict[str, Any]], bool]:
+    """Embed a single batch via the Azure call only — no DB / index writes.
+
+    Returns ``(matched_chunks, vectors, unaccounted_chunks, azure_failed)``.
+
+    Split from the persistence step so multiple Azure calls can run in
+    parallel threads while the SQLite + usearch writes stay serialised
+    on a single writer thread. SQLite write serialisation is the cheap
+    half of the cycle (~50ms/batch); Azure is the expensive half (~1-2s/
+    batch). Parallelising only the Azure half captures ~95% of the
+    available speedup without touching SQLite thread-safety.
+
+    ``azure_failed=True`` means the Azure call raised — caller marks all
+    chunks in the batch as failed. ``unaccounted`` are chunks the
+    backend returned no vector for (partial 5xx / rate-limit) — caller
+    surfaces these as failed without overwriting matched chunks.
+    """
+    texts = [c["text"] for c in batch]
+
+    try:
+        vectors = embed_batch_fn(texts, api_key, endpoint, deployment, dims)
+    except (RuntimeError, KeyError, ValueError, OSError):
+        logger.exception(
+            "Batch %d failed — logging %d chunks as failed",
+            batch_idx,
+            len(batch),
+        )
+        return [], [], [], True
+
+    # Defend against a partial response — the backend may return fewer vectors
+    # than texts (rate-limit, partial 5xx, mocked dev backends). Without this
+    # guard, ``zip(strict=False)`` would silently truncate and we'd report all
+    # chunks as embedded while staging only the matched ones — a silent
+    # over-count surfaced by the partial-response contract test.
+    matched = batch[: len(vectors)]
+    unaccounted = list(batch[len(vectors) :])
+    if unaccounted:
+        logger.error(
+            "Batch %d: backend returned %d vectors for %d texts — %d chunks unaccounted",
+            batch_idx,
+            len(vectors),
+            len(batch),
+            len(unaccounted),
+        )
+
+    return matched, vectors, unaccounted, False
+
+
 def _embed_and_store_batch(
     batch: list[dict[str, Any]],
     batch_idx: int,
@@ -432,34 +498,15 @@ def _embed_and_store_batch(
     constructs the right callable at the boundary (the ``run_embed``
     function below threads ``deps.embed_batch`` through). Removing the
     legacy ``= None`` default closes the F6 test-seam violation.
+
+    Kept for the ``--parallel 1`` (serial) path and for tests that
+    exercise the per-batch boundary directly.
     """
-    texts = [c["text"] for c in batch]
-
-    try:
-        vectors = embed_batch_fn(texts, api_key, endpoint, deployment, dims)
-    except (RuntimeError, KeyError, ValueError, OSError):
-        logger.exception(
-            "Batch %d failed — logging %d chunks as failed",
-            batch_idx,
-            len(batch),
-        )
+    matched, vectors, unaccounted, azure_failed = _embed_batch_only(
+        batch, batch_idx, api_key, endpoint, deployment, dims, embed_batch_fn
+    )
+    if azure_failed:
         return 0, list(batch)
-
-    # Defend against a partial response — the backend may return fewer vectors
-    # than texts (rate-limit, partial 5xx, mocked dev backends). Without this
-    # guard, ``zip(strict=False)`` would silently truncate and we'd report all
-    # chunks as embedded while staging only the matched ones — a silent
-    # over-count surfaced by the partial-response contract test.
-    matched = batch[: len(vectors)]
-    unaccounted = list(batch[len(vectors) :])
-    if unaccounted:
-        logger.error(
-            "Batch %d: backend returned %d vectors for %d texts — %d chunks unaccounted",
-            batch_idx,
-            len(vectors),
-            len(batch),
-            len(unaccounted),
-        )
 
     try:
         _stage_batch_embeddings(db, matched, vectors, deployment, now)
@@ -534,6 +581,145 @@ def _save_index_checkpoint(vec_index: Any) -> None:
         logger.exception("usearch final save failed: %s", e)
 
 
+# ── Parallel orchestration ───────────────────────────────────────────────────
+
+
+def _validate_parallel(parallel: int) -> None:
+    """Reject out-of-range ``--parallel`` values with an F21-shaped affordance.
+
+    Default is 1 (serial — today's behaviour, no-op for operators who
+    don't opt in). Range 1..MAX_PARALLEL_BATCHES. Above that the Azure
+    quota-burn / 429-rate risk dominates the throughput gain — see the
+    runbook.
+    """
+    if parallel < 1 or parallel > MAX_PARALLEL_BATCHES:
+        raise ValueError(
+            f"--parallel {parallel} out of range [1..{MAX_PARALLEL_BATCHES}]. "
+            "fix: pass --parallel between 1 (serial, default) and "
+            f"{MAX_PARALLEL_BATCHES} — higher values risk Azure rate-limit (429) "
+            "burn and saturate downstream search-side reads on the same SQLite. "
+            "next: pick --parallel 3 for the default VM size, --parallel 5 for "
+            "a catch-up cycle on a worker sized per the runbook. "
+            "run: see docs/operations/runbooks/worker-memory-and-swap.md "
+            "for sizing guidance per corpus + per VM."
+        )
+
+
+def _persist_batch_result(
+    matched: list[dict[str, Any]],
+    vectors: list[list[float]],
+    batch_idx: int,
+    db: sqlite3.Connection,
+    vec_index: Any,
+    deployment: str,
+    now: int,
+    save_interval: int,
+    db_lock: threading.Lock,
+) -> bool:
+    """Persist one Azure-completed batch under the single-writer lock.
+
+    Returns True on success, False if the SQLite write raised (caller
+    surfaces the batch's chunks as failed).
+
+    The lock guards both SQLite (no shared cursor across threads) and
+    the usearch ``add_vectors`` call (single-threaded today). Running
+    this body under the lock keeps the writer fast — only the Azure
+    call runs outside it, which is exactly where parallelism pays.
+    """
+    with db_lock:
+        try:
+            _stage_batch_embeddings(db, matched, vectors, deployment, now)
+        except sqlite3.Error:
+            logger.exception("DB write for batch %d failed", batch_idx)
+            return False
+        _add_batch_to_vec_index(vec_index, matched, vectors, batch_idx, save_interval)
+        return True
+
+
+def _run_embed_loop_parallel(
+    all_chunks: list[dict[str, Any]],
+    batch_size: int,
+    parallel: int,
+    db: sqlite3.Connection,
+    vec_index: Any,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    actual_dims: int,
+    now: int,
+    save_interval: int,
+    total: int,
+    embed_batch_fn: Callable[..., list[list[float]]],
+) -> tuple[int, list[dict[str, Any]]]:
+    """Run the embed loop with up to ``parallel`` concurrent Azure calls.
+
+    The Azure call runs on a ``ThreadPoolExecutor`` (releases the GIL
+    during the network wait). The SQLite + usearch writes run under a
+    single ``db_lock`` so each batch's persistence is serialised even
+    when many embed futures complete in parallel. This keeps the
+    SQLite connection single-threaded (no ``check_same_thread`` games)
+    and the usearch index single-writer (matches today's contract).
+
+    F66-exempt: parallel batches are bounded by --parallel (1..10), not
+    by per_tick_max_items — the bound is explicit at the CLI surface.
+
+    Returns ``(embedded_count, failed_chunks)``.
+    """
+    embedded = 0
+    failed_chunks: list[dict[str, Any]] = []
+    db_lock = threading.Lock()
+
+    batches = list(enumerate(batched(all_chunks, batch_size)))
+
+    with ThreadPoolExecutor(max_workers=parallel, thread_name_prefix="embed-batch") as pool:
+        future_to_batch: dict[Future[Any], tuple[int, list[dict[str, Any]]]] = {
+            pool.submit(
+                _embed_batch_only,
+                batch,
+                batch_idx,
+                api_key,
+                endpoint,
+                deployment,
+                actual_dims,
+                embed_batch_fn,
+            ): (batch_idx, batch)
+            for batch_idx, batch in batches
+        }
+
+        for fut in as_completed(future_to_batch):
+            batch_idx, batch = future_to_batch[fut]
+            matched, vectors, unaccounted, azure_failed = fut.result()
+            if azure_failed:
+                failed_chunks.extend(batch)
+                continue
+            persisted = _persist_batch_result(
+                matched,
+                vectors,
+                batch_idx,
+                db,
+                vec_index,
+                deployment,
+                now,
+                save_interval,
+                db_lock,
+            )
+            if not persisted:
+                failed_chunks.extend(batch)
+                continue
+            failed_chunks.extend(unaccounted)
+            embedded += len(matched)
+            if matched:
+                logger.info(
+                    "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
+                    embedded,
+                    total,
+                    100.0 * embedded / total if total > 0 else 0,
+                    batch_idx + 1,
+                )
+
+    return embedded, failed_chunks
+
+
 # ── Main embed runner ─────────────────────────────────────────────────────────
 
 
@@ -552,12 +738,62 @@ def _maybe_clear_vec_index_for_force(force: bool, vec_index: Any) -> None:
         vec_index.clear()
 
 
+def _run_embed_loop_serial(
+    all_chunks: list[dict[str, Any]],
+    batch_size: int,
+    db: sqlite3.Connection,
+    vec_index: Any,
+    api_key: str,
+    endpoint: str,
+    deployment: str,
+    actual_dims: int,
+    now: int,
+    save_interval: int,
+    total: int,
+    embed_batch_fn: Callable[..., list[list[float]]],
+) -> tuple[int, list[dict[str, Any]]]:
+    """Run the embed loop serially — today's default, ``--parallel 1``.
+
+    Lifted out of ``run_embed`` for symmetry with
+    ``_run_embed_loop_parallel`` and to keep ``run_embed`` under the F16
+    cognitive-complexity ceiling once the parallel branch is added.
+    """
+    embedded = 0
+    failed_chunks: list[dict[str, Any]] = []
+    for batch_idx, batch in enumerate(batched(all_chunks, batch_size)):
+        batch_ok, batch_failed = _embed_and_store_batch(
+            batch,
+            batch_idx,
+            db,
+            vec_index,
+            api_key,
+            endpoint,
+            deployment,
+            actual_dims,
+            now,
+            save_interval,
+            embed_batch_fn=embed_batch_fn,
+        )
+        embedded += batch_ok
+        failed_chunks.extend(batch_failed)
+        if batch_ok:
+            logger.info(
+                "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
+                embedded,
+                total,
+                100.0 * embedded / total if total > 0 else 0,
+                batch_idx + 1,
+            )
+    return embedded, failed_chunks
+
+
 def run_embed(
     db: sqlite3.Connection,
     force: bool = False,
     batch_size: int = DEFAULT_BATCH_SIZE,
     limit: int | None = None,
     deps: EmbedDependencies | None = None,
+    parallel: int = DEFAULT_PARALLEL_BATCHES,
 ) -> dict[str, Any]:
     """
     Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
@@ -568,9 +804,17 @@ def run_embed(
         batch_size: Chunks per Azure API call (Azure supports up to 2048; default 500)
         limit:      Cap total chunks (for validation/testing)
         deps:       Injectable dependencies. Defaults to production implementations.
+        parallel:   Number of batches to embed concurrently (1..10). Default 1
+                    is today's serial behaviour. Higher values run the Azure
+                    call on a ThreadPoolExecutor while the SQLite + usearch
+                    writes stay serialised under a single-writer lock. See
+                    docs/operations/runbooks/worker-memory-and-swap.md for
+                    sizing guidance.
 
     Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
     """
+    _validate_parallel(parallel)
+
     if deps is None:  # pragma: no cover  # prod lazy default; tests pass deps=
         deps = EmbedDependencies()
 
@@ -604,14 +848,13 @@ def run_embed(
         }
 
     logger.info(
-        "Embedding %d chunks across %d documents (batch_size=%d)",
+        "Embedding %d chunks across %d documents (batch_size=%d, parallel=%d)",
         total,
         doc_count,
         batch_size,
+        parallel,
     )
 
-    embedded = 0
-    failed_chunks: list[dict[str, Any]] = []
     start_time = time.time()
     now = int(start_time)
 
@@ -619,10 +862,10 @@ def run_embed(
     _maybe_clear_vec_index_for_force(force, vec_index)
     save_interval = 10
 
-    for batch_idx, batch in enumerate(batched(all_chunks, batch_size)):
-        batch_ok, batch_failed = _embed_and_store_batch(
-            batch,
-            batch_idx,
+    if parallel == 1:
+        embedded, failed_chunks = _run_embed_loop_serial(
+            all_chunks,
+            batch_size,
             db,
             vec_index,
             api_key,
@@ -631,18 +874,25 @@ def run_embed(
             actual_dims,
             now,
             save_interval,
-            embed_batch_fn=deps.embed_batch,
+            total,
+            deps.embed_batch,
         )
-        embedded += batch_ok
-        failed_chunks.extend(batch_failed)
-        if batch_ok:
-            logger.info(
-                "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
-                embedded,
-                total,
-                100.0 * embedded / total if total > 0 else 0,
-                batch_idx + 1,
-            )
+    else:
+        embedded, failed_chunks = _run_embed_loop_parallel(
+            all_chunks,
+            batch_size,
+            parallel,
+            db,
+            vec_index,
+            api_key,
+            endpoint,
+            deployment,
+            actual_dims,
+            now,
+            save_interval,
+            total,
+            deps.embed_batch,
+        )
 
     _save_index_checkpoint(vec_index)
 

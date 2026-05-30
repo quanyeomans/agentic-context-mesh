@@ -20,7 +20,7 @@ from typing import IO, Any
 
 from kairix.core.db import get_db_path, open_db
 
-from .embed import DEFAULT_BATCH_SIZE
+from .embed import DEFAULT_BATCH_SIZE, DEFAULT_PARALLEL_BATCHES, MAX_PARALLEL_BATCHES
 from .recall_check import run_recall_gate
 
 # F17 — argparse action keyword repeated across boolean-flag declarations; one
@@ -145,7 +145,14 @@ def cmd_embed(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> 
             limit=args.limit,
             skip_recall_check=args.skip_recall_check,
             rebuild_canaries=getattr(args, "rebuild_canaries", False),
+            parallel=getattr(args, "parallel", DEFAULT_PARALLEL_BATCHES),
         )
+    except ValueError as exc:
+        # --parallel out of range surfaces here as an F21-shaped affordance
+        # from run_embed. Print to stderr so operators see the rationale +
+        # runbook pointer without scrolling through the exception traceback.
+        logging.error("%s", exc)
+        return 2
     except Exception:
         logging.exception("Embed failed")
         return 2
@@ -342,6 +349,17 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
         default=DEFAULT_BATCH_SIZE,
         help="Chunks per Azure API call",
     )
+    embed_p.add_argument(
+        "--parallel",
+        type=int,
+        default=DEFAULT_PARALLEL_BATCHES,
+        help=(
+            f"Run up to N batches concurrently (1..{MAX_PARALLEL_BATCHES}, default 1 = serial). "
+            "Speeds up catch-up cycles 3-5x at the same Azure API cost. "
+            "Recommended N=3 for the default VM size; see "
+            "docs/operations/runbooks/worker-memory-and-swap.md for sizing per corpus."
+        ),
+    )
     embed_p.add_argument("--skip-recall-check", action=_STORE_TRUE, help="Skip post-embed quality gate")
     embed_p.add_argument(
         "--rebuild-canaries",
@@ -388,6 +406,7 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
             args.force = False
             args.limit = None
             args.batch_size = DEFAULT_BATCH_SIZE
+            args.parallel = DEFAULT_PARALLEL_BATCHES
             args.skip_recall_check = False
             args.rebuild_canaries = False
             args.skip_summarise = False

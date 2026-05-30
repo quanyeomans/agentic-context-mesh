@@ -48,3 +48,9 @@ def test_limit_caps_chunks() -> None:
 @scenario(FEATURE, "A dimension mismatch from preflight aborts the run with SchemaVersionError")
 def test_dim_mismatch_raises() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario(FEATURE, "Concurrent batches embed every chunk and preserve the count")
+def test_concurrent_batches_embed_every_chunk() -> None:
+    """Body populated by @scenario from the .feature file."""

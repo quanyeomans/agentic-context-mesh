@@ -22,3 +22,9 @@ def test_embed_subcommand_help() -> None:
 @scenario("features/embed_cli.feature", "An unknown subcommand fails with argparse usage error")
 def test_embed_unknown_subcommand() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario("features/embed_cli.feature", "--parallel help text points operators at the sizing runbook")
+def test_embed_parallel_runbook_pointer() -> None:
+    """Body populated by @scenario from the .feature file."""
