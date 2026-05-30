@@ -63,6 +63,18 @@ class _WritableFakeNeo4jClient(FakeNeo4jClient):
         if "SET" in query and "wikidata_qid" in query:
             self.set_calls.append((query, params))
             return []
+        # GH #343 §10.7 — the canonical-slug query in seed.py
+        # (`MATCH (n) WHERE n.wikidata_qid IS NOT NULL OR
+        # n.kairix_provenance_batch IS NOT NULL RETURN n.id AS id`) must
+        # honour the predicate against the seeded fixture; the parent
+        # FakeNeo4jClient.cypher returns every entity regardless of
+        # query shape, which would skip all seeded test entities.
+        if "wikidata_qid IS NOT NULL" in query and "kairix_provenance_batch" in query:
+            return [
+                {"id": e["id"]}
+                for e in self._entities
+                if e.get("wikidata_qid") is not None or e.get("kairix_provenance_batch") is not None
+            ]
         return super().cypher(query, params)
 
 
