@@ -22,6 +22,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | Setting up MCP server for the first time | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) |
 | Migrating an existing MCP client off SSE | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) |
 | Worker container restart-loops with `vec_index: converting immutable index to mutable (...)`; vector index drifting behind `content_vectors` | [worker-memory-and-swap](worker-memory-and-swap.md) — raise mem ceiling + allow host swap; #335 |
+| `app-kairix-1` container fails to start with `failed to bind host port 127.0.0.1:8080/tcp: address already in use` (reverse proxy already owns 8080) | Set `KAIRIX_HOST_PORT=8090` (or any unused port) in `.env` and `docker compose up -d --force-recreate kairix`; see [OPERATIONS §"Deploying behind a reverse proxy"](../OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared); #331 |
 
 ---
 

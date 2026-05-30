@@ -73,6 +73,8 @@ This starts three services:
 - **kairix-worker** — indexes your documents automatically every hour
 - **neo4j** — knowledge graph for people/company queries
 
+> **Port 8080 already in use?** If you're already running caddy, nginx, or another reverse proxy on host 8080, set `KAIRIX_HOST_PORT=8090` (or any unused port) in your `.env` before `docker compose up -d`. See [OPERATIONS §"Deploying behind a reverse proxy"](../operations/OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared).
+
 ### A5. Index your documents
 
 ```bash

@@ -297,6 +297,19 @@ docker compose up -d
 
 See `docker/docker-compose.yml` for the full service definition. `kairix onboard check` runs inside the container on startup.
 
+#### Deploying behind a reverse proxy (caddy / nginx / Cloudflared)
+
+If host port 8080 is already used by your reverse proxy fronting kairix, set `KAIRIX_HOST_PORT` in `.env` to an unused port:
+
+```bash
+# .env
+KAIRIX_HOST_PORT=8090
+```
+
+The base compose file binds `127.0.0.1:${KAIRIX_HOST_PORT:-8080}:8080` so the env var fully controls the host port — no `docker-compose.override.yml` array-merge gymnastics required ([#331](https://github.com/three-cubes/kairix/issues/331) — the merge-not-replace behaviour caused silent port collisions on reverse-proxy deployments). Point your reverse proxy at `127.0.0.1:8090` and you're done.
+
+If kairix container fails to start with `failed to bind host port 127.0.0.1:8080/tcp: address already in use`, that's the symptom — check `KAIRIX_HOST_PORT` per the runbook entry below.
+
 ### systemd unit (recommended for reboot-survivable VM deployments)
 
 If you run kairix as a systemd-managed Docker stack on a long-running VM, copy the example units from `scripts/install/` and tailor them. They pin the correct dependency ordering (kairix.service → kairix-fetch-secrets.service → docker.service) so the deployment self-heals after a reboot rather than crash-looping when `/run/secrets/kairix.env` is empty (resolved in v2026.5.10, see #167).
