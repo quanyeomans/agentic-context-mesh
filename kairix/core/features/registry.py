@@ -495,6 +495,52 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/ADR-025-pipeline-observability-and-status-surface.md",
     ),
+    "connector_gmail": FeatureFlag(
+        name="connector_gmail",
+        default=False,
+        description=(
+            "Enable the Gmail connector — pulls full message body + envelope "
+            "(Subject / From / To / Cc / Bcc / Date / Thread / Labels) via the "
+            "Gmail REST API (users.history.list + users.messages.get). One Gmail "
+            "message becomes one document; attachments surface as metadata only. "
+            "OAuth2 with gmail.readonly scope. Default-off until the Workspace "
+            "OAuth credentials are provisioned (tracked under GH #356)."
+        ),
+        stage="introduce",
+        # Gmail cutover plan (per docs/architecture/feature-flag-architecture.md §7):
+        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage soak →
+        # retire. 6-month target_retire_in matches the per-connector default in
+        # the feature-flag spec; F51 will fire if retirement slips past
+        # v2026.11.30 without explicit extension.
+        introduced_in="v2026.5.30",
+        target_retire_in="v2026.11.30",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_CONNECTOR_INGESTION_SPEC,
+    ),
+    "topology_v2_gmail": FeatureFlag(
+        name="topology_v2_gmail",
+        default=False,
+        description=(
+            _WAVE_E_DESC_PREFIX
+            + "per-connector pilot for the gmail connector. When ON, the "
+            + "GmailConnector emits one Container per authorised mailbox (carrying "
+            + "its own Gmail historyId as cursor_token) and "
+            + "list_changes_for_container drains the History API against that "
+            + "mailbox only. When OFF, the connector retains the Wave B shim shape "
+            + "— "
+            + _WAVE_E_OFF_DELEGATES
+            + "list_changes call. load_hierarchy emits a single root FOLDER node "
+            + "on both branches (per-label hierarchy is a Wave-E+1 enhancement). "
+            + "Default-off until per-mailbox isolation soaks against the dogfood "
+            + "Workspace tenant; mirrors the topology_v2_m365_email_headers pilot's "
+            + "shape and shares the same per-mailbox cursor pattern."
+        ),
+        stage="introduce",
+        introduced_in="v2026.5.30",
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
 }
 
 

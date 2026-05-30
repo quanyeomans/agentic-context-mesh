@@ -263,6 +263,14 @@ pytest_plugins = [
     # delta cursor; load_hierarchy emits one root FOLDER plus one
     # FOLDER per mailbox parent-before-child per F58.
     "tests.bdd.steps.feature_flag_topology_v2_m365_email_headers_steps",
+    # Wave 5 Gmail — Google Workspace mailbox connector. Single-mailbox
+    # per cc_pair (Onyx pattern); full-message body + envelope; History
+    # API for change detection. Two flags: ``connector_gmail`` (introduce
+    # stage, gates the connector slot) + ``topology_v2_gmail`` (Wave E
+    # per-mailbox Container emission pilot). F45 / F54 coverage.
+    "tests.bdd.steps.connector_gmail_steps",
+    "tests.bdd.steps.feature_flag_connector_gmail_steps",
+    "tests.bdd.steps.feature_flag_topology_v2_gmail_steps",
     # Topology v2 Wave E — per-connector multi-container pilot for the
     # dex_crm connector behind the ``topology_v2_dex_crm`` flag.
     # F45 / F54 coverage. Dex's API is single-tenant single-cursor so

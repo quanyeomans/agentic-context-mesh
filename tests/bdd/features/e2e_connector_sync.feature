@@ -39,3 +39,4 @@ Feature: End-to-end connector sync journey
       | notion              | markitdown   |
       | github              | passthrough  |
       | slack               | passthrough  |
+      | gmail               | passthrough  |

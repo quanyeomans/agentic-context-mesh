@@ -3195,6 +3195,145 @@ class FakeSlackConnector:
         return SourceMetadata()
 
 
+class FakeGmailConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the Gmail plugin.
+
+    Constructor takes the message envelopes the fake should emit; the
+    fake satisfies the SourceConnector + PollConnector + CheckpointedConnector
+    surface without touching the Gmail REST API. Canonical fake F43
+    pairs with the real :class:`kairix.connectors.gmail.GmailConnector`
+    inside ``tests/contracts/test_gmail_protocol.py``.
+
+    Default sensitivity tier is ``client-confidential`` per the Gmail
+    spec brief (email is more sensitive than docs by default); the
+    constructor accepts a ``sensitivity`` override so contract
+    assertions can pin both the default and an override tier.
+
+    Each message dict accepts these keys:
+      ``id`` — message id (defaults to ``"fake-msg"``)
+      ``thread_id`` — thread id (defaults to ``"fake-thread"``)
+      ``from`` — From header value
+      ``to`` — To header value (single addr or comma-separated)
+      ``subject`` — Subject header value
+      ``date`` — Date header value (ISO-8601 UTC)
+      ``body`` — bytes / str body content (defaults to ``b"fake body"``)
+    """
+
+    name: str = "gmail"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = 5_000_000_000
+
+    def __init__(
+        self,
+        *,
+        user_email: str = "agent-alpha@example.com",
+        messages: list[dict[str, Any]] | None = None,
+        sensitivity: str = "client-confidential",
+    ) -> None:
+        self._user = user_email
+        self._messages: list[dict[str, Any]] = list(messages) if messages is not None else []
+        self._sensitivity = sensitivity
+        self._by_id: dict[str, dict[str, Any]] = {
+            str(m.get("id", f"fake-msg-{i}")): m for i, m in enumerate(self._messages)
+        }
+        self._next_cursor_token: str | None = "fake-history-tip"
+
+    def list_changes(self, cursor: Any | None = None) -> Any:
+        from kairix.core.protocols import ChangeEvent
+
+        _ = cursor
+        events: list[ChangeEvent] = []
+        for entry_id, entry in self._by_id.items():
+            events.append(
+                ChangeEvent(
+                    op="created",
+                    item_id=entry_id,
+                    modified_at=str(entry.get("date", "2026-05-28T10:00:00Z")),
+                    metadata={"sensitivity": self._sensitivity},
+                )
+            )
+        return iter(events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        entry = self._by_id.get(item_id, {})
+        body = entry.get("body", b"fake body")
+        if not isinstance(body, bytes):
+            body = str(body).encode("utf-8")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=body, mime="text/plain", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        from urllib.parse import quote
+
+        return f"https://mail.google.com/mail/u/0/#inbox/{quote(item_id, safe='')}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Fake Gmail connector cursor — returns the configurable test token or None."""
+        return self._next_cursor_token
+
+    def metadata_for(self, item_id: str) -> Any:
+        from kairix.core.protocols import SourceMetadata
+
+        entry = self._by_id.get(item_id, {})
+        if not entry:
+            return SourceMetadata()
+        from_addr = entry.get("from")
+        to_value = entry.get("to", "")
+        to_addrs = tuple(addr.strip() for addr in str(to_value).split(",") if addr.strip())
+        properties: dict[str, str] = {}
+        if entry.get("subject"):
+            properties["subject"] = str(entry["subject"])
+        thread_id = entry.get("thread_id")
+        if thread_id:
+            properties["thread_id"] = str(thread_id)
+        return SourceMetadata(
+            modified_at=str(entry.get("date")) if entry.get("date") else None,
+            created_at=str(entry.get("date")) if entry.get("date") else None,
+            author=str(from_addr) if from_addr else None,
+            author_email=str(from_addr) if from_addr and "@" in str(from_addr) else None,
+            tags=to_addrs,
+            properties=properties,
+        )
+
+    def load_from_checkpoint(self, _container: Any, _checkpoint: Any) -> Any:
+        return self.list_changes(None)
+
+    def iter_containers(self, cc_pair_id: int) -> Any:
+        from kairix.core.protocols import Container
+
+        yield Container(
+            cc_pair_id=cc_pair_id,
+            container_id=self._user,
+            access_state="ACCESSIBLE",
+            cursor_token=None,
+            last_synced_at=None,
+        )
+
+    def list_changes_for_container(self, _container: Any) -> Any:
+        return self.list_changes(None)
+
+    def load_hierarchy(self, cc_pair_id: int) -> Any:
+        from kairix.core.protocols import HierarchyNode
+
+        yield HierarchyNode(
+            cc_pair_id=cc_pair_id,
+            raw_node_id="gmail",
+            raw_parent_id=None,
+            display_name=f"Gmail ({self._user})",
+            link="https://mail.google.com/mail/u/0/",
+            node_type="FOLDER",
+            external_access_json=None,
+            sensitivity_hint=None,
+        )
+
+
 class FakeExtractor:
     """Capture-only :class:`kairix.core.protocols.Extractor`.
 
