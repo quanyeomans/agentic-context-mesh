@@ -705,6 +705,60 @@ def tool_worker_status() -> dict[str, Any]:
         return {"available": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def _default_dead_letter_db_path() -> Path:
+    """Production callable that returns the configured kairix SQLite path."""
+    from kairix.paths import db_path
+
+    return db_path()
+
+
+def tool_dead_letter_status(
+    source_name: str | None = None,
+    *,
+    read_db_path: Callable[[], Path] = _default_dead_letter_db_path,
+) -> dict[str, Any]:
+    """Per-source dead-letter triage envelope.
+
+    Mirrors ``kairix dead-letter status --json``. Agents call this to
+    decide whether the operator should run a re-extract or whether the
+    failure class needs an upstream code fix. Returns the same shape
+    documented in the dispatch brief: ``{total, per_source: [...]}``.
+
+    On any exception, surfaces a typed error string and an empty
+    ``per_source`` list so the agent can decide whether to fall back
+    or escalate.
+
+    ``read_db_path`` is the unit-test DI seam: leaving it at the
+    default routes through :func:`kairix.paths.db_path`; tests pass a
+    callable returning a tmp_path so the read hits a sandbox.
+    """
+    import sqlite3 as _sqlite3
+    from contextlib import closing as _closing
+
+    from kairix.core.observability.dead_letter_status import (
+        build_status as _build_status,
+    )
+    from kairix.core.observability.dead_letter_status import (
+        render_json as _render_json,
+    )
+
+    try:
+        resolved = read_db_path()
+        conn = _sqlite3.connect(str(resolved))
+        with _closing(conn):
+            report = _build_status(conn, source_name=source_name)
+        envelope = _render_json(report)
+        envelope["error"] = ""
+        return envelope
+    except Exception as exc:
+        logger.warning("tool_dead_letter_status failed: %s", exc, exc_info=True)
+        return {
+            "total": 0,
+            "per_source": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
 # ---------------------------------------------------------------------------
 # Operator-only capability stubs — agents that call these get a structured
 # escalation envelope naming the exact CLI command to ask their admin to run.
@@ -1049,6 +1103,12 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix features status",
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
+            _cap(
+                name="dead_letter_status",
+                mcp_tool="dead_letter_status",
+                cli="kairix dead-letter status",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
             _cap(name="warm", mcp_tool="warm", cli="kairix warm", category=CAP_CATEGORY_DIAGNOSTIC),
             # Probe search — capped MCP variant
             _cap(
@@ -1374,6 +1434,19 @@ def _register_synthesis_and_diagnostic_tools(
     def features_status() -> dict[str, Any]:
         """Feature-flag status envelope. Read-only. Identical to `kairix features status --json`."""
         return tool_features_status()
+
+    @server.tool(
+        description=(
+            "Operator-facing dead-letter triage view. Returns per-source counts, "
+            "failure-class buckets (best-effort regex on last_error), "
+            "MIME breakdown (LEFT JOIN on bronze_records), and the oldest five failures. "
+            "Read-only. Identical envelope to `kairix dead-letter status --json`."
+        )
+    )
+    @async_tool_handler
+    def dead_letter_status(source_name: str | None = None) -> dict[str, Any]:
+        """Dead-letter status envelope. Read-only. Identical to `kairix dead-letter status --json`."""
+        return tool_dead_letter_status(source_name=source_name)
 
     @server.tool(
         description=(

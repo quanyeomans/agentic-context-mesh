@@ -125,6 +125,7 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "onboard_check",
         "worker_status",
         "features_status",
+        "dead_letter_status",
         "warm",
         # Agent-safe capped surface (escalates above queries<=20 / concurrency<=3)
         "probe_search",
@@ -185,6 +186,7 @@ def test_build_server_each_wrapper_dispatches_to_tool_function_under_unit() -> N
         ("onboard_check", {}),
         ("worker_status", {}),
         ("features_status", {}),
+        ("dead_letter_status", {}),
         ("warm", {}),
         # Capped agent-safe probe — over-cap so the closure returns the escalation
         # envelope without spinning up a real probe in unit context.

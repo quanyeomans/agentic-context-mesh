@@ -168,6 +168,10 @@ pytest_plugins = [
     # See docs/architecture/feature-flag-architecture.md.
     "tests.bdd.steps.cli_features_steps",
     "tests.bdd.steps.mcp_features_status_steps",
+    # Dead-letter triage surface (kairix dead-letter status CLI +
+    # tool_dead_letter_status MCP). See GH #337 / #351.
+    "tests.bdd.steps.cli_dead_letter_steps",
+    "tests.bdd.steps.mcp_dead_letter_status_steps",
     # PR-6 — IM-6 recast: ``obsidian_connector_primary`` flag at introduce
     # stage. Both-branch coverage per F54.
     "tests.bdd.steps.feature_flag_obsidian_connector_primary_steps",

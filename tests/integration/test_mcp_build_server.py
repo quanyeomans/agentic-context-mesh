@@ -41,6 +41,7 @@ _EXPECTED_TOOLS = {
     "onboard_check",
     "worker_status",
     "features_status",
+    "dead_letter_status",
     "warm",
     # Agent-safe capped surface (escalates above queries<=20 / concurrency<=3)
     "probe_search",
