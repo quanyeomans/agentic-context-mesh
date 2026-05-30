@@ -99,8 +99,11 @@ jobs:
         # The agents extras (mcp>=1.20) are required for
         # tests/integration/test_mcp_build_server.py — those probes exercise
         # the production build_server() wiring and need the real FastMCP
-        # package, not a stub.
-        run: pip install -e ".[dev,agents]" pytest-timeout
+        # package, not a stub. xlsx + docx are required because the matching
+        # BDD step files (extractor_xlsx_steps.py / extractor_docx_steps.py)
+        # import openpyxl / python-docx at module-top level, so pytest can't
+        # collect the integration suite without them.
+        run: pip install -e ".[dev,agents,xlsx,docx]" pytest-timeout
 
       - name: Run integration tests
         run: |
