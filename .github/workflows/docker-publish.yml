@@ -8,8 +8,15 @@ name: "3 · Docker publish (release)"
 # Only one build at a time per ref. Cancel in-progress on main
 # (saves minutes on rapid pushes), but never cancel a release build
 # mid-tag-push.
+#
+# GH #326 — for workflow_dispatch (release-alpha.yml + manual backfill),
+# group on inputs.ref so a tag publish (dispatched with the tag's ref as
+# inputs.ref) is in its own concurrency group, not the main ref the
+# dispatcher itself ran from. Otherwise a routine push to main would
+# cancel an in-flight alpha tag publish (cancel-in-progress=true for
+# push events), and operators see release-alpha runs failing silently.
 concurrency:
-  group: docker-publish-${{ github.ref }}
+  group: docker-publish-${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
 on:
