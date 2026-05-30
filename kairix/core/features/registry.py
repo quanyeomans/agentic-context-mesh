@@ -58,6 +58,10 @@ _TOPOLOGY_V2_TARGET_RETIRE_IN = "v2027.5.23"
 # Wave E newer-flag dispatch window (slack/github/notion/sharepoint pilots).
 _FLAG_INTRODUCED_WAVE_E_LATER = "v2026.5.24"
 _TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER = "v2027.5.24"
+# Wave 5 connector pilots (gmail / google_drive / google_calendar / apple_caldav)
+# all introduced in v2026.5.30 with the 6-month F51 retire ceiling.
+_FLAG_INTRODUCED_WAVE5_2026_05_30 = "v2026.5.30"
+_FLAG_TARGET_RETIRE_WAVE5_2026_11_30 = "v2026.11.30"
 # Wave E flag description fragments — recurring text across per-connector pilots.
 _WAVE_E_DESC_PREFIX = "Wave E of the connector/collection/scope topology v2 migration — "
 _WAVE_E_OFF_DELEGATES = "list_changes_for_container delegates to the legacy single "
@@ -562,13 +566,8 @@ REGISTRY: dict[str, FeatureFlag] = {
             "OAuth credentials are provisioned (tracked under GH #356)."
         ),
         stage="introduce",
-        # Gmail cutover plan (per docs/architecture/feature-flag-architecture.md §7):
-        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage soak →
-        # retire. 6-month target_retire_in matches the per-connector default in
-        # the feature-flag spec; F51 will fire if retirement slips past
-        # v2026.11.30 without explicit extension.
-        introduced_in="v2026.5.30",
-        target_retire_in="v2026.11.30",
+        introduced_in=_FLAG_INTRODUCED_WAVE5_2026_05_30,
+        target_retire_in=_FLAG_TARGET_RETIRE_WAVE5_2026_11_30,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
@@ -591,10 +590,35 @@ REGISTRY: dict[str, FeatureFlag] = {
             + "shape and shares the same per-mailbox cursor pattern."
         ),
         stage="introduce",
-        introduced_in="v2026.5.30",
+        introduced_in=_FLAG_INTRODUCED_WAVE5_2026_05_30,
         target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
+    ),
+    "topology_v2_google_calendar": FeatureFlag(
+        name="topology_v2_google_calendar",
+        default=False,
+        description=(
+            "Enable the Google Calendar connector — pulls events from one "
+            "Google Calendar (calendar_id, defaulting to primary) via the "
+            "Calendar API v3 events.list endpoint and persists the returned "
+            "nextSyncToken as the incremental-sync cursor. Ships OFF until "
+            "Google Workspace OAuth credentials are provisioned in the "
+            "operator's Key Vault (tracked GH #356); flipping ON without "
+            "provisioning is a no-op because make_connector raises with a fix "
+            "pointer when the access_token resolves to empty. When ON, the "
+            "connector emits one created/modified ChangeEvent per event "
+            "(cancelled events are skipped); recurring masters surface once "
+            "with the RRULE captured in SourceMetadata.properties.recurrence_rule "
+            "per ADR-028 (no per-occurrence expansion). On Google 410 Gone "
+            "(syncToken too old), the connector transparently falls back to a "
+            "fresh initial sync per Google's docs."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_WAVE5_2026_05_30,
+        target_retire_in=_FLAG_TARGET_RETIRE_WAVE5_2026_11_30,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/connector-ingestion-architecture.md",
     ),
 }
 

@@ -310,6 +310,11 @@ pytest_plugins = [
     # per F58.
     "tests.bdd.steps.connector_apple_caldav_steps",
     "tests.bdd.steps.feature_flag_topology_v2_apple_caldav_steps",
+    # Google Calendar connector + topology_v2_google_calendar flag.
+    # Ships OFF until Google Workspace OAuth credentials are
+    # provisioned (GH #356).
+    "tests.bdd.steps.connector_google_calendar_steps",
+    "tests.bdd.steps.feature_flag_topology_v2_google_calendar_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

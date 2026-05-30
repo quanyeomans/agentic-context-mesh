@@ -2719,6 +2719,75 @@ class FakeAppleCalDavConnector:
         return SourceMetadata()
 
 
+class FakeGoogleCalendarConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    Google Calendar plugin's contract test (F43).
+
+    Mirrors :class:`FakeM365CalendarConnector` shape — pinning the
+    same Protocol surface keeps the Wave-E connector fleet's contract
+    coverage uniform. The real plugin
+    (:class:`kairix.connectors.google_calendar.GoogleCalendarConnector`)
+    persists Google's ``nextSyncToken`` as the cursor; the fake
+    accepts a ``sync_token`` constructor argument the test can pin and
+    assert against.
+    """
+
+    name: str = "google_calendar"
+    per_tick_max_items: int = 500
+    # Calendar events are small structured envelopes — no large disk
+    # writes, so the watermark is unset (F66-watermark-exempt mirror).
+    disk_watermark_min_free_bytes: int | None = None
+
+    def __init__(
+        self,
+        *,
+        events: list[Any] | None = None,
+        content: dict[str, bytes] | None = None,
+        sensitivity: str = "internal",
+        sync_token: str | None = None,
+    ) -> None:
+        from kairix.core.protocols import ChangeEvent
+
+        self._events: list[ChangeEvent] = list(events) if events is not None else []
+        self._content: dict[str, bytes] = dict(content) if content is not None else {}
+        self._sensitivity = sensitivity
+        self._sync_token = sync_token
+
+    def list_changes(self, cursor: Any | None) -> Any:
+        del cursor
+        return iter(self._events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        raw = self._content.get(item_id, b"")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime="text/calendar", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        return f"https://calendar.google.com/calendar/u/0/r/eventedit/{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Return the seeded ``nextSyncToken`` (Google opaque-cursor shape)."""
+        return self._sync_token
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        ADR-021 (Wave E.5): real Google event envelope extraction lives
+        on the shipped :class:`GoogleCalendarConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
+
 class FakeSharePointConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
     SharePoint plugin's contract test.
