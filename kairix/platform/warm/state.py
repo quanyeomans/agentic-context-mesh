@@ -89,18 +89,25 @@ def mark_warming() -> None:
         _state[_K_STARTED_AT] = time.time()
 
 
-def mark_warm() -> None:
+def mark_warm(*, flag_path: Any = None) -> None:
     """Record successful warm-up completion. Called by run_warm on ok=True.
 
     Also writes the cross-process flag so ``kairix onboard ready``
     (running as the docker healthcheck) returns 0.
+
+    ``flag_path`` is the public DI seam — production callers leave it
+    None and the default resolution via ``warm_flag_path()`` (env-aware
+    per F4) fires. Integration tests pass an explicit ``tmp_path /
+    "warm.flag"`` so the test asserts against its own per-test path
+    without relying on ``monkeypatch.setenv("KAIRIX_WARM_FLAG_PATH",
+    ...)`` (F2-clean).
     """
     with _lock:
         _state[_K_WARM] = True
         _state[_K_WARMING] = False
         _state[_K_COMPLETED_AT] = time.time()
+    flag = flag_path if flag_path is not None else warm_flag_path()
     try:
-        flag = warm_flag_path()
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.touch(exist_ok=True)
     except OSError as exc:

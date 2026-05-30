@@ -381,6 +381,18 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
         _emit_warm_outcome(warm_result)
         if warm_result.get("ready") is True:
             gate.mark_ready()
+            # GH #355 — also flip the cross-process warm flag so the docker
+            # healthcheck (kairix onboard ready) and the ColdStartMiddleware
+            # see the same warm signal. Before this call, the MCP server's
+            # in-process ``gate`` flipped to ready but the warm-flag file
+            # at warm_flag_path() never appeared, so ``docker ps`` showed
+            # the container as ``unhealthy`` for the process lifetime even
+            # after warm-up completed in the application logs. Threading
+            # the deps-injected ``warm_flag_path_fn()`` through ``mark_warm``
+            # keeps the test seam intact (F2-clean — no env monkeypatch).
+            from kairix.platform.warm.state import mark_warm
+
+            mark_warm(flag_path=deps.warm_flag_path_fn())
             print(
                 f"warm-up complete — elapsed_ms={warm_result.get(_KEY_ELAPSED_MS, 'unknown')}",
                 file=sys.stderr,

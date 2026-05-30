@@ -188,6 +188,90 @@ def test_warm_started_event_emits_when_warm_ready(
     assert failed_records == [], f"unexpected mcp_warm_failed on ready path: {failed_records}"
 
 
+def _build_deps_sync_warm(*, warm_result: dict[str, Any], warm_flag_path: Any) -> McpCliDeps:
+    """Like :func:`_build_deps` but runs the warm body synchronously so
+    tests can assert on side effects of the warm thread immediately on
+    return (rather than racing the daemon thread the production default
+    spawns).
+    """
+
+    def _fake_build_server(**_kwargs: Any) -> _FakeMcpServer:
+        return _FakeMcpServer()
+
+    return McpCliDeps(
+        build_server_factory=lambda: _fake_build_server,
+        uvicorn_runner_factory=lambda: _FakeUvicornRunner(),
+        warm_retrieval_stack_fn=lambda: warm_result,
+        warm_flag_path_fn=lambda: warm_flag_path,
+        warm_runner=lambda warm_body: warm_body(),  # sync, not daemon thread
+    )
+
+
+def test_warm_ready_writes_cross_process_flag_for_docker_healthcheck(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """GH #355 — when warm_retrieval_stack_fn returns ready=True, the MCP
+    server MUST write the cross-process warm-flag file at
+    ``deps.warm_flag_path_fn()`` so the docker healthcheck
+    (``kairix onboard ready``, read by ``docker compose up --wait`` and
+    by the in-image ``HEALTHCHECK`` directive) flips to healthy.
+
+    Without this, the in-process readiness gate flips but the on-disk
+    flag never appears, so the container shows ``unhealthy`` for the
+    process lifetime even after warm-up actually completes in the
+    application logs.
+
+    Sabotage-proof: in ``_warm_and_mark_ready``, drop the
+    ``mark_warm(flag_path=deps.warm_flag_path_fn())`` call — this test's
+    ``flag_path.exists()`` assertion fires (the flag never gets
+    written). Executed; restored.
+    """
+    flag_path = tmp_path / "warm.flag"
+    assert not flag_path.exists(), "precondition: flag file must not exist before warm"
+
+    deps = _build_deps_sync_warm(
+        warm_result={"ready": True, "elapsed_ms": 42},
+        warm_flag_path=flag_path,
+    )
+    _drive_serve_http(caplog, deps, monkeypatch, port=18094)
+
+    assert flag_path.exists(), (
+        f"GH #355 — mark_warm(flag_path=deps.warm_flag_path_fn()) must write the "
+        f"cross-process warm-flag file so the docker healthcheck reads it; "
+        f"flag_path={flag_path} did not appear after warm completed"
+    )
+
+
+def test_warm_not_ready_skips_cross_process_flag_write(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    """GH #355 inverse — when warm_retrieval_stack_fn returns ready=False,
+    the cross-process flag must NOT be written. Otherwise the docker
+    healthcheck would flip to healthy on a broken warm-up.
+
+    Sabotage-proof: move the mark_warm() call outside the
+    ``if warm_result.get('ready') is True:`` branch — this test's
+    ``not flag_path.exists()`` assertion fires. Executed; restored.
+    """
+    flag_path = tmp_path / "warm.flag"
+
+    deps = _build_deps_sync_warm(
+        warm_result={"ready": False, "elapsed_ms": 100, "status": "error"},
+        warm_flag_path=flag_path,
+    )
+    _drive_serve_http(caplog, deps, monkeypatch, port=18095)
+
+    assert not flag_path.exists(), (
+        f"GH #355 — warm-flag must NOT be written when warm_result.ready=False; "
+        f"flag_path={flag_path} appeared anyway, which would falsely flip the "
+        f"docker healthcheck to healthy"
+    )
+
+
 def test_warm_failed_event_emits_when_warm_not_ready(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
