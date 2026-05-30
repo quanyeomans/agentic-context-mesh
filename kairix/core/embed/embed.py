@@ -326,7 +326,11 @@ def _open_usearch_index() -> Any:  # pragma: no cover  # prod lazy default; deps
         db_p = get_db_path()
         index_path = db_p.parent / "vectors.usearch"
         meta_path = db_p.parent / "vectors.meta.json"
-        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p)
+        # GH #352 — worker is the only mutate-capable VectorIndex caller.
+        # read_only=False (default, named explicitly here for clarity)
+        # loads the index fully into memory at .load() time so the first
+        # add_vectors() call has no first-write conversion path to hit.
+        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p, read_only=False)
         idx.load()  # auto-deletes if dims mismatch
         return idx
     except Exception:
@@ -597,6 +601,16 @@ def run_embed(
     now = int(start_time)
 
     vec_index = deps.open_usearch_index()
+    # GH #352 — under --force we already cleared SQLite content_vectors in
+    # _gather_pending_chunks. The on-disk usearch index must be cleared
+    # too, otherwise the first add_vectors() call previously triggered a
+    # convert-on-mutate path that loaded every existing vector into
+    # memory just to discard it. clear() is the fast path: drop the
+    # on-disk files, reset in-memory state, let the upcoming add_vectors
+    # calls build a fresh mutable index from empty.
+    if force and vec_index is not None and hasattr(vec_index, "clear"):
+        logger.info("--force: clearing on-disk usearch index")
+        vec_index.clear()
     save_interval = 10
 
     for batch_idx, batch in enumerate(batched(all_chunks, batch_size)):

@@ -163,7 +163,33 @@ The `count` should DROP cycle-over-cycle as the worker catches up. At the curren
 | Corpus passes 5M vectors (~32 GB resident) | Raise `KAIRIX_WORKER_MEM_LIMIT` to 16g, swap to 32g |
 | Corpus passes 10M vectors (~64 GB resident) | Outgrown a 16 GB VM — move worker to a larger host OR adopt ADR-023 A1 (BLOB + offline rebuild) to keep the worker bound |
 | Embed cycle wall-clock exceeds the schedule (default 3600s) | Worker can't keep up with embedding workload; either reduce embedding source rate, lengthen the cycle, or move to ADR-023 A2 (delta segments) for fresh-write path |
-| usearch index file corrupts | Re-embed from scratch (`kairix embed --force`) OR adopt ADR-023 A1 so SQLite is the source of truth |
+| usearch index file corrupts | Re-embed from scratch (`kairix embed embed --force`) OR adopt ADR-023 A1 so SQLite is the source of truth |
+
+## #352 — VectorIndex read/write modes (post-2026-05-30)
+
+As of v2026.5.30a1's #352 fix, `VectorIndex` opens in one of two modes:
+
+| Mode | Used by | What it does | Memory cost |
+|---|---|---|---|
+| `read_only=True` | MCP server, eval, probe, recall-check, search-side singleton (`get_vector_index`) | `Index.restore(view=True)` — mmap'd, pages loaded on demand | Near-zero baseline; grows with query working set |
+| `read_only=False` (default) | Worker embed cycle (`_open_usearch_index` in `kairix.core.embed.embed`), `--force` rebuilds, ADR-028 re-chunk-sweep | `Index.restore(view=False)` — full HNSW graph loaded into process memory at `.load()` time | ~vectors × 1536 × 4B + HNSW graph overhead (typically 2-4× the vector size) |
+
+**Why this matters for memory tuning:**
+- The convert-on-first-mutation path (the original #335 / #352 OOM cause) is gone. The worker no longer needs swap headroom to absorb a one-time conversion spike — but it DOES need permanent resident memory equal to the full mutable index.
+- For 1.27M × 1536 vectors that's ~8 GB just for the vectors, plus ~16-32 GB for the HNSW graph (usearch's M16 default). With the runbook's recommended `KAIRIX_WORKER_MEM_LIMIT=8g + KAIRIX_WORKER_MEMSWAP_LIMIT=16g`, the worker may spill into swap during normal operation — slower per cycle but stable.
+- `kairix embed embed --force` does NOT need to load the old index at all now — the embed pipeline calls `vec_index.clear()` after `DELETE FROM content_vectors` so the on-disk file is removed and the worker rebuilds from empty. No more OOM during `--force`.
+
+**Memory budget by corpus size (read-write worker mode):**
+
+| Vectors | Resident vectors (×1536×4B) | + HNSW graph (~2.5x) | Recommended `MEM_LIMIT` | Recommended `MEMSWAP_LIMIT` |
+|---|---|---|---|---|
+| 100k | 0.6 GB | ~2 GB | 4 GB | 8 GB |
+| 500k | 3 GB | ~10 GB | 8 GB | 16 GB |
+| 1M | 6 GB | ~20 GB | 8 GB | 24 GB |
+| 2M | 12 GB | ~40 GB | 16 GB | 48 GB |
+| 5M+ | 30 GB+ | ~100 GB+ | Outgrown swap-first — adopt ADR-023 A1 (BLOB + offline rebuild) |
+
+The MCP-server / search-side processes use `read_only=True` and do NOT need this headroom; they sit on the mmap.
 
 ADR-023 is the architectural fallback if any of those scenarios fire. Until then, the swap-first operational approach has lower risk and lower lift.
 

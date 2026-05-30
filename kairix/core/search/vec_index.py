@@ -74,11 +74,29 @@ class VectorIndex:
         meta_path: Path,
         db_path: Path,
         ndim: int = DIMS,
+        read_only: bool = False,
     ) -> None:
+        # GH #352 — ``read_only`` selects the on-disk open mode:
+        #   * read_only=False (default, mutate-capable): ``Index.restore(view=False)``
+        #     loads the full HNSW graph into process memory at load() time.
+        #     One-time ~7.8 GB for a 1.27M x 1536-dim corpus, resident for
+        #     the process lifetime. Required for any caller that adds /
+        #     removes vectors (the worker's embed cycle, --force rebuilds,
+        #     ADR-028 re-chunk-sweep tick). The alternative — view=True
+        #     followed by a conversion-on-first-mutation — OOM-killed the
+        #     production worker at 1.27M vectors even under memswap=24g
+        #     (see GH #352 root-cause analysis).
+        #   * read_only=True: ``Index.restore(view=True)`` mmap's the file,
+        #     pages are loaded on access. Cheap startup; ANY mutation
+        #     raises a typed error from _ensure_mutable(). Right mode for
+        #     search-side consumers (MCP, eval, probe, recall-check).
+        # Default is False so a caller who forgets to think about it gets
+        # the correct behaviour for the mutate-heavy worker path.
         self._index_path = Path(index_path)
         self._meta_path = Path(meta_path)
         self._db_path = Path(db_path)
         self._ndim = ndim
+        self._read_only = read_only
         self._index: Any = None
         self._key_to_hash_seq: dict[int, str] = {}
         self._next_key: int = 0
@@ -121,7 +139,12 @@ class VectorIndex:
                 self._delete_index_files()
                 return 0
 
-        self._index = Index.restore(str(self._index_path), view=True)
+        # GH #352 — view=self._read_only chooses mmap (read_only) vs
+        # full-load-into-memory (read_write). See __init__ docstring for
+        # the trade-off. A read_write instance is mutable from this point;
+        # no first-write conversion path will fire.
+        self._index = Index.restore(str(self._index_path), view=self._read_only)
+        self._mutable = not self._read_only
         if meta is not None:
             try:
                 self._key_to_hash_seq = {int(k): v for k, v in meta["keys"].items()}
@@ -140,6 +163,32 @@ class VectorIndex:
         self._index = None
         self._key_to_hash_seq = {}
         self._next_key = 0
+        # GH #352 — _mutable left alone deliberately. A read_only instance
+        # stays read_only post-clear (and refuses mutation cleanly);
+        # a read_write instance hits the "_index is None → construct
+        # fresh mutable" branch in _ensure_mutable on the next add call.
+        self._mutable = False
+
+    def clear(self) -> None:
+        """Discard the on-disk index + in-memory state.
+
+        GH #352 — public entry point for ``kairix embed --force`` and the
+        ADR-028 re-chunk-sweep tick. Before this method existed, ``--force``
+        cleared SQLite ``content_vectors`` but left the on-disk usearch
+        index untouched. The first subsequent ``add_vectors()`` call would
+        trigger ``_ensure_mutable`` to load every existing vector into a
+        numpy array (to copy into a new mutable index) only to have those
+        keys overwritten by the freshly-embedded vectors. On a 1.27M-vector
+        corpus that wasted load OOM-killed the worker under memswap=24g.
+
+        ``clear()`` is the right pre-step: the embed pipeline calls it
+        immediately after ``DELETE FROM content_vectors`` so the on-disk
+        index file is also gone, and the next ``add_vectors()`` builds a
+        fresh empty mutable index with zero conversion cost.
+
+        Safe to call when the index doesn't exist on disk (no-op).
+        """
+        self._delete_index_files()
 
     def build_from_vectors(self, hash_seqs: list[str], vectors: np.ndarray) -> int:
         """Build a new index from provided vectors. Saves to disk."""
@@ -293,42 +342,48 @@ class VectorIndex:
         return self._resolve_match_metadata(matches, k, collections)
 
     def _ensure_mutable(self) -> None:
-        """Ensure the index is mutable (not a read-only mmap view).
+        """Ensure the index is mutable. Cheap when constructed with
+        ``read_only=False`` (load() already opened it mutable); raises
+        when constructed with ``read_only=True`` (caller should construct
+        a separate read_write instance for mutation).
 
-        usearch Index.restore(view=True) creates an immutable memory-mapped
-        index. To add vectors we need a mutable copy. This rebuilds the
-        index from the existing vectors when needed. Subsequent calls are
-        a no-op once the index has been converted.
+        GH #352 — the previous "convert on first mutation" path loaded
+        every existing vector into a numpy array to copy into a new
+        mutable index. On a 1.27M x 1536-dim corpus that's ~7.8 GB just
+        for the array plus HNSW graph overhead, which OOM-killed the
+        production worker even under memswap=24g. The fix shifts the
+        decision to construction time: a read_write instance is mutable
+        from load(); a read_only instance refuses mutation loudly.
+
+        Check order matters: read_only refusal first (so a read_only
+        instance can never mutate, even post-clear); fresh-construct
+        second (covers post-clear() and never-loaded cases on a
+        read_write instance); steady-state short-circuit third.
         """
         from usearch.index import Index
 
-        if self._mutable:
-            return
+        if self._read_only:
+            raise RuntimeError(
+                "VectorIndex was constructed with read_only=True — mutation rejected. "
+                "fix: construct a separate VectorIndex(read_only=False) for the writer process; "
+                "the read_only mode is intended for search-side consumers (MCP / eval / probe). "
+                "next: in the worker path use VectorIndex(..., read_only=False) (the default). "
+                "run: see kairix/core/embed/embed.py:_open_usearch_index for the production wiring."
+            )
 
         if self._index is None:
             self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")
             self._mutable = True
             return
 
-        # Check if the index is immutable by attempting a dummy operation
-        try:
-            test_key = np.array([self._next_key], dtype=np.int64)
-            test_vec = np.zeros((1, self._ndim), dtype=np.float32)
-            self._index.add(test_key, test_vec)
-            self._index.remove(test_key)
-            self._mutable = True
-        except Exception:
-            # Index is immutable — rebuild as mutable
-            logger.info(
-                "vec_index: converting immutable index to mutable (%d vectors)",
-                len(self._index),
-            )
-            old_keys = np.array(list(self._key_to_hash_seq.keys()), dtype=np.int64)
-            old_vecs = np.array([self._index[k] for k in old_keys], dtype=np.float32)
-            self._index = Index(ndim=self._ndim, metric="cos", dtype="f32")
-            if len(old_keys) > 0:
-                self._index.add(old_keys, old_vecs)
-            self._mutable = True
+        if self._mutable:
+            return
+
+        # Defensive: index exists but isn't mutable. With read_only=False
+        # this shouldn't happen after load() unless someone hand-toggled
+        # _mutable. Re-load fresh from disk to get a mutable copy rather
+        # than risk the deprecated convert-on-mutate OOM path.
+        self.load()
 
     def add_vectors(self, hash_seqs: list[str], vectors: list[list[float]]) -> int:
         """Add new vectors incrementally. Does NOT auto-save — caller controls save timing."""
@@ -392,7 +447,13 @@ def get_vector_index(db_path: Path | None = None) -> Any:
             db_path = _resolve_db_path()
         index_path = db_path.parent / "vectors.usearch"
         meta_path = db_path.parent / "vectors.meta.json"
-        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path)
+        # GH #352 — singleton consumers (MCP search, eval, probe,
+        # recall-check) are read-only; they query the index, never mutate.
+        # read_only=True opens via mmap (cheap startup, low RSS); any
+        # accidental mutation surfaces as a typed error from
+        # _ensure_mutable. The worker's mutate-capable instance is
+        # constructed separately in kairix.core.embed.embed._open_usearch_index.
+        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=True)
         count = idx.load()
         if count > 0:
             logger.info("vec_index: loaded usearch index (%d vectors)", count)

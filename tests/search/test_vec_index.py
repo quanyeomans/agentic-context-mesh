@@ -843,3 +843,255 @@ def test_get_vector_index_returns_none_on_loader_failure() -> None:
         assert out is None
     finally:
         vi.reset_vector_index_singleton()
+
+
+# ---------------------------------------------------------------------------
+# GH #352 — read_only mode + clear() — replace the convert-on-mutate OOM path
+# ---------------------------------------------------------------------------
+
+
+def _seed_disk_index(tmp_path: Path, n_vectors: int = 50) -> tuple[Path, Path, Path]:
+    """Seed an on-disk usearch index with ``n_vectors`` so subsequent
+    re-opens exercise the load-from-disk path. Returns
+    ``(db_path, index_path, meta_path)``.
+    """
+    from kairix.core.search.vec_index import VectorIndex
+
+    db_path = tmp_path / "index.sqlite"
+    sqlite3.connect(str(db_path)).close()
+    index_path = tmp_path / "vectors.usearch"
+    meta_path = tmp_path / "vectors.meta.json"
+
+    builder = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=False)
+    builder.load()
+    rng = np.random.default_rng(seed=0)
+    hash_seqs = [f"seed{i}_0" for i in range(n_vectors)]
+    vectors = rng.standard_normal((n_vectors, 1536)).astype(np.float32).tolist()
+    builder.add_vectors(hash_seqs, vectors)
+    builder.save()
+    return db_path, index_path, meta_path
+
+
+@pytest.mark.unit
+def test_read_only_load_rejects_mutation_with_actionable_error(tmp_path: Path) -> None:
+    """A VectorIndex constructed with ``read_only=True`` must refuse
+    mutation with an actionable error message (F21 ``fix:/next:/run:``).
+
+    Sabotage: drop the read_only=True check in _ensure_mutable; the
+    assertion below fails because add_vectors() silently succeeds (or
+    silently rebuilds via the deprecated OOM path).
+    """
+    from kairix.core.search.vec_index import VectorIndex
+
+    db_path, index_path, meta_path = _seed_disk_index(tmp_path, n_vectors=20)
+
+    reader = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=True)
+    reader.load()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        rng = np.random.default_rng(seed=1)
+        reader.add_vectors(["new_0"], rng.standard_normal((1, 1536)).astype(np.float32).tolist())
+
+    msg = str(exc_info.value)
+    assert "read_only=True" in msg, f"error message must name the mode that caused refusal; got: {msg}"
+    assert "fix:" in msg and "next:" in msg and "run:" in msg, (
+        f"error message must carry F21 fix:/next:/run: affordance; got: {msg}"
+    )
+
+
+@pytest.mark.unit
+def test_read_write_load_skips_first_mutation_conversion(tmp_path: Path, caplog: Any) -> None:
+    """A VectorIndex constructed with ``read_only=False`` (the worker
+    default) must be mutable from .load() onward — adding a vector to a
+    pre-existing on-disk index must NOT trigger the
+    ``converting immutable index to mutable`` log line (the line that
+    indicated the convert-on-mutate OOM path was about to fire).
+
+    Sabotage: revert load() to ``Index.restore(..., view=True)`` regardless
+    of read_only; this test fails because the conversion log fires on the
+    first add_vectors() call.
+    """
+    import logging
+
+    from kairix.core.search.vec_index import VectorIndex
+
+    db_path, index_path, meta_path = _seed_disk_index(tmp_path, n_vectors=20)
+
+    writer = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=False)
+    writer.load()
+
+    with caplog.at_level(logging.INFO, logger="kairix.core.search.vec_index"):
+        rng = np.random.default_rng(seed=2)
+        writer.add_vectors(["fresh_0"], rng.standard_normal((1, 1536)).astype(np.float32).tolist())
+
+    conversion_lines = [r for r in caplog.records if "converting immutable index to mutable" in r.message]
+    assert not conversion_lines, (
+        f"add_vectors on a read_write VectorIndex must not trigger the convert-on-mutate "
+        f"path; got log records: {[r.message for r in conversion_lines]}"
+    )
+
+
+@pytest.mark.unit
+def test_clear_removes_disk_files_and_leaves_index_writable(tmp_path: Path) -> None:
+    """``VectorIndex.clear()`` must delete the on-disk index + meta file
+    and leave the in-memory state clean enough that the next add_vectors()
+    call builds a fresh mutable index without raising.
+
+    Sabotage: remove the ``self._mutable = True`` reset in
+    ``_delete_index_files``; the assertion that add_vectors() succeeds
+    after clear() fails because _ensure_mutable hits the read_only
+    refusal (or the deprecated convert path) instead of the
+    fresh-mutable branch.
+    """
+    from kairix.core.search.vec_index import VectorIndex
+
+    db_path, index_path, meta_path = _seed_disk_index(tmp_path, n_vectors=30)
+    assert index_path.exists() and meta_path.exists()
+
+    writer = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=False)
+    writer.load()
+    writer.clear()
+
+    assert not index_path.exists(), "clear() must delete the on-disk vectors.usearch file"
+    assert not meta_path.exists(), "clear() must delete the on-disk vectors.meta.json file"
+
+    rng = np.random.default_rng(seed=3)
+    added = writer.add_vectors(["post_clear_0"], rng.standard_normal((1, 1536)).astype(np.float32).tolist())
+    assert added == 1, "VectorIndex must remain writable after clear() — add_vectors should succeed"
+    assert len(writer) == 1, "post-clear index should contain exactly the one vector we just added"
+
+
+@pytest.mark.integration
+def test_force_embed_invokes_vec_index_clear(tmp_path: Path) -> None:
+    """``run_embed(force=True)`` must call ``vec_index.clear()`` so the
+    on-disk usearch index is wiped before the first add_vectors() call.
+
+    GH #352 integration contract: without this call the embed pipeline
+    would re-load up to N existing vectors into memory just to discard
+    them — the path that OOM-killed production at 1.27M vectors. The
+    contract under test: when force=True and the vec_index exposes
+    ``clear``, the pipeline invokes it.
+
+    Sabotage: gate the ``vec_index.clear()`` call behind ``if False``
+    in embed.py's force branch; this test fails because the spy records
+    zero clear invocations.
+    """
+    from kairix.core.embed.deps import EmbedDependencies
+    from kairix.core.embed.embed import run_embed
+
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(str(db_path))
+    db.executescript("""
+        CREATE TABLE documents (
+            hash TEXT PRIMARY KEY, path TEXT,
+            active INTEGER DEFAULT 1, source_modified_at TEXT
+        );
+        CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
+        CREATE TABLE content_vectors (
+            hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT
+        );
+    """)
+    for i in range(2):
+        db.execute("INSERT INTO content (hash, doc) VALUES (?, ?)", (f"h{i}", "body content " * 30))
+        db.execute(
+            "INSERT INTO documents (hash, path, active, source_modified_at) VALUES (?, ?, 1, NULL)",
+            (f"h{i}", f"docs/{i}.md"),
+        )
+    db.commit()
+
+    class _ClearSpyVecIndex:
+        """Records clear() invocations + accepts add_vectors no-op so the
+        embed loop completes. Frozen-purpose: detect whether force=True
+        wired clear() correctly."""
+
+        def __init__(self) -> None:
+            self.clear_calls = 0
+            self.add_calls = 0
+
+        def clear(self) -> None:
+            self.clear_calls += 1
+
+        def add_vectors(self, hash_seqs: list[str], vectors: list[list[float]]) -> int:
+            self.add_calls += 1
+            return len(hash_seqs)
+
+        def save(self) -> None:
+            pass
+
+    spy = _ClearSpyVecIndex()
+    deps = EmbedDependencies(
+        get_azure_config=lambda: ("k", "https://ep.com", "deploy"),
+        preflight_check=lambda *_a, **_kw: 1536,
+        migrate_content_vectors=lambda _db: None,
+        open_usearch_index=lambda: spy,
+        get_document_root=lambda: None,
+        embed_batch=lambda texts, *_a, **_kw: [[0.1] * 1536 for _ in texts],
+    )
+
+    run_embed(db, force=True, batch_size=10, deps=deps)
+
+    assert spy.clear_calls == 1, (
+        f"--force must invoke vec_index.clear() exactly once before add_vectors; "
+        f"got clear_calls={spy.clear_calls}, add_calls={spy.add_calls}"
+    )
+
+
+@pytest.mark.integration
+def test_incremental_embed_does_not_invoke_vec_index_clear(tmp_path: Path) -> None:
+    """Conversely: ``run_embed(force=False)`` (the routine worker cycle)
+    must NOT call ``clear()`` — clearing on an incremental cycle would
+    nuke the index every worker tick.
+
+    Sabotage: drop the ``force`` guard on the clear call in embed.py
+    (call clear() unconditionally); this test fails because clear_calls
+    rises to 1 on what should have been a no-op incremental pass.
+    """
+    from kairix.core.embed.deps import EmbedDependencies
+    from kairix.core.embed.embed import run_embed
+
+    db_path = tmp_path / "index.sqlite"
+    db = sqlite3.connect(str(db_path))
+    db.executescript("""
+        CREATE TABLE documents (
+            hash TEXT PRIMARY KEY, path TEXT,
+            active INTEGER DEFAULT 1, source_modified_at TEXT
+        );
+        CREATE TABLE content (hash TEXT PRIMARY KEY, doc TEXT);
+        CREATE TABLE content_vectors (
+            hash TEXT, seq INTEGER, pos INTEGER, model TEXT, embedded_at INTEGER, chunk_date TEXT
+        );
+    """)
+    db.execute("INSERT INTO content (hash, doc) VALUES ('h0', ?)", ("body content " * 30,))
+    db.execute("INSERT INTO documents (hash, path, active, source_modified_at) VALUES ('h0', 'docs/0.md', 1, NULL)")
+    db.commit()
+
+    class _ClearSpyVecIndex:
+        """Same shape as the force-path test's spy."""
+
+        def __init__(self) -> None:
+            self.clear_calls = 0
+
+        def clear(self) -> None:
+            self.clear_calls += 1
+
+        def add_vectors(self, hash_seqs: list[str], vectors: list[list[float]]) -> int:
+            return len(hash_seqs)
+
+        def save(self) -> None:
+            pass
+
+    spy = _ClearSpyVecIndex()
+    deps = EmbedDependencies(
+        get_azure_config=lambda: ("k", "https://ep.com", "deploy"),
+        preflight_check=lambda *_a, **_kw: 1536,
+        migrate_content_vectors=lambda _db: None,
+        open_usearch_index=lambda: spy,
+        get_document_root=lambda: None,
+        embed_batch=lambda texts, *_a, **_kw: [[0.1] * 1536 for _ in texts],
+    )
+
+    run_embed(db, force=False, batch_size=10, deps=deps)
+
+    assert spy.clear_calls == 0, (
+        f"incremental embed (force=False) must not invoke clear(); got clear_calls={spy.clear_calls}"
+    )
