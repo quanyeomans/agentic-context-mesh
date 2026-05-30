@@ -73,6 +73,12 @@ _SECRET_ENV_MAP = {
     "connector-github-webhook-secret": "CONNECTOR_GITHUB_WEBHOOK_SECRET",  # pragma: allowlist secret
     "connector-notion-token": "CONNECTOR_NOTION_TOKEN",
     "connector-google-drive-access-token": "CONNECTOR_GOOGLE_DRIVE_ACCESS_TOKEN",
+    # Apple iCloud CalDAV — basic auth with an app-specific password
+    # (NOT the operator's primary iCloud password). KV holds the pair
+    # under ``apple-caldav-username`` + ``apple-caldav-access``; env-var
+    # form is the upper-snake-case version.
+    "apple-caldav-username": "CONNECTOR_APPLE_CALDAV_USERNAME",
+    "apple-caldav-access": "CONNECTOR_APPLE_CALDAV_PASSWORD",  # pragma: allowlist secret
 }
 
 

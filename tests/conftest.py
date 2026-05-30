@@ -299,6 +299,17 @@ pytest_plugins = [
     # (tracked under GH #356).
     "tests.bdd.steps.connector_google_drive_steps",
     "tests.bdd.steps.feature_flag_topology_v2_google_drive_steps",
+    # Apple iCloud CalDAV connector — greenfield Wave-E build with a
+    # single capability flag (``topology_v2_apple_caldav``). Connector
+    # ingests calendar events via the CalDAV <sync-collection> REPORT
+    # (RFC 6578) against caldav.icloud.com using an Apple-issued
+    # app-specific password (NOT the operator's primary iCloud
+    # password). Each iCloud calendar becomes its own Container with
+    # its own CalDAV sync token; load_hierarchy emits a root FOLDER
+    # plus one child per discovered calendar parent-before-child
+    # per F58.
+    "tests.bdd.steps.connector_apple_caldav_steps",
+    "tests.bdd.steps.feature_flag_topology_v2_apple_caldav_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

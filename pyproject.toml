@@ -139,6 +139,16 @@ xlsx = [
     # formula cells render via ``data_only=True`` cached display values.
     "openpyxl>=3.1,<4",
 ]
+caldav = [
+    # python-caldav (GPLv3) — CalDAV (RFC 4791) client library used by
+    # the Apple iCloud CalDAV connector (``kairix.connectors.apple_caldav``).
+    # Optional because the connector is gated by the
+    # ``topology_v2_apple_caldav`` feature flag (default OFF) and
+    # operators without an iCloud account skip both the dep and the
+    # plugin. Per F37, ``caldav`` may only be imported inside the
+    # connector's own ``client.py`` (which lazy-imports it on first use).
+    "caldav>=1.3,<3",
+]
 dev = [
     # Test runner
     "pytest>=8.0",
@@ -197,6 +207,7 @@ github             = "kairix.connectors.github:make_connector"
 slack              = "kairix.connectors.slack:make_connector"
 gmail              = "kairix.connectors.gmail:make_connector"
 google_drive       = "kairix.connectors.google_drive:make_connector"
+apple_caldav       = "kairix.connectors.apple_caldav:make_connector"
 
 # Extractor plugin discovery — same shape as kairix.providers above.
 # Per-format-family plugins live under kairix/extractors/<name>/ and

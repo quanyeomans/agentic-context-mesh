@@ -2647,6 +2647,78 @@ class FakeM365CalendarConnector:
         return SourceMetadata()
 
 
+class FakeAppleCalDavConnector:
+    """Scripted :class:`kairix.core.protocols.SourceConnector` for the
+    Apple iCloud CalDAV plugin's contract test.
+
+    Constructor takes the calendar event payloads to emit; the fake
+    satisfies the full Protocol surface without touching iCloud, the
+    :mod:`caldav` library, or any network. This is the canonical fake
+    F43 pairs with the real
+    :class:`kairix.connectors.apple_caldav.AppleCalDavConnector`
+    inside ``tests/contracts/test_apple_caldav_protocol.py``.
+
+    Default sensitivity tier is ``personal`` per the dispatch brief —
+    iCloud calendars are operator-personal data. The constructor
+    accepts a ``sensitivity`` override so contract assertions can pin
+    both the default and an alternative tier.
+    """
+
+    name: str = "apple_caldav"
+    per_tick_max_items: int = 500
+    disk_watermark_min_free_bytes: int | None = None
+
+    def __init__(
+        self,
+        *,
+        events: list[Any] | None = None,
+        content: dict[str, bytes] | None = None,
+        sensitivity: str = "personal",
+        sync_token: str | None = None,
+    ) -> None:
+        from kairix.core.protocols import ChangeEvent
+
+        self._events: list[ChangeEvent] = list(events) if events is not None else []
+        self._content: dict[str, bytes] = dict(content) if content is not None else {}
+        self._sensitivity = sensitivity
+        self._sync_token = sync_token
+
+    def list_changes(self, cursor: Any | None) -> Any:
+        del cursor
+        return iter(self._events)
+
+    def fetch(self, item_id: str) -> Any:
+        from datetime import datetime, timezone
+
+        from kairix.core.protocols import RawArtefact
+
+        raw = self._content.get(item_id, b"BEGIN:VCALENDAR\nEND:VCALENDAR\n")
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        return RawArtefact(raw=raw, mime="text/calendar", fetched_at=fetched_at)
+
+    def source_link(self, item_id: str) -> str:
+        return f"caldav://{item_id}"
+
+    def sensitivity_for(self, _item_id: str) -> Any:
+        return self._sensitivity
+
+    def next_cursor(self) -> str | None:
+        """Return the seeded sync token (CalDAV opaque-token cursor shape)."""
+        return self._sync_token
+
+    def metadata_for(self, item_id: str) -> Any:
+        """Return empty :class:`SourceMetadata` (Protocol-shape compliance only).
+
+        Real CalDAV event envelope extraction (ORGANIZER / DTSTART /
+        RRULE / ATTENDEE / LOCATION) lives on the shipped
+        :class:`AppleCalDavConnector`.
+        """
+        del item_id
+        from kairix.core.protocols import SourceMetadata
+
+        return SourceMetadata()
+
+
 class FakeSharePointConnector:
     """Scripted :class:`kairix.core.protocols.SourceConnector` for the
     SharePoint plugin's contract test.

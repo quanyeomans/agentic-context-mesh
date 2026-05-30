@@ -274,6 +274,23 @@ topology_v2:
       # itself is the workspace selector.
       connector_specific_config: {}
 
+    # Apple iCloud CalDAV — calendar event ingestion via the CalDAV
+    # protocol (RFC 4791 + RFC 6578). Requires an Apple-issued
+    # app-specific password (NOT the operator's primary iCloud
+    # password); see https://support.apple.com/en-us/HT204397 for the
+    # operator instructions. Gated by ``topology_v2_apple_caldav`` —
+    # set the flag ON in ``features:`` below to enable the connector.
+    # KV stores the credentials under apple-caldav-username +
+    # apple-caldav-access; env-var fallbacks are CONNECTOR_APPLE_CALDAV_USERNAME +
+    # CONNECTOR_APPLE_CALDAV_PASSWORD.
+    # - id: apple-caldav-personal-conn
+    #   kind: apple_caldav
+    #   name: "Apple iCloud calendars"
+    #   default_sensitivity: personal
+    #   connector_specific_config:
+    #     endpoint: https://caldav.icloud.com
+    #     calendar_ids: []  # empty = all calendars; otherwise list CalDAV URLs
+
   # ── credentials ─────────────────────────────────────────────────────────
   # Each entry declares one credential bundle the connectors can
   # reference. ``secret_name`` is the logical name passed to
@@ -324,6 +341,18 @@ topology_v2:
       kind: bearer_token
       secret_name: connector-notion  # pragma: allowlist secret — logical name
       admin_public: true
+
+    # Apple iCloud CalDAV — basic auth with an Apple-issued
+    # app-specific password (NOT the operator's primary iCloud
+    # password). KV stores the pair as apple-caldav-username +
+    # apple-caldav-access; env-var fallbacks are
+    # CONNECTOR_APPLE_CALDAV_USERNAME + CONNECTOR_APPLE_CALDAV_PASSWORD.
+    # See https://support.apple.com/en-us/HT204397 for how operators
+    # generate or rotate the app-password.
+    # - id: apple-caldav-icloud
+    #   kind: basic_auth
+    #   secret_name_prefix: apple-caldav  # KV: apple-caldav-username + apple-caldav-access  # pragma: allowlist secret — logical prefix
+    #   admin_public: false  # personal calendar — operator only
 
   # ── cc_pairs (ConnectorCredentialPair) ──────────────────────────────────
   # Each entry binds one connector to one credential. The cc_pair is

@@ -455,6 +455,32 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_apple_caldav": FeatureFlag(
+        name="topology_v2_apple_caldav",
+        default=False,
+        description=(
+            _WAVE_E_DESC_PREFIX
+            + "per-connector slice for the apple_caldav connector. When ON, the "
+            + "AppleCalDavConnector emits one Container per discovered (or "
+            + "operator-pinned) iCloud calendar with each carrying its own CalDAV "
+            + "sync token as cursor_token, and list_changes_for_container scopes "
+            + "the CalDAV <sync-collection> REPORT to that calendar URL only. "
+            + "When OFF, the connector retains the legacy shim shape — "
+            + "list_changes_for_container delegates to the legacy single-cursor "
+            + "list_changes call that folds every calendar's token into one "
+            + "composite cursor. load_hierarchy emits a root FOLDER node plus one "
+            + "child FOLDER per configured calendar on both branches "
+            + "(single calendar-as-folder depth; per-calendar event grouping is a "
+            + "Wave-E+1 enhancement). Default-off until per-calendar isolation "
+            + "soaks against a production iCloud account; mirrors the sibling "
+            + "m365_calendar Wave E pilot shape."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
     "connector_slack": FeatureFlag(
         name="connector_slack",
         default=False,

@@ -1404,6 +1404,66 @@ def dispatch_google_drive_sync(
     return off_branch()
 
 
+def apple_caldav_off_branch_noop() -> ConnectorSyncResult:
+    """OFF-branch default for :func:`dispatch_apple_caldav_sync` —
+    return zero counters and emit the operator-visible signal that the
+    Apple CalDAV connector is gated off.
+
+    F6-clean: a real callable default, no ``None``. Public so the
+    feature-flag BDD steps can reach it without an internal-name
+    import (F5).
+    """
+    logger.info("worker: apple_caldav connector gated off (flag OFF)")
+    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+
+
+def run_via_apple_caldav_connector() -> ConnectorSyncResult:
+    """ON-branch default for :func:`dispatch_apple_caldav_sync` —
+    delegate to the canonical :func:`run_connector_sync_pipeline` which
+    resolves the ``apple_caldav`` plugin via its entry-point factory
+    and drives the standard ConnectorPipeline.
+
+    The branch log distinguishes the Apple CalDAV path from the
+    sibling m365_calendar / sharepoint / notion paths so operators
+    can tell which connector ran by grep-ing INFO logs.
+    """
+    logger.info("worker: apple_caldav connector running (flag ON)")
+    return run_connector_sync_pipeline()
+
+
+def dispatch_apple_caldav_sync(
+    read_flag: Callable[[str], bool] = _default_flag_value,
+    on_branch: Callable[[], ConnectorSyncResult] = run_via_apple_caldav_connector,
+    off_branch: Callable[[], ConnectorSyncResult] = apple_caldav_off_branch_noop,
+) -> ConnectorSyncResult:
+    """Compose the flag-branching dispatcher for the Apple CalDAV connector slot.
+
+    Reads the ``topology_v2_apple_caldav`` flag and routes to the ON
+    branch (the standard connector pipeline, which resolves the
+    ``apple_caldav`` plugin) or the OFF branch (a no-op that skips
+    the connector entirely). Mirrors :func:`dispatch_notion_sync`
+    shape — the BDD + integration tests pin the flag through
+    :class:`FakeFeatureFlagResolver` and observe the branch via the
+    per-helper INFO log.
+
+    Gating happens at the connector-selection boundary — when OFF,
+    the apple_caldav plugin never runs even if listed in
+    ``kairix.config.yaml``. When ON, the connector is selected via
+    the standard config + entry-point shape.
+
+    Unlike the M365 connector flags (which have a separate
+    ``connector_*`` introduce flag distinct from the topology-v2
+    cutover flag), the Apple CalDAV connector ships behind a single
+    capability flag — the connector is brand new at landing time so
+    there's no legacy single-cursor shape to preserve; the
+    ``topology_v2_apple_caldav`` flag gates the entire plugin until
+    it soaks against a production iCloud account.
+    """
+    if read_flag("topology_v2_apple_caldav"):
+        return on_branch()
+    return off_branch()
+
+
 # ---------------------------------------------------------------------------
 # KFEAT-021 Phase 1 — maintenance scheduler wiring (behind the
 # ``maintenance_loop`` feature flag). When the flag is OFF the
