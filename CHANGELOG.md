@@ -7,20 +7,51 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
-### Added
+## [2026.5.30a1] - 2026-05-30 — Entity graph fills, dates flow through to search, legacy Excel extracts
 
-- **Entity-modelling iter_5 enrichment deployed to production Neo4j** (GH #343 — deployed 2026-05-29). Cypher-shell load lifted production Neo4j from 871 nodes / 2 relationship types to **26,946 nodes / 12 relationship types** (+26,075 nodes, +258,897 edges). Added 5 new node labels (`Place`, `Product`, `Vocation`, `Industry`, `LegalCompliance`) and 10 new edge kinds (`LOCATED_IN_COUNTRY`, `HEADQUARTERED_IN`, `CITIZEN_OF`, `OPERATES_IN`, `HAS_OCCUPATION`, `DEVELOPED_BY`, `FIELD_OF`, `RUNS_ON`, `APPLIES_IN`, `CO_OCCURS_IN_CORPUS`). Curated values (`tier`, `engagement_status`, `vault_path`) preserved on existing hand-curated nodes; pipeline enrichment (`wikidata_qid`, `description`, `aliases`, demoted external-ref properties) augmented non-destructively. 26,151 nodes + ~258,766 edges carry `kairix_provenance_batch = 'iter5-2026-05-29'` for surgical rollback. Pre-flight dump at `/data/backups/neo4j.dump` for total restore. Search and entity-aware retrieval now operate against a fully enriched graph instead of the previous mostly-empty shape.
-- **§10.7 — `seed.py` canonical-skip patch** (GH #343 prerequisite). `kairix.knowledge.entities.seed.seed_graph` now reads the set of canonical entity slugs from Neo4j (nodes carrying `wikidata_qid` OR `kairix_provenance_batch`) once per pass and skips any regex-discovered candidate whose slug matches. Prevents the worker tick from regenerating cleansed minimal-property nodes within 24h of the iter_5 cleanse phase.
-- **`NodeLabel` + `EdgeKind` enum extensions** in `kairix.knowledge.graph.models` — 5 new labels + 10 new edge kinds to match the iter_5 deployment surface. Constraint creation + per-class LOAD CSV patterns shipped as cypher artefacts in the entity-modelling repo (`kairix-deployment/iter5-2026-05-29/`).
-- **`docs/architecture/graph-modelling-refs-as-properties.md`** — engineering norm establishing "if an external entity is not itself part of your corpus, do not model it as a node; carry its identifier + label as properties on the source node." Adopted from the entity-modelling pipeline's design doc; cited by ADR-027.
-- **ADR-027 — Entity-enrichment worker stage** — proposes the future `_run_entity_enrichment` worker tick that converts the iter_5 one-time enrichment into a continuous per-tick pass (Wikidata + Perplexity → SQLite `entities_enrichment` → Neo4j promote, with `:Candidate` review queue + `kairix entities review` CLI). Sequenced after the iter_5 deployment lands.
+> **Upgrading?** No config changes needed. The entity graph and date-aware search both start working better the moment the new image is running. Full details below.
 
-### Fixed
+### New for agents
 
-- **GH #336 — `documents_media` writer wired through worker.** Forward-going wire-up of `SqliteDocumentsMediaWriter` into the two `DefaultSilverProcessor()` call sites in `kairix.worker` that previously bypassed the factory. Closes a two-year empty-table bug where every extractor docstring promised to write to `documents_media.extractor_version` but no INSERT site existed in production. F40 (extractor-version tagging) becomes verifiable on net-new content from this commit forward; existing 14.5K bronze rows need an operator-side backfill (out of scope here).
-- **GH #334 — Neo4j entity-graph drain shipped** (`c3f96252` — previously open as tracking debt). The 2.3M `entity_signals` staging backlog drains on first worker tick after deploy; subsequent ticks process incremental writes. Per-row `pushed_to_neo4j` flip from 0 → 1 on success.
-- **GH #335 — Embed worker OOM mitigated.** `KAIRIX_WORKER_WRITES_VEC_INDEX` env-gate defaults OFF so the worker no longer attempts the 1.27M-vector HNSW rebuild on each cycle; SQLite `content_vectors` keeps advancing. Operators with adequate host swap can opt back in via the runbook (`docs/operations/runbooks/worker-memory-and-swap.md`) — `memswap_limit` hook in docker-compose enables the spillover. ADR-023 records the decision and the trigger conditions for the A1/A2/sqlite-vec architectural fallbacks.
-- **GH #330 — kairix-worker container resource limits.** `mem_limit` / `memswap_limit` / `cpus` / `blkio_config.weight` / `tmpfs` declared on both production `docker-compose.yml` and `docker-compose.example.yml`. Host can no longer be saturated by any single container regardless of code bug or unbounded workload.
+- **Entity-aware search now sees a real knowledge graph.** The graph went from a near-empty starting state to roughly 27,000 entity nodes covering people, organisations, places, products, vocations, industries, and legal/compliance concepts — connected by twelve kinds of relationships (who works where, what's headquartered where, what runs on what, what applies in which jurisdiction, and so on). When an agent asks "who runs the X program?" or "what tools do we use for Y?", the graph answer is now built from a populated map instead of a handful of names.
+- **Legacy Excel files (.xls) from SharePoint now extract.** Previously the worker had the modern Office format (.xlsx) covered but raised a missing-dependency error on older .xls files, so they accumulated in the dead-letter queue. The next worker cycle after upgrade retries them automatically — expect around 10–15 spreadsheets to recover on a typical SharePoint mount.
+- **Date-aware search picks up envelope timestamps when the body has none.** Previously only Obsidian notes with a `date:` field in their frontmatter contributed timestamps to search ranking; SharePoint, Microsoft 365, GitHub, Slack, and Notion documents all dropped their envelope dates between ingestion and search. They now fall through to the document's "last modified" timestamp, lifting temporal-boost coverage from around 2% to near-complete on the next embed cycle.
+
+### New for operators
+
+- **Per-document extractor tracking now actually writes.** The `documents_media` table that records which extractor processed each document was empty for two years — every extractor's documentation said "writes to documents_media" but no code path was wired to do so. The worker now writes a row per extraction. Operators can audit "which PDF extractor handled this file?" against fresh content immediately; existing files backfill as they re-extract.
+- **A pre-deployment Neo4j snapshot is kept in operator backup.** Before the entity-graph load, the existing graph was dumped to `/data/backups/neo4j.dump` so the whole change can be rolled back in one command if anything looks wrong. New nodes and edges are also tagged so they can be removed surgically without touching the operator's hand-curated content.
+
+### Things that work better
+
+- **Hand-curated entity properties are preserved across enrichment.** Operators who had added tier, engagement-status, or location values to specific entity nodes keep those values. The enrichment layer adds Wikidata identifiers, descriptions, and aliases alongside them — never overwriting.
+- **The worker stops regenerating entities you've already cleansed.** A one-pass cache of canonical entity slugs sits in front of the regex-driven entity discovery step. If you've already curated `Builder` as an entity, the worker won't try to recreate a minimal stub from another mention of the word.
+
+### Configuration migration from v2026.5.28.1a1
+
+No required configuration changes. New behaviour is on by default.
+
+Optional: after the new alpha is running, trigger a worker embed cycle (or wait for the scheduled one) — chunks embedded after the upgrade will carry the envelope timestamp. Existing chunks keep their previous date (which for most was null); to backfill, `kairix embed --force` re-embeds everything against current metadata. Decision tracked in #349.
+
+### Things that haven't changed
+
+- The kairix CLI surface for search, MCP, embed, entity management, briefing, prep, eval, benchmark, connectors.
+- The vector index format (`vectors.usearch`) and the SQLite schema's content + content_vectors tables.
+- The provider plugin selection model.
+
+### Internal
+
+- **Entity-modelling iter_5 deployment (#343).** Cypher-shell load against production Neo4j: 871 → 26,946 nodes, 2 → 12 relationship types. Five new node labels (`Place`, `Product`, `Vocation`, `Industry`, `LegalCompliance`) and ten new edge kinds. 26,151 nodes + ~258,766 edges carry a deployment-batch tag for surgical rollback; pre-flight dump retained for total restore. ADR-027 specifies the follow-up that converts this one-time load into a continuous per-tick worker stage; tracked under #347.
+- **`graph-modelling-refs-as-properties.md`** engineering norm added — external entities that aren't part of the corpus get carried as properties on the source node, not modelled as standalone nodes. Adopted from the entity-modelling pipeline's design doc; cited by ADR-027.
+- **`NodeLabel` + `EdgeKind` enum extensions** in `kairix.knowledge.graph.models` match the deployment surface; canonical-slug skip patch in `seed.py` prevents worker regeneration of cleansed entities.
+- **GH #329 root cause fixed** — `_gather_pending_chunks` now selects `documents.source_modified_at` and falls back to it when `extract_chunk_date(body, path)` returns None. PRAGMA-guarded so older test fixtures with a minimal documents schema keep working. Verification of the live coverage lift tracked under #349.
+- **GH #337 quick-win** — `markitdown[xls]` extra added to the kairix install. ~85 genuine Class B/C/D dead-letter failures remain; structural follow-ups (MIME sniffing, `unsupported` terminal status, 403 distinct classification, `kairix connectors requeue` CLI) tracked under #348.
+- **ADR-024 — test pyramid redesign.** F68 (Protocol failure-injection coverage), F69 (scale-bound integration tests), F70 (schema-writer symmetry), F71 (preflight-truthfulness), F72 (cross-layer integrity invariants), plus a new soak tier under `tests/soak/` with three seed soak tests + `soak-suite.yml` workflow. F7 affordance rewritten with defect catalogue.
+- **ADR-025 — pipeline observability foundation.** `pipeline_item_status` timeline + `status_emit` context manager + F54 both-branch coverage gate. CLI surface, provenance envelope, self-healing loops, and dashboards tracked under #344.
+- **ADR-026 — cross-cutting primitive abstractions.** Track A: `Stage` Protocol + `IsolatedStageRunner` + `BatchTransactionStageRunner` (12 existing stage migrations tracked under #345). Track B: `FitnessRule` ABC with 13 batches migrated (F5, F8, F11, F12, F13, F15, F16, F17, F18, F19, F20, F24, F26, F27, F34, F35, F37, F38, F39, F40, F41, F44, F47, F56, F57, F61, F63, F64, F65, F66). Track C: `FlagGatedCapability[T]` ABC + contract tests; 11 callsite migrations tracked under #346.
+- **F73, F74, F76, F77 fitness functions** landed: private-infrastructure reference scanner with externalised pattern source; status-emit coverage; no f-string interpolation of content-like variables in log/exception strings; SQLite single-writer call-site allow-list.
+- **Fitness function catalogue + bidirectional consistency tests** live under `scripts/checks/_rule_catalogue.py`; CLAUDE.md F-rule section restructured into 8 category groups.
+- **Default-safe cutover discipline.** Every architectural change in this alpha lands as default-OFF or zero-change-for-existing-operators.
 
 ## [2026.5.28.1a1] - 2026-05-28 — Connector safety bounds, per-source metadata in search, worker memory fixes, entity graph fills
 
