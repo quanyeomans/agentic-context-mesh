@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-012@example.invalid
+DTSTAMP:20260513T140000Z
+DTSTART:20260513T140000Z
+DTEND:20260513T150000Z
+SUMMARY:project-otter — dependency cooldown window (Q3)
+DESCRIPTION:Working session on dependency cooldown window for project-otter in Q3. Driver: agent-delta.
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-foxtrot:mailto:agent-foxtrot@example.invalid
+ATTENDEE;CN=agent-delta:mailto:agent-delta@example.invalid
+RRULE:FREQ=WEEKLY;COUNT=4
+END:VEVENT
+END:VCALENDAR

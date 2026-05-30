@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:weekly-standup-week-01@example.invalid
+DTSTAMP:20260504T090000Z
+DTSTART:20260504T090000Z
+DTEND:20260504T093000Z
+SUMMARY:Weekly standup — our-team
+DESCRIPTION:Recurring weekly standup. Project: project-falcon. Default time: Monday 09:00. Attendees: full team.
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+RRULE:FREQ=WEEKLY;BYDAY=MO
+END:VEVENT
+END:VCALENDAR

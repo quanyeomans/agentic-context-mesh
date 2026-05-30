@@ -65,6 +65,10 @@ _LEGACY_SUBCOMMANDS: frozenset[str] = frozenset(
         "tune",
         "hybrid-sweep",
         "sweep",
+        # ADR-028 §"Quality evaluation" #4 — per-source-type chunk-size
+        # distribution. Lives next to the other eval subcommands so the
+        # operator surface stays one CLI.
+        "chunk-stats",
     }
 )
 

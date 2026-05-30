@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-011@example.invalid
+DTSTAMP:20260512T140000Z
+DTSTART:20260512T140000Z
+DTEND:20260512T150000Z
+SUMMARY:project-orca — dependency cooldown window (Q1)
+DESCRIPTION:Working session on dependency cooldown window for project-orca in Q1. Driver: agent-epsilon.
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+END:VEVENT
+END:VCALENDAR

@@ -2,16 +2,18 @@
 CLI for kairix eval — automated evaluation suite generation and monitoring.
 
 Subcommands:
-  generate   Generate a new benchmark suite using the GPL pipeline
-  enrich     Enrich an existing suite with graded gold_titles
-  monitor    Run canary suite and check for regression
-  report     Generate markdown report from monitor log
+  generate    Generate a new benchmark suite using the GPL pipeline
+  enrich      Enrich an existing suite with graded gold_titles
+  monitor     Run canary suite and check for regression
+  report      Generate markdown report from monitor log
+  chunk-stats Per-source-type chunk-size distribution (ADR-028 measurement)
 
 Usage:
   kairix eval generate --output suites/generated.yaml --count 100
   kairix eval enrich --suite suites/v2-real-world.yaml --output suites/v2-enriched.yaml
   kairix eval monitor --suite suites/canary.yaml
   kairix eval report --days 30
+  kairix eval chunk-stats --db-path ~/.cache/kairix/index.sqlite
 """
 
 from __future__ import annotations
@@ -435,6 +437,20 @@ def _cmd_gate(args: argparse.Namespace) -> int:
     return 0 if result.passed else 2
 
 
+def _cmd_chunk_stats(args: argparse.Namespace) -> int:
+    """ADR-028 §"Quality evaluation" #4 — emit per-source-type chunk-size stats.
+
+    Reads ``content_vectors`` joined against ``documents`` / ``content``
+    and emits mean / p50 / p95 / p99 chunk size per source type
+    (markdown, pptx, pdf, docx, xlsx, email, calendar). Operator-facing
+    diagnostic for spotting chunker fragmentation or over-uniformity.
+    """
+    from kairix.quality.eval.chunk_stats import emit_chunk_stats
+
+    db_path = Path(args.db_path).expanduser()
+    return emit_chunk_stats(db_path, sys.stdout)
+
+
 def _cmd_sweep(args: argparse.Namespace) -> int:
     from pathlib import Path
 
@@ -595,6 +611,17 @@ def main(argv: list[str] | None = None) -> None:
         help="Category floor threshold (default: 0.50)",
     )
 
+    # --- chunk-stats (ADR-028 §"Quality evaluation" #4) ---
+    p_chunk = subparsers.add_parser(
+        "chunk-stats",
+        help="Per-source-type chunk-size distribution (mean, p50, p95, p99)",
+    )
+    p_chunk.add_argument(
+        "--db-path",
+        default=_DEFAULT_DB_PATH,
+        help="kairix SQLite path (default: ~/.cache/kairix/index.sqlite)",
+    )
+
     # --- sweep ---
     p_sweep = subparsers.add_parser("sweep", help="Grid search BM25 column weights and query styles")
     p_sweep.add_argument("--suite", required=True, help="Benchmark suite YAML with gold_titles")
@@ -633,6 +660,7 @@ def main(argv: list[str] | None = None) -> None:
         "gate": _cmd_gate,
         "sweep": _cmd_sweep,
         "hybrid-sweep": _cmd_hybrid_sweep,
+        "chunk-stats": _cmd_chunk_stats,
     }
 
     fn = dispatch[args.subcommand]

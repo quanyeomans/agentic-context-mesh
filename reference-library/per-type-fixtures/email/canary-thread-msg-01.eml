@@ -1,0 +1,12 @@
+From: agent-alpha@example.invalid
+To: agent-beta@example.invalid
+Subject: Re: project-falcon go/no-go
+Date: Mon, 04 May 2026 09:00:00 +0000
+Message-ID: <canary-thread-msg-01@example.invalid>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+
+Team — circling back on the project-falcon go/no-go decision.
+What does everyone think about pushing to next cycle?
+We have the architecture spike landing this week.

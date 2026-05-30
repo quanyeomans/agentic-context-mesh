@@ -21,6 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from kairix.quality.benchmark.per_type_slicing import (
+    aggregate_canary,
+    aggregate_per_source_type,
+)
 from kairix.quality.benchmark.suite import BenchmarkSuite
 from kairix.quality.eval.constants import (
     CATEGORY_ALIASES,
@@ -40,6 +44,9 @@ _CATEGORY_CLASSIFICATION = "classification"
 _KEY_WEIGHTED_TOTAL = "weighted_total"
 _KEY_SCORE_METHOD = "score_method"
 _KEY_ELAPSED_MS = "elapsed_ms"
+# F17 — NDCG@10 is the primary IR metric; the key appears in the summary
+# emit, the human format block, and the ADR-028 per-source-type slice.
+_KEY_NDCG_AT_10 = "ndcg_at_10"
 
 if TYPE_CHECKING:
     from kairix.core.protocols import ChatBackend
@@ -437,6 +444,52 @@ def _category_diagnosis(category: str, score: float) -> str:
     return diagnoses[category]
 
 
+def _format_per_source_type_block(per_source_type: dict[str, dict[str, float]]) -> list[str]:
+    """Render the per-source-type slicing as fixed-column text lines.
+
+    ADR-028 §"Quality evaluation" #1 — slice the overall NDCG@10 /
+    MRR@10 / Hit@10 by the source-type of the gold answer doc. Empty
+    block when no NDCG cases carry a derivable source type.
+    """
+    if not per_source_type:
+        return []
+    lines = ["", "Per source type:"]
+    for stype in sorted(per_source_type.keys()):
+        row = per_source_type[stype]
+        n = int(row.get("n", 0))
+        lines.append(
+            f"  {stype:11} NDCG@10={row.get('ndcg_at_10', 0.0):.3f}  "
+            f"MRR@10={row.get('mrr_at_10', 0.0):.3f}  "
+            f"Hit@10={row.get('hit_at_10', 0.0):.3f}  (queries={n})"
+        )
+    return lines
+
+
+def _format_canary_block(canary: dict[str, Any]) -> list[str]:
+    """Render the canary pass-rate block. Empty when no canaries ran.
+
+    ADR-028 §"Quality evaluation" #3 — boundary-spanning canaries fail
+    loudly when a chunker regression splits an atomic unit.
+    """
+    overall = canary.get("overall", {}) if canary else {}
+    total = int(overall.get("total", 0))
+    if total == 0:
+        return []
+    passed = int(overall.get("passed", 0))
+    rate = overall.get("rate", 0.0)
+    lines = [
+        "",
+        f"Boundary-spanning canaries: {passed}/{total} passed ({rate * 100:.0f}%)",
+    ]
+    by_unit = canary.get("by_unit", {})
+    for unit in sorted(by_unit.keys()):
+        row = by_unit[unit]
+        unit_passed = int(row.get("passed", 0))
+        unit_total = int(row.get("total", 0))
+        lines.append(f"  {unit:9} {unit_passed}/{unit_total} passed")
+    return lines
+
+
 def format_interpretation(result: BenchmarkResult) -> str:
     """Return a human-readable interpretation section."""
     lines: list[str] = []
@@ -447,7 +500,7 @@ def format_interpretation(result: BenchmarkResult) -> str:
     lines.append("BENCHMARK RESULTS")
     lines.append("=" * 60)
     lines.append(f"Weighted total: {wt:.3f}  [{tier}]")
-    ndcg = result.summary.get("ndcg_at_10")
+    ndcg = result.summary.get(_KEY_NDCG_AT_10)
     hit5 = result.summary.get("hit_rate_at_5")
     mrr = result.summary.get("mrr_at_10")
     if ndcg is not None:
@@ -460,6 +513,12 @@ def format_interpretation(result: BenchmarkResult) -> str:
         n = result.diagnostics.get("category_counts", {}).get(cat, 0)
         diagnosis = _category_diagnosis(cat, score)
         lines.append(f"  {cat:12} {score:.3f}  (weight {weight:.0%}, n={n})  {diagnosis}")
+
+    # ADR-028 — per-source-type + canary slices, layered below the
+    # legacy category breakdown so existing scrapers keep their format.
+    lines.extend(_format_per_source_type_block(result.summary.get("per_source_type", {})))
+    lines.extend(_format_canary_block(result.summary.get("canary", {})))
+
     lines.append("")
 
     # Gate check
@@ -811,6 +870,15 @@ def run_benchmark(
         diagnostics["mode"] = "single-shot"
         diagnostics["per_query_runs"] = _build_single_shot_runs(case_results)
 
+    # ADR-028 §"Quality evaluation" — per-source-type Recall@k slicing
+    # + boundary-spanning canary aggregation. Layered on top of the
+    # existing summary so the overall NDCG@10 / MRR / Hit@5 numbers
+    # stay untouched and downstream consumers that only read those keys
+    # see no regression. New consumers read ``per_source_type`` /
+    # ``canary`` for the per-type breakdown.
+    per_source_type = aggregate_per_source_type(suite.cases, case_results)
+    canary_summary = aggregate_canary(suite.cases, case_results)
+
     result = BenchmarkResult(
         meta={
             "suite_name": suite.meta.get("name", "unknown"),
@@ -827,9 +895,11 @@ def run_benchmark(
             _KEY_WEIGHTED_TOTAL: weighted_total,
             "category_scores": per_category_avg,
             "gates": gates,
-            "ndcg_at_10": ndcg_at_10,
+            _KEY_NDCG_AT_10: ndcg_at_10,
             "hit_rate_at_5": hit_rate_at_5,
             "mrr_at_10": mrr_at_10,
+            "per_source_type": per_source_type,
+            "canary": canary_summary,
         },
         diagnostics=diagnostics,
         cases=case_results,

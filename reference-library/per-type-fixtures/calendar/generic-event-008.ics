@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-007@example.invalid
+DTSTAMP:20260508T140000Z
+DTSTART:20260508T140000Z
+DTEND:20260508T150000Z
+SUMMARY:project-falcon — deployment rollout strategy (Q1)
+DESCRIPTION:Working session on deployment rollout strategy for project-falcon in Q1. Driver: agent-delta.
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+ATTENDEE;CN=agent-foxtrot:mailto:agent-foxtrot@example.invalid
+END:VEVENT
+END:VCALENDAR

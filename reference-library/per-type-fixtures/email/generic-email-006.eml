@@ -1,0 +1,17 @@
+From: agent-beta@example.invalid
+To: agent-delta@example.invalid
+Subject: project-otter update
+Date: Mon, 04 May 2026 09:00:00 +0000
+Message-ID: <generic-005@example.invalid>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Para 0: covering observability stack upgrade for project-otter in Q3. Owner i=
+s agent-alpha; action: schedule the deployment rollout strategy review.
+Para 1: covering deployment rollout strategy for project-otter in Q3. Owner i=
+s agent-delta; action: schedule the incident response runbook review.
+Para 2: covering incident response runbook for project-otter in Q3. Owner is =
+agent-delta; action: schedule the schema migration sequencing review.
+Para 3: covering dependency cooldown window for project-otter in Q3. Owner is=
+ agent-alpha; action: schedule the incident response runbook review.

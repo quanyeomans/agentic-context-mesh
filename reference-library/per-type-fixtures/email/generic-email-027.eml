@@ -1,0 +1,17 @@
+From: agent-epsilon@example.invalid
+To: agent-beta@example.invalid
+Subject: project-lynx update
+Date: Mon, 04 May 2026 09:00:00 +0000
+Message-ID: <generic-026@example.invalid>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Para 0: covering deployment rollout strategy for project-lynx in Q4. Owner is=
+ agent-gamma; action: schedule the deployment rollout strategy review.
+Para 1: covering incident response runbook for project-lynx in Q4. Owner is a=
+gent-delta; action: schedule the feature-flag retirement review.
+Para 2: covering observability stack upgrade for project-lynx in Q4. Owner is=
+ agent-alpha; action: schedule the deployment rollout strategy review.
+Para 3: covering deployment rollout strategy for project-lynx in Q4. Owner is=
+ agent-epsilon; action: schedule the roadmap planning cycle review.

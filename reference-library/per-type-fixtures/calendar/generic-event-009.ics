@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-008@example.invalid
+DTSTAMP:20260509T140000Z
+DTSTART:20260509T140000Z
+DTEND:20260509T150000Z
+SUMMARY:project-condor — roadmap planning cycle (Q3)
+DESCRIPTION:Working session on roadmap planning cycle for project-condor in Q3. Driver: agent-epsilon.
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+RRULE:FREQ=WEEKLY;COUNT=4
+END:VEVENT
+END:VCALENDAR

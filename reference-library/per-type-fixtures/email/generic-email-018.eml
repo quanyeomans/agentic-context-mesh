@@ -1,0 +1,19 @@
+From: agent-epsilon@example.invalid
+To: agent-delta@example.invalid
+Subject: project-condor update
+Date: Mon, 04 May 2026 09:00:00 +0000
+Message-ID: <generic-017@example.invalid>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Para 0: covering roadmap planning cycle for project-condor in Q1. Owner is ag=
+ent-delta; action: schedule the performance benchmark baseline review.
+Para 1: covering deployment rollout strategy for project-condor in Q1. Owner =
+is agent-alpha; action: schedule the dependency cooldown window review.
+Para 2: covering deployment rollout strategy for project-condor in Q1. Owner =
+is agent-gamma; action: schedule the release-stabilisation gate review.
+Para 3: covering roadmap planning cycle for project-condor in Q1. Owner is ag=
+ent-alpha; action: schedule the observability stack upgrade review.
+Para 4: covering observability stack upgrade for project-condor in Q1. Owner =
+is agent-beta; action: schedule the deployment rollout strategy review.

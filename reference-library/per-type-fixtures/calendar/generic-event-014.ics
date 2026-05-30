@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-013@example.invalid
+DTSTAMP:20260514T140000Z
+DTSTART:20260514T140000Z
+DTEND:20260514T150000Z
+SUMMARY:project-lynx — dependency cooldown window (Q3)
+DESCRIPTION:Working session on dependency cooldown window for project-lynx in Q3. Driver: agent-alpha.
+ATTENDEE;CN=agent-foxtrot:mailto:agent-foxtrot@example.invalid
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+END:VEVENT
+END:VCALENDAR

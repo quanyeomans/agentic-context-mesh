@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:weekly-standup-week-02@example.invalid
+DTSTAMP:20260512T090000Z
+DTSTART:20260512T090000Z
+DTEND:20260512T093000Z
+SUMMARY:Weekly standup — our-team (MOVED)
+DESCRIPTION:Standup moved to Tuesday this week. Original Monday slot conflicts with project-falcon review. Next move: back to Monday from week 3.
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+END:VEVENT
+END:VCALENDAR

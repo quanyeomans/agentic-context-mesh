@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-016@example.invalid
+DTSTAMP:20260517T140000Z
+DTSTART:20260517T140000Z
+DTEND:20260517T150000Z
+SUMMARY:project-lynx — performance benchmark baseline (Q4)
+DESCRIPTION:Working session on performance benchmark baseline for project-lynx in Q4. Driver: agent-alpha.
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+ATTENDEE;CN=agent-foxtrot:mailto:agent-foxtrot@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+RRULE:FREQ=WEEKLY;COUNT=4
+END:VEVENT
+END:VCALENDAR

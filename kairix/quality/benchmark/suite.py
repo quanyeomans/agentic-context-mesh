@@ -89,6 +89,26 @@ class BenchmarkCase:
     zero matches (routing-boundary probe, e.g. 'this query against
     agent-X's scope must not surface shared-Y's note'). Reserved for
     P5/P6 scorer wiring; declarative-only in P4."""
+    # ------------------------------------------------------------------
+    # ADR-028 extensions — per-source-type slicing + boundary canaries
+    # ------------------------------------------------------------------
+    source_type: str | None = None
+    """Source-type tag for per-type Recall@k slicing — e.g. ``markdown``,
+    ``pptx``, ``pdf``, ``docx``, ``xlsx``, ``email``, ``calendar``. When
+    unset, the runner derives the type from the gold doc's file extension
+    or collection name. ADR-028 §"Quality evaluation" #1 prereq — every
+    benchmark answer-set is sliced by this tag so chunker-plugin
+    fitness can be measured per type."""
+    canary: bool = False
+    """When True, the case is a boundary-spanning canary — its gold answer
+    deliberately crosses two chunks of one atomic unit (slide pair, row
+    pair, event series, message thread). ADR-028 §"Quality evaluation"
+    #3 prereq — canaries fail loudly when a chunker regression splits
+    an atomic unit."""
+    canary_unit: str | None = None
+    """When ``canary`` is True, names the atomic unit the canary probes:
+    ``slide`` (PPTX), ``row`` (XLSX), ``event`` (calendar), ``message``
+    (email thread). The reporter slices canary pass-rate by this value."""
 
 
 @dataclass
@@ -450,6 +470,10 @@ class _CaseFields:
     scope: str | None = None
     collection: str | None = None
     expected_zero_results: bool | None = None
+    # ADR-028 — per-source-type slicing + boundary-spanning canaries
+    source_type: str | None = None
+    canary: bool = False
+    canary_unit: str | None = None
 
 
 def _coerce_str_list(items: Any) -> list[str] | None:
@@ -486,6 +510,9 @@ def build_benchmark_case(i: int, fields: _CaseFields) -> BenchmarkCase:
         expected_zero_results=(
             bool(fields.expected_zero_results) if fields.expected_zero_results is not None else None
         ),
+        source_type=str(fields.source_type) if fields.source_type else None,
+        canary=bool(fields.canary),
+        canary_unit=str(fields.canary_unit) if fields.canary_unit else None,
     )
 
 
@@ -555,6 +582,9 @@ def load_suite(path: str) -> BenchmarkSuite:
                 scope=raw_case.get("scope"),
                 collection=raw_case.get("collection"),
                 expected_zero_results=raw_case.get("expected_zero_results"),
+                source_type=raw_case.get("source_type"),
+                canary=bool(raw_case.get("canary", False)),
+                canary_unit=raw_case.get("canary_unit"),
             )
             cases.append(build_benchmark_case(i, fields))
 

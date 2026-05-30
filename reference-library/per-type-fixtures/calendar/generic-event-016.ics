@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-015@example.invalid
+DTSTAMP:20260516T140000Z
+DTSTART:20260516T140000Z
+DTEND:20260516T150000Z
+SUMMARY:project-orca — test-suite hardening (Q3)
+DESCRIPTION:Working session on test-suite hardening for project-orca in Q3. Driver: agent-alpha.
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+END:VEVENT
+END:VCALENDAR

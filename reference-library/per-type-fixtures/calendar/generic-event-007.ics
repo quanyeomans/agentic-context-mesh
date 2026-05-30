@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-006@example.invalid
+DTSTAMP:20260507T140000Z
+DTSTART:20260507T140000Z
+DTEND:20260507T150000Z
+SUMMARY:project-condor — schema migration sequencing (Q4)
+DESCRIPTION:Working session on schema migration sequencing for project-condor in Q4. Driver: agent-delta.
+ATTENDEE;CN=agent-foxtrot:mailto:agent-foxtrot@example.invalid
+ATTENDEE;CN=agent-delta:mailto:agent-delta@example.invalid
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+END:VEVENT
+END:VCALENDAR

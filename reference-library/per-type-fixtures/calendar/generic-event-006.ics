@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-005@example.invalid
+DTSTAMP:20260506T140000Z
+DTSTART:20260506T140000Z
+DTEND:20260506T150000Z
+SUMMARY:project-condor — incident response runbook (Q1)
+DESCRIPTION:Working session on incident response runbook for project-condor in Q1. Driver: agent-delta.
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-foxtrot:mailto:agent-foxtrot@example.invalid
+END:VEVENT
+END:VCALENDAR

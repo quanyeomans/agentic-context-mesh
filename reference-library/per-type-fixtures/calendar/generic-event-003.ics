@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-002@example.invalid
+DTSTAMP:20260503T140000Z
+DTSTART:20260503T140000Z
+DTEND:20260503T150000Z
+SUMMARY:project-lynx — release-stabilisation gate (Q1)
+DESCRIPTION:Working session on release-stabilisation gate for project-lynx in Q1. Driver: agent-gamma.
+ATTENDEE;CN=agent-beta:mailto:agent-beta@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-delta:mailto:agent-delta@example.invalid
+END:VEVENT
+END:VCALENDAR

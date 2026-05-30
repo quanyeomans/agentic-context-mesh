@@ -1,0 +1,25 @@
+From: agent-alpha@example.invalid
+To: agent-gamma@example.invalid
+Subject: project-lynx update
+Date: Mon, 04 May 2026 09:00:00 +0000
+Message-ID: <generic-014@example.invalid>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Para 0: covering roadmap planning cycle for project-lynx in Q4. Owner is agen=
+t-delta; action: schedule the incident response runbook review.
+Para 1: covering feature-flag retirement for project-lynx in Q4. Owner is age=
+nt-alpha; action: schedule the release-stabilisation gate review.
+Para 2: covering release-stabilisation gate for project-lynx in Q4. Owner is =
+agent-alpha; action: schedule the observability stack upgrade review.
+Para 3: covering roadmap planning cycle for project-lynx in Q4. Owner is agen=
+t-alpha; action: schedule the dependency cooldown window review.
+Para 4: covering dependency cooldown window for project-lynx in Q4. Owner is =
+agent-delta; action: schedule the incident response runbook review.
+Para 5: covering incident response runbook for project-lynx in Q4. Owner is a=
+gent-foxtrot; action: schedule the performance benchmark baseline review.
+Para 6: covering observability stack upgrade for project-lynx in Q4. Owner is=
+ agent-delta; action: schedule the dependency cooldown window review.
+Para 7: covering incident response runbook for project-lynx in Q4. Owner is a=
+gent-foxtrot; action: schedule the incident response runbook review.

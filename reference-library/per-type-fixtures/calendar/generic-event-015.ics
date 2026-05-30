@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-014@example.invalid
+DTSTAMP:20260515T140000Z
+DTSTART:20260515T140000Z
+DTEND:20260515T150000Z
+SUMMARY:project-otter — dependency cooldown window (Q1)
+DESCRIPTION:Working session on dependency cooldown window for project-otter in Q1. Driver: agent-epsilon.
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-alpha:mailto:agent-alpha@example.invalid
+END:VEVENT
+END:VCALENDAR

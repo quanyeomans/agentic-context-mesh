@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-003@example.invalid
+DTSTAMP:20260504T140000Z
+DTSTART:20260504T140000Z
+DTEND:20260504T150000Z
+SUMMARY:project-falcon — feature-flag retirement (Q1)
+DESCRIPTION:Working session on feature-flag retirement for project-falcon in Q1. Driver: agent-beta.
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+END:VEVENT
+END:VCALENDAR

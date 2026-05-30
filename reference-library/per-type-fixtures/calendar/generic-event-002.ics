@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//kairix//per-type-fixtures//EN
+BEGIN:VEVENT
+UID:generic-event-001@example.invalid
+DTSTAMP:20260502T140000Z
+DTSTART:20260502T140000Z
+DTEND:20260502T150000Z
+SUMMARY:project-otter — incident response runbook (Q4)
+DESCRIPTION:Working session on incident response runbook for project-otter in Q4. Driver: agent-beta.
+ATTENDEE;CN=agent-delta:mailto:agent-delta@example.invalid
+ATTENDEE;CN=agent-epsilon:mailto:agent-epsilon@example.invalid
+ATTENDEE;CN=agent-gamma:mailto:agent-gamma@example.invalid
+END:VEVENT
+END:VCALENDAR
