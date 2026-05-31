@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from tenacity import RetryError
 
 from kairix.connectors.dex_crm.client import DexCrmClient, DexCrmClientConfig
 from kairix.transport.auth.api_key import ApiKeyAuth, BearerHeaders
@@ -127,17 +126,21 @@ def test_dex_crm_429_exhausted_raises_typed_error() -> None:
     exhaust (no silent swallow that would let the worker keep polling),
     AND the recorded sleeps prove the backoff progressed.
 
-    The current contract surfaces :class:`tenacity.RetryError` (rather
-    than :class:`httpx.HTTPStatusError`) on exhausted-retries because
-    the retry predicate is ``retry_if_result`` not ``retry_if_exception_type``
-    — tenacity wraps the final "rejected result" in ``RetryError``. GH #358
-    covers normalising this to ``HTTPStatusError`` matching the SharePoint
-    connector's shape.
+    GH #358: the exhausted-retry surface is now :class:`httpx.HTTPStatusError`
+    (was :class:`tenacity.RetryError` pre-fix), matching the SharePoint
+    connector. The retry predicate is ``retry_if_result`` not
+    ``retry_if_exception_type``, so tenacity wraps the rejected response
+    in :class:`tenacity.RetryError`; the client lifts the underlying
+    response and re-raises via ``raise_for_status`` so dead-letter logs
+    show the canonical HTTP error type.
 
-    Sabotage proof: changing the retry loop's ``stop`` to
-    ``stop_after_attempt(99)`` would never exhaust on the bounded
-    handler-call count; the ``pytest.raises`` block sees nothing and
-    the test hangs / times out. Restored.
+    Sabotage proof: dropping the ``except RetryError`` branch in
+    ``_send_with_retry`` (or restoring the original
+    ``exc.last_attempt.exception()`` + bare ``raise`` shape) makes the
+    assertion fail because ``tenacity.RetryError`` bubbles up instead of
+    :class:`httpx.HTTPStatusError`. Mutation executed during authoring;
+    the ``pytest.raises(httpx.HTTPStatusError)`` block saw a
+    :class:`RetryError` and the test failed. Restored.
     """
     call_count = {"n": 0}
     recorded_sleeps: list[float] = []
@@ -150,9 +153,12 @@ def test_dex_crm_429_exhausted_raises_typed_error() -> None:
         return httpx.Response(429, json={"error": "throttled"})
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps, max_retries=max_retries)
-    with pytest.raises(RetryError):
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
         list(client.iter_listing("contacts", updated_after=None))
 
+    assert exc_info.value.response.status_code == 429, (
+        f"exhausted-retry surface must be 429, saw {exc_info.value.response.status_code}"
+    )
     assert call_count["n"] == max_retries, (
         f"expected {max_retries} attempts before exhausting retries, saw {call_count['n']}"
     )
@@ -163,6 +169,61 @@ def test_dex_crm_429_exhausted_raises_typed_error() -> None:
     assert all(s > 0.0 for s in recorded_sleeps), (
         f"every retry must sleep before the next attempt, saw {recorded_sleeps!r}"
     )
+
+
+@pytest.mark.integration
+def test_dex_crm_429_exhausted_error_type_is_httpx_not_tenacity() -> None:
+    """The exhausted-retry path raises ``httpx.HTTPStatusError``, NOT ``tenacity.RetryError``.
+
+    Operator-facing dead-letter logs need the canonical HTTP error type
+    so a 429 surfaces as "Graph throttle" not "tenacity internal". This
+    test explicitly pins that the result-based retry predicate
+    (``retry_if_result``) does NOT leak ``tenacity.RetryError`` to
+    callers — the client's ``except RetryError`` handler must intercept
+    and re-raise via ``response.raise_for_status()``.
+
+    GH #358 — pairs with ``test_dex_crm_429_exhausted_raises_typed_error``
+    by adding an explicit ``isinstance`` check that the bug-shape error
+    type does NOT escape, even though the positive assertion already
+    proves it.
+
+    Sabotage proof: replacing the ``except RetryError`` body with bare
+    ``raise`` (the pre-fix shape) makes this test fail with
+    ``tenacity.RetryError`` instead of the expected
+    :class:`httpx.HTTPStatusError`. Mutation executed during authoring;
+    test failed concretely. Restored.
+    """
+    # Tenacity is imported here (not at module scope) because the
+    # contract is "RetryError must NOT escape" — the production import
+    # surface stays narrow, and the test's negative assertion needs the
+    # type symbol to compare against.
+    from tenacity import RetryError as _TenacityRetryError
+
+    call_count = {"n": 0}
+    recorded_sleeps: list[float] = []
+    max_retries = 2
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if not request.url.path.endswith(_LISTING_PATH_TAIL):
+            return httpx.Response(200, json={"data": [], "next_cursor": None})
+        call_count["n"] += 1
+        return httpx.Response(429, json={"error": "throttled"})
+
+    client = _build_client(_handler, recorded_sleeps=recorded_sleeps, max_retries=max_retries)
+    raised: Exception | None = None
+    try:
+        list(client.iter_listing("contacts", updated_after=None))
+    except Exception as exc:
+        raised = exc
+
+    assert raised is not None, "exhausted retries must raise"
+    assert not isinstance(raised, _TenacityRetryError), (
+        f"GH #358: tenacity.RetryError must NOT leak to callers, saw {type(raised).__name__}"
+    )
+    assert isinstance(raised, httpx.HTTPStatusError), (
+        f"exhausted retries must surface httpx.HTTPStatusError, saw {type(raised).__name__}"
+    )
+    assert raised.response.status_code == 429
 
 
 @pytest.mark.integration

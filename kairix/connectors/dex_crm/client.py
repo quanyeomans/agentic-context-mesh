@@ -247,17 +247,23 @@ class DexCrmClient:
         )
         try:
             response = retrying(client.get, url, headers=headers, params=params)
-        except RetryError as exc:  # pragma: no cover — reraise=True bypasses this path
-            wrapped = exc.last_attempt.exception()
-            if wrapped is not None:
-                raise wrapped from exc
-            raise
-        if _is_rate_limited(response):
+        except RetryError as exc:
+            # ``retry_if_result`` returns a "successful" outcome from
+            # tenacity's perspective, so ``reraise=True`` can't lift an
+            # exception (there is none). On stop-condition exhaustion
+            # tenacity wraps the final attempt's result in
+            # :class:`RetryError`; we lift the underlying response and
+            # convert it via ``raise_for_status`` so callers see the
+            # canonical :class:`httpx.HTTPStatusError` (GH #358 — matches
+            # the SharePoint connector's exhausted-retry surface).
+            final: httpx.Response = exc.last_attempt.result()
             logger.warning(
                 "dex_crm: rate-limited after %d attempts on path %s",
                 self.config.max_retries,
                 safe_path,
             )
+            final.raise_for_status()
+            return final  # pragma: no cover — raise_for_status above always raises here for 429
         response.raise_for_status()
         return response
 
