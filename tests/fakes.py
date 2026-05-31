@@ -2146,6 +2146,73 @@ class FakeXlsxExtractor:
         return SourceMetadata()
 
 
+class FakeEmbeddingCache:
+    """In-memory ``EmbeddingCache``-compatible fake for unit tests.
+
+    Mirrors :class:`kairix.core.embed.embedding_cache.EmbeddingCache`'s
+    shape — ``get_many`` / ``put_many`` / ``count`` / ``clear`` /
+    ``close`` — but stores rows in a plain dict instead of SQLite. Use
+    when a test wants to assert "the cache was consulted with these
+    hashes" or "the cache contains exactly N vectors" without paying
+    the SQLite open cost.
+
+    Integration tests that want production fidelity should instead
+    construct a real :class:`EmbeddingCache` against ``tmp_path``.
+
+    Records every ``get_many`` / ``put_many`` call on ``get_calls`` /
+    ``put_calls`` so tests can sabotage-prove the integration boundary.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[tuple[str, int, str], list[float]] = {}
+        self.get_calls: list[tuple[str, int, list[str]]] = []
+        self.put_calls: list[tuple[str, int, list[str]]] = []
+        self.closed: bool = False
+
+    def get_many(
+        self,
+        model: str,
+        dimension: int,
+        chunk_hashes: Any,
+    ) -> dict[str, Any]:
+        import numpy as np
+
+        hashes = list(chunk_hashes)
+        self.get_calls.append((model, dimension, hashes))
+        out: dict[str, Any] = {}
+        for h in hashes:
+            stored = self._store.get((model, dimension, h))
+            if stored is not None:
+                out[h] = np.asarray(stored, dtype="float32")
+        return out
+
+    def put_many(
+        self,
+        model: str,
+        dimension: int,
+        pairs: Any,
+    ) -> int:
+        written = 0
+        recorded_hashes: list[str] = []
+        for chunk_hash, vector in pairs:
+            self._store[(model, dimension, chunk_hash)] = list(vector)
+            recorded_hashes.append(chunk_hash)
+            written += 1
+        self.put_calls.append((model, dimension, recorded_hashes))
+        return written
+
+    def count(self, model: str | None = None, dimension: int | None = None) -> int:
+        if model is None and dimension is None:
+            return len(self._store)
+        return sum(1 for (m, d, _h) in self._store if m == model and d == dimension)
+
+    def clear(self) -> None:
+        self._store.clear()
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class FakeCorpusEmbedder:
     """Capture-only CorpusEmbedder — records embed calls, returns scripted counts.
 

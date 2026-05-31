@@ -446,6 +446,21 @@ def workspace_root() -> Path:
     return KairixPaths.resolve().workspace_root
 
 
+def embedding_cache_path() -> Path:
+    """Resolve the SQLite-backed persistent embedding cache path.
+
+    Lives under ``<document_root>/.kairix/cache/embedding_cache.sqlite``
+    so it travels with the document store across deployments and is
+    never mixed with the canonical ``index.sqlite``. Reuses the cached
+    ``document_root()`` resolution so per-process overrides flow through.
+
+    See :mod:`kairix.core.embed.embedding_cache` for cache shape +
+    invariants. F4-clean — the env read for ``KAIRIX_DOCUMENT_ROOT``
+    happens inside ``document_root`` at the paths boundary.
+    """
+    return document_root() / ".kairix" / "cache" / "embedding_cache.sqlite"
+
+
 def summaries_db_path() -> Path:
     """Get the summaries database path.
 

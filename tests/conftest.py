@@ -89,6 +89,7 @@ pytest_plugins = [
     "tests.bdd.steps.query_cache_steps",
     "tests.bdd.steps.enrich_cache_steps",
     "tests.bdd.steps.embed_cache_steps",
+    "tests.bdd.steps.embedding_cache_steps",
     "tests.bdd.steps.embed_coalescer_steps",
     "tests.bdd.steps.vec_index_batched_metadata_steps",
     "tests.bdd.steps.transport_pool_steps",

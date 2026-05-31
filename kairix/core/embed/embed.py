@@ -14,6 +14,7 @@ from typing import Any
 
 from .date_extract import extract_chunk_date
 from .deps import EmbedDependencies
+from .embedding_cache import EmbeddingCache, hash_chunk_text
 from .schema import EMBED_VECTOR_DIMS, SchemaVersionError
 
 logger = logging.getLogger(__name__)
@@ -420,6 +421,49 @@ def _gather_pending_chunks(
     return all_chunks, len(rows)
 
 
+def _split_batch_against_cache(
+    batch: list[dict[str, Any]],
+    cache: EmbeddingCache | None,
+    deployment: str,
+    dims: int,
+) -> tuple[
+    list[tuple[dict[str, Any], list[float]]],
+    list[dict[str, Any]],
+]:
+    """Split a batch into ``(cache_hits, cache_misses)``.
+
+    Returns ``(hits, misses)`` where ``hits`` is a list of
+    ``(chunk, vector_as_list_of_floats)`` pairs already populated from
+    the persistent cache, and ``misses`` is the subset of ``batch`` that
+    must go to the embed provider. With ``cache=None`` every chunk is a
+    miss.
+
+    Each chunk's ``text_hash`` is computed once here and stashed on the
+    chunk dict so subsequent cache writes reuse the same hash without
+    re-hashing.
+    """
+    if cache is None:
+        for chunk in batch:
+            chunk.setdefault("text_hash", hash_chunk_text(chunk["text"]))
+        return [], list(batch)
+
+    hashes: list[str] = []
+    for chunk in batch:
+        text_hash = chunk.setdefault("text_hash", hash_chunk_text(chunk["text"]))
+        hashes.append(text_hash)
+
+    cached = cache.get_many(deployment, dims, hashes)
+    hits: list[tuple[dict[str, Any], list[float]]] = []
+    misses: list[dict[str, Any]] = []
+    for chunk in batch:
+        cached_vec = cached.get(chunk["text_hash"])
+        if cached_vec is not None:
+            hits.append((chunk, cached_vec.tolist()))
+        else:
+            misses.append(chunk)
+    return hits, misses
+
+
 def _embed_batch_only(
     batch: list[dict[str, Any]],
     batch_idx: int,
@@ -428,51 +472,84 @@ def _embed_batch_only(
     deployment: str,
     dims: int,
     embed_batch_fn: Callable[..., list[list[float]]],
+    *,
+    cache: EmbeddingCache | None = None,
 ) -> tuple[list[dict[str, Any]], list[list[float]], list[dict[str, Any]], bool]:
-    """Embed a single batch via the Azure call only — no DB / index writes.
+    """Embed a single batch via the provider call only — no DB / index writes.
 
-    Returns ``(matched_chunks, vectors, unaccounted_chunks, azure_failed)``.
+    Returns ``(matched_chunks, vectors, unaccounted_chunks, provider_failed)``.
 
-    Split from the persistence step so multiple Azure calls can run in
+    Cache-first: any chunk whose ``(deployment, dims, sha256(text))``
+    tuple is present in the persistent cache short-circuits the provider
+    call. The provider only sees the cache misses. After the provider
+    response the new vectors are written to the cache BEFORE the caller
+    persists them anywhere else — a crash between provider response and
+    SQLite write leaves the cache with the vectors so the next run finds
+    them and skips the provider.
+
+    Split from the persistence step so multiple provider calls can run in
     parallel threads while the SQLite + usearch writes stay serialised
-    on a single writer thread. SQLite write serialisation is the cheap
-    half of the cycle (~50ms/batch); Azure is the expensive half (~1-2s/
-    batch). Parallelising only the Azure half captures ~95% of the
-    available speedup without touching SQLite thread-safety.
+    on a single writer thread.
 
-    ``azure_failed=True`` means the Azure call raised — caller marks all
-    chunks in the batch as failed. ``unaccounted`` are chunks the
-    backend returned no vector for (partial 5xx / rate-limit) — caller
-    surfaces these as failed without overwriting matched chunks.
+    ``provider_failed=True`` means the provider call raised — caller marks
+    every miss in the batch as failed (cache hits are kept). ``unaccounted``
+    are chunks the backend returned no vector for (partial 5xx / rate-limit).
     """
-    texts = [c["text"] for c in batch]
+    hits, misses = _split_batch_against_cache(batch, cache, deployment, dims)
 
-    try:
-        vectors = embed_batch_fn(texts, api_key, endpoint, deployment, dims)
-    except (RuntimeError, KeyError, ValueError, OSError):
-        logger.exception(
-            "Batch %d failed — logging %d chunks as failed",
-            batch_idx,
-            len(batch),
-        )
-        return [], [], [], True
+    miss_vectors: list[list[float]] = []
+    provider_failed = False
+    if misses:
+        texts = [c["text"] for c in misses]
+        try:
+            miss_vectors = embed_batch_fn(texts, api_key, endpoint, deployment, dims)
+        except (RuntimeError, KeyError, ValueError, OSError):
+            logger.exception(
+                "Batch %d failed — logging %d chunks as failed",
+                batch_idx,
+                len(misses),
+            )
+            provider_failed = True
 
-    # Defend against a partial response — the backend may return fewer vectors
-    # than texts (rate-limit, partial 5xx, mocked dev backends). Without this
-    # guard, ``zip(strict=False)`` would silently truncate and we'd report all
-    # chunks as embedded while staging only the matched ones — a silent
-    # over-count surfaced by the partial-response contract test.
-    matched = batch[: len(vectors)]
-    unaccounted = list(batch[len(vectors) :])
+    if provider_failed:
+        # Cache hits are still good to surface — they cost nothing and
+        # the production goal is to skip provider calls on chunks we
+        # already paid for. Only the misses count as failed here.
+        hit_chunks = [chunk for chunk, _ in hits]
+        hit_vectors = [vec for _, vec in hits]
+        return hit_chunks, hit_vectors, [], True
+
+    matched_misses = misses[: len(miss_vectors)]
+    unaccounted = list(misses[len(miss_vectors) :])
     if unaccounted:
         logger.error(
             "Batch %d: backend returned %d vectors for %d texts — %d chunks unaccounted",
             batch_idx,
-            len(vectors),
-            len(batch),
+            len(miss_vectors),
+            len(misses),
             len(unaccounted),
         )
 
+    if cache is not None and matched_misses:
+        try:
+            cache.put_many(
+                deployment,
+                dims,
+                ((c["text_hash"], v) for c, v in zip(matched_misses, miss_vectors, strict=True)),
+            )
+        except sqlite3.Error:
+            logger.exception("embedding_cache: put_many for batch %d failed (continuing)", batch_idx)
+
+    matched = [chunk for chunk, _ in hits] + matched_misses
+    vectors = [vec for _, vec in hits] + list(miss_vectors)
+    if hits:
+        logger.info(
+            "Batch %d: %d/%d cache hits (saved %d provider calls)",
+            batch_idx,
+            len(hits),
+            len(batch),
+            len(hits),
+        )
     return matched, vectors, unaccounted, False
 
 
@@ -488,6 +565,8 @@ def _embed_and_store_batch(
     now: int,
     save_interval: int,
     embed_batch_fn: Callable[..., list[list[float]]],
+    *,
+    cache: EmbeddingCache | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Embed a single batch and write results to DB + usearch index.
 
@@ -503,10 +582,17 @@ def _embed_and_store_batch(
     exercise the per-batch boundary directly.
     """
     matched, vectors, unaccounted, azure_failed = _embed_batch_only(
-        batch, batch_idx, api_key, endpoint, deployment, dims, embed_batch_fn
+        batch, batch_idx, api_key, endpoint, deployment, dims, embed_batch_fn, cache=cache
     )
     if azure_failed:
-        return 0, list(batch)
+        # Cache hits already in `matched` are real and should still
+        # persist. The miss-set is the failed set.
+        failed = [c for c in batch if c not in matched]
+    else:
+        failed = list(unaccounted)
+
+    if not matched:
+        return 0, failed
 
     try:
         _stage_batch_embeddings(db, matched, vectors, deployment, now)
@@ -515,7 +601,7 @@ def _embed_and_store_batch(
         return 0, list(batch)
 
     _add_batch_to_vec_index(vec_index, matched, vectors, batch_idx, save_interval)
-    return len(matched), unaccounted
+    return len(matched), failed
 
 
 def _stage_batch_embeddings(
@@ -650,6 +736,8 @@ def _run_embed_loop_parallel(
     save_interval: int,
     total: int,
     embed_batch_fn: Callable[..., list[list[float]]],
+    *,
+    cache: EmbeddingCache | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Run the embed loop with up to ``parallel`` concurrent Azure calls.
 
@@ -682,6 +770,7 @@ def _run_embed_loop_parallel(
                 deployment,
                 actual_dims,
                 embed_batch_fn,
+                cache=cache,
             ): (batch_idx, batch)
             for batch_idx, batch in batches
         }
@@ -690,8 +779,12 @@ def _run_embed_loop_parallel(
             batch_idx, batch = future_to_batch[fut]
             matched, vectors, unaccounted, azure_failed = fut.result()
             if azure_failed:
-                failed_chunks.extend(batch)
-                continue
+                # Cache hits already in `matched` still persist; only the
+                # provider-bound subset counts as failed.
+                misses_failed = [c for c in batch if c not in matched]
+                failed_chunks.extend(misses_failed)
+                if not matched:
+                    continue
             persisted = _persist_batch_result(
                 matched,
                 vectors,
@@ -751,6 +844,8 @@ def _run_embed_loop_serial(
     save_interval: int,
     total: int,
     embed_batch_fn: Callable[..., list[list[float]]],
+    *,
+    cache: EmbeddingCache | None = None,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Run the embed loop serially — today's default, ``--parallel 1``.
 
@@ -773,6 +868,7 @@ def _run_embed_loop_serial(
             now,
             save_interval,
             embed_batch_fn=embed_batch_fn,
+            cache=cache,
         )
         embedded += batch_ok
         failed_chunks.extend(batch_failed)
@@ -862,37 +958,45 @@ def run_embed(
     _maybe_clear_vec_index_for_force(force, vec_index)
     save_interval = 10
 
-    if parallel == 1:
-        embedded, failed_chunks = _run_embed_loop_serial(
-            all_chunks,
-            batch_size,
-            db,
-            vec_index,
-            api_key,
-            endpoint,
-            deployment,
-            actual_dims,
-            now,
-            save_interval,
-            total,
-            deps.embed_batch,
-        )
-    else:
-        embedded, failed_chunks = _run_embed_loop_parallel(
-            all_chunks,
-            batch_size,
-            parallel,
-            db,
-            vec_index,
-            api_key,
-            endpoint,
-            deployment,
-            actual_dims,
-            now,
-            save_interval,
-            total,
-            deps.embed_batch,
-        )
+    cache = deps.open_embedding_cache()
+
+    try:
+        if parallel == 1:
+            embedded, failed_chunks = _run_embed_loop_serial(
+                all_chunks,
+                batch_size,
+                db,
+                vec_index,
+                api_key,
+                endpoint,
+                deployment,
+                actual_dims,
+                now,
+                save_interval,
+                total,
+                deps.embed_batch,
+                cache=cache,
+            )
+        else:
+            embedded, failed_chunks = _run_embed_loop_parallel(
+                all_chunks,
+                batch_size,
+                parallel,
+                db,
+                vec_index,
+                api_key,
+                endpoint,
+                deployment,
+                actual_dims,
+                now,
+                save_interval,
+                total,
+                deps.embed_batch,
+                cache=cache,
+            )
+    finally:
+        if cache is not None:
+            cache.close()
 
     _save_index_checkpoint(vec_index)
 

@@ -22,9 +22,11 @@ from kairix.core.embed._deps_defaults import (
     default_get_azure_config,
     default_get_document_root,
     default_migrate_content_vectors,
+    default_open_embedding_cache,
     default_open_usearch_index,
     default_preflight_check,
 )
+from kairix.core.embed.embedding_cache import EmbeddingCache
 
 
 @dataclass
@@ -59,3 +61,6 @@ class EmbedDependencies:
         default_factory=lambda: default_migrate_content_vectors
     )
     get_document_root: Callable[[], str | None] = field(default_factory=lambda: default_get_document_root)
+    open_embedding_cache: Callable[[], EmbeddingCache | None] = field(
+        default_factory=lambda: default_open_embedding_cache
+    )

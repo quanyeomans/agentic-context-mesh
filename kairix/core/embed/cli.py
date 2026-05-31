@@ -146,6 +146,7 @@ def cmd_embed(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> 
             skip_recall_check=args.skip_recall_check,
             rebuild_canaries=getattr(args, "rebuild_canaries", False),
             parallel=getattr(args, "parallel", DEFAULT_PARALLEL_BATCHES),
+            force_rebuild_cache=getattr(args, "force_rebuild_cache", False),
         )
     except ValueError as exc:
         # --parallel out of range surfaces here as an F21-shaped affordance
@@ -370,6 +371,16 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
         ),
     )
     embed_p.add_argument(
+        "--force-rebuild-cache",
+        action=_STORE_TRUE,
+        help=(
+            "Discard the persistent embedding_cache.sqlite before the run. "
+            "Use only when the cache itself is suspected wrong (e.g. corrupted "
+            "rows). Rare — --force alone rebuilds the vec index from the cache "
+            "for $0 when the cache is intact."
+        ),
+    )
+    embed_p.add_argument(
         "--skip-summarise",
         action=_STORE_TRUE,
         help="Skip post-embed L0 summary generation",
@@ -409,6 +420,7 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
             args.parallel = DEFAULT_PARALLEL_BATCHES
             args.skip_recall_check = False
             args.rebuild_canaries = False
+            args.force_rebuild_cache = False
             args.skip_summarise = False
         sys.exit(cmd_embed(args, deps=deps))
     elif args.command == "recall-check":

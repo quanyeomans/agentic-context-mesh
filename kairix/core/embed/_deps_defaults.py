@@ -24,6 +24,7 @@ All defaults are addressed by their fully-qualified name in
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from typing import Any
 
@@ -70,6 +71,38 @@ def default_migrate_content_vectors(db: sqlite3.Connection) -> None:
     from kairix.core.embed.schema import migrate_content_vectors
 
     migrate_content_vectors(db)
+
+
+def default_open_embedding_cache() -> Any:
+    """Production default for ``EmbedDependencies.open_embedding_cache``.
+
+    Resolves the path under ``KAIRIX_DOCUMENT_ROOT/.kairix/cache/`` via
+    the F4 paths boundary and returns an open
+    :class:`kairix.core.embed.embedding_cache.EmbeddingCache`. Returning
+    ``None`` on path-layer failure keeps the embed pipeline running
+    without the cache safety net — the operator still gets vectors,
+    just without restart-resilience for this cycle.
+
+    Test-isolation guard: pytest sets ``PYTEST_CURRENT_TEST`` for every
+    test it runs. When that env var is present we refuse to construct
+    a cache against the production path resolution, since test fixtures
+    that haven't explicitly injected a cache via
+    ``EmbedDependencies(open_embedding_cache=...)`` would otherwise
+    leak cache files into the developer's real document root and bleed
+    state between unrelated tests. Test code that genuinely wants the
+    cache path exercised passes a ``tmp_path``-backed
+    :class:`EmbeddingCache` through the constructor seam.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    try:
+        from kairix.core.embed.embedding_cache import EmbeddingCache
+        from kairix.paths import embedding_cache_path
+
+        return EmbeddingCache(embedding_cache_path())
+    except Exception as e:
+        logger.warning("default_open_embedding_cache: cache unavailable — %s", e)
+        return None
 
 
 def default_get_document_root() -> str | None:

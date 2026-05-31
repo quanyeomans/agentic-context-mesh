@@ -255,6 +255,35 @@ class PipelineDeps:
     )
 
 
+def _drop_embedding_cache(deps: EmbedDependencies | None, diagnostics: list[str]) -> None:
+    """Clear the persistent embedding cache before the embed call.
+
+    Opens a transient handle via ``deps.open_embedding_cache`` (the same
+    seam ``run_embed`` uses) so production reads from
+    :func:`kairix.paths.embedding_cache_path` and tests can inject a
+    pinned ``EmbeddingCache(tmp_path)``. Failures are surfaced as
+    diagnostics rather than raised so the embed call still runs — the
+    operator picked ``--force-rebuild-cache`` because they want to
+    re-embed regardless.
+    """
+    if deps is None:
+        deps = EmbedDependencies()
+    try:
+        cache = deps.open_embedding_cache()
+    except Exception as exc:
+        diagnostics.append(f"force_rebuild_cache: open failed — {exc}")
+        return
+    if cache is None:
+        diagnostics.append("force_rebuild_cache: open returned None — cache layer unavailable")
+        return
+    try:
+        cache.clear()
+    except Exception as exc:
+        diagnostics.append(f"force_rebuild_cache: clear failed — {exc}")
+    finally:
+        cache.close()
+
+
 def run_incremental_embed_pipeline(
     *,
     force: bool = False,
@@ -265,6 +294,7 @@ def run_incremental_embed_pipeline(
     deps: EmbedDependencies | None = None,
     pipeline_deps: PipelineDeps | None = None,
     parallel: int = DEFAULT_PARALLEL_BATCHES,
+    force_rebuild_cache: bool = False,
 ) -> EmbedPipelineResult:
     """Run the full incremental embed pipeline and return a structured result.
 
@@ -322,6 +352,9 @@ def run_incremental_embed_pipeline(
             validate_fn(db)
 
             scan_new, scan_updated, scan_errors = scan_fn(db, diagnostics)
+
+            if force_rebuild_cache:
+                _drop_embedding_cache(deps, diagnostics)
 
             embed_result = embed_fn(
                 db=db,

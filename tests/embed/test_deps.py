@@ -336,3 +336,95 @@ def test_default_get_document_root_returns_string_on_success(tmp_path: Any) -> N
 
     assert isinstance(result, str)
     assert result == str(tmp_path)
+
+
+# ── default_open_embedding_cache — production-default wrapper ─────────
+
+
+@pytest.mark.unit
+def test_default_open_embedding_cache_returns_none_under_pytest() -> None:
+    """The default wrapper short-circuits to ``None`` under pytest so test
+    fixtures that haven't explicitly injected a cache via
+    ``EmbedDependencies(open_embedding_cache=...)`` don't leak cache
+    files into the developer's real document root.
+    """
+    import os
+
+    assert os.environ.get("PYTEST_CURRENT_TEST")  # confirm pytest sentinel is live
+    deps = EmbedDependencies()
+    result = deps.open_embedding_cache()
+    assert result is None
+
+
+@pytest.mark.unit
+def test_default_open_embedding_cache_constructs_cache_outside_pytest(tmp_path) -> None:
+    """When the pytest sentinel is absent, the default wrapper resolves
+    the path via ``kairix.paths.embedding_cache_path`` and returns an
+    open ``EmbeddingCache``.
+
+    Drives both the path-resolution branch (sys.modules swap on
+    ``kairix.paths`` so the lazy import inside the wrapper picks up
+    our stand-in) and the os.environ "no PYTEST_CURRENT_TEST" branch
+    (temporarily unset).
+    """
+    import os
+    import sys
+    import types
+
+    from kairix.core.embed.embedding_cache import EmbeddingCache
+
+    target = tmp_path / "cache.sqlite"
+    fake_paths = types.ModuleType("kairix.paths")
+    fake_paths.embedding_cache_path = lambda: target  # type: ignore[attr-defined]  # synthetic stand-in module; mypy doesn't know our test attrs
+
+    real_paths = sys.modules.get("kairix.paths")
+    sys.modules["kairix.paths"] = fake_paths
+    real_env = os.environ.pop("PYTEST_CURRENT_TEST", None)
+    try:
+        deps = EmbedDependencies()
+        result = deps.open_embedding_cache()
+    finally:
+        if real_env is not None:
+            os.environ["PYTEST_CURRENT_TEST"] = real_env
+        if real_paths is not None:
+            sys.modules["kairix.paths"] = real_paths
+        else:
+            sys.modules.pop("kairix.paths", None)
+        if isinstance(result, EmbeddingCache):
+            result.close()
+
+    assert isinstance(result, EmbeddingCache)
+    assert result.path == target
+
+
+@pytest.mark.unit
+def test_default_open_embedding_cache_swallows_paths_layer_failure() -> None:
+    """When the paths layer raises during cache-path resolution, the
+    wrapper logs and returns ``None`` rather than crashing the embed
+    pipeline."""
+    import os
+    import sys
+    import types
+
+    fake_paths = types.ModuleType("kairix.paths")
+
+    def _boom() -> Any:
+        raise RuntimeError("paths layer not initialised")
+
+    fake_paths.embedding_cache_path = _boom  # type: ignore[attr-defined]  # synthetic stand-in module; mypy doesn't know our test attrs
+
+    real_paths = sys.modules.get("kairix.paths")
+    sys.modules["kairix.paths"] = fake_paths
+    real_env = os.environ.pop("PYTEST_CURRENT_TEST", None)
+    try:
+        deps = EmbedDependencies()
+        result = deps.open_embedding_cache()
+    finally:
+        if real_env is not None:
+            os.environ["PYTEST_CURRENT_TEST"] = real_env
+        if real_paths is not None:
+            sys.modules["kairix.paths"] = real_paths
+        else:
+            sys.modules.pop("kairix.paths", None)
+
+    assert result is None

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, TypedDict
@@ -48,6 +49,46 @@ _METADATA_SELECT_SQL: str = (
     "FROM documents d LEFT JOIN content c ON d.hash = c.hash "
     "WHERE d.active = 1 AND d.hash IN ({placeholders})"
 )
+
+
+def _fsync_file(path: Path) -> None:
+    """Flush a freshly written file's bytes to disk.
+
+    Best-effort: an OSError here (e.g. a filesystem that does not
+    implement fsync) is logged and swallowed because the atomic rename
+    that follows still gives "old file OR new file, never partial" — the
+    fsync is the belt-and-braces durability guarantee, not a correctness
+    requirement.
+    """
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        logger.warning("vec_index: fsync(%s) failed — %s", path, e)
+
+
+def _fsync_dir(directory: Path) -> None:
+    """Flush a directory entry to disk so the rename is durable.
+
+    On POSIX, ``os.rename`` is atomic but the directory entry update
+    that records the new file name lives in the parent's inode; only an
+    fsync on the directory fd guarantees the rename survives a crash
+    that hits before the next periodic dirent flush. No-op on Windows
+    where directory fsync is not supported.
+    """
+    try:
+        fd = os.open(str(directory), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError as e:
+        # PermissionError on Windows (no dir fsync) is expected and not
+        # actionable; log at debug so production noise stays low.
+        logger.debug("vec_index: fsync(dir=%s) skipped — %s", directory, e)
 
 
 class VecResult(TypedDict):
@@ -112,8 +153,18 @@ class VectorIndex:
 
         If the index was built with different dimensions, deletes it and
         returns 0 so a fresh index is created on the next add_vectors() call.
+
+        Crash-recovery: if the canonical ``<index_path>`` is missing but
+        a sibling ``<index_path>.tmp`` exists (a crash mid-rename during
+        :meth:`_save`), promote the .tmp file to the canonical path
+        before loading. The atomic rename in ``_save`` makes "old file
+        intact OR new file intact" the only post-crash states; surfacing
+        the .tmp here closes the rare window where the OS crashed
+        between fsync and rename.
         """
         from usearch.index import Index
+
+        self._recover_pending_tmp_files()
 
         if not self._index_path.exists():
             return 0
@@ -404,17 +455,65 @@ class VectorIndex:
         self._save()
 
     def _save(self) -> None:
-        """Save index and metadata to disk."""
+        """Save index and metadata to disk using a write-tmp + fsync + rename
+        protocol.
+
+        Crash-safety contract: ``os.replace(tmp, path)`` is atomic on POSIX,
+        so a crash mid-cycle leaves either the old valid file or the new
+        valid file — never a half-written index that fails ``Index.restore``
+        with an unreadable header. ``os.fsync`` on the temp file and on the
+        parent directory fd flushes the bytes + the directory entry before
+        the rename, which is what makes the atomicity guarantee meaningful
+        on disks with write caches.
+
+        Closes the production incident where ~1.57M of 1.8M vectors were
+        successfully embedded then the file was corrupted by a partial
+        in-place write; the operator paid for the embed calls but had to
+        re-run.
+        """
         if self._index is None:
             return
         self._index_path.parent.mkdir(parents=True, exist_ok=True)
-        self._index.save(str(self._index_path))
+
+        tmp_index = self._tmp_path(self._index_path)
+        self._index.save(str(tmp_index))
+        _fsync_file(tmp_index)
+        os.replace(tmp_index, self._index_path)
+
         meta = {
             "keys": {str(k): v for k, v in self._key_to_hash_seq.items()},
             "next_key": self._next_key,
             "ndim": self._ndim,
         }
-        self._meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        tmp_meta = self._tmp_path(self._meta_path)
+        tmp_meta.write_text(json.dumps(meta), encoding="utf-8")
+        _fsync_file(tmp_meta)
+        os.replace(tmp_meta, self._meta_path)
+
+        _fsync_dir(self._index_path.parent)
+
+    @staticmethod
+    def _tmp_path(target: Path) -> Path:
+        """Return the sibling ``<target>.tmp`` path used by :meth:`_save`."""
+        return target.with_name(target.name + ".tmp")
+
+    def _recover_pending_tmp_files(self) -> None:
+        """Promote a lingering ``<path>.tmp`` to its canonical path.
+
+        Only fires when the canonical file is MISSING — a present
+        canonical file is the source-of-truth and any stale .tmp is
+        ignored. Logged as info so the recovery shows up in operator
+        diagnostics without raising the severity to warning.
+        """
+        for canonical in (self._index_path, self._meta_path):
+            tmp = self._tmp_path(canonical)
+            if canonical.exists() or not tmp.exists():
+                continue
+            try:
+                os.replace(tmp, canonical)
+                logger.info("vec_index: recovered pending %s from .tmp after interrupted save", canonical.name)
+            except OSError as e:
+                logger.warning("vec_index: could not promote %s.tmp — %s", canonical, e)
 
 
 # ---------------------------------------------------------------------------
