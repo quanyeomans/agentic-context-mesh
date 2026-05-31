@@ -824,9 +824,44 @@ def _reextract_one(
         else:
             db.rollback()
         return _BUCKET_RECOVERED
-    except Exception:
-        db.rollback()
+    except Exception as exc:
+        _record_reextract_failure(db=db, dead_letter=dead_letter, entry=entry, exc=exc, dry_run=dry_run)
         return _BUCKET_STILL_FAILING
+
+
+def _record_reextract_failure(
+    *,
+    db: sqlite3.Connection,
+    dead_letter: Any,
+    entry: Any,
+    exc: Exception,
+    dry_run: bool,
+) -> None:
+    """Roll back the failed per-item txn and refresh dead-letter bookkeeping.
+
+    GH #351 — bumps ``failure_count`` + sets ``last_attempt = now()`` +
+    writes ``last_error`` so operators see fresh state after each
+    reextract attempt. Without this, the row reads "3-day-old error"
+    even after a brand-new reextract with a fixed extractor (#337
+    SharePoint triage hit this).
+
+    ``dry_run`` preserves the "commits nothing" contract — the row is
+    NOT touched in that mode, so operators can size a recovery without
+    dirtying the table.
+
+    Extracted from :func:`_reextract_one`'s except branch to keep that
+    function under the F16 cognitive-complexity threshold.
+    """
+    db.rollback()
+    if dry_run:
+        return
+    try:
+        dead_letter.record(entry.source_name, entry.item_id, f"reextract: {exc}")
+        db.commit()
+    except Exception:
+        # Don't let a bookkeeping failure mask the original failure bucket;
+        # operator still gets still_failing surfaced via the counter.
+        db.rollback()
 
 
 def _read_raw_for_reextract(
