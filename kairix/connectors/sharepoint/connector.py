@@ -59,6 +59,7 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets.loader import SecretsLoader, SecretsResolver
 from kairix.transport.auth.oauth2_client_creds import (
     OAuth2ClientCredsAuth,
 )
@@ -162,21 +163,22 @@ def _default_flag_reader(name: str) -> bool:
     return _prod_flag(name)
 
 
-def _resolve_credentials_from_secrets() -> SharePointCredentials:
-    """Resolve the three required secrets via :func:`kairix.secrets.get_secret`.
+def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> SharePointCredentials:
+    """Resolve the three required secrets via the canonical :class:`SecretsResolver`.
 
-    All three must be present — :func:`kairix.secrets.get_secret` with
-    ``required=True`` raises :class:`OSError` when the underlying secret
-    cannot be resolved, so each call below either returns a non-empty
-    string or aborts the resolve. Per ADR-019, SharePoint reuses the
-    M365 secret-name convention (``connector-m365-*``) so a single AAD
-    app registration drives every sibling connector.
+    Per ADR-019, SharePoint reuses the M365 canonical identity tuple
+    ``(connector, m365, None, <leaf>)`` so a single AAD app registration
+    drives every sibling connector. Each call uses
+    :meth:`SecretsResolver.require` so a missing secret raises
+    :class:`kairix.secrets.SecretNotFoundError` with the canonical KV
+    name + env-var in the message. The loader's legacy-alias fallback
+    resolves the historical ``CONNECTOR_M365_*`` / ``KAIRIX_M365_*`` /
+    ``M365_*`` env vars transparently so existing deployments keep
+    working unchanged.
     """
-    from kairix.secrets import get_secret
-
-    tenant = get_secret("connector-m365-tenant-id", required=True) or ""
-    client = get_secret("connector-m365-client-id", required=True) or ""
-    secret = get_secret("connector-m365-client-secret", required=True) or ""
+    tenant = secrets.require("connector", "m365", None, "tenant-id")
+    client = secrets.require("connector", "m365", None, "client-id")
+    secret = secrets.require("connector", "m365", None, "client-secret")
     return SharePointCredentials(tenant_id=tenant, client_id=client, client_secret=secret)
 
 
@@ -217,6 +219,7 @@ class SharePointConnector:
         auth: OAuth2ClientCredsAuth | None = None,
         default_sensitivity: Sensitivity = DEFAULT_SENSITIVITY,
         flag_reader: Callable[[str], bool] = _default_flag_reader,
+        secrets: SecretsResolver | None = None,
     ) -> None:
         if not drives:
             raise ValueError(
@@ -230,11 +233,12 @@ class SharePointConnector:
         self._default_sensitivity: Sensitivity = default_sensitivity
         self._flag_reader = flag_reader
 
+        self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
         resolved_auth: OAuth2ClientCredsAuth
         if auth is not None:
             resolved_auth = auth
         else:
-            creds = credentials if credentials is not None else _resolve_credentials_from_secrets()
+            creds = credentials if credentials is not None else _resolve_credentials_from_secrets(self._secrets)
             resolved_auth = OAuth2ClientCredsAuth(
                 tenant_id=creds.tenant_id,
                 client_id=creds.client_id,
@@ -1046,10 +1050,13 @@ def make_connector(config: Mapping[str, Any]) -> SharePointConnector:
       * ``default_sensitivity`` (optional) — one of the F39 sensitivity
         literals; defaults to ``"internal"``.
 
-    Credentials resolve via :func:`kairix.secrets.get_secret` —
-    ``connector-m365-tenant-id`` / ``connector-m365-client-id`` /
-    ``connector-m365-client-secret`` must all be set. The same triple
-    drives the M365 email-headers + calendar siblings per ADR-019.
+    Credentials resolve via :class:`kairix.secrets.loader.SecretsLoader`
+    against the canonical identities ``(connector, m365, None, tenant-id)``,
+    ``(connector, m365, None, client-id)``, and ``(connector, m365, None,
+    client-secret)``. The loader's legacy-alias fallback resolves the
+    historical ``CONNECTOR_M365_*`` / ``KAIRIX_M365_*`` / ``M365_*`` env
+    vars transparently. The same canonical triple drives the M365
+    email-headers + calendar siblings per ADR-019.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer can resolve

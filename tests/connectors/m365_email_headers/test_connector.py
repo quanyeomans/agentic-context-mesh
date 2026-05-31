@@ -347,10 +347,13 @@ def test_make_connector_accepts_locked_sensitivity_declaration() -> None:
     not raise the locked-tier ValueError; the real-credentials path
     is exercised separately.
     """
+    from kairix.secrets.loader import SecretNotFoundError
+
     # The factory will try to resolve secrets — we expect it to raise
-    # MissingCredentialsError / OSError rather than a sensitivity-locked
-    # ValueError. That demonstrates the sensitivity check passed.
-    with pytest.raises((MissingCredentialsError, OSError)):
+    # SecretNotFoundError / MissingCredentialsError / OSError rather
+    # than a sensitivity-locked ValueError. That demonstrates the
+    # sensitivity check passed.
+    with pytest.raises((SecretNotFoundError, MissingCredentialsError, OSError)):
         make_connector({"user_principal_name": "agent-alpha@example.com", "sensitivity": LOCKED_SENSITIVITY})
 
 
@@ -402,37 +405,71 @@ def test_constructor_uses_default_graph_client_when_no_builder_supplied() -> Non
     assert connector.sensitivity_for("msg-1") == LOCKED_SENSITIVITY
 
 
-def test_constructor_resolves_credentials_from_secrets_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
-    """Omitting ``credentials`` and ``auth`` resolves via :mod:`kairix.secrets`.
+def test_constructor_resolves_credentials_via_injected_secrets_loader() -> None:
+    """Omitting ``credentials`` / ``auth`` resolves via the injected ``secrets``.
 
-    Drives ``_resolve_credentials_from_secrets`` through the per-file
-    secret resolver — write the three required secrets to a fake XDG
-    secrets directory, then construct the connector. We use
-    ``XDG_CONFIG_HOME`` (NOT a ``KAIRIX_*`` env var so F2 is satisfied)
-    so the per-file resolver finds the fixtures.
+    Per ADR-031, the connector reads credentials through the canonical
+    :class:`kairix.secrets.loader.SecretsResolver`. Tests pass a populated
+    :class:`tests.fakes.FakeSecretsLoader` rather than priming env vars
+    or per-file mounts; the canonical identity tuple
+    ``(connector, m365, None, <leaf>)`` matches the one M365 / SharePoint
+    / Calendar share per the legacy-alias map.
 
     Sabotage proof: remove the ``_resolve_credentials_from_secrets()``
-    call from ``__init__`` — the construction below raises because the
-    auth helper sees an empty tenant_id and refuses.
+    call from ``__init__`` (e.g. force ``creds = M365Credentials(...)`` with
+    empty strings) — the auth helper raises ``MissingCredentialsError``
+    because it sees an empty tenant_id.
     """
-    secrets_dir = tmp_path / "xdg" / "kairix" / "secrets"
-    secrets_dir.mkdir(parents=True)
-    (secrets_dir / "connector-m365-tenant-id").write_text("fake-tenant\n")
-    (secrets_dir / "connector-m365-client-id").write_text("fake-client\n")
-    (secrets_dir / "connector-m365-client-secret").write_text("fake-secret-value\n")
+    from tests.fakes import FakeSecretsLoader
 
-    # XDG_CONFIG_HOME is not a KAIRIX_* env var — F2 only forbids KAIRIX_*.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    # Make sure no Docker /run/secrets path shadows the XDG dir during test.
-    # KAIRIX_SECRETS_DIR is forbidden by F2; rely on XDG fallback only.
-
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "m365", None, "tenant-id"): "fake-tenant",
+            ("connector", "m365", None, "client-id"): "fake-client",
+            ("connector", "m365", None, "client-secret"): "fake-secret-value",
+        }
+    )
     connector = M365EmailHeadersConnector(
         user_principal_name="agent-alpha@example.com",
+        secrets=loader,
     )
     assert connector.sensitivity_for("any-id") == LOCKED_SENSITIVITY
     assert connector.source_link("msg-1").startswith("https://outlook.office.com/")
+
+
+def test_constructor_loads_secrets_via_loader() -> None:
+    """``__init__`` calls ``loader.require`` for each of the three M365 leaves.
+
+    Asserts on the loader's call history so the test pins each canonical
+    identity tuple read at construction time — adding or removing a leaf
+    surfaces here before downstream callers notice.
+
+    Sabotage proof: drop one of the three ``secrets.require(...)`` calls
+    in ``_resolve_credentials_from_secrets`` — the expected-tuples set
+    no longer matches the loader's recorded calls and this test fails.
+    """
+    from tests.fakes import FakeSecretsLoader
+
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "m365", None, "tenant-id"): "fake-tenant",
+            ("connector", "m365", None, "client-id"): "fake-client",
+            ("connector", "m365", None, "client-secret"): "fake-secret-value",
+        }
+    )
+    M365EmailHeadersConnector(
+        user_principal_name="agent-alpha@example.com",
+        secrets=loader,
+    )
+    expected: set[tuple[str, str, str | None, str]] = {
+        ("connector", "m365", None, "tenant-id"),
+        ("connector", "m365", None, "client-id"),
+        ("connector", "m365", None, "client-secret"),
+    }
+    recorded = set(loader.get_calls)
+    assert expected.issubset(recorded), (
+        f"connector must call loader.require for each canonical M365 leaf; missing={expected - recorded}"
+    )
 
 
 # ---------------------------------------------------------------------------

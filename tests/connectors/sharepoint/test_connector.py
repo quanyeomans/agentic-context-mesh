@@ -373,21 +373,61 @@ def test_next_cursor_is_none_when_no_drive_completes_a_delta_sweep() -> None:
 def test_make_connector_with_string_drives_list_parses_specs(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
     """``make_connector`` parses a list of drive_id strings into typed specs.
 
-    Drives ``_resolve_credentials_from_secrets`` through the per-file
-    secret resolver — write the three required secrets to a fake XDG
-    secrets directory, then construct the connector. F2-clean: only
-    ``XDG_CONFIG_HOME`` is set (not a ``KAIRIX_*`` env var).
+    Drives credential resolution through the canonical loader's KV mount
+    seam — write the three required secrets as canonical-named files in
+    a per-process mount directory, then point the loader at it via the
+    XDG fallback (which the legacy chain still inspects with the
+    canonical name, since the loader passes the canonical KV name into
+    ``get_secret(canonical_kv, ...)``). F2-clean: only ``XDG_CONFIG_HOME``
+    is set (not a ``KAIRIX_*`` env var).
     """
     secrets_dir = tmp_path / "xdg" / "kairix" / "secrets"
     secrets_dir.mkdir(parents=True)
-    (secrets_dir / "connector-m365-tenant-id").write_text("fake-tenant\n")
-    (secrets_dir / "connector-m365-client-id").write_text("fake-client\n")
-    (secrets_dir / "connector-m365-client-secret").write_text("fake-secret-value\n")
+    (secrets_dir / "kairix-connector-m365-tenant-id").write_text("fake-tenant\n")
+    (secrets_dir / "kairix-connector-m365-client-id").write_text("fake-client\n")
+    (secrets_dir / "kairix-connector-m365-client-secret").write_text("fake-secret-value\n")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
 
     connector = make_connector({"drives": [_DRIVE_ID]})
     assert connector.name == "sharepoint"
     assert connector.sensitivity_for("any") == DEFAULT_SENSITIVITY
+
+
+def test_constructor_loads_secrets_via_loader() -> None:
+    """``__init__`` calls ``loader.require`` for each of the three M365 leaves.
+
+    Asserts on the loader's call history so the test pins each canonical
+    identity tuple read at construction time — SharePoint reuses the M365
+    triple per ADR-019, so the tuples mirror the m365 connectors. The
+    drive spec carries no ``include_paths`` so ``_probe_include_paths``
+    is a noop and the test never reaches Graph.
+
+    Sabotage proof: drop one of the three ``secrets.require(...)`` calls
+    in ``_resolve_credentials_from_secrets`` — the expected-tuples set no
+    longer matches the loader's recorded calls and this test fails.
+    """
+    from tests.fakes import FakeSecretsLoader
+
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "m365", None, "tenant-id"): "fake-tenant",
+            ("connector", "m365", None, "client-id"): "fake-client",
+            ("connector", "m365", None, "client-secret"): "fake-secret-value",
+        }
+    )
+    SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id=_DRIVE_ID)],
+        secrets=loader,
+    )
+    expected: set[tuple[str, str, str | None, str]] = {
+        ("connector", "m365", None, "tenant-id"),
+        ("connector", "m365", None, "client-id"),
+        ("connector", "m365", None, "client-secret"),
+    }
+    recorded = set(loader.get_calls)
+    assert expected.issubset(recorded), (
+        f"connector must call loader.require for each canonical M365 leaf; missing={expected - recorded}"
+    )
 
 
 def test_make_connector_rejects_missing_drives() -> None:
@@ -412,9 +452,9 @@ def test_make_connector_with_dict_drive_entries_parses_specs(monkeypatch: pytest
     """make_connector accepts dict drive entries with drive_id + site_id + display_name."""
     secrets_dir = tmp_path / "xdg" / "kairix" / "secrets"
     secrets_dir.mkdir(parents=True)
-    (secrets_dir / "connector-m365-tenant-id").write_text("fake-tenant\n")
-    (secrets_dir / "connector-m365-client-id").write_text("fake-client\n")
-    (secrets_dir / "connector-m365-client-secret").write_text("fake-secret-value\n")
+    (secrets_dir / "kairix-connector-m365-tenant-id").write_text("fake-tenant\n")
+    (secrets_dir / "kairix-connector-m365-client-id").write_text("fake-client\n")
+    (secrets_dir / "kairix-connector-m365-client-secret").write_text("fake-secret-value\n")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
 
     connector = make_connector(
@@ -447,9 +487,9 @@ def test_list_changes_round_trips_cursor_with_two_drives(monkeypatch: pytest.Mon
     """
     secrets_dir = tmp_path / "xdg" / "kairix" / "secrets"
     secrets_dir.mkdir(parents=True)
-    (secrets_dir / "connector-m365-tenant-id").write_text("fake-tenant\n")
-    (secrets_dir / "connector-m365-client-id").write_text("fake-client\n")
-    (secrets_dir / "connector-m365-client-secret").write_text("fake-secret-value\n")
+    (secrets_dir / "kairix-connector-m365-tenant-id").write_text("fake-tenant\n")
+    (secrets_dir / "kairix-connector-m365-client-id").write_text("fake-client\n")
+    (secrets_dir / "kairix-connector-m365-client-secret").write_text("fake-secret-value\n")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
 
     seen_urls: list[str] = []

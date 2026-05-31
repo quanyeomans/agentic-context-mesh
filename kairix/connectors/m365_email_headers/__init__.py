@@ -9,10 +9,12 @@ every body field — see :mod:`kairix.connectors.m365_email_headers.graph_client
 
 Auth is OAuth2 client-credentials (app-only) — the connector resolves
 the tenant / client / secret triple via
-:func:`kairix.secrets.get_secret` at construction time, exchanges for a
-bearer through :class:`kairix.transport.auth.OAuth2ClientCredsAuth`,
-then drives the Graph ``/users/{upn}/messages/delta`` delta query so
-sync is incremental between worker ticks.
+:class:`kairix.secrets.loader.SecretsLoader` (canonical identity
+``(connector, m365, None, <leaf>)``) at construction time, exchanges
+for a bearer through
+:class:`kairix.transport.auth.OAuth2ClientCredsAuth`, then drives the
+Graph ``/users/{upn}/messages/delta`` delta query so sync is
+incremental between worker ticks.
 
 Registered via ``[project.entry-points."kairix.connectors"]`` in
 kairix's ``pyproject.toml`` — operators select it by listing

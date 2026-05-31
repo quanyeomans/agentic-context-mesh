@@ -9,8 +9,10 @@ tier, and last-modified timestamp travel through to every emitted
 chunk per F39.
 
 Auth is OAuth2 client-credentials (app-only) — the connector resolves
-the tenant / client / secret triple via :func:`kairix.secrets.get_secret`
-at construction time, exchanges for a bearer through
+the tenant / client / secret triple via
+:class:`kairix.secrets.loader.SecretsLoader` (canonical identity
+``(connector, m365, None, <leaf>)``) at construction time, exchanges
+for a bearer through
 :class:`kairix.transport.auth.OAuth2ClientCredsAuth`, then drives the
 Graph ``/drives/{drive-id}/root/delta`` query so sync is incremental
 between worker ticks. The triple is shared with the M365 email-headers

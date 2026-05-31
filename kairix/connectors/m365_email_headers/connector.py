@@ -56,6 +56,7 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets.loader import SecretsLoader, SecretsResolver
 from kairix.transport.auth.oauth2_client_creds import (
     OAuth2ClientCredsAuth,
 )
@@ -152,20 +153,19 @@ def _default_client_builder(auth: OAuth2ClientCredsAuth, upn: str) -> M365GraphC
     return M365GraphClient(user_principal_name=upn, auth=auth)
 
 
-def _resolve_credentials_from_secrets() -> M365Credentials:
-    """Resolve the three required secrets via :func:`kairix.secrets.get_secret`.
+def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> M365Credentials:
+    """Resolve the three required secrets via the canonical :class:`SecretsResolver`.
 
-    All three must be present — :func:`kairix.secrets.get_secret` with
-    ``required=True`` raises :class:`OSError` when the underlying secret
-    cannot be resolved, so each call below either returns a non-empty
-    string or aborts the resolve. Lazy import so the connector module
-    loads cleanly even when the secret backend is mid-bootstrap.
+    Each call uses :meth:`SecretsResolver.require` so a missing secret
+    raises :class:`kairix.secrets.SecretNotFoundError` with the canonical
+    KV name + env-var in the message. Per ADR-031, the canonical identity
+    tuple is ``(connector, m365, None, <leaf>)``; the loader's legacy-
+    alias fallback resolves the historical ``CONNECTOR_M365_*`` env vars
+    transparently so existing deployments keep working unchanged.
     """
-    from kairix.secrets import get_secret
-
-    tenant = get_secret("connector-m365-tenant-id", required=True) or ""
-    client = get_secret("connector-m365-client-id", required=True) or ""
-    secret = get_secret("connector-m365-client-secret", required=True) or ""
+    tenant = secrets.require("connector", "m365", None, "tenant-id")
+    client = secrets.require("connector", "m365", None, "client-id")
+    secret = secrets.require("connector", "m365", None, "client-secret")
     return M365Credentials(tenant_id=tenant, client_id=client, client_secret=secret)
 
 
@@ -203,6 +203,7 @@ class M365EmailHeadersConnector:
         auth: OAuth2ClientCredsAuth | None = None,
         mailboxes: Sequence[str] | None = None,
         flag_reader: Callable[[str], bool] = _default_flag_reader,
+        secrets: SecretsResolver | None = None,
     ) -> None:
         if not user_principal_name:
             raise ValueError(
@@ -225,11 +226,12 @@ class M365EmailHeadersConnector:
                     all_mailboxes.append(extra)
         self._mailboxes: tuple[str, ...] = tuple(sorted(all_mailboxes))
 
+        self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
         resolved_auth: OAuth2ClientCredsAuth
         if auth is not None:
             resolved_auth = auth
         else:
-            creds = credentials if credentials is not None else _resolve_credentials_from_secrets()
+            creds = credentials if credentials is not None else _resolve_credentials_from_secrets(self._secrets)
             resolved_auth = OAuth2ClientCredsAuth(
                 tenant_id=creds.tenant_id,
                 client_id=creds.client_id,
@@ -701,11 +703,14 @@ def make_connector(config: Mapping[str, Any]) -> M365EmailHeadersConnector:
         is a config error (raises ``ValueError`` so operators see
         the misconfiguration loudly rather than silently mis-tagging).
 
-    Credentials resolve via :func:`kairix.secrets.get_secret` —
-    ``connector-m365-tenant-id`` / ``connector-m365-client-id`` /
-    ``connector-m365-client-secret`` must all be set. The OAuth2
-    client-credentials flow exchanges the triple for a bearer at
-    Graph's ``v2.0/token`` endpoint.
+    Credentials resolve via :class:`kairix.secrets.loader.SecretsLoader`
+    against the canonical identities ``(connector, m365, None, tenant-id)``,
+    ``(connector, m365, None, client-id)``, and ``(connector, m365, None,
+    client-secret)``. The loader's legacy-alias fallback resolves the
+    historical ``CONNECTOR_M365_*`` / ``KAIRIX_M365_*`` / ``M365_*`` env
+    vars transparently, so existing deployments keep working unchanged.
+    The OAuth2 client-credentials flow exchanges the triple for a bearer
+    at Graph's ``v2.0/token`` endpoint.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer can resolve
