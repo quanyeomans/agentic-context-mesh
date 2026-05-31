@@ -138,20 +138,17 @@ curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/docker-compose
 
 ### 2. Configure secrets
 
-Two supported paths — pick whichever matches your deployment.
+Pick the recipe that matches where you're running:
 
-**Production (Azure Key Vault):** set `KAIRIX_KV_NAME=<vault-name>` in `/opt/kairix/service.env`. Kairix resolves secrets via `az keyvault secret show` at first use. On Docker / VM deployments a `kairix-fetch-secrets.service` systemd unit can pre-populate `/run/secrets/kairix.env` from the vault so the kairix process never touches the Azure CLI at runtime.
+| Where you run kairix | What to do |
+|---|---|
+| Laptop / local dev | Edit `.env` (Docker) or `~/.config/kairix/secrets/kairix.env` (pip) — set `KAIRIX_LLM_ENDPOINT` + `KAIRIX_LLM_API_KEY` |
+| Single-machine prod (any cloud) | Same as local dev with `chmod 600` on the file; store a backup out-of-band |
+| VM with cloud secrets manager (Azure KV / AWS / GCP / 1Password) | Run a small sidecar that materialises every `kairix-*` secret to `/run/secrets/kairix.env` at boot — no per-secret list to maintain |
+| Managed container platform (ECS / Cloud Run / AKS) | Reference the secrets directly in your task definition / service spec — the platform injects them as env vars |
+| Claude Desktop / Cursor / Aider | Wrapper script that sources the secrets file before exec'ing `kairix mcp serve`, or systemd-run `kairix mcp serve --transport http` and let clients connect to `localhost:8080/mcp` |
 
-**Local dev / CI:** set the env vars directly. The four that matter:
-
-| Env var | Purpose |
-|---------|---------|
-| `KAIRIX_LLM_API_KEY` | API key for the LLM / embedding provider |
-| `KAIRIX_LLM_ENDPOINT` | LLM / embedding endpoint URL |
-| `KAIRIX_AZURE_API_KEY` | Azure OpenAI API key (when using Azure) |
-| `KAIRIX_AZURE_API_VERSION` | Azure OpenAI API version (e.g. `2024-08-01-preview`) |
-
-For the full secret map (Neo4j password, embed-specific overrides, etc.) see [`kairix/secrets.py`](kairix/secrets.py). Resolution order is: direct env vars → per-file secrets → `kairix.env` bundle → Azure Key Vault CLI fallback.
+Every recipe is in [**docs/operations/secrets-configuration.md**](docs/operations/secrets-configuration.md) — the cross-provider matrix, the canonical naming convention, the resolution order, and rotation / verification commands. Run `kairix secrets verify` to see which secrets are loaded vs missing; `kairix onboard check --json` rolls every signal into one exit code.
 
 ### 3. Configure document collections
 

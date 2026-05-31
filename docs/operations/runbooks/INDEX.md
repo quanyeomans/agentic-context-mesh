@@ -23,6 +23,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | Migrating an existing MCP client off SSE | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) |
 | Worker container restart-loops with `vec_index: converting immutable index to mutable (...)`; vector index drifting behind `content_vectors` | [worker-memory-and-swap](worker-memory-and-swap.md) — raise mem ceiling + allow host swap; #335 |
 | `app-kairix-1` container fails to start with `failed to bind host port 127.0.0.1:8080/tcp: address already in use` (reverse proxy already owns 8080) | Set `KAIRIX_HOST_PORT=8090` (or any unused port) in `.env` and `docker compose up -d --force-recreate kairix`; see [OPERATIONS §"Deploying behind a reverse proxy"](../OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared); #331 |
+| `secrets_loaded` onboard check fails, or you need to add / rotate a secret | [secrets-configuration](../secrets-configuration.md) — install × secrets-manager matrix (Docker / pip × Azure KV / AWS / GCP / 1Password / ECS / Cloud Run / AKS / .env), canonical names, resolution order, rotation commands |
 
 ---
 
@@ -43,6 +44,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | Procedure | What it covers |
 |---|---|
 | [how-to-upgrade-kairix](how-to-upgrade-kairix.md) | Install tagged release, verify, run onboard check |
+| [secrets-configuration](../secrets-configuration.md) | Cross-provider secrets setup — Docker / pip × Azure KV / AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS / plain .env; canonical naming convention; rotation + verification |
 | [how-to-run-benchmark](how-to-run-benchmark.md) | Run benchmark suite, interpret results, compare before/after |
 | [how-to-debug-search-ranking](how-to-debug-search-ranking.md) | Query intent dispatch, RRF weights, category-specific tuning |
 | [how-to-rebuild-entity-graph](how-to-rebuild-entity-graph.md) | Drop and rebuild the Neo4j entity graph from the document store |

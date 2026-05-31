@@ -25,6 +25,8 @@ For benchmark methodology and current scores see [EVALUATION.md](EVALUATION.md).
 
 Not all environment variables are secrets. Configuration values belong in `service.env` or `docker-compose.override.yml`. Secrets belong in Key Vault or `/run/secrets/` (tmpfs).
 
+> **Cross-provider recipes:** the table below covers the Azure KV path on a VM. For the same setup on AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS CSI / plain Docker .env, and for pip-install variants, see [`secrets-configuration.md`](secrets-configuration.md). The canonical naming convention + resolution order live there too.
+
 **Configuration (service.env / compose environment):**
 
 | Variable | Purpose | Default |

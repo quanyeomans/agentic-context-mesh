@@ -31,6 +31,31 @@ Flags:
 - `--port` (default `8080`) — listening port. Auto-detected to a free port if the default is in use; set `KAIRIX_MCP_PORT` to make a substitution permanent.
 - `--no-sse` — when `--transport=http`, omit the legacy `/sse` mount and serve only `/mcp`.
 
+## Secrets injection for the MCP server
+
+The MCP server needs the same credentials any other kairix command does — `KAIRIX_LLM_API_KEY`, `KAIRIX_LLM_ENDPOINT`, optionally connector and Neo4j secrets. How they reach the process depends on which transport you run:
+
+- **stdio (Claude Desktop / Cursor / Aider):** kairix is launched as a subprocess by the MCP client and inherits its environment. On macOS GUI launchers (Claude Desktop) that don't pick up your shell rc, wrap kairix in a small script that sources the secrets file before exec'ing it:
+
+  ```bash
+  cat > ~/.local/bin/kairix-mcp <<'EOF'
+  #!/usr/bin/env bash
+  set -a
+  source ~/.config/kairix/secrets/kairix.env
+  set +a
+  exec ~/.venvs/kairix/bin/kairix mcp serve --transport stdio "$@"
+  EOF
+  chmod +x ~/.local/bin/kairix-mcp
+  ```
+
+  Then point the MCP client config at `~/.local/bin/kairix-mcp` instead of `kairix`.
+
+- **http (server deployments — recommended for shared use):** secrets load once at service start. Use systemd's `EnvironmentFile=` (pip install) or docker-compose `env_file:` / mounted `/run/secrets/kairix.env` (Docker). Clients connect to `http://host:port/mcp` and never see credentials.
+
+- **sse (deprecated):** same as http.
+
+Full recipes for every install × secret-source permutation (Docker .env, systemd, Azure KV, AWS Secrets Manager, GCP Secret Manager, 1Password, ECS, Cloud Run, AKS CSI) are in [`secrets-configuration.md`](secrets-configuration.md). Run `kairix secrets verify` inside the running MCP container to confirm every required secret is loaded.
+
 ## Health
 
 Kairix exposes two health endpoints. Use `/healthz` for liveness, `/healthz/ready` for layered readiness (v2026.5.10+).

@@ -54,6 +54,8 @@ KAIRIX_LLM_API_KEY=your-key-here
 # KAIRIX_LLM_API_KEY=sk-your-key-here
 ```
 
+`docker-compose.yml` loads `.env` via `env_file:` so every kairix container picks the values up. For production with a cloud secrets manager (Azure KV, AWS Secrets Manager, GCP Secret Manager, 1Password, ECS / Cloud Run / AKS), see [secrets-configuration.md](../operations/secrets-configuration.md) — same kairix, different secret source.
+
 ### A3. Point to your documents
 
 ```bash
@@ -125,6 +127,8 @@ KAIRIX_LLM_ENDPOINT=https://your-resource.openai.azure.com
 EOF
 chmod 600 ~/.config/kairix/secrets/kairix.env
 ```
+
+Set `KAIRIX_SECRETS_FILE` to point at it (next step). For long-running deployments or cloud secrets managers, see [secrets-configuration.md](../operations/secrets-configuration.md) — covers systemd + cloud-secret-fetch sidecars for every major provider.
 
 Optional: if you want the agent-driven setup flow (an LLM agent writes the config on your behalf), see [agent-driven-setup.md](agent-driven-setup.md).
 

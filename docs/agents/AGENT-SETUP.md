@@ -125,6 +125,7 @@ The exit code is `0` when `fully_passed` is `true`, `1` otherwise. Use this from
 1. **Surface the full failure block to your human, verbatim.** Each failure includes a `remediation` string — quote it. The strings are written so the admin can act on them without translation.
 2. **Do not attempt to fix systemd units or container internals yourself.** That is an admin action. You do not have shell access to the host and would not have permission to use it if you did. Refer your human to `ADMIN-CONVERSATION.md` for the right script to follow with their admin.
 3. **Note which capabilities are degraded as a result.** If `secrets_loaded` failed, expect vector search and synthesis to be offline; tell your human upfront. If `neo4j_reachable` failed, entity lookup is degraded; tell your human upfront.
+4. **For `secrets_loaded` specifically:** the per-secret canonical names + every install × secrets-manager recipe live in [`docs/operations/secrets-configuration.md`](../operations/secrets-configuration.md). If your human asks you what to put where, point them there — it covers Docker + pip × Azure KV / AWS Secrets Manager / GCP Secret Manager / 1Password / ECS / Cloud Run / AKS / plain .env, with the resolution order and rotation commands. `kairix secrets verify` reports which canonical names are present vs missing.
 
 ---
 
