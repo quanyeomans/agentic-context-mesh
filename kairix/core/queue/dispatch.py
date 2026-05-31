@@ -314,7 +314,7 @@ def _mark_started(db: sqlite3.Connection, *, query_id: str) -> None:
 # code wasn't directly tested by the existing contract suite). The right
 # paydown is a direct unit suite per call-path — tracked as follow-up
 # after the ADR-029 G.2/G.3 work lands.
-def dispatch_or_queue(  # NOSONAR(python:S3776)
+def dispatch_or_queue(
     *,
     budget_seconds: float = DEFAULT_BUDGET_SECONDS,
     sync_only: bool = False,
@@ -338,7 +338,7 @@ def dispatch_or_queue(  # NOSONAR(python:S3776)
         effective_tool_name = tool_name or fn.__name__
 
         @functools.wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:  # NOSONAR — see waiver rationale above def dispatch_or_queue
             agent_id = kwargs.get("agent_id") or "unknown-agent"
 
             # Build args_json from positional + keyword args so the dedup

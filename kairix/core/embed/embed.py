@@ -722,7 +722,14 @@ def _persist_batch_result(
         return True
 
 
-def _run_embed_loop_parallel(
+# S107 waiver — 14 params vs ceiling 13. Each is a distinct concern
+# (chunks / batch_size / parallel / db handle / vec_index handle /
+# 4 Azure-config strings / current time / save_interval / total count /
+# embed_batch fn / optional cache); grouping any subset into a dataclass
+# would obscure the contract more than it clarifies. Paydown: extract
+# AzureEmbedSpec(api_key, endpoint, deployment, actual_dims) when the
+# next signature change lands so this drops from 14 to 11.
+def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale above def
     all_chunks: list[dict[str, Any]],
     batch_size: int,
     parallel: int,
