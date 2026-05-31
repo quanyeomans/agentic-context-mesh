@@ -49,9 +49,16 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
-from kairix.transport.auth.api_key import MissingCredentialsError
+from kairix.secrets import Scope, SecretsResolver
+from kairix.transport.auth.api_key import ApiKeyAuth, BearerHeaders, MissingCredentialsError
 
 CONNECTOR_NAME = "dex_crm"
+
+# Canonical secret identity tuple for the dex_crm connector's bearer
+# API key. The legacy alias map maps this to ``CONNECTOR_DEX_API_KEY``
+# so existing operator deployments keep working unchanged through the
+# loader's alias-fallback path.
+_SECRET_SCOPE_API_KEY: tuple[Scope, str, str | None, str] = ("connector", "dex", None, "api-key")
 
 # Wave E topology v2 pilot — name of the per-connector flag that gates
 # the multi-container shape. Module-level constant so the F52 call-site
@@ -102,6 +109,35 @@ def _iso_utc(dt: datetime) -> str:
 
 def _now_iso() -> str:
     return _iso_utc(datetime.now(timezone.utc))
+
+
+@dataclass(frozen=True)
+class _PreBoundApiKeyAuth(ApiKeyAuth):
+    """:class:`ApiKeyAuth` subclass bound to a pre-resolved bearer token.
+
+    The base :class:`ApiKeyAuth` resolves its secret on every
+    :meth:`headers` call via :func:`kairix.secrets.get_secret`. When the
+    connector has already resolved the api key via the canonical
+    :class:`SecretsLoader`, this subclass surfaces the value directly so
+    the per-request path never re-walks the legacy chain (and never
+    re-fires the loader's DeprecationWarning on alias hits).
+
+    Frozen dataclass — the bound token is held as a field rather than
+    on a mutable attribute, so the auth instance stays safely shareable
+    across threads. F15 is preserved: the token never appears in logs;
+    only the secret-slot name is referenced in diagnostic output.
+    """
+
+    api_key: str = ""
+
+    def headers(self, _secret_name: str) -> BearerHeaders:
+        """Return the pre-bound Bearer header — never re-walks the resolver chain."""
+        # The secret_name kwarg is accepted for Protocol-shape compatibility
+        # with the base ApiKeyAuth but is intentionally unused: the token is
+        # already bound at construction time via the canonical SecretsLoader,
+        # so re-walking the legacy chain on every request would be redundant
+        # work and would re-fire the loader's DeprecationWarning on alias hits.
+        return BearerHeaders(mapping={"Authorization": f"Bearer {self.api_key}"})
 
 
 def _default_flag_reader(name: str) -> bool:
@@ -180,6 +216,16 @@ class DexCrmConnector:
         ``"internal"`` per ADR-005's "CRM data is internal by default".
         Operators can opt to ``"client-confidential"`` via
         ``connectors[].sensitivity`` in ``kairix.config.yaml``.
+      * ``secrets`` — optional :class:`SecretsResolver` injection seam.
+        When set AND no ``client`` is supplied, the connector eagerly
+        resolves the canonical ``connector/dex/-/api-key`` identity
+        tuple and wires a pre-bound :class:`ApiKeyAuth` into the
+        default :class:`DexCrmClient`. This routes credential reads
+        through the canonical secrets surface (the loader's
+        env -> legacy aliases -> KV mount -> legacy chain) so the
+        connector's __init__ has one cred surface, not two. Tests
+        inject :class:`tests.fakes.FakeSecretsLoader` so no env-var
+        monkey-patching is needed (F2-clean).
     """
 
     name: str = CONNECTOR_NAME
@@ -194,9 +240,43 @@ class DexCrmConnector:
         client_config: DexCrmClientConfig | None = None,
         sensitivity: Sensitivity = "internal",
         flag_reader: Callable[[str], bool] = _default_flag_reader,
+        secrets: SecretsResolver | None = None,
     ) -> None:
         cfg = client_config if client_config is not None else DexCrmClientConfig()
-        self._client = client if client is not None else DexCrmClient(config=cfg)
+        if client is not None:
+            # Explicit client wins: tests pass a recording stand-in here,
+            # and production-style callers that want full control of the
+            # transport surface own the auth wiring themselves.
+            self._client = client
+        elif secrets is not None:
+            # Canonical surface: eagerly resolve via the loader and bind
+            # the bearer into a pre-bound ApiKeyAuth so the client's
+            # per-request `.headers(...)` call never re-walks the legacy
+            # chain. The SecretsLoader's resolution chain
+            # (env -> legacy aliases -> KV mount -> legacy chain) means
+            # production deployments keep working through the alias
+            # fallback. Translate SecretNotFoundError to the connector's
+            # typed MissingCredentialsError so the worker dead-letter
+            # surface stays uniform across the auth-error shape (the F21
+            # fix/next markers ride along).
+            from kairix.secrets import SecretNotFoundError
+
+            try:
+                api_key = secrets.require(*_SECRET_SCOPE_API_KEY)
+            except SecretNotFoundError as exc:
+                raise MissingCredentialsError(
+                    "dex_crm: api-key secret is not configured. "
+                    "fix: set the secret via the configured resolver chain "
+                    "(env var KAIRIX_CONNECTOR_DEX_API_KEY, per-file secret, "
+                    "sidecar bundle, or Azure Key Vault). "
+                    "next: see docs/operations/OPERATIONS.md for the secret-loading runbook."
+                ) from exc
+            self._client = DexCrmClient(config=cfg, auth=_PreBoundApiKeyAuth(api_key=api_key))
+        else:
+            # Legacy path — no loader injected, keep historic behaviour
+            # so callers that don't yet thread the loader through (tests,
+            # downstream code mid-migration) keep working.
+            self._client = DexCrmClient(config=cfg)
         self._sensitivity: Sensitivity = sensitivity
         self._flag_reader = flag_reader
         # Cache of last-fetched records keyed by item_id so ``fetch``
@@ -607,7 +687,11 @@ def _walk_hierarchy(*, cc_pair_id: int) -> Iterator[HierarchyNode]:
     )
 
 
-def make_connector(config: Mapping[str, Any]) -> DexCrmConnector:
+def make_connector(
+    config: Mapping[str, Any],
+    *,
+    secrets: SecretsResolver | None = None,
+) -> DexCrmConnector:
     """Construct a :class:`DexCrmConnector` from a config mapping.
 
     Expected keys (all optional with sensible defaults so the simplest
@@ -616,12 +700,24 @@ def make_connector(config: Mapping[str, Any]) -> DexCrmConnector:
       * ``base_url`` — Dex API base URL; defaults to
         ``https://api.prod.getdex.com/v1``.
       * ``secret_name`` — logical secret slot for the API key; defaults
-        to ``connector-dex-api-key``.
+        to ``connector-dex-api-key``. Only consulted on the legacy
+        client path (when ``secrets`` is ``None`` AND the operator
+        hasn't configured the loader chain); the canonical surface
+        keys on ``connector/dex/-/api-key``.
       * ``page_size`` — pagination size; defaults to 100.
       * ``rate_limit_sleep_s`` — inter-request pause in seconds;
         defaults to 1.0 (conservative 1 req/sec).
       * ``sensitivity`` — one of the F39 sensitivity literals; defaults
         to ``"internal"`` per ADR-005.
+
+    Args:
+      config: operator-supplied connector config mapping.
+      secrets: optional :class:`SecretsResolver` injection seam. When
+        ``None`` (production default), a :class:`SecretsLoader` is
+        constructed lazily — its env / KV mount / legacy alias chain
+        resolves the api-key. Tests inject
+        :class:`tests.fakes.FakeSecretsLoader` so no env-var monkey-
+        patching is needed (F2-clean).
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer resolves
@@ -637,7 +733,13 @@ def make_connector(config: Mapping[str, Any]) -> DexCrmConnector:
         rate_limit_sleep_s=float(config.get("rate_limit_sleep_s", DexCrmClientConfig.rate_limit_sleep_s)),
     )
     sensitivity: Sensitivity = config.get("sensitivity", "internal")
-    return DexCrmConnector(client_config=cfg, sensitivity=sensitivity)
+    # When `secrets` is supplied, resolve via the canonical surface
+    # eagerly at construction — operator misconfiguration surfaces
+    # immediately rather than at first poll. When `secrets` is None
+    # (default), the connector retains its historic lazy-resolution
+    # contract: construction is cheap, the api-key resolves on first
+    # `list_changes()` via the legacy :class:`ApiKeyAuth` path.
+    return DexCrmConnector(client_config=cfg, sensitivity=sensitivity, secrets=secrets)
 
 
 __all__ = [

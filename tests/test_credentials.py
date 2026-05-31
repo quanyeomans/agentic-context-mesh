@@ -16,6 +16,8 @@ from kairix.credentials import (
     get_credentials,
     make_openai_client,
 )
+from kairix.secrets import SecretNotFoundError
+from tests.fakes import FakeSecretsLoader
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -118,12 +120,19 @@ def test_resolve_llm_uses_default_model(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.unit
 def test_resolve_llm_raises_when_missing(monkeypatch, tmp_path) -> None:
-    """When required secret missing, raises OSError."""
+    """When required secret missing via legacy env-var path, raises SecretNotFoundError.
+
+    Post-loader migration the credentials module surfaces the loader's
+    typed :class:`SecretNotFoundError` (LookupError subclass) — message
+    carries the canonical KV name + the loader's F21 fix/next/run markers.
+    """
     monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_PROVIDER_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_PROVIDER_LLM_ENDPOINT", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
-    with pytest.raises(OSError):
+    with pytest.raises(SecretNotFoundError):
         get_credentials("llm")
 
 
@@ -206,6 +215,132 @@ def test_resolve_graph_uses_default_uri_when_unset(monkeypatch, tmp_path) -> Non
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     creds = get_credentials("graph")
     assert isinstance(creds, GraphCredentials)
+    assert creds.uri == "bolt://localhost:7687"
+    assert creds.user == "neo4j"
+
+
+# ---------------------------------------------------------------------------
+# Canonical surface — secrets= injection seam (FakeSecretsLoader)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_credentials_loads_secrets_via_loader() -> None:
+    """get_credentials threads through the injected SecretsResolver.
+
+    Pins the canonical-surface contract: the FakeSecretsLoader's
+    get_calls captures every identity tuple the credentials module asks
+    for, so the contract surface (which scopes are asked for which
+    purpose) is mechanically observable.
+
+    Sabotage-proof: replace ``loader.require`` with hardcoded strings in
+    _resolve_llm → the loader's get_calls stays empty and the assertion
+    on the api-key identity tuple below flunks.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("provider", "llm", None, "api-key"): "loader-llm-key",
+            ("provider", "llm", None, "endpoint"): "https://loader.example.com",
+            ("provider", "llm", None, "model"): "loader-model",
+        },
+    )
+    creds = get_credentials("llm", secrets=loader)
+    assert isinstance(creds, Credentials)
+    assert creds.api_key == "loader-llm-key"  # pragma: allowlist secret
+    assert creds.endpoint == "https://loader.example.com"
+    assert creds.model == "loader-model"
+    # Loader was asked for each identity tuple
+    assert ("provider", "llm", None, "api-key") in loader.get_calls
+    assert ("provider", "llm", None, "endpoint") in loader.get_calls
+    assert ("provider", "llm", None, "model") in loader.get_calls
+
+
+@pytest.mark.unit
+def test_get_credentials_llm_via_loader_raises_when_required_missing() -> None:
+    """When the injected loader can't resolve api-key/endpoint, raises SecretNotFoundError.
+
+    Sabotage-proof: replace ``loader.require(*_SCOPE_LLM_API_KEY)`` with
+    ``loader.get(*_SCOPE_LLM_API_KEY) or ""`` → the assertion catches
+    that get_credentials no longer raises on missing required secrets.
+    """
+    loader = FakeSecretsLoader()  # nothing bound
+    with pytest.raises(SecretNotFoundError):
+        get_credentials("llm", secrets=loader)
+
+
+@pytest.mark.unit
+def test_get_credentials_embed_falls_back_to_llm_via_loader() -> None:
+    """Embed-specific creds missing → falls back to llm-scope creds (loader path).
+
+    Sabotage-proof: drop the ``if not api_key: api_key = loader.require(...)``
+    fallback in _resolve_embed → the embed-creds api_key stays None /
+    empty and the resulting Credentials has the wrong value.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("provider", "llm", None, "api-key"): "llm-fallback-key",
+            ("provider", "llm", None, "endpoint"): "https://llm.example.com",
+        },
+    )
+    creds = get_credentials("embed", secrets=loader)
+    assert isinstance(creds, Credentials)
+    assert creds.api_key == "llm-fallback-key"  # pragma: allowlist secret
+    assert creds.endpoint == "https://llm.example.com"
+    # Default embed model when neither embed-model nor an override resolves.
+    assert creds.model == "text-embedding-3-large"
+
+
+@pytest.mark.unit
+def test_get_credentials_graph_via_loader_returns_none_without_password() -> None:
+    """Loader with no neo4j password → graph credentials resolve to None.
+
+    Sabotage-proof: change ``if not password: return None`` to ``return
+    GraphCredentials(...)`` and the assertion catches that we now build
+    invalid credentials with a missing password.
+    """
+    loader = FakeSecretsLoader()  # nothing bound
+    creds = get_credentials("graph", secrets=loader)
+    assert creds is None
+
+
+@pytest.mark.unit
+def test_get_credentials_graph_via_loader_resolves_full_triple() -> None:
+    """Loader with neo4j password+uri+user → GraphCredentials with those values.
+
+    Sabotage-proof: hardcode ``user = "neo4j"`` in _resolve_graph and the
+    assertion on creds.user catches the override that should have come
+    from the loader.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("infra", "neo4j", None, "password"): "loader-pw",
+            ("infra", "neo4j", None, "uri"): "bolt://loader.example:7687",
+            ("infra", "neo4j", None, "user"): "loader-user",
+        },
+    )
+    creds = get_credentials("graph", secrets=loader)
+    assert isinstance(creds, GraphCredentials)
+    assert creds.password == "loader-pw"  # pragma: allowlist secret
+    assert creds.uri == "bolt://loader.example:7687"
+    assert creds.user == "loader-user"
+
+
+@pytest.mark.unit
+def test_get_credentials_graph_loader_defaults_uri_and_user() -> None:
+    """Loader with only the neo4j password → URI/user fall back to defaults.
+
+    Sabotage-proof: remove the ``or "bolt://localhost:7687"`` fallback in
+    _resolve_graph and the URI flips to falsy/empty rather than the
+    documented default.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("infra", "neo4j", None, "password"): "only-pw",
+        },
+    )
+    creds = get_credentials("graph", secrets=loader)
+    assert isinstance(creds, GraphCredentials)
+    assert creds.password == "only-pw"  # pragma: allowlist secret
     assert creds.uri == "bolt://localhost:7687"
     assert creds.user == "neo4j"
 

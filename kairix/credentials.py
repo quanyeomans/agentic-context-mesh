@@ -29,8 +29,23 @@ from kairix.paths import (
 from kairix.paths import (
     embed_pool_size as _embed_pool_size,
 )
+from kairix.secrets import Scope, SecretsResolver
 
 logger = logging.getLogger(__name__)
+
+# Canonical secret identity tuples — the loader's legacy alias map
+# (``kairix.secrets._legacy_aliases.LEGACY_ALIASES``) covers each of
+# these with the historical ``KAIRIX_*`` env-var fallback, so legacy
+# operator deployments keep working through the alias path.
+_SCOPE_LLM_API_KEY: tuple[Scope, str, str | None, str] = ("provider", "llm", None, "api-key")
+_SCOPE_LLM_ENDPOINT: tuple[Scope, str, str | None, str] = ("provider", "llm", None, "endpoint")
+_SCOPE_LLM_MODEL: tuple[Scope, str, str | None, str] = ("provider", "llm", None, "model")
+_SCOPE_EMBED_API_KEY: tuple[Scope, str, str | None, str] = ("provider", "embed", None, "api-key")
+_SCOPE_EMBED_ENDPOINT: tuple[Scope, str, str | None, str] = ("provider", "embed", None, "endpoint")
+_SCOPE_EMBED_MODEL: tuple[Scope, str, str | None, str] = ("provider", "embed", None, "model")
+_SCOPE_NEO4J_PASSWORD: tuple[Scope, str, str | None, str] = ("infra", "neo4j", None, "password")
+_SCOPE_NEO4J_URI: tuple[Scope, str, str | None, str] = ("infra", "neo4j", None, "uri")
+_SCOPE_NEO4J_USER: tuple[Scope, str, str | None, str] = ("infra", "neo4j", None, "user")
 
 
 # Env read lives in kairix.paths.azure_api_version (F4 — env reads stay in paths/secrets).
@@ -220,66 +235,85 @@ def make_openai_client(
     )
 
 
-def get_credentials(purpose: str) -> Credentials | GraphCredentials | None:
+def get_credentials(
+    purpose: str,
+    *,
+    secrets: SecretsResolver | None = None,
+) -> Credentials | GraphCredentials | None:
     """Resolve credentials for the given purpose.
 
     Args:
         purpose: "llm" (chat completions), "embed" (embeddings), or "graph" (Neo4j).
+        secrets: optional :class:`SecretsResolver` injection seam. When
+            ``None`` (production default), a :class:`SecretsLoader` is
+            constructed lazily — its env / KV mount / legacy alias chain
+            resolves the credentials. Tests inject
+            :class:`tests.fakes.FakeSecretsLoader` so no env-var monkey-
+            patching is needed (F2-clean).
 
     For "embed": tries embed-specific secrets first, falls back to LLM secrets.
     For "graph": returns None if Neo4j password is not configured.
 
     Raises:
-        OSError: When required credentials (llm, embed) cannot be resolved.
+        OSError: When required credentials (llm, embed) cannot be resolved
+            via the legacy chain (raised by :func:`kairix.secrets.get_secret`).
+        kairix.secrets.SecretNotFoundError: When required credentials cannot
+            be resolved via the injected loader (canonical surface).
         ValueError: When purpose is not recognised.
     """
+    loader = secrets if secrets is not None else _default_secrets_loader()
     if purpose == "llm":
-        return _resolve_llm()
+        return _resolve_llm(loader)
     elif purpose == "embed":
-        return _resolve_embed()
+        return _resolve_embed(loader)
     elif purpose == "graph":
-        return _resolve_graph()
+        return _resolve_graph(loader)
     else:
         raise ValueError(f"Unknown credential purpose: {purpose!r}. Use 'llm', 'embed', or 'graph'.")
 
 
-def _resolve_llm() -> Credentials:
-    from kairix.secrets import get_secret
+def _default_secrets_loader() -> SecretsResolver:
+    """Build the production :class:`SecretsLoader` lazily.
 
-    api_key = get_secret("kairix-llm-api-key", required=True)
-    endpoint = get_secret("kairix-llm-endpoint", required=True)
-    assert api_key is not None  # get_secret raises if required and missing
-    assert endpoint is not None
-    model = get_secret("kairix-llm-model", required=False) or "gpt-4o-mini"
+    Local import keeps the credentials module importable without paying
+    for the loader's env-snapshot work on every kairix import. The
+    loader's resolution chain (env -> legacy aliases -> KV mount ->
+    legacy chain) is unchanged from the canonical secrets package, so
+    existing operator deployments keep working through the alias path.
+    """
+    from kairix.secrets import SecretsLoader
+
+    return SecretsLoader()
+
+
+def _resolve_llm(loader: SecretsResolver) -> Credentials:
+    api_key = loader.require(*_SCOPE_LLM_API_KEY)
+    endpoint = loader.require(*_SCOPE_LLM_ENDPOINT)
+    model = loader.get(*_SCOPE_LLM_MODEL) or "gpt-4o-mini"
     return Credentials(api_key=api_key, endpoint=endpoint, model=model)
 
 
-def _resolve_embed() -> Credentials:
+def _resolve_embed(loader: SecretsResolver) -> Credentials:
     from kairix.core.db import EMBED_VECTOR_DIMS
-    from kairix.secrets import get_secret
 
-    api_key = get_secret("kairix-embed-api-key", required=False)
-    endpoint = get_secret("kairix-embed-endpoint", required=False)
-    model = get_secret("kairix-embed-model", required=False)
+    api_key = loader.get(*_SCOPE_EMBED_API_KEY)
+    endpoint = loader.get(*_SCOPE_EMBED_ENDPOINT)
+    model = loader.get(*_SCOPE_EMBED_MODEL)
 
     if not api_key:
-        api_key = get_secret("kairix-llm-api-key", required=True)
-        assert api_key is not None
+        api_key = loader.require(*_SCOPE_LLM_API_KEY)
     if not endpoint:
-        endpoint = get_secret("kairix-llm-endpoint", required=True)
-        assert endpoint is not None
+        endpoint = loader.require(*_SCOPE_LLM_ENDPOINT)
     if not model:
         model = "text-embedding-3-large"
 
     return Credentials(api_key=api_key, endpoint=endpoint, model=model, dims=EMBED_VECTOR_DIMS)
 
 
-def _resolve_graph() -> GraphCredentials | None:
-    from kairix.secrets import get_secret, neo4j_uri, neo4j_user
-
-    uri = neo4j_uri()
-    user = neo4j_user()
-    password = get_secret("kairix-neo4j-password", required=False)
+def _resolve_graph(loader: SecretsResolver) -> GraphCredentials | None:
+    password = loader.get(*_SCOPE_NEO4J_PASSWORD)
     if not password:
         return None
+    uri = loader.get(*_SCOPE_NEO4J_URI) or "bolt://localhost:7687"
+    user = loader.get(*_SCOPE_NEO4J_USER) or "neo4j"
     return GraphCredentials(uri=uri, user=user, password=password)

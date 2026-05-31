@@ -50,8 +50,23 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets import Scope, SecretsResolver
 
 CONNECTOR_NAME = "apple_caldav"
+
+# Canonical secret-area name for this connector. Module-level constant
+# so the hierarchy-root id, the secret-identity tuples, and any future
+# canonical-name references all key off one literal — F17 (no string
+# literal ≥10 chars duplicated ≥3 times).
+_AREA_APPLE_CALDAV = "apple-caldav"
+
+# Canonical secret identity tuples for the apple_caldav connector. The
+# legacy alias map (``kairix.secrets._legacy_aliases.LEGACY_ALIASES``)
+# resolves both via the legacy ``CONNECTOR_APPLE_CALDAV_*`` env vars,
+# so production deployments keep working unchanged through the
+# loader's alias-fallback path.
+_SECRET_SCOPE_USERNAME: tuple[Scope, str, str | None, str] = ("connector", _AREA_APPLE_CALDAV, None, "username")
+_SECRET_SCOPE_ACCESS: tuple[Scope, str, str | None, str] = ("connector", _AREA_APPLE_CALDAV, None, "access")
 
 # Wave-E topology v2 pilot — name of the per-connector flag that gates
 # the multi-container shape. Module-level constant so the F52 call-site
@@ -60,7 +75,7 @@ TOPOLOGY_V2_APPLE_CALDAV_FLAG = "topology_v2_apple_caldav"
 
 # Hierarchy root node id for the calendar tree. Each discovered (or
 # operator-pinned) calendar becomes a child FOLDER node under this root.
-_HIERARCHY_ROOT_ID = "apple-caldav"
+_HIERARCHY_ROOT_ID = _AREA_APPLE_CALDAV
 
 # Source-link scheme — the canonical iCloud Calendar deeplink. Apple's
 # Calendar.app accepts the CalDAV URL directly, and the kairix UI
@@ -616,16 +631,25 @@ def _parse_composite_cursor(cursor: Cursor | None) -> dict[str, str | None]:
     return out
 
 
-def make_connector(config: Mapping[str, Any]) -> AppleCalDavConnector:
+def make_connector(
+    config: Mapping[str, Any],
+    *,
+    secrets: SecretsResolver | None = None,
+) -> AppleCalDavConnector:
     """Construct an :class:`AppleCalDavConnector` from a config mapping.
 
     Expected keys:
 
-    * ``username`` (required) — the iCloud Apple ID (e.g.
-      ``operator@example.com``).
-    * ``password`` (required) — the Apple-issued app-specific password
-      (NOT the iCloud account password). See the package README for
-      operator instructions.
+    * ``username`` (optional) — the iCloud Apple ID (e.g.
+      ``operator@example.com``). When absent, resolved via ``secrets``
+      from the canonical ``connector/apple-caldav/-/username`` identity
+      tuple (which the loader's legacy-alias fallback maps to the
+      historical ``CONNECTOR_APPLE_CALDAV_USERNAME`` env var).
+    * ``password`` (optional) — the Apple-issued app-specific password
+      (NOT the iCloud account password). When absent, resolved via
+      ``secrets`` from the canonical ``connector/apple-caldav/-/access``
+      identity tuple (legacy alias: ``CONNECTOR_APPLE_CALDAV_PASSWORD``).
+      See the package README for operator instructions.
     * ``endpoint`` (optional) — CalDAV root URL; defaults to
       ``https://caldav.icloud.com``.
     * ``sensitivity`` (optional) — one of the F39 sensitivity
@@ -634,26 +658,49 @@ def make_connector(config: Mapping[str, Any]) -> AppleCalDavConnector:
     * ``calendar_ids`` (optional) — list/tuple of CalDAV URLs to scope
       the connector to. Empty / unset = discover all calendars.
 
+    Args:
+      config: operator-supplied connector config mapping.
+      secrets: optional :class:`SecretsResolver` injection seam. When
+        ``None`` (production default), a :class:`SecretsLoader` is
+        constructed lazily — its env / KV mount / legacy alias chain
+        resolves the credentials. Tests inject
+        :class:`tests.fakes.FakeSecretsLoader` so no env-var monkey-
+        patching is needed (F2-clean).
+
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer resolves
     ``apple_caldav`` to this factory by name.
     """
-    required = ("username", "password")
-    missing = [key for key in required if not config.get(key)]
-    if missing:
-        raise ValueError(
-            f"apple_caldav: config is missing required key(s): {sorted(missing)!r}. "
-            "fix: declare username + password under the apple_caldav connector block in "
-            "kairix.config.yaml; secrets resolve via the operator's secret-resolution "
-            "path (KV: apple-caldav-username + apple-caldav-access). "
-            "next: see kairix/connectors/apple_caldav/README.md for the operator setup."
-        )
+    username_raw = config.get("username")
+    password_raw = config.get("password")
+
+    # Resolve any missing field via the canonical secrets surface; the
+    # loader's legacy-alias fallback covers the historical env-var path.
+    if not username_raw or not password_raw:
+        loader = secrets if secrets is not None else _default_secrets_loader()
+        if not username_raw:
+            username_raw = loader.require(*_SECRET_SCOPE_USERNAME)
+        if not password_raw:
+            password_raw = loader.require(*_SECRET_SCOPE_ACCESS)
 
     resolved = AppleCalDavConfig(
-        username=str(config["username"]),
-        password=str(config["password"]),
+        username=str(username_raw),
+        password=str(password_raw),
         endpoint=str(config.get("endpoint", DEFAULT_ICLOUD_ENDPOINT)),
         sensitivity=config.get("sensitivity", "personal"),
         calendar_ids=tuple(str(c) for c in config.get("calendar_ids", ())),
     )
     return AppleCalDavConnector(resolved)
+
+
+def _default_secrets_loader() -> SecretsResolver:
+    """Build the production :class:`SecretsLoader` lazily.
+
+    Local import keeps the connector module importable without paying
+    for the loader's env-snapshot work on every kairix import. The
+    loader's resolution chain (env -> legacy aliases -> KV mount ->
+    legacy chain) is unchanged from the canonical secrets package.
+    """
+    from kairix.secrets import SecretsLoader
+
+    return SecretsLoader()

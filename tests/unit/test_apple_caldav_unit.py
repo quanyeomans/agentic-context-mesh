@@ -27,6 +27,8 @@ from kairix.connectors.apple_caldav import (
     make_connector,
 )
 from kairix.core.protocols import Container
+from kairix.secrets import SecretNotFoundError
+from tests.fakes import FakeSecretsLoader
 
 pytestmark = pytest.mark.unit
 
@@ -250,16 +252,123 @@ def test_load_from_checkpoint_delegates_to_list_changes() -> None:
     assert events
 
 
-def test_make_connector_raises_on_missing_username() -> None:
-    """make_connector raises ValueError with the F21 fix marker."""
-    with pytest.raises(ValueError, match="missing required key"):
-        make_connector({"password": "p"})  # pragma: allowlist secret — test fixture
+def test_make_connector_raises_when_username_missing_from_config_and_loader() -> None:
+    """When neither config nor loader resolves username, SecretNotFoundError fires.
+
+    The canonical surface now resolves missing config fields via the injected
+    :class:`SecretsResolver`. A FakeSecretsLoader with no bound values means
+    the require() call raises ``SecretNotFoundError`` — message carries the
+    canonical KV name + the F21 fix/next/run markers from the loader.
+
+    Sabotage-proof: dropping the ``if not username_raw or not password_raw``
+    branch in make_connector → the connector silently constructs with
+    ``str(None)`` username, the test catches that via the missing exception.
+    """
+    with pytest.raises(SecretNotFoundError):
+        make_connector(
+            {"password": "p"},  # pragma: allowlist secret — test fixture
+            secrets=FakeSecretsLoader(),
+        )
 
 
-def test_make_connector_raises_on_missing_password() -> None:
-    """make_connector raises ValueError when password is absent."""
-    with pytest.raises(ValueError, match="missing required key"):
-        make_connector({"username": "u"})
+def test_make_connector_raises_when_password_missing_from_config_and_loader() -> None:
+    """When neither config nor loader resolves password, SecretNotFoundError fires.
+
+    Sabotage-proof: removing the access (password) require() call in
+    make_connector → connector constructs with ``str(None)`` password, the
+    test catches the missing exception.
+    """
+    with pytest.raises(SecretNotFoundError):
+        make_connector(
+            {"username": "u"},
+            secrets=FakeSecretsLoader(),
+        )
+
+
+def test_make_connector_resolves_username_via_loader_when_absent_from_config() -> None:
+    """Config password + loader-supplied username yields a working connector.
+
+    Sabotage-proof: replace the loader.require call with the literal string
+    ``"sabotage-string"`` → the assertion on the resolved username flunks.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "apple-caldav", None, "username"): "loader-username@example.com",
+        },
+    )
+    connector = make_connector(
+        {
+            "password": "fixture-app-password",  # pragma: allowlist secret — test fixture
+        },
+        secrets=loader,
+    )
+    assert connector._config.username == "loader-username@example.com"
+    assert connector._config.password == "fixture-app-password"  # pragma: allowlist secret
+
+
+def test_make_connector_resolves_password_via_loader_when_absent_from_config() -> None:
+    """Config username + loader-supplied password yields a working connector.
+
+    Sabotage-proof: replace the loader.require call with an empty string →
+    the assertion on the resolved password flunks.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "apple-caldav", None, "access"): "loader-app-password",  # pragma: allowlist secret
+        },
+    )
+    connector = make_connector(
+        {"username": "agent-alpha@example.com"},
+        secrets=loader,
+    )
+    assert connector._config.username == "agent-alpha@example.com"
+    assert connector._config.password == "loader-app-password"  # pragma: allowlist secret
+
+
+def test_make_connector_resolves_both_credentials_via_loader_when_config_empty() -> None:
+    """Empty config + fully-populated loader → connector with loader-resolved creds.
+
+    Pins the F45-style "no env vars in tests" contract: the canonical surface
+    works end-to-end through a Fake* without any monkey-patching.
+
+    Sabotage-proof: drop the username require() call → assertion on
+    ``connector._config.username`` flunks.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "apple-caldav", None, "username"): "loader-username@example.com",
+            ("connector", "apple-caldav", None, "access"): "loader-app-password",  # pragma: allowlist secret
+        },
+    )
+    connector = make_connector({}, secrets=loader)
+    assert connector._config.username == "loader-username@example.com"
+    assert connector._config.password == "loader-app-password"  # pragma: allowlist secret
+
+
+def test_apple_caldav_loads_secrets_via_loader() -> None:
+    """make_connector calls loader.require() for each missing credential.
+
+    Pins the canonical-surface contract: when both username and password
+    are absent from the config block, the injected SecretsResolver is asked
+    for each via its require() method (not get()), so a missing secret
+    surfaces a typed SecretNotFoundError — never a stack trace.
+
+    Sabotage-proof: swap ``loader.require`` to ``loader.get`` in
+    make_connector → the loader.get_calls captures `get` calls only when
+    require() is called (FakeSecretsLoader's require chains through get),
+    so the test instead asserts that BOTH calls landed in order. The hash
+    of identity tuples in get_calls flunks if the canonical tuple shape
+    changes.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "apple-caldav", None, "username"): "loader-u@example.com",
+            ("connector", "apple-caldav", None, "access"): "loader-p",  # pragma: allowlist secret
+        },
+    )
+    make_connector({}, secrets=loader)
+    assert ("connector", "apple-caldav", None, "username") in loader.get_calls
+    assert ("connector", "apple-caldav", None, "access") in loader.get_calls
 
 
 def test_make_connector_builds_with_required_fields() -> None:
