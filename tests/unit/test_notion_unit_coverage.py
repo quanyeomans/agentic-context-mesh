@@ -41,6 +41,8 @@ from kairix.connectors.notion.connector import (
     DEFAULT_SENSITIVITY,
     NOTION_MARKDOWN_MIME,
 )
+from kairix.secrets import SecretNotFoundError
+from tests.fakes import FakeSecretsLoader
 
 pytestmark = pytest.mark.unit
 
@@ -1077,3 +1079,58 @@ def test_connector_make_connector_validates_sensitivity_and_depth() -> None:
         make_connector({"default_sensitivity": "garbage-tier"})
     with pytest.raises(ValueError, match="max_block_depth"):
         make_connector({"max_block_depth": -1})
+
+
+# ---------------------------------------------------------------------------
+# ADR-031 — secrets are resolved via the injected SecretsResolver
+# ---------------------------------------------------------------------------
+
+
+def test_notion_loads_secrets_via_loader() -> None:
+    """Constructor reads the Notion integration token through the injected ``secrets`` resolver.
+
+    Pins ADR-031: ``_resolve_credentials_from_secrets`` calls
+    ``secrets.require(scope="connector", area="notion", instance=None,
+    leaf="token")`` so the operator's KAIRIX_CONNECTOR_NOTION_TOKEN
+    env var (or the legacy CONNECTOR_NOTION_TOKEN alias) resolves
+    through the loader, never via a hidden ``kairix.secrets.get_secret``
+    call.
+
+    Sabotage proof (executed): in the connector module, change the
+    ``leaf="token"`` argument to ``leaf="api-key"`` — the
+    ``FakeSecretsLoader`` no longer has a value for the new tuple and
+    ``.require()`` raises ``SecretNotFoundError``. Restored after
+    confirming the failure: ``SecretNotFoundError: Required secret
+    not available: kairix-connector-notion-api-key.``
+    """
+    fake_secrets = FakeSecretsLoader(
+        values={("connector", "notion", None, "token"): "secret_loader_value"},  # pragma: allowlist secret
+    )
+
+    def _builder(creds: NotionCredentials) -> NotionApiClient:
+        # No real HTTP — just confirm the resolved token reached the api_client.
+        return NotionApiClient(token=creds.token)
+
+    connector = NotionConnector(secrets=fake_secrets, client_builder=_builder)
+    # The loader was asked for the canonical token leaf.
+    asked = {(scope, area, instance, leaf) for scope, area, instance, leaf in fake_secrets.get_calls}
+    assert ("connector", "notion", None, "token") in asked
+    # The resolved value reached the credentials dataclass.
+    assert connector._credentials.token == "secret_loader_value"
+
+
+def test_notion_loader_miss_raises_actionable_error() -> None:
+    """Missing token surfaces as :class:`SecretNotFoundError`, not a silent ``None``.
+
+    Sabotage proof (executed): swap ``secrets.require(...)`` for
+    ``secrets.get(...) or ""`` in the connector's resolver helper —
+    the test below stops raising :class:`SecretNotFoundError` because
+    the empty token now flows through to ``NotionApiClient``, which
+    surfaces the miss as a plain :class:`ValueError`. Restored after
+    confirming the failure (under the sabotage):
+    ``Failed: DID NOT RAISE <class 'kairix.secrets.loader.SecretNotFoundError'>``
+    (actually raised ``ValueError: notion api client: token is empty``).
+    """
+    fake_secrets = FakeSecretsLoader()  # no values registered
+    with pytest.raises(SecretNotFoundError):
+        NotionConnector(secrets=fake_secrets)

@@ -58,6 +58,7 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets.loader import SecretsLoader, SecretsResolver
 
 logger = logging.getLogger(__name__)
 
@@ -112,21 +113,22 @@ class NotionCredentials:
     token: str
 
 
-def _resolve_credentials_from_secrets() -> NotionCredentials:
-    """Resolve the Notion integration token via :func:`kairix.secrets.get_secret`.
+def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> NotionCredentials:
+    """Resolve the Notion integration token via :class:`SecretsResolver`.
 
-    The secret name ``connector-notion-token`` is the canonical
-    credential identifier for the Notion plugin. When the secret is
-    absent the function raises :class:`OSError` with an actionable
-    ``fix:`` message — module import never crashes, only first-use of
-    list_changes / fetch.
+    ADR-031 canonical-naming: the loader resolves
+    ``("connector", "notion", None, "token")`` through env (canonical
+    ``KAIRIX_CONNECTOR_NOTION_TOKEN`` → legacy alias
+    ``CONNECTOR_NOTION_TOKEN``) → KV mount → legacy chain. When no
+    source resolves, :meth:`SecretsResolver.require` raises
+    :class:`SecretNotFoundError` with an actionable ``fix:`` message
+    — module import never crashes, only first-use of list_changes /
+    fetch.
 
     F15-clean: the resolved token is captured into the frozen dataclass
     and never logged through any code path in this module.
     """
-    from kairix.secrets import get_secret
-
-    token = get_secret("connector-notion-token", required=True) or ""
+    token = secrets.require(scope="connector", area="notion", instance=None, leaf="token")
     return NotionCredentials(token=token)
 
 
@@ -141,14 +143,18 @@ class NotionConnector:
     DI seams:
 
       * ``credentials`` — resolved :class:`NotionCredentials`. Tests
-        pass a literal; production callers omit and the factory
-        resolves from :mod:`kairix.secrets`.
+        pass a literal; production callers omit and the connector
+        resolves via the injected :class:`SecretsResolver`.
       * ``client_builder`` — builds the :class:`NotionApiClient`.
         Tests pass a builder returning a client backed by an
         ``httpx.MockTransport`` so no real Notion call leaks.
       * ``default_sensitivity`` — connector-wide F39 tier; defaults to
         ``internal``. Operators set the matching key in
         ``connector_specific_config`` to override.
+      * ``secrets`` — :class:`~kairix.secrets.SecretsResolver`. Tests
+        pass :class:`tests.fakes.FakeSecretsLoader` so credential
+        resolution rides the F2-clean DI seam; production defaults
+        to :class:`~kairix.secrets.SecretsLoader` (ADR-031).
 
     Flag gating happens at the worker-dispatch boundary
     (:func:`kairix.worker.dispatch_notion_sync`) — when the
@@ -168,11 +174,17 @@ class NotionConnector:
         client_builder: Callable[[NotionCredentials], NotionApiClient] | None = None,
         default_sensitivity: Sensitivity = DEFAULT_SENSITIVITY,
         max_block_depth: int = DEFAULT_MAX_BLOCK_DEPTH,
+        secrets: SecretsResolver | None = None,
     ) -> None:
         self._default_sensitivity: Sensitivity = default_sensitivity
         self._max_block_depth = max_block_depth
+        # ADR-031 canonical-naming seam. Tests inject FakeSecretsLoader
+        # via this kwarg; production constructs a real SecretsLoader
+        # lazily so the connector still imports cleanly without a
+        # provisioned secrets backend.
+        self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
 
-        resolved = credentials if credentials is not None else _resolve_credentials_from_secrets()
+        resolved = credentials if credentials is not None else _resolve_credentials_from_secrets(self._secrets)
         self._credentials = resolved
 
         if client_builder is not None:
@@ -623,8 +635,12 @@ def make_connector(config: Mapping[str, Any]) -> NotionConnector:
       * ``max_block_depth`` (optional) — recursion cap on the block
         walk. Defaults to ``DEFAULT_MAX_BLOCK_DEPTH``.
 
-    Credentials resolve via :func:`kairix.secrets.get_secret` —
-    ``connector-notion-token`` must be set.
+    Credentials resolve via the connector's injected
+    :class:`~kairix.secrets.SecretsResolver` (production:
+    :class:`~kairix.secrets.SecretsLoader`) — the canonical leaf is
+    ``("connector", "notion", None, "token")`` which the loader walks
+    canonical env → legacy alias ``CONNECTOR_NOTION_TOKEN`` → KV mount
+    → legacy chain.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer can resolve

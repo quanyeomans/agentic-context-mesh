@@ -70,6 +70,7 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets.loader import SecretsLoader, SecretsResolver
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,8 @@ class GitHubConnector:
     DI seams (all keyword arguments with real defaults — F6-clean):
 
       * ``credentials`` — :class:`GitHubCredentials`. Tests pass a
-        literal; production resolves via :func:`_resolve_credentials_from_secrets`.
+        literal; production resolves via :func:`_resolve_credentials_from_secrets`
+        using the injected ``secrets`` resolver.
       * ``client_builder`` — constructs the :class:`GitHubApiClient`.
         Tests pass a builder returning a client backed by an
         :class:`httpx.MockTransport` so no real GitHub call leaks.
@@ -190,6 +192,10 @@ class GitHubConnector:
       * ``default_sensitivity`` — Wave E F39 tier; defaults to
         ``client-confidential`` per spec §1 (private repos are the
         default GitHub assumption; public/internal repos opt down).
+      * ``secrets`` — :class:`~kairix.secrets.SecretsResolver`. Tests
+        pass :class:`tests.fakes.FakeSecretsLoader` so credential
+        resolution rides the F2-clean DI seam; production defaults
+        to :class:`~kairix.secrets.SecretsLoader` (ADR-031).
     """
 
     name: str = CONNECTOR_NAME
@@ -206,6 +212,7 @@ class GitHubConnector:
         flag_reader: Callable[[str], bool] = _default_flag_reader,
         default_sensitivity: Sensitivity = _DEFAULT_SENSITIVITY,
         webhook_secret: str | None = None,
+        secrets: SecretsResolver | None = None,
     ) -> None:
         self._flag_reader = flag_reader
         self._default_sensitivity: Sensitivity = default_sensitivity
@@ -213,10 +220,16 @@ class GitHubConnector:
         # attribute is consumed only by the verify_and_parse helper in
         # webhook.py. NEVER passed to logger.* / print / raise.
         self._webhook_secret = webhook_secret
+        # ADR-031 canonical-naming seam. Tests inject FakeSecretsLoader
+        # via this kwarg; production constructs a real SecretsLoader
+        # lazily (only when credentials need resolving).
+        self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
         if client is not None:
             self._client = client
         else:
-            resolved_credentials = credentials if credentials is not None else _resolve_credentials_from_secrets()
+            resolved_credentials = (
+                credentials if credentials is not None else _resolve_credentials_from_secrets(self._secrets)
+            )
             if client_builder is not None:
                 self._client = client_builder(resolved_credentials)
             elif resolved_credentials.personal_access_token or resolved_credentials.installation_id is not None:
@@ -914,8 +927,15 @@ def f39_tier_from_visibility(visibility: str) -> F39Tier:
     return "confidential"
 
 
-def _resolve_credentials_from_secrets() -> GitHubCredentials:
-    """Resolve the GitHub credential blob via :func:`kairix.secrets.get_secret`.
+def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> GitHubCredentials:
+    """Resolve the GitHub credential blob via :class:`SecretsResolver`.
+
+    ADR-031 canonical-naming: routes every credential read through the
+    injected :class:`SecretsResolver` (production: :class:`SecretsLoader`;
+    tests: :class:`tests.fakes.FakeSecretsLoader`). The legacy env-var
+    aliases (``CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN`` etc.) keep
+    resolving via the loader's alias fallback so production operators
+    don't need to rotate their KV before this lands.
 
     Tolerant of partial config — the operator may set just a PAT
     (development/test) or the App triple (production). The connector
@@ -925,13 +945,11 @@ def _resolve_credentials_from_secrets() -> GitHubCredentials:
     :class:`GitHubCredentials` dataclass and passed to the api_client;
     they are NEVER logged.
     """
-    from kairix.secrets import get_secret
-
-    app_id_str = get_secret("connector-github-app-id", required=False) or ""
-    installation_id_str = get_secret("connector-github-installation-id", required=False) or ""
-    private_key = get_secret("connector-github-app-private-key", required=False) or ""
-    pat = get_secret("connector-github-personal-access-token", required=False) or ""
-    webhook_secret = get_secret("connector-github-webhook-secret", required=False) or ""
+    app_id_str = secrets.get(scope="connector", area="github", instance=None, leaf="app-id") or ""
+    installation_id_str = secrets.get(scope="connector", area="github", instance=None, leaf="installation-id") or ""
+    private_key = secrets.get(scope="connector", area="github", instance=None, leaf="app-private-key") or ""
+    pat = secrets.get(scope="connector", area="github", instance=None, leaf="pat") or ""
+    webhook_secret = secrets.get(scope="connector", area="github", instance=None, leaf="webhook-secret") or ""
     app_id = int(app_id_str) if app_id_str else None
     installation_id = int(installation_id_str) if installation_id_str else None
     return GitHubCredentials(
@@ -1089,8 +1107,10 @@ def make_connector(config: Mapping[str, Any]) -> GitHubConnector:
       * ``webhook_secret`` — overrides the secret resolution; mostly
         for test-double wiring.
 
-    Credentials resolve via :func:`kairix.secrets.get_secret` — see
-    :func:`_resolve_credentials_from_secrets` for the per-secret names.
+    Credentials resolve via the connector's injected
+    :class:`~kairix.secrets.SecretsResolver` (production:
+    :class:`~kairix.secrets.SecretsLoader`) — see
+    :func:`_resolve_credentials_from_secrets` for the per-leaf names.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer can resolve

@@ -52,7 +52,8 @@ from kairix.core.protocols import (
     SlimConnectorWithPermSync,
     SourceConnector,
 )
-from tests.fakes import FakeFeatureFlagResolver
+from kairix.secrets import SecretNotFoundError
+from tests.fakes import FakeFeatureFlagResolver, FakeSecretsLoader
 
 pytestmark = pytest.mark.unit
 
@@ -1027,3 +1028,79 @@ def test_socket_mode_transport_protocol_is_runtime_checkable() -> None:
     # NOT @runtime_checkable so duck-typing stays the contract. Confirm
     # the type alias is importable + named as expected.
     assert SocketModeTransport.__name__ == "SocketModeTransport"
+
+
+# ---------------------------------------------------------------------------
+# ADR-031 — secrets are resolved via the injected SecretsResolver
+# ---------------------------------------------------------------------------
+
+
+def test_slack_loads_secrets_via_loader() -> None:
+    """First ``_web()`` call resolves every Slack leaf through the injected ``secrets`` resolver.
+
+    Pins ADR-031: the connector defers credential resolution until the
+    Web API client is needed; when called without ``credentials=``, it
+    routes through ``secrets.require(bot-token)`` plus
+    ``secrets.get(...)`` for the optional ``app-token`` / ``client-id``
+    / ``client-secret`` leaves.
+
+    Sabotage proof (executed): change the connector's bot-token
+    resolution call from ``leaf="bot-token"`` to
+    ``leaf="not-bot-token"`` — the ``FakeSecretsLoader`` has no value
+    bound to the new tuple and ``.require()`` raises
+    ``SecretNotFoundError`` before the asserts even run. Restored
+    after confirming the failure: ``kairix.secrets.loader.SecretNotFoundError:
+    Required secret not available: kairix-connector-slack-not-bot-token.``
+    """
+    fake_secrets = FakeSecretsLoader(
+        values={
+            ("connector", "slack", None, "bot-token"): "xoxb-loader-fake",  # pragma: allowlist secret
+            ("connector", "slack", None, "app-token"): "xapp-loader-fake",  # pragma: allowlist secret
+        }
+    )
+    web = _InMemoryWeb(channels=[])
+
+    def _builder(_creds: SlackCredentials) -> SlackWebClient:
+        return web
+
+    connector = SlackConnector(
+        secrets=fake_secrets,
+        web_client_factory=_builder,
+        flag_reader=FakeFeatureFlagResolver().with_flag("connector_slack", False).get,
+    )
+    # Force credential resolution by triggering the lazy _web() path.
+    connector._web()
+    # The loader was asked for every canonical Slack leaf.
+    asked = {(scope, area, instance, leaf) for scope, area, instance, leaf in fake_secrets.get_calls}
+    assert ("connector", "slack", None, "bot-token") in asked
+    assert ("connector", "slack", None, "app-token") in asked
+    assert ("connector", "slack", None, "client-id") in asked
+    assert ("connector", "slack", None, "client-secret") in asked
+    # The resolved bot_token reached the credentials dataclass cached on the instance.
+    assert connector._credentials is not None
+    assert connector._credentials.bot_token == "xoxb-loader-fake"
+    assert connector._credentials.app_token == "xapp-loader-fake"
+
+
+def test_slack_loader_miss_on_required_bot_token_raises() -> None:
+    """Missing bot-token leaf surfaces as :class:`SecretNotFoundError`.
+
+    Sabotage proof (executed): mark every leaf optional by swapping
+    ``secrets.require(bot-token)`` for ``secrets.get(bot-token)`` —
+    the assertion below stops raising because the empty bot-token
+    flows quietly into the SlackCredentials dataclass. Restored after
+    confirming the failure: ``DID NOT RAISE
+    <class 'kairix.secrets.SecretNotFoundError'>``.
+    """
+    fake_secrets = FakeSecretsLoader()  # no values registered
+
+    def _builder(_creds: SlackCredentials) -> SlackWebClient:
+        return _InMemoryWeb(channels=[])
+
+    connector = SlackConnector(
+        secrets=fake_secrets,
+        web_client_factory=_builder,
+        flag_reader=FakeFeatureFlagResolver().with_flag("connector_slack", False).get,
+    )
+    with pytest.raises(SecretNotFoundError):
+        connector._web()

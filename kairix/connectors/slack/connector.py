@@ -78,6 +78,7 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets.loader import SecretsLoader, SecretsResolver
 
 logger = logging.getLogger(__name__)
 
@@ -180,29 +181,39 @@ class SlackCredentials:
     client_secret: str | None = None
 
 
-def _resolve_credentials_from_secrets() -> SlackCredentials:
-    """Resolve the workspace credentials via :func:`kairix.secrets.get_secret`.
+def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> SlackCredentials:
+    """Resolve the workspace credentials via :class:`SecretsResolver`.
 
-    The Slack credential triple lives under three secret keys per the
-    operator-facing naming convention (mirrors the M365 sibling shape):
+    ADR-031 canonical-naming: each leaf below routes through the
+    injected resolver (production: :class:`SecretsLoader`; tests:
+    :class:`tests.fakes.FakeSecretsLoader`). Production keeps working
+    unchanged because the loader's alias fallback still resolves the
+    legacy env vars (``CONNECTOR_SLACK_BOT_TOKEN`` etc.).
 
-      * ``connector-slack-bot-token`` (required) — ``xoxb-…``.
-      * ``connector-slack-app-token`` (optional) — ``xapp-…`` for
-        Socket Mode; absent when only the poll surface is wired.
-      * ``connector-slack-client-id`` /
-        ``connector-slack-client-secret`` (optional) — the OAuth v2
-        install flow's app-registration credentials; absent when the
-        operator has already installed and only the worker is running.
+    The Slack credential triple lives under four canonical leaves
+    (mirrors the M365 sibling shape):
 
-    Lazy import so the connector module loads cleanly even when the
-    secret backend is mid-bootstrap.
+      * ``("connector", "slack", None, "bot-token")`` (required) —
+        ``xoxb-…``.
+      * ``("connector", "slack", None, "app-token")`` (optional) —
+        ``xapp-…`` for Socket Mode; absent when only the poll surface
+        is wired.
+      * ``("connector", "slack", None, "client-id")`` /
+        ``("connector", "slack", None, "client-secret")`` (optional) —
+        the OAuth v2 install flow's app-registration credentials;
+        absent when the operator has already installed and only the
+        worker is running.
+
+    The canonical schema currently models Slack with ``instance=None``;
+    production runs per-workspace tokens (slack-bot-token-builder /
+    slack-bot-token-coach). Per-workspace ``instance`` support is a
+    separate follow-up; this refactor only moves the resolution onto
+    the loader surface.
     """
-    from kairix.secrets import get_secret
-
-    bot_token = get_secret("connector-slack-bot-token", required=True) or ""
-    app_token = get_secret("connector-slack-app-token", required=False)
-    client_id = get_secret("connector-slack-client-id", required=False)
-    client_secret = get_secret("connector-slack-client-secret", required=False)
+    bot_token = secrets.require(scope="connector", area="slack", instance=None, leaf="bot-token")
+    app_token = secrets.get(scope="connector", area="slack", instance=None, leaf="app-token")
+    client_id = secrets.get(scope="connector", area="slack", instance=None, leaf="client-id")
+    client_secret = secrets.get(scope="connector", area="slack", instance=None, leaf="client-secret")
     return SlackCredentials(
         bot_token=bot_token,
         app_token=app_token or None,
@@ -245,8 +256,9 @@ class SlackConnector:
     DI seams (every external collaborator passes via constructor):
 
       * ``credentials`` — resolved :class:`SlackCredentials`. Tests pass
-        a literal; production callers omit and the factory resolves
-        from :mod:`kairix.secrets`.
+        a literal; production callers omit and the connector resolves
+        via the injected :class:`SecretsResolver` on first ``_web()``
+        call.
       * ``web_client_factory`` — builds the
         :class:`~kairix.connectors.slack.web_client.SlackWebClient`.
         Tests pass a factory returning a client backed by an
@@ -258,6 +270,10 @@ class SlackConnector:
       * ``flag_reader`` — resolves feature flags. Tests inject a
         :class:`~tests.fakes.FakeFeatureFlagResolver` so the branch
         under test is pinned without monkey-patching.
+      * ``secrets`` — :class:`~kairix.secrets.SecretsResolver`. Tests
+        pass :class:`tests.fakes.FakeSecretsLoader` so credential
+        resolution rides the F2-clean DI seam; production defaults
+        to :class:`~kairix.secrets.SecretsLoader` (ADR-031).
     """
 
     name: str = CONNECTOR_NAME
@@ -272,6 +288,7 @@ class SlackConnector:
         web_client_factory: Callable[[SlackCredentials], SlackWebClient] | None = None,
         socket_mode_handler_factory: Callable[..., SlackSocketModeHandler] | None = None,
         flag_reader: Callable[[str], bool] = _default_flag_reader,
+        secrets: SecretsResolver | None = None,
     ) -> None:
         # Lift credential resolution out of the hot path so tests that
         # never reach the network can construct without any secrets backend.
@@ -281,6 +298,11 @@ class SlackConnector:
         )
         self._socket_mode_handler_factory = socket_mode_handler_factory
         self._flag_reader = flag_reader
+        # ADR-031 canonical-naming seam. Tests inject FakeSecretsLoader
+        # via this kwarg; production constructs a real SecretsLoader
+        # lazily so the connector still imports cleanly without a
+        # provisioned secrets backend.
+        self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
 
         self._web_client_cache: SlackWebClient | None = None
         self._socket_mode_handler: SlackSocketModeHandler | None = None
@@ -818,7 +840,7 @@ class SlackConnector:
         """Resolve (or lazily build) the workspace's Web API client."""
         if self._web_client_cache is not None:
             return self._web_client_cache
-        creds = self._credentials if self._credentials is not None else _resolve_credentials_from_secrets()
+        creds = self._credentials if self._credentials is not None else _resolve_credentials_from_secrets(self._secrets)
         self._credentials = creds
         self._web_client_cache = self._web_client_factory(creds)
         return self._web_client_cache
@@ -1126,8 +1148,8 @@ def make_connector(config: Mapping[str, Any]) -> SlackConnector:
 
       * ``bot_token`` (optional) — operator may override the secret
         lookup by passing the token inline. Production resolves via
-        :func:`kairix.secrets.get_secret` with key
-        ``connector-slack-bot-token``.
+        the connector's injected :class:`~kairix.secrets.SecretsResolver`
+        for the canonical leaf ``("connector", "slack", None, "bot-token")``.
       * ``app_token`` (optional) — ``xapp-…`` for Socket Mode.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in

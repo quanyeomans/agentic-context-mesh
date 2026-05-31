@@ -51,7 +51,7 @@ from kairix.connectors.github.webhook import (
     compute_signature,
 )
 from kairix.core.protocols import ContainerTransientError, CredentialExpiredError, RawArtefact
-from tests.fakes import FakeFeatureFlagResolver
+from tests.fakes import FakeFeatureFlagResolver, FakeSecretsLoader
 
 pytestmark = pytest.mark.unit
 
@@ -1187,3 +1187,62 @@ def test_connector_invalidate_token_on_deferred_client_is_noop() -> None:
     connector = GitHubConnector()  # deferred client
     # Should not raise — invalidate is idempotent until creds arrive.
     connector._client.invalidate_token()
+
+
+# ---------------------------------------------------------------------------
+# ADR-031 — secrets are resolved via the injected SecretsResolver
+# ---------------------------------------------------------------------------
+
+
+def test_github_loads_secrets_via_loader() -> None:
+    """Constructor reads every credential leaf through the injected ``secrets`` resolver.
+
+    Pins ADR-031: the connector calls ``secrets.get(...)`` for each of
+    the canonical leaves named in ``kairix.secrets._legacy_aliases``
+    (``pat``, ``app-id``, ``installation-id``, ``app-private-key``,
+    ``webhook-secret``). Asserting on the loader's call history proves
+    that ``_resolve_credentials_from_secrets`` actually rode the
+    injected seam rather than reaching for ``kairix.secrets.get_secret``
+    behind the test's back.
+
+    Sabotage proof (executed): in the connector module, change
+    ``leaf="pat"`` to ``leaf="not-pat"`` in the PAT resolution call —
+    the call-history assertion ``("connector", "github", None, "pat")
+    in asked`` flips. Restored after confirming the failure:
+    ``AssertionError: assert ('connector', 'github', None, 'pat') in
+    {... 'not-pat' ...}``.
+    """
+    fake_secrets = FakeSecretsLoader(
+        values={
+            ("connector", "github", None, "pat"): "ghp-fake",
+            ("connector", "github", None, "webhook-secret"): "wh-fake",
+        }
+    )
+    connector = GitHubConnector(secrets=fake_secrets)
+    # The loader was asked for every canonical leaf the connector cares about.
+    asked = {(scope, area, instance, leaf) for scope, area, instance, leaf in fake_secrets.get_calls}
+    assert ("connector", "github", None, "pat") in asked
+    assert ("connector", "github", None, "app-id") in asked
+    assert ("connector", "github", None, "installation-id") in asked
+    assert ("connector", "github", None, "app-private-key") in asked
+    assert ("connector", "github", None, "webhook-secret") in asked
+    # PAT-bearing credentials build a real GitHubApiClient (not the deferred stand-in).
+    assert isinstance(connector._client, GitHubApiClient)
+
+
+def test_github_loader_miss_falls_through_to_deferred_client() -> None:
+    """Empty loader (no values) yields the deferred credential client.
+
+    Sabotage proof (executed): mutate the connector to call
+    ``secrets.require(...)`` instead of ``secrets.get(...)`` for the
+    ``pat`` leaf — the constructor now raises ``SecretNotFoundError``
+    instead of quietly building the deferred client. Restored after
+    confirming the failure:
+    ``kairix.secrets.loader.SecretNotFoundError: Required secret not
+    available: kairix-connector-github-pat.``
+    """
+    fake_secrets = FakeSecretsLoader()  # every leaf misses
+    connector = GitHubConnector(secrets=fake_secrets)
+    # Construction succeeded; the client is the deferred stand-in.
+    snap = connector.stats()
+    assert snap["rest_requests"] == 0
