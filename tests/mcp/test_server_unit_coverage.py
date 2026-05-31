@@ -399,9 +399,14 @@ def test_build_server_retrieval_tools_return_cold_start_envelope_when_not_ready(
         # The tool returned a cold-start envelope — accept either shape:
         # `@warm_gate`'s warming envelope OR cold-start branch's
         # retryable_not_ready envelope. Both mean "do not proceed".
-        warming_envelope = payload.get("status") == "warming" and payload.get("error") == "ColdStart"
+        # Python 3.10's asyncio.run plumbing through FastMCP can wrap the
+        # envelope under a top-level "result" key; 3.11/3.12 return the
+        # envelope flat. Normalise to handle both shapes — the property
+        # under test is the envelope contents, not where it sits.
+        envelope = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+        warming_envelope = envelope.get("status") == "warming" and envelope.get("error") == "ColdStart"
         cold_start_envelope = (
-            payload.get("status") == "retryable_not_ready" and payload.get("error_code") == "KAIRIX_COLD_START"
+            envelope.get("status") == "retryable_not_ready" and envelope.get("error_code") == "KAIRIX_COLD_START"
         )
         assert warming_envelope or cold_start_envelope, (
             f"tool {tool_name!r} returned non-cold-start envelope when readiness_check=False: {payload!r}"
