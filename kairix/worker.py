@@ -2151,6 +2151,65 @@ def _run_preflight_at_boot(deps: PreflightDeps | None = None) -> bool:
     return True
 
 
+def probe_vec_index_at_boot(
+    *,
+    db_path: Path | None = None,
+    enabled: bool | None = None,
+) -> None:
+    """Open the vec_index at worker boot to surface recovery actions early.
+
+    The 2026-05-31 production bug had the operator discover index
+    corruption ~6 hours into a force-embed run, via the recall canary
+    check at the end. This probe runs the same load_or_recreate() at
+    boot so any recovery (orphan .tmp promotion, corrupt-file
+    recreation) is logged immediately AND fixed in place before the
+    first embed tick. The probe is idempotent — opening a healthy
+    index is a no-op.
+
+    Disabled when ``enabled=False`` (or, when ``enabled`` is None,
+    when ``worker_writes_vec_index()`` returns False — the operator
+    opted out of worker-side vec writes; the probe wouldn't help and
+    the open shouldn't happen).
+
+    Never raises — failures log as WARNING and boot continues. The
+    embed pipeline's own load_or_recreate() will retry at first-tick
+    if this probe somehow missed a state transition.
+
+    ``db_path`` / ``enabled`` are the F2-clean test seams; production
+    callers omit both and the boundary reads from KairixPaths.
+    """
+    try:
+        if enabled is None:
+            from kairix.paths import worker_writes_vec_index
+
+            enabled = worker_writes_vec_index()
+        if not enabled:
+            return
+
+        if db_path is None:
+            from kairix.paths import db_path as get_db_path
+
+            db_path = get_db_path()
+
+        from kairix.core.embed.embed import open_usearch_index_for_paths
+
+        # Opens, recovers, logs — no further action needed. The returned
+        # VectorIndex isn't kept (the embed tick opens its own).
+        open_usearch_index_for_paths(
+            index_path=db_path.parent / "vectors.usearch",
+            meta_path=db_path.parent / "vectors.meta.json",
+            db_path=db_path,
+        )
+    except Exception as exc:  # pragma: no cover - boundary
+        logger.warning(
+            "worker: vec_index startup probe raised — %s. "
+            "fix: this is non-fatal; first embed tick will retry. "
+            "next: kairix onboard check if the warning persists. "
+            "run: ls -la $KAIRIX_DOCUMENT_ROOT/../kairix/vectors.usearch*",
+            exc,
+        )
+
+
 @dataclass
 class TopologyV2ApplyDeps:
     """Injectable dependencies for :func:`apply_topology_v2_at_boot`.
@@ -2442,6 +2501,14 @@ def main(
     # boot; ``KAIRIX_PREFLIGHT_STRICT=1`` makes error gaps fatal.
     if not _run_preflight_at_boot():
         return
+
+    # Vec-index startup probe — surfaces any pending .tmp promotion or
+    # corrupt-file recreation BEFORE the first embed tick runs. Without
+    # this, operators learnt about recovery actions hours later via the
+    # next recall canary (the 2026-05-31 production bug). The probe
+    # itself is idempotent — load_or_recreate either passes through an
+    # already-valid index or fixes it in place.
+    probe_vec_index_at_boot()
 
     # Wave D apply-bridge — when the topology_v2_config flag is ON, read
     # the parsed config and materialise it into runtime topology_* rows
