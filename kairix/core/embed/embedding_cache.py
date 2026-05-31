@@ -36,7 +36,7 @@ import hashlib
 import logging
 import sqlite3
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -204,7 +204,7 @@ class EmbeddingCache:
         write MUST be all-or-nothing per batch.
         """
         rows: list[tuple[str, int, str, bytes, str]] = []
-        created_at = datetime.now(UTC).isoformat()
+        created_at = datetime.now(timezone.utc).isoformat()
         for chunk_hash, vector in pairs:
             rows.append((model, dimension, chunk_hash, _encode_vector(vector), created_at))
         if not rows:
