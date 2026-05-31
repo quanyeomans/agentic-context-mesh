@@ -94,9 +94,10 @@ kairix/core/features/cli.py
 kairix/quality/probe/burst.py
 kairix/quality/probe/config_cli.py
 # kairix/chunkers/email_thread/chunker.py — shipped in commit a80b6599
-# (ADR-028 Wave G.1 batch 1) without a baseline entry; F7 floor at 87.7%
-# vs 90% target. Uncovered branches are the multi-message thread-split
+# (ADR-028 Wave G.1 batch 1 chunkers) without a baseline entry; F7 floor
+# at 87.7% vs 90% target. Uncovered branches are multi-message thread-split
 # edge cases that need a fixture-corpus expansion in the chunkers wave's
-# follow-up commit. Grandfathered here in GH #357 to unblock the m365
-# retry-after fix; pay-down owner is the Wave G.1 author.
+# follow-up commit. Grandfathered to unblock unrelated waves (ADR-029
+# G.1 queue spike, M365 Retry-After fix, etc.). Paydown owner: Wave G.1
+# author (chunker BDD coverage extension lifts above floor).
 kairix/chunkers/email_thread/chunker.py

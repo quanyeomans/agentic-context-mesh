@@ -86,6 +86,16 @@ def test_validate_schema_passes_on_valid_db() -> None:
         CREATE TABLE topology_scope_profiles (id INTEGER PRIMARY KEY, actor_id TEXT);
         CREATE TABLE topology_scope_entries (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_skills (id INTEGER PRIMARY KEY, name TEXT);
+        -- ADR-029 G.1 — agent-facing query queue.
+        CREATE TABLE pending_queries (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            args_json TEXT NOT NULL,
+            args_hash TEXT NOT NULL,
+            status TEXT NOT NULL,
+            submitted_at TEXT NOT NULL
+        );
     """)
     errors = validate_schema(db)
     assert errors == []
@@ -152,6 +162,12 @@ def test_validate_schema_detects_missing_column() -> None:
         CREATE TABLE topology_scope_profiles (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_scope_entries (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_skills (id INTEGER PRIMARY KEY);
+        -- ADR-029 G.1 — agent-facing query queue (minimal shape).
+        CREATE TABLE pending_queries (
+            id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, tool TEXT NOT NULL,
+            args_json TEXT NOT NULL, args_hash TEXT NOT NULL,
+            status TEXT NOT NULL, submitted_at TEXT NOT NULL
+        );
     """)
     errors = validate_schema(db)
     assert any("hash" in e for e in errors)
@@ -193,11 +209,14 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
 
     KFEAT-021 Phase 1 added the ``content_vectors_pruned`` soft-delete
     staging table (one additional required table).
+
+    ADR-029 G.1 added the ``pending_queries`` agent-query-queue table
+    (one additional required table).
     """
     db = sqlite3.connect(":memory:")
     errors = validate_schema(db)
-    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology v2 = 22
-    assert len(errors) == 22
+    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology v2 + 1 ADR-029 = 23
+    assert len(errors) == 23
     assert any("documents" in e for e in errors)
     assert any("content" in e for e in errors)
     assert any("content_vectors" in e for e in errors)
@@ -263,6 +282,12 @@ def test_validate_schema_missing_content_vectors_only() -> None:
         CREATE TABLE topology_scope_profiles (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_scope_entries (id INTEGER PRIMARY KEY);
         CREATE TABLE topology_skills (id INTEGER PRIMARY KEY);
+        -- ADR-029 G.1 — agent-facing query queue (minimal shape).
+        CREATE TABLE pending_queries (
+            id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, tool TEXT NOT NULL,
+            args_json TEXT NOT NULL, args_hash TEXT NOT NULL,
+            status TEXT NOT NULL, submitted_at TEXT NOT NULL
+        );
     """)
     errors = validate_schema(db)
     assert len(errors) == 1

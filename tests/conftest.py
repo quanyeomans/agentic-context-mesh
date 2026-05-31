@@ -321,6 +321,10 @@ pytest_plugins = [
     "tests.bdd.steps.chunker_slide_steps",
     "tests.bdd.steps.chunker_sheet_row_steps",
     "tests.bdd.steps.chunker_docx_heading_steps",
+    # ADR-029 G.1 — agent-facing query queue + carry-along delivery.
+    # tool_search-only spike behind the agent_query_queue flag (default OFF).
+    "tests.bdd.steps.agent_query_queue_steps",
+    "tests.bdd.steps.feature_flag_agent_query_queue_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

@@ -192,6 +192,25 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             PRIMARY KEY (source_name, item_id, stage, occurred_at)
         );
 
+        -- ADR-029 G.1: agent-facing query queue + carry-along delivery.
+        -- INSERT site: kairix/core/queue/dispatch.py (dispatch_or_queue).
+        -- UPDATE site: kairix/core/queue/carry_along.py (mark 'delivered').
+        CREATE TABLE IF NOT EXISTS pending_queries (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            args_json TEXT NOT NULL,
+            args_hash TEXT NOT NULL,
+            status TEXT NOT NULL,
+            submitted_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            delivered_at TEXT,
+            result_json TEXT,
+            error_message TEXT,
+            UNIQUE(agent_id, args_hash, submitted_at)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(hash);
         CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection);
         CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
@@ -200,6 +219,9 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             ON pipeline_item_status (source_name, item_id, occurred_at DESC);
         CREATE INDEX IF NOT EXISTS idx_pipeline_status_by_code
             ON pipeline_item_status (status_code, occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_pending_queries_agent_pending
+            ON pending_queries (agent_id, status)
+            WHERE status IN ('completed', 'failed');
     """)
 
     # Run migrations to bring legacy schemas up to current (adds agent_owner,
@@ -276,6 +298,8 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "topology_scope_profiles",
         "topology_scope_entries",
         "topology_skills",
+        # ADR-029 G.1 — agent-facing query queue
+        "pending_queries",
     )
     for required in required_tables:
         if required not in tables:
@@ -419,6 +443,28 @@ CREATE TABLE IF NOT EXISTS content_vectors_pruned (
 );
 
 CREATE INDEX IF NOT EXISTS idx_content_vectors_pruned_at ON content_vectors_pruned(pruned_at);
+
+-- ADR-029 G.1: agent-facing query queue. See kairix/core/queue/.
+-- INSERT site: dispatch.py; UPDATE site: carry_along.py (status->'delivered').
+CREATE TABLE IF NOT EXISTS pending_queries (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    args_json TEXT NOT NULL,
+    args_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    delivered_at TEXT,
+    result_json TEXT,
+    error_message TEXT,
+    UNIQUE(agent_id, args_hash, submitted_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_queries_agent_pending
+    ON pending_queries (agent_id, status)
+    WHERE status IN ('completed', 'failed');
 """
 
 

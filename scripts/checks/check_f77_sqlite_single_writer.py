@@ -63,6 +63,13 @@ _ALLOWLIST_PATHS: tuple[str, ...] = (
     "kairix/agents/mcp/",
     "kairix/core/connectors/",  # framework — already coordinated via factory
     "kairix/core/maintenance/",  # tick-driven, same coordinator
+    # ADR-029 G.1: agent-query-queue worker needs its own connection because
+    # work runs on a background ThreadPoolExecutor and the existing factory
+    # connection is single-thread. The queue's writes are scoped to a single
+    # table (pending_queries) and are serialised by a module-level
+    # threading.Lock so contention stays bounded. See module docstring at
+    # kairix/core/queue/dispatch.py for the rationale.
+    "kairix/core/queue/",
 )
 
 _EXEMPT_COMMENT = "# F77-allow:"

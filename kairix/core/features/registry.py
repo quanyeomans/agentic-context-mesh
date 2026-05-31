@@ -554,6 +554,26 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/ADR-025-pipeline-observability-and-status-surface.md",
     ),
+    "agent_query_queue": FeatureFlag(
+        name="agent_query_queue",
+        default=False,
+        description=(
+            "ADR-029 G.1 spike: route tool_search through the dispatch_or_queue "
+            "decorator + carry-along middleware. When OFF, tool_search runs "
+            "synchronously as today (legacy ColdStart envelope path still applies "
+            "via the warm-gate decorator). When ON, slow calls (>1.5s) queue to "
+            "pending_queries, return plain text 'Processing your request...' "
+            "(NOT an error envelope), and the next tool_search call from the same "
+            "agent carries the completed result back as a prefix. Default-off until "
+            "the G.1 spike validates the carry-along delivery shape; G.2 will roll "
+            "the same pattern across remaining MCP tools."
+        ),
+        stage="introduce",
+        introduced_in="v2026.5.30",
+        target_retire_in="v2026.11.30",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec="docs/architecture/ADR-029-agent-query-queue-and-carry-along-delivery.md",
+    ),
     "connector_gmail": FeatureFlag(
         name="connector_gmail",
         default=False,

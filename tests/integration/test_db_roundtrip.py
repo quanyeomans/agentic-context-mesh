@@ -113,6 +113,12 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS topology_scope_profiles (id INTEGER PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS topology_scope_entries (id INTEGER PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS topology_skills (id INTEGER PRIMARY KEY);
+        -- ADR-029 G.1 — agent-facing query queue.
+        CREATE TABLE IF NOT EXISTS pending_queries (
+            id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, tool TEXT NOT NULL,
+            args_json TEXT NOT NULL, args_hash TEXT NOT NULL,
+            status TEXT NOT NULL, submitted_at TEXT NOT NULL
+        );
     """)
     db.commit()
 
