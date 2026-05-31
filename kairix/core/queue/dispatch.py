@@ -49,7 +49,7 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -198,7 +198,7 @@ def _build_query_id(args_hash: str) -> str:
 
 def _now_iso() -> str:
     """ISO8601 UTC timestamp — used for every row column."""
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ----------------------------------------------------------------------
@@ -217,7 +217,7 @@ def _lookup_recent_job(
 
     Returns None when no match. The window is :data:`DEDUP_WINDOW_SECONDS`.
     """
-    cutoff = datetime.fromtimestamp(now_seconds - DEDUP_WINDOW_SECONDS, UTC).isoformat()
+    cutoff = datetime.fromtimestamp(now_seconds - DEDUP_WINDOW_SECONDS, timezone.utc).isoformat()
     with _db_lock:
         row = db.execute(
             "SELECT id, status FROM pending_queries "

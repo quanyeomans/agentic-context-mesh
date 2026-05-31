@@ -19,7 +19,7 @@ import json
 import logging
 import sqlite3
 import threading
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ _carry_lock = threading.Lock()
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _format_result_summary(tool: str, result_json: str | None) -> str:

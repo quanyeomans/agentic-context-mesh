@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -83,7 +83,7 @@ def test_no_completed_rows_returns_empty_prefix(queue_db: sqlite3.Connection) ->
 
 def test_returns_prefix_with_one_completed_row(queue_db: sqlite3.Connection) -> None:
     """A single completed row appears in the prefix."""
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     _insert_completed_row(
         queue_db,
         query_id="q_aaaa1111",
@@ -104,7 +104,7 @@ def test_returns_prefix_with_one_completed_row(queue_db: sqlite3.Connection) -> 
 
 def test_caps_at_five_completed_rows(queue_db: sqlite3.Connection) -> None:
     """No matter how many completed rows exist, at most CARRY_ALONG_CAP appear."""
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     for i in range(7):
         _insert_completed_row(
             queue_db,
@@ -124,7 +124,7 @@ def test_caps_at_five_completed_rows(queue_db: sqlite3.Connection) -> None:
 
 def test_orders_by_completed_at_ascending(queue_db: sqlite3.Connection) -> None:
     """Rows surface in completion order (oldest first)."""
-    base = datetime.now(UTC)
+    base = datetime.now(timezone.utc)
     _insert_completed_row(
         queue_db,
         query_id="q_newer000",
@@ -155,7 +155,7 @@ def test_second_call_does_not_redeliver_completed_rows(queue_db: sqlite3.Connect
     assertion (``second_prefix == ""``) fails — the same row gets
     delivered twice. Mutate, run, restore.
     """
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     _insert_completed_row(
         queue_db,
         query_id="q_dedup0000",
@@ -186,7 +186,7 @@ def test_second_call_does_not_redeliver_completed_rows(queue_db: sqlite3.Connect
 
 def test_failed_rows_carry_with_error_summary(queue_db: sqlite3.Connection) -> None:
     """Failed rows surface so the agent knows the prior attempt didn't return cleanly."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     queue_db.execute(
         "INSERT INTO pending_queries "
         "(id, agent_id, tool, args_json, args_hash, status, "
@@ -288,7 +288,7 @@ def test_log_agent_fallback_affordance_uses_module_logger_by_default() -> None:
 
 def test_format_result_summary_handles_empty_result_json(queue_db: sqlite3.Connection) -> None:
     """A NULL result_json renders as <empty>."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     queue_db.execute(
         "INSERT INTO pending_queries "
         "(id, agent_id, tool, args_json, args_hash, status, "
@@ -304,7 +304,7 @@ def test_format_result_summary_handles_empty_result_json(queue_db: sqlite3.Conne
 
 def test_format_result_summary_handles_unparseable_json(queue_db: sqlite3.Connection) -> None:
     """Garbage JSON in result_json renders as <unparseable>."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     queue_db.execute(
         "INSERT INTO pending_queries "
         "(id, agent_id, tool, args_json, args_hash, status, "
@@ -320,7 +320,7 @@ def test_format_result_summary_handles_unparseable_json(queue_db: sqlite3.Connec
 
 def test_format_result_summary_handles_generic_dict(queue_db: sqlite3.Connection) -> None:
     """A dict without query/results/error renders with its top-level keys."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     payload = json.dumps({"alpha": 1, "beta": 2})
     queue_db.execute(
         "INSERT INTO pending_queries "
@@ -338,7 +338,7 @@ def test_format_result_summary_handles_generic_dict(queue_db: sqlite3.Connection
 
 def test_format_result_summary_handles_non_dict(queue_db: sqlite3.Connection) -> None:
     """A non-dict (e.g. a list) renders as its repr."""
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     payload = json.dumps([1, 2, 3])
     queue_db.execute(
         "INSERT INTO pending_queries "
@@ -375,7 +375,7 @@ def test_carry_along_prefix_safe_returns_prefix_on_success(queue_db: sqlite3.Con
     """Happy path through the production-safe wrapper."""
     from kairix.core.queue.carry_along import carry_along_prefix_safe
 
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     _insert_completed_row(
         queue_db,
         query_id="q_safe00000",
