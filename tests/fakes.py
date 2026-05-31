@@ -4199,3 +4199,55 @@ def seed_bulk_content_rows(
     )
     db.commit()
     return n_rows
+
+
+class FakeSecretsLoader:
+    """In-memory :class:`kairix.secrets.SecretsResolver` for tests.
+
+    Pass ``values={(scope, area, instance, leaf): "secret-value"}`` —
+    the loader returns each value verbatim from :meth:`get`; any miss
+    returns ``None`` and :meth:`require` raises
+    :class:`kairix.secrets.SecretNotFoundError`.
+
+    Designed to be the F2-clean drop-in for tests that historically
+    used ``monkeypatch.setenv("KAIRIX_*")`` — pass a populated
+    ``FakeSecretsLoader`` through the production code's ``secrets=``
+    kwarg instead.
+    """
+
+    def __init__(
+        self,
+        *,
+        values: dict[tuple[str, str, str | None, str], str] | None = None,
+    ) -> None:
+        self._values: dict[tuple[str, str, str | None, str], str] = dict(values or {})
+        # Call history for tests that want to assert the loader was
+        # asked for a particular identity (e.g. "verify the connector
+        # required client-secret, not just bot-token").
+        self.get_calls: list[tuple[str, str, str | None, str]] = []
+
+    def get(
+        self,
+        scope: str,
+        area: str,
+        instance: str | None,
+        leaf: str,
+    ) -> str | None:
+        self.get_calls.append((scope, area, instance, leaf))
+        return self._values.get((scope, area, instance, leaf))
+
+    def require(
+        self,
+        scope: str,
+        area: str,
+        instance: str | None,
+        leaf: str,
+    ) -> str:
+        value = self.get(scope, area, instance, leaf)
+        if value is None:
+            from kairix.secrets import SecretNotFoundError, canonical_secret_name
+
+            raise SecretNotFoundError(
+                f"Required secret not available: {canonical_secret_name(scope, area, instance, leaf)}.",  # type: ignore[arg-type]  # F3 rationale: FakeSecretsLoader accepts plain str scope for test ergonomics; canonical_secret_name expects Literal.
+            )
+        return value

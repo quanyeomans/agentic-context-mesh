@@ -169,6 +169,9 @@ pytest_plugins = [
     # See docs/architecture/feature-flag-architecture.md.
     "tests.bdd.steps.cli_features_steps",
     "tests.bdd.steps.mcp_features_status_steps",
+    # Canonical-credential-naming CLI (kairix secrets verify + migrate-list).
+    # See kairix/secrets/cli.py + ADR-031.
+    "tests.bdd.steps.secrets_cli_steps",
     # Dead-letter triage surface (kairix dead-letter status CLI +
     # tool_dead_letter_status MCP). See GH #337 / #351.
     "tests.bdd.steps.cli_dead_letter_steps",

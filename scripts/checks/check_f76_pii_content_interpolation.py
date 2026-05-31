@@ -90,12 +90,18 @@ _CONTENT_HINT_NAMES: frozenset[str] = frozenset(
 _LOG_METHODS: frozenset[str] = frozenset({"debug", "info", "warning", "warn", "error", "critical", "exception", "log"})
 
 # Modules whose .py files are exempt — same boundary as F15.
+# ``kairix/secrets/`` is a package; the prefix variant in
+# :func:`_file_has_violation` covers every submodule under it.
 _EXEMPT_FILES: frozenset[str] = frozenset(
     {
         "kairix/secrets.py",
         "kairix/credentials.py",
     }
 )
+
+# Prefix exemptions — same boundary intent as ``_EXEMPT_FILES`` but
+# for whole subtrees.
+_EXEMPT_PREFIXES: tuple[str, ...] = ("kairix/secrets/",)
 
 _EXEMPT_COMMENT = "# F76-allow:"
 
@@ -231,6 +237,8 @@ def _file_has_violation(path: Path, repo_root: Path) -> bool:
     except ValueError:
         return False
     if str(rel) in _EXEMPT_FILES:
+        return False
+    if any(str(rel).startswith(prefix) for prefix in _EXEMPT_PREFIXES):
         return False
 
     try:

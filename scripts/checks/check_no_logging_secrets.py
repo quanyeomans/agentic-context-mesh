@@ -76,10 +76,17 @@ _SECRET_NAME_PATTERNS = (
 
 # Boundary modules — they own secret-redaction discipline and are
 # allowed to reference these names directly. The check skips them.
+# ``kairix/secrets/`` is a package; the prefix variant in
+# :func:`_is_allowed` covers every submodule under it.
 _ALLOW_FILES = {
     "kairix/secrets.py",
     "kairix/credentials.py",
 }
+
+# Boundary prefixes — every file under these trees is exempt. Kept
+# separate from _ALLOW_FILES so the file-set membership check is the
+# fast common path; the prefix walk only fires when that misses.
+_ALLOW_PREFIXES = ("kairix/secrets/",)
 
 # Logger / sink callable surface. Method names that look like
 # "logger.{level}(...)" or "logging.{level}(...)". The check matches
@@ -189,6 +196,8 @@ def file_has_violation(path: Path) -> bool:
     except ValueError:
         return False
     if rel in _ALLOW_FILES:
+        return False
+    if any(rel.startswith(prefix) for prefix in _ALLOW_PREFIXES):
         return False
 
     try:

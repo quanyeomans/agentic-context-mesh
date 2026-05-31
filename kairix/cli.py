@@ -33,6 +33,7 @@ Subcommands:
   ingest-chat Ingest JSONL chat transcripts into the document + fact stores
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
   dead-letter Operator triage view over the connector_deadletter table (status)
+  secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -74,6 +75,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "features": ("kairix.core.features.cli", "main", True),
     "cc-pair": ("kairix.core.connectors.cc_pair_cli", "main", True),
     "dead-letter": ("kairix.dead_letter_cli", "main", True),
+    "secrets": ("kairix.secrets.cli", "main", True),
 }
 
 
