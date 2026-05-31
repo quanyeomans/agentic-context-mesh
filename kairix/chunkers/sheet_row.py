@@ -75,12 +75,13 @@ class SheetRowChunker:
     """
 
     name: str = PLUGIN_NAME
+    version: str
 
     def __init__(self, small_sheet_threshold: int = _DEFAULT_SMALL_SHEET_THRESHOLD) -> None:
         """Construct the chunker; ``small_sheet_threshold`` is the data-row count
         at or below which the whole sheet becomes one chunk.
         """
-        self.version: str = version
+        self.version = version
         self.small_sheet_threshold = small_sheet_threshold
 
     def chunk(self, *, text: str, section_kind: str, source_uri: str) -> tuple[Chunk, ...]:

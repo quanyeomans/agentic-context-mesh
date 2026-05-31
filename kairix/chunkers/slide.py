@@ -67,9 +67,10 @@ class SlideChunker:
     """
 
     name: str = PLUGIN_NAME
+    version: str
 
     def __init__(self) -> None:
-        self.version: str = version
+        self.version = version
 
     def chunk(self, *, text: str, section_kind: str, source_uri: str) -> tuple[Chunk, ...]:
         """Split ``text`` on slide-header boundaries; one Chunk per slide.

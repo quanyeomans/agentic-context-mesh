@@ -132,12 +132,15 @@ def _default_flag_reader(name: str) -> bool:
     return _prod_flag(name)
 
 
+_UTC_OFFSET_SUFFIX = "+00:00"
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def _iso(dt: datetime) -> str:
-    return dt.isoformat().replace("+00:00", "Z")
+    return dt.isoformat().replace(_UTC_OFFSET_SUFFIX, "Z")
 
 
 def _duration_minutes(start_iso: str, end_iso: str) -> int | None:
@@ -150,8 +153,8 @@ def _duration_minutes(start_iso: str, end_iso: str) -> int | None:
     if not start_iso or not end_iso:
         return None
     try:
-        start = datetime.fromisoformat(start_iso.replace("Z", "+00:00"))
-        end = datetime.fromisoformat(end_iso.replace("Z", "+00:00"))
+        start = datetime.fromisoformat(start_iso.replace("Z", _UTC_OFFSET_SUFFIX))
+        end = datetime.fromisoformat(end_iso.replace("Z", _UTC_OFFSET_SUFFIX))
     except (ValueError, TypeError):
         return None
     return int((end - start).total_seconds() // 60)

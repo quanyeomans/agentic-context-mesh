@@ -306,7 +306,15 @@ def _mark_started(db: sqlite3.Connection, *, query_id: str) -> None:
 # ----------------------------------------------------------------------
 
 
-def dispatch_or_queue(
+# S3776 waiver rationale — cognitive complexity 18 vs ceiling 15.
+# The wrapper is a state-machine over four call-paths (dedup short-circuit,
+# sync_only, async-under-budget, async-handoff-on-timeout) and each branch
+# is load-bearing for the ADR-029 contract. Extraction into a helper was
+# tried first but dropped per-file coverage below the F7 90% floor (helper
+# code wasn't directly tested by the existing contract suite). The right
+# paydown is a direct unit suite per call-path — tracked as follow-up
+# after the ADR-029 G.2/G.3 work lands.
+def dispatch_or_queue(  # NOSONAR(python:S3776)
     *,
     budget_seconds: float = DEFAULT_BUDGET_SECONDS,
     sync_only: bool = False,
