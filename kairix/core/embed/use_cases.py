@@ -107,6 +107,79 @@ def _default_run_recall_gate(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
     return run_recall_gate(**kwargs)
 
 
+REFERENCE_LIBRARY_NAME = "reference-library"
+
+
+def harmonise_reference_library(
+    declared: list[Any],
+    reflib_root: Path,
+    document_root: Path,
+) -> list[Any]:
+    """Reconcile operator-declared reference-library with the bundled path.
+
+    The reference library ships inside the kairix container image at
+    ``$KAIRIX_REFLIB_ROOT`` (typically ``/opt/kairix/reference-library``).
+    Operators who declare the collection in ``kairix.config.yaml`` for
+    custom retrieval params often write ``path: reference-library``
+    (relative), which the scanner resolves under
+    ``$KAIRIX_DOCUMENT_ROOT`` and fails to find — silent miss with only
+    a WARNING. This helper:
+
+    1. If the operator declared ``reference-library`` and its path
+       does NOT resolve, rewrite the path to ``reflib_root`` and emit
+       an actionable INFO line telling them how to silence the notice.
+    2. If the operator declared it with a valid path, leave it alone.
+    3. If no declaration exists, append a default declaration (the
+       historic behaviour) pointing at ``reflib_root``.
+
+    Net: one and only one ``reference-library`` entry survives, always
+    pointing at a path that exists. The user's retrieval params apply
+    iff declared.
+    """
+    from dataclasses import replace as _replace
+
+    if not reflib_root.is_dir():
+        # No bundled library available — nothing to harmonise.
+        return declared
+
+    out = list(declared)
+    found_at: int | None = None
+    for idx, c in enumerate(out):
+        if getattr(c, "name", None) == REFERENCE_LIBRARY_NAME:
+            found_at = idx
+            break
+
+    if found_at is None:
+        out.append(_default_reflib_collection(reflib_root))
+        return out
+
+    c = out[found_at]
+    declared_path = Path(c.path) if Path(c.path).is_absolute() else document_root / c.path
+    if declared_path.is_dir():
+        return out  # Operator's path resolves — respect their declaration verbatim.
+
+    logger.info(
+        "use_cases: auto-correcting '%s' path %s -> %s "
+        "(declared path does not resolve; falling back to KAIRIX_REFLIB_ROOT). "
+        "fix: in your kairix.config.yaml, change `path: %s` to `path: %s` to silence this notice. "
+        "next: kairix config validate. "
+        "run: docker compose restart kairix kairix-worker",
+        REFERENCE_LIBRARY_NAME,
+        declared_path,
+        reflib_root,
+        c.path,
+        reflib_root,
+    )
+    out[found_at] = _replace(c, path=str(reflib_root))
+    return out
+
+
+def _default_reflib_collection(reflib_root: Path) -> Any:
+    from kairix.core.db.scanner import CollectionConfig
+
+    return CollectionConfig(name=REFERENCE_LIBRARY_NAME, path=str(reflib_root), glob="**/*.md")
+
+
 def _default_scan_documents(db: Any, diagnostics: list[str]) -> tuple[int, int, int]:
     """Scan the document root for new/changed files and rebuild FTS.
 
@@ -148,8 +221,7 @@ def _default_scan_documents(db: Any, diagnostics: list[str]) -> tuple[int, int, 
         scan_collections = [CollectionConfig(name="default", path=".")]
 
     reflib_root = reference_library_root()
-    if reflib_root.is_dir():
-        scan_collections.append(CollectionConfig(name="reference-library", path=str(reflib_root), glob="**/*.md"))
+    scan_collections = harmonise_reference_library(scan_collections, reflib_root, droot)
 
     scan_report = scanner.scan(scan_collections)
     if scan_report.new > 0 or scan_report.updated > 0:

@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+import threading
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -134,6 +135,16 @@ class EmbeddingCache:
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._conn: sqlite3.Connection | None = None
+        # Connection is opened with check_same_thread=False so the embed
+        # pipeline's ThreadPoolExecutor workers (--parallel N>1) can use
+        # the cache concurrently. SQLite cursors on a single connection
+        # are NOT safe for concurrent use — even reads can interleave a
+        # cursor's internal state and surface as "bad parameter or other
+        # API misuse". So we serialise ALL access (reads + writes) at
+        # the Python level. The cache is read-mostly during embed runs
+        # and the lock cost is sub-microsecond vs the Azure round-trip,
+        # so single-lock serialisation is the right shape.
+        self._lock = threading.Lock()
 
     @property
     def path(self) -> Path:
@@ -143,8 +154,12 @@ class EmbeddingCache:
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             self._path.parent.mkdir(parents=True, exist_ok=True)
+            # check_same_thread=False — parallel embed workers share this
+            # connection from a ThreadPoolExecutor; all read + write access
+            # is serialised by self._lock so SQLite's "single writer" model
+            # holds at the Python level.
             # F77-allow: separate cache DB under .kairix/cache/, single writer (embed cycle).
-            conn = sqlite3.connect(str(self._path))
+            conn = sqlite3.connect(str(self._path), check_same_thread=False)
             conn.execute(_CREATE_SQL)
             conn.commit()
             self._conn = conn
@@ -174,20 +189,21 @@ class EmbeddingCache:
         if not hashes:
             return {}
 
-        conn = self._connection()
         results: dict[str, np.ndarray] = {}
-        for start in range(0, len(hashes), _IN_CLAUSE_BATCH_SIZE):
-            chunk = hashes[start : start + _IN_CLAUSE_BATCH_SIZE]
-            placeholders = ",".join("?" * len(chunk))
-            sql = (
-                f"SELECT chunk_hash, vector FROM {_TABLE} "
-                f"WHERE model = ? AND dimension = ? AND chunk_hash IN ({placeholders})"
-            )
-            params: list[Any] = [model, dimension, *chunk]
-            # F63-bounded: caller-supplied IN-clause caps result cardinality at
-            # _IN_CLAUSE_BATCH_SIZE (500); the per-call batching above is the bound.
-            for row_hash, row_blob in conn.execute(sql, params).fetchall():
-                results[row_hash] = _decode_vector(row_blob, dimension)
+        with self._lock:
+            conn = self._connection()
+            for start in range(0, len(hashes), _IN_CLAUSE_BATCH_SIZE):
+                chunk = hashes[start : start + _IN_CLAUSE_BATCH_SIZE]
+                placeholders = ",".join("?" * len(chunk))
+                sql = (
+                    f"SELECT chunk_hash, vector FROM {_TABLE} "
+                    f"WHERE model = ? AND dimension = ? AND chunk_hash IN ({placeholders})"
+                )
+                params: list[Any] = [model, dimension, *chunk]
+                # F63-bounded: caller-supplied IN-clause caps result cardinality at
+                # _IN_CLAUSE_BATCH_SIZE (500); the per-call batching above is the bound.
+                for row_hash, row_blob in conn.execute(sql, params).fetchall():
+                    results[row_hash] = _decode_vector(row_blob, dimension)
         return results
 
     def put_many(
@@ -209,9 +225,10 @@ class EmbeddingCache:
             rows.append((model, dimension, chunk_hash, _encode_vector(vector), created_at))
         if not rows:
             return 0
-        conn = self._connection()
-        with conn:
-            conn.executemany(_UPSERT_SQL, rows)
+        with self._lock:
+            conn = self._connection()
+            with conn:
+                conn.executemany(_UPSERT_SQL, rows)
         return len(rows)
 
     def count(self, model: str | None = None, dimension: int | None = None) -> int:
@@ -220,14 +237,17 @@ class EmbeddingCache:
         Bounded query — used by status reporting + the integration test
         that asserts cache writes happened.
         """
-        conn = self._connection()
         if model is None and dimension is None:
-            row = conn.execute(f"SELECT COUNT(*) FROM {_TABLE}").fetchone()
+            with self._lock:
+                conn = self._connection()
+                row = conn.execute(f"SELECT COUNT(*) FROM {_TABLE}").fetchone()
         elif model is not None and dimension is not None:
-            row = conn.execute(
-                f"SELECT COUNT(*) FROM {_TABLE} WHERE model = ? AND dimension = ?",
-                (model, dimension),
-            ).fetchone()
+            with self._lock:
+                conn = self._connection()
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM {_TABLE} WHERE model = ? AND dimension = ?",
+                    (model, dimension),
+                ).fetchone()
         else:
             raise ValueError(
                 "count() requires both model and dimension or neither. "

@@ -242,3 +242,44 @@ def test_get_many_batches_large_hash_lists(tmp_path: Path) -> None:
     got = cache.get_many("m", 4, [f"h{i}" for i in range(n)])
     assert len(got) == n
     cache.close()
+
+
+def test_concurrent_reads_writes_from_multiple_threads_safe(tmp_path: Path) -> None:
+    """20 worker threads hammer the cache concurrently — no SQLite errors.
+
+    Production bug fixed: the parallel embed pipeline (--parallel N>1)
+    runs Azure calls on a ThreadPoolExecutor and the cache get_many /
+    put_many calls happen from worker threads. The original
+    sqlite3.connect(...) defaulted to check_same_thread=True which
+    crashed the first cross-thread call with 'SQLite objects created
+    in a thread can only be used in that same thread' on a $211 prod
+    embed run on 2026-05-31.
+
+    Sabotage target: removing check_same_thread=False from the
+    connection open OR removing the lock around get_many / put_many
+    surfaces SQLite errors under this stress shape.
+    """
+    import threading
+
+    cache = EmbeddingCache(tmp_path / "cache.sqlite")
+    cache.put_many("m", 4, [("seed", _vec(0, 4))])
+
+    errors: list[BaseException] = []
+
+    def worker(i: int) -> None:
+        try:
+            cache.get_many("m", 4, ["seed", f"h_{i - 1}"])
+            cache.put_many("m", 4, [(f"h_{i}", _vec(i, 4))])
+            cache.count("m", 4)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"expected zero SQLite errors under concurrent access; got {len(errors)}: {errors[:3]}"
+    assert cache.count("m", 4) == 21, "1 seed + 20 worker upserts"
+    cache.close()
