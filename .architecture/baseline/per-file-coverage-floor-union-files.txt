@@ -6,3 +6,14 @@ kairix/quality/benchmark/pipeline.py
 # the warm_retrieval_stack happy path needs a working SearchPipeline,
 # covered by the integration suite with KAIRIX_E2E=1 + KAIRIX_KV_NAME.
 kairix/agents/mcp/cold_start.py
+# kairix/worker.py — F9 union floor dipped after the Wave-2 connector
+# additions (gmail / google_drive / apple_caldav / google_calendar
+# dispatchers). The F7 (unit-only) baseline already carries worker.py
+# with the canonical Adapter rationale per ADR-024 §"Repositioning F7";
+# same rationale applies to F9. New parametrised unit tests in
+# tests/unit/test_worker_wave5_connector_dispatchers.py cover the new
+# dispatchers but the file is broader _default_* production-default
+# wrappers (per the F7 entry rationale) keep total under 85% on union.
+# Pay-down owner: per the F7 entry, extract each _default_* wrapper into
+# its own deps-injectable module (the run_default_drain_tick template).
+kairix/worker.py
