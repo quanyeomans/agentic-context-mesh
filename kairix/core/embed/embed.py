@@ -10,6 +10,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
 from .date_extract import extract_chunk_date
@@ -301,25 +302,53 @@ def batched(items: list[Any], size: int) -> Generator[list[Any], None, None]:
 # ── usearch index update ─────────────────────────────────────────────────────
 
 
+def open_usearch_index_for_paths(
+    *,
+    index_path: Path,
+    meta_path: Path,
+    db_path: Path,
+) -> Any:
+    """Open (or create) the usearch ANN index at the supplied paths.
+
+    Uses :meth:`VectorIndex.load_or_recreate` so a corrupt on-disk file
+    auto-recovers to a fresh empty index instead of returning None
+    (the silent-no-op bug seen 2026-05-31 — see
+    tests/e2e/test_vec_index_corrupt_recovery_e2e.py).
+
+    Always returns a usable VectorIndex. Callers don't have to handle
+    None and don't have to inspect file state — the recovery happened
+    here.
+    """
+    from kairix.core.search.vec_index import VectorIndex
+
+    # GH #352 — worker is the only mutate-capable VectorIndex caller.
+    # read_only=False (default, named explicitly here for clarity)
+    # loads the index fully into memory at .load() time so the first
+    # add_vectors() call has no first-write conversion path to hit.
+    idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=False)
+    count, status = idx.load_or_recreate()
+    logger.info(
+        "vec_index: opened at %s (vectors=%d, status=%s)",
+        index_path,
+        count,
+        status,
+    )
+    return idx
+
+
 def _open_usearch_index() -> Any:  # pragma: no cover  # prod lazy default; deps injection
-    """Open (or create) the usearch ANN index for the embed run.
+    """Production default for ``EmbedDependencies.open_usearch_index``.
 
-    Production-only — every test that exercises ``run_embed`` injects an
-    ``open_usearch_index`` callable via ``EmbedDependencies`` (typically a
-    ``lambda: None`` or a ``_FakeVecIndex`` double). The real
-    ``VectorIndex.load()`` requires a writable on-disk path and embedded
-    vectors that match the current schema, neither of which is available
-    in unit tests.
+    Thin wrapper that resolves canonical paths from ``KairixPaths`` and
+    delegates to :func:`open_usearch_index_for_paths`. Tests inject
+    :func:`open_usearch_index_for_paths` directly with tmp_path-scoped
+    paths so the same recovery logic is exercised under integration +
+    E2E coverage (the prior version had ``# pragma: no cover`` on the
+    whole body and the recovery path was untested — that's why the
+    production silent-None bug shipped).
 
-    Returns ``None`` (skipping the usearch open + per-batch add) when
-    ``worker_writes_vec_index()`` is False — the default. See issue #335:
-    the HNSW rebuild on first per-cycle write needs ~7.8 GB resident for
-    a 1.27M-vector corpus, which OOM-kills any sane worker mem_limit.
-    The SQLite ``content_vectors`` (metadata) write path remains
-    independent; the usearch on-disk index goes stale against new
-    embeddings until rebuilt out-of-band (#335 tracks the rebuild path —
-    requires either a sidecar with 10+ GiB or the schema-change /
-    delta-segments architectural follow-up).
+    Returns ``None`` (skipping the usearch open + per-batch add) only
+    when ``worker_writes_vec_index()`` is False — see #335 for context.
     """
     from kairix.paths import worker_writes_vec_index
 
@@ -330,23 +359,14 @@ def _open_usearch_index() -> Any:  # pragma: no cover  # prod lazy default; deps
             "drift (see #335 for rebuild plan)."
         )
         return None
-    try:
-        from kairix.core.search.vec_index import VectorIndex
-        from kairix.paths import db_path as get_db_path
+    from kairix.paths import db_path as get_db_path
 
-        db_p = get_db_path()
-        index_path = db_p.parent / "vectors.usearch"
-        meta_path = db_p.parent / "vectors.meta.json"
-        # GH #352 — worker is the only mutate-capable VectorIndex caller.
-        # read_only=False (default, named explicitly here for clarity)
-        # loads the index fully into memory at .load() time so the first
-        # add_vectors() call has no first-write conversion path to hit.
-        idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_p, read_only=False)
-        idx.load()  # auto-deletes if dims mismatch
-        return idx
-    except Exception:
-        logger.exception("usearch index open failed")
-        return None
+    db_p = get_db_path()
+    return open_usearch_index_for_paths(
+        index_path=db_p.parent / "vectors.usearch",
+        meta_path=db_p.parent / "vectors.meta.json",
+        db_path=db_p,
+    )
 
 
 # ── Extracted helpers (run_embed decomposition) ─────────────────────────────

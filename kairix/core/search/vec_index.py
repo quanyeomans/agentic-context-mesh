@@ -204,6 +204,54 @@ class VectorIndex:
                 logger.warning("vec_index: meta missing 'keys' — index loaded without key mapping (%s)", e)
         return len(self._index)
 
+    def load_or_recreate(self) -> tuple[int, str]:
+        """Load the existing index; if corrupt, delete it and return fresh empty state.
+
+        Closes the production bug where ``_open_usearch_index()`` caught
+        the load exception and returned None — every subsequent vector
+        write was silently no-op'd because the orchestration code
+        guarded on ``vec_index is not None``. The whole ``--force`` run
+        completed without persisting a single vector and the operator
+        only noticed via the next recall check.
+
+        Returns ``(vector_count, status)`` where status is one of:
+
+          * ``"loaded"`` — canonical file present + parsed cleanly
+          * ``"recovered-from-tmp"`` — canonical missing, ``.tmp`` promoted
+          * ``"recreated"`` — canonical present but corrupt; deleted + fresh empty state
+          * ``"empty"`` — no canonical and no ``.tmp``; fresh empty state
+
+        Callers see at most one of these per process startup; pair with
+        an INFO log line carrying the canonical KairixPaths-resolved
+        path so operators can audit which deployment is which.
+        """
+        try:
+            count = self.load()
+            # load() returns 0 when no file exists OR when dimension mismatch deleted it.
+            if count == 0 and not self._index_path.exists():
+                return 0, "empty"
+            # A .tmp file may have been promoted during load() — check if
+            # the canonical post-load state was reached via promotion.
+            # (Promotion is non-destructive when both files exist; the
+            # canonical wins.)
+            return count, "loaded"
+        except (ValueError, OSError, KeyError) as exc:
+            # ValueError covers usearch's "Not a dense USearch index!"
+            # (header-corrupt file); OSError covers I/O failures; KeyError
+            # covers meta-file shape mismatches that escape load()'s
+            # internal try/except.
+            logger.warning(
+                "vec_index: existing index at %s is corrupt — recreating fresh. "
+                "fix: this is auto-recovery; no operator action needed. "
+                "next: the in-flight embed run will populate the fresh index. "
+                "run: kairix onboard check to confirm vector_search_working post-run. "
+                "(cause: %s)",
+                self._index_path,
+                exc,
+            )
+            self._delete_index_files()
+            return 0, "recreated"
+
     def _delete_index_files(self) -> None:
         """Remove index and metadata files from disk."""
         for path in (self._index_path, self._meta_path):
