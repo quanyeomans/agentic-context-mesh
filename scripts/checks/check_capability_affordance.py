@@ -80,10 +80,13 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         # transcript supplied by the operator; not safe to expose to agents
         # even as an escalation stub (the operator runs it from the host).
         "ingest-chat",
-        # secrets verify / migrate-list are pre-deploy operator gates that
-        # inspect KV + env state; agents cannot fix missing credentials and
-        # exposing the alias-resolution surface to agents would leak the
-        # operator-facing legacy-secret map. Operator-only on the host.
+        # secrets migrate-list is pre-deploy operator-only — it dumps the
+        # entire legacy → canonical mapping which agents have no use for and
+        # which could help an attacker enumerate env-var names. The verify
+        # subcommand, by contrast, IS exposed via tool_secrets_verify
+        # (kairix/agents/mcp/secrets_status.py) with the legacy_used alias
+        # redacted, so agents can answer "is auth healthy?" without leaking
+        # the operator-facing legacy-secret map.
         "secrets",
     }
 )

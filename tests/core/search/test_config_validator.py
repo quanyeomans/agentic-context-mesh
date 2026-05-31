@@ -151,7 +151,17 @@ def test_main_no_subcommand_prints_help_returns_1() -> None:
 
 @pytest.mark.unit
 def test_main_with_explicit_valid_config(tmp_path: Path) -> None:
-    """When the YAML is well-formed and valid, main prints OK and returns 0."""
+    """When the YAML is well-formed and valid, main prints OK and returns 0.
+
+    The v2026.5.32 path-resolution check requires each declared
+    collection path to exist under the resolved document_root. Pass
+    document_root explicitly through the main() seam (F2-clean) and
+    create the matching docs/ subdir so the schema-validity test still
+    asserts on "schema valid", not "paths resolve".
+    """
+    docroot = tmp_path / "docs-root"
+    docroot.mkdir()
+    (docroot / "docs").mkdir()
     cfg = tmp_path / "kairix.config.yaml"
     cfg.write_text(
         """\
@@ -165,7 +175,7 @@ collections:
     )
     stdout = io.StringIO()
     with redirect_stdout(stdout):
-        rc = validator_main(["validate", str(cfg)])
+        rc = validator_main(["validate", str(cfg)], document_root=docroot, reflib_root=tmp_path / "no-reflib")
     assert rc == 0
     assert "OK" in stdout.getvalue()
 

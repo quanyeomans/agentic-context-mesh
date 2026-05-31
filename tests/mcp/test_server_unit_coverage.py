@@ -125,6 +125,7 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "onboard_check",
         "worker_status",
         "features_status",
+        "secrets_verify",
         "dead_letter_status",
         "warm",
         # Agent-safe capped surface (escalates above queries<=20 / concurrency<=3)

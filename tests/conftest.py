@@ -172,6 +172,8 @@ pytest_plugins = [
     # Canonical-credential-naming CLI (kairix secrets verify + migrate-list).
     # See kairix/secrets/cli.py + ADR-031.
     "tests.bdd.steps.secrets_cli_steps",
+    # MCP tool_secrets_verify — agent-callable preflight envelope.
+    "tests.bdd.steps.mcp_secrets_verify_steps",
     # Dead-letter triage surface (kairix dead-letter status CLI +
     # tool_dead_letter_status MCP). See GH #337 / #351.
     "tests.bdd.steps.cli_dead_letter_steps",

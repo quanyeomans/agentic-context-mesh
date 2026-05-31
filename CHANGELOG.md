@@ -7,6 +7,43 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.5.31a2] - 2026-05-31 — Restart-resilient embed, one credential naming rule, silent-config-bug class closed
+
+> **Upgrading?** No required config changes; the embed cache and the new secrets loader both fall back to your existing setup. If you want the new operator goodies — `kairix secrets verify`, the cross-provider deployment recipes, the convention-driven secrets fetcher — see the migration note below.
+
+### New for agents
+
+- **`tool_secrets_verify` reports what the deployed kairix can actually resolve.** Agents asking "is my deployment healthy on the credentials side?" get a structured per-secret table with status and the canonical Key Vault name on every row.
+
+### New for operators
+
+- **Embeds never burn money twice.** Every chunk that hits the LLM embed endpoint is now persisted to a SQLite cache before it touches the vector index. If an embed run pauses, crashes, or is restarted, the next run resumes for free — the cached vectors flow straight back into the new index. The vector-index save is also atomic now (write-to-temp-then-rename), so a partial write can't corrupt the on-disk file again.
+- **One credential naming rule across every cloud secrets manager.** Every kairix-bound secret has a canonical name of the shape `kairix-<scope>-<area>[-<instance>]-<leaf>` — for example `kairix-provider-llm-api-key` or `kairix-connector-m365-tenant-id`. The same rule works in Azure Key Vault, AWS Secrets Manager, GCP Secret Manager, 1Password, and plain `.env` files. Existing env-var names keep working through a built-in alias layer.
+- **A single docs page for every install × secrets-manager combination.** [`docs/operations/secrets-configuration.md`](docs/operations/secrets-configuration.md) covers Docker and pip × Azure KV / AWS / GCP / 1Password / ECS / Cloud Run / AKS CSI / plain `.env`, with rotation commands and the local-MCP-server-from-Claude-Desktop wrapper recipe.
+- **Adding a new secret is now zero-glue.** The shipped [`scripts/deploy/fetch-secrets.sh`](scripts/deploy/fetch-secrets.sh) discovers every `kairix-*` secret in the vault on each restart — no per-secret list to keep in sync. New connector? Drop its secret into KV with the canonical prefix; it's available at the next service restart.
+- **`kairix config validate` catches the silent-path-misconfig bug class.** If your `kairix.config.yaml` declares a collection with a path that doesn't resolve on the deployed filesystem, validate-time now fails loudly with a one-line `fix:` hint instead of leaving operators to find the silent WARNING in scan logs hours later. Reference-library specifically auto-resolves to `$KAIRIX_REFLIB_ROOT` with a "change `path:` to X to silence this notice" affordance.
+- **`kairix secrets {verify, migrate-list}` CLI** — `verify` walks every registered credential, tells you which are present, which resolve via a legacy alias (with the deprecation flag), and which are missing; `migrate-list` dumps the legacy-env-var → canonical-KV-name mapping as TSV so operators can pipe it into their KV provisioning loop.
+
+### Things that work better
+
+- **Parallel embed (`--parallel N`) is safe under load.** The embedding cache's SQLite layer now uses a thread-safe connection model. Previously running `kairix embed --force --parallel 3` against a corrupted vector index would crash partway through; the fix shipped before the next production rebuild needed it.
+- **The verify CLI mirrors runtime.** Previously `kairix secrets verify` skipped the bundle-file hydration that the rest of kairix does automatically, so it reported false-MISSING for every bundle-only secret. It now loads the bundle first; what verify says matches what the embed and MCP paths actually resolve.
+
+### Configuration migration from v2026.5.30a1
+
+No required configuration changes. Three optional moves once you're ready:
+
+1. **Provision the canonical names in KV alongside your existing entries.** Run `kairix secrets migrate-list` to get the TSV of legacy → canonical names; loop over it with `az keyvault secret set` (or your provider's equivalent). The loader prefers canonical; legacy still resolves as a fallback with a deprecation log.
+2. **Replace the per-secret fetch script with the convention-driven one.** Copy `scripts/deploy/fetch-secrets.sh` and `scripts/deploy/kairix-fetch-secrets.service` into `/opt/kairix/bin/` and `/etc/systemd/system/` respectively, then `sudo systemctl restart kairix-fetch-secrets`. Adding a new connector now stops touching the script.
+3. **Re-run `kairix config validate` after deploy.** The new path-resolution check surfaces any collection entries pointing at directories that don't exist on this host. Each failure has a `fix:` hint inline.
+
+### Things that haven't changed
+
+- The kairix CLI surface for search, MCP, embed, entity management, briefing, prep, eval, benchmark, connectors.
+- The vector index format (`vectors.usearch`) and the SQLite schema's content + content_vectors tables.
+- The provider plugin selection model.
+- Every existing env-var name continues to resolve via the loader's legacy-alias layer.
+
 ## [2026.5.30a1] - 2026-05-30 — Entity graph fills, dates flow through to search
 
 > **Upgrading?** No config changes needed. The entity graph and date-aware search both start working better the moment the new image is running. Full details below.

@@ -176,3 +176,60 @@ def test_secrets_migrate_list_via_subprocess() -> None:
     assert result.returncode == 0, f"expected exit 0; got rc={result.returncode}\nstderr={result.stderr!r}"
     assert "LEGACY_ENV_VAR\tCANONICAL_KV_NAME" in result.stdout
     assert "kairix-connector-m365-tenant-id" in result.stdout
+
+
+def test_verify_loads_bundle_file_before_reading_env(tmp_path) -> None:
+    """Verify must hydrate the bundle file into os.environ first.
+
+    Regression test for #360: previously the verify CLI walked
+    SecretsLoader.get() over the legacy alias map, which reads
+    os.environ. Connectors + providers running in production load
+    the bundle file implicitly via kairix.secrets.get_secret(), but
+    'kairix secrets verify' invoked from `docker exec` did not — so
+    every bundle-only secret showed as MISSING despite working at
+    runtime. Fix: _ensure_bundle_loaded() calls load_secrets() at the
+    top of _run_verify.
+
+    Sabotage target: removing _ensure_bundle_loaded() makes this test
+    fail because the canonical env var won't be present (the bundle
+    file has 'KAIRIX_PROVIDER_LLM_API_KEY=...' but env doesn't until
+    hydration).
+
+    F2-clean: bundle_path is passed explicitly via the secrets_main
+    kwarg seam — no monkeypatch.setenv on KAIRIX_* keys.
+    """
+    bundle = tmp_path / "kairix.env"
+    bundle.write_text(
+        "KAIRIX_PROVIDER_LLM_API_KEY=hydrated-from-bundle\n",  # pragma: allowlist secret
+        encoding="utf-8",
+    )
+
+    out, rc = _capture(
+        ["verify", "--json"],
+        aliases_provider=lambda: (("provider", "llm", None, "api-key"),),
+        bundle_path=bundle,
+    )
+    assert rc == 0, f"expected exit 0 (bundle hydrates key); got rc={rc}, out={out}"
+    payload = json.loads(out)
+    row = next(r for r in payload["secrets"] if r["leaf"] == "api-key")
+    assert row["status"] in ("present", "present-via-legacy"), f"expected key resolved via bundle hydration; got {row}"
+
+
+def test_verify_with_nonexistent_bundle_passes_through_to_loader(tmp_path) -> None:
+    """When bundle_path points at a non-existent file, verify still runs.
+
+    Covers the load_secrets "file absent → return 0" branch via the
+    public secrets_main seam (no internal-name imports). The verify
+    walk completes against env-only resolution; the test just asserts
+    the path runs cleanly.
+    """
+    nonexistent = tmp_path / "no-such.env"
+    fake = FakeSecretsLoader(values={("provider", "llm", None, "api-key"): "k"})
+    out, rc = _capture(
+        ["verify", "--json"],
+        loader_factory=lambda: fake,
+        aliases_provider=lambda: (("provider", "llm", None, "api-key"),),
+        bundle_path=nonexistent,
+    )
+    assert rc == 0
+    assert "secrets" in out

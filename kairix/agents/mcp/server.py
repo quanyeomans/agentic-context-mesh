@@ -1237,6 +1237,12 @@ def tool_capabilities() -> dict[str, Any]:
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
             _cap(
+                name="secrets_verify",
+                mcp_tool="secrets_verify",
+                cli="kairix secrets verify",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
+            _cap(
                 name="dead_letter_status",
                 mcp_tool="dead_letter_status",
                 cli="kairix dead-letter status",
@@ -1572,6 +1578,24 @@ def _register_synthesis_and_diagnostic_tools(
     def features_status() -> dict[str, Any]:
         """Feature-flag status envelope. Read-only. Identical to `kairix features status --json`."""
         return tool_features_status()
+
+    @server.tool(
+        description=(
+            "Operator-facing credential preflight. Walks every kairix-bound secret "
+            "(LLM, embed, Neo4j, every connector) and reports which canonical KV "
+            "names resolve, which resolve via a deprecated legacy alias, and which "
+            "are MISSING. Never returns secret VALUES — only canonical names + "
+            "resolution status. Use when an agent or operator wants to know "
+            "'is auth healthy on this deployment?' without docker exec access. "
+            "Read-only. Identical envelope to `kairix secrets verify --json`."
+        )
+    )
+    @async_tool_handler
+    def secrets_verify() -> dict[str, Any]:
+        """Secrets resolution envelope. Read-only. Identical to `kairix secrets verify --json`."""
+        from kairix.agents.mcp.secrets_status import tool_secrets_verify
+
+        return tool_secrets_verify()
 
     @server.tool(
         description=(

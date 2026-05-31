@@ -22,6 +22,7 @@ import json
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from kairix.secrets._legacy_aliases import LEGACY_ALIASES, legacy_to_canonical_map
 from kairix.secrets.loader import SecretsLoader, SecretsResolver
@@ -140,17 +141,46 @@ def _default_env_provider() -> dict[str, str]:
     return dict(os.environ)
 
 
+def _ensure_bundle_loaded(bundle_path: Path | None = None) -> None:
+    """Hydrate ``/run/secrets/kairix.env`` into ``os.environ`` if present.
+
+    Fix for #360: in deployed shape, connector + provider secrets live
+    in a bundle file that the historic ``kairix.secrets.get_secret(...)``
+    path loads implicitly on first call. ``kairix secrets verify`` only
+    walks the new ``SecretsLoader`` chain, which reads ``os.environ``
+    directly — so without this hydration step, verify reports false-
+    MISSING for every secret that's actually present at runtime via the
+    bundle. ``load_secrets()`` is idempotent (skips keys already in
+    env) so calling it here is safe even after the bundle was loaded
+    elsewhere.
+
+    Production callers leave ``bundle_path`` as None — load_secrets
+    resolves the path from ``$KAIRIX_SECRETS_FILE`` / the default. Tests
+    pass an explicit path (typically tmp_path / "...env") so they never
+    mutate process env (F2-clean).
+    """
+    from kairix.secrets._legacy import load_secrets
+
+    load_secrets(bundle_path)
+
+
 def _run_verify(
     *,
     emit_json: bool,
     loader_factory: Callable[[], SecretsResolver],
     aliases_provider: Callable[[], tuple[tuple[Scope, str, str | None, str], ...]],
     env_provider: Callable[[], dict[str, str]],
+    bundle_path: Path | None = None,
 ) -> tuple[str, int]:
     """Build the verify table + return (rendered_output, exit_code).
 
     Exit code is 1 if any row is MISSING, 0 otherwise.
+
+    ``bundle_path`` is the test seam for the bundle-hydration step;
+    production callers leave it as None (load_secrets reads
+    ``$KAIRIX_SECRETS_FILE`` / the default path).
     """
+    _ensure_bundle_loaded(bundle_path)
     loader = loader_factory()
     env = env_provider()
     aliases = aliases_provider()
@@ -222,13 +252,15 @@ def main(
         tuple[tuple[Scope, str, str | None, str], ...],
     ] = _default_aliases_provider,
     env_provider: Callable[[], dict[str, str]] = _default_env_provider,
+    bundle_path: Path | None = None,
 ) -> int:
     """Entry point for ``kairix secrets``.
 
     Thin adapter — parse argv, route to the verify or migrate-list
-    branch. The three keyword-only seams (``loader_factory``,
-    ``aliases_provider``, ``env_provider``) are the DI surface for
-    tests; production callers leave them at their defaults.
+    branch. The keyword-only seams (``loader_factory``,
+    ``aliases_provider``, ``env_provider``, ``bundle_path``) are the
+    DI surface for tests; production callers leave them at their
+    defaults.
     """
     args = build_parser().parse_args(argv if argv is not None else sys.argv[2:])
 
@@ -238,6 +270,7 @@ def main(
             loader_factory=loader_factory,
             aliases_provider=aliases_provider,
             env_provider=env_provider,
+            bundle_path=bundle_path,
         )
     else:
         rendered, exit_code = _run_migrate_list(emit_json=args.emit_json)

@@ -38,8 +38,17 @@ _VALID_OVERRIDE_KEYS = frozenset(
     }
 )
 
+# F17: 'collections' top-level YAML key, referenced ≥3 times across the
+# validator. Hoisted so a future rename has a single edit site.
+_COLLECTIONS_KEY = "collections"
 
-def validate_config(data: dict[str, Any]) -> list[str]:
+
+def validate_config(
+    data: dict[str, Any],
+    *,
+    document_root: Path | None = None,
+    reflib_root: Path | None = None,
+) -> list[str]:
     """Validate a parsed kairix.config.yaml dict.
 
     Returns a list of human-readable error messages. Empty list means valid.
@@ -48,12 +57,131 @@ def validate_config(data: dict[str, Any]) -> list[str]:
     Also runs the Wave D topology v2 referential-integrity validators
     when any of the 6 Wave D blocks is present — empty / absent blocks
     skip cleanly so legacy configs see byte-identical behaviour.
+
+    Filesystem-resolving path checks fire when ``document_root`` (or its
+    env-var fallback ``$KAIRIX_DOCUMENT_ROOT``) points at a real
+    directory — i.e. we're in a deployed environment rather than a
+    test/CI shell. Each declared collection path must resolve to an
+    existing directory; the reference-library collection is auto-resolved
+    against ``reflib_root`` (or ``$KAIRIX_REFLIB_ROOT``) per the same
+    harmoniser the scanner uses (catches the silent
+    "path: reference-library" misconfiguration class).
+
+    Tests pass ``document_root`` / ``reflib_root`` explicitly so they
+    never mutate process env (F2-clean).
     """
     errors: list[str] = []
-    errors.extend(_validate_collections(data.get("collections")))
-    errors.extend(_validate_agents(data.get("agents"), data.get("collections")))
+    errors.extend(_validate_collections(data.get(_COLLECTIONS_KEY)))
+    errors.extend(_validate_agents(data.get("agents"), data.get(_COLLECTIONS_KEY)))
     errors.extend(_validate_topology_v2(data))
+    errors.extend(
+        _validate_collection_paths_resolve(
+            data.get(_COLLECTIONS_KEY),
+            document_root=document_root,
+            reflib_root=reflib_root,
+        )
+    )
     return errors
+
+
+def _validate_collection_paths_resolve(
+    collections: Any,
+    *,
+    document_root: Path | None = None,
+    reflib_root: Path | None = None,
+) -> list[str]:
+    """Every declared collection path must resolve to an existing dir.
+
+    Silent-skip when ``document_root`` is None / not a real dir — that's
+    the test-environment shape, not a real deployment. In a real
+    deployment, an unresolvable path was previously a per-scan WARNING
+    that operators missed; this turns it into a hard validate-time error
+    with F21-actionable remediation.
+
+    Reference-library is auto-resolved against ``reflib_root`` using the
+    same logic as ``harmonise_reference_library`` so the operator sees
+    the same "auto-corrected" outcome at validate time that they'd see
+    at scan time.
+
+    Production callers leave the kwargs as None — the boundary read
+    happens here via ``KairixPaths.resolve()``. Tests pass explicit
+    paths constructed in a tmp_path so they never mutate process env.
+    """
+    if collections is None or not isinstance(collections, dict):
+        return []
+    shared = collections.get("shared", [])
+    if not isinstance(shared, list):
+        return []
+
+    # Default-skip when document_root is not explicitly supplied — keeps
+    # legacy callers (existing schema-only validate_config tests, plus
+    # the topology v2 unit-test fixtures) byte-identical. Operators
+    # running `kairix config validate` opt into path resolution by
+    # passing the resolved KairixPaths.document_root from the CLI
+    # boundary (see kairix.core.search.config_validator's CLI main).
+    if document_root is None:
+        return []
+    if not document_root.is_dir():
+        return []  # Document root supplied but doesn't exist — test shell, skip.
+
+    if reflib_root is None:
+        from kairix.paths import reference_library_root
+
+        reflib_root = reference_library_root()
+
+    errors: list[str] = []
+    for i, item in enumerate(shared):
+        error = _check_one_collection_path(i, item, document_root, reflib_root)
+        if error:
+            errors.append(error)
+    return errors
+
+
+def _shared_prefix(i: int) -> str:
+    """Return the canonical `collections.shared[i]` error prefix.
+
+    F17: extracted to one helper so the prefix template lives in one
+    place (3+ call sites once the path-resolution check is in).
+    """
+    return f"collections.shared[{i}]"
+
+
+def _check_one_collection_path(
+    index: int,
+    item: Any,
+    document_root: Path,
+    reflib_root: Path,
+) -> str | None:
+    """Return an actionable error string for one collection entry, or None when it resolves."""
+    if not isinstance(item, dict):
+        return None
+    name = item.get("name")
+    raw_path = item.get("path")
+    if not name or not raw_path:
+        return None
+    candidate = Path(raw_path) if Path(raw_path).is_absolute() else document_root / raw_path
+    if candidate.is_dir():
+        return None
+    common = (
+        f"{_shared_prefix(index)} ({name}): declared path {raw_path!r} resolves to {candidate} which does not exist"
+    )
+    # Reference-library auto-correction: if the declared path doesn't
+    # resolve but $KAIRIX_REFLIB_ROOT does, return the actionable hint
+    # that points operators at the canonical path.
+    if name == "reference-library" and reflib_root and reflib_root.is_dir():
+        return (
+            f"{common}; the scanner auto-corrects this to {reflib_root} at runtime. "
+            f"fix: change `path: {raw_path}` to `path: {reflib_root}` in your kairix.config.yaml. "
+            f"next: kairix config validate. "
+            f"run: docker compose restart kairix kairix-worker"
+        )
+    return (
+        f"{common}. "
+        f"fix: change `path:` to an absolute path that exists on the deployment, OR "
+        f"remove this collection from kairix.config.yaml if it's no longer in scope. "
+        f"next: kairix config validate. "
+        f"run: ls {candidate.parent} to see what's actually mounted there."
+    )
 
 
 def _validate_topology_v2(data: dict[str, Any]) -> list[str]:
@@ -142,7 +270,7 @@ def _validate_collections(collections: Any) -> list[str]:
     errors: list[str] = []
     seen_names: set[str] = set()
     for i, item in enumerate(shared):
-        errors.extend(_validate_shared_collection_item(f"collections.shared[{i}]", item, seen_names))
+        errors.extend(_validate_shared_collection_item(_shared_prefix(i), item, seen_names))
     errors.extend(_validate_agent_pattern(collections.get("agent_pattern")))
     return errors
 
@@ -235,8 +363,18 @@ def _validate_agents(agents: Any, collections: Any) -> list[str]:
     return errors
 
 
-def main(argv: list[str] | None = None) -> int:
-    """CLI entry: kairix config validate [path]"""
+def main(
+    argv: list[str] | None = None,
+    *,
+    document_root: Path | None = None,
+    reflib_root: Path | None = None,
+) -> int:
+    """CLI entry: kairix config validate [path]
+
+    ``document_root`` / ``reflib_root`` are test seams — production
+    callers leave them as None and the CLI resolves them at the
+    boundary via KairixPaths.
+    """
     import argparse
 
     import yaml
@@ -277,7 +415,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"YAML parse error in {config_path}: {exc}")
         return 1
 
-    errors = validate_config(data)
+    # Opt into path resolution at the operator-facing CLI boundary so
+    # `kairix config validate` catches misconfigured paths but unit tests
+    # of the schema parser stay silent on the new check. Tests inject
+    # document_root / reflib_root directly; production reads via the
+    # KairixPaths boundary.
+    if document_root is None:
+        from kairix.paths import KairixPaths
+
+        document_root = KairixPaths.resolve().document_root
+    if reflib_root is None:
+        from kairix.paths import reference_library_root
+
+        reflib_root = reference_library_root()
+    errors = validate_config(
+        data,
+        document_root=document_root,
+        reflib_root=reflib_root,
+    )
     if errors:
         print(f"Found {len(errors)} validation error(s) in {config_path}:")
         for err in errors:
