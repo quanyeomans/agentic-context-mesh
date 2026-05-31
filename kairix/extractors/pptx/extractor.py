@@ -24,7 +24,7 @@ from __future__ import annotations
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
@@ -213,7 +213,7 @@ def _default_presentation_loader(path: str) -> _PptxPresentation:
             "to opt into the slide-aware extractor. "
             "next: re-run the connector sync; pptx will then resolve."
         ) from exc
-    return Presentation(path)
+    return cast("_PptxPresentation", Presentation(path))
 
 
 def _walk_slides(prs: _PptxPresentation) -> list[_Slide]:

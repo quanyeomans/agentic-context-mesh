@@ -31,11 +31,20 @@ at ``kairix/connectors/m365_email_headers/graph_client.py``).
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Final
 
 import httpx
+from tenacity import (
+    RetryCallState,
+    RetryError,
+    Retrying,
+    retry_if_result,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
 
@@ -56,6 +65,18 @@ _DEFAULT_GRAPH_BASE: Final[str] = "https://graph.microsoft.com/v1.0"
 # 60s covers a cold connection on a paginated reply with a large
 # mailbox.
 _GRAPH_REQUEST_TIMEOUT_S: Final[float] = 60.0
+
+# Retry tuning for Graph throttling (GH #357). Mirrors the SharePoint
+# Graph client's strategy: 429 + 503 honour ``Retry-After`` when present;
+# other transient 5xx fall back to bounded exponential backoff. Graph
+# documents 429 + 503 as the throttled responses; both carry
+# ``Retry-After`` per https://learn.microsoft.com/graph/throttling.
+_DEFAULT_MAX_ATTEMPTS: Final[int] = 3
+_DEFAULT_BACKOFF_MIN_S: Final[float] = 2.0
+_DEFAULT_BACKOFF_MAX_S: Final[float] = 60.0
+_RETRY_AFTER_HEADER: Final[str] = "Retry-After"
+_RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
+_THROTTLED_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 503})
 
 
 @dataclass(frozen=True)
@@ -110,6 +131,12 @@ class M365GraphClient:
         http_client: Optional ``httpx.Client`` for the request path.
             Tests pass an :class:`httpx.MockTransport`-backed client
             so no real Graph call leaks from the test suite.
+        sleep_fn: Optional sleep shim used by the throttling-retry loop.
+            Defaults to :func:`time.sleep`; tests pass a recording no-op
+            so the suite stays fast without monkey-patching stdlib.
+        max_attempts: Total attempt count (initial call + retries) for
+            any single Graph request. Defaults to
+            :data:`_DEFAULT_MAX_ATTEMPTS` (3) per GH #357.
     """
 
     def __init__(
@@ -119,6 +146,8 @@ class M365GraphClient:
         auth: OAuth2ClientCredsAuth,
         graph_base: str | None = None,
         http_client: httpx.Client | None = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+        max_attempts: int = _DEFAULT_MAX_ATTEMPTS,
     ) -> None:
         if not user_principal_name:
             raise ValueError(
@@ -131,6 +160,8 @@ class M365GraphClient:
         self._auth = auth
         self._graph_base = (graph_base or _DEFAULT_GRAPH_BASE).rstrip("/")
         self._http_client = http_client
+        self._sleep_fn = sleep_fn
+        self._max_attempts = max_attempts
 
     def initial_delta_url(self) -> str:
         """Compose the seed delta URL with the header-only projection.
@@ -200,8 +231,56 @@ class M365GraphClient:
     # ------------------------------------------------------------------
 
     def _authorised_get(self, url: str) -> httpx.Response:
-        """Issue a GET with the current bearer; on 401, invalidate +
-        retry once. Persistent 401 raises ``httpx.HTTPStatusError``.
+        """Issue a GET with the current bearer + retry-with-backoff on throttle.
+
+        Two layered retry behaviours, both intentionally narrow
+        (GH #357 — mirrors :class:`SharePointGraphClient._authorised_get`):
+
+          1. **401 once.** A single ``401 Unauthorized`` invalidates the
+             cached token and retries the request once with a freshly
+             exchanged bearer. A second 401 raises — the credential is
+             genuinely bad and no amount of waiting will help.
+          2. **429 / 5xx with backoff.** Throttled (429) and Service
+             Unavailable (503) responses honour the server's
+             ``Retry-After`` header; other 5xx (500, 502, 504) fall back
+             to exponential backoff. ``_DEFAULT_MAX_ATTEMPTS`` total
+             attempts (initial call + retries). After exhaustion the
+             final response is returned to ``raise_for_status`` which
+             converts it to :class:`httpx.HTTPStatusError`.
+
+        Other 4xx responses (e.g. 403 Forbidden, 404 Not Found) raise
+        immediately — they're permanent for this URL + credential pair.
+        """
+        retrying = Retrying(
+            retry=retry_if_result(_is_retryable_response),
+            wait=self._wait_strategy,
+            stop=stop_after_attempt(self._max_attempts),
+            sleep=self._sleep_fn,
+            reraise=True,
+        )
+        try:
+            response = retrying(self._authorised_get_once, url)
+        except RetryError as exc:
+            # ``retry_if_result`` returns a "successful" outcome from
+            # tenacity's perspective, so ``reraise=True`` can't lift an
+            # exception. On stop-condition exhaustion tenacity wraps the
+            # final attempt's result in :class:`RetryError`; lift the
+            # underlying response and convert it via ``raise_for_status``
+            # so callers see the same :class:`httpx.HTTPStatusError`
+            # shape they did before retry was added.
+            final: httpx.Response = exc.last_attempt.result()
+            final.raise_for_status()
+            return final  # pragma: no cover — raise_for_status above always raises here
+        response.raise_for_status()
+        return response
+
+    def _authorised_get_once(self, url: str) -> httpx.Response:
+        """One bearer-authorised GET with the single 401 refresh step.
+
+        Returns the raw :class:`httpx.Response` (never raises on status
+        alone); the retry loop in :meth:`_authorised_get` inspects the
+        status code via :func:`_is_retryable_response` and either retries
+        or hands the response back to the caller for ``raise_for_status``.
         """
         token = self._auth.get_token()
         response = self._do_get(url, token)
@@ -210,8 +289,38 @@ class M365GraphClient:
             self._auth.invalidate()
             token = self._auth.get_token()
             response = self._do_get(url, token)
-        response.raise_for_status()
         return response
+
+    def _wait_strategy(self, retry_state: RetryCallState) -> float:
+        """Compute the wait between retries (GH #357).
+
+        For 429 / 503 responses honour the server's ``Retry-After`` header
+        (seconds OR HTTP-date). For other retryable statuses (or when
+        ``Retry-After`` is missing / unparseable) fall back to exponential
+        backoff between :data:`_DEFAULT_BACKOFF_MIN_S` and
+        :data:`_DEFAULT_BACKOFF_MAX_S`.
+        """
+        outcome = retry_state.outcome
+        if outcome is None or outcome.failed:  # pragma: no cover — exception path bypasses retry_if_result
+            return _DEFAULT_BACKOFF_MIN_S
+        response = outcome.result()
+        retry_after = _parse_retry_after(response) if response.status_code in _THROTTLED_STATUS_CODES else None
+        if retry_after is not None:
+            logger.warning(
+                "m365 graph: %s on attempt %d; honouring Retry-After=%.1fs",
+                response.status_code,
+                retry_state.attempt_number,
+                retry_after,
+            )
+            return retry_after
+        backoff = wait_exponential(multiplier=1, min=_DEFAULT_BACKOFF_MIN_S, max=_DEFAULT_BACKOFF_MAX_S)(retry_state)
+        logger.warning(
+            "m365 graph: %s on attempt %d; backing off %.1fs",
+            response.status_code,
+            retry_state.attempt_number,
+            backoff,
+        )
+        return backoff
 
     def _do_get(self, url: str, token: str) -> httpx.Response:
         """Single HTTP GET — separated for the 401-retry path's
@@ -224,6 +333,36 @@ class M365GraphClient:
             return client.get(url, headers=headers, timeout=_GRAPH_REQUEST_TIMEOUT_S)
         with httpx.Client(timeout=_GRAPH_REQUEST_TIMEOUT_S) as owned:
             return owned.get(url, headers=headers)
+
+
+def _is_retryable_response(response: httpx.Response) -> bool:
+    """``True`` when ``response.status_code`` is in
+    :data:`_RETRYABLE_STATUS_CODES` (429 + 5xx subset).
+
+    Used by the :class:`Retrying` loop in
+    :meth:`M365GraphClient._authorised_get` to decide whether the
+    request gets retried (with the wait dictated by
+    :meth:`M365GraphClient._wait_strategy`) or returned to the
+    caller for ``raise_for_status``.
+    """
+    return response.status_code in _RETRYABLE_STATUS_CODES
+
+
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    """Return the ``Retry-After`` header (seconds) as a float, or ``None``.
+
+    Graph emits ``Retry-After`` as an integer second count per
+    https://learn.microsoft.com/graph/throttling. The HTTP spec also
+    allows an HTTP-date form; this client only parses the seconds form
+    and falls back to exponential backoff for anything unparseable.
+    """
+    raw = response.headers.get(_RETRY_AFTER_HEADER)
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_delta_page(body: dict[str, Any]) -> DeltaPage:

@@ -20,7 +20,7 @@ from __future__ import annotations
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
@@ -118,7 +118,7 @@ def _default_document_opener() -> DocxOpener:
     def _open_path(path: str) -> _DocxDocument:
         # python-docx returns its concrete ``Document`` type which
         # satisfies the local :class:`_DocxDocument` Protocol structurally.
-        return _docx.Document(path)
+        return cast("_DocxDocument", _docx.Document(path))
 
     return _open_path
 

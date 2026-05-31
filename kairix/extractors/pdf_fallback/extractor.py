@@ -40,7 +40,7 @@ import logging
 import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from kairix.core.protocols import SourceMetadata
 from kairix.extractors import (
@@ -155,7 +155,7 @@ def _default_pdf_opener() -> PdfOpener:
         # The runtime ``pdfplumber.PDF`` object satisfies the
         # :class:`_PdfDocument` Protocol structurally (``pages``,
         # ``metadata``, ``__enter__`` / ``__exit__``).
-        return pdfplumber.open(path)  # type: ignore[return-value]  # pdfplumber returns its concrete PDF type; structurally satisfies _PdfDocument.
+        return cast("_PdfDocument", pdfplumber.open(path))
 
     return _open_path
 

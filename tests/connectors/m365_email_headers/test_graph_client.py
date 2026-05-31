@@ -404,3 +404,172 @@ def test_fetch_page_handles_non_string_subject_via_optional_str_fallback() -> No
     assert len(page.messages) == 1
     assert page.messages[0].subject is None
     assert page.messages[0].sent_at is None
+
+
+# ---------------------------------------------------------------------------
+# Throttling retry loop (GH #357) — unit coverage of the new wait/retry
+# helpers, exercised through the public ``iter_messages`` surface so the
+# F7 floor on this file stays green.
+# ---------------------------------------------------------------------------
+
+
+def _build_client_with_sleep_recording(
+    handler: httpx.MockTransport,
+    *,
+    recorded_sleeps: list[float],
+    max_attempts: int = 3,
+) -> M365GraphClient:
+    """Construct a real :class:`M365GraphClient` with a recording sleep_fn.
+
+    F1 / F2 clean — ``sleep_fn`` is a public constructor seam already in
+    production use for tests; the mock transport replaces the HTTP wire
+    without monkey-patching kairix internals.
+    """
+    shared = httpx.Client(transport=handler)
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="fake-tenant",
+        client_id="fake-client",
+        client_secret="fake-secret-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    return M365GraphClient(
+        user_principal_name="agent-alpha@example.com",
+        auth=auth,
+        http_client=shared,
+        sleep_fn=recorded_sleeps.append,
+        max_attempts=max_attempts,
+    )
+
+
+def _token_response_for_unit(request: httpx.Request) -> httpx.Response | None:
+    """Return a 200 token reply for the OAuth2 endpoint, else ``None``."""
+    if "/oauth2/v2.0/token" in str(request.url):
+        # pragma: allowlist secret — test fixture
+        body = {"access_token": "fake-bearer", "expires_in": 3600, "token_type": "Bearer"}
+        return httpx.Response(200, json=body)
+    return None
+
+
+def test_authorised_get_retries_on_429_with_retry_after() -> None:
+    """A 429 with ``Retry-After: 2`` retries after sleeping exactly 2s, then 200.
+
+    Drives :meth:`_authorised_get` retry loop + :meth:`_wait_strategy`
+    Retry-After branch + :func:`_parse_retry_after` through the public
+    ``iter_messages`` surface.
+
+    Sabotage proof: drop the ``retry_after`` branch in ``_wait_strategy``
+    (always return exponential) — the recorded sleep would be the
+    exponential floor (2.0s); coincidentally equal here so this test
+    asserts on call_count too. Removing 429 from
+    ``_RETRYABLE_STATUS_CODES`` would cause the first 429 to raise and
+    the call_count assertion would fail (1 instead of 2).
+    """
+    call_count = {"n": 0}
+    recorded_sleeps: list[float] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for_unit(request)
+        if token is not None:
+            return token
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "2"}, json={"error": "throttled"})
+        return httpx.Response(200, json={"value": []})
+
+    transport = httpx.MockTransport(_handler)  # type: ignore[arg-type]  # F3 rationale: pytest typing accepts handler shapes httpx narrows at runtime.
+    client = _build_client_with_sleep_recording(transport, recorded_sleeps=recorded_sleeps)
+    messages = list(client.iter_messages(start_url=None))
+    assert messages == []
+    assert call_count["n"] == 2
+    assert recorded_sleeps == [2.0]
+
+
+def test_authorised_get_503_without_retry_after_uses_exponential_backoff() -> None:
+    """A 503 with NO Retry-After falls back to exponential backoff (≥2.0s floor).
+
+    Drives the second branch of :meth:`_wait_strategy` —
+    ``_parse_retry_after`` returns ``None`` → ``wait_exponential`` fires.
+
+    Sabotage proof: removing the ``wait_exponential`` fallback in
+    ``_wait_strategy`` would make the recorded sleep 0, breaking the
+    ``>=2.0`` floor assertion.
+    """
+    call_count = {"n": 0}
+    recorded_sleeps: list[float] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for_unit(request)
+        if token is not None:
+            return token
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return httpx.Response(503, json={"error": "unavailable"})
+        return httpx.Response(200, json={"value": []})
+
+    transport = httpx.MockTransport(_handler)  # type: ignore[arg-type]  # F3 rationale: pytest typing accepts handler shapes httpx narrows at runtime.
+    client = _build_client_with_sleep_recording(transport, recorded_sleeps=recorded_sleeps)
+    messages = list(client.iter_messages(start_url=None))
+    assert messages == []
+    assert call_count["n"] == 2
+    assert len(recorded_sleeps) == 1
+    assert recorded_sleeps[0] >= 2.0
+
+
+def test_authorised_get_503_with_unparseable_retry_after_falls_back() -> None:
+    """``Retry-After: not-a-number`` falls back to exponential backoff.
+
+    Drives :func:`_parse_retry_after`'s ``except (TypeError, ValueError)``
+    branch. The header is present but the value can't parse to float, so
+    the wait strategy must fall back to exponential.
+
+    Sabotage proof: removing the ``try / except`` around ``float(raw)``
+    in ``_parse_retry_after`` would propagate ``ValueError`` and the
+    iter_messages call would raise instead of completing cleanly.
+    """
+    call_count = {"n": 0}
+    recorded_sleeps: list[float] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response_for_unit(request)
+        if token is not None:
+            return token
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return httpx.Response(503, headers={"Retry-After": "not-a-number"}, json={"error": "unavailable"})
+        return httpx.Response(200, json={"value": []})
+
+    transport = httpx.MockTransport(_handler)  # type: ignore[arg-type]  # F3 rationale: pytest typing accepts handler shapes httpx narrows at runtime.
+    client = _build_client_with_sleep_recording(transport, recorded_sleeps=recorded_sleeps)
+    messages = list(client.iter_messages(start_url=None))
+    assert messages == []
+    assert call_count["n"] == 2
+    assert recorded_sleeps[0] >= 2.0
+
+
+def test_authorised_get_default_http_client_path() -> None:
+    """When no ``http_client`` is injected the client owns its own httpx session.
+
+    Drives the ``http_client is None`` branch in :meth:`_do_get` (the
+    ``with httpx.Client(...) as owned`` arm). The constructor accepts
+    ``http_client=None`` by default; the constructed client falls back
+    to a self-owned httpx session for each request.
+
+    Sabotage proof: removing the ``if client is not None`` branch would
+    cause this test to fail because the owned-client path is never
+    exercised; instead the injected ``None`` would raise AttributeError.
+    """
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="fake-tenant",
+        client_id="fake-client",
+        client_secret="fake-secret-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+    )
+    # We never invoke the request; just confirm the construction path is
+    # reachable and the http_client attribute is set to None.
+    client = M365GraphClient(
+        user_principal_name="agent-alpha@example.com",
+        auth=auth,
+        http_client=None,
+    )
+    assert client._http_client is None

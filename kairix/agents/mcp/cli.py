@@ -26,7 +26,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from kairix.agents.mcp.cold_start import warm_retrieval_stack
 from kairix.platform.onboard.ports import find_available_port, is_port_available
@@ -172,7 +172,7 @@ def _default_uvicorn_run() -> Callable[..., Any]:
     """Default factory: lazy-import uvicorn.run so it isn't loaded at module import."""
     import uvicorn
 
-    return uvicorn.run
+    return cast("Callable[..., Any]", uvicorn.run)
 
 
 def _default_warm_runner(warm_body: Callable[[], None]) -> None:
