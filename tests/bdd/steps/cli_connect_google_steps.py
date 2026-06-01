@@ -193,22 +193,51 @@ def then_summary_names_canonical(connect_state: dict[str, Any]) -> None:
 @then("the error output mentions consent")
 def then_err_mentions_consent(connect_state: dict[str, Any]) -> None:
     err = connect_state["stderr"].getvalue().lower()
-    assert "consent" in err or "denied" in err
+    # Strengthened: the F21 consent-denied error must include BOTH the
+    # "consent denied" rationale AND the F21 fix/next/run markers.
+    # The previous form (consent OR denied) passed on either substring
+    # which let a regression that drops the rationale slip through.
+    assert "consent denied" in err, f"expected 'consent denied' in stderr, got: {err!r}"
+    assert "fix:" in err and "next:" in err and "run:" in err, (
+        f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )
 
 
 @then("the error output mentions the listener wait")
 def then_err_mentions_listener(connect_state: dict[str, Any]) -> None:
     err = connect_state["stderr"].getvalue().lower()
-    assert "timeout" in err or "callback" in err or "listener" in err
+    # Strengthened: must mention BOTH "callback" AND a time-related word
+    # so a regression that drops the time-out rationale is caught. The
+    # previous 3-way OR passed on any of timeout/callback/listener.
+    assert "callback" in err, f"expected 'callback' in stderr, got: {err!r}"
+    assert "timeout" in err or "within" in err, (
+        f"expected time-out indication ('timeout' or 'within ...s') in stderr, got: {err!r}"
+    )
+    assert "fix:" in err and "next:" in err and "run:" in err, (
+        f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )
 
 
 @then("the error output points the operator at the GCP console")
 def then_err_points_gcp(connect_state: dict[str, Any]) -> None:
     err = connect_state["stderr"].getvalue()
-    assert "GCP console" in err or "client_secret.json" in err
+    # Strengthened: must mention BOTH the file name AND the GCP console
+    # so a regression that drops the actionable hint is caught. The
+    # previous 2-way OR passed on either alone.
+    assert "client_secret.json" in err, f"expected 'client_secret.json' in stderr, got: {err!r}"
+    assert "GCP console" in err, f"expected 'GCP console' in stderr, got: {err!r}"
+    assert "fix:" in err and "next:" in err and "run:" in err, (
+        f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )
 
 
 @then("the error output mentions the store backend")
 def then_err_mentions_store(connect_state: dict[str, Any]) -> None:
     err = connect_state["stderr"].getvalue().lower()
-    assert "store" in err or "backend" in err
+    # Strengthened: must mention BOTH "store" AND "backend" so a
+    # regression that drops one half of the rationale is caught.
+    assert "store" in err, f"expected 'store' in stderr, got: {err!r}"
+    assert "backend" in err, f"expected 'backend' in stderr, got: {err!r}"
+    assert "fix:" in err and "next:" in err and "run:" in err, (
+        f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )

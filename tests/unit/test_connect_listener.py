@@ -180,25 +180,35 @@ def test_find_free_port_raises_when_all_used() -> None:
     F1-clean: ``find_free_port`` accepts ``scan_limit=`` as a
     constructor-injection seam so tests pass 2 instead of binding 50
     sockets — no monkeypatching of kairix internals.
+
+    Strengthened: the previous form had an ``if len(blockers) == 2:``
+    guard that let the test pass silently when only one socket bound.
+    The new form scans 20000..40000 for an adjacent free-port pair and
+    asserts the OSError unconditionally — if no adjacent pair is found
+    the test fails loudly rather than silently passing.
     """
-    port_a = _find_test_port()
-    port_b = port_a + 1
-    blockers: list[socket.socket] = []
-    try:
-        for p in (port_a, port_b):
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                s.bind(("127.0.0.1", p))
-                s.listen(1)
-                blockers.append(s)
-            except OSError:
-                s.close()
-        if len(blockers) == 2:
+    held: list[socket.socket] = []
+    for candidate in range(20000, 40000):
+        a = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        b = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            a.bind(("127.0.0.1", candidate))
+            b.bind(("127.0.0.1", candidate + 1))
+        except OSError:
+            a.close()
+            b.close()
+            continue
+        a.listen(1)
+        b.listen(1)
+        held = [a, b]
+        try:
             with pytest.raises(OSError, match="no free port"):
-                find_free_port("127.0.0.1", port_a, scan_limit=2)
-    finally:
-        for s in blockers:
-            s.close()
+                find_free_port("127.0.0.1", candidate, scan_limit=2)
+            return  # assertion fired — done
+        finally:
+            for s in held:
+                s.close()
+    pytest.fail("could not find an adjacent free-port pair to exhaust — test environment issue")
 
 
 def test_listener_close_is_idempotent() -> None:

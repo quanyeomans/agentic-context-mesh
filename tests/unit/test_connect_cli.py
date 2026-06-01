@@ -115,7 +115,11 @@ def test_cli_happy_path_returns_zero(tmp_path: Path) -> None:
 def test_cli_consent_denied_returns_nonzero(tmp_path: Path) -> None:
     """A denied consent surfaces as exit 1 with the F21 hint on stderr."""
     cs = _make_client_secret(tmp_path / "cs.json")
-    listener = FakeCallbackListener(denied=True, denied_message="user cancelled")
+    # Use the fake's default denied_message ("consent denied") so the
+    # strengthened assertion below can confirm the rationale lands in
+    # stderr verbatim. Customising the message in this CLI-level test
+    # would make the assertion test the customisation, not the prod path.
+    listener = FakeCallbackListener(denied=True)
     stderr = io.StringIO()
 
     # Override the flow with one that DOES call the listener so the
@@ -140,7 +144,13 @@ def test_cli_consent_denied_returns_nonzero(tmp_path: Path) -> None:
     )
     rc = main(["google-gmail", "--client-secret-path", str(cs)], deps=deps_real)
     assert rc == 1
-    assert "consent" in stderr.getvalue() or "denied" in stderr.getvalue()
+    # Strengthened: must mention BOTH "consent" AND "denied" so a
+    # regression that drops the rationale half is caught.
+    err = stderr.getvalue().lower()
+    assert "consent" in err and "denied" in err, f"expected both 'consent' and 'denied' in stderr, got: {err!r}"
+    assert "fix:" in err and "next:" in err and "run:" in err, (
+        f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )
 
 
 def test_cli_timeout_returns_nonzero(tmp_path: Path) -> None:
@@ -169,7 +179,14 @@ def test_cli_timeout_returns_nonzero(tmp_path: Path) -> None:
     )
     rc = main(["google-gmail", "--client-secret-path", str(cs)], deps=deps)
     assert rc == 1
-    assert "timeout" in stderr.getvalue().lower() or "callback" in stderr.getvalue().lower()
+    # Strengthened: must mention "callback" (the operator-visible noun)
+    # AND a timing word (timeout / within ...s).
+    err = stderr.getvalue().lower()
+    assert "callback" in err, f"expected 'callback' in stderr, got: {err!r}"
+    assert "timeout" in err or "within" in err, f"expected time-out indication in stderr, got: {err!r}"
+    assert "fix:" in err and "next:" in err and "run:" in err, (
+        f"expected F21 fix/next/run markers in stderr, got: {err!r}"
+    )
 
 
 def test_cli_missing_client_secret_returns_nonzero(tmp_path: Path) -> None:
