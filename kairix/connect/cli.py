@@ -1,22 +1,26 @@
 """``kairix connect`` CLI dispatcher.
 
 Operator surface for capturing OAuth2 tokens via the ``kairix connect
-<service>`` family. Phase 1 + Phase 2 wires:
+<service>`` family. Phase 1 + Phase 2 + Phase 3 wires:
 
   * ``kairix connect google-gmail`` — Gmail OAuth2 flow
   * ``kairix connect google-drive`` — Google Drive OAuth2 flow
   * ``kairix connect google-calendar`` — Google Calendar OAuth2 flow
   * ``kairix connect slack --workspace <name>`` — Slack OAuth v2 flow,
     per-workspace canonical-naming via the ``instance`` slot
+  * ``kairix connect github-app --app-id <id> --private-key-path <pem>``
+    — GitHub App install + JWT exchange; carries ``installation_id``
+    via the ``CapturedTokens.metadata`` slot
 
 Each subcommand:
   1. Reads the OAuth client credentials from the per-service source
      (Google: ``--client-secret-path``; Slack: ``--client-id`` +
-     ``--client-secret`` or pre-populated KV entries).
+     ``--client-secret``; GitHub App: ``--app-id`` + ``--private-key-path``).
   2. Starts the localhost callback listener (``--port``, default 8080).
-  3. Opens the browser to the consent screen.
-  4. Captures the code via the listener (timeout 120s by default).
-  5. Exchanges the code for tokens.
+  3. Opens the browser to the consent / install screen.
+  4. Captures the callback via the listener (timeout 120s by default).
+  5. Exchanges the captured value for tokens (Google: code → tokens;
+     GitHub App: installation_id + JWT → installation access token).
   6. Writes the tokens to the chosen store (``--store``, default ``file``).
   7. Prints a success summary listing canonical names and store target.
 
@@ -39,6 +43,7 @@ from pathlib import Path
 from typing import TextIO
 
 from kairix.connect.listener import DEFAULT_PORT, LocalhostCallbackListener
+from kairix.connect.oauth2.github_app import GITHUB_APP_SERVICE_AREA, GitHubAppFlow
 from kairix.connect.oauth2.google import GoogleOAuth2Flow
 from kairix.connect.oauth2.slack import SLACK_SERVICE_AREA, SlackOAuth2Flow
 from kairix.connect.protocols import (
@@ -104,8 +109,24 @@ def _build_slack_flow(args: argparse.Namespace) -> OAuth2Flow:
     )
 
 
+def _build_github_app_flow(args: argparse.Namespace) -> OAuth2Flow:
+    """Build a :class:`GitHubAppFlow` from the parsed CLI args.
+
+    GitHub App's flow needs three inputs the Google + Slack flows
+    don't share: the numeric App id (``--app-id``), the PEM private
+    key (``--private-key-path``), and the App URL slug
+    (``--app-slug``, default ``"kairix-bot"``) that drives the install
+    URL.
+    """
+    return GitHubAppFlow(
+        app_id=args.app_id,
+        private_key_path=args.private_key_path,
+        app_slug=args.app_slug,
+    )
+
+
 def _none_instance(_args: argparse.Namespace) -> str | None:
-    """Instance-reader for singleton services (Google subcommands)."""
+    """Instance-reader for singleton services (Google + GitHub App)."""
     return None
 
 
@@ -153,6 +174,11 @@ SUBCOMMAND_REGISTRY: dict[str, _SubcommandSpec] = {
         service_area=SLACK_SERVICE_AREA,
         flow_builder=_build_slack_flow,
         instance_reader=_slack_workspace_instance,
+    ),
+    "github-app": _SubcommandSpec(
+        service_area=GITHUB_APP_SERVICE_AREA,
+        flow_builder=_build_github_app_flow,
+        instance_reader=_none_instance,
     ),
 }
 
@@ -346,6 +372,44 @@ def _build_parser() -> argparse.ArgumentParser:
         help=("Slack app's OAuth client_secret from https://api.slack.com/apps -> Basic Information."),
     )
     _add_common_store_args(slack_p)
+
+    # GitHub App — App-id + PEM private key drive a JWT-signed install flow.
+    gh_p = sub.add_parser(
+        "github-app",
+        help="Connect github-app — captures a GitHub App installation id via the App install flow.",
+    )
+    gh_p.add_argument(
+        "--app-id",
+        required=True,
+        type=str,
+        help=(
+            "GitHub App numeric id from github.com/settings/apps/<your-app> 'About' "
+            "section. Drives the JWT 'iss' claim used to mint installation access tokens."
+        ),
+    )
+    gh_p.add_argument(
+        "--private-key-path",
+        required=True,
+        type=Path,
+        help=(
+            "Path to the GitHub App PEM private key. Download from "
+            "github.com/settings/apps/<your-app> -> 'Private keys' -> "
+            "'Generate a private key'. The key file is the long-lived "
+            "credential — installation access tokens are minted on demand."
+        ),
+    )
+    gh_p.add_argument(
+        "--app-slug",
+        default="kairix-bot",
+        type=str,
+        help=(
+            "GitHub App URL slug used to construct the install URL "
+            "(https://github.com/apps/<slug>/installations/new). Default "
+            "'kairix-bot' — override if your App was published under a "
+            "different slug."
+        ),
+    )
+    _add_common_store_args(gh_p)
     return parser
 
 
@@ -384,6 +448,16 @@ def _run(args: argparse.Namespace, deps: ConnectDeps) -> int:
         deps.stderr.write(str(exc) + "\n")
         return 1
     except FileNotFoundError as exc:
+        listener.close()
+        deps.stderr.write(str(exc) + "\n")
+        return 1
+    except (ValueError, RuntimeError) as exc:
+        # Per-service OAuth flows raise ValueError/RuntimeError when the
+        # provider response is malformed or the operator's input is
+        # invalid (Google: bad client_secret.json; GitHub App: missing
+        # installation_id callback). Surface the F21 message to stderr
+        # and return rc=1 so the operator gets the same error contract
+        # as the F-rule ConnectError path.
         listener.close()
         deps.stderr.write(str(exc) + "\n")
         return 1

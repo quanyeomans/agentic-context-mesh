@@ -1,6 +1,6 @@
 # `kairix connect` — OAuth2 token capture for connectors
 
-Operator-only CLI family for capturing OAuth2 tokens for connector authentication. Currently covers Google Workspace (Gmail / Drive / Calendar) and Slack workspaces; GitHub App lands in a follow-up release sharing the same `kairix.connect` abstractions.
+Operator-only CLI family for capturing OAuth2 tokens for connector authentication. Currently covers Google Workspace (Gmail / Drive / Calendar), Slack workspaces, and GitHub App installations — all share the same `kairix.connect` listener / store / refresh abstractions.
 
 This is the package documentation. Operator-facing setup steps live in [`docs/operations/secrets-configuration.md`](../../docs/operations/secrets-configuration.md). The architectural contract is [`docs/architecture/ADR-032-oauth2-connect-flow.md`](../../docs/architecture/ADR-032-oauth2-connect-flow.md).
 
@@ -71,6 +71,73 @@ You can use the **same** `client_secret.json` for all three. The captured tokens
 
 (Canonical names follow [ADR-031](../../docs/architecture/ADR-031-canonical-credential-naming.md).)
 
+## GitHub App setup walkthrough (one-time)
+
+GitHub Apps replace personal access tokens for production deployments. They scope permissions per repo set, rotate installation tokens automatically (1h TTL), and don't expire on user offboarding.
+
+The five steps you do **once per kairix install** before running `kairix connect github-app`:
+
+1. **Create the GitHub App.** Open [github.com/settings/apps](https://github.com/settings/apps) → "New GitHub App". (Use your org's developer settings if installing to an org instead of a user.)
+
+   - **GitHub App name:** anything (e.g. "kairix-bot-yourorg"). Must be globally unique on GitHub.
+   - **Homepage URL:** anything (e.g. `https://kairix.example.com` or your repo URL).
+   - **Webhook → Active:** uncheck. kairix doesn't use webhooks in the Phase 3 release.
+   - **Callback URL:** `http://127.0.0.1:8080/oauth2callback` (matches `kairix connect`'s default listener; if you pass `--port` to `kairix connect github-app`, update this to match).
+
+2. **Configure permissions.** Under **Repository permissions** set:
+   - **Contents:** Read-only
+   - **Issues:** Read-only
+   - **Metadata:** Read-only (auto-selected; required)
+   - **Pull requests:** Read-only
+
+   Leave **Organization** and **Account** permissions at "No access" unless you have a specific reason to grant them.
+
+3. **Generate the private key.** After creating the App, scroll to **Private keys** → **Generate a private key**. This downloads a `.pem` file (e.g. `kairix-bot-yourorg.2026-06-01.private-key.pem`). Save it somewhere readable but private (e.g. `~/Downloads/`).
+
+4. **Capture the App id.** On the App's settings page, the **About** section shows **App ID** (a numeric id like `123456`). Copy this; you'll pass it via `--app-id`.
+
+5. **Install the App into your org or account.** On the App's settings page, click **Install App** in the left sidebar → pick your org/account → choose either "All repositories" or "Only select repositories" (kairix will only see what you grant). Click **Install**.
+
+   After install completes, GitHub redirects to a URL like:
+   ```
+   http://127.0.0.1:8080/oauth2callback?installation_id=98765432&setup_action=install
+   ```
+   The `installation_id` here is what `kairix connect github-app`'s listener captures automatically — you don't need to copy it by hand.
+
+## Running `kairix connect github-app`
+
+```bash
+kairix connect github-app \
+  --app-id 123456 \
+  --private-key-path ~/Downloads/kairix-bot-yourorg.2026-06-01.private-key.pem
+```
+
+If your App's URL slug isn't the default `kairix-bot`, pass `--app-slug` to point at your install URL:
+
+```bash
+kairix connect github-app \
+  --app-id 123456 \
+  --private-key-path ~/Downloads/kairix-bot-yourorg.2026-06-01.private-key.pem \
+  --app-slug kairix-bot-yourorg
+```
+
+(The `--app-slug` defaults to `kairix-bot`; the install URL becomes `https://github.com/apps/<slug>/installations/new`.)
+
+The captured tokens land under these canonical names:
+
+| Subcommand | Canonical secret names written |
+|---|---|
+| `github-app` | `KAIRIX_CONNECTOR_GITHUB_{ACCESS_TOKEN,INSTALLATION_ID}` |
+
+Note the GitHub App flow does NOT write a `REFRESH_TOKEN` line — there is no refresh token in the App model. The PEM private key (which you keep on disk and reference via `--private-key-path`) is the long-lived credential; the installation access token is ephemeral (1h TTL) and the GitHub connector mints a fresh one transparently per tick via the shared `GitHubAppRefreshableToken`.
+
+For the GitHub connector to use App mode at runtime, three secrets must also be provisioned in your KV / secrets file:
+- `KAIRIX_CONNECTOR_GITHUB_APP_ID` — the same `--app-id` value
+- `KAIRIX_CONNECTOR_GITHUB_APP_PRIVATE_KEY` — the PEM contents (the entire file body, multi-line)
+- `KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID` — captured by `kairix connect github-app` automatically
+
+Without all three, the connector falls back to the legacy single-`installation_id` JWT path or to PAT mode.
+
 ## Store backends
 
 Pass `--store=` to control where tokens land:
@@ -111,8 +178,9 @@ Every failure surface emits an actionable hint:
 
 - `google-auth>=2.40` + `google-auth-oauthlib>=1.2` — Google OAuth2 dance and refresh.
 - `azure-identity>=1.19` + `azure-keyvault-secrets>=4.9` — Azure Key Vault writes (only loaded when `--store=azure-kv*`).
+- `pyjwt[crypto]>=2.10` + `cryptography>=43` — GitHub App JWT signing (only loaded when running `kairix connect github-app` or when the GitHub connector runs in App mode at runtime).
 
-All four are lazy-imported: operators who only use the file or stdout store never load the Azure SDKs; operators who pass their own `token_exchanger` to `GoogleOAuth2Flow` in tests never load `google-auth-oauthlib`.
+All deps are lazy-imported: operators who only use the file or stdout store never load the Azure SDKs; operators who never run the GitHub App flow never load `pyjwt`; operators who pass their own `token_exchanger` to `GoogleOAuth2Flow` or `GitHubAppFlow` in tests never load the upstream client library.
 
 ## Slack setup walkthrough (one-time per workspace)
 
@@ -164,7 +232,8 @@ kairix/connect/
 ├── oauth2/
 │   ├── __init__.py
 │   ├── google.py         # GoogleOAuth2Flow — gmail / google-drive / google-calendar
-│   └── slack.py          # SlackOAuth2Flow — per-workspace bot-token capture
+│   ├── slack.py          # SlackOAuth2Flow — per-workspace bot-token capture
+│   └── github_app.py     # GitHubAppFlow — JWT-signed installation-token capture
 └── store/
     ├── __init__.py
     ├── _leaves.py        # shared leaf-derivation helper (per-service shape)
@@ -173,4 +242,4 @@ kairix/connect/
     └── stdout_store.py   # TSV emission
 ```
 
-The Protocol surface (`protocols.py`) is the only thing connectors import. The store implementations are private to `kairix.connect`; per F26/F35 layering, the connectors must not import them. The Drive + Calendar connectors import `kairix.connect.refresh` (and only that) to get the `GoogleRefreshableToken` wrapper they need at runtime.
+The Protocol surface (`protocols.py`) is the only thing connectors import. The store implementations are private to `kairix.connect`; per F26/F35 layering, the connectors must not import them. The Drive + Calendar connectors import `kairix.connect.refresh` (and only that) to get the `GoogleRefreshableToken` wrapper they need at runtime; the GitHub connector likewise imports `GitHubAppRefreshableToken` from `kairix.connect.refresh` for App-mode auth.

@@ -34,7 +34,7 @@ Subcommands:
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
   dead-letter Operator triage view over the connector_deadletter table (status)
   secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
-  connect     Operator-only: capture OAuth2 tokens for Google connectors (Gmail/Drive/Calendar)
+  connect     Operator-only: capture OAuth2 tokens for connectors (Google + GitHub App)
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """

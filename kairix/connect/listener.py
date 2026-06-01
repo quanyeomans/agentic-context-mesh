@@ -91,7 +91,13 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             return
         code = params.get("code", [None])[0]
         state = params.get("state", [None])[0]
-        if not code:
+        # GitHub App install callback shape: ``installation_id`` +
+        # ``setup_action`` instead of ``code``. Treat the install id as
+        # the captured value (the flow reads it via ``params``) so the
+        # listener Protocol stays uniform across services.
+        installation_id = params.get("installation_id", [None])[0]
+        captured_code = code or installation_id
+        if not captured_code:
             self.send_response(400)
             self.send_header(_HEADER_CONTENT_TYPE, _HTML_MIME)
             self.end_headers()
@@ -99,7 +105,12 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             server._error = "missing_code"  # type: ignore[attr-defined]  # F3 rationale: see comment above.
             server._done_event.set()  # type: ignore[attr-defined]  # F3 rationale: see comment above.
             return
-        server._result = CallbackResult(code=code, state=state)  # type: ignore[attr-defined]  # F3 rationale: see comment above.
+        flat_params = {k: v[0] for k, v in params.items() if v}
+        server._result = CallbackResult(  # type: ignore[attr-defined]  # F3 rationale: see comment above.
+            code=captured_code,
+            state=state,
+            params=flat_params,
+        )
         server._done_event.set()  # type: ignore[attr-defined]  # F3 rationale: see comment above.
         self.send_response(200)
         self.send_header(_HEADER_CONTENT_TYPE, _HTML_MIME)

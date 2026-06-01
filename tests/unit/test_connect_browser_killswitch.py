@@ -27,9 +27,10 @@ from pathlib import Path
 
 import pytest
 
+from kairix.connect.oauth2.github_app import GITHUB_JWT_AUDIENCE_TOKEN_URI, GitHubAppFlow
 from kairix.connect.oauth2.google import GOOGLE_TOKEN_URI, GoogleOAuth2Flow
 from kairix.connect.oauth2.slack import SLACK_TOKEN_URI, SlackOAuth2Flow
-from kairix.connect.protocols import CapturedTokens, ClientCredentials
+from kairix.connect.protocols import CallbackResult, CapturedTokens, ClientCredentials
 from kairix.paths import connect_browser_disabled
 from tests.fakes import FakeCallbackListener
 
@@ -111,6 +112,58 @@ def test_slack_default_browser_short_circuits_when_disabled(caplog: pytest.LogCa
     record_msgs = [r.getMessage() for r in caplog.records]
     assert any("suppressed by KAIRIX_CONNECT_DISABLE_BROWSER" in m for m in record_msgs), (
         f"expected suppression warning from slack default browser, got: {record_msgs!r}"
+    )
+    assert any("fix:" in m and "next:" in m and "run:" in m for m in record_msgs), (
+        f"expected F21 markers in warning, got: {record_msgs!r}"
+    )
+
+
+_FAKE_PEM = (  # pragma: allowlist secret
+    "-----BEGIN RSA PRIVATE KEY-----\n"
+    "MIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\n"
+    "FAKE-PEM-BODY-FOR-KILLSWITCH-TEST-NOT-A-REAL-KEY\n"
+    "-----END RSA PRIVATE KEY-----\n"
+)
+
+
+def test_github_app_default_browser_short_circuits_when_disabled(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Driving the public ``GitHubAppFlow.authorize`` with no ``browser=`` injection.
+
+    With ``KAIRIX_CONNECT_DISABLE_BROWSER=1`` (set by conftest), the default
+    browser path inside the flow MUST short-circuit — authorize() still
+    completes (returns the test-exchanger's token) but no real browser opens.
+    """
+    pem = tmp_path / "app.pem"
+    pem.write_text(_FAKE_PEM)
+    caplog.set_level(logging.WARNING, logger="kairix.connect.oauth2.github_app")
+
+    listener = FakeCallbackListener(
+        callback=CallbackResult(
+            code="ignored",
+            state=None,
+            params={"installation_id": "9001", "setup_action": "install"},
+        ),
+    )
+
+    # NO browser= kwarg — the default browser path runs and MUST hit the
+    # kill-switch (otherwise this test would fire a real webbrowser.open
+    # against a live install URL).
+    flow = GitHubAppFlow(
+        app_id="42",
+        private_key_path=pem,
+        token_exchanger=lambda *_: "installation-token-from-test",
+    )
+    tokens = flow.authorize(listener=listener)
+    assert tokens.access_token == "installation-token-from-test"
+    assert tokens.token_uri == GITHUB_JWT_AUDIENCE_TOKEN_URI
+    assert tokens.metadata == {"installation-id": "9001"}
+
+    record_msgs = [r.getMessage() for r in caplog.records]
+    assert any("suppressed by KAIRIX_CONNECT_DISABLE_BROWSER" in m for m in record_msgs), (
+        f"expected suppression warning from github_app default browser, got: {record_msgs!r}"
     )
     assert any("fix:" in m and "next:" in m and "run:" in m for m in record_msgs), (
         f"expected F21 markers in warning, got: {record_msgs!r}"

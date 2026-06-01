@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from kairix.connect.listener import LocalhostCallbackListener
+from kairix.connect.oauth2.github_app import GitHubAppFlow
 from kairix.connect.oauth2.google import GOOGLE_TOKEN_URI, GoogleOAuth2Flow
 from kairix.connect.oauth2.slack import SLACK_TOKEN_URI, SlackOAuth2Flow
 from kairix.connect.protocols import (
@@ -38,7 +39,12 @@ from kairix.connect.protocols import (
     TokenStore,
     TokenStoreUnauthorizedError,
 )
-from kairix.connect.refresh import GoogleRefreshableToken, GoogleRefreshState, StaticRefreshableToken
+from kairix.connect.refresh import (
+    GitHubAppRefreshableToken,
+    GoogleRefreshableToken,
+    GoogleRefreshState,
+    StaticRefreshableToken,
+)
 from kairix.connect.store.azure_kv_store import AzureKeyVaultTokenStore
 from kairix.connect.store.file_store import FileTokenStore
 from kairix.connect.store.stdout_store import StdoutTokenStore
@@ -50,6 +56,11 @@ from tests.fakes import (
 )
 
 pytestmark = pytest.mark.contract
+
+# Minimal PEM body for the GitHub App contract tests; never signed.
+_GH_APP_FAKE_PEM = (  # pragma: allowlist secret
+    "-----BEGIN RSA PRIVATE KEY-----\nFAKE-PEM-FOR-CONTRACT-TEST-NOT-A-REAL-KEY\n-----END RSA PRIVATE KEY-----\n"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +274,112 @@ def test_callback_result_frozen() -> None:
     result = CallbackResult(code="c", state=None)
     with pytest.raises(AttributeError):
         result.code = "mutated"  # type: ignore[misc]  # F3 rationale: frozen dataclass — intentional assignment to prove the freeze
+
+
+# ---------------------------------------------------------------------------
+# GitHub App contract tests (ADR-032 Phase 3 + F68 failure-injection)
+# ---------------------------------------------------------------------------
+
+
+def test_github_app_flow_satisfies_oauth2_flow_protocol(tmp_path: Path) -> None:
+    """:class:`GitHubAppFlow` satisfies :class:`OAuth2Flow`."""
+    pem = tmp_path / "app.pem"
+    pem.write_text(_GH_APP_FAKE_PEM)
+    flow = GitHubAppFlow(app_id="42", private_key_path=pem)
+    assert isinstance(flow, OAuth2Flow)
+
+
+def test_github_app_refreshable_satisfies_refreshable_token_protocol() -> None:
+    """:class:`GitHubAppRefreshableToken` satisfies :class:`RefreshableToken`."""
+    token = GitHubAppRefreshableToken(
+        app_id="42",
+        private_key_pem=_GH_APP_FAKE_PEM,
+        installation_id="98765",
+    )
+    assert isinstance(token, RefreshableToken)
+
+
+def test_github_app_discover_raises_when_pem_missing(tmp_path: Path) -> None:
+    """F68 ``raises`` shape: missing PEM → :class:`FileNotFoundError`."""
+    flow = GitHubAppFlow(app_id="42", private_key_path=tmp_path / "missing.pem")
+    with pytest.raises(FileNotFoundError, match=r"private key not found"):
+        flow.discover_client_credentials()
+
+
+def test_github_app_authorize_raises_when_callback_missing_install_id(tmp_path: Path) -> None:
+    """F68 shape: callback with neither installation_id nor code → ValueError."""
+    pem = tmp_path / "app.pem"
+    pem.write_text(_GH_APP_FAKE_PEM)
+    flow = GitHubAppFlow(
+        app_id="42",
+        private_key_path=pem,
+        browser=FakeBrowserLauncher(),
+        token_exchanger=lambda *_: "ignored",
+    )
+    # FakeCallbackListener returns the default which has code="fake-code-001" —
+    # we need to inject a broken result via the params route to drive this.
+    listener = FakeCallbackListener(
+        callback=CallbackResult(code="", state=None, params={}),
+    )
+    with pytest.raises(ValueError, match="installation_id"):
+        flow.authorize(listener=listener)
+
+
+def test_github_app_refresh_unavailable_when_exchanger_fails() -> None:
+    """F68 ``unavailable`` shape: exchanger raises → :class:`RefreshUnavailableError`."""
+
+    def fake_exchanger(_a: str, _p: str, _i: str) -> tuple[str, float]:
+        raise ConnectionError("github unreachable")
+
+    token = GitHubAppRefreshableToken(
+        app_id="42",
+        private_key_pem=_GH_APP_FAKE_PEM,
+        installation_id="98765",
+        token_exchanger=fake_exchanger,
+    )
+    with pytest.raises(RefreshUnavailableError, match="refresh failed"):
+        token.refresh()
+
+
+def test_captured_tokens_metadata_backwards_compat_with_google() -> None:
+    """Google flows (which don't populate metadata) continue to work — empty dict default."""
+    # No metadata kwarg — Google's call path.
+    tokens = CapturedTokens(refresh_token="r", access_token="a", token_uri="https://x/")
+    assert tokens.metadata == {}
+    # GitHub App's call path with explicit metadata.
+    gh_tokens = CapturedTokens(
+        refresh_token="",
+        access_token="a",
+        token_uri="https://x/",
+        metadata={"installation-id": "12345"},
+    )
+    assert gh_tokens.metadata == {"installation-id": "12345"}
+
+
+def test_captured_tokens_with_metadata_frozen_field_mutates_only_via_replace() -> None:
+    """The CapturedTokens dataclass is frozen — metadata dict is the only mutable slot.
+
+    The dataclass-level freeze prevents reassignment; the metadata dict
+    contents are still mutable (Python dict semantics). The store layer
+    iterates the dict but never mutates it — this test pins the
+    expected shape rather than freezing the dict itself.
+    """
+    tokens = CapturedTokens(
+        refresh_token="r",
+        access_token="a",
+        token_uri="https://x/",
+        metadata={"k": "v"},
+    )
+    with pytest.raises(AttributeError):
+        tokens.metadata = {"new": "dict"}  # type: ignore[misc]  # F3 rationale: frozen dataclass — intentional assignment to prove the freeze
+
+
+def test_callback_result_with_params_carries_install_id() -> None:
+    """CallbackResult.params round-trips arbitrary OAuth callback query params."""
+    result = CallbackResult(
+        code="x",
+        state=None,
+        params={"installation_id": "12345", "setup_action": "install"},
+    )
+    assert result.params["installation_id"] == "12345"
+    assert result.params["setup_action"] == "install"

@@ -59,6 +59,17 @@ class CapturedTokens:
     refresh-token, access-token); Slack writes 3 (client-id,
     client-secret, bot-token) plus app-token when Socket Mode is wired.
 
+    ``metadata`` carries per-service identifiers that don't fit the
+    refresh / access / token-uri shape — for example the GitHub App
+    flow carries an ``installation_id`` here because the App-install
+    callback returns an installation id (not an OAuth code) and there
+    is no refresh_token at all (the App's private key is the long-lived
+    credential, and the installation access token is minted per-call
+    from a JWT signed with that key). Google + Slack pass an empty
+    mapping; the GitHub App flow populates ``{"installation_id": "..."}``.
+    Token stores emit metadata as additional leaves alongside the
+    base-leaf set via :func:`kairix.connect.store.leaves.leaf_pairs`.
+
     F15-sensitive: token values live here only to round-trip from the
     OAuth exchange into a ``TokenStore``; this dataclass is never
     serialised to logs.
@@ -70,6 +81,7 @@ class CapturedTokens:
     expires_in: int | None = None
     bot_token: str = ""
     app_token: str = ""
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,10 +91,18 @@ class CallbackResult:
     The ``code`` is the OAuth authorization code the listener captured
     from the redirect URI query string; the listener does not exchange
     it for tokens (that responsibility lives in ``OAuth2Flow.authorize``).
+
+    ``params`` carries the rest of the redirect URI's query-string
+    params verbatim — used by per-service flows whose callback shape
+    isn't pure OAuth code/state (the GitHub App install callback
+    returns ``installation_id`` + ``setup_action`` instead of a code,
+    and the flow reads those values from ``params``). Empty for
+    standard OAuth code flows.
     """
 
     code: str
     state: str | None = None
+    params: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

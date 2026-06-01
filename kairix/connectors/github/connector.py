@@ -1014,13 +1014,37 @@ def _build_default_client(
     credentials: GitHubCredentials,
     client_config: GitHubClientConfig | None,
 ) -> GitHubApiClient:
-    """Build the default GitHubApiClient from resolved credentials."""
+    """Build the default GitHubApiClient from resolved credentials.
+
+    Per ADR-032 §"github_app" + Phase 3: App-mode now routes through
+    the shared :class:`~kairix.connect.refresh.GitHubAppRefreshableToken`
+    when ``app_id`` + ``app_private_key_pem`` + ``installation_id`` are
+    all set. The legacy single-``installation_id`` path remains for
+    backwards compat with pre-ADR-032 deployments where only the
+    installation id was provisioned (the api_client's own JWT-signing
+    is the fallback).
+    """
     if credentials.personal_access_token:
         return GitHubApiClient(
             personal_access_token=credentials.personal_access_token,
             config=client_config,
         )
+    if credentials.app_id is not None and credentials.app_private_key_pem and credentials.installation_id is not None:
+        # ADR-032 Phase 3 path — shared JWT-sign + installation-token
+        # rotation via kairix.connect.refresh.GitHubAppRefreshableToken.
+        from kairix.connect.refresh import GitHubAppRefreshableToken
+
+        refreshable = GitHubAppRefreshableToken(
+            app_id=str(credentials.app_id),
+            private_key_pem=credentials.app_private_key_pem,
+            installation_id=str(credentials.installation_id),
+        )
+        return GitHubApiClient(
+            refreshable_token=refreshable,
+            config=client_config,
+        )
     if credentials.installation_id is not None:
+        # Legacy App-mode path — pre-ADR-032 single-installation-id shape.
         return GitHubApiClient(
             installation_id=credentials.installation_id,
             config=client_config,

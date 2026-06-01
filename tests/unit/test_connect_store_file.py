@@ -169,3 +169,54 @@ def test_report_lists_all_four_canonical_names(tmp_path: Path) -> None:
         "KAIRIX_CONNECTOR_GMAIL_REFRESH_TOKEN",
         "KAIRIX_CONNECTOR_GMAIL_ACCESS_TOKEN",
     )
+
+
+def test_file_store_emits_metadata_leaves_and_skips_empties(tmp_path: Path) -> None:
+    """GitHub App style: empty base leaves are skipped; metadata leaves are appended."""
+    target = tmp_path / "kairix.env"
+    store = FileTokenStore(path=target)
+    tokens_with_meta = CapturedTokens(
+        refresh_token="",  # GitHub App has no refresh_token
+        access_token="installation-token-xyz",
+        token_uri="https://api.github.com/app/installations/access_tokens",
+        metadata={"installation-id": "12345"},
+    )
+    fake_pem = (  # pragma: allowlist secret
+        "-----BEGIN RSA PRIVATE KEY-----\nFAKE\n-----END RSA PRIVATE KEY-----\n"
+    )
+    client = ClientCredentials(client_id="42", client_secret=fake_pem)
+    report = store.store(
+        scope="connector",
+        area="github",
+        instance=None,
+        tokens=tokens_with_meta,
+        client=client,
+    )
+    content = target.read_text()
+    # Strengthened: must include both the metadata leaf AND the access-token
+    # base leaf, AND must exclude the empty refresh-token leaf.
+    assert "KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID=12345" in content
+    assert "KAIRIX_CONNECTOR_GITHUB_ACCESS_TOKEN=installation-token-xyz" in content  # pragma: allowlist secret
+    assert "KAIRIX_CONNECTOR_GITHUB_REFRESH_TOKEN=" not in content
+    assert "KAIRIX_CONNECTOR_GITHUB_INSTALLATION_ID" in report.canonical_names
+
+
+def test_file_store_skips_empty_metadata_values(tmp_path: Path) -> None:
+    """Empty-string metadata values are not written as blank-valued lines."""
+    target = tmp_path / "kairix.env"
+    store = FileTokenStore(path=target)
+    tokens_with_empty_meta = CapturedTokens(
+        refresh_token="rt",
+        access_token="at",
+        token_uri="https://x/",
+        metadata={"installation-id": ""},
+    )
+    store.store(
+        scope="connector",
+        area="github",
+        instance=None,
+        tokens=tokens_with_empty_meta,
+        client=_client(),
+    )
+    content = target.read_text()
+    assert "INSTALLATION_ID" not in content, f"empty metadata value should be skipped, got: {content!r}"

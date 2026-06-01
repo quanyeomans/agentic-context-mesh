@@ -94,6 +94,22 @@ def leaf_pairs(
             if not isinstance(value, str) or value == "":
                 continue
             pairs.append((leaf, value))
+    # Per-service metadata leaves on top of the base set. The GitHub
+    # App flow uses this to carry ``installation_id`` (the App-install
+    # callback returns no refresh_token; the installation id IS the
+    # per-tenant identifier the connector pairs with the JWT signing
+    # key to mint installation access tokens on demand).
+    #
+    # Keys are dataclass-style ``snake_case`` so per-service code can
+    # read them via ``tokens.metadata["installation_id"]``; the leaf
+    # written to KV is the canonical ``kebab-case`` form. Empty values
+    # are skipped (matches the base-leaf behaviour for Slack's empty
+    # ``refresh_token``).
+    for meta_key, meta_value in tokens.metadata.items():
+        if not isinstance(meta_value, str) or meta_value == "":
+            continue
+        leaf = meta_key.replace("_", "-")
+        pairs.append((leaf, meta_value))
     return tuple(pairs)
 
 

@@ -160,12 +160,21 @@ connect = [
     # operator passes ``--store=azure-kv*``; default ``--store=file``
     # skips both. DefaultAzureCredential walks the standard chain
     # (managed identity → env → cached ``az login``).
-    # All four are lazy-imported inside the modules that need them so
-    # operators on the default file-store path never load the Azure SDK.
+    # pyjwt[crypto] + cryptography — JWT signing for the GitHub App
+    # flow (``kairix connect github-app``) and the runtime
+    # GitHubAppRefreshableToken used by the GitHub connector when in
+    # App mode. ``[crypto]`` extra pulls cryptography for RS256 support;
+    # both are lazy-imported inside kairix.connect.oauth2.github_app
+    # + kairix.connect.refresh so operators not using App mode skip them.
+    # All deps below are lazy-imported inside the modules that need them
+    # so operators on the default file-store + non-GitHub path never load
+    # the Azure SDK or the JWT library.
     "google-auth>=2.40,<3",
     "google-auth-oauthlib>=1.2,<2",
     "azure-identity>=1.19,<2",
     "azure-keyvault-secrets>=4.9,<5",
+    "pyjwt[crypto]>=2.10,<3",
+    "cryptography>=43,<46",
 ]
 dev = [
     # Test runner

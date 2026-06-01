@@ -6,7 +6,8 @@ for one service. Per ADR-032 §"Library choices":
   * :mod:`kairix.connect.oauth2.google` — Google OAuth2 via
     ``google-auth-oauthlib`` (Phase 1).
   * ``slack`` — TBD by Agent B (Slack ``WebClient.oauth_v2_access``).
-  * ``github_app`` — TBD by Agent C (PyJWT + raw httpx).
+  * :mod:`kairix.connect.oauth2.github_app` — GitHub App JWT + install
+    callback via ``pyjwt[crypto]`` + raw ``httpx`` (Phase 3).
 """
 
 from __future__ import annotations

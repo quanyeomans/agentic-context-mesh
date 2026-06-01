@@ -175,13 +175,22 @@ def test_url_form_with_http_prefix_routes_through_vault_url() -> None:
 
 
 def test_lazy_import_azure_identity_raises_typed(monkeypatch: Any) -> None:
-    """When ``azure-identity`` isn't installed the credential build surfaces a typed error."""
+    """When ``azure-identity`` isn't installed the credential build surfaces a typed error.
+
+    Drives the credential-build path directly via ``_build_credential``
+    so the production import order isn't sensitive to which azure
+    submodule triggers the ImportError first (recent
+    ``azure-keyvault-secrets`` versions transitively load
+    ``azure.identity`` at module-init time, meaning a blanket-block-then-
+    import of azure.keyvault.secrets surfaces the keyvault error first).
+    Tighten the test to its actual contract: when azure.identity is
+    missing, ``_build_credential`` raises the typed error with the
+    "azure-identity package" rationale.
+    """
     import builtins
     import sys
 
-    for key in list(sys.modules):
-        if key.startswith("azure"):
-            monkeypatch.delitem(sys.modules, key, raising=False)
+    monkeypatch.delitem(sys.modules, "azure.identity", raising=False)
     original = builtins.__import__
 
     def blocked(name: str, *args: object, **kwargs: object) -> object:
@@ -201,13 +210,7 @@ def test_lazy_import_azure_identity_raises_typed(monkeypatch: Any) -> None:
         TokenStoreUnauthorizedError,
         match=r"requires the azure-identity package",
     ):
-        store.store(
-            scope="connector",
-            area="gmail",
-            instance=None,
-            tokens=_tokens(),
-            client=_client(),
-        )
+        store._build_credential()
 
 
 def test_lazy_import_real_azure_identity_returns_credential() -> None:

@@ -197,11 +197,14 @@ class GitHubApiClient:
         personal_access_token: str | None = None,
         http_client: httpx.Client | None = None,
         config: GitHubClientConfig | None = None,
+        refreshable_token: object | None = None,
     ) -> None:
-        if not installation_id and not personal_access_token:
+        if not installation_id and not personal_access_token and refreshable_token is None:
             raise ValueError(
-                "github: must provide installation_id (App) or personal_access_token (PAT). "
-                "fix: pass one of {installation_id, personal_access_token} to GitHubApiClient. "
+                "github: must provide installation_id (App), personal_access_token (PAT), "
+                "or a refreshable_token (App-mode via kairix.connect.refresh). "
+                "fix: pass one of {installation_id, personal_access_token, refreshable_token} "
+                "to GitHubApiClient. "
                 "next: see kairix/connectors/github/connector.py for the credential resolution path."
             )
         self._installation_id = installation_id
@@ -209,6 +212,11 @@ class GitHubApiClient:
         # logger.* / print / raise / std{out,err}.write outside the
         # secrets-boundary helpers in bearer_header below.
         self._pat = personal_access_token
+        # When set, ``bearer_header`` delegates to this wrapper for the
+        # auth dance. Used by the App-mode path (kairix.connect.refresh.
+        # GitHubAppRefreshableToken) so the JWT-sign + installation-token
+        # exchange shares one implementation with the connect CLI.
+        self._refreshable_token = refreshable_token
         self._config = config if config is not None else GitHubClientConfig()
         self._http = http_client if http_client is not None else httpx.Client(timeout=self._config.request_timeout_s)
         self._token_cache = _TokenCache()
@@ -227,20 +235,31 @@ class GitHubApiClient:
     def bearer_header(self) -> Mapping[str, str]:
         """Return the ``Authorization`` header for the current credential.
 
-        PAT path returns the raw PAT-bearing header; App path exchanges
-        the JWT for an installation token on the first call and
-        rotates at 50% of the TTL on subsequent calls. The rotation
-        critical section is guarded by ``self._rotation_lock`` so
-        concurrent callers cannot race two simultaneous rotations.
+        Three credential surfaces, checked in order:
+
+          1. ``refreshable_token`` (App-mode via kairix.connect.refresh) —
+             delegates JWT-sign + installation-token rotation to the
+             shared :class:`~kairix.connect.refresh.GitHubAppRefreshableToken`.
+             This is the path ADR-032 specifies; new App-mode deployments
+             land here.
+          2. PAT (legacy / single-developer) — returns the raw PAT-bearing
+             header verbatim.
+          3. Internal installation-token cache (pre-ADR-032 App path) —
+             exchanges the JWT via this client's own ``_rotate_under_lock``
+             helper. Kept for backwards compat with deployments that
+             haven't routed through ``kairix.connect`` yet.
 
         F15-clean — the token is materialised into a fresh dict and
         returned to the caller; this method never logs the token
         value, only the request-id correlation field on outcome.
         """
+        if self._refreshable_token is not None:
+            # Shared App-mode path via kairix.connect.refresh.
+            return dict(self._refreshable_token.headers())  # type: ignore[attr-defined]  # F3 rationale: duck-typed RefreshableToken; mypy can't see Protocol attrs on object
         if self._pat is not None:
             # PAT path — no rotation, no exchange.
             return {_HEADER_AUTHORIZATION: f"token {self._pat}"}
-        # App path — return cached token if still fresh, else rotate.
+        # Legacy App path — return cached token if still fresh, else rotate.
         if self._token_cache.token is not None:
             return {_HEADER_AUTHORIZATION: f"token {self._token_cache.token.token}"}
         return self._rotate_under_lock()

@@ -26,6 +26,10 @@ from typing import Any
 
 from kairix.connect.protocols import RefreshableToken, RefreshUnavailableError
 
+# F17 — extracted constant; every concrete RefreshableToken impl returns
+# auth headers keyed by this name.
+_HEADER_AUTHORIZATION = "Authorization"
+
 
 @dataclass(frozen=True)
 class GoogleRefreshState:
@@ -94,7 +98,7 @@ class GoogleRefreshableToken:
         """Return the auth headers, refreshing if the cached token is stale."""
         if self.is_expired():
             self.refresh()
-        return {"Authorization": f"Bearer {self._access_token}"}
+        return {_HEADER_AUTHORIZATION: f"Bearer {self._access_token}"}
 
     def is_expired(self) -> bool:
         """Return ``True`` if the cached access token is past its expiry (with skew)."""
@@ -179,7 +183,7 @@ class StaticRefreshableToken:
         self._scheme = scheme
 
     def headers(self) -> dict[str, str]:
-        return {"Authorization": f"{self._scheme} {self._token}"}
+        return {_HEADER_AUTHORIZATION: f"{self._scheme} {self._token}"}
 
     def is_expired(self) -> bool:
         return False
@@ -189,8 +193,145 @@ class StaticRefreshableToken:
         return
 
 
-def _make_protocol_check() -> tuple[RefreshableToken, RefreshableToken]:
-    """Runtime conformance check — both classes satisfy the Protocol."""
+# ---------------------------------------------------------------------------
+# GitHub App refresh — JWT-signed installation token
+# ---------------------------------------------------------------------------
+
+
+# GitHub installation tokens last 1h; rotate at the 50-min mark to absorb
+# clock skew + leave the connector's in-flight requests room to drain on
+# the old token while new ones acquire the fresh one. Matches the
+# api_client INSTALLATION_TOKEN_TTL_SECONDS contract from the existing
+# kairix/connectors/github/api_client.py.
+_GITHUB_INSTALLATION_TOKEN_TTL_S = 3600
+_GITHUB_ROTATE_AT_FRACTION = 50.0 / 60.0  # 50min of the 60min TTL
+
+
+class GitHubAppRefreshableToken:
+    """RefreshableToken that mints installation tokens from the App JWT.
+
+    Connectors construct one of these per App installation. Each HTTP
+    request calls :meth:`headers` which signs a fresh JWT + exchanges
+    for an installation token on cold start (or after expiry) and
+    caches it for ~50 min before re-rotating. The JWT signing key (PEM
+    private key) is the long-lived credential; the installation access
+    token is ephemeral.
+
+    Args:
+      app_id: The numeric GitHub App id (as a string — GitHub returns
+        it as a number but the JWT ``iss`` claim accepts either form).
+      private_key_pem: The PEM-encoded RSA private key text.
+      installation_id: The numeric installation id (as a string) the
+        operator captured via ``kairix connect github-app``.
+      now_fn: Test seam — replaces :func:`time.time` so tests pin the
+        clock. Defaults to :func:`time.time`.
+      token_exchanger: Test seam — replaces the JWT-sign-and-exchange
+        step. Receives ``(app_id, private_key, installation_id)`` and
+        returns ``(installation_token, expiry_epoch)``. Tests inject
+        a recording fake so the suite stays fast without
+        ``pyjwt[crypto]`` installed.
+
+    F15-clean: the PEM and the installation token never appear in
+    ``logger.*`` / ``print`` / ``raise`` strings here; the wrapper
+    holds them as instance attributes and surfaces them only via
+    :meth:`headers`.
+    """
+
+    def __init__(
+        self,
+        *,
+        app_id: str,
+        private_key_pem: str,
+        installation_id: str,
+        now_fn: Callable[[], float] = time.time,
+        token_exchanger: Callable[[str, str, str], tuple[str, float]] | None = None,
+    ) -> None:
+        self._app_id = app_id
+        self._private_key_pem = private_key_pem
+        self._installation_id = installation_id
+        self._now_fn = now_fn
+        self._token_exchanger = token_exchanger
+        self._cached_token: str = ""
+        self._cached_expiry_epoch: float = 0.0
+
+    def headers(self) -> dict[str, str]:
+        """Return the auth headers, rotating the installation token if stale."""
+        if self.is_expired():
+            self.refresh()
+        return {_HEADER_AUTHORIZATION: f"Bearer {self._cached_token}"}
+
+    def is_expired(self) -> bool:
+        """Return ``True`` when the cached installation token is past rotation.
+
+        Rotation budget is 50 min of the 60-min installation token
+        lifetime — leaves 10 min of headroom for clock skew + in-flight
+        requests.
+        """
+        if not self._cached_token:
+            return True
+        rotation_budget = _GITHUB_INSTALLATION_TOKEN_TTL_S * _GITHUB_ROTATE_AT_FRACTION
+        elapsed = self._now_fn() - (self._cached_expiry_epoch - _GITHUB_INSTALLATION_TOKEN_TTL_S)
+        return elapsed >= rotation_budget
+
+    def refresh(self) -> None:
+        """Sign a fresh JWT and exchange for a new installation access token.
+
+        Uses the injected ``token_exchanger`` if supplied (test path);
+        falls back to the default ``pyjwt[crypto]`` + ``httpx`` path.
+        """
+        try:
+            if self._token_exchanger is not None:
+                token, expiry = self._token_exchanger(
+                    self._app_id,
+                    self._private_key_pem,
+                    self._installation_id,
+                )
+            else:
+                token, expiry = _default_github_app_refresh(
+                    self._app_id,
+                    self._private_key_pem,
+                    self._installation_id,
+                )
+        except Exception as exc:
+            raise RefreshUnavailableError(
+                "kairix connect: GitHub App installation-token refresh failed. "
+                "fix: confirm the private key file is unchanged and the App still has "
+                "the installation (github.com/settings/apps/<your-app> -> 'Installations'). "
+                "next: re-run kairix connect github-app to capture a fresh installation_id. "
+                "run: kairix connect github-app --app-id <id> --private-key-path <path>",
+            ) from exc
+        self._cached_token = token
+        self._cached_expiry_epoch = expiry
+
+
+def _default_github_app_refresh(
+    app_id: str,
+    private_key_pem: str,
+    installation_id: str,
+) -> tuple[str, float]:
+    """Live JWT-sign + installation-token exchange via pyjwt + httpx.
+
+    Lazy-imports both libraries so the test path (which injects a
+    ``token_exchanger``) never touches them.
+
+    Mirrors :func:`kairix.connect.oauth2.github_app._default_token_exchanger`
+    but returns a ``(token, expiry_epoch)`` tuple suitable for the
+    refresh-cache contract.
+    """
+    from kairix.connect.oauth2.github_app import _default_token_exchanger
+
+    token = _default_token_exchanger(app_id, private_key_pem, installation_id)
+    # GitHub installation tokens last 1h from issuance; treat the
+    # wall-clock now as the issuance time for cache-expiry purposes.
+    # (The exchanger's response also carries an ``expires_at`` ISO
+    # string, but we don't expose it through the helper return shape —
+    # the 1h default matches GitHub's documented lifetime.)
+    expiry_epoch = time.time() + _GITHUB_INSTALLATION_TOKEN_TTL_S
+    return token, expiry_epoch
+
+
+def _make_protocol_check() -> tuple[RefreshableToken, RefreshableToken, RefreshableToken]:
+    """Runtime conformance check — every concrete class satisfies the Protocol."""
     a: RefreshableToken = StaticRefreshableToken(token="x")  # noqa: S106 — protocol-shape check, not a credential value
     b: RefreshableToken = GoogleRefreshableToken(
         state=GoogleRefreshState(
@@ -200,7 +341,12 @@ def _make_protocol_check() -> tuple[RefreshableToken, RefreshableToken]:
             token_uri="x",  # noqa: S106 — protocol-shape check, not a credential value
         ),
     )
-    return a, b
+    c: RefreshableToken = GitHubAppRefreshableToken(
+        app_id="x",
+        private_key_pem="x",
+        installation_id="x",
+    )
+    return a, b, c
 
 
 _PROTOCOL_CHECK = _make_protocol_check()
@@ -210,6 +356,7 @@ _PROTOCOL_CHECK = _make_protocol_check()
 _ = Any  # suppress unused-import on Any — preserved for future Refresh types
 
 __all__ = [
+    "GitHubAppRefreshableToken",
     "GoogleRefreshState",
     "GoogleRefreshableToken",
     "StaticRefreshableToken",
