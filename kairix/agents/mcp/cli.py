@@ -226,6 +226,15 @@ class McpCliDeps:
 
 
 def main(argv: list[str] | None = None, *, deps: McpCliDeps | None = None) -> None:
+    # Hydrate the secrets bundle into os.environ ONCE at MCP-server
+    # boot, before any SecretsLoader (or any credential-reading code
+    # path) is constructed. See kairix/secrets/bootstrap.py for why
+    # this lives here (and at every other entry point) rather than
+    # inside SecretsLoader.__init__.
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    bootstrap_secrets()
+
     parser = argparse.ArgumentParser(
         prog="kairix mcp",
         description="MCP server: expose search/entity/prep/timeline as MCP tools",

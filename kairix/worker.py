@@ -2478,6 +2478,15 @@ def main(
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    # Hydrate the secrets bundle into os.environ ONCE at worker boot,
+    # before any SecretsLoader (or any credential-reading code path) is
+    # constructed. After this call, kairix.secrets.SecretsLoader.get()
+    # reads os.environ live and sees every canonical env var the bundle
+    # provided. Replaces the per-call-site _ensure_bundle_loaded hacks.
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    bootstrap_secrets()
+
     deps = deps if deps is not None else WorkerDeps()
     schedule = _resolve_schedule(
         embed_interval,

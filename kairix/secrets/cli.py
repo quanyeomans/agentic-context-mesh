@@ -142,26 +142,16 @@ def _default_env_provider() -> dict[str, str]:
 
 
 def _ensure_bundle_loaded(bundle_path: Path | None = None) -> None:
-    """Hydrate ``/run/secrets/kairix.env`` into ``os.environ`` if present.
+    """Hydrate the secrets bundle via the canonical bootstrap_secrets.
 
-    Fix for #360: in deployed shape, connector + provider secrets live
-    in a bundle file that the historic ``kairix.secrets.get_secret(...)``
-    path loads implicitly on first call. ``kairix secrets verify`` only
-    walks the new ``SecretsLoader`` chain, which reads ``os.environ``
-    directly — so without this hydration step, verify reports false-
-    MISSING for every secret that's actually present at runtime via the
-    bundle. ``load_secrets()`` is idempotent (skips keys already in
-    env) so calling it here is safe even after the bundle was loaded
-    elsewhere.
-
-    Production callers leave ``bundle_path`` as None — load_secrets
-    resolves the path from ``$KAIRIX_SECRETS_FILE`` / the default. Tests
-    pass an explicit path (typically tmp_path / "...env") so they never
-    mutate process env (F2-clean).
+    Thin shim — kept for backwards-compat with existing tests that
+    call it directly. New code should call
+    ``kairix.secrets.bootstrap.bootstrap_secrets`` (or just let the
+    CLI dispatcher's bootstrap call cover it).
     """
-    from kairix.secrets._legacy import load_secrets
+    from kairix.secrets.bootstrap import bootstrap_secrets
 
-    load_secrets(bundle_path)
+    bootstrap_secrets(bundle_path=bundle_path, force=True)
 
 
 def _run_verify(

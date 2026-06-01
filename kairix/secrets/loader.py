@@ -103,11 +103,32 @@ class SecretsLoader:
         kv_mount: Path | None = None,
         legacy_chain: _LegacyResolver | None = None,
     ) -> None:
-        # os.environ is a mapping but mypy narrows it as Mapping[str, str];
-        # cast to a plain dict so the explicit-env test path can pass any dict.
-        self._env: dict[str, str] = dict(env) if env is not None else dict(os.environ)
+        # Store env by REFERENCE (not snapshot) when explicitly passed.
+        # When env is None (production), read os.environ live on every
+        # get(). Both paths are "live read of the mapping" — symmetric
+        # by design so the bootstrap-then-resolve flow works whether
+        # the caller passes its own dict (tests) or uses os.environ
+        # (production). The 2026-06-01 production bug was caused by a
+        # dict(env) snapshot at init that masked any subsequent
+        # bundle hydration; live reads close that class of bug
+        # structurally rather than via per-call-site hydration hacks.
+        self._env_override = env  # ref, not snapshot
         self._kv_mount = kv_mount if kv_mount is not None else _KV_MOUNT_DIR
         self._legacy_chain = legacy_chain if legacy_chain is not None else _default_legacy_chain
+
+    @property
+    def _env(self) -> dict[str, str] | os._Environ[str]:
+        """The live env mapping — either the explicit override or os.environ.
+
+        Both paths return a live reference, NOT a snapshot. Any
+        post-construction mutation (bootstrap_secrets, a test mutating
+        its own dict) is picked up on the next get() call. The
+        symmetric live-read shape is what closes the 2026-06-01
+        production class of bug structurally.
+        """
+        if self._env_override is not None:
+            return self._env_override
+        return os.environ
 
     def get(
         self,

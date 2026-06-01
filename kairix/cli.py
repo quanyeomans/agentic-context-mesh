@@ -89,6 +89,16 @@ def main(*, commands: dict[str, tuple[str, str, bool]] | None = None) -> None:
     """
     table = commands if commands is not None else COMMANDS
 
+    # Hydrate the secrets bundle into os.environ ONCE per CLI invocation,
+    # before any subcommand runs. After this call, every SecretsLoader
+    # (which reads os.environ live) sees the bundle's canonical env vars.
+    # See kairix/secrets/bootstrap.py for the why — closes the
+    # 2026-06-01 production class of bug where caller code had to
+    # remember to hydrate before resolving secrets.
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    bootstrap_secrets()
+
     # KAIRIX_TRACE=1 opts the operator into structured diagnostic logging
     # (D4 — Plan B-parity remediation). The trace lines emit at INFO via
     # ``logger.info``, so the CLI needs a handler installed; without this
