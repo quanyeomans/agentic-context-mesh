@@ -10,6 +10,31 @@ This is operator-facing release-ops tooling — it lives under
 ``scripts/cutover/``, not in the ``kairix`` package (it is not shipped in
 the published wheel).
 
+CLI surfaces used (current, post-#377):
+
+* **eval** — ``kairix benchmark run --suite <name> --output <dir>``.
+  The unified benchmark CLI writes a JSON report named
+  ``B-<suite-slug>-<system>-<YYYY-MM-DD>.json`` into the ``--output``
+  directory. The capture script picks the freshest file in that
+  directory and projects the report's ``summary`` block onto the
+  ``{recall_at_10, ndcg_at_10, hit_rate_at_5, mrr_at_10, weighted_total}``
+  shape the diff tool reads. ``recall_at_10`` mirrors ``ndcg_at_10``
+  because the bundled gold suites use ``score_method: ndcg`` — NDCG@10
+  is the canonical retrieval-quality surrogate.
+* **latency** — ``kairix benchmark run --suite <name> --mode single-shot
+  --output <dir>``. Single-shot mode populates
+  ``diagnostics.per_query_runs[].latency_ms`` for every case; the
+  capture script computes P50/P95/P99 from that array. (``--mode
+  concurrent`` is a stub in the unified CLI today; single-shot
+  exercises the same retrieval path with deterministic ordering.)
+* **sample-journey** — ``kairix search --json <query>`` for each
+  ``cutover.sample_queries`` entry in the operator config. When the
+  config block is absent or empty the script falls back to a single
+  canned probe ("default sample query") so the surface still emits a
+  dedup digest.
+* **state** — SQLite per-collection roll-up + content-hash digest;
+  unchanged from the original capture.
+
 Usage::
 
     python scripts/cutover/capture_baseline.py \\
@@ -57,6 +82,7 @@ import logging
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +91,24 @@ from typing import Any
 logger = logging.getLogger("cutover.capture_baseline")
 
 ALL_SURFACES = ("state", "eval", "latency", "sample-journey")
+
+# Default benchmark suites consulted for the eval surface. ``reflib`` ships
+# bundled; ``locomo`` is optional — when not present the suite-loader fails
+# fast and the capture returns None for that key (the diff tool then skips
+# the LoCoMo recall gate).
+DEFAULT_EVAL_SUITES: tuple[str, ...] = ("reflib", "locomo")
+
+# Default suite for the latency probe. Single-shot mode runs every case in
+# the suite once, so a small suite keeps capture time bounded. ``reflib``
+# is the canonical retrieval target so its latency is the right operator
+# signal.
+DEFAULT_LATENCY_SUITE: str = "reflib"
+
+# Fallback sample-journey query used when the operator config carries no
+# ``cutover.sample_queries`` block. Generic on purpose — its only role is
+# to keep the sample-journey surface alive so the diff tool can compute a
+# (degenerate) parity number against the same canned query on each side.
+DEFAULT_SAMPLE_QUERY: str = "default sample query"
 
 
 def _now_iso() -> str:
@@ -172,8 +216,18 @@ def _query_content_hash_digest(conn: sqlite3.Connection) -> str | None:
     return f"sha256:{hasher.hexdigest()}"
 
 
-def _run_cli_json(argv: list[str], timeout: int = 600) -> dict[str, Any] | None:
-    """Invoke a CLI command, parse stdout as JSON. Returns None on any failure."""
+def _run_cli(
+    argv: list[str],
+    timeout: int = 600,
+) -> subprocess.CompletedProcess[str] | None:
+    """Invoke a CLI command. Returns the completed process or None on error.
+
+    The benchmark CLI emits its JSON report to ``--output`` and writes a
+    human-readable summary to stdout; callers that need the report file
+    do not need stdout-as-JSON. ``_run_cli_json`` (below) is the legacy
+    helper kept for sample-journey, where ``kairix search --json`` does
+    emit a JSON envelope on stdout.
+    """
     try:
         result = subprocess.run(
             argv,
@@ -193,6 +247,19 @@ def _run_cli_json(argv: list[str], timeout: int = 600) -> dict[str, Any] | None:
             (result.stderr or "")[:400],
         )
         return None
+    return result
+
+
+def _run_cli_json(argv: list[str], timeout: int = 600) -> dict[str, Any] | None:
+    """Invoke a CLI command, parse stdout as JSON. Returns None on any failure.
+
+    Used for ``kairix search --json`` (sample-journey). The benchmark
+    surface uses :func:`_run_cli` instead because the report lives in
+    ``--output`` rather than on stdout.
+    """
+    result = _run_cli(argv, timeout=timeout)
+    if result is None:
+        return None
     try:
         parsed = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
@@ -204,30 +271,218 @@ def _run_cli_json(argv: list[str], timeout: int = 600) -> dict[str, Any] | None:
     return parsed
 
 
-def _capture_benchmark_scores() -> dict[str, Any] | None:
-    """Shell out to ``kairix benchmark`` for reflib + LoCoMo scores."""
-    reflib = _run_cli_json(["kairix", "benchmark", "run", "--suite", "reflib", "--concurrency", "1", "--json"])
-    locomo = _run_cli_json(["kairix", "benchmark", "run", "--suite", "locomo", "--concurrency", "1", "--json"])
-    if reflib is None and locomo is None:
+def _load_benchmark_report(output_dir: Path, suite_name: str) -> dict[str, Any] | None:
+    """Pick the freshest ``B-<suite-slug>-*.json`` report under ``output_dir``.
+
+    Matches the naming the runner uses
+    (``B-<suite-slug>-<system>-<YYYY-MM-DD>.json``) but tolerates any
+    ``B-*.json`` so suite-slug variants (e.g. "reflib" vs
+    "reflib-gold-v3") still resolve. Returns ``None`` if no matching
+    file exists or the chosen file fails to parse.
+    """
+    if not output_dir.exists():
         return None
+    # The suite-slug may differ from the operator's --suite argument
+    # because the runner slugifies ``suite.meta.name``. Match any
+    # ``B-*.json`` and take the freshest by mtime — the benchmark CLI
+    # just wrote it, so it wins.
+    candidates = sorted(output_dir.glob("B-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        logger.warning("eval: no benchmark report file in %s for suite %s", output_dir, suite_name)
+        return None
+    report_path = candidates[0]
+    try:
+        with report_path.open() as fh:
+            parsed = json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("eval: cannot read %s: %s", report_path, exc)
+        return None
+    if not isinstance(parsed, dict):
+        logger.warning("eval: report at %s is not a JSON object", report_path)
+        return None
+    return parsed
+
+
+def _project_eval_payload(report: dict[str, Any]) -> dict[str, Any]:
+    """Project a benchmark report's ``summary`` onto the diff-tool shape.
+
+    The diff tool's recall gate reads ``payload["recall_at_10"]`` (or a
+    fallback through ``metrics``/``summary``/``scores``/``aggregate``).
+    The bundled gold suites use ``score_method: ndcg``, so NDCG@10 is
+    the canonical retrieval-quality value — we surface it both as
+    ``ndcg_at_10`` and as ``recall_at_10`` so the gate has a target. We
+    also surface ``hit_rate_at_5``, ``mrr_at_10``, and
+    ``weighted_total`` so an operator inspecting the JSON can read the
+    full headline numbers.
+    """
+    summary = report.get("summary", {}) if isinstance(report.get("summary"), dict) else {}
+    ndcg = _coerce_float(summary.get("ndcg_at_10"))
+    hit5 = _coerce_float(summary.get("hit_rate_at_5"))
+    mrr = _coerce_float(summary.get("mrr_at_10"))
+    weighted_total = _coerce_float(summary.get("weighted_total"))
+    payload: dict[str, Any] = {}
+    if ndcg is not None:
+        payload["ndcg_at_10"] = ndcg
+        # diff_baseline._extract_recall reads "recall_at_10" first; map
+        # NDCG@10 onto it so the recall gate has a value to compare.
+        payload["recall_at_10"] = ndcg
+        # LoCoMo's gate keys off the literal "recall" metric; surface it
+        # so a future LoCoMo-bundled suite picks it up without further
+        # changes here.
+        payload["recall"] = ndcg
+    if hit5 is not None:
+        payload["hit_rate_at_5"] = hit5
+    if mrr is not None:
+        payload["mrr_at_10"] = mrr
+    if weighted_total is not None:
+        payload["weighted_total"] = weighted_total
+    return payload
+
+
+def _capture_one_benchmark_suite(suite: str, runner: _CLIRunner) -> dict[str, Any] | None:
+    """Run ``kairix benchmark run --suite <suite> --output <tmp>`` and project.
+
+    Returns the projected payload or ``None`` if the CLI failed, no
+    report was emitted, or the summary block is empty.
+    """
+    with tempfile.TemporaryDirectory(prefix=f"kairix-baseline-{suite}-") as tmp:
+        out_dir = Path(tmp)
+        result = runner(
+            ["kairix", "benchmark", "run", "--suite", suite, "--output", str(out_dir)],
+            timeout=900,
+        )
+        if result is None:
+            return None
+        report = _load_benchmark_report(out_dir, suite)
+        if report is None:
+            return None
+        payload = _project_eval_payload(report)
+        return payload or None
+
+
+def _capture_benchmark_scores(
+    suites: tuple[str, ...] = DEFAULT_EVAL_SUITES,
+    runner: _CLIRunner | None = None,
+) -> dict[str, Any] | None:
+    """Capture eval scores from one or more benchmark suites.
+
+    ``runner`` is the injection seam — tests pass a callable that emits a
+    pre-canned report into the temporary output directory; production
+    leaves it at None and falls back to :func:`_run_cli`.
+    """
+    runner = runner or _run_cli
     out: dict[str, Any] = {}
-    if reflib is not None:
-        out["reflib"] = reflib
-    if locomo is not None:
-        out["locomo"] = locomo
-    return out
+    for suite in suites:
+        payload = _capture_one_benchmark_suite(suite, runner)
+        if payload is not None:
+            out[suite] = payload
+    return out or None
 
 
-def _capture_latency() -> dict[str, Any] | None:
-    """Shell out to ``kairix probe`` and pull P50/P95/P99 latencies."""
-    payload = _run_cli_json(["kairix", "probe", "--suite", "reflib", "--concurrency", "10", "--json"])
-    if payload is None:
+def _capture_latency(
+    suite: str = DEFAULT_LATENCY_SUITE,
+    runner: _CLIRunner | None = None,
+) -> dict[str, Any] | None:
+    """Run ``kairix benchmark run --mode single-shot`` and pull p50/p95/p99.
+
+    Single-shot mode populates ``diagnostics.per_query_runs[]`` with one
+    row per case carrying ``latency_ms``. We compute p50/p95/p99 from
+    that array. ``runner`` is the same injection seam as
+    :func:`_capture_benchmark_scores`.
+    """
+    runner = runner or _run_cli
+    with tempfile.TemporaryDirectory(prefix=f"kairix-baseline-latency-{suite}-") as tmp:
+        out_dir = Path(tmp)
+        result = runner(
+            [
+                "kairix",
+                "benchmark",
+                "run",
+                "--suite",
+                suite,
+                "--mode",
+                "single-shot",
+                "--output",
+                str(out_dir),
+            ],
+            timeout=900,
+        )
+        if result is None:
+            return None
+        report = _load_benchmark_report(out_dir, suite)
+        if report is None:
+            return None
+        return _extract_latency_from_report(report)
+
+
+def _extract_latency_from_report(report: dict[str, Any]) -> dict[str, Any] | None:
+    """Compute p50/p95/p99 from a benchmark report's per-query latency rows.
+
+    The single-shot dispatcher emits ``diagnostics.per_query_runs`` —
+    one record per case with ``latency_ms`` (and ``latency_phase``).
+    Falls back to scanning ``cases[].elapsed_ms`` when single-shot
+    wasn't requested, so the legacy report shape still produces
+    percentiles.
+    """
+    diagnostics = report.get("diagnostics", {}) if isinstance(report.get("diagnostics"), dict) else {}
+    runs = diagnostics.get("per_query_runs")
+    samples: list[float] = []
+    if isinstance(runs, list):
+        for row in runs:
+            if not isinstance(row, dict):
+                continue
+            val = _coerce_float(row.get("latency_ms"))
+            if val is not None:
+                samples.append(val)
+    if not samples:
+        # Legacy fallback: every case carries elapsed_ms even without
+        # single-shot mode. The runner emits one per case in the
+        # "cases" array.
+        cases = report.get("cases")
+        if isinstance(cases, list):
+            for row in cases:
+                if not isinstance(row, dict):
+                    continue
+                val = _coerce_float(row.get("elapsed_ms"))
+                if val is not None:
+                    samples.append(val)
+    if not samples:
+        logger.warning("latency: no latency samples in benchmark report")
         return None
-    return _extract_latency_percentiles(payload)
+    samples.sort()
+    return {
+        "p50_ms": _percentile(samples, 0.50),
+        "p95_ms": _percentile(samples, 0.95),
+        "p99_ms": _percentile(samples, 0.99),
+    }
+
+
+def _percentile(sorted_samples: list[float], q: float) -> float:
+    """Linear-interpolation percentile on a pre-sorted sample list.
+
+    Matches the convention numpy uses by default (``method='linear'``)
+    so the numbers line up with operator expectations when they cross-
+    check with a notebook.
+    """
+    if not sorted_samples:
+        return 0.0
+    if len(sorted_samples) == 1:
+        return sorted_samples[0]
+    pos = q * (len(sorted_samples) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_samples) - 1)
+    frac = pos - lo
+    return sorted_samples[lo] + (sorted_samples[hi] - sorted_samples[lo]) * frac
 
 
 def _extract_latency_percentiles(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Pick P50/P95/P99 fields out of a probe envelope (tolerant of nesting)."""
+    """Pick P50/P95/P99 fields out of an arbitrary payload (legacy helper).
+
+    Retained because the unit-test suite at
+    ``tests/cutover/test_capture_baseline.py`` exercises it directly to
+    prove the diff-tool-facing latency shape. Production now flows
+    through :func:`_extract_latency_from_report`.
+    """
     candidates = [payload]
     for key in ("latency", "summary", "metrics", "stats"):
         nested = payload.get(key)
@@ -239,7 +494,7 @@ def _extract_latency_percentiles(payload: dict[str, Any]) -> dict[str, Any] | No
         p99 = _coerce_float(src.get("p99_ms") or src.get("p99"))
         if p50 is not None and p95 is not None and p99 is not None:
             return {"p50_ms": p50, "p95_ms": p95, "p99_ms": p99}
-    logger.warning("latency: could not find p50/p95/p99 in probe payload")
+    logger.warning("latency: could not find p50/p95/p99 in payload")
     return None
 
 
@@ -254,18 +509,42 @@ def _coerce_float(value: Any) -> float | None:
 
 
 def _capture_sample_journey(config: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """Run each operator-declared canonical query and capture top-5 doc paths."""
-    cutover_cfg = config.get("cutover", {}) if isinstance(config.get("cutover"), dict) else {}
-    queries = cutover_cfg.get("sample_queries")
-    if not isinstance(queries, list) or not queries:
-        logger.warning("sample-journey: no cutover.sample_queries in config; skipping surface")
-        return None
+    """Run each canonical query and capture top-5 doc paths.
+
+    Reads ``cutover.sample_queries`` from the operator config. When the
+    block is absent or empty falls back to a single canned probe
+    (:data:`DEFAULT_SAMPLE_QUERY`) so the surface still emits a row —
+    that row is sufficient for the diff tool to compute parity if the
+    same fallback fires on both pre and post sides.
+    """
+    queries = _resolve_sample_queries(config)
     results: list[dict[str, Any]] = []
     for query in queries:
-        if not isinstance(query, str) or not query.strip():
-            continue
         results.append({"query": query, "top_paths": _run_sample_query(query)})
     return results if results else None
+
+
+def _resolve_sample_queries(config: dict[str, Any]) -> list[str]:
+    """Return the sample-query list with a deterministic fallback.
+
+    Looks at ``config["cutover"]["sample_queries"]``; if missing /
+    non-list / empty, returns ``[DEFAULT_SAMPLE_QUERY]`` so the surface
+    is never silently skipped. Operators get a one-line warning the
+    first time the fallback fires so they know to populate the block.
+    """
+    cutover_cfg = config.get("cutover", {}) if isinstance(config.get("cutover"), dict) else {}
+    queries = cutover_cfg.get("sample_queries")
+    if isinstance(queries, list) and queries:
+        cleaned = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+        if cleaned:
+            return cleaned
+    logger.info(
+        "sample-journey: no cutover.sample_queries in config; using DEFAULT_SAMPLE_QUERY fallback. "
+        "fix: add a 'cutover.sample_queries' list to kairix.config.yaml. "
+        "next: see kairix.config.example.yaml for the canonical shape. "
+        "run: python scripts/cutover/capture_baseline.py --help"
+    )
+    return [DEFAULT_SAMPLE_QUERY]
 
 
 def _run_sample_query(
@@ -308,7 +587,14 @@ def _parse_surfaces(raw: str) -> list[str]:
     return items
 
 
-def _build_baseline(flag: str, config_path: Path, surfaces: list[str]) -> dict[str, Any]:
+def _build_baseline(
+    flag: str,
+    config_path: Path,
+    surfaces: list[str],
+    *,
+    eval_suites: tuple[str, ...] = DEFAULT_EVAL_SUITES,
+    latency_suite: str = DEFAULT_LATENCY_SUITE,
+) -> dict[str, Any]:
     """Build the full baseline JSON envelope for the requested surfaces."""
     config = _load_config(config_path)
     envelope: dict[str, Any] = {
@@ -319,9 +605,9 @@ def _build_baseline(flag: str, config_path: Path, surfaces: list[str]) -> dict[s
     if "state" in surfaces:
         envelope["state"] = _maybe_capture_state(config)
     if "eval" in surfaces:
-        envelope["eval"] = _capture_benchmark_scores()
+        envelope["eval"] = _capture_benchmark_scores(eval_suites)
     if "latency" in surfaces:
-        envelope["latency"] = _capture_latency()
+        envelope["latency"] = _capture_latency(latency_suite)
     if "sample-journey" in surfaces:
         envelope["sample_journey"] = _capture_sample_journey(config)
     return envelope
@@ -363,6 +649,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="all",
         help="Comma-separated surfaces (state,eval,latency,sample-journey,all).",
     )
+    parser.add_argument(
+        "--eval-suites",
+        default=",".join(DEFAULT_EVAL_SUITES),
+        help=(
+            f"Comma-separated benchmark suites for the eval surface "
+            f"(default: {','.join(DEFAULT_EVAL_SUITES)}). Any unbundled suite "
+            f"name is skipped with a warning."
+        ),
+    )
+    parser.add_argument(
+        "--latency-suite",
+        default=DEFAULT_LATENCY_SUITE,
+        help=(
+            f"Benchmark suite for the latency surface (default: {DEFAULT_LATENCY_SUITE}). Single-shot mode is forced."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -375,11 +677,22 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    envelope = _build_baseline(args.flag, args.config, surfaces)
+    eval_suites = tuple(s.strip() for s in args.eval_suites.split(",") if s.strip()) or DEFAULT_EVAL_SUITES
+    envelope = _build_baseline(
+        args.flag,
+        args.config,
+        surfaces,
+        eval_suites=eval_suites,
+        latency_suite=args.latency_suite,
+    )
     _write_envelope(envelope, args.out)
     captured = [s for s in ALL_SURFACES if envelope.get(s.replace("-", "_")) is not None]
     print(f"captured {len(captured)}/{len(ALL_SURFACES)} surfaces ({','.join(captured) or 'none'}) -> {args.out}")
     return 0
+
+
+# Type alias declared after the helpers so it can refer to subprocess.CompletedProcess.
+_CLIRunner = Callable[..., "subprocess.CompletedProcess[str] | None"]
 
 
 if __name__ == "__main__":  # pragma: no cover — module-as-script entrypoint

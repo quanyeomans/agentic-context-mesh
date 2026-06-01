@@ -158,7 +158,15 @@ def test_extract_latency_returns_none_when_incomplete() -> None:
 
 
 def test_build_baseline_missing_config_returns_null_surfaces(tmp_path: Path) -> None:
-    """A missing config file yields nulls for every surface, never crashes."""
+    """A missing config file yields nulls for state/eval/latency and the
+    canned-fallback row for sample_journey.
+
+    Post-#377 the sample-journey surface always emits at least one row —
+    the operator-config fallback to ``DEFAULT_SAMPLE_QUERY`` — so the
+    diff tool can compute parity against the same canned query on both
+    sides. ``top_paths`` is empty in a sandbox where ``kairix`` isn't on
+    PATH, but the row itself is present.
+    """
     envelope = _build_baseline(
         flag="obsidian_connector_primary",
         config_path=tmp_path / "missing.yaml",
@@ -166,7 +174,12 @@ def test_build_baseline_missing_config_returns_null_surfaces(tmp_path: Path) -> 
     )
     assert envelope["flag"] == "obsidian_connector_primary"
     assert envelope["state"] is None
-    assert envelope["sample_journey"] is None
+    # The sample-journey surface ships the canned-fallback row when the
+    # config block is absent. top_paths is empty in a sandbox where the
+    # kairix binary isn't reachable.
+    assert envelope["sample_journey"] is not None
+    assert len(envelope["sample_journey"]) == 1
+    assert envelope["sample_journey"][0]["query"] == "default sample query"
     # eval / latency call out to subprocess — they're None when CLI unavailable
     # in a sandbox; in CI the kairix CLI exists but pointing at a fresh test
     # state still produces None (no documents indexed). Either way the

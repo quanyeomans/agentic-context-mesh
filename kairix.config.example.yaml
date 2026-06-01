@@ -426,3 +426,32 @@ topology_v2:
           sources:
             - cc_pair: sharepoint-corp-pair
               path_filter: "**/Policies/**"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Cutover — feature-flag flip baseline capture
+# ──────────────────────────────────────────────────────────────────────────
+# Read by ``scripts/cutover/capture_baseline.py`` (see
+# ``docs/architecture/feature-flag-architecture.md`` §4.2). When the
+# operator runs ``capture_baseline.py`` it picks each query in
+# ``sample_queries`` and probes ``kairix search --json`` to capture the
+# top-5 doc paths. The diff tool then asserts >=80% of queries retain
+# >=3/5 paths after the flip.
+#
+# Pick 3-5 queries that are stable + representative across the corpora
+# you're cutting over — recurring agent tasks, frequent retrieval
+# patterns, anchor topics. Avoid time-sensitive queries (e.g. "what
+# happened today") because the same query will return different docs
+# on the post-flip side just from clock drift.
+#
+# When this block is missing or empty, the capture script falls back to
+# a single canned query ("default sample query") so the surface still
+# emits a row — the parity gate degenerates to "did the canned query
+# return the same paths before and after" which is weak signal but not
+# zero signal.
+cutover:
+  sample_queries:
+    - "how do we onboard a new connector"
+    - "retrieval pipeline architecture overview"
+    - "feature flag retirement deadline policy"
+    - "how does the cutover protocol work"
+    - "what does safe-commit.sh check"
