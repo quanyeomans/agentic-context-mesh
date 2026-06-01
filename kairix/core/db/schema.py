@@ -41,6 +41,10 @@ _TABLE_BRONZE_RECORDS = "bronze_records"
 # (column-add + the integrity-required-tables list) to satisfy F17's
 # "no string literal duplicated ≥3 times" cap.
 _TABLE_ENTITY_SIGNALS = "entity_signals"
+# GH #373 — topology_scope_entries referenced by the integrity-required-tables
+# list + the default_in_scope ALTER TABLE migration (2 sites in migrate). One
+# constant per table keeps the SQL identifier in a single edit site.
+_TABLE_TOPOLOGY_SCOPE_ENTRIES = "topology_scope_entries"
 
 
 def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> None:
@@ -296,7 +300,7 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "topology_federated_connectors",
         "topology_group_grants",
         "topology_scope_profiles",
-        "topology_scope_entries",
+        _TABLE_TOPOLOGY_SCOPE_ENTRIES,
         "topology_skills",
         # ADR-029 G.1 — agent-facing query queue
         "pending_queries",
@@ -597,6 +601,11 @@ CREATE TABLE IF NOT EXISTS topology_scope_entries (
     can_read INTEGER NOT NULL DEFAULT 1,
     can_write INTEGER NOT NULL DEFAULT 0,
     max_sensitivity TEXT NOT NULL DEFAULT 'internal',
+    -- GH #373: per-entry "is this collection in the default-search superset"
+    -- flag. NOT NULL DEFAULT 1 = back-compat (pre-#373 rows surface in
+    -- default search). Operators flip individual entries to 0 to mark them
+    -- opt-in (e.g. reflib) — only reachable via explicit `collections=[...]`.
+    default_in_scope INTEGER NOT NULL DEFAULT 1,
     UNIQUE(scope_profile_id, collection_name),
     FOREIGN KEY (scope_profile_id) REFERENCES topology_scope_profiles(id)
 );
@@ -621,6 +630,15 @@ _DOCUMENTS_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (
 
 _DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (("chunker_version", "TEXT"),)
 
+# GH #373 — additional columns on existing topology_v2 tables. Each tuple is
+# (column_name, column_def). The default of 1 (in-scope) is the back-compat
+# invariant — pre-#373 rows continue to surface in default search after the
+# ALTER TABLE migration runs, so the cutover does not silently drop every
+# collection from default search.
+_TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_V2_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("default_in_scope", "INTEGER NOT NULL DEFAULT 1"),
+)
+
 
 def _migrate_documents_connector_columns(db: sqlite3.Connection, tables: set[str]) -> None:
     """Add connector-framework Wave 1 columns to legacy documents tables."""
@@ -636,6 +654,10 @@ def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> No
     Pure-additive — `archived` + `access_lost` default to 0 (false),
     `chunker_version` defaults to NULL. No behavioural change until
     `topology_v2_schema` flag flips and write paths start populating.
+
+    GH #373 — also adds `default_in_scope INTEGER NOT NULL DEFAULT 1` to
+    `topology_scope_entries`. Existing rows get `default_in_scope=1` so
+    they continue to surface in default search after the migration runs.
     """
     if "documents" in tables:
         for column, column_def in _DOCUMENTS_TOPOLOGY_V2_COLUMNS:
@@ -643,6 +665,9 @@ def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> No
     if _TABLE_DOCUMENTS_MEDIA in tables:
         for column, column_def in _DOCUMENTS_MEDIA_TOPOLOGY_V2_COLUMNS:
             _add_column_if_missing(db, _TABLE_DOCUMENTS_MEDIA, column, column_def)
+    if _TABLE_TOPOLOGY_SCOPE_ENTRIES in tables:
+        for column, column_def in _TOPOLOGY_SCOPE_ENTRIES_TOPOLOGY_V2_COLUMNS:
+            _add_column_if_missing(db, _TABLE_TOPOLOGY_SCOPE_ENTRIES, column, column_def)
 
 
 def migrate(db: sqlite3.Connection) -> None:

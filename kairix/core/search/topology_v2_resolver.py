@@ -92,6 +92,7 @@ class TopologyV2CollectionResolver:
         db: sqlite3.Connection,
         scope_profile_resolver: ScopeProfileResolver | None = None,
         max_sensitivity_cap: F39Tier | None = None,
+        default_in_scope_filter_enabled: bool = True,
     ) -> None:
         """Construct the Adapter against ``db``.
 
@@ -104,10 +105,21 @@ class TopologyV2CollectionResolver:
         every scope-eligible entry is returned regardless of tier; when
         set, entries whose ``max_sensitivity`` exceeds the cap are
         dropped. Used by Wave F's per-skill cap enforcement.
+
+        ``default_in_scope_filter_enabled`` (GH #373): when True (the
+        Adapter's own default), the no-collections-specified
+        ``resolve()`` path calls the scope resolver with
+        ``default_only=True`` so only ``default_in_scope=1`` entries
+        surface. When False, the Adapter passes ``default_only=False``
+        and every read-eligible entry surfaces (back-compat with
+        pre-#373 behaviour). The factory wires the
+        ``topology_v2_default_in_scope`` feature flag into this kwarg so
+        operators can stage the cutover.
         """
         self._db = db
         self._resolver = scope_profile_resolver if scope_profile_resolver is not None else ScopeProfileResolver(db)
         self._cap = max_sensitivity_cap
+        self._default_in_scope_filter_enabled = default_in_scope_filter_enabled
 
     def resolve(self, agent: str | None, scope: object) -> list[str] | None:
         """Return the concrete collection list for ``(agent, scope)``.
@@ -125,8 +137,18 @@ class TopologyV2CollectionResolver:
                 return self._public_collections() or None
             return None
 
-        # agent supplied — resolve via the scope profile.
-        resolved = self._resolver.resolve(actors=(agent,))
+        # agent supplied — resolve via the scope profile. GH #373: the
+        # no-collections-specified path returns the in-default superset
+        # (default_only=True) when the topology_v2_default_in_scope flag
+        # is on, so opt-in collections like reflib are only reachable via
+        # explicit collections=[...] (see validate_explicit below which
+        # always passes default_only=False). When the flag is OFF the
+        # Adapter passes default_only=False so every read-eligible entry
+        # surfaces — back-compat with pre-#373 behaviour.
+        resolved = self._resolver.resolve(
+            actors=(agent,),
+            default_only=self._default_in_scope_filter_enabled,
+        )
         names = self._filter_by_scope(resolved.collections, scope_enum, agent)
         return names or None
 
@@ -148,7 +170,11 @@ class TopologyV2CollectionResolver:
         be sanity-checked against the actor's read scope.
         """
         scope_enum = scope if isinstance(scope, Scope) else Scope.parse(str(scope))
-        resolved = self._resolver.resolve(actors=(agent,))
+        # GH #373: explicit collections=[...] must be validated against
+        # the FULL read scope (default_only=False) so opt-in collections
+        # like reflib remain reachable by explicit name even though they
+        # don't surface under default search.
+        resolved = self._resolver.resolve(actors=(agent,), default_only=False)
         allowed = set(self._filter_by_scope(resolved.collections, scope_enum, agent))
         requested = list(collections)
         unknown = [name for name in requested if name not in allowed]

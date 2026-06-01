@@ -81,7 +81,6 @@ def _seeded_db_seven_in_default_one_opt_in() -> sqlite3.Connection:
     return db
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_topology_v2_resolver_satisfies_collection_resolver_protocol_with_default_only() -> None:
     """isinstance(resolver, CollectionResolver) still holds after the API
     extension — the new ``default_only`` kwarg lives on the underlying
@@ -98,7 +97,6 @@ def test_topology_v2_resolver_satisfies_collection_resolver_protocol_with_defaul
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_in_scope_default_search_returns_superset_load_bearing() -> None:
     """LOAD-BEARING — the GH #373 acceptance assertion.
 
@@ -136,7 +134,6 @@ def test_default_in_scope_default_search_returns_superset_load_bearing() -> None
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_scope_profile_resolver_default_only_propagates_to_topology_v2_resolver() -> None:
     """Composition assertion — TopologyV2CollectionResolver MUST call
     ScopeProfileResolver.resolve with ``default_only=True`` when the
@@ -165,7 +162,6 @@ def test_scope_profile_resolver_default_only_propagates_to_topology_v2_resolver(
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_f68_db_row_missing_default_in_scope_treats_as_default_true() -> None:
     """F68 failure injection — a row pre-dating the migration must be
     treated as ``default_in_scope=1`` (in-default).

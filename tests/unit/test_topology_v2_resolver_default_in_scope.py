@@ -40,7 +40,6 @@ def _fresh_db() -> sqlite3.Connection:
     return db
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_no_collections_specified_returns_default_in_scope_superset() -> None:
     """``collections=None`` → only ``default_in_scope=True`` entries.
 
@@ -83,7 +82,6 @@ def test_no_collections_specified_returns_default_in_scope_superset() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_explicit_collection_in_scope_returns_that_collection() -> None:
     """``collections=['reflib']`` when reflib is in scope (any
     ``default_in_scope`` state) returns ``['reflib']``.
@@ -107,7 +105,6 @@ def test_explicit_collection_in_scope_returns_that_collection() -> None:
     assert filtered == ["reflib"], f"explicit ['reflib'] must pass through; got {filtered!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_explicit_collection_not_in_scope_returns_none_with_f21_error() -> None:
     """``collections=['foo']`` when foo isn't in scope → ``(None, msg)``.
 
@@ -132,7 +129,6 @@ def test_explicit_collection_not_in_scope_returns_none_with_f21_error() -> None:
     assert "foo" in error, f"error must name the offending collection 'foo'; got {error!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_explicit_collection_opt_in_works_even_when_default_in_scope_false() -> None:
     """reflib has ``default_in_scope=False`` but IS in scope —
     ``collections=['reflib']`` retrieves it without error.
@@ -156,7 +152,6 @@ def test_explicit_collection_opt_in_works_even_when_default_in_scope_false() -> 
     assert filtered == ["reflib"], f"opt-in collection must be reachable by explicit name; got {filtered!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_only_true_excludes_other_agents_memory() -> None:
     """``agent='shape', collections=None`` → no builder-memory in result.
 
@@ -180,7 +175,6 @@ def test_default_only_true_excludes_other_agents_memory() -> None:
     assert "shape-memory" in result, f"agent's own memory must be in default search result; got {result!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_explicit_other_agent_memory_returns_none() -> None:
     """``agent='shape', collections=['builder-memory']`` → ``(None, F21 msg)``.
 
@@ -207,7 +201,6 @@ def test_explicit_other_agent_memory_returns_none() -> None:
     assert "fix:" in error, f"F21 affordance missing from cross-agent error: {error!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_agent_none_all_agents_path_unaffected_by_default_only() -> None:
     """``agent=None, scope=ALL_AGENTS`` continues to use public-access fan-out.
 
@@ -229,20 +222,19 @@ def test_agent_none_all_agents_path_unaffected_by_default_only() -> None:
     )
     conn_id = cur.lastrowid
     cur = db.execute(
-        "INSERT INTO topology_cc_pairs (connector_id, name, access_type, status, last_synced_at, "
-        "perm_sync_required, perm_sync_status, created_at, updated_at) "
-        "VALUES (?, 'pub-cc', 'PUBLIC', 'INITIALIZING', NULL, 0, 'IDLE', ?, ?)",
+        "INSERT INTO topology_cc_pairs (connector_id, name, access_type, status, created_at, updated_at) "
+        "VALUES (?, 'pub-cc', 'PUBLIC', 'INITIALIZING', ?, ?)",
         (conn_id, now, now),
     )
     cc_id = cur.lastrowid
     cur = db.execute(
-        "INSERT INTO topology_collections (name, target_sensitivity, created_at, updated_at) "
+        "INSERT INTO topology_collections (name, default_sensitivity, created_at, updated_at) "
         "VALUES ('public-collection', 'public', ?, ?)",
         (now, now),
     )
     coll_id = cur.lastrowid
     db.execute(
-        "INSERT INTO topology_collection_sources (collection_id, cc_pair_id) VALUES (?, ?)",
+        "INSERT INTO topology_collection_sources (collection_id, cc_pair_id, source_path_filter) VALUES (?, ?, '*')",
         (coll_id, cc_id),
     )
     db.commit()
@@ -261,7 +253,6 @@ def test_agent_none_all_agents_path_unaffected_by_default_only() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_factory_branch_on_topology_v2_collection_resolver_flag() -> None:
     """``build_collection_resolver`` returns the v2 Adapter when the
     ``topology_v2_default_in_scope`` flag is ON.

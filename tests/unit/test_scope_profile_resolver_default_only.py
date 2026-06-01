@@ -85,7 +85,6 @@ def _seed_scope_profile(
     return int(profile_id) if profile_id is not None else 0
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_only_false_returns_all_entries() -> None:
     """Back-compat: ``default_only=False`` (the existing call-site shape)
     returns every read-eligible entry regardless of ``default_in_scope``.
@@ -116,7 +115,6 @@ def test_default_only_false_returns_all_entries() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_only_true_filters_to_default_in_scope_true_entries() -> None:
     """``default_only=True`` keeps the 3 entries flagged ``default_in_scope=1``.
 
@@ -147,7 +145,6 @@ def test_default_only_true_filters_to_default_in_scope_true_entries() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_only_true_excludes_default_in_scope_false_entries() -> None:
     """Inverse of the happy path — 2 of 5 entries flagged out-of-default
     are dropped under ``default_only=True``.
@@ -180,7 +177,6 @@ def test_default_only_true_excludes_default_in_scope_false_entries() -> None:
     assert names == {"kept-1", "kept-2", "kept-3"}
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_only_true_with_no_default_in_scope_true_returns_empty() -> None:
     """Edge: every entry has ``default_in_scope=0`` → ``collections`` is empty.
 
@@ -208,7 +204,6 @@ def test_default_only_true_with_no_default_in_scope_true_returns_empty() -> None
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_in_scope_default_value_is_one_for_back_compat() -> None:
     """Schema migration: an INSERT without ``default_in_scope`` lands as 1.
 
@@ -247,7 +242,6 @@ def test_default_in_scope_default_value_is_one_for_back_compat() -> None:
     assert row[0] == 1, f"schema default for default_in_scope must be 1 (back-compat); got {row[0]!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_max_sensitivity_cap_still_honored_with_default_only() -> None:
     """Sensitivity tier composes with the new default_only filter.
 
@@ -284,7 +278,6 @@ def test_max_sensitivity_cap_still_honored_with_default_only() -> None:
     assert by_name.get("col-public") == "public"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_failure_injection_db_missing_default_in_scope_column_falls_back_gracefully() -> None:
     """F68: pre-migration DB → resolver still returns rows (back-compat).
 
@@ -334,7 +327,6 @@ def test_failure_injection_db_missing_default_in_scope_column_falls_back_gracefu
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_intersection_composition_with_default_only() -> None:
     """Intersection mode + default_only: every actor must list the entry
     AND the entry must be in-default for at least one of them.
@@ -378,7 +370,6 @@ def test_intersection_composition_with_default_only() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_union_composition_with_default_only() -> None:
     """Union mode + default_only: an entry surfaces if ANY actor flags
     it default_in_scope=1.

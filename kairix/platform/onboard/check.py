@@ -52,6 +52,8 @@ _CHECK_CHUNK_DATE_POPULATED = "chunk_date_populated"
 _CHECK_MCP_SERVICE = "mcp_service"
 _CHECK_TOPOLOGY_V2_CONFIG_VALID = "topology_v2_config_valid"
 _CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED = "topology_v2_cc_pairs_registered"
+# GH #373 — schema-migration check for the per-entry default_in_scope column.
+_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT = "topology_v2_default_in_scope_field_present"
 _CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
     "sharepoint_credentials_loaded"  # pragma: allowlist secret — check-name string, not a credential
 )
@@ -186,6 +188,16 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
         "`systemctl restart kairix-worker`) — the apply-bridge runs at boot when "
         "`topology_v2_config` is on and materialises declared cc_pairs idempotently. "
         "next: re-run `kairix onboard check` to confirm every declared cc_pair has a row."
+    ),
+    _CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT: (
+        "fix: restart the kairix worker / API process — the GH #373 schema migration "
+        "adds the `default_in_scope` column to `topology_scope_entries` at boot via "
+        "kairix.core.db.schema.migrate. Existing rows back-fill to default_in_scope=1 "
+        "(back-compat — every row surfaces in default search). "
+        "next: re-run `kairix onboard check topology_v2_default_in_scope_field_present` "
+        "to confirm the column is present. "
+        "run: docker compose restart kairix-worker kairix-1 (Docker) "
+        "OR systemctl restart kairix-worker kairix-mcp (systemd)."
     ),
     _CHECK_SHAREPOINT_CREDENTIALS_LOADED: (
         "fix: set the three M365 client-credentials secrets that the SharePoint "
@@ -1431,6 +1443,115 @@ def _default_db_cc_pair_names() -> frozenset[str]:
     return frozenset(row.name for row in rows)
 
 
+def _default_scope_entries_columns() -> frozenset[str]:
+    """Production seam — return the set of column names on topology_scope_entries.
+
+    Opens the kairix DB and runs ``PRAGMA table_info(topology_scope_entries)``;
+    returns a frozenset of column names so the check can detect presence /
+    absence of the GH #373 ``default_in_scope`` column added by the schema
+    migration. Returns an empty frozenset when the table doesn't exist (a
+    fresh DB before ``create_schema`` runs).
+    """
+    from kairix.core.db import get_db_path, open_db
+
+    db = open_db(Path(get_db_path()))
+    try:
+        # F63-bounded: PRAGMA table_info returns one row per column (≤O(20) for the topology_scope_entries shape).
+        rows = db.execute("PRAGMA table_info(topology_scope_entries)").fetchall()
+    finally:
+        db.close()
+    return frozenset(row[1] for row in rows)
+
+
+@dataclass
+class DefaultInScopeCheckDeps:
+    """Injectable dependencies for the GH #373 default_in_scope migration check.
+
+    Mirrors :class:`TopologyV2CheckDeps` but scoped to the schema-only check
+    — the migration is independent of the operator-facing
+    ``topology_v2_config`` block, so the check uses its own Deps class with
+    a single ``columns_reader`` seam. Tests pass a substitute callable
+    returning ``frozenset({"default_in_scope", ...})`` or ``frozenset()``
+    to drive the present / absent branches without touching the live DB.
+    """
+
+    columns_reader: Callable[[], frozenset[str]] = field(default_factory=lambda: _default_scope_entries_columns)
+
+
+def check_topology_v2_default_in_scope_field_present(
+    deps: DefaultInScopeCheckDeps | None = None,
+) -> CheckResult:
+    """GH #373 schema migration — ``topology_scope_entries.default_in_scope`` exists.
+
+    The schema migration in :mod:`kairix.core.db.schema` adds the
+    ``default_in_scope INTEGER NOT NULL DEFAULT 1`` column to
+    ``topology_scope_entries`` at boot. This check confirms the migration
+    actually applied — operators upgrading to v2026.6+ without restarting
+    the worker (e.g. a hot-reload that bypassed ``create_schema``) would
+    see the resolver fall back to its pre-migration code path; this check
+    surfaces that drift before the next default search runs.
+
+    Reports ok=True when the column is present; ok=False otherwise.
+    Tolerates a fresh DB (no ``topology_scope_entries`` table yet) by
+    treating "table missing" as a separate failure mode with the same
+    remediation (restart triggers ``create_schema`` which both creates
+    the table and runs the migration).
+    """
+    d = deps if deps is not None else DefaultInScopeCheckDeps()
+    try:
+        cols = d.columns_reader()
+    except Exception as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+            ok=False,
+            detail=f"columns reader raised: {exc}",
+            fix=(
+                "fix: confirm the kairix DB is reachable + readable. "
+                "next: run `kairix onboard check document_root_configured`. "
+                "run: ls -la $(kairix paths db)."
+            ),
+        )
+
+    if not cols:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+            ok=False,
+            detail=(
+                "topology_scope_entries table not present — schema migration has not run. "
+                "Restart the worker to trigger create_schema()."
+            ),
+            fix=(
+                "fix: restart the kairix worker / API process to trigger "
+                "kairix.core.db.schema.create_schema. "
+                "next: re-run `kairix onboard check topology_v2_default_in_scope_field_present`. "
+                "run: docker compose restart kairix-worker kairix-1."
+            ),
+        )
+
+    if "default_in_scope" not in cols:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+            ok=False,
+            detail=(
+                "topology_scope_entries missing default_in_scope column — GH #373 "
+                "schema migration did not apply. The resolver falls back to its "
+                "pre-migration code path (treats every row as in-default)."
+            ),
+            fix=(
+                "fix: restart the kairix worker / API process to trigger the "
+                "ALTER TABLE migration in kairix.core.db.schema.migrate. "
+                "next: re-run `kairix onboard check topology_v2_default_in_scope_field_present`. "
+                "run: docker compose restart kairix-worker kairix-1."
+            ),
+        )
+
+    return CheckResult(
+        name=_CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT,
+        ok=True,
+        detail="topology_scope_entries.default_in_scope column present (GH #373 schema migration applied)",
+    )
+
+
 def check_sharepoint_credentials_loaded(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
     """SharePoint connector secrets resolve via kairix.secrets.get_secret.
 
@@ -1716,6 +1837,7 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_embed_cache_stats,
     check_topology_v2_config_valid,
     check_topology_v2_cc_pairs_registered,
+    check_topology_v2_default_in_scope_field_present,
     check_sharepoint_credentials_loaded,
     check_maintenance_loop_ticking,
     check_extractor_libraries_importable,

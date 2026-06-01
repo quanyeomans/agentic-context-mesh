@@ -285,21 +285,27 @@ def build_collection_resolver(
     factory consults the real :func:`kairix.core.features.flag` resolver.
     """
     use_v2 = False
+    default_in_scope_enabled = False
     try:
         if flag_reader is not None:
             use_v2 = bool(flag_reader("topology_v2_collection_resolver"))
+            default_in_scope_enabled = bool(flag_reader("topology_v2_default_in_scope"))
         else:
             from kairix.core.features import flag as _feature_flag
 
             use_v2 = _feature_flag("topology_v2_collection_resolver")
+            default_in_scope_enabled = _feature_flag("topology_v2_default_in_scope")
     except Exception as e:
         logger.warning(
-            "factory: topology_v2_collection_resolver flag lookup failed — %s; defaulting to legacy resolver",
+            "factory: topology_v2 flag lookup failed — %s; defaulting to legacy resolver",
             e,
         )
 
     if use_v2:
-        return _build_topology_v2_collection_resolver(db_path)
+        return _build_topology_v2_collection_resolver(
+            db_path,
+            default_in_scope_filter_enabled=default_in_scope_enabled,
+        )
     return _build_legacy_collection_resolver()
 
 
@@ -340,7 +346,11 @@ def _build_legacy_collection_resolver() -> Any:
     )
 
 
-def _build_topology_v2_collection_resolver(db_path: Any) -> Any:
+def _build_topology_v2_collection_resolver(
+    db_path: Any,
+    *,
+    default_in_scope_filter_enabled: bool = False,
+) -> Any:
     """Construct :class:`TopologyV2CollectionResolver` against ``db_path``.
 
     Opens a sqlite3 Connection so the resolver can query
@@ -348,13 +358,21 @@ def _build_topology_v2_collection_resolver(db_path: Any) -> Any:
     ``topology_collections`` + ``topology_cc_pairs``. The connection
     stays open for the lifetime of the cached pipeline (matches the
     SearchPipeline's lifecycle).
+
+    ``default_in_scope_filter_enabled`` (GH #373) gates the new
+    default-in-scope filter on the collections=None path. The factory
+    reads the ``topology_v2_default_in_scope`` feature flag and threads
+    its value here.
     """
     import sqlite3
 
     from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
 
     db = sqlite3.connect(str(db_path), timeout=10.0)
-    return TopologyV2CollectionResolver(db=db)
+    return TopologyV2CollectionResolver(
+        db=db,
+        default_in_scope_filter_enabled=default_in_scope_filter_enabled,
+    )
 
 
 def _resolve_provider_name(cfg: RetrievalConfig) -> str | None:
