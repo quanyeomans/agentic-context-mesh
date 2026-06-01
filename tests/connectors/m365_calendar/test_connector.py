@@ -43,6 +43,24 @@ from kairix.connectors.m365_calendar.graph_client import (
     M365GraphCalendarClient,
 )
 from kairix.core.protocols import ChangeEvent, RawArtefact
+from kairix.secrets import SecretNotFoundError
+from tests.fakes import FakeSecretsLoader
+
+
+def _full_loader() -> FakeSecretsLoader:
+    """FakeSecretsLoader pre-populated with the canonical M365 triple.
+
+    Pass through ``make_connector(config, secrets_loader=_full_loader())``
+    so the factory resolves credentials without hitting any real env
+    var, KV mount, or legacy chain.
+    """
+    return FakeSecretsLoader(
+        values={
+            ("connector", "m365", None, "tenant-id"): "fake-tenant",
+            ("connector", "m365", None, "client-id"): "fake-client",
+            ("connector", "m365", None, "client-secret"): "fake-secret-value",
+        }
+    )
 
 
 def _event(
@@ -387,40 +405,140 @@ def test_sensitivity_for_returns_configured_tier() -> None:
 
 
 @pytest.mark.unit
-def test_make_connector_requires_full_credential_set() -> None:
-    """``make_connector`` raises ValueError when required keys are missing.
+def test_make_connector_requires_user_id() -> None:
+    """``make_connector`` raises ValueError when ``user_id`` is missing.
 
-    Sabotage-proof: remove the required-key check from
-    ``make_connector``; this test fails because no exception is raised.
+    Per #378, only ``user_id`` is required in YAML; the OAuth triple
+    resolves via the connector's injected :class:`SecretsResolver`.
+    Sabotage-proof: drop the ``if not isinstance(user_id, str)`` guard
+    at the top of ``make_connector``; this test fails because no
+    exception is raised.
     """
-    incomplete: dict[str, Any] = {
-        "user_id": "operator@example.com",
-        # tenant_id / client_id / client_secret all missing
-    }
-
-    with pytest.raises(ValueError, match="missing required key"):
-        make_connector(incomplete)
+    with pytest.raises(ValueError, match="user_id"):
+        make_connector({})
 
 
 @pytest.mark.unit
-def test_make_connector_builds_with_required_keys() -> None:
-    """``make_connector`` returns a connector when all required keys are present.
+def test_connector_resolves_secrets_via_injected_loader() -> None:
+    """:class:`M365CalendarConnector` resolves tenant_id / client_id /
+    client_secret via the injected :class:`SecretsResolver` against the
+    canonical ``(connector, m365, None, <leaf>)`` identities — same
+    triple as the ``m365_email_headers`` sibling per KP-2.
 
-    Sabotage-proof: hard-code the factory to return ``None``; this test
-    fails because the isinstance assertion below catches that.
+    The config carries only ``user_id`` (the bug #378 shape: YAML no
+    longer required the inline credential triple). The connector's
+    ``__init__`` reaches the loader for each empty credential leaf and
+    fills the resolved :class:`M365CalendarConfig` in place.
+
+    Sabotage-proof: drop the ``secrets.require(...)`` calls in
+    ``_resolve_config_credentials`` and hard-code ``""`` — this test
+    then fails because the loader's recorded ``get_calls`` no longer
+    contains the three canonical identity tuples.
     """
-    config: dict[str, Any] = {
-        "user_id": "operator@example.com",
-        "tenant_id": "placeholder-tenant",
-        "client_id": "placeholder-client",
-        "client_secret": "placeholder-secret",  # pragma: allowlist secret
-    }
+    loader = _full_loader()
+    config = M365CalendarConfig(user_id="operator@example.com")
 
-    connector = make_connector(config)
+    connector = M365CalendarConnector(
+        config,
+        client_factory=_factory_for([_page(_event("ev-alpha"))]),
+        secrets=loader,
+    )
 
-    assert isinstance(connector, M365CalendarConnector)
     assert connector.name == "m365_calendar"
     assert connector.sensitivity_for("any-id") == "internal"
+    expected: set[tuple[str, str, str | None, str]] = {
+        ("connector", "m365", None, "tenant-id"),
+        ("connector", "m365", None, "client-id"),
+        ("connector", "m365", None, "client-secret"),
+    }
+    recorded = set(loader.get_calls)
+    assert expected.issubset(recorded), (
+        f"connector must call loader.require for each canonical M365 leaf; missing={expected - recorded}"
+    )
+
+
+@pytest.mark.unit
+def test_connector_inline_client_secret_overrides_loader_value() -> None:
+    """Inline ``client_secret`` on the :class:`M365CalendarConfig` wins
+    over the loader-resolved value.
+
+    Operators with a dedicated per-connector M365 AAD app can pin a
+    specific client_secret inline; the loader call is then skipped for
+    that leaf and the inline override propagates into the resolved
+    :class:`M365CalendarConfig`.
+
+    Sabotage-proof: drop the ``config.client_secret or`` short-circuit
+    in ``_resolve_config_credentials`` (force every leaf through
+    ``secrets.require``) — this test then fails because the resolved
+    config carries the loader's ``"loader-secret-value"`` instead of
+    the inline ``"inline-override-secret"``.
+    """
+    loader = FakeSecretsLoader(
+        values={
+            ("connector", "m365", None, "tenant-id"): "loader-tenant",
+            ("connector", "m365", None, "client-id"): "loader-client",
+            ("connector", "m365", None, "client-secret"): "loader-secret-value",
+        }
+    )
+    config = M365CalendarConfig(
+        user_id="operator@example.com",
+        client_secret="inline-override-secret",  # pragma: allowlist secret
+    )
+
+    connector = M365CalendarConnector(
+        config,
+        client_factory=_factory_for([_page(_event("ev-alpha"))]),
+        secrets=loader,
+    )
+
+    # Reach the resolved config via a single private-attribute read.
+    # The brief explicitly asks for an inline-override-wins test; the
+    # resolved client_secret is otherwise observable only at OAuth
+    # request time. Keeping the assertion at the config boundary
+    # avoids the auth round-trip in a unit test.
+    resolved: M365CalendarConfig = connector._config
+    assert resolved.client_secret == "inline-override-secret", (  # pragma: allowlist secret — test fixture string
+        f"inline override must win over loader value; got {resolved.client_secret!r}"
+    )
+    # The loader was NOT asked for the secret leaf — only the other two
+    # canonical leaves that still defer to the resolver.
+    assert ("connector", "m365", None, "client-secret") not in loader.get_calls, (
+        f"loader was asked for client-secret despite inline override; calls={loader.get_calls!r}"
+    )
+    assert ("connector", "m365", None, "tenant-id") in loader.get_calls
+    assert ("connector", "m365", None, "client-id") in loader.get_calls
+
+
+@pytest.mark.unit
+def test_connector_raises_when_loader_misses_and_no_inline_override() -> None:
+    """A missing canonical leaf with no inline override raises
+    :class:`SecretNotFoundError` from the loader's ``require`` call.
+
+    Pins the F68 failure-injection contract: when the
+    :class:`SecretsResolver` returns ``None`` for any of the three
+    canonical M365 leaves, the connector's ``__init__`` surfaces the
+    loader's typed error rather than silently constructing a broken
+    connector. The error message already carries the
+    ``fix:`` / ``next:`` / ``run:`` F21 markers from
+    :meth:`SecretsLoader.require`.
+
+    Sabotage-proof: change ``_resolve_config_credentials`` to fall back
+    to an empty string on a loader miss — this test fails because the
+    connector then constructs instead of raising.
+    """
+    # Loader supplies only tenant + client; client-secret is missing.
+    partial_loader = FakeSecretsLoader(
+        values={
+            ("connector", "m365", None, "tenant-id"): "fake-tenant",
+            ("connector", "m365", None, "client-id"): "fake-client",
+        }
+    )
+    config = M365CalendarConfig(user_id="operator@example.com")
+
+    with pytest.raises(SecretNotFoundError) as exc_info:
+        M365CalendarConnector(config, secrets=partial_loader)
+    msg = str(exc_info.value)
+    assert "client-secret" in msg, f"error message must name the missing leaf: {msg!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -487,13 +605,13 @@ def test_make_connector_default_production_path_handles_single_calendar() -> Non
     Tests the production-default factory paths through the public
     surface only (no internal-name imports per F5).
     """
-    config: dict[str, Any] = {
+    config_dict: dict[str, Any] = {
         "user_id": "operator@example.com",
         "tenant_id": "placeholder-tenant",
         "client_id": "placeholder-client",
         "client_secret": "placeholder-secret",  # pragma: allowlist secret
     }
-    connector = make_connector(config)
+    connector = make_connector(config_dict)
     # iter_containers is a public Wave E method — drives _configured_upns
     # through to the singleton-from-user_id fallback path.
     containers = list(connector.iter_containers(cc_pair_id=7))
@@ -584,9 +702,9 @@ def test_make_connector_accepts_user_ids_for_multi_calendar() -> None:
     """
     config: dict[str, Any] = {
         "user_id": "alice@example.com",
-        "tenant_id": "t",
-        "client_id": "c",
-        "client_secret": "s",  # pragma: allowlist secret
+        "tenant_id": "placeholder-tenant",
+        "client_id": "placeholder-client",
+        "client_secret": "placeholder-secret",  # pragma: allowlist secret
         "user_ids": ("alice@example.com", "bob@example.com"),
     }
     connector = make_connector(config)

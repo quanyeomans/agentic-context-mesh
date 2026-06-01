@@ -28,7 +28,7 @@ the extractor layer.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -52,6 +52,7 @@ from kairix.core.protocols import (
     Sensitivity,
     SourceMetadata,
 )
+from kairix.secrets.loader import SecretsLoader, SecretsResolver
 
 CONNECTOR_NAME = "m365_calendar"
 
@@ -77,23 +78,24 @@ _HIERARCHY_ROOT_ID = "m365-calendar"
 
 @dataclass(frozen=True)
 class M365CalendarConfig:
-    """Resolved configuration for an :class:`M365CalendarConnector`.
+    """Configuration for an :class:`M365CalendarConnector`.
 
-    Built by :func:`make_connector` from the operator's config block;
-    construction-time validation lives in the factory so the connector
-    itself can assume well-formed inputs.
+    Per ADR-031, credential leaves default to empty strings so the
+    operator's YAML can omit them and let the connector's injected
+    :class:`SecretsResolver` resolve the canonical M365 triple at
+    construction time. Operators with a dedicated per-connector AAD app
+    can still pin specific values inline (the connector treats those as
+    advisory overrides that win over the loader-resolved value).
 
-    All three secret values are resolved via the operator's secret
-    boundary (see :mod:`kairix.secrets`). Per F15, the dataclass field
-    names carry the ``client_secret`` / ``tenant_id`` suffix shape so
-    the secret-logging gate flags any plaintext interpolation outside
-    the boundary modules.
+    Per F15, the dataclass field names carry the ``client_secret`` /
+    ``tenant_id`` suffix shape so the secret-logging gate flags any
+    plaintext interpolation outside the boundary modules.
     """
 
     user_id: str
-    tenant_id: str
-    client_id: str
-    client_secret: str
+    tenant_id: str = ""
+    client_id: str = ""
+    client_secret: str = ""
     sensitivity: Sensitivity = "internal"
     scope: str = DEFAULT_GRAPH_SCOPE
     window_days_back: int = DEFAULT_WINDOW_DAYS_BACK
@@ -190,10 +192,43 @@ def _iso(dt: datetime) -> str:
     return dt.isoformat().replace("+00:00", "Z")
 
 
+def _resolve_config_credentials(
+    config: M365CalendarConfig,
+    secrets: SecretsResolver,
+) -> M365CalendarConfig:
+    """Fill missing tenant / client / secret leaves from the secrets resolver.
+
+    Inline values on the incoming :class:`M365CalendarConfig` win — the
+    operator who pins a per-connector AAD app in YAML sees that value
+    flow through unchanged. Empty leaves trigger
+    :meth:`SecretsResolver.require` against the canonical
+    ``(connector, m365, None, <leaf>)`` identity. Same canonical triple
+    as the :mod:`kairix.connectors.m365_email_headers` sibling per KP-2.
+
+    Returns a new :class:`M365CalendarConfig` with the three credential
+    fields fully populated. Raises
+    :class:`kairix.secrets.SecretNotFoundError` from the loader when a
+    leaf is unset both inline AND on the resolver — the loader's message
+    already carries the F21 ``fix:`` / ``next:`` / ``run:`` markers.
+    """
+    tenant_id = config.tenant_id or secrets.require("connector", "m365", None, "tenant-id")
+    client_id = config.client_id or secrets.require("connector", "m365", None, "client-id")
+    client_secret = config.client_secret or secrets.require("connector", "m365", None, "client-secret")
+    return replace(
+        config,
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+
 class M365CalendarConnector:
     """SourceConnector for one M365 calendar (one mailbox).
 
-    Construction is cheap (no I/O, no OAuth2 exchange). The first
+    Construction is cheap (no Graph I/O, no OAuth2 exchange — but it
+    DOES resolve the OAuth client-credentials triple via the injected
+    :class:`SecretsResolver` so the operator sees a typed loader error
+    here rather than at first-fetch time). The first
     :meth:`list_changes` call triggers the token fetch + first Graph
     page.
 
@@ -206,6 +241,12 @@ class M365CalendarConnector:
     * ``clock`` — returns the current UTC datetime. Tests substitute a
       :class:`tests.fakes.FakeClock`-like callable so the date window
       is deterministic. F6-clean: the default is a real callable.
+    * ``secrets`` — :class:`SecretsResolver` used to resolve missing
+      ``tenant_id`` / ``client_id`` / ``client_secret`` leaves on the
+      :class:`M365CalendarConfig`. Tests pass
+      :class:`tests.fakes.FakeSecretsLoader`; production omits the
+      kwarg (defaults to :class:`SecretsLoader`). Mirrors the
+      ``m365_email_headers`` sibling connector's shape per KP-2.
     """
 
     name: str = CONNECTOR_NAME
@@ -220,8 +261,10 @@ class M365CalendarConnector:
         clock: Callable[[], datetime] = _utc_now,
         per_user_client_factory: PerUserClientFactory = _default_per_user_client_factory,
         flag_reader: Callable[[str], bool] = _default_flag_reader,
+        secrets: SecretsResolver | None = None,
     ) -> None:
-        self._config = config
+        self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
+        self._config = _resolve_config_credentials(config, self._secrets)
         self._client_factory = client_factory
         self._clock = clock
         self._per_user_client_factory = per_user_client_factory
@@ -775,9 +818,6 @@ def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:
     Expected keys:
 
     * ``user_id`` (required) — the mailbox principal (UPN or object id).
-    * ``tenant_id`` / ``client_id`` / ``client_secret`` (required) —
-      Azure AD app registration credentials. Same triple as the
-      ``m365_email_headers`` sibling connector.
     * ``sensitivity`` (optional) — one of the F39 sensitivity literals;
       defaults to ``"internal"``.
     * ``scope`` (optional) — OAuth2 scope; defaults to
@@ -789,27 +829,52 @@ def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:
       Wave E ON branch falls back to a singleton derived from
       ``user_id``; when set, each entry becomes its own Container with
       its own delta cursor.
+    * ``tenant_id`` / ``client_id`` / ``client_secret`` (optional
+      advisory overrides) — operators with a dedicated per-connector M365
+      AAD app can pin specific credentials inline; when present, the
+      override wins over the loader-resolved value. The common case (one
+      tenant-wide app shared with ``m365_email_headers``) omits these
+      keys and lets the secret resolver supply them.
+
+    Credentials resolve via :class:`kairix.secrets.loader.SecretsLoader`
+    against the canonical identities ``(connector, m365, None, tenant-id)``,
+    ``(connector, m365, None, client-id)``, and
+    ``(connector, m365, None, client-secret)`` — same triple as the
+    ``m365_email_headers`` sibling connector (KP-2: one Azure AD app
+    grants Calendar.Read + Mail.Read across the tenant). The loader's
+    legacy-alias fallback resolves the historical ``CONNECTOR_M365_*`` /
+    ``KAIRIX_M365_*`` / ``M365_*`` env vars transparently so existing
+    deployments keep working unchanged.
+
+    Tests that want to verify the loader resolution shape construct
+    :class:`M365CalendarConnector` directly with ``secrets=`` set to
+    :class:`tests.fakes.FakeSecretsLoader` — mirrors the
+    ``m365_email_headers`` sibling's test pattern.
+
+    A missing ``user_id`` raises an F21-shaped :class:`ValueError`. A
+    missing credential leaf with no inline override raises
+    :class:`kairix.secrets.SecretNotFoundError` from the connector's
+    constructor; that message already carries the ``fix:`` / ``next:``
+    / ``run:`` markers naming the canonical KV secret + env var.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer resolves
     ``m365_calendar`` to this factory by name.
     """
-    required = ("user_id", "tenant_id", "client_id", "client_secret")
-    missing = [key for key in required if not config.get(key)]
-    if missing:
+    user_id = config.get("user_id")
+    if not isinstance(user_id, str) or not user_id:
         raise ValueError(
-            f"m365_calendar: config is missing required key(s): {sorted(missing)!r}. "
-            "fix: declare user_id + tenant_id + client_id + client_secret under the "
-            "m365_calendar connector block in kairix.config.yaml; secrets resolve via the "
-            "operator's secret-resolution path, not env vars. "
+            "m365_calendar: config is missing 'user_id'. "
+            "fix: add user_id: operator@example.com under the m365_calendar "
+            "connector block in kairix.config.yaml. "
             "next: see docs/architecture/connector-ingestion-architecture.md §10."
         )
 
     resolved = M365CalendarConfig(
-        user_id=str(config["user_id"]),
-        tenant_id=str(config["tenant_id"]),
-        client_id=str(config["client_id"]),
-        client_secret=str(config["client_secret"]),
+        user_id=str(user_id),
+        tenant_id=_inline_or_empty(config, "tenant_id"),
+        client_id=_inline_or_empty(config, "client_id"),
+        client_secret=_inline_or_empty(config, "client_secret"),
         sensitivity=config.get("sensitivity", "internal"),
         scope=str(config.get("scope", DEFAULT_GRAPH_SCOPE)),
         window_days_back=int(config.get("window_days_back", DEFAULT_WINDOW_DAYS_BACK)),
@@ -817,3 +882,17 @@ def make_connector(config: Mapping[str, Any]) -> M365CalendarConnector:
         user_ids=tuple(str(u) for u in config.get("user_ids", ())),
     )
     return M365CalendarConnector(resolved)
+
+
+def _inline_or_empty(config: Mapping[str, Any], key: str) -> str:
+    """Return the inline string override for ``key`` or ``""`` when absent.
+
+    Empty string is the sentinel the connector's
+    :func:`_resolve_config_credentials` reads to decide whether to ask
+    the :class:`SecretsResolver` for the leaf. A truthy string here is
+    a per-connector override that wins over the loader value.
+    """
+    value = config.get(key)
+    if isinstance(value, str) and value:
+        return value
+    return ""
