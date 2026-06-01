@@ -590,12 +590,20 @@ def test_metadata_for_unknown_id_returns_empty_metadata() -> None:
 
 
 def test_make_connector_missing_access_token_raises_with_fix_pointer() -> None:
-    with pytest.raises(ValueError) as exc_info:
+    # Post-ADR-032: an empty config triggers the secret-backed resolver
+    # (kairix.connectors.google_calendar.auth.resolve_calendar_access_token).
+    # In an environment without provisioned OAuth credentials it raises
+    # OSError carrying the F21-shaped hint pointing the operator at
+    # `kairix connect google-calendar`. The contract is unchanged
+    # (clear error with fix/next markers); the exception class shifted
+    # from ValueError to OSError because resolution now happens via the
+    # secrets backend.
+    with pytest.raises((ValueError, OSError)) as exc_info:
         make_connector({})
     msg = str(exc_info.value)
-    assert "access_token" in msg
     assert "fix:" in msg
     assert "next:" in msg
+    assert "kairix connect google-calendar" in msg or "access_token" in msg
 
 
 def test_make_connector_with_defaults_emits_primary_calendar_connector() -> None:

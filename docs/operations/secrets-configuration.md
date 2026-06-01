@@ -360,6 +360,47 @@ The mechanics depend on your source:
 
 After every rotation, run `kairix onboard check --json` to verify the new value loaded cleanly.
 
+## Capturing OAuth2 tokens with `kairix connect`
+
+For Google connectors (Gmail / Drive / Calendar) — and the Slack / GitHub App connectors landing alongside — `kairix connect` automates the OAuth2 capture so you do not have to copy-paste tokens into your KV.
+
+### Google (Gmail / Drive / Calendar)
+
+One-time GCP setup (do this once per kairix install; the same OAuth client works for all three Google connectors):
+
+1. **GCP project + APIs.** In the [GCP console](https://console.cloud.google.com/), create or pick a project. Under *APIs & Services → Library*, enable the APIs you need: **Gmail API**, **Google Drive API**, **Google Calendar API**.
+2. **Consent screen — set to Production.** Under *APIs & Services → OAuth consent screen*, choose **External** user type and configure the app name + support email. Then click **Publish App** to move the consent screen from Testing to Production.
+
+   This step is unavoidable and load-bearing. In Testing mode, Google silently expires refresh tokens after 7 days; your connector will stop working a week after capture and the failure is difficult to diagnose. Production mode keeps refresh tokens valid until the operator explicitly revokes them.
+3. **Create the OAuth client.** Under *APIs & Services → Credentials → Create credentials → OAuth client ID*, pick application type **Desktop app**. Name it whatever you like. After creation, click **Download JSON** — you'll get a `client_secret_<long-id>.json` file.
+4. **Run `kairix connect`.** Pass the downloaded JSON to the connect command:
+
+   ```bash
+   kairix connect google-gmail --client-secret-path ~/Downloads/client_secret.json
+   kairix connect google-drive --client-secret-path ~/Downloads/client_secret.json
+   kairix connect google-calendar --client-secret-path ~/Downloads/client_secret.json
+   ```
+
+   For each subcommand, your default browser opens to Google's consent screen, you approve the scopes, and `kairix connect` captures the resulting tokens into `$KAIRIX_SECRETS_FILE` (default `~/.config/kairix/secrets/kairix.env`).
+
+### Store backends
+
+`kairix connect` writes to whatever backend you choose:
+
+| Backend | Flag | Where the tokens land |
+|---|---|---|
+| File (default) | `--store=file` | `$KAIRIX_SECRETS_FILE` (default `~/.config/kairix/secrets/kairix.env`) |
+| Azure Key Vault | `--store=azure-kv` (reads `$KAIRIX_KV_NAME`) | `https://<vault>.vault.azure.net/` |
+| Azure Key Vault (named) | `--store=azure-kv:<vault-name>` | `https://<vault-name>.vault.azure.net/` |
+| Azure Key Vault (full URL) | `--store=azure-kv:https://<vault>.vault.usgovcloudapi.net/` | the exact URL (sovereign clouds) |
+| Stdout TSV | `--store=stdout` | `<CANONICAL_ENV_VAR>\t<value>` lines piped wherever you like |
+
+For Azure Key Vault, the identity running `kairix connect` needs the **Key Vault Secrets Officer** role on the vault (the read-only `Key Vault Secrets User` is not enough — writes need Officer). See [ADR-032 §"Operator setup for `--store=azure-kv`"](../architecture/ADR-032-oauth2-connect-flow.md) for the full identity-options matrix (managed identity / service principal / `az login`).
+
+### Headless VMs
+
+`kairix connect` opens a browser locally; on a headless VM it will fail fast with a clear hint to run from your local workstation instead. A `--no-browser` mode that prints the URL for you to paste into a remote browser is planned for a future release.
+
 ## Adding a new secret
 
 The canonical-name convention is load-bearing — there's no central registry to update. To add a new secret:

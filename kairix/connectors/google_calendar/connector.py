@@ -596,18 +596,24 @@ def make_connector(config: Mapping[str, Any]) -> GoogleCalendarConnector:
     kairix's ``pyproject.toml`` so the orchestration layer resolves
     ``google_calendar`` to this factory by name.
     """
-    if not config.get("access_token"):
-        raise ValueError(
-            "google_calendar: config is missing required key 'access_token'. "
-            "fix: declare access_token under the google_calendar connector "
-            "block in kairix.config.yaml; secrets resolve via the operator's "
-            "secret-resolution path, not env vars. "
-            "next: see kairix/connectors/google_calendar/README.md and GH #356 "
-            "for the credential provisioning runbook."
-        )
+    # ADR-032 §"Refresh handling (connector-side)" — when the config
+    # block omits an explicit access_token, resolve via the canonical
+    # secret backend with the refresh-on-cold-start path so the
+    # connector picks up a freshly-minted bearer rather than a
+    # potentially-stale one captured weeks ago. The
+    # ``resolve_calendar_access_token`` helper raises a clear OSError
+    # when neither the full credential set nor the legacy
+    # static-access-token slot is populated.
+    raw_token = config.get("access_token")
+    if raw_token:
+        access_token = str(raw_token)
+    else:
+        from kairix.connectors.google_calendar.auth import resolve_calendar_access_token
+
+        access_token = resolve_calendar_access_token()
 
     resolved = GoogleCalendarConfig(
-        access_token=str(config["access_token"]),
+        access_token=access_token,
         calendar_id=str(config.get("calendar_id", "primary")),
         sensitivity=config.get("sensitivity", "internal"),
         window_days_back=int(config.get("window_days_back", DEFAULT_INITIAL_WINDOW_DAYS_BACK)),

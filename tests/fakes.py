@@ -4251,3 +4251,146 @@ class FakeSecretsLoader:
                 f"Required secret not available: {canonical_secret_name(scope, area, instance, leaf)}.",  # type: ignore[arg-type]  # F3 rationale: FakeSecretsLoader accepts plain str scope for test ergonomics; canonical_secret_name expects Literal.
             )
         return value
+
+
+# ---------------------------------------------------------------------------
+# kairix.connect — OAuth2 connect flow fakes (ADR-032 Phase 1)
+# ---------------------------------------------------------------------------
+
+
+class FakeCallbackListener:
+    """In-memory ``CallbackListener`` that returns a pre-seeded callback.
+
+    Tests pre-populate either ``callback`` (success path) or one of
+    ``timeout`` / ``denied`` (failure-injection path). ``redirect_uri``
+    is a configured string — no socket is bound.
+
+    Per F1 / F2 — tests construct this directly, never monkeypatch the
+    real :class:`kairix.connect.listener.LocalhostCallbackListener`.
+    """
+
+    def __init__(
+        self,
+        *,
+        callback: Any = None,
+        timeout: bool = False,
+        denied: bool = False,
+        denied_message: str = "consent denied",
+        redirect_uri: str = "http://127.0.0.1:8080/oauth2callback",
+        port: int = 8080,
+    ) -> None:
+        self._callback = callback
+        self._timeout = timeout
+        self._denied = denied
+        self._denied_message = denied_message
+        self._redirect_uri = redirect_uri
+        self.port = port
+        self.wait_calls: list[float] = []
+        self.closed = False
+
+    @property
+    def redirect_uri(self) -> str:
+        return self._redirect_uri
+
+    def wait_for_callback(self, timeout_s: float = 120.0) -> Any:
+        from kairix.connect.protocols import (
+            CallbackDeniedError,
+            CallbackResult,
+            CallbackTimeoutError,
+        )
+
+        self.wait_calls.append(timeout_s)
+        if self._timeout:
+            raise CallbackTimeoutError(
+                f"fake listener: simulated timeout after {timeout_s:.0f}s. "
+                "fix: pre-seed FakeCallbackListener(callback=...) for the success path. "
+                "next: see tests/fakes.py FakeCallbackListener docstring. "
+                "run: pytest tests/unit/test_connect_listener.py -k success",
+            )
+        if self._denied:
+            raise CallbackDeniedError(
+                f"fake listener: {self._denied_message}. "
+                "fix: pre-seed FakeCallbackListener(callback=...) for the success path. "
+                "next: see tests/fakes.py FakeCallbackListener docstring. "
+                "run: pytest tests/unit/test_connect_listener.py -k consent",
+            )
+        if isinstance(self._callback, CallbackResult):
+            return self._callback
+        # Default — synthesise a deterministic test callback.
+        return CallbackResult(code="fake-code-001", state=None)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeTokenStore:
+    """In-memory ``TokenStore`` that records every store() call.
+
+    Tests pull the recorded payloads from ``self.writes`` to assert the
+    correct canonical names + values were written. The default
+    behaviour returns a synthetic :class:`WriteReport`; pass
+    ``raises=`` to exercise the unauthorized branch.
+    """
+
+    def __init__(self, *, raises: BaseException | None = None, backend: str = "fake") -> None:
+        self.writes: list[dict[str, Any]] = []
+        self._raises = raises
+        self._backend = backend
+
+    def store(self, **kwargs: Any) -> Any:
+        from kairix.connect.protocols import WriteReport
+        from kairix.secrets.naming import canonical_env_var
+
+        if self._raises is not None:
+            raise self._raises
+        self.writes.append(kwargs)
+        scope = kwargs["scope"]
+        area = kwargs["area"]
+        instance = kwargs.get("instance")
+        names = tuple(
+            canonical_env_var(scope, area, instance, leaf)
+            for leaf in ("client-id", "client-secret", "refresh-token", "access-token")
+        )
+        return WriteReport(canonical_names=names, backend=self._backend, target="<fake>")
+
+
+class FakeRefreshableToken:
+    """Configurable ``RefreshableToken`` — pinned token, optional expiry."""
+
+    def __init__(
+        self,
+        *,
+        token: str = "fake-access-token",
+        expired: bool = False,
+        refresh_raises: BaseException | None = None,
+    ) -> None:
+        self._token = token
+        self._expired = expired
+        self._raises = refresh_raises
+        self.refresh_calls = 0
+
+    def headers(self) -> dict[str, str]:
+        if self._expired:
+            self.refresh()
+        return {"Authorization": f"Bearer {self._token}"}
+
+    def is_expired(self) -> bool:
+        return self._expired
+
+    def refresh(self) -> None:
+        self.refresh_calls += 1
+        if self._raises is not None:
+            raise self._raises
+        self._expired = False
+
+
+class FakeBrowserLauncher:
+    """``BrowserLauncher`` that records every URL it was asked to open."""
+
+    def __init__(self, *, result: bool = True) -> None:
+        self.opened: list[str] = []
+        self._result = result
+
+    def open(self, url: str) -> bool:
+        self.opened.append(url)
+        return self._result

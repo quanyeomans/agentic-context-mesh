@@ -34,6 +34,7 @@ Subcommands:
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
   dead-letter Operator triage view over the connector_deadletter table (status)
   secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
+  connect     Operator-only: capture OAuth2 tokens for Google connectors (Gmail/Drive/Calendar)
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -76,6 +77,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "cc-pair": ("kairix.core.connectors.cc_pair_cli", "main", True),
     "dead-letter": ("kairix.dead_letter_cli", "main", True),
     "secrets": ("kairix.secrets.cli", "main", True),
+    "connect": ("kairix.connect.cli", "main", True),
 }
 
 

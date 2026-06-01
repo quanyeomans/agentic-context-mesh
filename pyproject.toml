@@ -149,6 +149,24 @@ caldav = [
     # connector's own ``client.py`` (which lazy-imports it on first use).
     "caldav>=1.3,<3",
 ]
+connect = [
+    # ADR-032 ``kairix connect`` OAuth2 token-capture CLI family.
+    # google-auth + google-auth-oauthlib: the consent dance for
+    # ``kairix connect google-{gmail,drive,calendar}`` and the runtime
+    # refresh wrapper used by the Drive + Calendar + Gmail connectors
+    # to mint fresh access tokens transparently (closes the silent-401
+    # bug Drive + Calendar previously surfaced as CredentialExpiredError).
+    # azure-identity + azure-keyvault-secrets — only loaded when the  # pragma: allowlist secret
+    # operator passes ``--store=azure-kv*``; default ``--store=file``
+    # skips both. DefaultAzureCredential walks the standard chain
+    # (managed identity → env → cached ``az login``).
+    # All four are lazy-imported inside the modules that need them so
+    # operators on the default file-store path never load the Azure SDK.
+    "google-auth>=2.40,<3",
+    "google-auth-oauthlib>=1.2,<2",
+    "azure-identity>=1.19,<2",
+    "azure-keyvault-secrets>=4.9,<5",
+]
 dev = [
     # Test runner
     "pytest>=8.0",

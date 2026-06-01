@@ -88,6 +88,13 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         # redacted, so agents can answer "is auth healthy?" without leaking
         # the operator-facing legacy-secret map.
         "secrets",
+        # connect is operator-only — opens a browser, captures OAuth2 tokens via
+        # the consent flow, and writes them to the operator's chosen store
+        # (file / Azure KV / stdout). Agents cannot complete a browser-based
+        # consent flow (no $DISPLAY, no human in the loop) and the capability
+        # writes credential material — categorically not safe to expose even
+        # as an escalation stub.
+        "connect",
     }
 )
 

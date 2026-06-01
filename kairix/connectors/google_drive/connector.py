@@ -153,21 +153,26 @@ def _default_flag_reader(name: str) -> bool:
 
 
 def _resolve_credentials_from_secrets() -> GoogleDriveCredentials:
-    """Resolve the Drive access token via :func:`kairix.secrets.get_secret`.
+    """Resolve Drive OAuth credentials with auto-refresh on cold-start.
 
-    The secret name ``connector-google-drive-access-token`` is the
-    canonical credential identifier for the Google Drive plugin. When
-    the secret is absent the function raises :class:`OSError` with an
-    actionable ``fix:`` message — module import never crashes, only
-    first-use of list_changes / fetch.
+    Per ADR-032 §"Refresh handling (connector-side)" this delegates to
+    :func:`kairix.connectors.google_drive.auth.resolve_drive_credentials_with_refresh`
+    which reads the full canonical OAuth credential set (client_id +
+    client_secret + refresh_token + access_token), mints a fresh
+    access_token via the refresh dance, and returns the credentials
+    with the fresh bearer.
+
+    Legacy path: if only ``connector-google-drive-access-token`` is set
+    (no refresh material), the function preserves the old behaviour —
+    returns the static token and the connector raises
+    :class:`CredentialExpiredError` on 401 as before.
 
     F15-clean: the resolved token is captured into the frozen dataclass
     and never logged through any code path in this module.
     """
-    from kairix.secrets import get_secret
+    from kairix.connectors.google_drive.auth import resolve_drive_credentials_with_refresh
 
-    token = get_secret("connector-google-drive-access-token", required=True) or ""
-    return GoogleDriveCredentials(access_token=token)
+    return resolve_drive_credentials_with_refresh()
 
 
 class GoogleDriveConnector:
