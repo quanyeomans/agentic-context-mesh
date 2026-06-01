@@ -88,7 +88,7 @@ def _ok_deps(
         )
     return ConnectDeps(
         listener_factory=lambda _h, _p: real_listener,
-        oauth2_flow_factory=lambda _cmd, _path, _port: flow,
+        oauth2_flow_factory=lambda _args: flow,
         token_store_factory=lambda _spec: real_store,
         stdout=real_stdout,
         stderr=real_stderr,
@@ -137,7 +137,7 @@ def test_cli_consent_denied_returns_nonzero(tmp_path: Path) -> None:
 
     deps_real = ConnectDeps(
         listener_factory=lambda _h, _p: listener,
-        oauth2_flow_factory=lambda _cmd, _path, _port: _RealCallFlow(),
+        oauth2_flow_factory=lambda _args: _RealCallFlow(),
         token_store_factory=lambda _spec: FakeTokenStore(),
         stdout=io.StringIO(),
         stderr=stderr,
@@ -172,7 +172,7 @@ def test_cli_timeout_returns_nonzero(tmp_path: Path) -> None:
 
     deps = ConnectDeps(
         listener_factory=lambda _h, _p: listener,
-        oauth2_flow_factory=lambda _cmd, _path, _port: _RealCallFlow(),
+        oauth2_flow_factory=lambda _args: _RealCallFlow(),
         token_store_factory=lambda _spec: FakeTokenStore(),
         stdout=io.StringIO(),
         stderr=stderr,
@@ -234,7 +234,7 @@ def _capture_store_from_main(tmp_path: Path, store_arg: str) -> tuple[int, objec
     listener = FakeCallbackListener()
     deps = ConnectDeps(
         listener_factory=lambda _h, _p: listener,
-        oauth2_flow_factory=lambda _cmd, _path, _port: _FakeFlow(
+        oauth2_flow_factory=lambda _args: _FakeFlow(
             tokens=CapturedTokens(
                 refresh_token="rt",
                 access_token="at",
@@ -322,7 +322,7 @@ def test_cli_build_azure_kv_malformed_form_returns_error_code(tmp_path: Path) ->
     cs = _make_client_secret(tmp_path / "cs.json")
     deps_real = ConnectDeps(
         listener_factory=lambda _h, _p: FakeCallbackListener(),
-        oauth2_flow_factory=lambda _cmd, _path, _port: _FakeFlow(
+        oauth2_flow_factory=lambda _args: _FakeFlow(
             tokens=CapturedTokens(refresh_token="rt", access_token="at", token_uri=GOOGLE_TOKEN_URI),
             client=ClientCredentials(client_id="cid", client_secret="csec"),
         ),

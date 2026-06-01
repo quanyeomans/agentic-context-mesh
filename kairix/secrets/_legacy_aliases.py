@@ -99,6 +99,9 @@ LEGACY_ALIASES: dict[tuple[Scope, str, str | None, str], list[str]] = {
         "M365_CLIENT_SECRET",  # pragma: allowlist secret
     ],
     # ── Connectors: Slack ──────────────────────────────────────────
+    # Singleton (default) — instance=None form. Pre-dates the
+    # per-workspace plumbing; kept for backwards-compat with existing
+    # operator deployments.
     ("connector", "slack", None, "bot-token"): [
         "CONNECTOR_SLACK_BOT_TOKEN",
     ],
@@ -111,6 +114,22 @@ LEGACY_ALIASES: dict[tuple[Scope, str, str | None, str], list[str]] = {
     ("connector", "slack", None, _LEAF_CLIENT_SECRET): [
         "CONNECTOR_SLACK_CLIENT_SECRET",  # pragma: allowlist secret
     ],
+    # Per-workspace shape (ADR-032 Phase 2 / #362 resolution). The
+    # ``instance`` slot carries the workspace name so two Slack
+    # workspaces (``alpha``, ``coach``) can co-resident in the same
+    # KV without clobbering each other. New deployments use this
+    # shape; the singleton rows above stay for back-compat. Operators
+    # provisioning per-workspace tokens before #362 closes use the
+    # canonical names directly (no legacy alias to map) — the canonical
+    # name already names the workspace via the instance slot:
+    #   kairix-connector-slack-<workspace>-bot-token
+    #   kairix-connector-slack-<workspace>-app-token
+    #   kairix-connector-slack-<workspace>-client-id
+    #   kairix-connector-slack-<workspace>-client-secret
+    # Per-workspace rows land here on a per-deployment basis as
+    # operators retire whatever legacy single-token env-var they were
+    # using. No compile-time enumeration of workspace names; rows
+    # land in operator-controlled overrides at provision time.
     # ── Connectors: GitHub ─────────────────────────────────────────
     ("connector", "github", None, "pat"): [
         "CONNECTOR_GITHUB_PERSONAL_ACCESS_TOKEN",

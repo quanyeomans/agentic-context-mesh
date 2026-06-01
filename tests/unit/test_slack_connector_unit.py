@@ -1104,3 +1104,60 @@ def test_slack_loader_miss_on_required_bot_token_raises() -> None:
     )
     with pytest.raises(SecretNotFoundError):
         connector._web()
+
+
+def test_slack_per_workspace_instance_routes_to_workspace_canonical_name() -> None:
+    """Per-workspace ``workspace=`` resolves tokens via the per-workspace instance slot.
+
+    ADR-032 Phase 2: when ``kairix connect slack --workspace alpha`` captured
+    the bot token under ``kairix-connector-slack-alpha-bot-token``, the
+    connector configured with ``workspace="alpha"`` should resolve THAT
+    canonical name — not the legacy singleton ``kairix-connector-slack-bot-token``.
+    """
+    # The 'singleton' entry must NOT be used — only the per-workspace tuple should resolve.
+    fake_secrets = FakeSecretsLoader(
+        values={
+            ("connector", "slack", "alpha", "bot-token"): "xoxb-alpha-only",  # pragma: allowlist secret
+            ("connector", "slack", None, "bot-token"): "xoxb-singleton-WRONG",  # pragma: allowlist secret
+        },
+    )
+    web = _InMemoryWeb(channels=[])
+
+    def _builder(_creds: SlackCredentials) -> SlackWebClient:
+        return web
+
+    connector = SlackConnector(
+        workspace="alpha",
+        secrets=fake_secrets,
+        web_client_factory=_builder,
+        flag_reader=FakeFeatureFlagResolver().with_flag("connector_slack", False).get,
+    )
+    connector._web()
+    # The loader was asked for the per-workspace tuple, not the singleton one.
+    asked = {(scope, area, instance, leaf) for scope, area, instance, leaf in fake_secrets.get_calls}
+    assert ("connector", "slack", "alpha", "bot-token") in asked, (
+        f"expected per-workspace bot-token tuple in resolver calls, got: {asked!r}"
+    )
+    # The resolved bot_token must be the per-workspace value, not the singleton.
+    assert connector._credentials is not None
+    assert connector._credentials.bot_token == "xoxb-alpha-only", (
+        f"expected per-workspace bot_token, got: {connector._credentials.bot_token!r}"
+    )
+
+
+def test_slack_make_connector_propagates_workspace_from_config() -> None:
+    """make_connector({"workspace": "coach"}) wires the workspace into the connector."""
+    from kairix.connectors.slack.connector import make_connector
+
+    connector = make_connector({"workspace": "coach"})
+    assert connector.workspace == "coach", (
+        f"expected workspace='coach' on the constructed connector, got: {connector.workspace!r}"
+    )
+
+
+def test_slack_make_connector_workspace_defaults_to_none() -> None:
+    """make_connector({}) leaves workspace=None for back-compat singleton resolution."""
+    from kairix.connectors.slack.connector import make_connector
+
+    connector = make_connector({})
+    assert connector.workspace is None

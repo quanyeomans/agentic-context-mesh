@@ -48,6 +48,17 @@ class CapturedTokens:
     consent screen is in Production state — see the connect README's
     GCP setup walkthrough.
 
+    ``bot_token`` + ``app_token`` carry the Slack-shape long-lived
+    tokens (``xoxb-…`` workspace bot token; ``xapp-…`` app-level token
+    for Socket Mode). Slack returns no refresh_token (bot tokens never
+    expire), so :class:`kairix.connect.oauth2.slack.SlackOAuth2Flow`
+    sets ``refresh_token=""`` and populates ``bot_token`` (and
+    optionally ``app_token``) instead. Token stores skip empty-string
+    leaves at write time, so each service writes only the leaves it
+    actually captured — Google writes 4 (client-id, client-secret,
+    refresh-token, access-token); Slack writes 3 (client-id,
+    client-secret, bot-token) plus app-token when Socket Mode is wired.
+
     F15-sensitive: token values live here only to round-trip from the
     OAuth exchange into a ``TokenStore``; this dataclass is never
     serialised to logs.
@@ -57,6 +68,8 @@ class CapturedTokens:
     access_token: str
     token_uri: str
     expires_in: int | None = None
+    bot_token: str = ""
+    app_token: str = ""
 
 
 @dataclass(frozen=True)

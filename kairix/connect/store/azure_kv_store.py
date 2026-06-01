@@ -37,19 +37,10 @@ from kairix.connect.protocols import (
     TokenStoreUnauthorizedError,
     WriteReport,
 )
+from kairix.connect.store.leaves import leaf_pairs
 from kairix.secrets.naming import Scope, canonical_secret_name
 
 _BACKEND_NAME = "azure-kv"
-
-# Same four canonical leaves the other stores write — Azure KV stores
-# them as four distinct secrets (one per leaf), matching the ADR-031
-# resolution shape on the read side.
-_LEAVES: tuple[tuple[str, str], ...] = (
-    ("client-id", "client_id"),
-    ("client-secret", "client_secret"),
-    ("refresh-token", "refresh_token"),
-    ("access-token", "access_token"),
-)
 
 
 class AzureKeyVaultTokenStore:
@@ -98,9 +89,8 @@ class AzureKeyVaultTokenStore:
         url = self._resolve_vault_url()
         secret_client = self._build_secret_client(url)
         canonical: list[str] = []
-        for leaf, attr in _LEAVES:
+        for leaf, value in leaf_pairs(client, tokens):
             name = canonical_secret_name(scope, area, instance, leaf)
-            value = _resolve_value(attr, tokens, client)
             try:
                 secret_client.set_secret(name, value)  # type: ignore[attr-defined]  # F3 rationale: secret_client is typed object because the live SecretClient + the test FakeSecretClient share the .set_secret(name, value) shape but no common base.
             except Exception as exc:
@@ -165,18 +155,6 @@ class AzureKeyVaultTokenStore:
                 "run: pip install 'azure-identity>=1.19' 'azure-keyvault-secrets>=4.9'",
             ) from exc
         return DefaultAzureCredential()
-
-
-def _resolve_value(attr: str, tokens: CapturedTokens, client: ClientCredentials) -> str:
-    if attr == "client_id":
-        return client.client_id
-    if attr == "client_secret":
-        return client.client_secret
-    if attr == "refresh_token":
-        return tokens.refresh_token
-    if attr == "access_token":
-        return tokens.access_token
-    raise KeyError(f"kairix connect: unknown attribute {attr!r}.")
 
 
 # Protocol conformance smoke check.

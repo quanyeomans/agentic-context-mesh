@@ -1,14 +1,18 @@
 """``kairix connect`` CLI dispatcher.
 
 Operator surface for capturing OAuth2 tokens via the ``kairix connect
-<service>`` family. Phase 1 wires:
+<service>`` family. Phase 1 + Phase 2 wires:
 
   * ``kairix connect google-gmail`` — Gmail OAuth2 flow
   * ``kairix connect google-drive`` — Google Drive OAuth2 flow
   * ``kairix connect google-calendar`` — Google Calendar OAuth2 flow
+  * ``kairix connect slack --workspace <name>`` — Slack OAuth v2 flow,
+    per-workspace canonical-naming via the ``instance`` slot
 
 Each subcommand:
-  1. Reads the OAuth client credentials from ``--client-secret-path``.
+  1. Reads the OAuth client credentials from the per-service source
+     (Google: ``--client-secret-path``; Slack: ``--client-id`` +
+     ``--client-secret`` or pre-populated KV entries).
   2. Starts the localhost callback listener (``--port``, default 8080).
   3. Opens the browser to the consent screen.
   4. Captures the code via the listener (timeout 120s by default).
@@ -19,6 +23,10 @@ Each subcommand:
 F6-compliance: tests inject :class:`ConnectDeps` rather than passing
 ``*_fn=None`` kwargs to the free functions. The deps dataclass mirrors
 ``kairix.worker.WorkerDeps``.
+
+Dispatch is via :data:`SUBCOMMAND_REGISTRY` — a mapping from
+subcommand name to a flow-factory callable. New services land by
+adding one row + one subparser; no if/elif chain.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ from typing import TextIO
 
 from kairix.connect.listener import DEFAULT_PORT, LocalhostCallbackListener
 from kairix.connect.oauth2.google import GoogleOAuth2Flow
+from kairix.connect.oauth2.slack import SLACK_SERVICE_AREA, SlackOAuth2Flow
 from kairix.connect.protocols import (
     CallbackListener,
     CapturedTokens,
@@ -46,12 +55,105 @@ from kairix.connect.store.file_store import FileTokenStore
 from kairix.connect.store.stdout_store import StdoutTokenStore
 from kairix.secrets.naming import Scope
 
-# Map of CLI subcommand → (service_area, scope override). Drives the
-# ``GoogleOAuth2Flow`` construction and the canonical-name writes.
-_GOOGLE_SUBCOMMANDS: dict[str, str] = {
-    "google-gmail": "gmail",
-    "google-drive": "google-drive",
-    "google-calendar": "google-calendar",
+
+# Per-subcommand spec: how to derive (area, instance) for the canonical
+# write AND how to build the OAuth2Flow from the argparse namespace.
+@dataclass(frozen=True)
+class _SubcommandSpec:
+    """One row in :data:`SUBCOMMAND_REGISTRY`.
+
+    Fields:
+
+      * ``service_area`` — the canonical-naming "area" slot (per ADR-031).
+        Google subcommands set distinct areas (``"gmail"``,
+        ``"google-drive"``, ``"google-calendar"``); Slack sets
+        ``"slack"`` and uses the ``instance`` slot for the workspace.
+      * ``flow_builder`` — callable receiving the argparse Namespace
+        and returning a concrete :class:`OAuth2Flow`. Slack reads
+        ``args.workspace`` + ``args.client_id`` + ``args.client_secret``;
+        Google reads ``args.client_secret_path``.
+      * ``instance_reader`` — callable receiving the argparse
+        Namespace and returning the canonical-naming ``instance`` slot
+        value (``None`` for Google singletons; the workspace name for
+        Slack so per-workspace tokens land in distinct KV entries).
+    """
+
+    service_area: str
+    flow_builder: Callable[[argparse.Namespace], OAuth2Flow]
+    instance_reader: Callable[[argparse.Namespace], str | None]
+
+
+def _build_google_flow(subcommand: str) -> Callable[[argparse.Namespace], OAuth2Flow]:
+    """Return a flow-builder closure for one Google subcommand."""
+
+    def build(args: argparse.Namespace) -> OAuth2Flow:
+        return GoogleOAuth2Flow(
+            service_area=_GOOGLE_AREA_FOR_SUBCOMMAND[subcommand],
+            client_secret_path=args.client_secret_path,
+        )
+
+    return build
+
+
+def _build_slack_flow(args: argparse.Namespace) -> OAuth2Flow:
+    """Build a :class:`SlackOAuth2Flow` from the parsed CLI args."""
+    return SlackOAuth2Flow(
+        workspace=args.workspace,
+        client_id=args.client_id,
+        client_secret=args.client_secret,
+    )
+
+
+def _none_instance(_args: argparse.Namespace) -> str | None:
+    """Instance-reader for singleton services (Google subcommands)."""
+    return None
+
+
+def _slack_workspace_instance(args: argparse.Namespace) -> str | None:
+    """Instance-reader for Slack — the workspace name lands in the slot."""
+    return str(args.workspace)
+
+
+# Subcommand names — hoisted constants so F17 (no string literal ≥10 chars
+# duplicated ≥3 times) stays clean across the registry, the argparse
+# subparser registration, and the per-subcommand flow builders.
+_CMD_GOOGLE_GMAIL = "google-gmail"
+_CMD_GOOGLE_DRIVE = "google-drive"
+_CMD_GOOGLE_CALENDAR = "google-calendar"
+
+# Map of Google subcommand → canonical service-area. Drives both the
+# argparse subparser registration and the per-subcommand flow builder.
+_GOOGLE_AREA_FOR_SUBCOMMAND: dict[str, str] = {
+    _CMD_GOOGLE_GMAIL: "gmail",
+    _CMD_GOOGLE_DRIVE: _CMD_GOOGLE_DRIVE,
+    _CMD_GOOGLE_CALENDAR: _CMD_GOOGLE_CALENDAR,
+}
+
+
+# Public dispatch registry. New services land by adding one row here +
+# one subparser in :func:`_build_parser`. The dispatch is then automatic
+# — no if/elif chain inside :func:`_run`.
+SUBCOMMAND_REGISTRY: dict[str, _SubcommandSpec] = {
+    _CMD_GOOGLE_GMAIL: _SubcommandSpec(
+        service_area="gmail",
+        flow_builder=_build_google_flow(_CMD_GOOGLE_GMAIL),
+        instance_reader=_none_instance,
+    ),
+    _CMD_GOOGLE_DRIVE: _SubcommandSpec(
+        service_area=_CMD_GOOGLE_DRIVE,
+        flow_builder=_build_google_flow(_CMD_GOOGLE_DRIVE),
+        instance_reader=_none_instance,
+    ),
+    _CMD_GOOGLE_CALENDAR: _SubcommandSpec(
+        service_area=_CMD_GOOGLE_CALENDAR,
+        flow_builder=_build_google_flow(_CMD_GOOGLE_CALENDAR),
+        instance_reader=_none_instance,
+    ),
+    "slack": _SubcommandSpec(
+        service_area=SLACK_SERVICE_AREA,
+        flow_builder=_build_slack_flow,
+        instance_reader=_slack_workspace_instance,
+    ),
 }
 
 
@@ -71,9 +173,8 @@ class ConnectDeps:
         :class:`LocalhostCallbackListener`; tests inject a fake that
         returns a recording stub.
       * ``oauth2_flow_factory`` — builds the per-service
-        :class:`OAuth2Flow` given subcommand + client_secret_path +
-        port. Tests inject a fake that returns the captured tokens
-        directly.
+        :class:`OAuth2Flow` given the parsed argparse Namespace. Tests
+        inject a fake that returns a recording flow directly.
       * ``token_store_factory`` — builds the :class:`TokenStore` given
         the ``--store`` string. Tests inject a fake that records the
         write target.
@@ -86,7 +187,7 @@ class ConnectDeps:
     listener_factory: Callable[[str, int], CallbackListener] = field(
         default_factory=lambda: _default_listener_factory,
     )
-    oauth2_flow_factory: Callable[[str, Path, int], OAuth2Flow] = field(
+    oauth2_flow_factory: Callable[[argparse.Namespace], OAuth2Flow] = field(
         default_factory=lambda: _default_oauth2_flow_factory,
     )
     token_store_factory: Callable[[str], TokenStore] = field(
@@ -100,20 +201,22 @@ def _default_listener_factory(host: str, port: int) -> CallbackListener:
     return LocalhostCallbackListener(host=host, port=port)
 
 
-def _default_oauth2_flow_factory(subcommand: str, client_secret_path: Path, _port: int) -> OAuth2Flow:
-    """Build the per-subcommand OAuth2Flow. Phase 1 covers Google only."""
-    service_area = _GOOGLE_SUBCOMMANDS.get(subcommand)
-    if service_area is None:
+def _default_oauth2_flow_factory(args: argparse.Namespace) -> OAuth2Flow:
+    """Build the per-subcommand OAuth2Flow from the parsed argv.
+
+    Routes through :data:`SUBCOMMAND_REGISTRY` — adding a new service
+    means appending one row to the registry + one subparser to
+    :func:`_build_parser`; this dispatcher stays unchanged.
+    """
+    spec = SUBCOMMAND_REGISTRY.get(args.subcommand)
+    if spec is None:
         raise ValueError(
-            f"kairix connect: unsupported subcommand {subcommand!r}. "
-            f"fix: pass one of {sorted(_GOOGLE_SUBCOMMANDS)}. "
+            f"kairix connect: unsupported subcommand {args.subcommand!r}. "
+            f"fix: pass one of {sorted(SUBCOMMAND_REGISTRY)}. "
             f"next: see kairix/connect/README.md for the supported services. "
             f"run: kairix connect google-gmail --client-secret-path <path>",
         )
-    return GoogleOAuth2Flow(
-        service_area=service_area,
-        client_secret_path=client_secret_path,
-    )
+    return spec.flow_builder(args)
 
 
 def _default_token_store_factory(store_spec: str) -> TokenStore:
@@ -155,27 +258,13 @@ def _build_azure_kv_store(store_spec: str) -> TokenStore:
     return AzureKeyVaultTokenStore(vault_name=value)
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="kairix connect",
-        description=(
-            "Capture OAuth2 tokens for a kairix connector. Opens the operator's browser "
-            "to the service's consent screen, captures the callback on a localhost listener, "
-            "and writes canonical-named secrets to the chosen store backend."
-        ),
-    )
-    parser.add_argument(
-        "subcommand",
-        choices=sorted(_GOOGLE_SUBCOMMANDS),
-        help="Which service to connect (one of: google-gmail | google-drive | google-calendar).",
-    )
-    parser.add_argument(
-        "--client-secret-path",
-        required=True,
-        type=Path,
-        help="Path to the operator-downloaded client_secret.json from the GCP console.",
-    )
-    parser.add_argument(
+def _add_common_store_args(p: argparse.ArgumentParser) -> None:
+    """Attach the shared ``--store / --port / --host / --timeout`` flags.
+
+    Lifted to one place so adding a new subcommand doesn't drift on
+    these — every subcommand has identical store + listener semantics.
+    """
+    p.add_argument(
         "--store",
         default="file",
         help=(
@@ -185,23 +274,78 @@ def _build_parser() -> argparse.ArgumentParser:
             "azure-kv[:<vault-name>|:<vault-url>] (Azure Key Vault via DefaultAzureCredential)."
         ),
     )
-    parser.add_argument(
+    p.add_argument(
         "--port",
         type=int,
         default=DEFAULT_PORT,
         help=f"Localhost port for the OAuth callback listener. Default {DEFAULT_PORT}.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--host",
         default="127.0.0.1",
         help="Host for the OAuth callback listener. Default 127.0.0.1.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--timeout",
         type=float,
         default=120.0,
         help="Seconds to wait for the operator to complete the browser flow. Default 120.",
     )
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kairix connect",
+        description=(
+            "Capture OAuth2 tokens for a kairix connector. Opens the operator's browser "
+            "to the service's consent screen, captures the callback on a localhost listener, "
+            "and writes canonical-named secrets to the chosen store backend."
+        ),
+    )
+    sub = parser.add_subparsers(dest="subcommand", required=True)
+
+    # Google family — three subcommands share the same argv shape.
+    for cmd in sorted(_GOOGLE_AREA_FOR_SUBCOMMAND):
+        p = sub.add_parser(
+            cmd,
+            help=f"Connect {cmd} — captures Google OAuth2 tokens for the matching service.",
+        )
+        p.add_argument(
+            "--client-secret-path",
+            required=True,
+            type=Path,
+            help="Path to the operator-downloaded client_secret.json from the GCP console.",
+        )
+        _add_common_store_args(p)
+
+    # Slack — per-workspace via the canonical-naming ``instance`` slot.
+    slack_p = sub.add_parser(
+        "slack",
+        help="Connect slack — captures a Slack workspace bot token via OAuth v2.",
+    )
+    slack_p.add_argument(
+        "--workspace",
+        required=True,
+        type=str,
+        help=(
+            "Operator-chosen workspace identifier — lands in the canonical-naming "
+            "instance slot (kairix-connector-slack-<workspace>-bot-token). Use a slug "
+            "like 'alpha' or 'coach' so per-workspace tokens stay distinct in your KV."
+        ),
+    )
+    slack_p.add_argument(
+        "--client-id",
+        required=True,
+        type=str,
+        help=("Slack app's OAuth client_id from https://api.slack.com/apps -> Basic Information."),
+    )
+    slack_p.add_argument(
+        "--client-secret",
+        required=True,
+        type=str,
+        help=("Slack app's OAuth client_secret from https://api.slack.com/apps -> Basic Information."),
+    )
+    _add_common_store_args(slack_p)
     return parser
 
 
@@ -227,7 +371,7 @@ def _run(args: argparse.Namespace, deps: ConnectDeps) -> int:
         deps.stderr.write(str(exc) + "\n")
         return 1
     try:
-        flow = deps.oauth2_flow_factory(args.subcommand, args.client_secret_path, args.port)
+        flow = deps.oauth2_flow_factory(args)
     except (FileNotFoundError, ValueError) as exc:
         listener.close()
         deps.stderr.write(str(exc) + "\n")
@@ -248,20 +392,21 @@ def _run(args: argparse.Namespace, deps: ConnectDeps) -> int:
     except ValueError as exc:
         deps.stderr.write(str(exc) + "\n")
         return 1
+    spec = SUBCOMMAND_REGISTRY[args.subcommand]
     scope: Scope = "connector"
-    area = _GOOGLE_SUBCOMMANDS[args.subcommand]
+    instance = spec.instance_reader(args)
     try:
         report = store.store(
             scope=scope,
-            area=area,
-            instance=None,
+            area=spec.service_area,
+            instance=instance,
             tokens=tokens,
             client=client,
         )
     except ConnectError as exc:
         deps.stderr.write(str(exc) + "\n")
         return 1
-    _print_success(deps.stdout, args.subcommand, report, tokens, client)
+    _print_success(deps.stdout, args.subcommand, report, tokens, client, flow)
     return 0
 
 
@@ -271,17 +416,28 @@ def _print_success(
     report: WriteReport,
     _tokens: CapturedTokens,
     _client: ClientCredentials,
+    flow: OAuth2Flow,
 ) -> None:
     """Print the operator-facing success summary.
 
     F15-clean: the token values are deliberately not echoed; only the
     canonical names are printed. Operators read the values back from
     the configured store.
+
+    Slack adds an extra line naming the team — the Slack OAuth
+    response carries ``team_id`` + ``team_name`` so the operator
+    sees which workspace the bot was actually installed into (a
+    typo in ``--workspace`` would otherwise silently land tokens
+    under the wrong instance).
     """
     stdout.write(f"kairix connect {subcommand}: ok\n")
     stdout.write(f"  backend: {report.backend}\n")
     if report.target:
         stdout.write(f"  target:  {report.target}\n")
+    team_id = getattr(flow, "team_id", "") or ""
+    team_name = getattr(flow, "team_name", "") or ""
+    if team_id or team_name:
+        stdout.write(f"  team:    {team_name} ({team_id})\n")
     stdout.write("  names:\n")
     for name in report.canonical_names:
         stdout.write(f"    - {name}\n")

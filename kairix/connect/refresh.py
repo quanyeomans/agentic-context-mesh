@@ -141,6 +141,12 @@ def _default_google_refresh(state: GoogleRefreshState) -> tuple[str, float]:
             "next: re-run the connector after installing google-auth. "
             "run: pip install 'google-auth>=2.40'",
         ) from exc
+    # google-auth's Credentials + .refresh are untyped per the lib's
+    # PEP 561 absence; runtime contract is exercised in
+    # tests/unit/test_connect_refresh.py. Suppressions are needed when
+    # the SDK IS installed (mypy resolves the symbols) but become
+    # unused-ignore warnings on hosts without the SDK on the path —
+    # CI installs all extras and produces the strict-typed Any here.
     creds = Credentials(  # type: ignore[no-untyped-call]  # F3 rationale: google-auth ships no PEP-561 stubs; constructor signature checked at runtime via stubs in tests/unit/test_connect_refresh.py
         token=None,
         refresh_token=state.refresh_token,

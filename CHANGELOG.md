@@ -10,11 +10,13 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 ### New for operators
 
 - **`kairix connect google-gmail | google-drive | google-calendar` — one-command OAuth setup.** Run the command, your browser opens to Google's consent screen, you approve, and the captured tokens land in your secrets store (file by default; Azure Key Vault and stdout-pipe also supported). No more manual GCP-console-then-KV-copy-paste for the four canonical secrets per Google service. See [`kairix/connect/README.md`](kairix/connect/README.md) for the one-time GCP setup walkthrough.
+- **`kairix connect slack --workspace <name>` — one-command Slack workspace setup.** Run the command with your Slack app's client_id + client_secret, the browser opens to Slack's workspace-install screen, you approve, and the captured bot token lands in your secrets store under a per-workspace canonical name (`KAIRIX_CONNECTOR_SLACK_<NAME>_BOT_TOKEN`). Run again for a second workspace — both co-exist in the same KV. The README walks you through the one-time Slack app setup at api.slack.com.
 - **Google Drive and Calendar now auto-refresh tokens.** Previously these connectors expected a static `access_token` and surfaced `CredentialExpiredError` to the operator the moment Google's hour-long access-token TTL ran out — the failure was silent on the connector side and looked like "Drive sync just stopped working a week after I set it up". The new auto-refresh path uses the `refresh_token` captured by `kairix connect` (or pre-provisioned in KV under the canonical names) to mint fresh access tokens transparently. Gmail already worked this way; Drive and Calendar now match.
 
 ### Important when upgrading
 
 - **Production-mode OAuth consent screen is unavoidable for Google.** If you set up Google connectors with the consent screen in Testing mode, refresh tokens silently expire after 7 days. The `kairix connect` README walks you through publishing the consent screen to Production state — do that step before running `kairix connect google-*`, otherwise you'll hit the seven-day-cliff failure again.
+- **Per-workspace Slack tokens.** The Slack connector now reads tokens by workspace (`KAIRIX_CONNECTOR_SLACK_<NAME>_BOT_TOKEN`); existing singleton deployments using `CONNECTOR_SLACK_BOT_TOKEN` continue to work through the legacy-alias layer. To switch to per-workspace tokens, run `kairix connect slack --workspace <name>` and update your connector config to include `workspace: <name>` — the connector then reads from the per-workspace canonical name.
 
 ## [2026.5.31a2] - 2026-05-31 — Restart-resilient embed, one credential naming rule, silent-config-bug class closed
 

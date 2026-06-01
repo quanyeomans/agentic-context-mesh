@@ -24,6 +24,7 @@ import pytest
 
 from kairix.connect.listener import LocalhostCallbackListener
 from kairix.connect.oauth2.google import GOOGLE_TOKEN_URI, GoogleOAuth2Flow
+from kairix.connect.oauth2.slack import SLACK_TOKEN_URI, SlackOAuth2Flow
 from kairix.connect.protocols import (
     BrowserLauncher,
     CallbackListener,
@@ -61,6 +62,12 @@ def test_oauth2_flow_real_implementation_satisfies_protocol(tmp_path: Path) -> N
     cs = tmp_path / "cs.json"
     cs.write_text('{"installed":{"client_id":"x","client_secret":"y"}}')
     flow = GoogleOAuth2Flow(service_area="gmail", client_secret_path=cs)
+    assert isinstance(flow, OAuth2Flow)
+
+
+def test_slack_oauth2_flow_satisfies_protocol() -> None:
+    """:class:`SlackOAuth2Flow` satisfies :class:`OAuth2Flow` (F43)."""
+    flow = SlackOAuth2Flow(workspace="alpha", client_id="x", client_secret="y")
     assert isinstance(flow, OAuth2Flow)
 
 
@@ -185,6 +192,51 @@ def test_refreshable_token_unavailable_when_refresh_fails() -> None:
     token = GoogleRefreshableToken(state=state, refresh_fn=refresh_fn)
     with pytest.raises(RefreshUnavailableError, match="refresh failed"):
         token.refresh()
+
+
+def test_slack_oauth2_flow_discover_raises_when_credentials_empty() -> None:
+    """F68 ``raises`` shape for Slack: missing client credentials surface at construction.
+
+    Slack carries its credentials in the constructor (no on-disk
+    ``client_secret.json`` like Google), so the ``raises`` shape
+    triggers at ``SlackOAuth2Flow.__init__`` rather than at
+    ``discover_client_credentials``. The contract is the same: an
+    operator-correctable failure with F21 markers.
+    """
+    with pytest.raises(ValueError, match=r"client_id and client_secret are required"):
+        SlackOAuth2Flow(workspace="alpha", client_id="", client_secret="csec")  # pragma: allowlist secret
+
+
+def test_slack_oauth2_flow_authorize_returns_partial_no_refresh_token() -> None:
+    """F68 ``returns_partial`` shape: Slack's documented no-refresh-token response.
+
+    The contract is round-trip: the Flow returns whatever the
+    exchanger gave it. Slack ALWAYS returns ``refresh_token=""`` for
+    bot tokens (bot tokens never expire — see ADR-032 §"Refresh
+    handling"). This test pins that the partial state is surfaced to
+    the caller verbatim — the caller (CLI / store) doesn't reject it.
+    """
+
+    def slack_exchanger(_c: ClientCredentials, _code: str, _ru: str) -> CapturedTokens:
+        return CapturedTokens(
+            refresh_token="",  # PARTIAL — Slack never grants refresh tokens.
+            access_token="",
+            token_uri=SLACK_TOKEN_URI,
+            bot_token="xoxb-partial",
+        )
+
+    flow = SlackOAuth2Flow(
+        workspace="alpha",
+        client_id="cid",
+        client_secret="csec",  # pragma: allowlist secret
+        browser=FakeBrowserLauncher(),
+        token_exchanger=slack_exchanger,
+    )
+    tokens = flow.authorize(listener=FakeCallbackListener())
+    # Caller sees the partial state verbatim — refresh_token is "".
+    assert tokens.refresh_token == ""
+    # The bot_token field carries the Slack credential the connector reads.
+    assert tokens.bot_token == "xoxb-partial"
 
 
 # ---------------------------------------------------------------------------

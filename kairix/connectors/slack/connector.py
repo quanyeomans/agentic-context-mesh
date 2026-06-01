@@ -181,7 +181,10 @@ class SlackCredentials:
     client_secret: str | None = None
 
 
-def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> SlackCredentials:
+def _resolve_credentials_from_secrets(
+    secrets: SecretsResolver,
+    workspace: str | None = None,
+) -> SlackCredentials:
     """Resolve the workspace credentials via :class:`SecretsResolver`.
 
     ADR-031 canonical-naming: each leaf below routes through the
@@ -193,27 +196,31 @@ def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> SlackCredenti
     The Slack credential triple lives under four canonical leaves
     (mirrors the M365 sibling shape):
 
-      * ``("connector", "slack", None, "bot-token")`` (required) —
+      * ``("connector", "slack", <workspace>, "bot-token")`` (required) —
         ``xoxb-…``.
-      * ``("connector", "slack", None, "app-token")`` (optional) —
+      * ``("connector", "slack", <workspace>, "app-token")`` (optional) —
         ``xapp-…`` for Socket Mode; absent when only the poll surface
         is wired.
-      * ``("connector", "slack", None, "client-id")`` /
-        ``("connector", "slack", None, "client-secret")`` (optional) —
+      * ``("connector", "slack", <workspace>, "client-id")`` /
+        ``("connector", "slack", <workspace>, "client-secret")`` (optional) —
         the OAuth v2 install flow's app-registration credentials;
         absent when the operator has already installed and only the
         worker is running.
 
-    The canonical schema currently models Slack with ``instance=None``;
-    production runs per-workspace tokens (slack-bot-token-builder /
-    slack-bot-token-coach). Per-workspace ``instance`` support is a
-    separate follow-up; this refactor only moves the resolution onto
-    the loader surface.
+    Per-workspace ``instance`` support (ADR-032 Phase 2): when
+    ``workspace`` is supplied, the resolver looks for
+    ``kairix-connector-slack-<workspace>-bot-token`` (and siblings)
+    so a single deployment can carry per-workspace tokens for
+    ``alpha`` and ``coach`` side-by-side. When ``workspace`` is
+    ``None`` (the legacy singleton shape), the loader's alias
+    fallback still resolves the original ``CONNECTOR_SLACK_*`` env
+    vars — back-compat for deployments that haven't migrated to the
+    per-workspace shape yet.
     """
-    bot_token = secrets.require(scope="connector", area="slack", instance=None, leaf="bot-token")
-    app_token = secrets.get(scope="connector", area="slack", instance=None, leaf="app-token")
-    client_id = secrets.get(scope="connector", area="slack", instance=None, leaf="client-id")
-    client_secret = secrets.get(scope="connector", area="slack", instance=None, leaf="client-secret")
+    bot_token = secrets.require(scope="connector", area="slack", instance=workspace, leaf="bot-token")
+    app_token = secrets.get(scope="connector", area="slack", instance=workspace, leaf="app-token")
+    client_id = secrets.get(scope="connector", area="slack", instance=workspace, leaf="client-id")
+    client_secret = secrets.get(scope="connector", area="slack", instance=workspace, leaf="client-secret")
     return SlackCredentials(
         bot_token=bot_token,
         app_token=app_token or None,
@@ -285,6 +292,7 @@ class SlackConnector:
         self,
         *,
         credentials: SlackCredentials | None = None,
+        workspace: str | None = None,
         web_client_factory: Callable[[SlackCredentials], SlackWebClient] | None = None,
         socket_mode_handler_factory: Callable[..., SlackSocketModeHandler] | None = None,
         flag_reader: Callable[[str], bool] = _default_flag_reader,
@@ -293,6 +301,12 @@ class SlackConnector:
         # Lift credential resolution out of the hot path so tests that
         # never reach the network can construct without any secrets backend.
         self._credentials: SlackCredentials | None = credentials
+        # ADR-032 Phase 2: per-workspace ``instance`` slot for secret
+        # resolution. ``None`` keeps the legacy singleton resolution
+        # path (CONNECTOR_SLACK_BOT_TOKEN alias still resolves);
+        # supplied for new deployments that capture per-workspace
+        # tokens via ``kairix connect slack --workspace <name>``.
+        self.workspace: str | None = workspace
         self._web_client_factory: Callable[[SlackCredentials], SlackWebClient] = (
             web_client_factory if web_client_factory is not None else _default_web_client_factory
         )
@@ -840,7 +854,11 @@ class SlackConnector:
         """Resolve (or lazily build) the workspace's Web API client."""
         if self._web_client_cache is not None:
             return self._web_client_cache
-        creds = self._credentials if self._credentials is not None else _resolve_credentials_from_secrets(self._secrets)
+        creds = (
+            self._credentials
+            if self._credentials is not None
+            else _resolve_credentials_from_secrets(self._secrets, self.workspace)
+        )
         self._credentials = creds
         self._web_client_cache = self._web_client_factory(creds)
         return self._web_client_cache
@@ -1149,8 +1167,15 @@ def make_connector(config: Mapping[str, Any]) -> SlackConnector:
       * ``bot_token`` (optional) — operator may override the secret
         lookup by passing the token inline. Production resolves via
         the connector's injected :class:`~kairix.secrets.SecretsResolver`
-        for the canonical leaf ``("connector", "slack", None, "bot-token")``.
+        for the canonical leaf
+        ``("connector", "slack", <workspace>, "bot-token")``.
       * ``app_token`` (optional) — ``xapp-…`` for Socket Mode.
+      * ``workspace`` (optional) — per-workspace canonical-naming
+        ``instance`` slot. When set, the connector resolves tokens
+        from ``kairix-connector-slack-<workspace>-bot-token``;
+        unset, the legacy ``kairix-connector-slack-bot-token`` is
+        used (back-compat). Captured by
+        ``kairix connect slack --workspace <name>``.
 
     Registered via ``[project.entry-points."kairix.connectors"]`` in
     kairix's ``pyproject.toml`` so the orchestration layer can resolve
@@ -1158,6 +1183,8 @@ def make_connector(config: Mapping[str, Any]) -> SlackConnector:
     """
     inline_bot_token = config.get("bot_token")
     inline_app_token = config.get("app_token")
+    workspace_value = config.get("workspace")
+    workspace: str | None = str(workspace_value) if workspace_value else None
     credentials: SlackCredentials | None
     if inline_bot_token:
         credentials = SlackCredentials(
@@ -1166,4 +1193,4 @@ def make_connector(config: Mapping[str, Any]) -> SlackConnector:
         )
     else:
         credentials = None
-    return SlackConnector(credentials=credentials)
+    return SlackConnector(credentials=credentials, workspace=workspace)

@@ -31,21 +31,13 @@ from kairix.connect.protocols import (
     TokenStoreUnauthorizedError,
     WriteReport,
 )
+from kairix.connect.store.leaves import leaf_pairs
 from kairix.secrets.naming import Scope, canonical_env_var
 
 # Default path when neither ``$KAIRIX_SECRETS_FILE`` nor
 # ``--secrets-file`` is set. Mirrors the operator-facing convention
 # documented in ``docs/operations/secrets-configuration.md``.
 _DEFAULT_PATH_TEMPLATE = ".config/kairix/secrets/kairix.env"
-
-# Four leaves we always write for an OAuth2 connect — order matters for
-# operator readability (client identity before token material).
-_LEAVES: tuple[tuple[str, str], ...] = (
-    ("client-id", "client_id"),
-    ("client-secret", "client_secret"),
-    ("refresh-token", "refresh_token"),
-    ("access-token", "access_token"),
-)
 
 _BACKEND_NAME = "file"
 
@@ -84,7 +76,16 @@ class FileTokenStore:
         tokens: CapturedTokens,
         client: ClientCredentials,
     ) -> WriteReport:
-        """Write all four canonical-named secrets for the identity tuple."""
+        """Write every non-empty canonical-named secret for the identity tuple.
+
+        Leaves are derived from the supplied :class:`ClientCredentials`
+        + :class:`CapturedTokens` dataclasses via
+        :func:`kairix.connect.store.leaves.leaf_pairs` — empty-string
+        fields are skipped. Google writes 4 leaves (client-id,
+        client-secret, refresh-token, access-token); Slack writes 3 + 1
+        optional (client-id, client-secret, bot-token, optional
+        app-token).
+        """
         path = self._resolve_path()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,11 +96,9 @@ class FileTokenStore:
                 f"next: chmod +w {path.parent.parent} OR pass --secrets-file <writable-path>. "
                 f"run: kairix connect <service> --secrets-file ./kairix.env --client-secret-path <path>",
             ) from exc
-        canonical: list[tuple[str, str]] = []
-        for leaf, attr in _LEAVES:
-            env_name = canonical_env_var(scope, area, instance, leaf)
-            value = _value_for(attr, tokens, client)
-            canonical.append((env_name, value))
+        canonical: list[tuple[str, str]] = [
+            (canonical_env_var(scope, area, instance, leaf), value) for leaf, value in leaf_pairs(client, tokens)
+        ]
         existing_lines = _read_lines(path)
         updated = _merge_lines(existing_lines, canonical)
         try:
@@ -124,28 +123,6 @@ class FileTokenStore:
         if env_override:
             return Path(env_override)
         return self._home / _DEFAULT_PATH_TEMPLATE
-
-
-def _value_for(attr: str, tokens: CapturedTokens, client: ClientCredentials) -> str:
-    """Resolve the per-leaf string value to write.
-
-    Lifted to a free function so the dispatch table is centralised and
-    F16 cognitive-complexity scoring on ``store`` stays low.
-    """
-    if attr == "client_id":
-        return client.client_id
-    if attr == "client_secret":
-        return client.client_secret
-    if attr == "refresh_token":
-        return tokens.refresh_token
-    if attr == "access_token":
-        return tokens.access_token
-    raise KeyError(
-        f"kairix connect: unknown token attribute {attr!r}. "
-        f"fix: this is a kairix bug — please file an issue. "
-        f"next: see kairix/connect/store/file_store.py::_LEAVES for the canonical mapping. "
-        f"run: kairix connect <service> --client-secret-path <path>",
-    )
 
 
 def _read_lines(path: Path) -> list[str]:

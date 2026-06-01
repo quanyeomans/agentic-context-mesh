@@ -122,14 +122,14 @@ def when_operator_runs_connect(connect_state: dict[str, Any], subcommand: str) -
     browser = connect_state["browser"]
     store = connect_state["store"]
 
-    def flow_factory(cmd: str, path: Path, _port: int) -> GoogleOAuth2Flow:
+    def flow_factory(args: Any) -> GoogleOAuth2Flow:
         # Build a real GoogleOAuth2Flow but inject the fake browser +
         # token exchanger so the consent dance is fully driven by fakes.
         area = {
             "google-gmail": "gmail",
             "google-drive": "google-drive",
             "google-calendar": "google-calendar",
-        }[cmd]
+        }[args.subcommand]
 
         def fake_exchanger(_client: ClientCredentials, code: str, _ru: str) -> CapturedTokens:
             return CapturedTokens(
@@ -140,7 +140,7 @@ def when_operator_runs_connect(connect_state: dict[str, Any], subcommand: str) -
 
         return GoogleOAuth2Flow(
             service_area=area,
-            client_secret_path=path,
+            client_secret_path=args.client_secret_path,
             browser=browser,
             token_exchanger=fake_exchanger,
         )

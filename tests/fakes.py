@@ -4330,6 +4330,15 @@ class FakeTokenStore:
     correct canonical names + values were written. The default
     behaviour returns a synthetic :class:`WriteReport`; pass
     ``raises=`` to exercise the unauthorized branch.
+
+    Mirrors the production stores' dynamic leaf-derivation shape
+    (per ADR-032 Phase 2 follow-up): leaves are derived from the
+    ``client`` + ``tokens`` dataclass fields at write time so the fake
+    reports the SAME canonical names a real store would write — Google
+    writes 4 (client-id, client-secret, refresh-token, access-token);
+    Slack writes 3 (client-id, client-secret, bot-token) plus app-token
+    when present. Tests can assert against the recorded names without
+    knowing which service shape is in play.
     """
 
     def __init__(self, *, raises: BaseException | None = None, backend: str = "fake") -> None:
@@ -4339,6 +4348,7 @@ class FakeTokenStore:
 
     def store(self, **kwargs: Any) -> Any:
         from kairix.connect.protocols import WriteReport
+        from kairix.connect.store.leaves import leaf_pairs
         from kairix.secrets.naming import canonical_env_var
 
         if self._raises is not None:
@@ -4347,10 +4357,9 @@ class FakeTokenStore:
         scope = kwargs["scope"]
         area = kwargs["area"]
         instance = kwargs.get("instance")
-        names = tuple(
-            canonical_env_var(scope, area, instance, leaf)
-            for leaf in ("client-id", "client-secret", "refresh-token", "access-token")
-        )
+        client = kwargs["client"]
+        tokens = kwargs["tokens"]
+        names = tuple(canonical_env_var(scope, area, instance, leaf) for leaf, _ in leaf_pairs(client, tokens))
         return WriteReport(canonical_names=names, backend=self._backend, target="<fake>")
 
 

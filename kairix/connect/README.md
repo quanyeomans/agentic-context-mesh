@@ -1,6 +1,6 @@
 # `kairix connect` — OAuth2 token capture for connectors
 
-Operator-only CLI family for capturing OAuth2 tokens for Google Workspace connectors (Gmail / Drive / Calendar). Slack and GitHub App flows land in follow-up releases sharing the same `kairix.connect` abstractions.
+Operator-only CLI family for capturing OAuth2 tokens for connector authentication. Currently covers Google Workspace (Gmail / Drive / Calendar) and Slack workspaces; GitHub App lands in a follow-up release sharing the same `kairix.connect` abstractions.
 
 This is the package documentation. Operator-facing setup steps live in [`docs/operations/secrets-configuration.md`](../../docs/operations/secrets-configuration.md). The architectural contract is [`docs/architecture/ADR-032-oauth2-connect-flow.md`](../../docs/architecture/ADR-032-oauth2-connect-flow.md).
 
@@ -114,11 +114,42 @@ Every failure surface emits an actionable hint:
 
 All four are lazy-imported: operators who only use the file or stdout store never load the Azure SDKs; operators who pass their own `token_exchanger` to `GoogleOAuth2Flow` in tests never load `google-auth-oauthlib`.
 
+## Slack setup walkthrough (one-time per workspace)
+
+For each Slack workspace you want kairix to read, do this once at https://api.slack.com/apps:
+
+1. **Create the Slack app.** Click **Create New App → From scratch**, name it (e.g. `kairix-connect`), pick the workspace you're installing into.
+
+2. **Configure OAuth scopes.** Under **OAuth & Permissions → Scopes → Bot Token Scopes**, add (at minimum): `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `im:read`, `mpim:history`, `mpim:read`, `users:read`. This is the default scope set `kairix connect slack` requests; if your workspace needs a narrower scope, override with `--scopes` on the CLI (rare).
+
+3. **Configure the redirect URL.** Under **OAuth & Permissions → Redirect URLs**, add `http://127.0.0.1:8080/oauth2callback` (the default port `kairix connect` listens on; if you use `--port 9090`, register `http://127.0.0.1:9090/oauth2callback` instead). Slack requires the redirect URL to match exactly.
+
+4. **Capture client_id + client_secret.** Under **Basic Information → App Credentials**, copy the **Client ID** and **Client Secret**. You'll pass both on the kairix CLI in step 5.
+
+5. **Run kairix connect.** From your workstation:
+   ```bash
+   kairix connect slack --workspace alpha --client-id <client-id> --client-secret <client-secret>
+   ```
+   The browser opens to Slack's install screen — pick the workspace and click **Allow**. The captured bot token lands in your secrets store under the per-workspace canonical name `KAIRIX_CONNECTOR_SLACK_<workspace-uppercase>_BOT_TOKEN`.
+
+You can run this multiple times for different workspaces — each run lands tokens under a distinct `--workspace` slug, so workspace `alpha` and workspace `coach` co-exist in the same KV without collision.
+
+**Optional: Socket Mode (`app_token`).** Slack's `oauth.v2.access` does NOT return the `xapp-…` app-level token used for Socket Mode push events. Capture it manually from **Basic Information → App-Level Tokens → Generate** and pre-populate `kairix-connector-slack-<workspace>-app-token` in your KV; the connector picks it up automatically when present.
+
+**Canonical names written by `kairix connect slack`:**
+
+| Subcommand | Canonical secret names written |
+|---|---|
+| `slack --workspace <NAME>` | `KAIRIX_CONNECTOR_SLACK_<NAME>_{CLIENT_ID, CLIENT_SECRET, BOT_TOKEN}` (CLIENT_ID / CLIENT_SECRET are written so subsequent re-runs can re-exchange without re-prompting) |
+
+Slack bot tokens never expire — there is no `REFRESH_TOKEN` or `ACCESS_TOKEN` written for Slack (those fields would be empty and the file store skips empty leaves at write time). The connector reads the bot token directly and uses a `StaticRefreshableToken` wrapper that never refreshes.
+
 ## What's not yet covered
 
 - **Headless `--no-browser` mode** — paste-the-URL-into-your-local-browser flow. Planned for a future release. For now `kairix connect` fails fast on headless VMs with a hint to run from your workstation.
 - **Service-account JSON / GCP Workload Identity Federation** — out of scope; operators on those auth shapes provision tokens directly into KV.
 - **AWS Secrets Manager** — planned; the SDK shape mirrors Azure but isn't yet implemented.
+- **Slack `app_token` auto-capture** — Slack's OAuth v2 response doesn't return the app-level token; operators on Socket Mode capture it manually (one-time, per the optional step in the Slack setup above).
 
 ## Architecture
 
@@ -126,15 +157,17 @@ All four are lazy-imported: operators who only use the file or stdout store neve
 kairix/connect/
 ├── __init__.py
 ├── README.md             # this file
-├── cli.py                # `kairix connect <service>` dispatcher
+├── cli.py                # `kairix connect <service>` dispatcher (SUBCOMMAND_REGISTRY)
 ├── listener.py           # localhost HTTP callback listener (shared)
 ├── protocols.py          # OAuth2Flow / CallbackListener / TokenStore / RefreshableToken
 ├── refresh.py            # RefreshableToken wrappers used by connectors at runtime
 ├── oauth2/
 │   ├── __init__.py
-│   └── google.py         # GoogleOAuth2Flow — gmail / google-drive / google-calendar
+│   ├── google.py         # GoogleOAuth2Flow — gmail / google-drive / google-calendar
+│   └── slack.py          # SlackOAuth2Flow — per-workspace bot-token capture
 └── store/
     ├── __init__.py
+    ├── _leaves.py        # shared leaf-derivation helper (per-service shape)
     ├── file_store.py     # writes $KAIRIX_SECRETS_FILE
     ├── azure_kv_store.py # writes via azure-identity + azure-keyvault-secrets
     └── stdout_store.py   # TSV emission

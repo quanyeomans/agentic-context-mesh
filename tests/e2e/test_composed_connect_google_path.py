@@ -74,7 +74,7 @@ class _StubListener:
 class _StubBrowser:
     def open(self, url): return True
 
-def _stub_flow_factory(cmd, path, _port):
+def _stub_flow_factory(args):
     area_map = {"google-gmail": "gmail", "google-drive": "google-drive", "google-calendar": "google-calendar"}
     def _stub_exchanger(_c, code, _ru):
         return CapturedTokens(
@@ -83,8 +83,8 @@ def _stub_flow_factory(cmd, path, _port):
             token_uri=GOOGLE_TOKEN_URI,
         )
     return GoogleOAuth2Flow(
-        service_area=area_map[cmd],
-        client_secret_path=path,
+        service_area=area_map[args.subcommand],
+        client_secret_path=args.client_secret_path,
         browser=_StubBrowser(),
         token_exchanger=_stub_exchanger,
     )
