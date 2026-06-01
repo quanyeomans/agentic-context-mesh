@@ -151,14 +151,14 @@ def _default_google_refresh(state: GoogleRefreshState) -> tuple[str, float]:
     # the SDK IS installed (mypy resolves the symbols) but become
     # unused-ignore warnings on hosts without the SDK on the path —
     # CI installs all extras and produces the strict-typed Any here.
-    creds = Credentials(  # type: ignore[no-untyped-call]  # F3 rationale: google-auth ships no PEP-561 stubs; constructor signature checked at runtime via stubs in tests/unit/test_connect_refresh.py
+    creds = Credentials(  # type: ignore[no-untyped-call,unused-ignore]  # F3 rationale: google-auth ships no PEP-561 stubs; constructor signature checked at runtime via tests/unit/test_connect_refresh.py. unused-ignore is bundled because google-auth is an optional [connect] extra — hosts without it resolve Credentials to Any and the no-untyped-call ignore reads as unused.
         token=None,
         refresh_token=state.refresh_token,
         client_id=state.client_id,
         client_secret=state.client_secret,
         token_uri=state.token_uri,
     )
-    creds.refresh(google.auth.transport.requests.Request())  # type: ignore[no-untyped-call]  # F3 rationale: google-auth ships no PEP-561 stubs; the refresh + Request shapes are checked at runtime via the unit tests
+    creds.refresh(google.auth.transport.requests.Request())  # type: ignore[no-untyped-call,unused-ignore]  # F3 rationale: google-auth ships no PEP-561 stubs; the refresh + Request shapes are checked at runtime via the unit tests. unused-ignore is bundled per the same reasoning as the Credentials() suppression above.
     new_token = creds.token or ""
     # google-auth's Credentials.expiry is a naive datetime in UTC.
     if creds.expiry is None:

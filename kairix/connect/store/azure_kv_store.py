@@ -139,7 +139,7 @@ class AzureKeyVaultTokenStore:
                 "next: re-run kairix connect <service> --store=azure-kv. "
                 "run: pip install 'azure-identity>=1.19' 'azure-keyvault-secrets>=4.9'",
             ) from exc
-        return SecretClient(vault_url=vault_url, credential=self._build_credential())  # type: ignore[arg-type]  # F3 rationale: _build_credential returns object so the test-injection seam can pass a stand-in; the real production path returns DefaultAzureCredential which satisfies TokenCredential.
+        return SecretClient(vault_url=vault_url, credential=self._build_credential())  # type: ignore[arg-type,unused-ignore]  # F3 rationale: _build_credential returns object so the test-injection seam can pass a stand-in; the real production path returns DefaultAzureCredential which satisfies TokenCredential. unused-ignore is bundled because azure-keyvault-secrets is an optional [connect] extra — hosts without it resolve SecretClient to Any and the arg-type ignore reads as unused.
 
     def _build_credential(self) -> object:
         """Construct the Azure credential. Lazy-imports the SDK on first call."""

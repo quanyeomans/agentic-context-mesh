@@ -661,6 +661,30 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_TOPOLOGY_V2_SPEC,
     ),
+    "topology_v2_default_in_scope": FeatureFlag(
+        name="topology_v2_default_in_scope",
+        default=False,
+        description=(
+            "GH #373 — gate the new per-scope-entry default_in_scope filter. "
+            "When OFF (default), ScopeProfileResolver.resolve(default_only=True) "
+            "behaves like default_only=False — every read-eligible entry surfaces "
+            "regardless of the default_in_scope column (back-compat). When ON, "
+            "TopologyV2CollectionResolver invokes the resolver with "
+            "default_only=True for the collections=None code path, so default "
+            "search returns only entries where default_in_scope=1 (the broad "
+            "superset of in-default sources). Explicit collections=[...] still "
+            "validates against the full read scope (default_only=False), so "
+            "opt-in collections like reflib remain reachable by explicit name. "
+            "Default-off until the dogfood VM cutover validates the operator-"
+            "config promotion path per the default-safe principle in "
+            "feature-flag-architecture.md §2.1."
+        ),
+        stage="introduce",
+        introduced_in="v2026.6.2",
+        target_retire_in="v2027.6.30",
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
 }
 
 

@@ -4406,7 +4406,7 @@ class FakeBrowserLauncher:
 
 
 class FakeScopeProfileResolver:
-    """In-memory :class:`ScopeProfileResolver` for #372 test discipline.
+    """In-memory :class:`ScopeProfileResolver` for #372 / #373 test discipline.
 
     Returns a pre-seeded ``ResolvedScope`` keyed on the actor tuple. Used
     by :class:`TopologyV2CollectionResolver` unit / contract tests so they
@@ -4414,9 +4414,25 @@ class FakeScopeProfileResolver:
     logic itself (the contract test covers the SQL → ResolvedScope path
     separately).
 
-    Construct with ``with_actor(name, entries=[...])`` builder:
+    Construct with ``with_actor(name, entries=[...])`` builder. Each entry
+    is one of:
 
+      * 3-tuple ``(collection_name, mode, max_sensitivity)`` — back-compat
+        shape from GH #372. The ``default_in_scope`` flag is implicitly
+        ``True`` (back-compat with the pre-#373 schema where every entry
+        is in the default superset).
+      * 4-tuple ``(collection_name, mode, max_sensitivity, default_in_scope)``
+        — GH #373 shape. ``default_in_scope`` is a bool controlling whether
+        the entry surfaces under ``resolve(default_only=True)``.
+
+    ``mode`` is one of ``'read'`` / ``'write'`` / ``'read_write'``.
+    Entries with mode='write' are EXCLUDED from the ``collections=`` field
+    (they fail the can_read filter the real ScopeProfileResolver enforces);
+    they surface in ``excluded_collections`` instead.
+
+    Examples:
         >>> from tests.fakes import FakeScopeProfileResolver
+        >>> # Back-compat 3-tuple shape (pre-#373)
         >>> fake = FakeScopeProfileResolver().with_actor(
         ...     "agent-alpha",
         ...     entries=[
@@ -4428,30 +4444,52 @@ class FakeScopeProfileResolver:
         >>> {c.name for c in scope.collections}
         {'sharepoint-all', 'memory-bucket'}
 
-    Each entry is ``(collection_name, mode, max_sensitivity)`` where mode
-    is one of ``'read'`` / ``'write'`` / ``'read_write'``. Entries with
-    mode='write' are EXCLUDED from the ``collections=`` field (they fail
-    the can_read filter the real ScopeProfileResolver enforces); they
-    surface in ``excluded_collections`` instead.
+        >>> # #373 4-tuple shape with default_in_scope
+        >>> fake = FakeScopeProfileResolver().with_actor(
+        ...     "agent-alpha",
+        ...     entries=[
+        ...         ("sharepoint", "read", "internal", True),
+        ...         ("reflib", "read", "public", False),
+        ...     ],
+        ... )
+        >>> scope = fake.resolve(actors=("agent-alpha",), default_only=True)
+        >>> {c.name for c in scope.collections}
+        {'sharepoint'}
 
     F1-clean substitute: production code constructs the real
     :class:`ScopeProfileResolver`; tests pass this fake via the
     ``scope_profile_resolver=`` kwarg on
     :class:`TopologyV2CollectionResolver`.
+
+    Planned production extension (GH #373, ``topology_v2_default_in_scope``
+    feature flag): the real ``ScopeProfileResolver.resolve`` will accept a
+    new ``default_only: bool = False`` kwarg. When True, entries with
+    ``default_in_scope=0`` are filtered out of ``ResolvedScope.collections``
+    (they would normally surface). This fake honours that contract today so
+    unit tests can pin the resolver wiring before the production change
+    lands.
     """
 
     def __init__(self) -> None:
-        # actor tuple → entries list[(name, mode, max_sensitivity)]
-        self._actors: dict[tuple[str, ...], list[tuple[str, str, str]]] = {}
+        # actor tuple → entries list of either 3-tuple (name, mode, max_sens)
+        # or 4-tuple (name, mode, max_sens, default_in_scope).
+        self._actors: dict[tuple[str, ...], list[tuple]] = {}
         self._raises_on_resolve: Exception | None = None
+        # Capture the most recent ``default_only`` kwarg the resolver saw —
+        # contract tests assert the Adapter propagates the kwarg through.
+        self.last_default_only: bool | None = None
 
     def with_actor(
         self,
         actor: str,
         *,
-        entries: list[tuple[str, str, str]],
+        entries: list[tuple],
     ) -> FakeScopeProfileResolver:
         """Builder — declare an actor's scope-entry set.
+
+        Accepts either the back-compat 3-tuple shape
+        ``(name, mode, max_sensitivity)`` or the #373 4-tuple shape
+        ``(name, mode, max_sensitivity, default_in_scope)``.
 
         Returns a new fake (immutable-builder pattern, matches
         :class:`FakeFeatureFlagResolver`).
@@ -4474,13 +4512,26 @@ class FakeScopeProfileResolver:
         clone._raises_on_resolve = exc
         return clone
 
-    def resolve(self, *, actors: tuple[str, ...], **_: Any) -> Any:
+    def resolve(
+        self,
+        *,
+        actors: tuple[str, ...],
+        default_only: bool = False,
+        **_: Any,
+    ) -> Any:
         """Return a synthesized :class:`ResolvedScope` for ``actors``.
 
         Mirrors :meth:`ScopeProfileResolver.resolve` — the can_read
         filter is applied here so ``mode='write'`` entries land in
         ``excluded_collections`` rather than the ``collections`` tuple.
+
+        Per #373: when ``default_only=True``, entries whose 4-tuple
+        ``default_in_scope`` flag is False are dropped from
+        ``collections``. 3-tuple entries are treated as
+        ``default_in_scope=True`` (back-compat with pre-#373 callers).
         """
+        self.last_default_only = default_only
+
         if self._raises_on_resolve is not None:
             raise self._raises_on_resolve
 
@@ -4493,17 +4544,15 @@ class FakeScopeProfileResolver:
         entries = self._actors.get(actors, [])
         collections = []
         excluded = []
-        for name, mode, max_sens in entries:
-            can_read = mode in ("read", "read_write")
-            if can_read:
-                collections.append(
-                    ResolvedCollection(
-                        name=name,
-                        max_sensitivity=max_sens,  # type: ignore[arg-type]  # F3-rationale: F39Tier is Literal; fake accepts the str alias from the test seed
-                        weight=1.0,
-                    )
-                )
+        for raw in entries:
+            # Unpack — support 3-tuple and 4-tuple entry shapes.
+            if len(raw) == 4:
+                name, mode, max_sens, default_in_scope = raw
             else:
+                name, mode, max_sens = raw
+                default_in_scope = True
+            can_read = mode in ("read", "read_write")
+            if not can_read:
                 excluded.append(
                     ExcludedCollection(
                         name=name,
@@ -4511,7 +4560,100 @@ class FakeScopeProfileResolver:
                         escalation_hint=(f"grant can_read=True to {actors!r} for {name!r}"),
                     )
                 )
+                continue
+            # #373 — default_only filter drops entries flagged out of default.
+            if default_only and not default_in_scope:
+                continue
+            collections.append(
+                ResolvedCollection(
+                    name=name,
+                    max_sensitivity=max_sens,  # type: ignore[arg-type]  # F3-rationale: F39Tier is Literal; fake accepts the str alias from the test seed
+                    weight=1.0,
+                )
+            )
         return ResolvedScope(
             collections=tuple(collections),
             excluded_collections=tuple(excluded),
         )
+
+
+def seed_bulk_scope_entries(
+    db: Any,
+    *,
+    n_agents: int = 100,
+    entries_per_agent: int = 100,
+    default_in_scope_ratio: float = 0.7,
+) -> int:
+    """Soak-tier helper — seed N agents x M entries into topology_scope_*.
+
+    Idempotent: drops any pre-existing rows for the ``agent-soak-*``
+    actor prefix before inserting fresh ones. Deterministic: collection
+    names + default_in_scope assignments derive from the loop indices,
+    not from any RNG, so repeated calls produce identical row content.
+
+    Used by :mod:`tests.soak.test_scope_resolver_at_scale` to drive the
+    ScopeProfileResolver against a production-scale (10k+ row) scope-
+    entries surface for the p95 latency assertion.
+
+    Returns the number of scope_entries rows inserted (``n_agents *
+    entries_per_agent``) so the caller can assert against the seed.
+
+    Planned production extension (GH #373): ``topology_scope_entries``
+    will gain a ``default_in_scope INTEGER NOT NULL DEFAULT 1`` column.
+    This helper writes to that column when present and falls back to the
+    pre-migration shape (no column) when not — so the soak helper
+    survives the migration in either direction.
+    """
+    cur = db.execute(
+        "SELECT id FROM topology_scope_profiles WHERE actor_id LIKE 'agent-soak-%'",
+    )
+    stale_ids = [row[0] for row in cur.fetchall()]
+    if stale_ids:
+        placeholders = ",".join("?" for _ in stale_ids)
+        db.execute(
+            f"DELETE FROM topology_scope_entries WHERE scope_profile_id IN ({placeholders})",
+            stale_ids,
+        )
+        db.execute(
+            f"DELETE FROM topology_scope_profiles WHERE id IN ({placeholders})",
+            stale_ids,
+        )
+
+    # Detect whether the ``default_in_scope`` column exists. The soak helper
+    # has to survive the migration in either direction so the post-impl
+    # soak run uses the column and the pre-impl run silently skips it.
+    cols = {row[1] for row in db.execute("PRAGMA table_info(topology_scope_entries)").fetchall()}
+    has_default_col = "default_in_scope" in cols
+
+    now = "2026-06-01T00:00:00Z"
+    inserted = 0
+    for agent_idx in range(n_agents):
+        actor_id = f"agent-soak-{agent_idx:04d}"
+        cur = db.execute(
+            "INSERT INTO topology_scope_profiles "
+            "(actor_id, actor_kind, inherits_from_json, created_at, updated_at) "
+            "VALUES (?, 'agent', '[]', ?, ?)",
+            (actor_id, now, now),
+        )
+        profile_id = cur.lastrowid
+        for entry_idx in range(entries_per_agent):
+            collection_name = f"collection-soak-{entry_idx:04d}"
+            default_in_scope = 1 if (entry_idx / entries_per_agent) < default_in_scope_ratio else 0
+            if has_default_col:
+                db.execute(
+                    "INSERT INTO topology_scope_entries "
+                    "(scope_profile_id, collection_name, can_read, can_write, "
+                    "max_sensitivity, default_in_scope) "
+                    "VALUES (?, ?, 1, 0, 'internal', ?)",
+                    (profile_id, collection_name, default_in_scope),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO topology_scope_entries "
+                    "(scope_profile_id, collection_name, can_read, can_write, max_sensitivity) "
+                    "VALUES (?, ?, 1, 0, 'internal')",
+                    (profile_id, collection_name),
+                )
+            inserted += 1
+    db.commit()
+    return inserted
