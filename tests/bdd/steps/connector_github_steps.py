@@ -128,6 +128,7 @@ class _Ctx:
     webhook_body: bytes = b""
     webhook_headers: dict[str, str] = field(default_factory=dict)
     webhook_secret: str = "test-secret"
+    repos_allowlist: list[str] | None = None
 
 
 @pytest.fixture
@@ -326,6 +327,78 @@ def _error_names_secrets(github_ctx: _Ctx) -> None:
     assert "fix:" in message or "secret" in message.lower(), (
         f"expected actionable secret-name guidance; got {message!r}"
     )
+
+
+# ----- Givens / Whens / Thens for repos_allowlist scenarios -----
+
+
+@given("a stubbed GitHub API endpoint that lists three repositories")
+def _three_repos_listed(github_ctx: _Ctx) -> None:
+    github_ctx.repos = [
+        {
+            "full_name": "agent-alpha-org/repo-one",
+            "visibility": "private",
+            "commits": [{"sha": "sha-one", "committed_at": "2026-05-23T01:00:00Z"}],
+        },
+        {
+            "full_name": "agent-alpha-org/repo-two",
+            "visibility": "private",
+            "commits": [{"sha": "sha-two", "committed_at": "2026-05-23T02:00:00Z"}],
+        },
+        {
+            "full_name": "agent-alpha-org/repo-three",
+            "visibility": "private",
+            "commits": [{"sha": "sha-three", "committed_at": "2026-05-23T03:00:00Z"}],
+        },
+    ]
+
+
+@given("an operator-configured repos_allowlist naming exactly two of those repositories")
+def _allowlist_two_of_three(github_ctx: _Ctx) -> None:
+    github_ctx.repos_allowlist = [
+        "agent-alpha-org/repo-one",
+        "agent-alpha-org/repo-three",
+    ]
+    github_ctx.connector = GitHubConnector(
+        client=_ScriptedClient(github_ctx.repos),  # type: ignore[arg-type]  # F3 rationale: ScriptedClient is shape-equivalent to GitHubApiClient for the bounded test surface; full Protocol inheritance is overkill for the fixture seam
+        webhook_secret=github_ctx.webhook_secret,
+        repos_allowlist=github_ctx.repos_allowlist,
+    )
+
+
+@given("no repos_allowlist is configured")
+def _no_allowlist(github_ctx: _Ctx) -> None:
+    github_ctx.repos_allowlist = None
+    github_ctx.connector = GitHubConnector(
+        client=_ScriptedClient(github_ctx.repos),  # type: ignore[arg-type]  # F3 rationale: ScriptedClient is shape-equivalent to GitHubApiClient for the bounded test surface; full Protocol inheritance is overkill for the fixture seam
+        webhook_secret=github_ctx.webhook_secret,
+        repos_allowlist=None,
+    )
+
+
+@then("change events are emitted only for the allowlisted repositories")
+def _events_only_allowlisted(github_ctx: _Ctx) -> None:
+    modified = [e for e in github_ctx.events if e.op == "modified"]
+    repos_seen = {e.metadata.get("repo") for e in modified}
+    expected = set(github_ctx.repos_allowlist or [])
+    assert repos_seen == expected, f"expected events from {expected!r}; got {repos_seen!r}"
+
+
+@then("no change event references the excluded repository")
+def _no_event_for_excluded(github_ctx: _Ctx) -> None:
+    all_repo_names = {r["full_name"] for r in github_ctx.repos}
+    allowed = set(github_ctx.repos_allowlist or [])
+    excluded = all_repo_names - allowed
+    repos_seen = {e.metadata.get("repo") for e in github_ctx.events}
+    leaked = repos_seen & excluded
+    assert leaked == set(), f"expected no events for excluded repos; leaked: {leaked!r}"
+
+
+@then("change events are emitted for every repository in the installation")
+def _events_for_every_repo(github_ctx: _Ctx) -> None:
+    repos_seen = {e.metadata.get("repo") for e in github_ctx.events if e.op == "modified"}
+    expected = {r["full_name"] for r in github_ctx.repos}
+    assert repos_seen == expected, f"expected events from every repo {expected!r}; got {repos_seen!r}"
 
 
 # Reference imports so F52 sees them as live callable references.

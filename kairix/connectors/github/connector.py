@@ -42,8 +42,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -101,6 +102,12 @@ _ACCESS_ACCESSIBLE: ContainerAccessState = "ACCESSIBLE"
 _ACCESS_REVOKED: ContainerAccessState = "REVOKED"
 # F58 ordering: org first, then repos, then directories. Each
 # raw_parent_id references a previously-emitted node's raw_node_id.
+
+# Operator-facing repos_allowlist slug shape: ``owner/repo`` where each
+# side is the GitHub-accepted character set
+# (alphanumerics + ``_`` / ``.`` / ``-``). Anchored full-match so we
+# reject the "just an owner" and "owner/repo/extra" shapes outright.
+_REPOS_ALLOWLIST_SLUG_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True)
@@ -196,6 +203,15 @@ class GitHubConnector:
         pass :class:`tests.fakes.FakeSecretsLoader` so credential
         resolution rides the F2-clean DI seam; production defaults
         to :class:`~kairix.secrets.SecretsLoader` (ADR-031).
+      * ``repos_allowlist`` — optional iterable of ``owner/repo``
+        slugs. When non-empty, the connector restricts every drain
+        (list_changes / iter_containers) to repositories whose
+        ``full_name`` is in the allowlist. Empty / ``None`` =
+        back-compat (all installation-accessible repos drain).
+        Slugs that the underlying credential cannot see are silently
+        skipped — the allowlist is an intent declaration, not an
+        access assertion. See :func:`make_connector` for the operator
+        config surface.
     """
 
     name: str = CONNECTOR_NAME
@@ -213,6 +229,7 @@ class GitHubConnector:
         default_sensitivity: Sensitivity = _DEFAULT_SENSITIVITY,
         webhook_secret: str | None = None,
         secrets: SecretsResolver | None = None,
+        repos_allowlist: Iterable[str] | None = None,
     ) -> None:
         self._flag_reader = flag_reader
         self._default_sensitivity: Sensitivity = default_sensitivity
@@ -266,6 +283,16 @@ class GitHubConnector:
         # token cache but this lock is what the spec §5 "rotation under
         # cc_pair lock" contract refers to. Sabotage target #4.
         self._cc_pair_lock = threading.Lock()
+        # Operator-facing repos_allowlist — frozenset of "owner/repo"
+        # slugs. Empty / None means "no filter" (all installation
+        # repos drain). Validation happens in :func:`make_connector`
+        # at config-time so the constructor stays a pass-through.
+        self._repos_allowlist: frozenset[str] = frozenset(repos_allowlist) if repos_allowlist else frozenset()
+        # One-shot log flag so the "filtered N→K" message lands once
+        # per connector lifetime, not per tick. Operator only needs to
+        # see the filter outcome on the first sync; subsequent ticks
+        # are silent so the log doesn't pollute steady-state traffic.
+        self._allowlist_logged: bool = False
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface (base)
@@ -283,7 +310,7 @@ class GitHubConnector:
         deserialised = deserialise_cursor(cursor)
         for repo_full_name, state in deserialised.items():
             self._per_repo_cursors.setdefault(repo_full_name, state)
-        repos = self._client.list_installation_repositories()
+        repos = self._apply_repos_allowlist(self._client.list_installation_repositories())
         events: list[ChangeEvent] = []
         for repo in repos:
             for event in self._drain_repo(repo):
@@ -387,7 +414,7 @@ class GitHubConnector:
         own per-repo cursor; the framework persists subsequent cursor
         values to the ``topology_containers`` table.
         """
-        repos = self._client.list_installation_repositories()
+        repos = self._apply_repos_allowlist(self._client.list_installation_repositories())
         for repo in repos:
             access_state: ContainerAccessState = _ACCESS_REVOKED if repo.archived else _ACCESS_ACCESSIBLE
             yield Container(
@@ -508,7 +535,7 @@ class GitHubConnector:
                 sensitivity_hint=None,
             )
             return
-        repos = self._client.list_installation_repositories()
+        repos = self._apply_repos_allowlist(self._client.list_installation_repositories())
         emitted: set[str] = set()
         # Wave E: emit org nodes first (parent), then repos under each
         # org (child of org), then top-level dirs (child of repo).
@@ -629,6 +656,44 @@ class GitHubConnector:
         """
         return serialise_cursor(self._per_repo_cursors)
 
+    def _apply_repos_allowlist(self, repos: tuple[GitHubRepoRef, ...]) -> tuple[GitHubRepoRef, ...]:
+        """Filter ``repos`` against the configured ``repos_allowlist``.
+
+        When the allowlist is empty the input tuple is returned
+        unchanged (back-compat — full installation drain). When
+        non-empty, only repositories whose ``full_name`` appears in
+        the allowlist survive. Unknown allowlist slugs (PAT can't see
+        the repo, or it doesn't exist) are silently skipped — the
+        connector's job is to drain what it can, not to assert that
+        every operator-named repo is reachable.
+
+        Logs the filter outcome once per connector lifetime at INFO so
+        the operator can confirm the filter took effect on first sync
+        without log spam every tick.
+
+        Sabotage proof (executed): drop the
+        ``if not self._repos_allowlist`` short-circuit so the filter
+        always runs even when empty — every repo is filtered out
+        (frozenset membership against ``frozenset()`` is always
+        False); ``test_unset_allowlist_drains_all_repos`` flips with
+        ``assert 3 == 0`` (no events emitted). Restored after
+        confirming the failure.
+        """
+        if not self._repos_allowlist:
+            return repos
+        kept = tuple(repo for repo in repos if repo.full_name in self._repos_allowlist)
+        if not self._allowlist_logged:
+            kept_names = {repo.full_name for repo in kept}
+            filtered_out = sorted({repo.full_name for repo in repos} - kept_names)
+            logger.info(
+                "github: repos_allowlist filtered %d→%d (filtered out: %r)",
+                len(repos),
+                len(kept),
+                filtered_out,
+            )
+            self._allowlist_logged = True
+        return kept
+
     def _drain_repo(self, repo: GitHubRepoRef) -> Iterator[ChangeEvent]:
         """Drain commits + issues for one repo, advancing the per-repo cursor."""
         state = self._per_repo_cursors.setdefault(repo.full_name, PerRepoCursorState())
@@ -687,7 +752,7 @@ class GitHubConnector:
         """Wave E ON-branch: scope the drain to one repo (Container)."""
         # Look up the repo by full_name; we don't re-call list_installation_repositories
         # because the orchestrator already populated the container row.
-        repos = self._client.list_installation_repositories()
+        repos = self._apply_repos_allowlist(self._client.list_installation_repositories())
         for repo in repos:
             if repo.full_name == container.container_id:
                 yield from self._drain_repo(repo)
@@ -1130,6 +1195,12 @@ def make_connector(config: Mapping[str, Any]) -> GitHubConnector:
         ``"client-confidential"`` per spec §1.
       * ``webhook_secret`` — overrides the secret resolution; mostly
         for test-double wiring.
+      * ``repos_allowlist`` — optional list of ``owner/repo`` slugs.
+        When set, restricts ingestion to those repositories — useful
+        when the PAT has admin visibility into the whole org but the
+        operator only wants a subset drained. Each entry must match
+        ``^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$``. Empty / unset = all
+        installation-accessible repos drain.
 
     Credentials resolve via the connector's injected
     :class:`~kairix.secrets.SecretsResolver` (production:
@@ -1149,6 +1220,7 @@ def make_connector(config: Mapping[str, Any]) -> GitHubConnector:
             "next: see kairix/core/protocols.py Sensitivity for the literal set."
         )
     webhook_secret_override = config.get("webhook_secret")
+    repos_allowlist = _validate_repos_allowlist(config.get("repos_allowlist"))
     # Cast: prior membership check above narrows ``declared`` to the
     # Sensitivity literal set; mypy can't see through the .get() default
     # so the explicit cast keeps strict mode green.
@@ -1157,4 +1229,50 @@ def make_connector(config: Mapping[str, Any]) -> GitHubConnector:
     return GitHubConnector(
         default_sensitivity=_cast(Sensitivity, declared),
         webhook_secret=str(webhook_secret_override) if webhook_secret_override else None,
+        repos_allowlist=repos_allowlist,
     )
+
+
+def _validate_repos_allowlist(raw: Any) -> frozenset[str] | None:
+    """Validate the operator-supplied ``repos_allowlist`` config value.
+
+    Returns ``None`` when ``raw`` is falsy (empty / missing) so the
+    connector falls back to its all-repos default. Otherwise coerces
+    every entry to ``str``, checks the ``owner/repo`` slug shape, and
+    returns a deduplicated :class:`frozenset`.
+
+    Raises :class:`ValueError` with F21 ``fix:`` / ``next:`` markers
+    when:
+
+      * ``raw`` is not a list / tuple / set (operator passed a scalar)
+      * an entry does not match the slug shape (e.g. missing ``/``,
+        contains whitespace, contains a path separator)
+
+    Production callers route through :func:`make_connector`; tests
+    can call this helper directly to pin the validation contract.
+    """
+    if not raw:
+        return None
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        raise ValueError(
+            f"github: repos_allowlist must be a list of 'owner/repo' slugs; got {type(raw).__name__}. "
+            "fix: set repos_allowlist to a YAML list of strings, e.g. "
+            "['three-cubes/kairix', 'three-cubes/engineering-hub']. "
+            "next: see kairix/connectors/github/connector.py::make_connector for the config shape."
+        )
+    bad: list[str] = []
+    out: set[str] = set()
+    for entry in raw:
+        slug = str(entry)
+        if not _REPOS_ALLOWLIST_SLUG_RE.match(slug):
+            bad.append(slug)
+            continue
+        out.add(slug)
+    if bad:
+        raise ValueError(
+            f"github: repos_allowlist contains invalid 'owner/repo' slug(s): {bad!r}. "
+            "fix: every entry must match ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ "
+            "(one owner, one slash, one repo — no spaces, no leading/trailing slashes). "
+            "next: see kairix/connectors/github/connector.py::_validate_repos_allowlist for the regex."
+        )
+    return frozenset(out)

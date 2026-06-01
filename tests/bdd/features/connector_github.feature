@@ -43,3 +43,18 @@ Feature: GitHub connector polls per-repo for code, issues, and pull requests
     Given neither the github personal access token nor the App triple is configured
     When the operator constructs the github connector via the make_connector entry point
     Then the operator sees an actionable error naming the required secrets
+
+  @repos_allowlist
+  Scenario: A repos_allowlist restricts the drain to the operator-named repositories
+    Given a stubbed GitHub API endpoint that lists three repositories
+    And an operator-configured repos_allowlist naming exactly two of those repositories
+    When the operator runs the github connector list_changes with no cursor
+    Then change events are emitted only for the allowlisted repositories
+    And no change event references the excluded repository
+
+  @repos_allowlist_unset
+  Scenario: An unset repos_allowlist drains every installation-accessible repository
+    Given a stubbed GitHub API endpoint that lists three repositories
+    And no repos_allowlist is configured
+    When the operator runs the github connector list_changes with no cursor
+    Then change events are emitted for every repository in the installation
