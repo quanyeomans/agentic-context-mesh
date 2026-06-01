@@ -720,6 +720,40 @@ def _load_connector_entry(source_name: str, config_path: Path | None) -> dict[st
     return next((e for e in entries if e.get("name") == source_name), None)
 
 
+def resolve_collection_for_entry(entry: dict[str, Any]) -> str:
+    """Return the collection name a connector entry's writes must carry.
+
+    Single-source invariant for the ``documents.collection`` column —
+    both the live-sync path (``_run_one_connector_batch``) and the
+    re-extract path (``_build_reextract_components``) call this helper
+    so a connector's writes always tag with its connector name.
+
+    The connector entry's ``name`` field is the canonical source. An
+    explicit ``collection`` override is honoured (operators who pre-
+    declare a typed collection via topology v2 still get that name on
+    the legacy writer path), but the silent ``"default"`` fallback that
+    leaked ~1M SharePoint docs into the ``default`` collection in
+    production (GH #371) is gone — every entry must declare ``name``
+    (already enforced by :func:`_load_connector_config_entries`).
+
+    fix: every connector entry must have a non-empty ``name`` key in
+    the operator config. next: see
+    ``docs/architecture/connector-ingestion-architecture.md`` §8.
+    """
+    name = entry.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError(
+            "connector entry is missing the 'name' key — every entry under "
+            "connectors: must declare a non-empty name string. "
+            "fix: add `name: <connector>` (e.g. `name: sharepoint`) to the entry. "
+            "next: see docs/architecture/connector-ingestion-architecture.md §8."
+        )
+    override = entry.get("collection")
+    if isinstance(override, str) and override:
+        return override
+    return name
+
+
 def _build_reextract_components(
     *,
     source_name: str,
@@ -729,7 +763,9 @@ def _build_reextract_components(
     """Wire connector + extractor + silver + chunk_writer + entity-graph sink.
 
     Mirrors ``_run_one_connector_batch``'s resolution shape so re-extract
-    sees identical wiring to the original sync.
+    sees identical wiring to the original sync — including the
+    ``documents.collection`` tagging invariant via
+    :func:`resolve_collection_for_entry`.
     """
     from kairix.core.connectors import DefaultSilverProcessor, SqliteDocumentsMediaWriter, resolve_connector
     from kairix.core.connectors.collection_router import legacy_chunk_writer
@@ -744,7 +780,10 @@ def _build_reextract_components(
     # this, re-extracted documents flow through but the per-doc row is
     # silently skipped, leaving F40/F70 blind to recovered docs.
     silver = DefaultSilverProcessor(documents_media_writer=SqliteDocumentsMediaWriter(db))
-    chunk_writer = legacy_chunk_writer(db, collection=entry.get("collection", "default"))
+    # GH #371 — re-extract MUST tag with the same collection the sync
+    # path uses. The previous ``entry.get("collection", "default")``
+    # silently leaked ~1M SharePoint docs into the ``default`` collection.
+    chunk_writer = legacy_chunk_writer(db, collection=resolve_collection_for_entry(entry))
     entity_graph_sink = _SqliteEntityGraphSink(db)
     return connector, extractor, silver, chunk_writer, entity_graph_sink
 
