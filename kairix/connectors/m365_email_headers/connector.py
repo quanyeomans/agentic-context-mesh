@@ -6,16 +6,43 @@ the connector **never** fetches body content; the
 :func:`kairix.connectors.m365_email_headers.graph_client.HEADER_ONLY_SELECT`
 projection is the mechanical guard at the Graph query layer.
 
+Folder-scoped delta (#380): Graph rejects mailbox-wide
+``/users/{upn}/messages/delta`` with ``BadRequest: Change tracking is
+not supported against 'microsoft.graph.message'``. Delta only works
+folder-scoped, so the connector enumerates mail folders via
+:meth:`M365GraphClient.list_mail_folders` and drains each folder's
+delta independently. Each folder owns its own deltaLink — the
+connector's serialised cursor is a JSON-encoded
+``{folder_id: deltaLink}`` mapping. One bad folder (transient 5xx,
+throttle exhaustion) is logged + skipped + retried on the next tick;
+sibling folders make progress regardless.
+
 Cursor model:
 
   * First sync (``cursor is None``) — call
-    :meth:`M365GraphClient.iter_messages` from the seed delta URL,
-    yield one ``created`` :class:`ChangeEvent` per message, then
-    persist :meth:`M365GraphClient.last_delta_link` as the cursor.
+    :meth:`M365GraphClient.list_mail_folders` to enumerate folders,
+    then call :meth:`M365GraphClient.iter_messages` per folder from
+    the seed delta URL, yield one ``created`` :class:`ChangeEvent`
+    per message, then persist the merged ``{folder_id: deltaLink}``
+    mapping as the cursor.
 
-  * Subsequent ticks — pass the persisted deltaLink to
-    :meth:`iter_messages`; the Graph endpoint returns only items
-    changed since the cursor.
+  * Subsequent ticks — decode the cursor as a JSON mapping, pass
+    each folder's deltaLink back into
+    :meth:`M365GraphClient.iter_messages`; the Graph endpoint returns
+    only items changed since the cursor.
+
+  * Legacy / unrecognised cursor — any cursor that isn't a JSON dict
+    is treated as cold-start (so old single-string cursors stored
+    before the #380 fix trigger a fresh per-folder full sync rather
+    than a crash).
+
+Folder allowlist: operators can restrict which folders sync via the
+``folders_allowlist: ["inbox", "sentitems", "archive"]`` config key.
+Well-known folder names (``inbox``, ``sentitems``, ``drafts``,
+``deleteditems``, ``junkemail``, ``outbox``, ``archive``) are matched
+case-insensitively against the Graph ``wellKnownName`` field; custom
+folders are matched case-insensitively against ``displayName``. An
+empty / missing allowlist ingests every folder.
 
 ``fetch`` returns a small JSON artefact containing only header fields
 — the orchestration layer routes this through the canonical Silver
@@ -43,9 +70,12 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
+import httpx
+
 from kairix.connectors.m365_email_headers.graph_client import (
     GraphMessage,
     M365GraphClient,
+    MailFolderRef,
 )
 from kairix.core.protocols import (
     ChangeEvent,
@@ -99,6 +129,19 @@ _HIERARCHY_ROOT_ID = "m365-email-headers"
 # Wave E ChangeEvent emission + make_connector config validation) so
 # the literal lives in one place.
 _SENSITIVITY_METADATA_KEY = "sensitivity"
+
+# F17 — ChangeEvent metadata key for the source folder so downstream
+# consumers (Silver entity extraction, retrieval scoping) can scope by
+# folder without re-hitting Graph.
+_FOLDER_METADATA_KEY = "folder"
+
+# Microsoft Graph documented well-known folder names per
+# https://learn.microsoft.com/graph/api/resources/mailfolder — used by
+# the optional ``folders_allowlist`` filter to match folders without
+# the operator needing the server-assigned folder id.
+_WELL_KNOWN_FOLDER_NAMES: frozenset[str] = frozenset(
+    {"inbox", "sentitems", "drafts", "deleteditems", "junkemail", "outbox", "archive"}
+)
 
 
 def _now_iso() -> str:
@@ -202,6 +245,7 @@ class M365EmailHeadersConnector:
         client_builder: Callable[[OAuth2ClientCredsAuth, str], M365GraphClient] | None = None,
         auth: OAuth2ClientCredsAuth | None = None,
         mailboxes: Sequence[str] | None = None,
+        folders_allowlist: Sequence[str] | None = None,
         flag_reader: Callable[[str], bool] = _default_flag_reader,
         secrets: SecretsResolver | None = None,
     ) -> None:
@@ -268,35 +312,136 @@ class M365EmailHeadersConnector:
         # ``list_changes_for_container`` so the framework can persist a
         # distinct deltaLink per mailbox to ``topology_containers.cursor_token``.
         self._next_cursor_by_container: dict[str, str | None] = {}
+        # Per-folder allowlist (#380). ``None`` / empty = ingest every
+        # folder; a populated tuple restricts to folders matched by
+        # well-known name (case-insensitive) or display name
+        # (case-insensitive).
+        self._folders_allowlist: tuple[str, ...] | None = tuple(folders_allowlist) if folders_allowlist else None
 
     # ------------------------------------------------------------------
     # SourceConnector Protocol surface
     # ------------------------------------------------------------------
 
     def list_changes(self, cursor: Cursor | None) -> Iterator[ChangeEvent]:
-        """Stream header-only changes from Graph since ``cursor``.
+        """Stream header-only changes per folder from Graph since ``cursor``.
 
-        ``cursor`` is the opaque deltaLink URL from the previous tick;
-        ``None`` triggers a full sync from the seed delta URL. Each
-        ``GraphMessage`` becomes one ``created`` :class:`ChangeEvent`;
-        Graph itself handles the modified / deleted distinction in
-        future syncs. Connector scope is intentionally headers-only —
-        the delta endpoint's ``@removed`` deletion stream is not yet
-        propagated.
+        Folder-scoped delta (#380): Graph rejects mailbox-wide delta, so
+        the connector enumerates mail folders via
+        :meth:`M365GraphClient.list_mail_folders` (optionally filtered
+        by the ``folders_allowlist`` config), then drains each folder's
+        delta independently. ``cursor`` decodes as a JSON
+        ``{folder_id: deltaLink}`` mapping carrying each folder's
+        previous-tick deltaLink; ``None`` (or any non-JSON / non-dict
+        legacy cursor) triggers a cold-start full sync per folder.
+
+        Each ``GraphMessage`` becomes one ``created`` :class:`ChangeEvent`;
+        ``metadata`` carries the source folder under the
+        :data:`_FOLDER_METADATA_KEY` key so downstream consumers can
+        scope by folder without re-hitting Graph. Graph itself handles
+        the modified / deleted distinction in future syncs.
+
+        One bad folder (transient ``httpx.HTTPError``) is logged + skipped
+        + retried on the next tick. Sibling folders make progress
+        regardless: their next-cursor is still recorded and their events
+        are still yielded.
+        """
+        previous_cursors = _decode_per_folder_cursor(cursor)
+        events, next_cursors = self._drain_all_folders(
+            graph=self._graph,
+            previous_cursors=previous_cursors,
+            extra_metadata={},
+        )
+        self._next_cursor = _encode_per_folder_cursor(next_cursors)
+        return iter(events)
+
+    def _drain_all_folders(
+        self,
+        *,
+        graph: M365GraphClient,
+        previous_cursors: dict[str, str],
+        extra_metadata: dict[str, str],
+    ) -> tuple[list[ChangeEvent], dict[str, str]]:
+        """Enumerate folders, drain each, return events + next-cursors mapping.
+
+        Shared between :meth:`list_changes` (legacy / OFF-branch) and
+        :meth:`_list_changes_scoped` (Wave E ON-branch) so the
+        folder-enumerate → per-folder-drain → cursor-merge loop lives
+        in one place. The caller passes the per-mailbox Graph client
+        plus any extra ChangeEvent metadata (e.g. the Wave E
+        ``mailbox`` key) it wants threaded onto every event.
+
+        Returns ``([], previous_cursors)`` when the folder enumeration
+        call itself fails so the caller can persist the unchanged
+        cursor mapping and the next tick can resume.
         """
         events: list[ChangeEvent] = []
-        for message in self._graph.iter_messages(start_url=cursor):
-            self._cache[message.message_id] = message
-            events.append(
-                ChangeEvent(
-                    op="created",
-                    item_id=message.message_id,
-                    modified_at=_event_modified_at(message),
-                    metadata={_SENSITIVITY_METADATA_KEY: LOCKED_SENSITIVITY},
-                )
+        try:
+            folders = graph.list_mail_folders()
+        except httpx.HTTPError as exc:
+            logger.warning("m365 graph: list_mail_folders failed; deferring to next tick: %s", exc)
+            return events, dict(previous_cursors)
+
+        next_cursors: dict[str, str] = {}
+        for folder in _select_folders(folders, self._folders_allowlist):
+            self._drain_one_folder(
+                graph=graph,
+                folder=folder,
+                previous_cursors=previous_cursors,
+                next_cursors=next_cursors,
+                events=events,
+                extra_metadata=extra_metadata,
             )
-        self._next_cursor = self._graph.last_delta_link()
-        return iter(events)
+        return events, next_cursors
+
+    def _drain_one_folder(
+        self,
+        *,
+        graph: M365GraphClient,
+        folder: MailFolderRef,
+        previous_cursors: dict[str, str],
+        next_cursors: dict[str, str],
+        events: list[ChangeEvent],
+        extra_metadata: dict[str, str],
+    ) -> None:
+        """Drain one folder's delta; record cursor; skip on HTTPError.
+
+        Per #380's per-folder isolation contract: an ``httpx.HTTPError``
+        on this folder's drain is logged and the folder's prior cursor
+        (if any) is preserved so the next tick retries from the same
+        horizon. Siblings make progress regardless.
+        """
+        start_url = previous_cursors.get(folder.folder_id)
+        try:
+            for message in graph.iter_messages(folder.folder_id, start_url=start_url):
+                self._cache[message.message_id] = message
+                metadata: dict[str, str] = {
+                    _SENSITIVITY_METADATA_KEY: LOCKED_SENSITIVITY,
+                    _FOLDER_METADATA_KEY: folder.display_name or folder.folder_id,
+                }
+                metadata.update(extra_metadata)
+                events.append(
+                    ChangeEvent(
+                        op="created",
+                        item_id=message.message_id,
+                        modified_at=_event_modified_at(message),
+                        metadata=metadata,
+                    )
+                )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "m365 graph: folder %r drain failed; keeping previous cursor and skipping for this tick: %s",
+                folder.display_name or folder.folder_id,
+                exc,
+            )
+            prior = previous_cursors.get(folder.folder_id)
+            if prior is not None:
+                next_cursors[folder.folder_id] = prior
+            return
+        terminal = graph.last_delta_link()
+        if isinstance(terminal, str) and terminal:
+            next_cursors[folder.folder_id] = terminal
+        elif start_url is not None:
+            next_cursors[folder.folder_id] = start_url
 
     def fetch(self, item_id: str) -> RawArtefact:
         """Return the cached header envelope for ``item_id`` as JSON.
@@ -456,17 +601,35 @@ class M365EmailHeadersConnector:
     def retrieve_all_slim_docs(self, _container: Container) -> Iterator[str]:
         """SlimConnector shim — Graph delta is ID-only friendly via iter_messages.
 
-        The Graph delta endpoint already returns header-only envelopes
-        (no body content per ADR-004) — this shim drains the per-
-        mailbox iterator and yields only ``message_id`` strings for
-        the prune cycle's diff against ``documents.item_id``. Uses the
-        container's own cursor so prune walks observe the same horizon
-        as :meth:`list_changes_for_container`.
+        Folder-scoped delta (#380): drains each enumerated folder via
+        the per-mailbox Graph client and yields one ``message_id``
+        per envelope for the prune cycle's diff against
+        ``documents.item_id``. The container's ``cursor_token`` is the
+        JSON ``{folder_id: deltaLink}`` mapping (same shape as the
+        legacy :meth:`list_changes` cursor); each folder resumes from
+        its own deltaLink.
         """
         mailbox = _container.container_id or self._upn
         graph = self._per_mailbox_client(mailbox)
-        for message in graph.iter_messages(start_url=_container.cursor_token):
-            yield message.message_id
+        try:
+            folders = graph.list_mail_folders()
+        except httpx.HTTPError as exc:
+            logger.warning("m365 graph: slim-doc folder enumeration failed; yielding empty set: %s", exc)
+            return
+        previous_cursors = _decode_per_folder_cursor(_container.cursor_token)
+        selected = _select_folders(folders, self._folders_allowlist)
+        for folder in selected:
+            start_url = previous_cursors.get(folder.folder_id)
+            try:
+                for message in graph.iter_messages(folder.folder_id, start_url=start_url):
+                    yield message.message_id
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "m365 graph: slim-doc folder %r drain failed; skipping for this tick: %s",
+                    folder.display_name or folder.folder_id,
+                    exc,
+                )
+                continue
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
         """HierarchyConnector — emit one root FOLDER + one FOLDER per mailbox.
@@ -490,8 +653,11 @@ class M365EmailHeadersConnector:
         ADR-005.
 
         Inbox / Sent / other Graph mail folders are NOT walked at this
-        slice — that's a Wave-E+1 enhancement that would emit one
-        FOLDER per Graph mail folder under each mailbox.
+        slice as separate hierarchy nodes — the per-folder delta loop
+        (#380) drains each Graph mail folder for messages, but the
+        hierarchy emits one synthetic FOLDER per mailbox (not per Graph
+        mail folder). A Wave-E+1 enhancement could emit one FOLDER per
+        Graph mail folder under each mailbox.
         """
         # Root node first — F58 parent-before-child invariant.
         yield HierarchyNode(
@@ -540,36 +706,36 @@ class M365EmailHeadersConnector:
         return self._next_cursor_by_container.get(container_id)
 
     def _list_changes_scoped(self, container: Container) -> Iterator[ChangeEvent]:
-        """Wave E ON-branch: drain Graph delta against one mailbox only.
+        """Wave E ON-branch: drain folder-scoped delta against one mailbox.
 
-        Reads ``container.cursor_token`` as the per-mailbox deltaLink
-        (None for cold-start), drives a Graph
-        ``/users/{container.container_id}/messages/delta`` iteration via
-        the per-mailbox Graph client, emits one ``created`` ChangeEvent
-        per envelope, primes the per-tick fetch cache, and records the
-        terminal deltaLink in ``_next_cursor_by_container`` so the
-        framework can persist a distinct cursor per mailbox.
+        Reads ``container.cursor_token`` as a JSON
+        ``{folder_id: deltaLink}`` mapping (per-mailbox state of every
+        folder's cursor); ``None`` (or any non-JSON legacy cursor)
+        triggers a cold-start full sync per folder. Drives a Graph
+        ``/users/{container.container_id}/mailFolders/{folder_id}/messages/delta``
+        iteration per folder via the per-mailbox Graph client, emits one
+        ``created`` ChangeEvent per envelope, primes the per-tick fetch
+        cache, and records the merged per-folder cursor mapping in
+        ``_next_cursor_by_container`` so the framework can persist a
+        distinct (per-mailbox, per-folder) cursor.
 
         Per-mailbox isolation is structural: each mailbox owns its
         Graph client (UPN baked in), its cursor read (the container's
         ``cursor_token`` only), and its next-cursor write (keyed by
         ``container.container_id`` in ``_next_cursor_by_container``).
+        One bad folder doesn't poison the others — the same skip-and-
+        retry-next-tick policy from :meth:`list_changes` applies here
+        (both methods share :meth:`_drain_all_folders`).
         """
         mailbox = container.container_id
         graph = self._per_mailbox_client(mailbox)
-        cursor = container.cursor_token
-        events: list[ChangeEvent] = []
-        for message in graph.iter_messages(start_url=cursor):
-            self._cache[message.message_id] = message
-            events.append(
-                ChangeEvent(
-                    op="created",
-                    item_id=message.message_id,
-                    modified_at=_event_modified_at(message),
-                    metadata={_SENSITIVITY_METADATA_KEY: LOCKED_SENSITIVITY, "mailbox": mailbox},
-                )
-            )
-        self._next_cursor_by_container[mailbox] = graph.last_delta_link()
+        previous_cursors = _decode_per_folder_cursor(container.cursor_token)
+        events, next_cursors = self._drain_all_folders(
+            graph=graph,
+            previous_cursors=previous_cursors,
+            extra_metadata={"mailbox": mailbox},
+        )
+        self._next_cursor_by_container[mailbox] = _encode_per_folder_cursor(next_cursors)
         return iter(events)
 
     def _per_mailbox_client(self, mailbox: str) -> M365GraphClient:
@@ -677,6 +843,83 @@ class M365EmailHeadersConnector:
         )
 
 
+def _decode_per_folder_cursor(cursor: str | None) -> dict[str, str]:
+    """Decode a stored ``{folder_id: deltaLink}`` cursor string.
+
+    The cursor on the wire is the JSON serialisation of a
+    ``dict[str, str]``. Any value that isn't a JSON dict — including
+    ``None``, an empty string, a non-JSON string, or a JSON value that
+    isn't an object — collapses to an empty mapping, which the
+    connector treats as cold-start.
+
+    The "legacy / unrecognised" path is the safe migration for
+    deployments that stored a single mailbox-wide deltaLink string
+    before the #380 fix landed. Those cursors no longer match Graph's
+    folder-scoped delta surface, so the connector restarts from cold —
+    same observable state Graph would have reached if the operator
+    never had a working cursor (which is exactly what #380 reports:
+    Graph rejected mailbox-wide delta outright).
+    """
+    if not isinstance(cursor, str) or not cursor:
+        return {}
+    try:
+        parsed = json.loads(cursor)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in parsed.items():
+        if isinstance(key, str) and isinstance(value, str):
+            out[key] = value
+    return out
+
+
+def _encode_per_folder_cursor(cursors: Mapping[str, str]) -> str | None:
+    """Encode a ``{folder_id: deltaLink}`` mapping as the stored cursor.
+
+    Returns ``None`` for an empty mapping so the framework persists
+    "no cursor" rather than the literal string ``"{}"`` — keeps the
+    cursor column null when no folder has been drained yet.
+    """
+    if not cursors:
+        return None
+    return json.dumps(dict(cursors), sort_keys=True)
+
+
+def _select_folders(
+    folders: Sequence[MailFolderRef],
+    allowlist: Sequence[str] | None,
+) -> tuple[MailFolderRef, ...]:
+    """Filter folders by the operator's optional allowlist.
+
+    ``None`` / empty allowlist returns every folder. A populated
+    allowlist matches:
+
+      * well-known folder names (``inbox``, ``sentitems``, ``drafts``,
+        ``deleteditems``, ``junkemail``, ``outbox``, ``archive``)
+        case-insensitively against :attr:`MailFolderRef.well_known_name`
+      * custom folder names case-insensitively against
+        :attr:`MailFolderRef.display_name`
+
+    Returns the folders in the order Graph surfaced them so the
+    iteration order is stable across ticks (Graph's mailFolders
+    response is documented stably-ordered).
+    """
+    if not allowlist:
+        return tuple(folders)
+    normalised = {entry.strip().lower() for entry in allowlist if entry and entry.strip()}
+    if not normalised:
+        return tuple(folders)
+    out: list[MailFolderRef] = []
+    for folder in folders:
+        well_known = (folder.well_known_name or "").strip().lower()
+        display = (folder.display_name or "").strip().lower()
+        if (well_known and well_known in normalised) or (display and display in normalised):
+            out.append(folder)
+    return tuple(out)
+
+
 def _event_modified_at(message: GraphMessage) -> str:
     """Pick the best timestamp for a ChangeEvent's ``modified_at``.
 
@@ -749,4 +992,25 @@ def make_connector(config: Mapping[str, Any]) -> M365EmailHeadersConnector:
             )
         mailboxes = list(raw_mailboxes)
 
-    return M365EmailHeadersConnector(user_principal_name=upn, mailboxes=mailboxes)
+    raw_allowlist = config.get("folders_allowlist")
+    folders_allowlist: list[str] | None
+    if raw_allowlist is None:
+        folders_allowlist = None
+    else:
+        if not isinstance(raw_allowlist, list | tuple) or not all(isinstance(f, str) and f for f in raw_allowlist):
+            raise ValueError(
+                "m365_email_headers: 'folders_allowlist' must be a list of folder name strings. "
+                "fix: write `folders_allowlist: [inbox, sentitems, archive]` "
+                "under the m365_email_headers connector block. Well-known names "
+                f"recognised: {sorted(_WELL_KNOWN_FOLDER_NAMES)!r}; custom folders "
+                "match by case-insensitive displayName. "
+                "next: see https://learn.microsoft.com/graph/api/resources/mailfolder "
+                "for the well-known folder list."
+            )
+        folders_allowlist = list(raw_allowlist)
+
+    return M365EmailHeadersConnector(
+        user_principal_name=upn,
+        mailboxes=mailboxes,
+        folders_allowlist=folders_allowlist,
+    )

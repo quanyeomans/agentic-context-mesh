@@ -20,7 +20,7 @@ import pytest
 
 from kairix.connectors.m365_email_headers import M365EmailHeadersConnector
 from kairix.connectors.m365_email_headers.connector import M365Credentials
-from kairix.connectors.m365_email_headers.graph_client import GraphMessage, M365GraphClient
+from kairix.connectors.m365_email_headers.graph_client import GraphMessage, M365GraphClient, MailFolderRef
 from kairix.core import factory
 from kairix.core.db.schema import create_schema
 from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
@@ -34,9 +34,21 @@ class _ScriptedGraphClient(M365GraphClient):
         self._mailbox = mailbox
         self._delta: str | None = None
 
-    def iter_messages(self, start_url: str | None = None) -> Iterator[GraphMessage]:
-        del start_url
-        self._delta = f"https://graph.microsoft.com/v1.0/users/{self._mailbox}/messages/delta?$deltatoken=metadata-tok"
+    def list_mail_folders(self) -> tuple[MailFolderRef, ...]:
+        return (
+            MailFolderRef(
+                folder_id="AAMkAGFmYWtl-inbox",
+                display_name="Inbox",
+                well_known_name="inbox",
+            ),
+        )
+
+    def iter_messages(self, folder_id: str, start_url: str | None = None) -> Iterator[GraphMessage]:
+        del start_url, folder_id
+        self._delta = (
+            f"https://graph.microsoft.com/v1.0/users/{self._mailbox}"
+            "/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken=metadata-tok"
+        )
         yield GraphMessage(
             message_id="msg-metadata-1",
             sender="agent-alpha@example.com",

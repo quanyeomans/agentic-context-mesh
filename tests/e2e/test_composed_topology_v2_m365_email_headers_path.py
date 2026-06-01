@@ -71,8 +71,22 @@ def _per_mailbox_payload(mailbox: str) -> dict[str, Any]:
     return {
         "value": [_envelope(mailbox, 1)],
         "@odata.deltaLink": (
-            f"https://graph.microsoft.com/v1.0/users/{mailbox}/messages/delta?$deltatoken={mailbox}-tok"
+            f"https://graph.microsoft.com/v1.0/users/{mailbox}"
+            f"/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken={mailbox}-tok"
         ),
+    }
+
+
+def _single_inbox_folder_payload() -> dict[str, Any]:
+    """One mailFolders response carrying a single ``inbox`` well-known folder (#380)."""
+    return {
+        "value": [
+            {
+                "id": "AAMkAGFmYWtl-inbox",
+                "displayName": "Inbox",
+                "wellKnownName": "inbox",
+            },
+        ],
     }
 
 
@@ -82,6 +96,11 @@ def _make_graph_stub() -> tuple[httpx.MockTransport, list[str]]:
     The handler matches the requested URL to the correct mailbox UPN
     so per-mailbox delta requests get per-mailbox payloads — this is
     what proves per-mailbox isolation on the composed path.
+
+    #380: the handler also serves the mailFolders enumeration response
+    each mailbox now requires before driving per-folder delta. The
+    mailFolders response is mailbox-independent (one synthetic inbox
+    per mailbox) so the per-mailbox routing still works downstream.
     """
     recorded: list[str] = []
 
@@ -96,6 +115,8 @@ def _make_graph_stub() -> tuple[httpx.MockTransport, list[str]]:
                     "token_type": "Bearer",
                 },
             )
+        if "/mailFolders" in url and "/messages/delta" not in url:
+            return httpx.Response(200, json=_single_inbox_folder_payload())
         recorded.append(url)
         for mailbox in (_PRIMARY, _BETA, _GAMMA):
             if f"/users/{mailbox}/" in url:

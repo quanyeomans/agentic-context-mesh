@@ -39,6 +39,7 @@ from kairix.connectors.m365_email_headers.connector import (
 from kairix.connectors.m365_email_headers.graph_client import (
     GraphMessage,
     M365GraphClient,
+    MailFolderRef,
 )
 from kairix.core.protocols import Container, HierarchyNode
 from kairix.transport.auth.oauth2_client_creds import OAuth2ClientCredsAuth
@@ -54,20 +55,34 @@ class _RecordingGraphClient(M365GraphClient):
 
     Subclasses the real :class:`M365GraphClient` so the connector's
     isinstance / attribute expectations are unchanged. Overrides
-    :meth:`iter_messages` to bypass the HTTP layer — yields a single
-    scripted :class:`GraphMessage` whose ``message_id`` encodes the
-    mailbox UPN. ``last_delta_link`` returns a per-mailbox token so
-    per-container cursor isolation is mechanically observable.
+    :meth:`list_mail_folders` to surface one synthetic inbox folder
+    (#380 folder-scoped delta) and :meth:`iter_messages` to bypass the
+    HTTP layer — yields a single scripted :class:`GraphMessage` whose
+    ``message_id`` encodes the mailbox UPN. ``last_delta_link``
+    returns a per-mailbox token so per-container cursor isolation is
+    mechanically observable.
     """
 
     def __init__(self, *, mailbox: str) -> None:
         self._mailbox = mailbox
         self._delta: str | None = None
 
-    def iter_messages(self, start_url: str | None = None) -> Iterator[GraphMessage]:
+    def list_mail_folders(self) -> tuple[MailFolderRef, ...]:
+        return (
+            MailFolderRef(
+                folder_id="AAMkAGFmYWtl-inbox",
+                display_name="Inbox",
+                well_known_name="inbox",
+            ),
+        )
+
+    def iter_messages(self, folder_id: str, start_url: str | None = None) -> Iterator[GraphMessage]:
+        del folder_id
+        del start_url
         # Record the cursor read so callers can prove per-mailbox isolation.
         self._delta = (
-            f"https://graph.microsoft.com/v1.0/users/{self._mailbox}/messages/delta?$deltatoken={self._mailbox}-tok"
+            f"https://graph.microsoft.com/v1.0/users/{self._mailbox}"
+            f"/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken={self._mailbox}-tok"
         )
         yield GraphMessage(
             message_id=f"{self._mailbox}-msg-1",

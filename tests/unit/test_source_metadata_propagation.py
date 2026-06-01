@@ -34,7 +34,7 @@ from kairix.connectors.m365_calendar.graph_client import (
 )
 from kairix.connectors.m365_email_headers import M365EmailHeadersConnector
 from kairix.connectors.m365_email_headers.connector import M365Credentials
-from kairix.connectors.m365_email_headers.graph_client import GraphMessage, M365GraphClient
+from kairix.connectors.m365_email_headers.graph_client import GraphMessage, M365GraphClient, MailFolderRef
 from kairix.connectors.notion import NotionApiClient, NotionConnector, NotionCredentials
 from kairix.connectors.obsidian import ObsidianConnector
 from kairix.connectors.sharepoint import (
@@ -275,12 +275,24 @@ class _MailGraphClient(M365GraphClient):
     def __init__(self, message: GraphMessage) -> None:
         self._message = message
 
-    def iter_messages(self, start_url: str | None = None) -> Iterator[GraphMessage]:
-        del start_url
+    def list_mail_folders(self) -> tuple[MailFolderRef, ...]:
+        return (
+            MailFolderRef(
+                folder_id="AAMkAGFmYWtl-inbox",
+                display_name="Inbox",
+                well_known_name="inbox",
+            ),
+        )
+
+    def iter_messages(self, folder_id: str, start_url: str | None = None) -> Iterator[GraphMessage]:
+        del start_url, folder_id
         yield self._message
 
     def last_delta_link(self) -> str | None:
-        return "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com/messages/delta?$deltatoken=tok"
+        return (
+            "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com"
+            "/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken=tok"
+        )
 
 
 def test_m365_email_metadata_for_returns_sender_and_recipients() -> None:

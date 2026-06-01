@@ -27,6 +27,7 @@ from kairix.connectors.m365_email_headers.graph_client import (
     DeltaPage,
     GraphMessage,
     M365GraphClient,
+    MailFolderRef,
 )
 from kairix.transport.auth.oauth2_client_creds import (
     OAuth2ClientCredsAuth,
@@ -140,7 +141,7 @@ def test_authorised_get_retries_once_on_401() -> None:
         http_client=shared,
     )
 
-    messages = list(client.iter_messages())
+    messages = list(client.iter_messages("inbox"))
     # Two Graph calls fired (401 → invalidate → 200).
     assert len(graph_calls) == 2, f"expected 2 Graph hits (401 + retry), got {len(graph_calls)}"
     # The retry produced exactly one envelope.
@@ -183,7 +184,7 @@ def test_authorised_get_propagates_persistent_401() -> None:
     )
 
     with pytest.raises(httpx.HTTPStatusError):
-        list(client.iter_messages())
+        list(client.iter_messages("inbox"))
 
 
 # ---------------------------------------------------------------------------
@@ -479,7 +480,7 @@ def test_authorised_get_retries_on_429_with_retry_after() -> None:
 
     transport = httpx.MockTransport(_handler)  # type: ignore[arg-type]  # F3 rationale: pytest typing accepts handler shapes httpx narrows at runtime.
     client = _build_client_with_sleep_recording(transport, recorded_sleeps=recorded_sleeps)
-    messages = list(client.iter_messages(start_url=None))
+    messages = list(client.iter_messages("inbox", start_url=None))
     assert messages == []
     assert call_count["n"] == 2
     assert recorded_sleeps == [2.0]
@@ -509,7 +510,7 @@ def test_authorised_get_503_without_retry_after_uses_exponential_backoff() -> No
 
     transport = httpx.MockTransport(_handler)  # type: ignore[arg-type]  # F3 rationale: pytest typing accepts handler shapes httpx narrows at runtime.
     client = _build_client_with_sleep_recording(transport, recorded_sleeps=recorded_sleeps)
-    messages = list(client.iter_messages(start_url=None))
+    messages = list(client.iter_messages("inbox", start_url=None))
     assert messages == []
     assert call_count["n"] == 2
     assert len(recorded_sleeps) == 1
@@ -541,10 +542,224 @@ def test_authorised_get_503_with_unparseable_retry_after_falls_back() -> None:
 
     transport = httpx.MockTransport(_handler)  # type: ignore[arg-type]  # F3 rationale: pytest typing accepts handler shapes httpx narrows at runtime.
     client = _build_client_with_sleep_recording(transport, recorded_sleeps=recorded_sleeps)
-    messages = list(client.iter_messages(start_url=None))
+    messages = list(client.iter_messages("inbox", start_url=None))
     assert messages == []
     assert call_count["n"] == 2
     assert recorded_sleeps[0] >= 2.0
+
+
+# ---------------------------------------------------------------------------
+# Folder-scoped delta URL builder (#380)
+# ---------------------------------------------------------------------------
+
+
+def test_initial_delta_url_is_folder_scoped() -> None:
+    """The URL builder emits the folder-scoped delta URL shape per #380.
+
+    Graph rejects mailbox-wide ``/users/{upn}/messages/delta`` with
+    ``BadRequest: Change tracking is not supported against
+    'microsoft.graph.message'`` — delta only works folder-scoped. The
+    URL must carry ``/mailFolders/{folder_id}/messages/delta``.
+
+    Sabotage proof (verified): reverting :meth:`initial_delta_url` to
+    return ``f"{base}/users/{upn}/messages/delta?$select=..."`` makes
+    the ``/mailFolders/inbox/messages/delta`` substring assertion fail.
+    """
+    handler = httpx.MockTransport(lambda _r: httpx.Response(200, json={}))
+    auth, _ = _build_auth_with_transport(handler)
+    client = M365GraphClient(user_principal_name="agent-alpha@example.com", auth=auth)
+    url = client.initial_delta_url("inbox")
+    assert "/users/agent-alpha@example.com/mailFolders/inbox/messages/delta" in url, (
+        f"folder-scoped URL shape missing: {url!r}"
+    )
+    # And the URL still carries the header-only $select projection.
+    assert "$select=" in url
+
+
+def test_initial_delta_url_rejects_empty_folder_id() -> None:
+    """Calling :meth:`initial_delta_url` with an empty folder_id raises a typed ValueError.
+
+    The brief says #380's fix requires a folder id — an empty string
+    would silently produce a malformed URL like
+    ``/users/{upn}/mailFolders//messages/delta``. The guard is the
+    affordance: surface the misconfig at the caller with a ``fix:``
+    marker.
+
+    Sabotage proof: drop the ``if not folder_id`` guard at the top of
+    :meth:`initial_delta_url` — the ``pytest.raises`` block fails to
+    fire.
+    """
+    handler = httpx.MockTransport(lambda _r: httpx.Response(200, json={}))
+    auth, _ = _build_auth_with_transport(handler)
+    client = M365GraphClient(user_principal_name="agent-alpha@example.com", auth=auth)
+    with pytest.raises(ValueError) as exc_info:
+        client.initial_delta_url("")
+    msg = str(exc_info.value)
+    assert "folder_id" in msg
+    assert "fix:" in msg, f"error message missing fix: marker: {msg!r}"
+
+
+# ---------------------------------------------------------------------------
+# list_mail_folders parser shape (#380)
+# ---------------------------------------------------------------------------
+
+
+def _list_folders_with_body(body: dict[str, Any]) -> tuple[MailFolderRef, ...]:
+    """Drive :meth:`M365GraphClient.list_mail_folders` against a stub
+    serving ``body`` as the mailFolders response.
+    """
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/oauth2/v2.0/token" in url:
+            return httpx.Response(
+                200,
+                json={"access_token": "fake-bearer", "expires_in": 3600, "token_type": "Bearer"},
+            )
+        return httpx.Response(200, json=body)
+
+    handler = httpx.MockTransport(_handler)
+    auth, shared = _build_auth_with_transport(handler)
+    client = M365GraphClient(
+        user_principal_name="agent-alpha@example.com",
+        auth=auth,
+        http_client=shared,
+    )
+    return client.list_mail_folders()
+
+
+def test_list_mail_folders_parses_well_known_and_custom_folders() -> None:
+    """Both well-known and custom folders come through with their attributes.
+
+    Sabotage proof: drop the ``well_known_name`` field from the parser
+    helper — the ``well_known_name`` assertions below fail because the
+    field would be ``None`` for every folder.
+    """
+    body: dict[str, Any] = {
+        "value": [
+            {
+                "id": "AAMkAGFmYWtl-inbox",
+                "displayName": "Inbox",
+                "wellKnownName": "inbox",
+            },
+            {
+                "id": "AAMkAGFmYWtl-sent",
+                "displayName": "Sent Items",
+                "wellKnownName": "sentitems",
+            },
+            {
+                "id": "AAMkAGFmYWtl-q2-receipts",
+                "displayName": "Q2 Receipts",
+                "wellKnownName": None,
+            },
+        ],
+    }
+    folders = _list_folders_with_body(body)
+    assert len(folders) == 3
+    by_id = {f.folder_id: f for f in folders}
+    assert by_id["AAMkAGFmYWtl-inbox"].well_known_name == "inbox"
+    assert by_id["AAMkAGFmYWtl-inbox"].display_name == "Inbox"
+    assert by_id["AAMkAGFmYWtl-sent"].well_known_name == "sentitems"
+    assert by_id["AAMkAGFmYWtl-q2-receipts"].well_known_name is None
+    assert by_id["AAMkAGFmYWtl-q2-receipts"].display_name == "Q2 Receipts"
+
+
+def test_list_mail_folders_drops_entries_with_missing_id() -> None:
+    """Folders missing ``id`` are dropped — the id is the URL key.
+
+    Sabotage proof: change the parser's ``if not isinstance(folder_id, str)
+    or not folder_id`` guard to ``True`` (always append) — the folders
+    list would include a phantom entry and the count assertion below
+    would fail.
+    """
+    body: dict[str, Any] = {
+        "value": [
+            {"id": "AAMkAGFmYWtl-inbox", "displayName": "Inbox", "wellKnownName": "inbox"},
+            {"displayName": "Orphan (no id)", "wellKnownName": None},
+            {"id": "", "displayName": "Empty id", "wellKnownName": None},
+            {"id": 42, "displayName": "Non-string id", "wellKnownName": None},
+        ],
+    }
+    folders = _list_folders_with_body(body)
+    assert len(folders) == 1
+    assert folders[0].folder_id == "AAMkAGFmYWtl-inbox"
+
+
+def test_list_mail_folders_follows_next_link_pagination() -> None:
+    """A response with ``@odata.nextLink`` is followed to drain every page.
+
+    Sabotage proof: remove the ``while url is not None`` loop in
+    :meth:`list_mail_folders` (return after first page) — the second
+    folder never surfaces and the count assertion drops to 1.
+    """
+    pages = [
+        {
+            "value": [
+                {"id": "AAMkAGFmYWtl-inbox", "displayName": "Inbox", "wellKnownName": "inbox"},
+            ],
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com/mailFolders?$skiptoken=page2",
+        },
+        {
+            "value": [
+                {"id": "AAMkAGFmYWtl-archive", "displayName": "Archive", "wellKnownName": "archive"},
+            ],
+        },
+    ]
+    sequence = list(pages)
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "/oauth2/v2.0/token" in url:
+            return httpx.Response(
+                200,
+                json={"access_token": "fake-bearer", "expires_in": 3600, "token_type": "Bearer"},
+            )
+        payload = sequence.pop(0) if sequence else {"value": []}
+        return httpx.Response(200, json=payload)
+
+    handler = httpx.MockTransport(_handler)
+    auth, shared = _build_auth_with_transport(handler)
+    client = M365GraphClient(
+        user_principal_name="agent-alpha@example.com",
+        auth=auth,
+        http_client=shared,
+    )
+    folders = client.list_mail_folders()
+    assert len(folders) == 2
+    ids = [f.folder_id for f in folders]
+    assert ids == ["AAMkAGFmYWtl-inbox", "AAMkAGFmYWtl-archive"], (
+        f"expected pagination to drain both pages in order, got {ids!r}"
+    )
+
+
+def test_list_mail_folders_handles_empty_value_array() -> None:
+    """An empty ``value`` returns an empty tuple, not a parse error.
+
+    Sabotage proof: change ``if not isinstance(raw_folders, list)`` to
+    ``raw_folders is None`` — a non-list value would explode below.
+    """
+    folders = _list_folders_with_body({"value": []})
+    assert folders == ()
+
+
+def test_list_mail_folders_handles_non_dict_entries() -> None:
+    """A ``value`` array containing non-dict entries skips them gracefully.
+
+    Sabotage proof: drop the ``if not isinstance(entry, dict)`` guard in
+    the parser — non-dict entries raise ``AttributeError`` instead of
+    being skipped.
+    """
+    body: dict[str, Any] = {
+        "value": [
+            {"id": "AAMkAGFmYWtl-inbox", "displayName": "Inbox", "wellKnownName": "inbox"},
+            "not-a-dict",
+            None,
+            42,
+            {"id": "AAMkAGFmYWtl-archive", "displayName": "Archive", "wellKnownName": "archive"},
+        ],
+    }
+    folders = _list_folders_with_body(body)
+    assert len(folders) == 2
 
 
 def test_authorised_get_default_http_client_path() -> None:

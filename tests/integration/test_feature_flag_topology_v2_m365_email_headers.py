@@ -60,6 +60,7 @@ from kairix.connectors.m365_email_headers.connector import (
 from kairix.connectors.m365_email_headers.graph_client import (
     GraphMessage,
     M365GraphClient,
+    MailFolderRef,
 )
 from kairix.core.protocols import (
     Container,
@@ -82,6 +83,10 @@ class _RecordingGraphClient(M365GraphClient):
     """In-process Graph stand-in. Records the ``start_url`` passed to
     :meth:`iter_messages` per mailbox so the integration test can prove
     per-mailbox cursor isolation.
+
+    #380: folder-scoped delta. Each mailbox has one synthetic inbox
+    folder; the per-mailbox / per-folder cursor still round-trips so
+    the Wave E ON cursor-isolation contract is intact.
     """
 
     instances: ClassVar[list[_RecordingGraphClient]] = []
@@ -92,12 +97,23 @@ class _RecordingGraphClient(M365GraphClient):
         self.observed_starts: list[str | None] = []
         _RecordingGraphClient.instances.append(self)
 
-    def iter_messages(self, start_url: str | None = None) -> Iterator[GraphMessage]:
+    def list_mail_folders(self) -> tuple[MailFolderRef, ...]:
+        return (
+            MailFolderRef(
+                folder_id="AAMkAGFmYWtl-inbox",
+                display_name="Inbox",
+                well_known_name="inbox",
+            ),
+        )
+
+    def iter_messages(self, folder_id: str, start_url: str | None = None) -> Iterator[GraphMessage]:
+        del folder_id
         self.observed_starts.append(start_url)
         # Always emit a per-mailbox token so two containers reading the
         # same iter_messages output land on distinct deltaLinks.
         self._delta = (
-            f"https://graph.microsoft.com/v1.0/users/{self._mailbox}/messages/delta?$deltatoken={self._mailbox}-tok"
+            f"https://graph.microsoft.com/v1.0/users/{self._mailbox}"
+            f"/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken={self._mailbox}-tok"
         )
         yield GraphMessage(
             message_id=f"{self._mailbox}-msg-1",
@@ -331,24 +347,28 @@ def test_flag_on_per_mailbox_cursors_are_isolated() -> None:
     fail — both observed_starts land on the primary mailbox client and
     the per-container cursor write collapses onto a single key.
 
-    The structural proof: container A passes cursor_token "CURSOR-A"
-    and container B passes "CURSOR-B"; we then assert each per-mailbox
-    Graph client saw its OWN cursor as start_url and that
+    The structural proof: container A passes a JSON-encoded per-folder
+    cursor mapping the inbox folder to ``"CURSOR-A"`` (per #380 the
+    container cursor is now a ``{folder_id: deltaLink}`` JSON dict)
+    and container B carries ``"CURSOR-B"``; we then assert each
+    per-mailbox Graph client saw its OWN cursor as start_url and that
     ``next_cursor_for_container`` returns distinct deltaLinks.
     """
+    import json as _json
+
     connector = _build_connector(flag_on=True)
     container_a = Container(
         cc_pair_id=7,
         container_id=_BETA,
         access_state="ACCESSIBLE",
-        cursor_token="CURSOR-A",
+        cursor_token=_json.dumps({"AAMkAGFmYWtl-inbox": "CURSOR-A"}),
         last_synced_at=None,
     )
     container_b = Container(
         cc_pair_id=7,
         container_id=_GAMMA,
         access_state="ACCESSIBLE",
-        cursor_token="CURSOR-B",
+        cursor_token=_json.dumps({"AAMkAGFmYWtl-inbox": "CURSOR-B"}),
         last_synced_at=None,
     )
     events_a = list(connector.list_changes_for_container(container_a))
@@ -367,7 +387,8 @@ def test_flag_on_per_mailbox_cursors_are_isolated() -> None:
         f"ON: per-mailbox cursor isolation broken — {_GAMMA} client saw {by_mailbox[_GAMMA].observed_starts!r}"
     )
 
-    # Per-container next-cursor map carries one entry per mailbox.
+    # Per-container next-cursor map carries one JSON-encoded
+    # {folder_id: deltaLink} mapping per mailbox.
     cursor_beta = connector.next_cursor_for_container(_BETA)
     cursor_gamma = connector.next_cursor_for_container(_GAMMA)
     assert cursor_beta is not None and _BETA in cursor_beta, (

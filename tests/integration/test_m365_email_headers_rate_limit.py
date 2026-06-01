@@ -110,7 +110,7 @@ def test_m365_email_headers_429_with_retry_after_honoured() -> None:
         return httpx.Response(200, json={"value": []})
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps)
-    messages = list(client.iter_messages(start_url=None))
+    messages = list(client.iter_messages("inbox", start_url=None))
 
     assert messages == [], "post-retry 200 returned empty value array — should not raise"
     assert call_count["n"] == 2, f"expected 2 data calls (429 → retry → 200), saw {call_count['n']}"
@@ -142,7 +142,7 @@ def test_m365_email_headers_503_with_retry_after_honoured() -> None:
         return httpx.Response(200, json={"value": []})
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps)
-    messages = list(client.iter_messages(start_url=None))
+    messages = list(client.iter_messages("inbox", start_url=None))
 
     assert messages == []
     assert call_count["n"] == 2, f"expected 2 data calls (503 → retry → 200), saw {call_count['n']}"
@@ -178,7 +178,7 @@ def test_m365_email_headers_429_repeated_eventually_raises() -> None:
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps, max_attempts=max_attempts)
     with pytest.raises(httpx.HTTPStatusError) as exc_info:
-        list(client.iter_messages(start_url=None))
+        list(client.iter_messages("inbox", start_url=None))
 
     assert exc_info.value.response.status_code == 429
     assert call_count["n"] == max_attempts, (
@@ -219,7 +219,7 @@ def test_m365_email_headers_401_refreshes_token_once_then_raises() -> None:
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps)
     with pytest.raises(httpx.HTTPStatusError) as exc_info:
-        list(client.iter_messages(start_url=None))
+        list(client.iter_messages("inbox", start_url=None))
 
     assert exc_info.value.response.status_code == 401
     assert data_call_count["n"] == 2, (
@@ -254,7 +254,7 @@ def test_m365_email_headers_non_retryable_4xx_raises_immediately() -> None:
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps)
     with pytest.raises(httpx.HTTPStatusError) as exc_info:
-        list(client.iter_messages(start_url=None))
+        list(client.iter_messages("inbox", start_url=None))
 
     assert exc_info.value.response.status_code == 403
     assert data_call_count["n"] == 1, f"403 must not retry, saw {data_call_count['n']} calls"
@@ -286,7 +286,7 @@ def test_m365_email_headers_5xx_without_retry_after_uses_exponential_backoff() -
         return httpx.Response(200, json={"value": []})
 
     client = _build_client(_handler, recorded_sleeps=recorded_sleeps)
-    messages = list(client.iter_messages(start_url=None))
+    messages = list(client.iter_messages("inbox", start_url=None))
 
     assert messages == []
     assert call_count["n"] == 2, f"500 must retry once, saw {call_count['n']} calls"

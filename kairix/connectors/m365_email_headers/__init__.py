@@ -12,9 +12,12 @@ the tenant / client / secret triple via
 :class:`kairix.secrets.loader.SecretsLoader` (canonical identity
 ``(connector, m365, None, <leaf>)``) at construction time, exchanges
 for a bearer through
-:class:`kairix.transport.auth.OAuth2ClientCredsAuth`, then drives the
-Graph ``/users/{upn}/messages/delta`` delta query so sync is
-incremental between worker ticks.
+:class:`kairix.transport.auth.OAuth2ClientCredsAuth`, then drives the folder-scoped
+Graph ``/users/{upn}/mailFolders/{folder_id}/messages/delta`` delta
+query (#380 — Graph rejects mailbox-wide delta with ``BadRequest``) so
+sync is incremental per folder between worker ticks. Mail folders are
+enumerated once at cold-start via ``/users/{upn}/mailFolders``; each
+folder owns its own deltaLink in the connector's serialised cursor.
 
 Registered via ``[project.entry-points."kairix.connectors"]`` in
 kairix's ``pyproject.toml`` — operators select it by listing
@@ -43,6 +46,7 @@ from kairix.connectors.m365_email_headers.graph_client import (
     HEADER_ONLY_SELECT,
     GraphMessage,
     M365GraphClient,
+    MailFolderRef,
 )
 
 # F56 capability declaration (Wave B shims duck-type Protocol satisfaction).
@@ -56,5 +60,6 @@ __all__ = [
     "GraphMessage",
     "M365EmailHeadersConnector",
     "M365GraphClient",
+    "MailFolderRef",
     "make_connector",
 ]

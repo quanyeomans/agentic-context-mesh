@@ -61,18 +61,40 @@ def _fake_factory() -> SourceConnector:
 
 
 def _real_factory() -> SourceConnector:
-    """Real-impl factory — MockTransport-backed Graph stub."""
+    """Real-impl factory — MockTransport-backed Graph stub.
+
+    #380: the connector now enumerates folders via
+    ``GET /users/{upn}/mailFolders`` before driving per-folder delta,
+    so the stub distinguishes the folder enumeration response from
+    the per-folder delta response.
+    """
     envelopes = _envelopes()
 
     def _stub(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if "/oauth2/v2.0/token" in url:
             return httpx.Response(200, json={"access_token": "fake-bearer", "expires_in": 3600, "token_type": "Bearer"})
+        if "/mailFolders" in url and "/messages/delta" not in url:
+            return httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {
+                            "id": "AAMkAGFmYWtl-inbox",
+                            "displayName": "Inbox",
+                            "wellKnownName": "inbox",
+                        },
+                    ],
+                },
+            )
         return httpx.Response(
             200,
             json={
                 "value": envelopes,
-                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com/messages/delta?$deltatoken=tok",
+                "@odata.deltaLink": (
+                    "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com"
+                    "/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken=tok"
+                ),
             },
         )
 

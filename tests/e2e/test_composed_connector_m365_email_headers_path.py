@@ -90,8 +90,22 @@ def _three_messages_payload() -> dict[str, Any]:
             },
         ],
         "@odata.deltaLink": (
-            "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com/messages/delta?$deltatoken=tok-1"
+            "https://graph.microsoft.com/v1.0/users/agent-alpha@example.com"
+            "/mailFolders/AAMkAGFmYWtl-inbox/messages/delta?$deltatoken=tok-1"
         ),
+    }
+
+
+def _single_inbox_folder_payload() -> dict[str, Any]:
+    """One mailFolders response carrying a single ``inbox`` well-known folder (#380)."""
+    return {
+        "value": [
+            {
+                "id": "AAMkAGFmYWtl-inbox",
+                "displayName": "Inbox",
+                "wellKnownName": "inbox",
+            },
+        ],
     }
 
 
@@ -114,6 +128,8 @@ def _composed_connector(recorded_urls: list[str]) -> M365EmailHeadersConnector:
                     "token_type": "Bearer",
                 },
             )
+        if "/mailFolders" in url and "/messages/delta" not in url:
+            return httpx.Response(200, json=_single_inbox_folder_payload())
         recorded_urls.append(url)
         return httpx.Response(200, json=_three_messages_payload())
 

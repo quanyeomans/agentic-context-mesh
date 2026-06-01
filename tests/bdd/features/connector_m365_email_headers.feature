@@ -10,6 +10,11 @@ Feature: M365 email-headers connector pulls envelope metadata via Microsoft Grap
   query layer via a $select projection that excludes every body field.
   See docs/architecture/connector-ingestion-architecture.md Wave 5.
 
+  Per #380, Graph rejects mailbox-wide
+  /users/{upn}/messages/delta — delta only works folder-scoped. The
+  connector enumerates mail folders and drains each independently
+  with its own per-folder cursor.
+
   @happy_path
   Scenario: A new message in the mailbox surfaces as a created change event
     Given a stubbed Microsoft Graph endpoint that returns three header-only messages
@@ -26,3 +31,26 @@ Feature: M365 email-headers connector pulls envelope metadata via Microsoft Grap
     And the recorded Graph URL projection does not contain body
     And the recorded Graph URL projection does not contain bodyPreview
     And the recorded Graph URL projection does not contain uniqueBody
+
+  @folder_scoped_delta
+  Scenario: Multi-folder sync emits events from every folder
+    Given a stubbed Microsoft Graph endpoint with three folders carrying five messages each
+    When the operator runs the m365_email_headers connector list_changes with no cursor
+    Then fifteen created change events are emitted across all folders
+    And every recorded Graph URL is folder-scoped
+
+  @folder_scoped_delta
+  Scenario: Allowlist filters folders correctly
+    Given a stubbed Microsoft Graph endpoint with three folders carrying five messages each
+    And the operator configures the folders_allowlist to inbox and archive
+    When the operator runs the m365_email_headers connector list_changes with no cursor
+    Then ten created change events are emitted from only the allowed folders
+    And no change events come from the Sent Items folder
+
+  @folder_scoped_delta
+  Scenario: A bad folder does not block the others
+    Given a stubbed Microsoft Graph endpoint with three folders carrying five messages each
+    And the Inbox folder returns repeated server errors
+    When the operator runs the m365_email_headers connector list_changes with no cursor
+    Then ten created change events are emitted from the surviving folders
+    And the surviving folders advance their cursors

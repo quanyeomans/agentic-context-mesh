@@ -1,24 +1,35 @@
 """Thin Microsoft Graph client for header-only message retrieval.
 
 A focused wrapper around ``httpx.Client`` for the Microsoft Graph
-``/users/{upn}/messages/delta`` endpoint. Three commitments:
+folder-scoped ``/users/{upn}/mailFolders/{folder_id}/messages/delta``
+endpoint. Four commitments:
 
-  1. **Header-only retrieval** (ADR-004). Every Graph request carries
+  1. **Folder-scoped delta** (#380). Graph rejects mailbox-wide delta
+     with ``BadRequest: Change tracking is not supported against
+     'microsoft.graph.message'`` — delta only works folder-scoped. The
+     client builds URLs of the shape
+     ``/users/{upn}/mailFolders/{folder_id}/messages/delta`` and
+     exposes :meth:`list_mail_folders` so the connector can enumerate
+     the folders to drain.
+
+  2. **Header-only retrieval** (ADR-004). Every Graph request carries
      ``$select=from,toRecipients,ccRecipients,subject,sentDateTime,
      receivedDateTime,id``. Body fields (``body``, ``uniqueBody``,
      ``bodyPreview``) are never requested. Tests pin the ``$select``
      string at the query-construction surface.
 
-  2. **OAuth2 client-credentials auth.** Every request adds an
+  3. **OAuth2 client-credentials auth.** Every request adds an
      ``Authorization: Bearer <token>`` header via the injected
      :class:`OAuth2ClientCredsAuth` helper. A 401 triggers a single
      :meth:`invalidate` + retry; persistent 401 propagates.
 
-  3. **Delta-token pagination.** The connector hands an opaque cursor
+  4. **Delta-token pagination.** The connector hands an opaque cursor
      between ticks; the Graph response carries either ``@odata.nextLink``
      (more pages now) or ``@odata.deltaLink`` (resume here next tick).
      The client surfaces both as :class:`DeltaPage` so the connector
-     can advance cursors without parsing URLs itself.
+     can advance cursors without parsing URLs itself. Each folder
+     parks its own deltaLink — the connector persists a
+     ``{folder_id: deltaLink}`` mapping.
 
 Per F37, ``msgraph_core`` / ``msgraph`` import is allowed only under
 ``kairix/connectors/<name>/`` — but we deliberately avoid the SDK
@@ -115,6 +126,27 @@ class DeltaPage:
     delta_link: str | None
 
 
+@dataclass(frozen=True)
+class MailFolderRef:
+    """One mail folder reference projected from ``GET /users/{upn}/mailFolders``.
+
+    The Graph mailFolders response yields one of these per folder; the
+    connector keys per-folder delta cursors by :attr:`folder_id` and
+    matches operator-supplied allowlist entries against
+    :attr:`well_known_name` (case-insensitive, e.g. ``"inbox"``) and
+    :attr:`display_name` (case-insensitive, for custom folders).
+
+    ``well_known_name`` is non-``None`` only for the documented
+    Microsoft well-known folder set: ``inbox``, ``sentitems``,
+    ``drafts``, ``deleteditems``, ``junkemail``, ``outbox``,
+    ``archive``. Custom (user-created) folders surface it as ``None``.
+    """
+
+    folder_id: str
+    display_name: str
+    well_known_name: str | None
+
+
 class M365GraphClient:
     """Thin Microsoft Graph wrapper for header-only delta queries.
 
@@ -163,15 +195,53 @@ class M365GraphClient:
         self._sleep_fn = sleep_fn
         self._max_attempts = max_attempts
 
-    def initial_delta_url(self) -> str:
-        """Compose the seed delta URL with the header-only projection.
+    def initial_delta_url(self, folder_id: str) -> str:
+        """Compose the seed folder-scoped delta URL with the header-only projection.
 
-        The first sync (no cursor) starts here; subsequent syncs hand
-        the previous response's ``deltaLink`` directly to
-        :meth:`fetch_page`. Exposed publicly so tests can pin the
-        ``$select`` projection without driving a real HTTP call.
+        Graph rejects mailbox-wide ``/users/{upn}/messages/delta`` with
+        ``BadRequest: Change tracking is not supported against
+        'microsoft.graph.message'`` (#380) — delta only works folder-
+        scoped. The URL shape is
+        ``/users/{upn}/mailFolders/{folder_id}/messages/delta``.
+
+        The first sync for a folder (no cursor) starts here; subsequent
+        syncs hand the previous response's ``deltaLink`` directly to
+        :meth:`fetch_page`. Exposed publicly so tests can pin the URL
+        shape + the ``$select`` projection without driving a real HTTP
+        call.
         """
-        return f"{self._graph_base}/users/{self._upn}/messages/delta?$select={HEADER_ONLY_SELECT}"
+        if not folder_id:
+            raise ValueError(
+                "M365GraphClient.initial_delta_url: folder_id is empty. "
+                "fix: pass the Graph mailFolder id "
+                "(e.g. the 'inbox' well-known name or a folder id from list_mail_folders). "
+                "next: see kairix/connectors/m365_email_headers/graph_client.py "
+                "docstring for the folder-scoped delta URL shape."
+            )
+        return (
+            f"{self._graph_base}/users/{self._upn}/mailFolders/{folder_id}/messages/delta?$select={HEADER_ONLY_SELECT}"
+        )
+
+    def list_mail_folders(self) -> tuple[MailFolderRef, ...]:
+        """Enumerate the mailbox's mail folders via ``GET /users/{upn}/mailFolders``.
+
+        Returns one :class:`MailFolderRef` per folder. The connector
+        calls this once at cold-start so each folder gets its own
+        per-folder delta cursor (#380).
+
+        Graph's mailFolders response is paginated via ``@odata.nextLink``;
+        this method follows nextLink to drain every page so the connector
+        sees the full folder set in one call.
+        """
+        url: str | None = f"{self._graph_base}/users/{self._upn}/mailFolders"
+        folders: list[MailFolderRef] = []
+        while url is not None:
+            response = self._authorised_get(url)
+            body = response.json()
+            folders.extend(_parse_mail_folders(body))
+            next_link = body.get("@odata.nextLink")
+            url = next_link if isinstance(next_link, str) else None
+        return tuple(folders)
 
     def fetch_page(self, url: str) -> DeltaPage:
         """Fetch one page from the given Graph URL (delta or nextLink).
@@ -195,21 +265,28 @@ class M365GraphClient:
         body = response.json()
         return _parse_delta_page(body)
 
-    def iter_messages(self, start_url: str | None = None) -> Iterator[GraphMessage]:
-        """Iterate header-only messages across all pages until the
-        delta-link is reached.
+    def iter_messages(
+        self,
+        folder_id: str,
+        start_url: str | None = None,
+    ) -> Iterator[GraphMessage]:
+        """Iterate header-only messages for one folder across all pages
+        until the delta-link is reached.
 
         Args:
+            folder_id: The Graph mailFolder id (well-known name like
+                ``"inbox"`` or a server-assigned id). Required because
+                Graph rejects mailbox-wide delta (#380).
             start_url: Optional starting URL. ``None`` starts from
-                :meth:`initial_delta_url` (full sync); a stored
-                deltaLink starts from the previous cursor.
+                :meth:`initial_delta_url` (full sync for this folder);
+                a stored deltaLink starts from the previous cursor.
 
         Yields:
             One :class:`GraphMessage` per Graph response entry. The
             final page's ``deltaLink`` is accessible via
             :meth:`last_delta_link` after iteration completes.
         """
-        url: str | None = start_url or self.initial_delta_url()
+        url: str | None = start_url or self.initial_delta_url(folder_id)
         self._last_delta: str | None = None
         while url is not None:
             page = self.fetch_page(url)
@@ -363,6 +440,53 @@ def _parse_retry_after(response: httpx.Response) -> float | None:
         return float(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_mail_folders(body: dict[str, Any]) -> list[MailFolderRef]:
+    """Parse one Graph ``mailFolders`` JSON response page.
+
+    The Graph ``mailFolders`` payload has the shape::
+
+        {
+          "value": [
+            {"id": "AAMk...", "displayName": "Inbox",
+             "wellKnownName": "inbox"},
+            {"id": "AAMk...", "displayName": "Q2 Receipts",
+             "wellKnownName": null},
+            ...
+          ],
+          "@odata.nextLink": "..." | absent
+        }
+
+    Per the Graph docs (https://learn.microsoft.com/graph/api/resources/mailfolder),
+    ``wellKnownName`` is non-``None`` only for the documented well-known
+    folder set: ``inbox``, ``sentitems``, ``drafts``, ``deleteditems``,
+    ``junkemail``, ``outbox``, ``archive``. User-created folders carry
+    ``wellKnownName: null``.
+
+    Folders with missing ``id`` are dropped — the id is the URL key,
+    so an empty id can't be drained anyway.
+    """
+    raw_folders = body.get("value")
+    folders: list[MailFolderRef] = []
+    if not isinstance(raw_folders, list):
+        return folders
+    for entry in raw_folders:
+        if not isinstance(entry, dict):
+            continue
+        folder_id = entry.get("id")
+        if not isinstance(folder_id, str) or not folder_id:
+            continue
+        display = entry.get("displayName")
+        well_known = entry.get("wellKnownName")
+        folders.append(
+            MailFolderRef(
+                folder_id=folder_id,
+                display_name=display if isinstance(display, str) else "",
+                well_known_name=well_known if isinstance(well_known, str) and well_known else None,
+            )
+        )
+    return folders
 
 
 def _parse_delta_page(body: dict[str, Any]) -> DeltaPage:
