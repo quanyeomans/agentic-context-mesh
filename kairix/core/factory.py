@@ -252,11 +252,62 @@ def _build_search_logger() -> Any:
     )
 
 
-def _build_collection_resolver() -> Any:
-    """Construct the DefaultCollectionResolver from the on-disk YAML config.
+def build_collection_resolver(
+    db_path: Any = None,
+    *,
+    flag_reader: Any = None,
+) -> Any:
+    """Construct the production ``CollectionResolver``.
 
-    KAIRIX_EXTRA_COLLECTIONS is still honoured for ad-hoc deployments without
-    a full config file.
+    Branches on the ``topology_v2_collection_resolver`` feature flag
+    (GH #372):
+
+      * **OFF (default)** — :class:`DefaultCollectionResolver` reads
+        ``collections.shared[].in_default`` from ``kairix.config.yaml``;
+        ``KAIRIX_EXTRA_COLLECTIONS`` is still honoured for ad-hoc
+        deployments without a full config file.
+      * **ON** — :class:`TopologyV2CollectionResolver` reads the
+        ``topology_scope_profiles`` + ``topology_scope_entries`` v2
+        tables; default search returns the superset of every collection
+        the agent's scope_profile grants read access to.
+
+    The cutover is a separate deliberate action per the default-safe
+    principle (docs/architecture/feature-flag-architecture.md §2.1).
+
+    ``db_path`` is the resolved SQLite path threaded from
+    :func:`build_search_pipeline`; the v2 branch opens a connection
+    against it. The legacy branch ignores ``db_path``.
+
+    ``flag_reader`` is the DI seam — tests pass a
+    :class:`tests.fakes.FakeFeatureFlagResolver`'s ``.get`` method to
+    drive the OFF/ON branch deterministically without env-var or
+    overlay-file manipulation. Production passes ``None`` and the
+    factory consults the real :func:`kairix.core.features.flag` resolver.
+    """
+    use_v2 = False
+    try:
+        if flag_reader is not None:
+            use_v2 = bool(flag_reader("topology_v2_collection_resolver"))
+        else:
+            from kairix.core.features import flag as _feature_flag
+
+            use_v2 = _feature_flag("topology_v2_collection_resolver")
+    except Exception as e:
+        logger.warning(
+            "factory: topology_v2_collection_resolver flag lookup failed — %s; defaulting to legacy resolver",
+            e,
+        )
+
+    if use_v2:
+        return _build_topology_v2_collection_resolver(db_path)
+    return _build_legacy_collection_resolver()
+
+
+def _build_legacy_collection_resolver() -> Any:
+    """Construct the legacy :class:`DefaultCollectionResolver`.
+
+    Reads ``collections.shared[].in_default`` from ``kairix.config.yaml``;
+    ``KAIRIX_EXTRA_COLLECTIONS`` is still honoured.
     """
     from kairix.core.search.config_loader import load_collections, resolve_config_path
     from kairix.core.search.registry import parse_agent_registry
@@ -287,6 +338,23 @@ def _build_collection_resolver() -> Any:
         extra_collections=_extra_collections(),
         agent_registry=agent_registry,
     )
+
+
+def _build_topology_v2_collection_resolver(db_path: Any) -> Any:
+    """Construct :class:`TopologyV2CollectionResolver` against ``db_path``.
+
+    Opens a sqlite3 Connection so the resolver can query
+    ``topology_scope_profiles`` + ``topology_scope_entries`` +
+    ``topology_collections`` + ``topology_cc_pairs``. The connection
+    stays open for the lifetime of the cached pipeline (matches the
+    SearchPipeline's lifecycle).
+    """
+    import sqlite3
+
+    from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
+
+    db = sqlite3.connect(str(db_path), timeout=10.0)
+    return TopologyV2CollectionResolver(db=db)
 
 
 def _resolve_provider_name(cfg: RetrievalConfig) -> str | None:
@@ -499,7 +567,7 @@ def build_search_pipeline(
         fusion=_build_fusion(cfg),
         boosts=select_boosts(cfg, graph),
         logger=_build_search_logger(),
-        resolver=_build_collection_resolver(),
+        resolver=build_collection_resolver(db_path=resolved_db_path),
         config=cfg,
         # #281 — wire the process-shared LRU so repeat queries from
         # teaming agents skip the Azure embed roundtrip.

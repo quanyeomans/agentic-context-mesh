@@ -640,6 +640,27 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-ingestion-architecture.md",
     ),
+    "topology_v2_collection_resolver": FeatureFlag(
+        name="topology_v2_collection_resolver",
+        default=False,
+        description=(
+            "GH #372 — route the search pipeline's collection-resolver through "
+            "the topology v2 ScopeProfileResolver superset adapter instead of "
+            "the legacy DefaultCollectionResolver. When OFF, the legacy resolver "
+            "reads collections.shared[].in_default from kairix.config.yaml "
+            "(today's behaviour). When ON, `agent=X, collections=None` returns "
+            "the superset of every collection the agent's scope_profile grants "
+            "read access to, via ScopeProfileResolver.resolve(actors=(X,)). "
+            "Default-off until the scope-profile path has soaked against the "
+            "dogfood VM; the cutover is a separate deliberate action per the "
+            "default-safe principle in feature-flag-architecture.md §2.1."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        owner=_CONNECTOR_FRAMEWORK_OWNER,
+        related_spec=_TOPOLOGY_V2_SPEC,
+    ),
 }
 
 

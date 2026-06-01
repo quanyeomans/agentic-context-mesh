@@ -4403,3 +4403,115 @@ class FakeBrowserLauncher:
     def open(self, url: str) -> bool:
         self.opened.append(url)
         return self._result
+
+
+class FakeScopeProfileResolver:
+    """In-memory :class:`ScopeProfileResolver` for #372 test discipline.
+
+    Returns a pre-seeded ``ResolvedScope`` keyed on the actor tuple. Used
+    by :class:`TopologyV2CollectionResolver` unit / contract tests so they
+    don't have to seed the topology_v2 SQL tables to exercise the resolver
+    logic itself (the contract test covers the SQL → ResolvedScope path
+    separately).
+
+    Construct with ``with_actor(name, entries=[...])`` builder:
+
+        >>> from tests.fakes import FakeScopeProfileResolver
+        >>> fake = FakeScopeProfileResolver().with_actor(
+        ...     "agent-alpha",
+        ...     entries=[
+        ...         ("sharepoint-all", "read", "internal"),
+        ...         ("memory-bucket", "read_write", "restricted"),
+        ...     ],
+        ... )
+        >>> scope = fake.resolve(actors=("agent-alpha",))
+        >>> {c.name for c in scope.collections}
+        {'sharepoint-all', 'memory-bucket'}
+
+    Each entry is ``(collection_name, mode, max_sensitivity)`` where mode
+    is one of ``'read'`` / ``'write'`` / ``'read_write'``. Entries with
+    mode='write' are EXCLUDED from the ``collections=`` field (they fail
+    the can_read filter the real ScopeProfileResolver enforces); they
+    surface in ``excluded_collections`` instead.
+
+    F1-clean substitute: production code constructs the real
+    :class:`ScopeProfileResolver`; tests pass this fake via the
+    ``scope_profile_resolver=`` kwarg on
+    :class:`TopologyV2CollectionResolver`.
+    """
+
+    def __init__(self) -> None:
+        # actor tuple → entries list[(name, mode, max_sensitivity)]
+        self._actors: dict[tuple[str, ...], list[tuple[str, str, str]]] = {}
+        self._raises_on_resolve: Exception | None = None
+
+    def with_actor(
+        self,
+        actor: str,
+        *,
+        entries: list[tuple[str, str, str]],
+    ) -> FakeScopeProfileResolver:
+        """Builder — declare an actor's scope-entry set.
+
+        Returns a new fake (immutable-builder pattern, matches
+        :class:`FakeFeatureFlagResolver`).
+        """
+        clone = FakeScopeProfileResolver()
+        clone._actors = {k: list(v) for k, v in self._actors.items()}
+        clone._actors[(actor,)] = list(entries)
+        clone._raises_on_resolve = self._raises_on_resolve
+        return clone
+
+    def with_raises(self, exc: Exception) -> FakeScopeProfileResolver:
+        """Builder — pin a scripted exception for the next ``resolve`` call.
+
+        Used by F68 failure-injection contract tests to prove the
+        Adapter propagates resolver errors rather than silently
+        swallowing them.
+        """
+        clone = FakeScopeProfileResolver()
+        clone._actors = {k: list(v) for k, v in self._actors.items()}
+        clone._raises_on_resolve = exc
+        return clone
+
+    def resolve(self, *, actors: tuple[str, ...], **_: Any) -> Any:
+        """Return a synthesized :class:`ResolvedScope` for ``actors``.
+
+        Mirrors :meth:`ScopeProfileResolver.resolve` — the can_read
+        filter is applied here so ``mode='write'`` entries land in
+        ``excluded_collections`` rather than the ``collections`` tuple.
+        """
+        if self._raises_on_resolve is not None:
+            raise self._raises_on_resolve
+
+        from kairix.core.connectors.scope_profile_resolver import (
+            ExcludedCollection,
+            ResolvedCollection,
+            ResolvedScope,
+        )
+
+        entries = self._actors.get(actors, [])
+        collections = []
+        excluded = []
+        for name, mode, max_sens in entries:
+            can_read = mode in ("read", "read_write")
+            if can_read:
+                collections.append(
+                    ResolvedCollection(
+                        name=name,
+                        max_sensitivity=max_sens,  # type: ignore[arg-type]  # F3-rationale: F39Tier is Literal; fake accepts the str alias from the test seed
+                        weight=1.0,
+                    )
+                )
+            else:
+                excluded.append(
+                    ExcludedCollection(
+                        name=name,
+                        reason="actor_lacks_read",
+                        escalation_hint=(f"grant can_read=True to {actors!r} for {name!r}"),
+                    )
+                )
+        return ResolvedScope(
+            collections=tuple(collections),
+            excluded_collections=tuple(excluded),
+        )
