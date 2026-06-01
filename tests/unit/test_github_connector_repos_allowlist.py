@@ -151,8 +151,8 @@ def test_three_slug_allowlist_drains_only_those_repos() -> None:
     """A three-slug allowlist restricts the drain to exactly those three repos.
 
     This is the production deploy scenario from 2026-06-02 — the PAT
-    can see every org repo but the operator only wants kairix +
-    engineering-hub + tc-agent-zone draining.
+    can see every org repo but the operator only wants a specific
+    handful of repos draining.
 
     Sabotage proof noted in the module docstring.
     """
