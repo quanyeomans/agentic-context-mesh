@@ -366,12 +366,27 @@ class _DefaultBrowser:
     diverge from Google's without coupling.
     """
 
-    # Calls webbrowser.open on the operator's machine; tests inject
-    # FakeBrowserLauncher to avoid opening a real browser during pytest.
-    def open(self, url: str) -> bool:  # pragma: no cover — live browser path
-        import webbrowser
+    def open(self, url: str) -> bool:
+        # KAIRIX_CONNECT_DISABLE_BROWSER kill-switch: tests/conftest.py
+        # sets this so any test that escapes the FakeBrowserLauncher
+        # injection seam is hard-blocked instead of firing a real popup
+        # on the operator's machine (2026-06-01 incident).
+        from kairix.paths import connect_browser_disabled
 
-        return webbrowser.open(url)
+        if connect_browser_disabled():
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "kairix.connect.slack: _DefaultBrowser.open suppressed by KAIRIX_CONNECT_DISABLE_BROWSER=1; "
+                "url=%s. fix: this should only fire in pytest — production must leave the env var unset. "
+                "next: confirm the calling test injects browser=FakeBrowserLauncher() on its SlackOAuth2Flow. "
+                "run: KAIRIX_CONNECT_DISABLE_BROWSER= kairix connect slack ...",
+                url,
+            )
+            return False
+        import webbrowser  # pragma: no cover — live browser path
+
+        return webbrowser.open(url)  # pragma: no cover — live browser path
 
 
 # Protocol conformance smoke check — confirms _DefaultBrowser satisfies

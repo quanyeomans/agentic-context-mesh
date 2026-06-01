@@ -299,9 +299,26 @@ class _DefaultBrowser:
     """Default :class:`BrowserLauncher` — calls :func:`webbrowser.open`."""
 
     def open(self, url: str) -> bool:
-        import webbrowser
+        # KAIRIX_CONNECT_DISABLE_BROWSER kill-switch: tests/conftest.py
+        # sets this so any test that escapes the FakeBrowserLauncher
+        # injection seam is hard-blocked instead of firing a real popup
+        # on the operator's machine (2026-06-01 incident).
+        from kairix.paths import connect_browser_disabled
 
-        return webbrowser.open(url)
+        if connect_browser_disabled():
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "kairix.connect.google: _DefaultBrowser.open suppressed by KAIRIX_CONNECT_DISABLE_BROWSER=1; "
+                "url=%s. fix: this should only fire in pytest — production must leave the env var unset. "
+                "next: confirm the calling test injects browser=FakeBrowserLauncher() on its GoogleOAuth2Flow. "
+                "run: KAIRIX_CONNECT_DISABLE_BROWSER= kairix connect google-* ...",
+                url,
+            )
+            return False
+        import webbrowser  # pragma: no cover — live browser path
+
+        return webbrowser.open(url)  # pragma: no cover — live browser path
 
 
 # Protocol conformance smoke checks. ``GoogleOAuth2Flow`` requires

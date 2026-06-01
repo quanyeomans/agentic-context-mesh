@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -932,6 +933,39 @@ def connector_sync_disabled() -> bool:
     lives here at the boundary.
     """
     return os.environ.get("KAIRIX_CONNECTOR_SYNC_DISABLED", "").strip().lower() in {"1", "true", "yes"}
+
+
+def connect_browser_disabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when ``kairix connect *`` must NOT open a real browser.
+
+    Hard kill-switch on the ``_DefaultBrowser.open`` fallback in every
+    ``kairix.connect.oauth2.*`` flow. Production leaves this unset so
+    the operator's normal flow opens the consent screen; the pytest
+    session in ``tests/conftest.py`` sets it to ``"1"`` at collection
+    time so any test that forgets to inject a ``FakeBrowserLauncher``
+    (or any subprocess that escapes the ``_inject`` patching pattern)
+    is hard-blocked rather than silently firing a real popup against
+    the operator's machine.
+
+    Reason for existence: 2026-06-01 incident — agent test runs leaked
+    real ``webbrowser.open`` calls with placeholder OAuth ``client_id``s,
+    producing a stream of Slack "client_id not valid" approval popups
+    on the operator's desktop. The injection seams in each flow are
+    correct; this is defence-in-depth so a single missed seam can't
+    repeat the symptom.
+
+    Args:
+        env: Optional env mapping for unit tests to drive the parser
+            without monkeypatching ``os.environ`` (F2-clean). Production
+            callers leave this ``None`` and the live ``os.environ`` is
+            read at call time.
+
+    Accepted truthy values: ``1``, ``true``, ``yes`` (case-insensitive).
+    Anything else — including unset — is False. F4-clean: the env read
+    lives here at the boundary.
+    """
+    e = env if env is not None else os.environ
+    return e.get("KAIRIX_CONNECT_DISABLE_BROWSER", "").strip().lower() in {"1", "true", "yes"}
 
 
 def worker_writes_vec_index() -> bool:

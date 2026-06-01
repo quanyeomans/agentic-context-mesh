@@ -345,6 +345,16 @@ import os as _os  # noqa: E402 — keep pytest_plugins assembly above other impo
 if _os.environ.get("KAIRIX_PVT") == "1":
     pytest_plugins.append("tests.pvt.steps.pvt_placeholder_steps")
 
+# Hard kill-switch on the kairix.connect.oauth2.* default browser path.
+# 2026-06-01 incident: a stream of real Slack "client_id not valid" approval
+# popups appeared on the operator's desktop during agent test runs — root
+# cause was the per-flow ``_DefaultBrowser`` fallback firing real
+# ``webbrowser.open`` when a test path escaped the FakeBrowserLauncher
+# injection seam. Setting the env var here at conftest import time means
+# every test runs with the kill-switch ON; production leaves it unset.
+# F4-clean: kairix-side read lives in kairix/paths.py::connect_browser_disabled.
+_os.environ.setdefault("KAIRIX_CONNECT_DISABLE_BROWSER", "1")
+
 from tests.fixtures.embeddings import fake_embedding  # noqa: E402
 from tests.fixtures.neo4j_mock import FakeNeo4jClient  # noqa: E402
 
