@@ -124,7 +124,16 @@ def _build_v2_environment(tmp_path: Path) -> Path:
     return db_path
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave B — requires (1) build_search_pipeline routing through the v2 resolver, "
+        "which today needs flag_reader kwarg threading at the call site OR a flag default flip "
+        "(cutover), AND (2) Wave A's ScopeProfileResolver tolerance for 'personal' sensitivity "
+        "tier used in the fixture. Wave B added flag_reader kwarg to build_search_pipeline; "
+        "this test does not pass it. Pass post-cutover or after a test-fixture update."
+    ),
+    strict=False,
+)
 def test_composed_v2_path_search_returns_default_superset(tmp_path: Path) -> None:
     """E2E: config → factory.build → search → assert.
 

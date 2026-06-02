@@ -48,7 +48,6 @@ def _config(scope_profile_entries: list[dict], *, agents: list[str] | None = Non
     }
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_in_scope_missing_defaults_to_true() -> None:
     """A scope_entry YAML without ``default_in_scope`` parses to
     ``default_in_scope=True`` (back-compat — every pre-#373 entry is
@@ -72,7 +71,6 @@ def test_default_in_scope_missing_defaults_to_true() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_in_scope_explicit_false_persists() -> None:
     """A scope_entry YAML with ``default_in_scope: false`` parses to
     ``default_in_scope=False``.
@@ -99,7 +97,6 @@ def test_default_in_scope_explicit_false_persists() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_default_in_scope_non_bool_raises_f21() -> None:
     """``default_in_scope: "yes"`` (or any non-bool) raises a config
     error whose message carries fix:/next:/run: action markers (F21).
@@ -126,7 +123,6 @@ def test_default_in_scope_non_bool_raises_f21() -> None:
     assert "next:" in msg, f"F21 affordance missing from parse error: {msg!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
     """``applies_to: ["*"]`` + 6 agents in the registry → 6 materialised
     profile rows.
@@ -168,7 +164,6 @@ def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_wildcard_applies_to_with_zero_agents_raises_f21() -> None:
     """``applies_to: ["*"]`` with an empty agents block raises an F21 error.
 
@@ -207,7 +202,6 @@ def test_wildcard_applies_to_with_zero_agents_raises_f21() -> None:
     assert "fix:" in msg, f"F21 affordance missing: {msg!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_collection_name_referenced_but_not_defined_raises_f21() -> None:
     """Scope entry references a collection not in the collections list
     → loud error naming the missing collection.
@@ -246,7 +240,6 @@ def test_collection_name_referenced_but_not_defined_raises_f21() -> None:
     assert "fix:" in msg, f"F21 affordance missing from cross-ref error: {msg!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_agent_unreachable_from_all_profiles_raises_f21() -> None:
     """An agent listed in the agents block but not covered by any profile
     raises an F21 error.
@@ -286,7 +279,18 @@ def test_agent_unreachable_from_all_profiles_raises_f21() -> None:
     assert "fix:" in msg, f"F21 affordance missing: {msg!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave B — explicit applies_to + extra registered agent contradicts "
+        "agent-reachability validator. test_agent_unreachable_from_all_profiles_raises_f21 "
+        "(same file) pins strict reachability; this test has 'consultant' in agents but "
+        "no profile covering them, which strict reachability flags as misconfiguration. "
+        "Resolved separately via a follow-up issue (operator-config docs need clarifying "
+        "whether explicit applies_to subsetting is allowed in isolation). The materialisation "
+        "mechanism this test pins IS shipped — proven by test_wildcard_applies_to_expands_to_all_registered_agents."
+    ),
+    strict=False,
+)
 def test_applies_to_list_supports_explicit_agent_names() -> None:
     """``applies_to: ["shape", "builder"]`` → 2 materialised rows.
 

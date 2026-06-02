@@ -186,8 +186,49 @@ def _explicit_search(v2_state: dict[str, Any], agent: str, collection: str) -> N
 
 @when("the config loader materialises the scope_profiles")
 def _materialise_profiles(v2_state: dict[str, Any]) -> None:
-    del v2_state
-    pytest.xfail(_XFAIL_REASON)
+    """Drive the production config parser to expand the wildcard.
+
+    F46-compliant: composes via the public
+    :func:`kairix.config.topology_v2.parse_topology_v2` parser surface,
+    not by direct construction of the internal
+    ``_expand_wildcard_profiles`` helper. The materialised actor →
+    collections map populated here is what the ``Then`` step asserts on.
+    """
+    from kairix.config.topology_v2 import parse_topology_v2
+
+    wildcard = v2_state.get("wildcard_profile") or {}
+    entries_payload = [
+        {
+            "actor_id": "__placeholder__",
+            "collection_name": name,
+            "mode": "read",
+            "default_in_scope": default_in_scope,
+        }
+        for name, default_in_scope in wildcard.get("entries", [])
+    ]
+    collection_names = sorted({e["collection_name"] for e in entries_payload})
+    yaml_doc = {
+        "topology_v2": {
+            "collections": [{"name": name, "sources": [{"cc_pair": "cc-bdd-1"}]} for name in collection_names],
+            "scope_profiles": [
+                {
+                    "name": "agent-default",
+                    "actor_kind": "agent",
+                    "applies_to": list(wildcard.get("applies_to", ["*"])),
+                    "entries": entries_payload,
+                }
+            ],
+        },
+        "agents": list(v2_state.get("agents", [])),
+    }
+
+    cfg = parse_topology_v2(yaml_doc)
+
+    materialised: dict[str, set[str]] = {}
+    for profile in cfg.scope_profiles:
+        for entry in profile.entries:
+            materialised.setdefault(entry.actor_id, set()).add(entry.collection_name)
+    v2_state["materialised_scope"] = materialised
 
 
 # ---------------------------------------------------------------------------

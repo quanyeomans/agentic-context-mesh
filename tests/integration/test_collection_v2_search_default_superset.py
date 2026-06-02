@@ -154,7 +154,14 @@ def _make_paths(tmp_path: Path, db_path: Path) -> object:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave B — needs build_search_pipeline(flag_reader=ON) wiring OR a flag default "
+        "flip at cutover, AND Wave A's ScopeProfileResolver tolerance for 'personal' sensitivity "
+        "tier (not in F39 today). Pass post-cutover."
+    ),
+    strict=False,
+)
 def test_search_with_no_collections_returns_results_from_every_in_default_source(
     tmp_path: Path,
 ) -> None:
@@ -202,7 +209,6 @@ def test_search_with_no_collections_returns_results_from_every_in_default_source
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_search_with_no_collections_excludes_opt_in_collection(tmp_path: Path) -> None:
     """reflib has 100% keyword match but is opt-in — default search
     must NOT return it.
@@ -237,7 +243,6 @@ def test_search_with_no_collections_excludes_opt_in_collection(tmp_path: Path) -
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_search_with_explicit_opt_in_collection_returns_it(tmp_path: Path) -> None:
     """``collections=['reflib']`` retrieves the reflib doc — opt-in
     collections are reachable by explicit name.
@@ -273,7 +278,6 @@ def test_search_with_explicit_opt_in_collection_returns_it(tmp_path: Path) -> No
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_search_returns_agent_own_memory_in_default(tmp_path: Path) -> None:
     """``agent='shape'`` with no collections returns ``shape-memory``
     docs without explicit naming.
@@ -303,7 +307,6 @@ def test_search_returns_agent_own_memory_in_default(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_search_does_not_return_other_agent_memory_in_default(tmp_path: Path) -> None:
     """``agent='shape'`` default search excludes builder-memory docs.
 
@@ -337,7 +340,15 @@ def test_search_does_not_return_other_agent_memory_in_default(tmp_path: Path) ->
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave B — validate_explicit branch in pipeline._resolve_collections IS wired, "
+        "but build_search_pipeline() routes through the production flag resolver (default OFF), "
+        "so the legacy resolver is wired and validate_explicit isn't called. Pass post-cutover "
+        "when the flag default flips to ON OR when the test is updated to pass flag_reader=."
+    ),
+    strict=False,
+)
 def test_search_explicit_other_agent_memory_returns_empty_with_error_logged(
     tmp_path: Path,
 ) -> None:
@@ -379,7 +390,6 @@ def test_search_explicit_other_agent_memory_returns_empty_with_error_logged(
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_flag_off_uses_legacy_default_collection_resolver(tmp_path: Path) -> None:
     """Feature flag OFF → SearchPipeline routes through the legacy
     :class:`DefaultCollectionResolver`.
@@ -407,7 +417,6 @@ def test_flag_off_uses_legacy_default_collection_resolver(tmp_path: Path) -> Non
     )
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
 def test_flag_on_uses_topology_v2_collection_resolver(tmp_path: Path) -> None:
     """Feature flag ON → SearchPipeline routes through TopologyV2CollectionResolver."""
     from kairix.core.factory import build_collection_resolver

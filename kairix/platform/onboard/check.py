@@ -54,6 +54,8 @@ _CHECK_TOPOLOGY_V2_CONFIG_VALID = "topology_v2_config_valid"
 _CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED = "topology_v2_cc_pairs_registered"
 # GH #373 — schema-migration check for the per-entry default_in_scope column.
 _CHECK_TOPOLOGY_V2_DEFAULT_IN_SCOPE_FIELD_PRESENT = "topology_v2_default_in_scope_field_present"
+# GH #373 Wave B — config-loader check that wildcard applies_to was expanded.
+_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED = "topology_v2_wildcard_expansion_resolved"
 _CHECK_SHAREPOINT_CREDENTIALS_LOADED = (
     "sharepoint_credentials_loaded"  # pragma: allowlist secret — check-name string, not a credential
 )
@@ -198,6 +200,14 @@ _CANONICAL_REMEDIATIONS: dict[str, str] = {
         "to confirm the column is present. "
         "run: docker compose restart kairix-worker kairix-1 (Docker) "
         "OR systemctl restart kairix-worker kairix-mcp (systemd)."
+    ),
+    _CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED: (
+        "fix: re-run the topology v2 config loader (restart the worker) so any "
+        '`applies_to: ["*"]` wildcards in kairix.config.yaml expand to concrete '
+        "actor_id rows in topology_scope_entries. A literal `*` actor_id in the DB "
+        "means the loader did not run (or the YAML edit post-dates the last apply). "
+        "next: docker compose restart kairix-worker. "
+        "run: kairix config validate."
     ),
     _CHECK_SHAREPOINT_CREDENTIALS_LOADED: (
         "fix: set the three M365 client-credentials secrets that the SharePoint "
@@ -1211,6 +1221,7 @@ class TopologyV2CheckDeps:
     flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_reader)
     config_loader: Callable[[], dict[str, Any] | None] = field(default_factory=lambda: _default_overlay_path_loader)
     db_cc_pair_namer: Callable[[], frozenset[str]] = field(default_factory=lambda: _default_db_cc_pair_names)
+    db_scope_actor_id_reader: Callable[[], tuple[str, ...]] = field(default_factory=lambda: _default_db_scope_actor_ids)
     secret_reader: Callable[[str], str | None] = field(default_factory=lambda: _default_secret_reader)
 
 
@@ -1552,6 +1563,100 @@ def check_topology_v2_default_in_scope_field_present(
     )
 
 
+def _default_db_scope_actor_ids() -> tuple[str, ...]:
+    """Production seam — return distinct actor_id values from topology_scope_entries.
+
+    Joins ``topology_scope_entries`` against
+    ``topology_scope_profiles`` so the check sees the same field the
+    runtime resolver reads. Empty DB / missing table → empty tuple
+    (the caller treats that as a pass).
+    """
+    import sqlite3
+
+    from kairix.core.db import get_db_path, open_db
+
+    db = open_db(Path(get_db_path()))
+    try:
+        try:
+            rows = db.execute(
+                "SELECT DISTINCT sp.actor_id "
+                "FROM topology_scope_profiles sp "
+                "JOIN topology_scope_entries se ON se.scope_profile_id = sp.id "
+                "ORDER BY sp.actor_id "
+                "LIMIT 10000"  # F63-bounded: scope_profiles is operator-config sized (≤O(100))
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Schema not migrated (no topology_scope_* tables yet) — treat as pass.
+            return ()
+    finally:
+        db.close()
+    return tuple(row[0] for row in rows)
+
+
+def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
+    """GH #373 — every wildcard ``applies_to: ["*"]`` is expanded in the DB.
+
+    The Wave B config loader materialises every wildcard into concrete
+    per-actor scope_profile rows so the resolver never sees a literal
+    ``"*"`` actor_id. A ``"*"`` in ``topology_scope_profiles.actor_id``
+    means the loader did not run (or the operator edited the DB
+    directly) — a misconfiguration that silently breaks default-scope
+    resolution for every agent the wildcard was meant to cover.
+
+    When the ``topology_v2_config`` flag is OFF, returns ok=True with a
+    "skipped" detail — the wildcard expansion is part of the Wave B
+    config-loader surface gated by the same flag.
+
+    ``deps`` is the public DI seam. Production callers leave ``deps=None``;
+    tests substitute the ``db_cc_pair_namer`` slot via a custom callable
+    that mirrors the actor_id-reading shape used here (so the test
+    doesn't need to seed the v2 SQL tables to drive the check's branches).
+    """
+    d = deps if deps is not None else TopologyV2CheckDeps()
+    if not d.flag_reader(_TOPOLOGY_V2_CONFIG_FLAG):
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+            ok=True,
+            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_TOPOLOGY_V2_CONFIG_FLAG),
+        )
+
+    try:
+        actor_ids = d.db_scope_actor_id_reader()
+    except Exception as exc:
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+            ok=False,
+            detail=f"topology_scope_profiles lookup failed: {exc}",
+            fix=(
+                "fix: ensure the SQLite database is reachable and the topology_v2 "
+                "schema migration has run. next: restart the worker."
+            ),
+        )
+
+    unresolved = sorted(a for a in actor_ids if a == "*" or "*" in a)
+    if unresolved:
+        names = ", ".join(unresolved)
+        return CheckResult(
+            name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+            ok=False,
+            detail=(
+                f"{len(unresolved)} unexpanded wildcard actor_id(s) in topology_scope_profiles: {names}. "
+                f"The Wave B config loader should have materialised these into per-agent rows."
+            ),
+            fix=(
+                "fix: restart the worker so the config loader re-runs and expands "
+                '`applies_to: ["*"]` against the registered agents block. '
+                "next: re-run `kairix onboard check`."
+            ),
+        )
+
+    return CheckResult(
+        name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
+        ok=True,
+        detail=f"{len(actor_ids)} distinct scope actor_id(s) — no unexpanded wildcards",
+    )
+
+
 def check_sharepoint_credentials_loaded(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
     """SharePoint connector secrets resolve via kairix.secrets.get_secret.
 
@@ -1838,6 +1943,7 @@ ALL_CHECKS: list[Callable[..., CheckResult]] = [
     check_topology_v2_config_valid,
     check_topology_v2_cc_pairs_registered,
     check_topology_v2_default_in_scope_field_present,
+    check_topology_v2_wildcard_expansion_resolved,
     check_sharepoint_credentials_loaded,
     check_maintenance_loop_ticking,
     check_extractor_libraries_importable,

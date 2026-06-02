@@ -67,7 +67,15 @@ def _open_db(tmp_path: Path) -> sqlite3.Connection:
     return db
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave A — requires ScopeProfileResolver.resolve to accept default_only=True kwarg "
+        "AND the schema's default_in_scope column. Both ship in Wave A; Wave B's config-loader "
+        "extensions are independent of this test. The 10K-row soak harness + p95 budget pin is in "
+        "place; once Wave A cherry-picks the kwarg + column, the test runs end-to-end."
+    ),
+    strict=False,
+)
 def test_default_only_resolve_under_10k_scope_entries_p95_50ms(tmp_path: Path) -> None:
     """10K scope_entries seeded → 1000 resolve(default_only=True) calls
     → p95 latency ≤ 50ms.

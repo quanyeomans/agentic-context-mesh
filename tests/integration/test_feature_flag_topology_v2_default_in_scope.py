@@ -81,7 +81,15 @@ def _seeded_db_path(tmp_path: Path) -> Path:
     return db_path
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave A — requires ScopeProfileResolver.resolve to accept default_only kwarg "
+        "AND to tolerate the 'personal' sensitivity tier used in the test fixtures (today's "
+        "F39Tier closed-set raises on 'personal'). Wave A introduces both; Wave B's config-"
+        "loader / pipeline wiring is otherwise in place. Pass once Wave A cherry-picks."
+    ),
+    strict=False,
+)
 def test_flag_off_returns_every_read_eligible_collection(tmp_path: Path) -> None:
     """topology_v2_default_in_scope OFF → resolver returns every
     read-eligible collection (8 names — back-compat).
@@ -116,7 +124,15 @@ def test_flag_off_returns_every_read_eligible_collection(tmp_path: Path) -> None
     }, f"flag OFF must return every read-eligible collection (8 names); got {set(result)!r}"
 
 
-@pytest.mark.xfail(reason="impl pending — #373 / feature-flag topology_v2_default_in_scope", strict=False)
+@pytest.mark.xfail(
+    reason=(
+        "#373 Wave A — requires ScopeProfileResolver.resolve to accept default_only kwarg "
+        "AND to tolerate the 'personal' sensitivity tier used in the test fixtures (today's "
+        "F39Tier closed-set raises on 'personal'). Wave A introduces both; Wave B's config-"
+        "loader / pipeline wiring is otherwise in place. Pass once Wave A cherry-picks."
+    ),
+    strict=False,
+)
 def test_flag_on_filters_to_in_default_subset(tmp_path: Path) -> None:
     """topology_v2_default_in_scope ON → resolver filters to the 7
     in-default collections (drops reflib).

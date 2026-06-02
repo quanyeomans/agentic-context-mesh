@@ -61,6 +61,53 @@ def reset_search_pipeline_cache() -> None:
             _QUERY_CACHE.clear()
 
 
+def _lookup_cached_pipeline(cfg: RetrievalConfig, flag_reader: Any) -> SearchPipeline | None:
+    """Return the cached pipeline for ``cfg`` or ``None`` if not present.
+
+    Cache is bypassed when ``flag_reader`` is supplied — callers are
+    wiring an explicit resolver branch so the cached pipeline (built
+    against the production flag default) would be wrong.
+
+    Memoisation is keyed on the resolved config alone (frozen dataclass
+    → hashable by field values); the registry / paths / fact_retriever
+    seams are test-only and reused per-test. Tests that need a fresh
+    build with different seams call :func:`reset_search_pipeline_cache`.
+    """
+    if flag_reader is not None:
+        return None
+    return _PIPELINE_CACHE.get(cfg)
+
+
+def _auto_wire_fact_retriever(db_path: Any) -> Any:
+    """Return a SQLiteFactStore when the DB has a ``facts`` table; else None.
+
+    Plan B-parity Capability #5 — opt-in fact federation. Vault-only
+    operators have no facts table → returns None → today's chunk-only
+    behaviour is preserved. When the operator has run
+    ``kairix ingest-chat``, the table exists and federation activates
+    automatically.
+
+    Best-effort — any exception (missing DB, schema mismatch) returns
+    None so the chunk-only path keeps shipping.
+    """
+    if not db_path.exists():
+        return None
+    try:
+        import sqlite3 as _sqlite3
+
+        from kairix.core.facts.store import SQLiteFactStore
+
+        with _sqlite3.connect(str(db_path)) as conn:
+            has_facts = bool(
+                conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts' LIMIT 1").fetchone()
+            )
+        if has_facts:
+            return SQLiteFactStore(db_path=db_path)
+    except Exception:
+        return None
+    return None
+
+
 def _get_or_create_query_cache() -> QueryResultCache:
     """Return the process-shared :class:`QueryResultCache`, building it lazily.
 
@@ -463,6 +510,7 @@ def build_search_pipeline(
     registry: ProviderRegistry | None = None,
     fact_retriever: Any = None,
     paths: KairixPaths | None = None,
+    flag_reader: Any = None,
 ) -> SearchPipeline:
     """Construct the production search pipeline.
 
@@ -508,22 +556,24 @@ def build_search_pipeline(
                    provided, ``paths.db_path`` is used in place of
                    :func:`kairix.core.db.get_db_path`. Production passes
                    ``None`` and the default resolution chain runs.
+        flag_reader:
+                   Optional ``Callable[[str], bool]`` for tests to drive
+                   the feature-flag branch deterministically. Threaded
+                   straight to :func:`build_collection_resolver` so the
+                   v2 vs legacy resolver choice is reproducible without
+                   monkey-patching the registry (F2-clean). Production
+                   passes ``None``; the default flag resolver
+                   (:func:`kairix.core.features.flag`) is consulted.
 
     Returns:
         A fully wired SearchPipeline ready for search() calls.
     """
     cfg = _resolve_retrieval_config(config)
 
-    # Cache key is the resolved config value (frozen dataclass → hashable by
-    # field values). Critical that the key is the RESOLVED config, not the
-    # raw arg: when config=None is passed, every call resolves to the same
-    # default config object, so the cache hits.
-    #
-    # Memoisation is keyed on the config alone (not the registry): the
-    # registry is a test seam, and within a single test the same registry
-    # is reused. Tests that need a fresh build with a different registry
-    # call ``reset_search_pipeline_cache()`` between cases.
-    cached = _PIPELINE_CACHE.get(cfg)
+    # When ``flag_reader`` is supplied, callers are wiring an explicit
+    # resolver branch — skip the cache so the chosen branch is honoured
+    # per call (tests reset the cache between branches anyway).
+    cached = _lookup_cached_pipeline(cfg, flag_reader)
     if cached is not None:
         return cached
 
@@ -557,25 +607,9 @@ def build_search_pipeline(
     # operators have no facts table → fact_retriever stays None → today's
     # chunk-only behaviour preserved. Explicit ``fact_retriever=`` kwarg
     # still wins (tests + future config-driven opt-in).
-    resolved_fact_retriever = fact_retriever
-    if resolved_fact_retriever is None:
-        try:
-            import sqlite3 as _sqlite3
-
-            from kairix.core.facts.store import SQLiteFactStore
-
-            db_path = resolved_db_path
-            if db_path.exists():
-                with _sqlite3.connect(str(db_path)) as conn:
-                    has_facts = bool(
-                        conn.execute(
-                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='facts' LIMIT 1"
-                        ).fetchone()
-                    )
-                if has_facts:
-                    resolved_fact_retriever = SQLiteFactStore(db_path=db_path)
-        except Exception:  # noqa: S110 — auto-wire is best-effort; absence falls back to chunk-only
-            pass
+    resolved_fact_retriever = (
+        fact_retriever if fact_retriever is not None else _auto_wire_fact_retriever(resolved_db_path)
+    )
 
     pipeline = SearchPipeline(
         classifier=_RuleClassifier(),
@@ -585,7 +619,7 @@ def build_search_pipeline(
         fusion=_build_fusion(cfg),
         boosts=select_boosts(cfg, graph),
         logger=_build_search_logger(),
-        resolver=build_collection_resolver(db_path=resolved_db_path),
+        resolver=build_collection_resolver(db_path=resolved_db_path, flag_reader=flag_reader),
         config=cfg,
         # #281 — wire the process-shared LRU so repeat queries from
         # teaming agents skip the Azure embed roundtrip.
@@ -595,7 +629,8 @@ def build_search_pipeline(
         # Auto-wired above when the operator's data dir contains a facts table.
         fact_retriever=resolved_fact_retriever,
     )
-    _PIPELINE_CACHE[cfg] = pipeline
+    if flag_reader is None:
+        _PIPELINE_CACHE[cfg] = pipeline
     return pipeline
 
 

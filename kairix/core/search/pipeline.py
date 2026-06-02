@@ -234,8 +234,28 @@ class SearchPipeline:
         agent: str | None,
         scope: Scope,
     ) -> tuple[list[str] | None, str | None]:
-        """Resolve collections via the injected resolver when not pre-supplied."""
-        if collections is not None or self.resolver is None:
+        """Resolve collections via the injected resolver when not pre-supplied.
+
+        GH #373 — when the operator supplies ``collections=[...]`` AND the
+        resolver advertises a ``validate_explicit`` method (the v2
+        :class:`TopologyV2CollectionResolver` does; legacy
+        :class:`DefaultCollectionResolver` doesn't), validate the names
+        against the actor's scope. Out-of-scope names yield empty
+        results + an F21-shaped error in the result envelope so the
+        operator sees the misconfiguration immediately rather than via
+        a silent empty response.
+        """
+        if collections is not None:
+            if agent is not None and hasattr(self.resolver, "validate_explicit"):
+                try:
+                    filtered, error = self.resolver.validate_explicit(agent, collections, scope)
+                except Exception as e:
+                    return None, str(e)
+                if error is not None:
+                    return None, error
+                return filtered, None
+            return collections, None
+        if self.resolver is None:
             return collections, None
         try:
             return self.resolver.resolve(agent, scope), None

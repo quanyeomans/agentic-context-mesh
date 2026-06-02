@@ -1432,6 +1432,94 @@ def test_new_checks_appear_in_all_checks() -> None:
     assert "check_topology_v2_config_valid" in names
     assert "check_topology_v2_cc_pairs_registered" in names
     assert "check_sharepoint_credentials_loaded" in names
+    # #373 Wave B — wildcard expansion onboard check
+    assert "check_topology_v2_wildcard_expansion_resolved" in names
+
+
+@pytest.mark.unit
+def test_topology_v2_wildcard_expansion_skipped_when_flag_off() -> None:
+    """Flag OFF → ok=True with 'skipped' detail (default-safe)."""
+    from kairix.platform.onboard.check import (
+        TopologyV2CheckDeps,
+        check_topology_v2_wildcard_expansion_resolved,
+    )
+
+    deps = TopologyV2CheckDeps(
+        flag_reader=_flag_off,
+        config_loader=lambda: None,
+        db_cc_pair_namer=lambda: frozenset(),
+        secret_reader=lambda _n: None,
+        db_scope_actor_id_reader=lambda: ("*",),  # would fail if read; flag-off short-circuits
+    )
+    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    assert result.ok is True
+    assert "skipped" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_wildcard_expansion_pass_when_all_resolved() -> None:
+    """Flag ON + every actor_id is a concrete name (no '*') → ok=True."""
+    from kairix.platform.onboard.check import (
+        TopologyV2CheckDeps,
+        check_topology_v2_wildcard_expansion_resolved,
+    )
+
+    deps = TopologyV2CheckDeps(
+        flag_reader=lambda n: n == _FLAG_TOPOLOGY_V2,
+        config_loader=lambda: None,
+        db_cc_pair_namer=lambda: frozenset(),
+        secret_reader=lambda _n: None,
+        db_scope_actor_id_reader=lambda: ("agent-alpha", "agent-beta"),
+    )
+    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    assert result.ok is True
+    assert "2 distinct scope actor_id" in result.detail
+
+
+@pytest.mark.unit
+def test_topology_v2_wildcard_expansion_fail_when_literal_star_present() -> None:
+    """Flag ON + a '*' actor_id in DB → ok=False with restart-worker fix."""
+    from kairix.platform.onboard.check import (
+        TopologyV2CheckDeps,
+        check_topology_v2_wildcard_expansion_resolved,
+    )
+
+    deps = TopologyV2CheckDeps(
+        flag_reader=lambda n: n == _FLAG_TOPOLOGY_V2,
+        config_loader=lambda: None,
+        db_cc_pair_namer=lambda: frozenset(),
+        secret_reader=lambda _n: None,
+        db_scope_actor_id_reader=lambda: ("agent-alpha", "*"),
+    )
+    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    assert result.ok is False
+    assert "*" in result.detail
+    assert result.fix is not None
+    assert "restart the worker" in result.fix
+
+
+@pytest.mark.unit
+def test_topology_v2_wildcard_expansion_reader_raises() -> None:
+    """Flag ON + reader raises → ok=False with DB-reachability fix hint."""
+    from kairix.platform.onboard.check import (
+        TopologyV2CheckDeps,
+        check_topology_v2_wildcard_expansion_resolved,
+    )
+
+    def _raises() -> tuple[str, ...]:
+        raise RuntimeError("database is locked")
+
+    deps = TopologyV2CheckDeps(
+        flag_reader=lambda n: n == _FLAG_TOPOLOGY_V2,
+        config_loader=lambda: None,
+        db_cc_pair_namer=lambda: frozenset(),
+        secret_reader=lambda _n: None,
+        db_scope_actor_id_reader=_raises,
+    )
+    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
+    assert result.ok is False
+    assert "lookup failed" in result.detail
+    assert result.fix is not None
 
 
 @pytest.mark.unit
