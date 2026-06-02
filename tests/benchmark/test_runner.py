@@ -1568,7 +1568,10 @@ def test_run_benchmark_legacy_agent_config_emits_deprecation_once_and_completes(
         ],
     )
 
-    with caplog.at_level(logging.WARNING):
+    # Captured at INFO — the legacy-collection deprecation log was demoted
+    # from WARNING to INFO so it doesn't spam short-lived CLI invocations.
+    # Per-process dedup contract is unchanged; only the log level shifted.
+    with caplog.at_level(logging.INFO):
         result = run_benchmark(
             suite,
             system="hybrid",
@@ -1641,7 +1644,10 @@ def test_run_benchmark_modern_agent_config_emits_no_deprecation(
         ],
     )
 
-    with caplog.at_level(logging.WARNING):
+    # Captured at INFO — the legacy-collection deprecation log was demoted
+    # from WARNING to INFO so it doesn't spam short-lived CLI invocations.
+    # Per-process dedup contract is unchanged; only the log level shifted.
+    with caplog.at_level(logging.INFO):
         result = run_benchmark(
             suite,
             system="hybrid",

@@ -359,7 +359,12 @@ def test_legacy_collection_deprecation_warning_dedupes_across_invocations(caplog
         ]
     }
 
-    with caplog.at_level(logging.WARNING):
+    # Captured at INFO — the deprecation log was demoted from WARNING to INFO
+    # so it doesn't spam short-lived CLI invocations (per-process dedup resets
+    # every command). Operators see deprecations via `kairix onboard check`
+    # which surfaces #115 separately, or by setting KAIRIX_TRACE=1 / running
+    # with --log-level=info. The dedup contract this test pins is unchanged.
+    with caplog.at_level(logging.INFO):
         parse_agent_registry(raw)
         parse_agent_registry(raw)  # second pass — should NOT re-warn.
         parse_agent_registry(raw)  # third pass — still no new warnings.

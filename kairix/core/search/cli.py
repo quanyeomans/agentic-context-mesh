@@ -119,14 +119,19 @@ def format_text(out: SearchOutput) -> str:
     for i, hit in enumerate(out.results, start=1):
         title = hit.title or hit.path.split("/")[-1]
         tier = hit.tier or "search"
-        lines.append(f"{i}. [{tier}] {title}")
-        lines.append(f"   {hit.path}")
+        # Lead with snippet — the content is what the operator's eye should
+        # land on first. Title + path follow, then score/collection. URLs
+        # are typically long + uninformative without context.
+        snippet = ""
         if hit.snippet:
-            snippet = hit.snippet[:200].replace("\n", " ")
-            if len(hit.snippet) > 200:
+            snippet = hit.snippet[:600].replace("\n", " ")
+            if len(hit.snippet) > 600:
                 snippet += "…"
+        lines.append(f"{i}. [{tier}] {hit.collection} · score {hit.score:.4f}")
+        if snippet:
             lines.append(f"   {snippet}")
-        lines.append(f"   score={hit.score:.4f} | collection={hit.collection}")
+        lines.append(f"   {title}")
+        lines.append(f"   {hit.path}")
         lines.append("")
 
     if not out.results:

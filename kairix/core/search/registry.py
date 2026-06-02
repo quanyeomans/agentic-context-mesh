@@ -319,7 +319,13 @@ def _resolve_legacy_collection_name(
         warn_key = (name, candidate)
         if warn_key not in _LEGACY_COLLECTION_WARNED:
             _LEGACY_COLLECTION_WARNED.add(warn_key)
-            logger.warning(
+            # logger.info (not warning): the deprecation is real but short-lived
+            # CLI invocations re-print this on every command because dedupe is
+            # per-process. Surface to operators via KAIRIX_TRACE=1 or by
+            # consulting `kairix onboard check` (the #115 deprecation check
+            # is the canonical operator surface). Keeps every search/prep
+            # command's stderr clean.
+            logger.info(
                 "agent %r: 'collection: %s' is deprecated — prefer the multi-path "
                 "schema 'paths: [%s]'. The legacy field still parses but will be "
                 "removed in a future release. (#115)",

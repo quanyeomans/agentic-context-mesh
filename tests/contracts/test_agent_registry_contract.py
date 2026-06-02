@@ -298,7 +298,10 @@ def test_parse_warns_when_legacy_collection_field_used(
             }
         ]
     }
-    with caplog.at_level(logging.WARNING):
+    # INFO not WARNING — the legacy-collection deprecation log was demoted
+    # so it doesn't spam short-lived CLI invocations. Contract on the
+    # message + dedup is unchanged; only the log level shifted.
+    with caplog.at_level(logging.INFO):
         registry = parse_agent_registry(raw)
 
     # Behaviour preserved: legacy override still wins on the first synthetic name.

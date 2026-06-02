@@ -125,28 +125,39 @@ def test_format_text_marks_vec_failed() -> None:
 
 
 def test_format_text_renders_each_hit_with_path_score_collection() -> None:
+    """Per-hit render shows tier + collection + score + snippet + title + path.
+
+    Render order (post-#385): header (tier · collection · score) → snippet
+    → title → path. Snippet leads so the operator's eye lands on content
+    before URL noise.
+    """
     hit = _hit(path="docs/notes.md", title="Notes", snippet="hello world", score=0.812, tier="L1", collection="shared")
     out = SearchOutput(query="q", intent="semantic", results=[hit])
     text = format_text(out)
-    assert "1. [L1] Notes" in text
-    assert "docs/notes.md" in text
+    assert "1. [L1] shared · score 0.8120" in text
     assert "hello world" in text
-    assert "score=0.8120" in text
-    assert "collection=shared" in text
+    assert "Notes" in text
+    assert "docs/notes.md" in text
 
 
 def test_format_text_truncates_long_snippet_with_ellipsis() -> None:
-    hit = _hit(path="/p", snippet="x" * 250)
+    """Snippets > 600 chars get ellipsised (budget extended from 200 in #385)."""
+    hit = _hit(path="/p", snippet="x" * 700)
     out = SearchOutput(query="q", intent="semantic", results=[hit])
     text = format_text(out)
-    assert "x" * 200 + "…" in text
+    assert "x" * 600 + "…" in text
 
 
 def test_format_text_falls_back_to_basename_when_title_empty() -> None:
+    """Title line falls back to the path basename when hit.title is empty.
+
+    Post-#385: title appears on its own line below the snippet rather than
+    in the leading header. Basename fallback contract is unchanged.
+    """
     hit = _hit(path="docs/foo.md", title="", tier="L0")
     out = SearchOutput(query="q", intent="semantic", results=[hit])
     text = format_text(out)
-    assert "1. [L0] foo.md" in text
+    assert "foo.md" in text
 
 
 def test_format_text_says_no_results_when_empty() -> None:
