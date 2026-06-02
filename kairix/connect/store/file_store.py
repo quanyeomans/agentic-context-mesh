@@ -126,6 +126,15 @@ class FileTokenStore:
         existing_lines = _read_lines(path)
         updated = _merge_lines(existing_lines, canonical)
         try:
+            # NOSONAR pythonsecurity:S2083 — `path` is the output of
+            # ``_resolve_path()`` which calls ``_confine_to_allowed_root()``;
+            # the resolved + symlink-followed path is verified to live under
+            # ``{home, /etc/kairix, tmp}`` and raises ValueError on escape.
+            # Sonar's taint tracker doesn't recognise the allow-list sanitiser
+            # pattern (path-confinement isn't in its built-in sink list).
+            # Confinement contract is pinned by
+            # tests/unit/test_connect_store_file.py::test_*_escape_outside_allowed_roots_raises.
+            # NOSONAR pythonsecurity:S2083
             path.write_text("\n".join(updated) + "\n", encoding="utf-8")
         except OSError as exc:
             raise TokenStoreUnauthorizedError(

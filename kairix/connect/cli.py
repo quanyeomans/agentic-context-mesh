@@ -40,7 +40,7 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
 from kairix.connect.listener import DEFAULT_PORT, LocalhostCallbackListener
 from kairix.connect.oauth2.github_app import GITHUB_APP_SERVICE_AREA, GitHubAppFlow
@@ -100,11 +100,16 @@ def _build_google_flow(subcommand: str) -> Callable[[argparse.Namespace], OAuth2
     """
 
     def build(args: argparse.Namespace) -> OAuth2Flow:
-        flow: OAuth2Flow = GoogleOAuth2Flow(
-            service_area=_GOOGLE_AREA_FOR_SUBCOMMAND[subcommand],
-            client_secret_path=args.client_secret_path,
+        # cast(): Sonar's type-narrowing follows the concrete RHS class otherwise,
+        # tripping S5886/S5890. The Protocol satisfaction is checked at runtime via
+        # tests/contracts/test_connect_protocols.py::test_oauth2_flow_real_*.
+        return cast(
+            OAuth2Flow,
+            GoogleOAuth2Flow(
+                service_area=_GOOGLE_AREA_FOR_SUBCOMMAND[subcommand],
+                client_secret_path=args.client_secret_path,
+            ),
         )
-        return flow
 
     return build
 
@@ -112,16 +117,18 @@ def _build_google_flow(subcommand: str) -> Callable[[argparse.Namespace], OAuth2
 def _build_slack_flow(args: argparse.Namespace) -> OAuth2Flow:
     """Build a :class:`SlackOAuth2Flow` from the parsed CLI args.
 
-    Widens the concrete return value to the :class:`OAuth2Flow` Protocol
-    via a typed local binding so the inferred return type matches the
-    advertised return type (Sonar python:S5886).
+    cast(): Sonar's type-narrowing follows the concrete RHS class otherwise,
+    tripping S5886/S5890. The Protocol satisfaction is checked at runtime
+    via tests/contracts/test_connect_protocols.py::test_slack_oauth2_flow_satisfies_protocol.
     """
-    flow: OAuth2Flow = SlackOAuth2Flow(
-        workspace=args.workspace,
-        client_id=args.client_id,
-        client_secret=args.client_secret,
+    return cast(
+        OAuth2Flow,
+        SlackOAuth2Flow(
+            workspace=args.workspace,
+            client_id=args.client_id,
+            client_secret=args.client_secret,
+        ),
     )
-    return flow
 
 
 def _build_github_app_flow(args: argparse.Namespace) -> OAuth2Flow:
@@ -135,12 +142,15 @@ def _build_github_app_flow(args: argparse.Namespace) -> OAuth2Flow:
     match the sibling Google + Slack builder shape (consistency with
     Sonar python:S5886 fix).
     """
-    flow: OAuth2Flow = GitHubAppFlow(
-        app_id=args.app_id,
-        private_key_path=args.private_key_path,
-        app_slug=args.app_slug,
+    # cast(): Sonar's type-narrowing follows the concrete RHS class otherwise.
+    return cast(
+        OAuth2Flow,
+        GitHubAppFlow(
+            app_id=args.app_id,
+            private_key_path=args.private_key_path,
+            app_slug=args.app_slug,
+        ),
     )
-    return flow
 
 
 def _none_instance(_args: argparse.Namespace) -> str | None:
