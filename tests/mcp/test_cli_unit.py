@@ -139,7 +139,13 @@ def test_serve_http_transport_runs_uvicorn_with_resolved_app(monkeypatch) -> Non
     assert len(runner.calls) == 1
     pos, kwargs = runner.calls[0]
     assert pos[0] is not None  # the app object
-    assert kwargs == {"host": "127.0.0.1", "port": 18099, "log_level": "info"}
+    assert kwargs["host"] == "127.0.0.1"
+    assert kwargs["port"] == 18099
+    assert kwargs["log_level"] == "info"
+    # R1 (#387) — single worker prevents accidental vec_index duplication.
+    assert kwargs["workers"] == 1
+    # R1 (#387) — uvloop preferred, falls back to "auto" when not installed.
+    assert kwargs["loop"] in {"uvloop", "auto"}
     assert "Starting kairix MCP server on http://127.0.0.1:18099/mcp" in stderr
     assert "+ /sse legacy" in stderr
     assert "warm-up complete" in stderr

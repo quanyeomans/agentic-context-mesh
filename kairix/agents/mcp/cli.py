@@ -421,4 +421,19 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
     )
 
     uvicorn_run = deps.uvicorn_runner_factory()
-    uvicorn_run(app, host=args.host, port=port, log_level="info")
+    # R1 (#387) — pin workers=1 so we never accidentally duplicate the
+    # 10.86 GB vec_index mmap + per-worker pipeline cache. The MCP server
+    # holds expensive process-local state (vec_index, EmbedCache,
+    # QueryResultCache, TopologyV2CollectionResolver SQLite handle); a
+    # second worker would re-load all of it and fragment cache hits.
+    # ``loop="uvloop"`` is preferred for ~10-20% async-overhead reduction
+    # under load; falls back to asyncio default if uvloop isn't installed
+    # (uvloop is optional — not yet a hard dep, see #387 follow-up).
+    loop_kind: str = "auto"
+    try:
+        import uvloop as _uvloop  # noqa: F401 — probe-import for availability
+
+        loop_kind = "uvloop"
+    except ImportError:
+        loop_kind = "auto"
+    uvicorn_run(app, host=args.host, port=port, log_level="info", workers=1, loop=loop_kind)
