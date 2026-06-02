@@ -7,6 +7,34 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+## [2026.6.2a2] - 2026-06-02 — Search reads more sources by default, three connector fixes
+
+> **Upgrading?** Two things need attention: the M365 calendar window now caps at ~13 months total (defaults reduced from 455 to 360 days; configs over the cap fail validation with a clear message), and SharePoint deploys on the prior alpha should run the one-shot backfill migration to retag legacy rows. Everything else is drop-in.
+
+### New for agents
+
+- **Default-scope search now returns a superset across every connected source.** Agents that search without naming a collection used to get the legacy mapping (typically one source). They now get results from every collection their scope profile marks as in-scope by default — SharePoint, Obsidian, Slack, M365 email, M365 calendar, GitHub. The behaviour is opt-in via the `topology_v2_collection_resolver` flag so the previous mapping stays the default until you flip it.
+
+### New for operators
+
+- **Search results lead with the snippet, not the URL.** Old layout put a long SharePoint URL on the top line of every hit; the snippet text was buried below and truncated at 200 characters. New layout reverses it: 600-character snippet first, title + path below, then score + collection. Operators scanning results can read what the document *says* without scrolling past the URL.
+- **Agent-config deprecation notice is no longer search-time spam.** Searches under a legacy agent config used to emit six WARNING lines per query. The notice now logs at INFO level on the warm-up path only; routine searches are clean.
+- **`kairix connect` flow works for GitHub via Personal Access Token.** Previously the GitHub connector only worked when wired against a GitHub App installation; PAT-only deployments saw HTTP 401 on the first sync tick. The connector now detects the credential shape and routes PAT credentials through the `/user/repos` endpoint (with Link-header pagination), keeping the App-mode path unchanged.
+- **M365 email connector pulls from every mail folder, not just Inbox.** The Graph delta endpoint requires per-folder scoping; the old single-mailbox call silently missed everything outside Inbox. The new path enumerates the user's folders once, then maintains a per-folder delta cursor so future syncs only ship what changed.
+
+### Things that work better
+
+- **M365 calendar initial sync stops hitting the Graph 13-month limit.** Default window was 90 days back + 365 days forward = 455 days total, which Graph's `calendarView/delta` rejects with HTTP 400. The default is now 90 + 270 = 360 days total (30-day buffer), and config validation rejects window combinations over 390 days at construction time with a clear `fix:` message.
+- **SharePoint documents land in the right collection.** A re-extract path in the worker was falling back to `'default'` for the collection metadata instead of asking the connector. Fixed in the previous alpha; this release ships the one-shot migration script `scripts/migrations/2026-06-01-sharepoint-collection-backfill.py` to retag rows that were stuck in `'default'` on existing deploys.
+
+### Configuration migration from v2026.5.31a2
+
+1. **Reduce any custom M365 calendar windows over 390 days total.** If your `kairix.config.yaml` overrides `window_days_back` / `window_days_forward` and the sum is above 390, `kairix config validate` will tell you with the legal range. Default deploys need no action.
+2. **Run the SharePoint backfill once per deploy.** `python3 scripts/migrations/2026-06-01-sharepoint-collection-backfill.py --dry-run` shows you how many rows are affected; re-run without `--dry-run` to apply. Idempotent — a second run is a no-op. Vectors and content are unaffected; the migration only updates the `collection` metadata column.
+3. **Optional: turn on the broader default-scope search.** Set `features.topology_v2_collection_resolver: true` in `kairix.config.yaml` and restart. Validate the change has the effect you want by running a few representative queries before and after.
+
+## [Unreleased]
+
 ### New for operators
 
 - **`kairix connect google-gmail | google-drive | google-calendar` — one-command OAuth setup.** Run the command, your browser opens to Google's consent screen, you approve, and the captured tokens land in your secrets store (file by default; Azure Key Vault and stdout-pipe also supported). No more manual GCP-console-then-KV-copy-paste for the four canonical secrets per Google service. See [`kairix/connect/README.md`](kairix/connect/README.md) for the one-time GCP setup walkthrough.
