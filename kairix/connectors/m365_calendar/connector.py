@@ -58,8 +58,17 @@ CONNECTOR_NAME = "m365_calendar"
 
 # Default date window for the initial sync. Operators can override via
 # ``make_connector`` config keys ``window_days_back`` / ``window_days_forward``.
+#
+# Microsoft Graph ``calendarView/delta`` caps the total window at 13 months
+# (≈395 days). Configs that exceed the cap fail at request time with HTTP
+# 400 (#382). ``MAX_WINDOW_TOTAL_DAYS`` enforces the cap at config-construction
+# time with an affordance pointing the operator at the legal range; default
+# ``window_days_back + window_days_forward`` sits at 360 (90 + 270) with a
+# 30-day buffer for operators who want to lift ``window_days_back`` without
+# retuning ``window_days_forward``.
 DEFAULT_WINDOW_DAYS_BACK = 90
-DEFAULT_WINDOW_DAYS_FORWARD = 365
+DEFAULT_WINDOW_DAYS_FORWARD = 270
+MAX_WINDOW_TOTAL_DAYS = 390
 
 # Source-link URI scheme. Outlook web URLs are deeplink-able by event
 # id; the orchestrator wraps the connector's source_link result in a
@@ -109,6 +118,17 @@ class M365CalendarConfig:
     # behaviour; the per-container delta-cursor isolation is the ON-branch
     # value-add gated by the ``topology_v2_m365_calendar`` flag.
     user_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        total = self.window_days_back + self.window_days_forward
+        if total > MAX_WINDOW_TOTAL_DAYS:
+            raise ValueError(
+                f"m365_calendar window {self.window_days_back}+{self.window_days_forward}={total} "
+                f"days exceeds Graph calendarView/delta 13-month cap (max {MAX_WINDOW_TOTAL_DAYS} total). "
+                f"fix: reduce window_days_back or window_days_forward so the sum is <= {MAX_WINDOW_TOTAL_DAYS}. "
+                f"next: see kairix/connectors/m365_calendar/connector.py MAX_WINDOW_TOTAL_DAYS for the constant. "
+                f"run: kairix config validate"
+            )
 
 
 @dataclass
