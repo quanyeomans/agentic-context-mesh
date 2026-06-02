@@ -424,6 +424,49 @@ def test_make_connector_accepts_locked_sensitivity_declaration() -> None:
         make_connector({"user_principal_name": "agent-alpha@example.com", "sensitivity": LOCKED_SENSITIVITY})
 
 
+def test_make_connector_rejects_non_list_mailboxes() -> None:
+    """A scalar ``mailboxes`` value is rejected with the fix-pointer.
+
+    Pins the shared :func:`_coerce_optional_string_list` helper that
+    backs both ``mailboxes`` and ``folders_allowlist`` validation
+    (S3776 refactor). Sabotage-proof: drop the
+    ``isinstance(raw, list | tuple)`` check in the helper — the test
+    fails because a bare string no longer raises.
+    """
+    with pytest.raises(ValueError, match="'mailboxes' must be a list"):
+        make_connector({"user_principal_name": "alice@example.com", "mailboxes": "alice@example.com"})
+
+
+def test_make_connector_rejects_mailboxes_with_non_string_entries() -> None:
+    """A ``mailboxes`` list containing a non-string entry is rejected.
+
+    Sabotage-proof: drop the ``all(isinstance(item, str) and item ...)``
+    check in :func:`_coerce_optional_string_list` — the test fails
+    because the integer entry is silently accepted.
+    """
+    with pytest.raises(ValueError, match="'mailboxes' must be a list"):
+        make_connector({"user_principal_name": "alice@example.com", "mailboxes": ["alice@example.com", 42]})
+
+
+def test_make_connector_accepts_none_mailboxes_and_allowlist() -> None:
+    """Both ``mailboxes`` and ``folders_allowlist`` default to None.
+
+    A config that omits both keys must reach the constructor (which
+    then attempts credential resolution). Sabotage-proof: change
+    :func:`_coerce_optional_string_list` to ``return []`` on a ``None``
+    input — the empty-list case in the constructor changes shape and
+    other tests break first; this test confirms the ``None`` short-circuit
+    is intact.
+    """
+    from kairix.secrets.loader import SecretNotFoundError
+
+    # The factory will try to resolve secrets — anything other than the
+    # F-rule ValueErrors above (UPN, sensitivity, list shape) means the
+    # helper short-circuited None correctly.
+    with pytest.raises((SecretNotFoundError, MissingCredentialsError, OSError)):
+        make_connector({"user_principal_name": "agent-alpha@example.com"})
+
+
 # ---------------------------------------------------------------------------
 # Constructor input validation
 # ---------------------------------------------------------------------------

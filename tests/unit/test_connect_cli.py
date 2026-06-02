@@ -388,3 +388,95 @@ def test_cli_main_default_deps_does_not_raise_on_help(capsys: Any) -> None:
         main(["--help"])
     # argparse exits 0 for --help.
     assert exc_info.value.code == 0
+
+
+# ---------------------------------------------------------------------------
+# python:S5886 — flow-builder return type widens to OAuth2Flow
+# ---------------------------------------------------------------------------
+
+
+def test_subcommand_registry_google_flow_widens_to_oauth2_flow_protocol(tmp_path: Path) -> None:
+    """The Google subcommand's registry-bound flow-builder returns an OAuth2Flow.
+
+    Pins the python:S5886 fix that widened the concrete
+    :class:`GoogleOAuth2Flow` to the :class:`OAuth2Flow` Protocol via a
+    typed local binding inside the Google flow-builder. Drives the
+    public :data:`SUBCOMMAND_REGISTRY` surface rather than the
+    underscore-prefixed builder directly — F5-clean.
+
+    Sabotage-proof: drop the ``flow: OAuth2Flow = ...`` widening and
+    return the concrete directly — mypy + Sonar fire S5886 again. The
+    runtime ``isinstance(..., OAuth2Flow)`` keeps the Protocol shape
+    pinned: any future refactor that returns something missing
+    ``discover_client_credentials`` / ``authorize`` breaks this test.
+    """
+    import argparse as _argparse
+
+    from kairix.connect.cli import SUBCOMMAND_REGISTRY
+    from kairix.connect.oauth2.google import GoogleOAuth2Flow
+    from kairix.connect.protocols import OAuth2Flow
+
+    cs = _make_client_secret(tmp_path / "cs.json")
+    spec = SUBCOMMAND_REGISTRY["google-gmail"]
+    args = _argparse.Namespace(client_secret_path=cs)
+    flow = spec.flow_builder(args)
+    assert isinstance(flow, OAuth2Flow), f"builder must return OAuth2Flow Protocol shape; got {type(flow).__name__}"
+    assert isinstance(flow, GoogleOAuth2Flow), (
+        f"Google subcommand must yield the GoogleOAuth2Flow concrete; got {type(flow).__name__}"
+    )
+
+
+def test_subcommand_registry_slack_flow_widens_to_oauth2_flow_protocol() -> None:
+    """The Slack subcommand's registry-bound flow-builder returns an OAuth2Flow.
+
+    Mirrors the Google test for the Slack call site so the python:S5886
+    fix stays sabotage-pinned for both builders. Drives the public
+    :data:`SUBCOMMAND_REGISTRY` — F5-clean.
+    """
+    import argparse as _argparse
+
+    from kairix.connect.cli import SUBCOMMAND_REGISTRY
+    from kairix.connect.oauth2.slack import SlackOAuth2Flow
+    from kairix.connect.protocols import OAuth2Flow
+
+    spec = SUBCOMMAND_REGISTRY["slack"]
+    args = _argparse.Namespace(
+        workspace="alpha",
+        client_id="cid-001",
+        client_secret="csec-001",  # pragma: allowlist secret
+    )
+    flow = spec.flow_builder(args)
+    assert isinstance(flow, OAuth2Flow), f"builder must return OAuth2Flow Protocol shape; got {type(flow).__name__}"
+    assert isinstance(flow, SlackOAuth2Flow), (
+        f"Slack subcommand must yield the SlackOAuth2Flow concrete; got {type(flow).__name__}"
+    )
+
+
+def test_subcommand_registry_github_app_flow_widens_to_oauth2_flow_protocol(tmp_path: Path) -> None:
+    """The GitHub-App subcommand's registry-bound flow-builder returns an OAuth2Flow.
+
+    The brief only required #5/#6 (Google + Slack). Adding GitHub App
+    keeps the three sibling builders consistently sabotage-pinned so a
+    future refactor that drops the widening on any one fires this test
+    first.
+    """
+    import argparse as _argparse
+
+    from kairix.connect.cli import SUBCOMMAND_REGISTRY
+    from kairix.connect.oauth2.github_app import GitHubAppFlow
+    from kairix.connect.protocols import OAuth2Flow
+
+    pem = tmp_path / "key.pem"
+    fake_pem = "-----BEGIN RSA PRIVATE KEY-----\nFAKE\n-----END RSA PRIVATE KEY-----\n"  # pragma: allowlist secret
+    pem.write_text(fake_pem)
+    spec = SUBCOMMAND_REGISTRY["github-app"]
+    args = _argparse.Namespace(
+        app_id="42",
+        private_key_path=pem,
+        app_slug="agent-alpha-bot",
+    )
+    flow = spec.flow_builder(args)
+    assert isinstance(flow, OAuth2Flow), f"builder must return OAuth2Flow Protocol shape; got {type(flow).__name__}"
+    assert isinstance(flow, GitHubAppFlow), (
+        f"GitHub-App subcommand must yield the GitHubAppFlow concrete; got {type(flow).__name__}"
+    )

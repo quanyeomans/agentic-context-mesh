@@ -28,7 +28,7 @@ the extractor layer.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -210,15 +210,25 @@ def _resolve_config_credentials(
     :class:`kairix.secrets.SecretNotFoundError` from the loader when a
     leaf is unset both inline AND on the resolver — the loader's message
     already carries the F21 ``fix:`` / ``next:`` / ``run:`` markers.
+
+    Constructs the return value field-by-field rather than via
+    :func:`dataclasses.replace` so the inferred return type stays the
+    concrete :class:`M365CalendarConfig` (Sonar python:S5886) — matches
+    the ``_replace_document_root`` pattern in ``kairix/knowledge/wikilinks/cli.py``.
     """
     tenant_id = config.tenant_id or secrets.require("connector", "m365", None, "tenant-id")
     client_id = config.client_id or secrets.require("connector", "m365", None, "client-id")
     client_secret = config.client_secret or secrets.require("connector", "m365", None, "client-secret")
-    return replace(
-        config,
+    return M365CalendarConfig(
+        user_id=config.user_id,
         tenant_id=tenant_id,
         client_id=client_id,
         client_secret=client_secret,
+        sensitivity=config.sensitivity,
+        scope=config.scope,
+        window_days_back=config.window_days_back,
+        window_days_forward=config.window_days_forward,
+        user_ids=config.user_ids,
     )
 
 

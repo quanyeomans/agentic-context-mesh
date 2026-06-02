@@ -89,24 +89,39 @@ class _SubcommandSpec:
 
 
 def _build_google_flow(subcommand: str) -> Callable[[argparse.Namespace], OAuth2Flow]:
-    """Return a flow-builder closure for one Google subcommand."""
+    """Return a flow-builder closure for one Google subcommand.
+
+    The returned closure widens the concrete :class:`GoogleOAuth2Flow`
+    to the :class:`OAuth2Flow` Protocol via a typed local binding so the
+    inferred return type matches the advertised return type (Sonar
+    python:S5886). The registry stores callables typed against the
+    Protocol; the explicit widening keeps the call site agnostic to the
+    concrete service implementation.
+    """
 
     def build(args: argparse.Namespace) -> OAuth2Flow:
-        return GoogleOAuth2Flow(
+        flow: OAuth2Flow = GoogleOAuth2Flow(
             service_area=_GOOGLE_AREA_FOR_SUBCOMMAND[subcommand],
             client_secret_path=args.client_secret_path,
         )
+        return flow
 
     return build
 
 
 def _build_slack_flow(args: argparse.Namespace) -> OAuth2Flow:
-    """Build a :class:`SlackOAuth2Flow` from the parsed CLI args."""
-    return SlackOAuth2Flow(
+    """Build a :class:`SlackOAuth2Flow` from the parsed CLI args.
+
+    Widens the concrete return value to the :class:`OAuth2Flow` Protocol
+    via a typed local binding so the inferred return type matches the
+    advertised return type (Sonar python:S5886).
+    """
+    flow: OAuth2Flow = SlackOAuth2Flow(
         workspace=args.workspace,
         client_id=args.client_id,
         client_secret=args.client_secret,
     )
+    return flow
 
 
 def _build_github_app_flow(args: argparse.Namespace) -> OAuth2Flow:
@@ -116,13 +131,16 @@ def _build_github_app_flow(args: argparse.Namespace) -> OAuth2Flow:
     don't share: the numeric App id (``--app-id``), the PEM private
     key (``--private-key-path``), and the App URL slug
     (``--app-slug``, default ``"kairix-bot"``) that drives the install
-    URL.
+    URL. Widens to :class:`OAuth2Flow` via a typed local binding to
+    match the sibling Google + Slack builder shape (consistency with
+    Sonar python:S5886 fix).
     """
-    return GitHubAppFlow(
+    flow: OAuth2Flow = GitHubAppFlow(
         app_id=args.app_id,
         private_key_path=args.private_key_path,
         app_slug=args.app_slug,
     )
+    return flow
 
 
 def _none_instance(_args: argparse.Namespace) -> str | None:

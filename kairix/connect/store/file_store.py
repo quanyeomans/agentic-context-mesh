@@ -17,11 +17,24 @@ reads covers the secrets paths layer specifically; this module is the
 connect-side counterpart and follows the same operator-facing contract.
 The ``env`` constructor argument is the test seam (matches the F2-clean
 pattern in :class:`kairix.secrets.SecretsLoader`).
+
+Path-confinement (pythonsecurity:S2083). The destination path can flow
+from operator-controlled inputs (the ``--secrets-file`` flag and
+``$KAIRIX_SECRETS_FILE``). :meth:`FileTokenStore._resolve_path` runs
+the resolved path through :func:`_confine_to_allowed_root` before
+returning it; the helper canonicalises via
+``Path.expanduser().resolve()`` and verifies the result sits under one
+of the allowed roots (operator home, system temp, ``/etc/kairix``).
+Escapes raise :class:`ValueError` (kept as ``ValueError`` rather than a
+custom subclass so the F21-shaped ``except ValueError`` blocks at the
+``kairix connect`` CLI layer catch the escape without code churn —
+matches the canonical pattern in ``kairix/quality/eval/security.py``).
 """
 
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 from kairix.connect.protocols import (
@@ -40,6 +53,17 @@ from kairix.secrets.naming import Scope, canonical_env_var
 _DEFAULT_PATH_TEMPLATE = ".config/kairix/secrets/kairix.env"
 
 _BACKEND_NAME = "file"
+
+# System-level roots a kairix-connect-managed secrets file is allowed to
+# sit under in addition to the operator's home directory. ``/etc/kairix``
+# covers the packaged-deploy layout; the system temp dir covers CI runs
+# and the operator's home covers dev sandbox + interactive use. Anything
+# else — including an env value like ``../../etc/passwd`` that escapes
+# to a system path — fails closed with :class:`ValueError`.
+_SYSTEM_ALLOWED_ROOTS: tuple[Path, ...] = (
+    Path("/etc/kairix"),
+    Path(tempfile.gettempdir()),
+)
 
 
 class FileTokenStore:
@@ -117,12 +141,63 @@ class FileTokenStore:
         )
 
     def _resolve_path(self) -> Path:
+        """Resolve the destination, confining it to an allow-listed root.
+
+        Source order: explicit ``path=`` constructor arg → ``$KAIRIX_SECRETS_FILE``
+        env override → ``<home>/.config/kairix/secrets/kairix.env`` default.
+        Every branch runs through :func:`_confine_to_allowed_root` so the
+        canonicalised destination (after ``..`` collapse + symlink follow)
+        sits under one of: operator's home directory, the system temp dir,
+        or ``/etc/kairix``. Anything that escapes raises :class:`ValueError`
+        — pythonsecurity:S2083 fix.
+        """
         if self._explicit_path is not None:
-            return self._explicit_path
-        env_override = self._env.get("KAIRIX_SECRETS_FILE")
-        if env_override:
-            return Path(env_override)
-        return self._home / _DEFAULT_PATH_TEMPLATE
+            candidate = self._explicit_path
+        else:
+            env_override = self._env.get("KAIRIX_SECRETS_FILE")
+            if env_override:
+                candidate = Path(env_override)
+            else:
+                candidate = self._home / _DEFAULT_PATH_TEMPLATE
+        return _confine_to_allowed_root(candidate, home=self._home)
+
+
+def _allowed_roots(home: Path) -> tuple[Path, ...]:
+    """Build the per-call allow-list, resolving each root once.
+
+    The operator's home directory is the primary trust boundary; the
+    system roots in :data:`_SYSTEM_ALLOWED_ROOTS` cover packaged-deploy
+    and CI layouts. Each root is canonicalised via ``.resolve()`` so the
+    ``commonpath`` comparison in :func:`_confine_to_allowed_root` sees
+    the same shape on both sides.
+    """
+    return tuple(root.expanduser().resolve() for root in (home, *_SYSTEM_ALLOWED_ROOTS))
+
+
+def _confine_to_allowed_root(candidate: Path, *, home: Path) -> Path:
+    """Canonicalise ``candidate`` and verify it sits under an allowed root.
+
+    Resolves ``candidate`` via ``Path.expanduser().resolve()`` so ``..``
+    segments are collapsed and symlinks are followed before the
+    allow-list check. Raises :class:`ValueError` if the resolved path
+    does not sit inside any of :func:`_allowed_roots` — the helper fails
+    closed (Sonar pythonsecurity:S2083 sanitiser shape).
+    """
+    resolved = Path(candidate).expanduser().resolve()
+    allowed = _allowed_roots(home)
+    for root in allowed:
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        return resolved
+    raise ValueError(
+        f"kairix connect: secrets-file path {str(candidate)!r} escapes the allowed roots "
+        f"{tuple(str(r) for r in allowed)}. "
+        f"fix: pick a path under your home directory, the system temp dir, or /etc/kairix. "
+        f"next: pass --secrets-file <writable-path> OR set KAIRIX_SECRETS_FILE to a path under those roots. "
+        f"run: kairix connect <service> --secrets-file ~/.config/kairix/secrets/kairix.env --client-secret-path <path>",
+    )
 
 
 def _read_lines(path: Path) -> list[str]:

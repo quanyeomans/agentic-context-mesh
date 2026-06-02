@@ -220,3 +220,84 @@ def test_file_store_skips_empty_metadata_values(tmp_path: Path) -> None:
     )
     content = target.read_text()
     assert "INSTALLATION_ID" not in content, f"empty metadata value should be skipped, got: {content!r}"
+
+
+def test_env_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> None:
+    """``$KAIRIX_SECRETS_FILE`` resolving outside the allow-list raises ValueError.
+
+    Sabotage-proof (executed): mutated ``_confine_to_allowed_root`` to
+    ``return Path(candidate).expanduser().resolve()`` (skip the allow-list
+    loop); test then fails with no exception raised. Restored.
+
+    Pins pythonsecurity:S2083 — operator-controlled ``$KAIRIX_SECRETS_FILE``
+    must not write outside an allow-listed root (operator home, system
+    temp, /etc/kairix). The check fires before the FS write so a
+    misconfigured deploy never silently lands tokens in ``/`` or
+    ``/usr/local/share``.
+    """
+    # Use a fake home pointing inside tmp_path so the allow-list does NOT
+    # include the real ``/`` (or the operator's actual ``$HOME``). The
+    # env value then traverses out of tmp_path AND out of the system
+    # temp + /etc/kairix roots.
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    # A path under "/" that's NOT under tmp_path / fake_home / /etc/kairix.
+    # ``/var/log/kairix-escape.env`` resolves outside every allowed root.
+    escape_path = "/var/log/kairix-escape.env"
+    store = FileTokenStore(env={"KAIRIX_SECRETS_FILE": escape_path}, home=fake_home)
+    with pytest.raises(ValueError, match="escapes the allowed roots"):
+        store.store(
+            scope="connector",
+            area="gmail",
+            instance=None,
+            tokens=_tokens(),
+            client=_client(),
+        )
+
+
+def test_explicit_path_escape_outside_allowed_roots_raises(tmp_path: Path) -> None:
+    """``path=`` constructor arg that escapes the allow-list raises ValueError.
+
+    Pins the same defense for the explicit-path branch. Without the
+    confinement an operator wrapper script that constructs
+    ``FileTokenStore(path=user_input)`` would silently write anywhere
+    the process has FS perms.
+    """
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    escape_target = Path("/var/log/kairix-escape-explicit.env")
+    store = FileTokenStore(path=escape_target, home=fake_home)
+    with pytest.raises(ValueError, match="escapes the allowed roots"):
+        store.store(
+            scope="connector",
+            area="gmail",
+            instance=None,
+            tokens=_tokens(),
+            client=_client(),
+        )
+
+
+def test_dotdot_traversal_resolves_and_blocks(tmp_path: Path) -> None:
+    """``..`` segments in the env path are collapsed before the allow-list check.
+
+    A path like ``<home>/../../etc/passwd`` resolves to ``/etc/passwd``,
+    which sits outside every allowed root, so the helper raises.
+    Sabotage-proof: remove the ``.resolve()`` call in
+    ``_confine_to_allowed_root`` — the ``relative_to(home)`` check then
+    spuriously passes (because the unresolved string starts with the
+    home prefix), the write proceeds, and this test fails.
+    """
+    fake_home = tmp_path / "fake-home"
+    fake_home.mkdir()
+    # Build a string that lexically starts with fake_home but resolves
+    # well outside it.
+    escape = str(fake_home) + "/../../../../../etc/passwd-kairix"
+    store = FileTokenStore(env={"KAIRIX_SECRETS_FILE": escape}, home=fake_home)
+    with pytest.raises(ValueError, match="escapes the allowed roots"):
+        store.store(
+            scope="connector",
+            area="gmail",
+            instance=None,
+            tokens=_tokens(),
+            client=_client(),
+        )

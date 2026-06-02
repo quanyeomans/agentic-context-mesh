@@ -58,6 +58,46 @@ _FIELD_TO_LEAF: dict[str, str] = {
 }
 
 
+def _leaf_pair_for_field(source: object, field_name: str) -> tuple[str, str] | None:
+    """Return the ``(canonical-leaf, value)`` pair for one dataclass field, or None.
+
+    Hoisted from :func:`leaf_pairs` so the inner per-field decision
+    (skip-non-leaf / skip-unmapped / skip-empty / emit) collapses into
+    one helper call — Sonar S3776 (cognitive complexity) refactor. A
+    field is skipped (``None`` return) when:
+
+      * The field name appears in :data:`_NON_LEAF_FIELDS` (metadata, not
+        a writable secret).
+      * The field name is not in :data:`_FIELD_TO_LEAF` (unknown).
+      * The field's value is not a non-empty string (Slack's empty
+        ``refresh_token`` and Google's empty ``bot_token`` flow through
+        this path).
+    """
+    if field_name in _NON_LEAF_FIELDS:
+        return None
+    leaf = _FIELD_TO_LEAF.get(field_name)
+    if leaf is None:
+        return None
+    value = getattr(source, field_name)
+    if not isinstance(value, str) or value == "":
+        return None
+    return (leaf, value)
+
+
+def _meta_pair(meta_key: str, meta_value: object) -> tuple[str, str] | None:
+    """Return the ``(canonical-leaf, value)`` pair for one metadata entry, or None.
+
+    Keys are dataclass-style ``snake_case`` so per-service code can read
+    them via ``tokens.metadata["installation_id"]``; the leaf written to
+    KV is the canonical ``kebab-case`` form. Empty / non-string values
+    are skipped (matches the base-leaf behaviour for Slack's empty
+    ``refresh_token``).
+    """
+    if not isinstance(meta_value, str) or meta_value == "":
+        return None
+    return (meta_key.replace("_", "-"), meta_value)
+
+
 def leaf_pairs(
     client: ClientCredentials,
     tokens: CapturedTokens,
@@ -80,36 +120,23 @@ def leaf_pairs(
     identity material before token material), then tokens in field
     declaration order. This pins the operator-facing
     ``WriteReport.canonical_names`` tuple stably across runs.
+
+    Per-service metadata leaves on top of the base set. The GitHub App
+    flow uses this to carry ``installation_id`` (the App-install
+    callback returns no refresh_token; the installation id IS the
+    per-tenant identifier the connector pairs with the JWT signing key
+    to mint installation access tokens on demand).
     """
     pairs: list[tuple[str, str]] = []
     for source in (client, tokens):
         for field in fields(source):
-            name = field.name
-            if name in _NON_LEAF_FIELDS:
-                continue
-            leaf = _FIELD_TO_LEAF.get(name)
-            if leaf is None:
-                continue
-            value = getattr(source, name)
-            if not isinstance(value, str) or value == "":
-                continue
-            pairs.append((leaf, value))
-    # Per-service metadata leaves on top of the base set. The GitHub
-    # App flow uses this to carry ``installation_id`` (the App-install
-    # callback returns no refresh_token; the installation id IS the
-    # per-tenant identifier the connector pairs with the JWT signing
-    # key to mint installation access tokens on demand).
-    #
-    # Keys are dataclass-style ``snake_case`` so per-service code can
-    # read them via ``tokens.metadata["installation_id"]``; the leaf
-    # written to KV is the canonical ``kebab-case`` form. Empty values
-    # are skipped (matches the base-leaf behaviour for Slack's empty
-    # ``refresh_token``).
+            pair = _leaf_pair_for_field(source, field.name)
+            if pair is not None:
+                pairs.append(pair)
     for meta_key, meta_value in tokens.metadata.items():
-        if not isinstance(meta_value, str) or meta_value == "":
-            continue
-        leaf = meta_key.replace("_", "-")
-        pairs.append((leaf, meta_value))
+        meta_pair = _meta_pair(meta_key, meta_value)
+        if meta_pair is not None:
+            pairs.append(meta_pair)
     return tuple(pairs)
 
 

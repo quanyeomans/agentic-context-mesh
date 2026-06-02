@@ -935,6 +935,33 @@ def _event_modified_at(message: GraphMessage) -> str:
     return _now_iso()
 
 
+def _coerce_optional_string_list(
+    raw: Any,
+    *,
+    error_message: str,
+) -> list[str] | None:
+    """Validate that ``raw`` is either ``None`` or a non-empty list/tuple of strings.
+
+    Hoisted from :func:`make_connector` so the ``mailboxes`` + ``folders_allowlist``
+    branches share one validation shape (Sonar S3776 — cuts the outer
+    function's cognitive complexity by collapsing two near-identical
+    blocks). Returns ``None`` when ``raw`` is ``None`` (caller treats
+    that as "no override"); returns a freshly-copied ``list[str]``
+    otherwise. Raises :class:`ValueError` with the supplied
+    ``error_message`` when the shape is wrong (F21-shaped messages live
+    at the call site so the diagnostic stays close to the docs link).
+
+    Args:
+      raw: The raw config value, typically ``config.get(<key>)``.
+      error_message: The F21-shaped error string to surface on mis-shape.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list | tuple) or not all(isinstance(item, str) and item for item in raw):
+        raise ValueError(error_message)
+    return list(raw)
+
+
 def make_connector(config: Mapping[str, Any]) -> M365EmailHeadersConnector:
     """Construct an :class:`M365EmailHeadersConnector` from a config mapping.
 
@@ -978,36 +1005,28 @@ def make_connector(config: Mapping[str, Any]) -> M365EmailHeadersConnector:
             "next: see docs/architecture/adrs/ADR-004-email-headers-only.md."
         )
 
-    raw_mailboxes = config.get("mailboxes")
-    mailboxes: list[str] | None
-    if raw_mailboxes is None:
-        mailboxes = None
-    else:
-        if not isinstance(raw_mailboxes, list | tuple) or not all(isinstance(m, str) and m for m in raw_mailboxes):
-            raise ValueError(
-                "m365_email_headers: 'mailboxes' must be a list of UPN strings. "
-                "fix: write `mailboxes: [alice@contoso.com, bob@contoso.com]` "
-                "under the m365_email_headers connector block. "
-                "next: see docs/architecture/connector-scope-topology/ADR.md Wave E."
-            )
-        mailboxes = list(raw_mailboxes)
+    mailboxes = _coerce_optional_string_list(
+        config.get("mailboxes"),
+        error_message=(
+            "m365_email_headers: 'mailboxes' must be a list of UPN strings. "
+            "fix: write `mailboxes: [alice@contoso.com, bob@contoso.com]` "
+            "under the m365_email_headers connector block. "
+            "next: see docs/architecture/connector-scope-topology/ADR.md Wave E."
+        ),
+    )
 
-    raw_allowlist = config.get("folders_allowlist")
-    folders_allowlist: list[str] | None
-    if raw_allowlist is None:
-        folders_allowlist = None
-    else:
-        if not isinstance(raw_allowlist, list | tuple) or not all(isinstance(f, str) and f for f in raw_allowlist):
-            raise ValueError(
-                "m365_email_headers: 'folders_allowlist' must be a list of folder name strings. "
-                "fix: write `folders_allowlist: [inbox, sentitems, archive]` "
-                "under the m365_email_headers connector block. Well-known names "
-                f"recognised: {sorted(_WELL_KNOWN_FOLDER_NAMES)!r}; custom folders "
-                "match by case-insensitive displayName. "
-                "next: see https://learn.microsoft.com/graph/api/resources/mailfolder "
-                "for the well-known folder list."
-            )
-        folders_allowlist = list(raw_allowlist)
+    folders_allowlist = _coerce_optional_string_list(
+        config.get("folders_allowlist"),
+        error_message=(
+            "m365_email_headers: 'folders_allowlist' must be a list of folder name strings. "
+            "fix: write `folders_allowlist: [inbox, sentitems, archive]` "
+            "under the m365_email_headers connector block. Well-known names "
+            f"recognised: {sorted(_WELL_KNOWN_FOLDER_NAMES)!r}; custom folders "
+            "match by case-insensitive displayName. "
+            "next: see https://learn.microsoft.com/graph/api/resources/mailfolder "
+            "for the well-known folder list."
+        ),
+    )
 
     return M365EmailHeadersConnector(
         user_principal_name=upn,

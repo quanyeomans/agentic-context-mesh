@@ -547,6 +547,54 @@ def test_connector_raises_when_loader_misses_and_no_inline_override() -> None:
 
 
 @pytest.mark.unit
+def test_resolved_config_is_concrete_m365_calendar_config_subtype() -> None:
+    """The connector's resolved config object is a concrete :class:`M365CalendarConfig`.
+
+    Pins the python:S5886 fix that swapped :func:`dataclasses.replace`
+    for a field-by-field constructor call inside the credential
+    resolver. :func:`replace` returns the broader
+    ``DataclassInstance`` (Sonar flagged); the explicit constructor
+    returns the concrete subtype callers downcast against.
+
+    Drives the public :class:`M365CalendarConnector` constructor — the
+    credential resolver runs during ``__init__`` and stores the result
+    on the (existing-pattern-tested) ``_config`` field. F5-clean: no
+    import of the underscore-prefixed resolver.
+
+    Sabotage-proof: revert the resolver to use ``replace(config, ...)``;
+    this test still passes at runtime (the object IS an
+    M365CalendarConfig either way) BUT Sonar fires S5886 on the
+    function. The mechanical sabotage proof for the annotation-level
+    claim is mypy + Sonar; this test pins the runtime invariant the
+    type hint advertises AND that every config field round-trips
+    through the field-by-field copy.
+    """
+    loader = _full_loader()
+    incoming = M365CalendarConfig(user_id="operator@example.com")
+    connector = M365CalendarConnector(
+        incoming,
+        client_factory=_factory_for([_page(_event("ev-alpha"))]),
+        secrets=loader,
+    )
+    resolved = connector._config
+
+    assert isinstance(resolved, M365CalendarConfig), (
+        f"resolved config must be M365CalendarConfig; got {type(resolved).__name__}"
+    )
+    # Field-by-field copy preserves every non-credential field unchanged.
+    assert resolved.user_id == incoming.user_id
+    assert resolved.scope == incoming.scope
+    assert resolved.window_days_back == incoming.window_days_back
+    assert resolved.window_days_forward == incoming.window_days_forward
+    assert resolved.sensitivity == incoming.sensitivity
+    assert resolved.user_ids == incoming.user_ids
+    # Credential leaves filled from the loader.
+    assert resolved.tenant_id == "fake-tenant"
+    assert resolved.client_id == "fake-client"
+    assert resolved.client_secret  # non-empty
+
+
+@pytest.mark.unit
 def test_change_event_metadata_carries_subject_attendees_location() -> None:
     """The ChangeEvent metadata exposes the fields downstream consumers need.
 
