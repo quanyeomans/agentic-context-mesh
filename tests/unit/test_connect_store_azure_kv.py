@@ -21,6 +21,29 @@ from kairix.connect.store.azure_kv_store import AzureKeyVaultTokenStore
 pytestmark = pytest.mark.unit
 
 
+def _has_azure_sdk() -> bool:
+    """True iff the optional ``[connect]`` extras' Azure SDK is importable.
+
+    Stage 2 CI installs base deps only; the Azure SDK ships with the
+    ``[connect]`` extra. Tests that exercise the *real-import* branch
+    (``test_lazy_import_real_azure_*``) require the SDK on the path,
+    so they skip on hosts without the extra installed.
+    """
+    try:
+        import azure.identity
+        import azure.keyvault.secrets
+    except ImportError:
+        return False
+    _ = (azure.identity, azure.keyvault.secrets)  # import-only probe; bind for ruff
+    return True
+
+
+_SKIP_NO_AZURE = pytest.mark.skipif(
+    not _has_azure_sdk(),
+    reason="[connect] extra not installed — azure SDK absent. Run `uv sync --extra connect` to enable.",
+)
+
+
 class _FakeSecretClient:
     """Records every ``set_secret`` call. Optionally raises to exercise the unauthorized branch."""
 
@@ -213,6 +236,7 @@ def test_lazy_import_azure_identity_raises_typed(monkeypatch: Any) -> None:
         store._build_credential()
 
 
+@_SKIP_NO_AZURE
 def test_lazy_import_real_azure_identity_returns_credential() -> None:
     """When ``azure-identity`` IS installed, ``_build_credential`` constructs a real credential.
 
@@ -244,6 +268,7 @@ def test_lazy_import_real_azure_identity_returns_credential() -> None:
     assert isinstance(captured["cred"], DefaultAzureCredential)
 
 
+@_SKIP_NO_AZURE
 def test_lazy_import_real_azure_keyvault_returns_client() -> None:
     """When ``azure-keyvault-secrets`` IS installed, ``_build_secret_client`` returns a real client.
 
