@@ -125,15 +125,18 @@ def test_default_in_scope_non_bool_raises_f21() -> None:
 
 def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
     """``applies_to: ["*"]`` + 6 agents in the registry → 6 materialised
-    profile rows.
+    profile rows. The entries omit ``actor_id`` entirely (GH #381) — the
+    parser fills it per-target during expansion.
 
     Pins the wildcard fan-out: one operator-authored profile produces N
     materialised profiles, one per registered agent, so the resolver
-    sees concrete (not wildcard-aware) rows.
+    sees concrete (not wildcard-aware) rows. Also pins that operators
+    are not required to repeat a placeholder ``actor_id`` per entry —
+    the wildcard fan-out IS the actor_id filler.
     """
     from kairix.config.topology_v2 import parse_topology_v2
 
-    agents = ["shape", "builder", "consultant", "growth", "coach", "family"]
+    agents = ["agent-alpha", "agent-beta", "agent-gamma", "agent-delta", "agent-epsilon", "agent-zeta"]
     data = {
         "topology_v2": {
             "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
@@ -143,8 +146,8 @@ def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
                     "actor_kind": "agent",
                     "applies_to": ["*"],
                     "entries": [
+                        # GH #381 — no actor_id; expansion fills it per agent.
                         {
-                            "actor_id": "__placeholder__",
                             "collection_name": "sharepoint",
                             "mode": "read",
                             "default_in_scope": True,
@@ -162,6 +165,130 @@ def test_wildcard_applies_to_expands_to_all_registered_agents() -> None:
     assert materialised_actors == set(agents), (
         f"applies_to=['*'] must expand to every registered agent; expected {set(agents)!r}, got {materialised_actors!r}"
     )
+    # Every materialised entry must carry a non-empty actor_id (no sentinel slipped through).
+    for profile in cfg.scope_profiles:
+        for entry in profile.entries:
+            assert entry.actor_id, (
+                f"materialised entry must carry non-empty actor_id; got {entry.actor_id!r} on profile {profile.name!r}"
+            )
+
+
+def test_wildcard_applies_to_without_per_entry_actor_id_expands_correctly() -> None:
+    """GH #381 — ``applies_to: ["*"]`` with entries that omit ``actor_id``
+    parses successfully and materialises N agent rows.
+
+    Pre-fix this raised ``TopologyV2ParseError: 'actor_id' is required``
+    because ``_parse_scope_entry`` validated ``actor_id`` before
+    ``_expand_wildcard_profiles`` had a chance to fill it. Post-fix the
+    parser tolerates absent ``actor_id`` when the parent profile carries
+    a non-empty ``applies_to``.
+    """
+    from kairix.config.topology_v2 import parse_topology_v2
+
+    data = {
+        "topology_v2": {
+            "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
+            "scope_profiles": [
+                {
+                    "name": "agent-default",
+                    "actor_kind": "agent",
+                    "applies_to": ["*"],
+                    "entries": [
+                        # No actor_id — wildcard expansion must fill it.
+                        {"collection_name": "sharepoint", "mode": "read"},
+                    ],
+                }
+            ],
+        },
+        "agents": ["agent-alpha", "agent-beta", "agent-gamma"],
+    }
+
+    cfg = parse_topology_v2(data)
+
+    materialised_actors = sorted(p.entries[0].actor_id for p in cfg.scope_profiles if p.entries)
+    assert materialised_actors == ["agent-alpha", "agent-beta", "agent-gamma"], (
+        f"wildcard expansion must fill actor_id per target agent; got {materialised_actors!r}"
+    )
+
+
+def test_named_list_applies_to_without_per_entry_actor_id_expands_correctly() -> None:
+    """GH #381 — ``applies_to: ["agent-alpha", "agent-beta"]`` with
+    entries that omit ``actor_id`` materialises one row per named agent.
+
+    Pins that the named-list shape (not just wildcard) follows the same
+    "expansion is the actor_id filler" rule. The agents block also lists
+    a third agent (agent-gamma) covered by a separate profile so the
+    reachability validator is satisfied.
+    """
+    from kairix.config.topology_v2 import parse_topology_v2
+
+    data = {
+        "topology_v2": {
+            "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
+            "scope_profiles": [
+                {
+                    "name": "duo-profile",
+                    "actor_kind": "agent",
+                    "applies_to": ["agent-alpha", "agent-beta"],
+                    "entries": [
+                        {"collection_name": "sharepoint", "mode": "read"},
+                    ],
+                },
+                {
+                    # Cover agent-gamma so reachability passes.
+                    "name": "gamma-profile",
+                    "actor_kind": "agent",
+                    "entries": [
+                        {"actor_id": "agent-gamma", "collection_name": "sharepoint", "mode": "read"},
+                    ],
+                },
+            ],
+        },
+        "agents": ["agent-alpha", "agent-beta", "agent-gamma"],
+    }
+
+    cfg = parse_topology_v2(data)
+
+    # Two profiles from the duo + one from gamma = three materialised profiles.
+    duo_actors = sorted(p.entries[0].actor_id for p in cfg.scope_profiles if p.name.startswith("duo-profile::"))
+    assert duo_actors == ["agent-alpha", "agent-beta"], (
+        f"named-list applies_to must materialise one row per named agent; got {duo_actors!r}"
+    )
+
+
+def test_legacy_profile_without_actor_id_still_raises_f21() -> None:
+    """GH #381 — legacy profiles (no ``applies_to``) still require
+    explicit ``actor_id`` on every entry.
+
+    Pins the back-compat constraint: the optional-actor_id pattern only
+    activates when ``applies_to`` is present. Legacy single-actor
+    profiles must keep declaring ``actor_id`` on each entry.
+    """
+    from kairix.config.topology_v2 import TopologyV2ParseError, parse_topology_v2
+
+    data = {
+        "topology_v2": {
+            "collections": [{"name": "sharepoint", "sources": [{"cc_pair": "cc-1"}]}],
+            "scope_profiles": [
+                {
+                    "name": "legacy-profile",
+                    "actor_kind": "agent",
+                    # No applies_to — entries MUST carry actor_id.
+                    "entries": [
+                        {"collection_name": "sharepoint", "mode": "read"},
+                    ],
+                }
+            ],
+        },
+    }
+
+    with pytest.raises(TopologyV2ParseError) as exc_info:
+        parse_topology_v2(data)
+
+    msg = str(exc_info.value)
+    assert "actor_id" in msg, f"legacy missing-actor_id error must name 'actor_id'; got {msg!r}"
+    assert "fix:" in msg, f"F21 affordance missing: {msg!r}"
+    assert "next:" in msg, f"F21 affordance missing: {msg!r}"
 
 
 def test_wildcard_applies_to_with_zero_agents_raises_f21() -> None:

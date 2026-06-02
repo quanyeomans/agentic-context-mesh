@@ -49,6 +49,11 @@ from kairix.core.protocols import CCPairAccessType, F39Tier, ScopeProfileActorKi
 # validator's diagnostic strings. Pull to a single constant.
 _DEFAULT_PATH_FILTER = "*"
 
+# F17 — diagnostic-message prefix shared by three scope_profile error
+# sites (wildcard-with-no-agents, post-expansion empty-actor_id sentinel,
+# dangling collection reference). One constant, three reuse sites.
+_SCOPE_PROFILE_NAME_PREFIX = "scope_profiles[name="
+
 
 class TopologyV2ParseError(ValueError):
     """Raised when a Wave D config block has the wrong structural shape.
@@ -390,7 +395,26 @@ def _parse_default_in_scope(prefix: str, value: Any) -> bool:
     return bool(value)
 
 
-def _parse_scope_entry(prefix: str, raw: Any) -> ScopeEntryConfig:
+def _parse_scope_entry(prefix: str, raw: Any, *, allow_unfilled_actor_id: bool = False) -> ScopeEntryConfig:
+    """Parse one scope_entry mapping into a :class:`ScopeEntryConfig`.
+
+    ``actor_id`` handling depends on ``allow_unfilled_actor_id``:
+
+      * ``False`` (default, legacy shape — profile has no ``applies_to``):
+        ``actor_id`` is required at the entry level. The entry's
+        ``actor_id`` is its authoritative identity.
+      * ``True`` (profile carries ``applies_to`` — wildcard or named-list
+        fan-out): ``actor_id`` is optional at the entry level. Missing /
+        empty values produce an empty-string sentinel that
+        :func:`_expand_wildcard_profiles` rewrites to each target actor
+        during materialisation. GH #381 — operators using
+        ``applies_to: ["*"]`` must not have to repeat per-agent
+        ``actor_id`` on every entry; the parser fills it.
+
+    The post-expansion validator in :func:`parse_topology_v2` enforces
+    that no entry ships with the empty-string sentinel; defence in depth
+    against a future caller forgetting to wire ``allow_unfilled_actor_id``.
+    """
     item = _require_dict(prefix, raw)
     mode = item.get("mode", "read")
     if mode not in ("read", "write", "read_write"):
@@ -401,8 +425,14 @@ def _parse_scope_entry(prefix: str, raw: Any) -> ScopeEntryConfig:
     default_in_scope: bool = True
     if "default_in_scope" in item:
         default_in_scope = _parse_default_in_scope(prefix, item.get("default_in_scope"))
+    raw_actor_id = item.get("actor_id")
+    actor_id_is_blank = raw_actor_id is None or (isinstance(raw_actor_id, str) and not raw_actor_id.strip())
+    if allow_unfilled_actor_id and actor_id_is_blank:
+        actor_id = ""
+    else:
+        actor_id = _require_str(prefix, raw_actor_id, field="actor_id")
     return ScopeEntryConfig(
-        actor_id=_require_str(prefix, item.get("actor_id"), field="actor_id"),
+        actor_id=actor_id,
         collection_name=_require_str(prefix, item.get("collection_name"), field="collection_name"),
         mode=str(mode),
         default_in_scope=default_in_scope,
@@ -454,14 +484,26 @@ def _parse_one_scope_profile_raw(
     Returns ``(name, actor_kind, applies_to, entries)``. Wildcard
     expansion happens in :func:`parse_topology_v2` so the expansion has
     the registered-agents list in scope.
+
+    GH #381 — when ``applies_to`` is non-empty (wildcard ``["*"]`` or an
+    explicit name list), each entry's ``actor_id`` is filled by
+    :func:`_expand_wildcard_profiles` per target agent. The parser
+    therefore tolerates absent / empty ``actor_id`` on the entry in that
+    case (signalled via ``allow_unfilled_actor_id=True``). Legacy
+    profiles (no ``applies_to``) keep the strict ``actor_id`` requirement.
     """
     item = _require_dict(prefix, raw)
+    applies_to = _parse_applies_to(prefix, item.get("applies_to"))
     entries_raw = _require_list(f"{prefix}.entries", item.get("entries"))
-    entries = tuple(_parse_scope_entry(f"{prefix}.entries[{i}]", e) for i, e in enumerate(entries_raw))
+    allow_unfilled_actor_id = bool(applies_to)
+    entries = tuple(
+        _parse_scope_entry(f"{prefix}.entries[{i}]", e, allow_unfilled_actor_id=allow_unfilled_actor_id)
+        for i, e in enumerate(entries_raw)
+    )
     return (
         _require_str(prefix, item.get("name"), field="name"),
         _parse_actor_kind(item.get("actor_kind")),
-        _parse_applies_to(prefix, item.get("applies_to")),
+        applies_to,
         entries,
     )
 
@@ -508,13 +550,17 @@ def _expand_wildcard_profiles(
 
       * If ``applies_to == ()`` — one ``ScopeProfileConfig`` with the
         raw entries (legacy shape; entries already carry their own
-        ``actor_id``).
+        ``actor_id``, enforced by :func:`_parse_scope_entry` with
+        ``allow_unfilled_actor_id=False``).
       * If ``applies_to == ("*",)`` — N materialised profiles, one per
         registered agent. Each materialised profile has its entries'
         ``actor_id`` rewritten to the target agent so downstream
-        consumers (resolver / DB applier) see concrete rows.
+        consumers (resolver / DB applier) see concrete rows. GH #381 —
+        this function is the authoritative ``actor_id`` filler for
+        wildcard / named-list profiles; the entry-level ``actor_id`` (if
+        any) is overwritten by the target agent name during fan-out.
       * If ``applies_to == ("a", "b", ...)`` — N materialised profiles,
-        one per named agent.
+        one per named agent. Same fill-from-target rule as wildcard.
 
     Wildcard with zero registered agents raises F21 — it's a
     misconfiguration the operator wants to hear about loudly.
@@ -527,7 +573,7 @@ def _expand_wildcard_profiles(
         if applies_to == ("*",):
             if not agents:
                 raise TopologyV2ParseError(
-                    f"scope_profiles[name={name!r}].applies_to=['*'] but the agents block "
+                    f"{_SCOPE_PROFILE_NAME_PREFIX}{name!r}].applies_to=['*'] but the agents block "
                     f"is empty. The wildcard expands to zero profiles — a misconfiguration. "
                     f"fix: declare at least one agent in the top-level `agents:` block, OR "
                     f"replace the wildcard with an explicit `applies_to: [agent-name, ...]` list. "
@@ -557,6 +603,35 @@ def _expand_wildcard_profiles(
     return tuple(expanded)
 
 
+def _validate_actor_ids_filled(profiles: tuple[ScopeProfileConfig, ...]) -> None:
+    """F21 defence-in-depth — every materialised entry must carry a
+    non-empty ``actor_id``.
+
+    The empty-string sentinel produced by ``_parse_scope_entry`` when
+    ``allow_unfilled_actor_id=True`` must be filled in by
+    :func:`_expand_wildcard_profiles` for every wildcard / named-list
+    profile. If any entry still carries the sentinel post-expansion,
+    something in the pipeline (a future caller, a bug in the expansion
+    rules, an unhandled applies_to shape) failed to fill it. Surface
+    loudly rather than silently shipping ``actor_id=""`` to the DB
+    applier.
+    """
+    for profile in profiles:
+        for entry in profile.entries:
+            if not entry.actor_id:
+                raise TopologyV2ParseError(
+                    f"{_SCOPE_PROFILE_NAME_PREFIX}{profile.name!r}] has an entry with empty actor_id "
+                    f"after wildcard expansion. This is an internal-consistency failure: a "
+                    f"profile with applies_to=['*'] or applies_to=[name, ...] should have had "
+                    f"its entry actor_ids filled by the expansion step. "
+                    f"fix: confirm the profile declares applies_to and the agents block lists "
+                    f"at least one agent name. If the profile is intentionally legacy (no "
+                    f"applies_to), add explicit `actor_id: <name>` to every entry. "
+                    f"next: run kairix config validate. "
+                    f"run: grep -n scope_profiles kairix.config.yaml"
+                )
+
+
 def _validate_collection_references(
     profiles: tuple[ScopeProfileConfig, ...],
     collections: tuple[CollectionConfig, ...],
@@ -580,7 +655,7 @@ def _validate_collection_references(
         for entry in profile.entries:
             if entry.collection_name not in declared:
                 raise TopologyV2ParseError(
-                    f"scope_profiles[name={profile.name!r}].entries references "
+                    f"{_SCOPE_PROFILE_NAME_PREFIX}{profile.name!r}].entries references "
                     f"collection_name={entry.collection_name!r} which is not declared in "
                     f"topology_v2.collections. "
                     f"fix: add `{entry.collection_name}` to the collections list OR remove "
@@ -698,6 +773,11 @@ def parse_topology_v2(data: dict[str, Any]) -> TopologyV2Config:
         _parse_one_scope_profile_raw(f"topology_v2.scope_profiles[{i}]", s) for i, s in enumerate(scope_profiles_raw)
     ]
     scope_profiles = _expand_wildcard_profiles(raw_profiles, agents)
+
+    # F21 — defence-in-depth: every materialised entry must have a
+    # non-empty actor_id. Catches a future bug where applies_to handling
+    # leaves an entry with the empty-string sentinel.
+    _validate_actor_ids_filled(scope_profiles)
 
     # F21 — every collection_name in any scope entry must be declared;
     # every registered agent must be covered by at least one profile.
