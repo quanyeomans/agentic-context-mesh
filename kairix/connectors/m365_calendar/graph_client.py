@@ -161,16 +161,21 @@ class M365GraphCalendarClient:
         until ``delta_link`` is set.
 
         ``start_iso`` and ``end_iso`` must be ISO-8601 UTC timestamps.
-        The connector picks the window (default: 90 days back, 365
+        The connector picks the window (default: 90 days back, 270
         days forward; see :func:`kairix.connectors.m365_calendar.connector.default_window`).
+
+        Page size is expressed via the ``Prefer: odata.maxpagesize=N``
+        header — Graph's ``calendarView/delta`` rejects the ``$top``
+        query parameter on this resource with
+        ``ErrorInvalidUrlQuery`` (#382 part 3).
         """
         path = f"/users/{self._user_id}/calendar/calendarView/delta"
         params: dict[str, Any] = {
             "startDateTime": start_iso,
             "endDateTime": end_iso,
-            "$top": self._page_size,
         }
-        response = self._retrying_get(f"{GRAPH_BASE_URL}{path}", params=params)
+        headers = {"Prefer": f"odata.maxpagesize={self._page_size}"}
+        response = self._retrying_get(f"{GRAPH_BASE_URL}{path}", params=params, headers=headers)
         return _parse_delta_response(response.json())
 
     def fetch_delta_page(self, link: str) -> CalendarDeltaPage:
@@ -188,7 +193,13 @@ class M365GraphCalendarClient:
     # Internals — throttle-aware retry loop (GH #357)
     # ------------------------------------------------------------------
 
-    def _retrying_get(self, url: str, *, params: dict[str, Any] | None = None) -> httpx.Response:
+    def _retrying_get(
+        self,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
         """Issue an authorised GET with retry-with-backoff on throttle.
 
         Mirrors :class:`SharePointGraphClient._authorised_get` (GH #357):
@@ -217,7 +228,7 @@ class M365GraphCalendarClient:
             reraise=True,
         )
         try:
-            response = retrying(self._do_get, url, params)
+            response = retrying(self._do_get, url, params, headers)
         except RetryError as exc:
             # ``retry_if_result`` returns a "successful" outcome from
             # tenacity's perspective so ``reraise=True`` can't lift an
@@ -232,13 +243,21 @@ class M365GraphCalendarClient:
         response.raise_for_status()
         return response
 
-    def _do_get(self, url: str, params: dict[str, Any] | None) -> httpx.Response:
+    def _do_get(
+        self,
+        url: str,
+        params: dict[str, Any] | None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
         """Single HTTP GET. The bearer is injected by the
         :class:`httpx.Auth` flow attached to the underlying client.
         """
-        if params is None:
-            return self._http.get(url)
-        return self._http.get(url, params=params)
+        kwargs: dict[str, Any] = {}
+        if params is not None:
+            kwargs["params"] = params
+        if headers is not None:
+            kwargs["headers"] = headers
+        return self._http.get(url, **kwargs)
 
     def _wait_strategy(self, retry_state: RetryCallState) -> float:
         """Compute the wait between retries (GH #357).
