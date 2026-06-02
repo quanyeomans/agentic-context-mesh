@@ -435,3 +435,55 @@ def test_flag_on_uses_topology_v2_collection_resolver(tmp_path: Path) -> None:
     assert hasattr(resolver, "validate_explicit"), (
         f"flag ON must yield TopologyV2CollectionResolver; got {type(resolver).__name__}"
     )
+
+
+def test_topology_v2_resolver_usable_from_a_different_thread(tmp_path: Path) -> None:
+    """Resolver built on thread A must service queries from thread B.
+
+    Production trace: build_search_pipeline() memoises its pipeline for
+    the process lifetime; the cached pipeline gets reused across every
+    uvicorn worker thread that lands an MCP search request. Before the
+    fix at kairix/core/factory.py:418 the SQLite connection was opened
+    without ``check_same_thread=False`` so any request that landed on
+    a different thread than the one that warmed the pipeline raised
+    ``sqlite3.ProgrammingError`` and the search returned no hits.
+
+    This test pins the cross-thread access through the public surface:
+    build the resolver on the main thread, dispatch a resolve call on a
+    worker thread, assert no ProgrammingError. Sabotage anchor: revert
+    the ``check_same_thread=False`` keyword and the worker-thread call
+    raises ``sqlite3.ProgrammingError``.
+    """
+    import threading
+
+    from kairix.core.factory import build_collection_resolver
+
+    db_path, _registry = _build_pipeline(tmp_path)
+    db = _bootstrap_db(db_path)
+    _seed_scope_profile_seven_in_default_one_opt_in(db, actor_id="shape")
+    db.close()
+
+    def _flag_on(name: str) -> bool:
+        return name == "topology_v2_collection_resolver"
+
+    resolver = build_collection_resolver(db_path=db_path, flag_reader=_flag_on)
+
+    captured: dict[str, Exception | None] = {"error": None}
+
+    from kairix.core.search.scope import Scope
+
+    def _resolve_on_worker_thread() -> None:
+        try:
+            resolver.resolve(agent="shape", scope=Scope.AGENT)
+        except Exception as exc:
+            captured["error"] = exc
+
+    t = threading.Thread(target=_resolve_on_worker_thread)
+    t.start()
+    t.join(timeout=10.0)
+    assert not t.is_alive(), "worker thread hung on resolver call"
+    assert captured["error"] is None, (
+        f"cross-thread resolver call raised {type(captured['error']).__name__}: "
+        f"{captured['error']}. Was check_same_thread=False removed from "
+        f"kairix/core/factory.py _build_topology_v2_collection_resolver?"
+    )

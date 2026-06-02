@@ -415,7 +415,15 @@ def _build_topology_v2_collection_resolver(
 
     from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
 
-    db = sqlite3.connect(str(db_path), timeout=10.0)
+    # ``check_same_thread=False`` is mandatory here: build_search_pipeline
+    # memoises its result for the process lifetime, so the same Connection
+    # gets reused across every uvicorn worker thread that lands an MCP
+    # search request. Without this flag, every request that lands on a
+    # thread other than the one that warmed the pipeline raises
+    # ``sqlite3.ProgrammingError`` and the search returns no hits. SQLite
+    # serialises internal access; the resolver only issues SELECTs so the
+    # serialisation cost is negligible.
+    db = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False)
     return TopologyV2CollectionResolver(
         db=db,
         default_in_scope_filter_enabled=default_in_scope_filter_enabled,
