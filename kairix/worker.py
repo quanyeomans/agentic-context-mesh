@@ -80,6 +80,15 @@ _CONNECTOR_SYNC_KEY = "connector_sync"
 # manually; the unattended cadence below protects the worker loop.
 NEO4J_DRAIN_INTERVAL = 600  # 10 minutes
 
+# R3 (#389) — SQLite WAL checkpoint cadence. Forces a periodic
+# ``PRAGMA wal_checkpoint(TRUNCATE)`` so the WAL file can't grow
+# unbounded. Production trace (2026-06-02) showed the WAL hit 3.6 GB
+# under heavy connector + embed write traffic before being manually
+# checkpointed; auto-checkpoint's ~1000-page (4 MB) threshold doesn't
+# keep up under sustained load. 600s matches the neo4j drain cadence
+# so both DB-maintenance ticks share the same operational rhythm.
+WAL_CHECKPOINT_INTERVAL = 600  # 10 minutes
+
 # Idle backoff (#224): when embed runs find no work to do, the next-embed
 # wait extends exponentially. Cap at 4 hours so we don't go totally silent
 # on a long-idle vault but also don't churn CPU/IO every hour for nothing.
@@ -1100,6 +1109,40 @@ def _default_neo4j_drain() -> Any:
     return run_default_drain_tick()
 
 
+def _default_wal_checkpoint() -> dict[str, int]:
+    """Worker-loop dispatch slot for the periodic SQLite WAL checkpoint (R3 / #389).
+
+    Opens the kairix index DB and runs ``PRAGMA wal_checkpoint(TRUNCATE)``
+    so the WAL file can't grow unbounded (production trace showed 3.6 GB
+    accumulation before manual intervention). Returns the standard SQLite
+    checkpoint tuple as a dict so the worker can log structured outcomes.
+
+    The pragma is a no-op when there's nothing to truncate; never
+    corrupts. Failure modes:
+
+      * DB locked (concurrent embed write) → ``busy=1``, ``checkpointed=0``;
+        the next tick retries.
+      * DB path missing → propagates ``OperationalError`` up; the worker's
+        ``(Exception, SystemExit)`` discipline at the dispatch site keeps
+        the loop alive.
+
+    Tests inject a substitute via ``WorkerDeps(wal_checkpoint_fn=fake)``;
+    production omits and gets this default.
+    """
+    import sqlite3
+
+    from kairix.paths import db_path
+
+    conn = sqlite3.connect(str(db_path()), timeout=30.0)
+    try:
+        row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    finally:
+        conn.close()
+    # PRAGMA wal_checkpoint returns (busy, log_pages_in_wal, pages_checkpointed).
+    busy, log_pages, checkpointed = (int(row[0]), int(row[1]), int(row[2])) if row else (0, 0, 0)
+    return {"busy": busy, "log_pages": log_pages, "checkpointed": checkpointed}
+
+
 def _default_connector_sync() -> ConnectorSyncResult:
     """Worker-loop dispatch slot for the connector-sync maintenance task.
 
@@ -1775,6 +1818,11 @@ class WorkerDeps:
     # the import stays inside the function body (lazy load of the
     # graph layer keeps worker boot fast).
     neo4j_drain_fn: Callable[[], Any] = field(default_factory=lambda: _default_neo4j_drain)
+    # R3 (#389) — SQLite WAL checkpoint dispatch slot. Same F6-clean
+    # default_factory shape as ``neo4j_drain_fn``. Tests pass a Fake;
+    # production omits and gets ``_default_wal_checkpoint`` which opens
+    # the kairix index DB and runs PRAGMA wal_checkpoint(TRUNCATE).
+    wal_checkpoint_fn: Callable[[], Any] = field(default_factory=lambda: _default_wal_checkpoint)
     sleep: Callable[[float], None] = field(default_factory=lambda: time.sleep)
     # #224 phase 4-5 combined — observable state + pause flag.
     # ``state`` is the in-memory dataclass the loop mutates on phase changes.
@@ -2066,6 +2114,35 @@ def run_neo4j_drain(deps: WorkerDeps | None = None) -> None:
         logger.warning("worker: neo4j drain raised — %s", exc)
 
 
+def run_wal_checkpoint(deps: WorkerDeps | None = None) -> None:
+    """R3 (#389) — drive one SQLite WAL checkpoint tick.
+
+    Invokes ``deps.wal_checkpoint_fn`` (default
+    :func:`_default_wal_checkpoint`) and logs the structured result
+    dict. Mirrors the ``(Exception, SystemExit)`` discipline of every
+    other worker maintenance helper — failures inside the checkpoint
+    must not bring the worker process down. A locked DB (concurrent
+    embed writer) shows up as ``busy=1`` in the log and the next tick
+    retries.
+
+    Tests construct ``WorkerDeps(wal_checkpoint_fn=fake)``; production
+    omits the kwarg and the default factory wires
+    :func:`_default_wal_checkpoint`.
+    """
+    deps = deps if deps is not None else WorkerDeps()
+    try:
+        logger.info("worker: starting wal checkpoint")
+        result = deps.wal_checkpoint_fn()
+        logger.info(
+            "worker: wal checkpoint complete — busy=%d log_pages=%d checkpointed=%d",
+            int(result.get("busy", 0)) if isinstance(result, dict) else 0,
+            int(result.get("log_pages", 0)) if isinstance(result, dict) else 0,
+            int(result.get("checkpointed", 0)) if isinstance(result, dict) else 0,
+        )
+    except (Exception, SystemExit) as exc:
+        logger.warning("worker: wal checkpoint raised — %s", exc)
+
+
 @dataclass
 class _Schedule:
     """Worker task interval config — bundles the cadence ints.
@@ -2083,6 +2160,7 @@ class _Schedule:
     wikilinks: int
     connector_sync: int
     neo4j_drain: int
+    wal_checkpoint: int
 
 
 def _resolve_schedule(
@@ -2092,6 +2170,7 @@ def _resolve_schedule(
     wikilinks_interval: int | None,
     connector_sync_interval: int | None,
     neo4j_drain_interval: int | None = None,
+    wal_checkpoint_interval: int | None = None,
 ) -> _Schedule:
     """Fold kwargs + module defaults into a single ``_Schedule``."""
     return _Schedule(
@@ -2101,6 +2180,7 @@ def _resolve_schedule(
         wikilinks=wikilinks_interval if wikilinks_interval is not None else WIKILINKS_INTERVAL,
         connector_sync=connector_sync_interval if connector_sync_interval is not None else CONNECTOR_SYNC_INTERVAL,
         neo4j_drain=neo4j_drain_interval if neo4j_drain_interval is not None else NEO4J_DRAIN_INTERVAL,
+        wal_checkpoint=(wal_checkpoint_interval if wal_checkpoint_interval is not None else WAL_CHECKPOINT_INTERVAL),
     )
 
 
@@ -2447,8 +2527,9 @@ def _maybe_run_maintenance_cycle(
     last_wikilinks: float,
     last_connector_sync: float,
     last_neo4j_drain: float,
+    last_wal_checkpoint: float,
     schedule: _Schedule,
-) -> tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     """Run any maintenance task whose interval has elapsed; return updated timestamps.
 
     Two buckets (#312):
@@ -2492,7 +2573,19 @@ def _maybe_run_maintenance_cycle(
         _run_maintenance_task(deps, transition, run_neo4j_drain)
         new_neo4j_drain = now
 
-    return (new_entity, new_health, new_wikilinks, new_connector_sync, new_neo4j_drain)
+    new_wal_checkpoint = last_wal_checkpoint
+    if now - last_wal_checkpoint >= schedule.wal_checkpoint:
+        _run_maintenance_task(deps, transition, run_wal_checkpoint)
+        new_wal_checkpoint = now
+
+    return (
+        new_entity,
+        new_health,
+        new_wikilinks,
+        new_connector_sync,
+        new_neo4j_drain,
+        new_wal_checkpoint,
+    )
 
 
 def main(
@@ -2593,6 +2686,10 @@ def main(
     # post-boot iteration drains immediately (matches the connector_sync
     # bootstrap convention).
     last_neo4j_drain = 0.0
+    # R3 (#389) — last SQLite WAL checkpoint. Same 0.0 bootstrap so the
+    # first post-boot iteration truncates the WAL immediately (catches
+    # any inherited bloat from before the previous shutdown).
+    last_wal_checkpoint = 0.0
     # KFEAT-021 — last maintenance tick. Carried in WorkerState across
     # restarts so the cadence survives a container bounce; mirror it
     # into a local for the in-loop is_tick_due comparison.
@@ -2662,6 +2759,7 @@ def main(
             last_wikilinks,
             last_connector_sync,
             last_neo4j_drain,
+            last_wal_checkpoint,
         ) = _maybe_run_maintenance_cycle(
             deps=deps,
             transition=_transition,
@@ -2672,6 +2770,7 @@ def main(
             last_wikilinks=last_wikilinks,
             last_connector_sync=last_connector_sync,
             last_neo4j_drain=last_neo4j_drain,
+            last_wal_checkpoint=last_wal_checkpoint,
             schedule=schedule,
         )
 

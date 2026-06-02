@@ -1838,3 +1838,45 @@ def test_main_loop_default_connector_sync_does_not_crash_worker(tmp_path: Path) 
     assert embed_calls["n"] >= 2, (
         f"main loop must survive an exceptional connector_sync_fn; got {embed_calls['n']} embed call(s)."
     )
+
+
+# ---------------------------------------------------------------------------
+# run_wal_checkpoint() tests (R3, #389)
+# ---------------------------------------------------------------------------
+
+
+def test_run_wal_checkpoint_invokes_fn_and_logs_result() -> None:
+    """run_wal_checkpoint delegates to deps.wal_checkpoint_fn."""
+    from kairix.worker import run_wal_checkpoint
+
+    calls: list[bool] = []
+
+    def _fake_checkpoint() -> dict[str, int]:
+        calls.append(True)
+        return {"busy": 0, "log_pages": 0, "checkpointed": 142}
+
+    run_wal_checkpoint(deps=WorkerDeps(wal_checkpoint_fn=_fake_checkpoint))
+    assert calls == [True], "wal_checkpoint_fn must be invoked once"
+
+
+def test_run_wal_checkpoint_catches_exceptions() -> None:
+    """A raised checkpoint must not crash the worker loop."""
+    import sqlite3
+
+    from kairix.worker import run_wal_checkpoint
+
+    def _raising_checkpoint() -> dict[str, int]:
+        raise sqlite3.OperationalError("database is locked")
+
+    # Must not raise — the (Exception, SystemExit) catch keeps the worker alive.
+    run_wal_checkpoint(deps=WorkerDeps(wal_checkpoint_fn=_raising_checkpoint))
+
+
+def test_run_wal_checkpoint_handles_non_dict_return() -> None:
+    """A misbehaving fn returning a non-dict value must not crash the log call."""
+    from kairix.worker import run_wal_checkpoint
+
+    def _returns_none() -> None:
+        return None
+
+    run_wal_checkpoint(deps=WorkerDeps(wal_checkpoint_fn=_returns_none))  # type: ignore[arg-type] — intentional shape mismatch: pins the runtime-tolerance for misbehaving checkpoint impls.
