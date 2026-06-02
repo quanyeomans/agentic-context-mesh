@@ -87,19 +87,27 @@ def test_flag_off_factory_returns_legacy_resolver(tmp_path: Path) -> None:
 
 
 def test_flag_on_factory_returns_topology_v2_resolver(tmp_path: Path) -> None:
-    """ON branch — the factory wires :class:`TopologyV2CollectionResolver`.
+    """ON branch — the factory wires a :class:`TopologyV2CollectionResolver` resolve path.
 
     Drives the public ``build_collection_resolver`` boundary with the
     FakeFeatureFlagResolver's ``.get`` method threaded through the
     ``flag_reader=`` DI seam.
+
+    R2 (#388) wraps the resolver in :class:`ScopeCollectionCache` for
+    SQLite-contention relief, so the factory now returns the cache
+    wrapper rather than the bare resolver. The assertion accepts either
+    shape — the cache forwards every public method to the inner
+    resolver, so callers see the same behaviour.
     """
+    from kairix.core.search.scope_collection_cache import ScopeCollectionCache
+
     db_path = _seeded_db_path(tmp_path)
     flag_resolver = FakeFeatureFlagResolver().with_flag("topology_v2_collection_resolver", True)
 
     built = build_collection_resolver(db_path=db_path, flag_reader=flag_resolver.get)
 
-    assert isinstance(built, TopologyV2CollectionResolver), (
-        f"ON branch must produce TopologyV2CollectionResolver; got {type(built)!r}"
+    assert isinstance(built, TopologyV2CollectionResolver | ScopeCollectionCache), (
+        f"ON branch must produce TopologyV2CollectionResolver (or the R2 cache wrapper); got {type(built)!r}"
     )
 
 
