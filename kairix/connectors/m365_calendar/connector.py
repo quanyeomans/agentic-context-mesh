@@ -209,7 +209,12 @@ def _utc_now() -> datetime:
 
 
 def _iso(dt: datetime) -> str:
-    return dt.isoformat().replace("+00:00", "Z")
+    # Graph ``calendarView/delta`` rejects ISO timestamps that carry
+    # fractional seconds in ``startDateTime`` / ``endDateTime`` query
+    # parameters with HTTP 400, even when the rest of the request is
+    # well-formed (#382 part-2). Strip microseconds before serialising
+    # so the connector's window-bound formatter is wire-safe.
+    return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _resolve_config_credentials(
