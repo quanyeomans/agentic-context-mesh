@@ -413,6 +413,7 @@ def _build_topology_v2_collection_resolver(
     """
     import sqlite3
 
+    from kairix.core.search.scope_collection_cache import ScopeCollectionCache
     from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
 
     # ``check_same_thread=False`` is mandatory here: build_search_pipeline
@@ -424,10 +425,16 @@ def _build_topology_v2_collection_resolver(
     # serialises internal access; the resolver only issues SELECTs so the
     # serialisation cost is negligible.
     db = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False)
-    return TopologyV2CollectionResolver(
+    inner = TopologyV2CollectionResolver(
         db=db,
         default_in_scope_filter_enabled=default_in_scope_filter_enabled,
     )
+    # R2 (#388) — wrap in a TTL cache so the SQLite SELECT on
+    # topology_scope_profiles + topology_scope_entries doesn't run on
+    # every search request. Scope-profile changes are minute-scale
+    # operator actions, not query-scale events; the 10-minute default
+    # TTL is a deliberate consistency tradeoff documented on the cache.
+    return ScopeCollectionCache(inner)
 
 
 def _resolve_provider_name(cfg: RetrievalConfig) -> str | None:
