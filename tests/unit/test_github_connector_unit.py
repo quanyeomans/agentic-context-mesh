@@ -645,12 +645,18 @@ def test_api_client_fetch_blob_returns_raw_bytes() -> None:
 
 
 def test_api_client_stats_snapshot_carries_rate_gauge() -> None:
-    """A 200 response populates rest_rate_remaining + reset_epoch."""
+    """A 200 response populates rest_rate_remaining + reset_epoch.
+
+    PAT-mode (#386) enumeration walks ``/user/repos`` which returns a
+    top-level JSON array; the handler returns an empty array so the
+    paginator completes after one page and the rate gauge captures the
+    response headers.
+    """
 
     def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
-            json={"total_count": 0, "repositories": []},
+            json=[],
             headers={"x-ratelimit-remaining": "4500", "x-ratelimit-reset": "1716678000"},
         )
 
@@ -1246,3 +1252,92 @@ def test_github_loader_miss_falls_through_to_deferred_client() -> None:
     # Construction succeeded; the client is the deferred stand-in.
     snap = connector.stats()
     assert snap["rest_requests"] == 0
+
+
+# ---------------------------------------------------------------------------
+# #386 — PAT-mode list_installation_repositories routes to /user/repos
+# ---------------------------------------------------------------------------
+
+
+def test_pat_mode_list_repositories_uses_user_repos_endpoint() -> None:
+    """PAT-mode list_installation_repositories hits /user/repos, not /installation/repositories.
+
+    Sabotage proof: revert the credential-shape branch in
+    ``list_installation_repositories`` so it always calls
+    ``/installation/repositories`` — this test fails because the
+    handler records a hit to the App endpoint instead of /user/repos.
+    """
+    paths_hit: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        paths_hit.append(request.url.path)
+        if request.url.path == "/user/repos":
+            return httpx.Response(
+                200,
+                json=[
+                    {"id": 1, "full_name": "three-cubes/kairix", "default_branch": "main", "visibility": "private"},
+                ],
+            )
+        return httpx.Response(500, json={"error": f"unexpected path {request.url.path}"})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    api = GitHubApiClient(personal_access_token="fake-pat", http_client=client)
+    repos = api.list_installation_repositories()
+    assert paths_hit == ["/user/repos"]
+    assert len(repos) == 1
+    assert repos[0].full_name == "three-cubes/kairix"
+
+
+def test_pat_mode_list_repositories_follows_link_header_pagination() -> None:
+    """PAT-mode enumeration walks the Link ``rel="next"`` chain to completion.
+
+    Sabotage proof: remove the ``next_path = _parse_link_next_path(...)``
+    line — the loop exits after page 1 so the caller sees only the
+    first page's repos.
+    """
+    pages_served: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        path_with_query = request.url.path + ("?" + request.url.query.decode() if request.url.query else "")
+        pages_served.append(path_with_query)
+        if "page=2" in path_with_query:
+            return httpx.Response(200, json=[{"id": 2, "full_name": "three-cubes/engineering-hub"}])
+        return httpx.Response(
+            200,
+            headers={
+                "Link": '<https://api.github.com/user/repos?page=2&per_page=100>; rel="next", '
+                '<https://api.github.com/user/repos?page=2&per_page=100>; rel="last"',
+            },
+            json=[{"id": 1, "full_name": "three-cubes/kairix"}],
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    api = GitHubApiClient(personal_access_token="fake-pat", http_client=client)
+    repos = api.list_installation_repositories()
+    assert len(repos) == 2
+    assert {r.full_name for r in repos} == {"three-cubes/kairix", "three-cubes/engineering-hub"}
+    assert len(pages_served) == 2  # page-1 + page-2
+
+
+def test_app_mode_list_repositories_still_uses_installation_endpoint() -> None:
+    """App-mode (installation_id set) preserves the /installation/repositories path.
+
+    Sabotage proof: replace the credential-shape check with
+    ``if self._pat is not None`` (drops the installation_id guard) and
+    this test fails because App-mode now routes through /user/repos
+    while there's no PAT to authenticate the request.
+    """
+    paths_hit: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        paths_hit.append(request.url.path)
+        if "access_tokens" in request.url.path:
+            return httpx.Response(200, json={"token": "inst-tok", "expires_at": "2099-01-01T00:00:00Z"})
+        return httpx.Response(200, json={"repositories": [{"id": 9, "full_name": "tc/app"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    api = GitHubApiClient(installation_id=42, http_client=client)
+    repos = api.list_installation_repositories()
+    assert "/installation/repositories" in paths_hit
+    assert "/user/repos" not in paths_hit
+    assert repos[0].full_name == "tc/app"

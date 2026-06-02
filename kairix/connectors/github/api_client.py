@@ -64,6 +64,55 @@ _HEADER_AUTHORIZATION = "Authorization"
 INSTALLATION_TOKEN_TTL_SECONDS = 3600
 INSTALLATION_TOKEN_ROTATE_AT_FRACTION = 0.5
 
+# PAT-mode ``GET /user/repos`` is Link-header paginated at per_page=100;
+# the upper bound caps the follow-loop so a malformed Link header can't
+# spin forever. Sized for >>10k repos — generous for any human PAT.
+_USER_REPOS_MAX_PAGES = 200
+
+
+def _repo_ref_from_entry(entry: Mapping[str, Any]) -> GitHubRepoRef:
+    """Project a GitHub repo JSON envelope onto :class:`GitHubRepoRef`.
+
+    Same field projection for both the App-mode ``/installation/repositories``
+    and PAT-mode ``/user/repos`` shapes — GitHub returns the same per-repo
+    schema in either case.
+    """
+    return GitHubRepoRef(
+        repo_id=int(entry.get("id", 0)),
+        full_name=str(entry.get("full_name", "")),
+        default_branch=str(entry.get("default_branch", "main")),
+        visibility=str(entry.get("visibility", "private")),
+        archived=bool(entry.get("archived", False)),
+    )
+
+
+def _parse_link_next_path(link_header: str | None) -> str | None:
+    """Extract the next-page path from a GitHub ``Link`` response header.
+
+    The header shape is ``<url>; rel="next", <url>; rel="last"`` per
+    RFC 5988. Returns the path+query suffix of the ``rel="next"`` URL
+    (stripped of the GitHub host so it can be passed to :meth:`_get`),
+    or ``None`` when no next link is present.
+    """
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        chunk = part.strip()
+        if not chunk.startswith("<"):
+            continue
+        end = chunk.find(">")
+        if end < 0:
+            continue
+        url = chunk[1:end]
+        rel_block = chunk[end + 1 :]
+        if 'rel="next"' not in rel_block:
+            continue
+        if url.startswith(_GITHUB_API_BASE_DEFAULT):
+            return url[len(_GITHUB_API_BASE_DEFAULT) :]
+        # Defensive — Link points at an unexpected host. Drop the link.
+        return None
+    return None
+
 
 @dataclass(frozen=True)
 class GitHubRepoRef:
@@ -314,24 +363,48 @@ class GitHubApiClient:
     # ------------------------------------------------------------------
 
     def list_installation_repositories(self) -> tuple[GitHubRepoRef, ...]:
-        """Enumerate the repos this installation can see.
+        """Enumerate the repos this credential can see.
 
-        Wraps ``GET /installation/repositories`` (App path). Returns a
-        frozen tuple of :class:`GitHubRepoRef` per F42.
+        Two credential shapes, two endpoints (#386):
+
+          * App mode (``installation_id`` or ``refreshable_token``) →
+            ``GET /installation/repositories`` returns ``{repositories: [...]}``
+            in a single page (App installations expose all granted repos
+            at once).
+          * PAT mode (``personal_access_token``) →
+            ``GET /user/repos`` returns a top-level array, Link-header
+            paginated; the helper follows ``rel="next"`` until exhausted.
+
+        Returns a frozen tuple of :class:`GitHubRepoRef` per F42.
         """
+        if self._pat is not None and self._installation_id is None and self._refreshable_token is None:
+            return self._list_user_repos_paginated()
         response = self._get("/installation/repositories")
         payload = response.json()
         repos: list[GitHubRepoRef] = []
         for entry in payload.get("repositories", []):
-            repos.append(
-                GitHubRepoRef(
-                    repo_id=int(entry.get("id", 0)),
-                    full_name=str(entry.get("full_name", "")),
-                    default_branch=str(entry.get("default_branch", "main")),
-                    visibility=str(entry.get("visibility", "private")),
-                    archived=bool(entry.get("archived", False)),
-                )
-            )
+            repos.append(_repo_ref_from_entry(entry))
+        return tuple(repos)
+
+    def _list_user_repos_paginated(self) -> tuple[GitHubRepoRef, ...]:
+        """PAT-mode enumeration — ``GET /user/repos`` with Link pagination.
+
+        GitHub's PAT-scoped repo list returns at most 100 entries per
+        page; the Link response header carries ``rel="next"`` pointing
+        at the next page until exhausted. The loop bounds itself on
+        :data:`_USER_REPOS_MAX_PAGES` so a runaway PAT (or a corrupt
+        Link header) can't spin forever — sized for >>10k repos which
+        is generous for any single human's PAT.
+        """
+        repos: list[GitHubRepoRef] = []
+        next_path: str | None = "/user/repos?per_page=100"
+        pages = 0
+        while next_path is not None and pages < _USER_REPOS_MAX_PAGES:
+            response = self._get(next_path)
+            for entry in response.json():
+                repos.append(_repo_ref_from_entry(entry))
+            next_path = _parse_link_next_path(response.headers.get("link") or response.headers.get("Link"))
+            pages += 1
         return tuple(repos)
 
     def list_commits_since(self, *, full_name: str, since: str | None) -> tuple[GitHubCommitRef, ...]:
