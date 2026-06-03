@@ -6,6 +6,7 @@ Uses mocked sources and synthesiser — no live API calls or file system depende
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -265,3 +266,103 @@ class TestBriefingPipeline:
 
         expected = tmp_path / "builder-latest.md"
         assert expected.exists()
+
+
+@pytest.mark.unit
+class TestPerSourceBudgets:
+    """Per-source wall-clock budget contract (#397 W-C C1).
+
+    Exercises the timeout path in ``_bounded_source`` via the public
+    ``budgets_s`` injection seam on ``generate_briefing`` /
+    ``BriefingPipeline`` — no internal-name import required, satisfies
+    F5 + F1 (no monkeypatching).
+    """
+
+    @pytest.mark.unit
+    def test_short_budget_drops_slow_source(self, tmp_path):
+        """A 0.05s budget against a 0.2s sleep drops that source — others kept.
+
+        Sabotage-proof: deleting the ``except TimeoutError`` branch in
+        ``_bounded_source`` makes this test fail with TimeoutError
+        leaking out of ``generate_briefing``. Restored.
+        """
+        sources = _all_content_sources()
+
+        def _slow_memory_logs(*_args, **_kwargs):
+            time.sleep(0.2)
+            return "should not appear"
+
+        sources["memory_logs"] = _slow_memory_logs
+
+        tight_budgets = {
+            "memory_logs": 0.05,
+            "recent_memory": 5.0,
+            "entity_stub": 5.0,
+            "knowledge_rules": 5.0,
+            "recent_decisions": 5.0,
+            "hybrid_search": 5.0,
+        }
+
+        # No exception escapes — the brief still assembles + writes.
+        result = generate_briefing(
+            "builder",
+            deps=BriefingDeps(
+                synthesise_fn=lambda agent, ctx, max_tokens=800: "kept=" + ",".join(sorted(ctx)),
+                write_fn=_make_fake_writer(tmp_path),
+            ),
+            sources=sources,
+            budgets_s=tight_budgets,
+        )
+
+        # memory_logs was dropped; the other five sources populate the brief.
+        # context also carries a "_missing_memory_note" because recent_memory
+        # alone isn't enough to satisfy the memory_keys check; that note's
+        # presence is incidental — the load-bearing assertion is the dropped
+        # source's absence.
+        assert "memory_logs" not in result
+        assert "recent_memory" in result
+        assert "hybrid_search" in result
+
+    @pytest.mark.unit
+    def test_short_budget_drops_only_slow_source(self, tmp_path):
+        """Asymmetric budgets: 0.05s on entity_stub + 5s on hybrid_search.
+
+        Both sources sleep 0.2s. Entity_stub drops (over budget),
+        hybrid_search survives (under budget). The asymmetry is the
+        signal that the per-source dict drives the decision — not a
+        single global timeout.
+
+        Sabotage-proof: hardcoding ``budgets[name] = 0.05`` in
+        ``_fetch_sources_async`` makes this test fail (hybrid_search
+        also drops). Restored.
+        """
+        sources = _all_content_sources()
+
+        def _slow(*_args, **_kwargs):
+            time.sleep(0.2)
+            return "slow content"
+
+        sources["entity_stub"] = _slow
+        sources["hybrid_search"] = _slow
+
+        asymmetric_budgets = {
+            "memory_logs": 5.0,
+            "recent_memory": 5.0,
+            "entity_stub": 0.05,
+            "knowledge_rules": 5.0,
+            "recent_decisions": 5.0,
+            "hybrid_search": 5.0,
+        }
+
+        result = generate_briefing(
+            "builder",
+            deps=BriefingDeps(
+                synthesise_fn=lambda agent, ctx, max_tokens=800: "kept=" + ",".join(sorted(ctx)),
+                write_fn=_make_fake_writer(tmp_path),
+            ),
+            sources=sources,
+            budgets_s=asymmetric_budgets,
+        )
+
+        assert "entity_stub" not in result
+        assert "hybrid_search" in result

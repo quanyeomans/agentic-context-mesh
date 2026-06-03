@@ -14,15 +14,19 @@ Steps:
 Steps 1-6 run concurrently. Total context is capped at 3000 tokens with
 priority-based truncation (step 6 first, then 5, 4, etc.).
 
-Never raises — returns partial briefing on any failure.
+Never raises — returns partial briefing on any failure. Sources that
+exceed their per-source wall-clock budget contribute an empty section
+("section unavailable") rather than aborting the whole brief. The brief
+never raises TimeoutError to the caller — partial-result is always
+acceptable. See issue #397 Workstream C.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -82,6 +86,24 @@ _SOURCE_TOKEN_CAPS: dict[str, int] = {
 # Total context budget before truncation (3000 tokens ~ 2300 words)
 TOTAL_CONTEXT_CAP = 3000
 
+# Per-source wall-clock budgets (seconds). The five cheap sources finish
+# well under their slice in steady state; the budget is the graceful-
+# degradation cliff for the long tail (slow disk, slow neo4j round-trip).
+# Hybrid search needs the longer budget because it embeds the query
+# (Azure HTTP call, 250-1000ms tail) before hitting BM25 + vector.
+#
+# A source that exceeds its budget contributes None — the brief still
+# assembles + synthesises with the remaining sources. No TimeoutError
+# ever surfaces to the caller. #397 Workstream C.
+_SOURCE_BUDGETS_S: dict[str, float] = {
+    _KEY_MEMORY_LOGS: 3.0,
+    _KEY_RECENT_MEMORY: 3.0,
+    _KEY_ENTITY_STUB: 3.0,
+    _KEY_KNOWLEDGE_RULES: 3.0,
+    _KEY_RECENT_DECISIONS: 3.0,
+    _KEY_HYBRID_SEARCH: 15.0,
+}
+
 # Priority order for truncation when over budget (lowest priority first)
 _TRUNCATION_ORDER = [
     _KEY_HYBRID_SEARCH,
@@ -93,17 +115,46 @@ _TRUNCATION_ORDER = [
 ]
 
 
-def _run_source(name: str, fn, *args) -> tuple[str, str]:
-    """
-    Run a source fetcher safely. Returns (name, content).
-    Logs warning and returns empty string on any failure.
+async def _bounded_source(
+    name: str,
+    fn: Callable,
+    args: tuple,
+    budget_s: float,
+) -> tuple[str, str | None]:
+    """Run one source fetcher under a per-source wall-clock budget.
+
+    Returns ``(name, text)`` on success, ``(name, None)`` when the
+    budget elapses or the fetcher raises. None is the "section
+    unavailable" sentinel the assembler renders as an empty placeholder.
+
+    The fetcher itself runs in a worker thread via ``asyncio.to_thread``
+    because the source fetchers are sync (sqlite + file I/O); wrapping
+    in ``wait_for`` enforces the budget at the asyncio scheduler level
+    without needing the fetcher to know anything about cancellation.
     """
     try:
-        result = fn(*args)
-        return name, result or ""
-    except Exception as e:
-        logger.warning("pipeline: source %r failed — %s", name, e)
-        return name, ""
+        text = await asyncio.wait_for(
+            asyncio.to_thread(fn, *args),
+            timeout=budget_s,
+        )
+        return name, text or ""
+    except TimeoutError:
+        # The slow source is the diagnostic — log enough to find it in
+        # logs without poisoning the brief result.
+        logger.warning(
+            "pipeline: source %r exceeded %.1fs budget — section unavailable",
+            name,
+            budget_s,
+        )
+        return name, None
+    except Exception as exc:
+        logger.warning(
+            "pipeline: source %r raised — section unavailable: %s",
+            name,
+            exc,
+            exc_info=True,
+        )
+        return name, None
 
 
 def trim_context(context: dict[str, str]) -> dict[str, str]:
@@ -132,39 +183,60 @@ def trim_context(context: dict[str, str]) -> dict[str, str]:
     return trimmed
 
 
+async def _fetch_sources_async(
+    source_tasks: list[tuple[str, Callable, str, int]],
+    budgets_s: dict[str, float] | None = None,
+) -> dict[str, str]:
+    """Run all source fetchers concurrently under per-source budgets.
+
+    Returns a ``name -> content`` map containing only sources that
+    returned non-empty text within their budget. Sources that timed out
+    or raised contribute ``None`` and are filtered out of the map (so
+    downstream truncation + synthesis sees the same "empty section"
+    shape it always did for failed fetches).
+
+    Never raises — every per-source exception (including
+    ``asyncio.TimeoutError``) is caught inside ``_bounded_source`` and
+    converted to a None section.
+
+    ``budgets_s`` is a public override seam (defaults to
+    :data:`_SOURCE_BUDGETS_S`); operators tuning a deployment with
+    different latency characteristics, or tests injecting short
+    budgets to exercise the timeout path, pass a custom dict here.
+    """
+    budgets = budgets_s if budgets_s is not None else _SOURCE_BUDGETS_S
+    coros = [_bounded_source(name, fn, tuple(args), budgets[name]) for (name, fn, *args) in source_tasks]
+    # return_exceptions=False is intentional — _bounded_source already
+    # converts every per-source error into a (name, None) tuple, so
+    # gather can never see an unhandled exception. If it ever did,
+    # raising up would be a bug we want to surface, not silently bury.
+    results = await asyncio.gather(*coros, return_exceptions=False)
+
+    context: dict[str, str] = {}
+    for source_name, content in results:
+        if content:
+            context[source_name] = content
+            logger.debug(
+                "pipeline: source %r returned %d tokens",
+                source_name,
+                estimate_tokens(content),
+            )
+    return context
+
+
 def _fetch_sources_concurrently(
     source_tasks: list[tuple[str, Callable, str, int]],
+    budgets_s: dict[str, float] | None = None,
 ) -> dict[str, str]:
-    """Run all source fetchers in parallel, returning a name -> content map.
+    """Sync wrapper around :func:`_fetch_sources_async`.
 
-    Failed futures are logged and skipped — never raised. Extracted from
-    ``generate_briefing`` to keep that pipeline under F16's
-    cognitive-complexity ceiling — the ThreadPoolExecutor + as_completed
-    + per-future try/except + log-on-content block nested above 15 when
-    inlined.
+    Existing sync callers (``generate_briefing``, CLI tests, MCP tool
+    handler thread) drive the async fan-out via ``asyncio.run`` — this
+    keeps the call-site signature unchanged. When invoked from inside
+    a running loop, callers should ``await _fetch_sources_async(...)``
+    directly instead.
     """
-    context: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        future_map: dict[Future, str] = {}
-        for name, fn, *args in source_tasks:
-            future = executor.submit(_run_source, name, fn, *args)
-            future_map[future] = name
-
-        for future in as_completed(future_map, timeout=25):
-            try:
-                source_name, content = future.result()
-            except Exception as e:
-                failed_name = future_map[future]
-                logger.warning("pipeline: source %r future failed — %s", failed_name, e)
-                continue
-            if content:
-                context[source_name] = content
-                logger.debug(
-                    "pipeline: source %r returned %d tokens",
-                    source_name,
-                    estimate_tokens(content),
-                )
-    return context
+    return asyncio.run(_fetch_sources_async(source_tasks, budgets_s=budgets_s))
 
 
 def generate_briefing(
@@ -172,6 +244,7 @@ def generate_briefing(
     *,
     deps: BriefingDeps | None = None,
     sources: dict[str, Callable] | None = None,
+    budgets_s: dict[str, float] | None = None,
 ) -> str:
     """
     Generate a session briefing for the given agent.
@@ -188,6 +261,12 @@ def generate_briefing(
                     real implementations via ``default_factory``. Tests
                     construct ``BriefingDeps(synthesise_fn=fake, ...)``.
         sources:    Per-source callable overrides (key = source name).
+        budgets_s:  Per-source wall-clock budgets (key = source name,
+                    value = seconds). Defaults to the production
+                    :data:`_SOURCE_BUDGETS_S` (five cheap sources at 3s,
+                    hybrid_search at 15s). Operators wiring a deployment
+                    with different latency characteristics — and tests
+                    forcing the timeout path — pass an override here.
 
     Returns:
         Full briefing content (with header). Never raises.
@@ -247,7 +326,7 @@ def generate_briefing(
         ),
     ]
 
-    context = _fetch_sources_concurrently(source_tasks)
+    context = _fetch_sources_concurrently(source_tasks, budgets_s=budgets_s)
     sources_count = len(context)
     logger.info("pipeline: collected %d sources for %r", sources_count, agent)
 
@@ -334,10 +413,15 @@ class BriefingPipeline:
         sources:    Per-source callable overrides (key = source name).
         deps:       Injectable dependencies (synthesise_fn, write_fn).
                     Defaults to production implementations.
+        budgets_s:  Per-source wall-clock budgets (seconds). None means
+                    use the production defaults (5 cheap sources at 3s,
+                    hybrid_search at 15s). Operators tuning a deployment
+                    or tests forcing the timeout path pass a custom dict.
     """
 
     sources: dict[str, Callable] = field(default_factory=dict)
     deps: BriefingDeps = field(default_factory=BriefingDeps)
+    budgets_s: dict[str, float] | None = None
 
     def generate(self, agent: str) -> str:
         """Generate a session briefing for the given agent.
@@ -355,4 +439,5 @@ class BriefingPipeline:
             agent=agent,
             deps=self.deps,
             sources=self.sources if self.sources else None,
+            budgets_s=self.budgets_s,
         )
