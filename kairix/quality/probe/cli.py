@@ -240,6 +240,20 @@ def _build_parser() -> argparse.ArgumentParser:
         add_help=False,  # let the inner CLI render its own help with full flag list
     )
 
+    # caches — operator surface over the W-B TTL LRU stats (#396).
+    # Same dispatch shape as mcp-calls; the actual flag parser lives in
+    # kairix/quality/probe/caches_cli.py.
+    sub.add_parser(
+        "caches",
+        help="inspect Workstream B TTL LRU cache stats",
+        description=(
+            "Operator surface over the in-process TTL LRUs added by issue #396 "
+            "Workstream B (MCP perf sprint). Per-cache size, hits, misses, "
+            "evictions, and hit-rate %. Run --help on the subcommand for flags."
+        ),
+        add_help=False,
+    )
+
     return p
 
 
@@ -537,6 +551,18 @@ def _run_mcp_calls(argv: list[str] | None) -> int:
     return mcp_calls_main(argv)
 
 
+def _run_caches(argv: list[str] | None) -> int:
+    """Dispatch ``kairix probe caches`` to its dedicated CLI.
+
+    The caches subcommand stands apart from the search/burst flow for
+    the same reason as mcp-calls — its own parser, no shared flags.
+    Argv is the slice after ``probe caches`` in the parent's argv.
+    """
+    from kairix.quality.probe.caches_cli import main as caches_main
+
+    return caches_main(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     # P5 unification: emit a deprecation warning on every invocation; the
     # legacy probe/burst behaviour stays unchanged through v2026.6.x.
@@ -549,6 +575,8 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     if argv and argv[0] == "mcp-calls":
         return _run_mcp_calls(argv[1:])
+    if argv and argv[0] == "caches":
+        return _run_caches(argv[1:])
 
     args = _build_parser().parse_args(argv)
 
