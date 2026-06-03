@@ -274,11 +274,18 @@ def async_tool_handler(
         payload_hash = _payload_hash(kwargs)
         try:
             result = await asyncio.to_thread(safe, *args, **kwargs)
-            success = "error" not in result
+            # Many tools return ``{"error": "", ...}`` on success (empty
+            # string = "no error happened"); the wrapper must treat a
+            # falsy/empty error value as success, not just the key's
+            # absence. Production sweep 2026-06-03 showed every healthy
+            # tool call being recorded as success=0 because of the
+            # original ``"error" not in result`` check (#401).
+            error_value = result.get("error")
+            success = not error_value
             if not success:
                 # safe always returns the {"error": "<Class>: <msg>"} envelope on
                 # exception. Slice off the class prefix so the log groups by class.
-                err_text = str(result.get("error", ""))
+                err_text = str(error_value)
                 error_class = err_text.split(":", 1)[0].strip() if err_text else None
             return result
         except Exception as exc:
