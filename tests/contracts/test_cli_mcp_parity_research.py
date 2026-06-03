@@ -56,3 +56,32 @@ def test_kairix_research_command_is_registered() -> None:
 
     assert "research" in COMMANDS
     assert COMMANDS["research"][0] == "kairix.agents.research.cli"
+
+
+@pytest.mark.contract
+def test_cli_argparse_exposes_every_mcp_user_facing_arg() -> None:
+    """CLI argparse must expose every kwarg that MCP tool_research exposes.
+
+    Production sweep 2026-06-03 surfaced the divergence: MCP exposed
+    ``agent`` but CLI silently rejected it. This contract pins the
+    argument-shape parity, not just "both call the use case".
+
+    Sabotage proof: delete the ``--agent`` argparse line from
+    ``kairix.agents.research.cli.build_parser`` — this test fails with
+    ``agent`` reported as missing from CLI surface. Restored.
+
+    Exclusion ``deps`` is the test-DI seam (private to callers); not
+    relevant to operator-facing arg shape.
+    """
+    from kairix.agents.mcp.server import tool_research
+    from kairix.agents.research import cli
+
+    mcp_params = set(inspect.signature(tool_research).parameters) - {"deps"}
+    parser = cli.build_parser()
+    cli_dests = {action.dest for action in parser._actions if action.dest not in {"help"}}
+
+    missing = mcp_params - cli_dests
+    assert not missing, (
+        f"CLI argparse missing MCP-equivalent args: {sorted(missing)}. "
+        f"CLI dests: {sorted(cli_dests)}. MCP params: {sorted(mcp_params)}."
+    )

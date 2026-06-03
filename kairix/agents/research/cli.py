@@ -29,6 +29,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("query", help="Research question")
     parser.add_argument(
+        "--agent",
+        default=None,
+        help=(
+            "Agent name (for traceability in logs and CLI ↔ MCP parity; "
+            "the research use case is agent-agnostic today so this is logged "
+            "but does not affect retrieval). Matches the MCP tool's ``agent`` kwarg."
+        ),
+    )
+    parser.add_argument(
         "--max-turns",
         type=int,
         default=4,
@@ -68,7 +77,14 @@ def format_text(out: ResearchOutput) -> str:
 
 def main(argv: list[str] | None = None, *, deps: ResearchDeps | None = None) -> int:
     """Entry point for ``kairix research``."""
+    import logging
+
     args = build_parser().parse_args(argv)
+
+    # ``agent`` is accepted for CLI ↔ MCP parity and logged for traceability;
+    # the research use case is agent-agnostic today (see tool_research docstring).
+    if args.agent:
+        logging.getLogger(__name__).info("research: agent=%r turns<=%d", args.agent, args.max_turns)
 
     out = run_research_use_case(args.query, max_turns=args.max_turns, deps=deps)
 

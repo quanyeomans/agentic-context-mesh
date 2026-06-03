@@ -86,13 +86,53 @@ def test_mcp_tool_timeline_signature_matches_use_case_passthrough() -> None:
     from kairix.use_cases.timeline import run_timeline
 
     mcp_params = set(inspect.signature(tool_timeline).parameters)
-    use_case_params = set(inspect.signature(run_timeline).parameters)
 
     # MCP exposes the JSON-friendly wire surface.
     expected_mcp = {"query", "anchor_date", "agent", "scope"}
     assert mcp_params == expected_mcp
 
+    # And the use case must accept the same kwargs as a typed superset.
+    use_case_params_check = set(inspect.signature(run_timeline).parameters)
+    assert expected_mcp.issubset(use_case_params_check)
+
+
+@pytest.mark.contract
+def test_cli_argparse_exposes_every_mcp_user_facing_arg() -> None:
+    """CLI argparse must expose every kwarg that MCP tool_timeline exposes.
+
+    Production sweep 2026-06-03 surfaced the divergence: MCP exposed
+    ``agent`` + ``anchor_date`` but the CLI's argparse silently rejected
+    them. This contract pins the parity at the argument-shape level —
+    not just "both call run_timeline" but "both surface the same args".
+
+    Sabotage proof: delete the ``--agent`` argparse line from
+    ``kairix.core.temporal.cli.build_parser`` — this test fails with
+    ``agent`` reported as missing from CLI surface. Restored.
+
+    Exclusion ``scope`` is the MCP-only Scope enum; CLI ergonomics use
+    --since/--until/--type to bound the same query window so a verbatim
+    ``--scope`` flag would be confusing. Exclude from parity expectation
+    here and document the lift on the use-case side.
+    """
+    from kairix.agents.mcp.server import tool_timeline
+    from kairix.core.temporal import cli
+
+    mcp_params = set(inspect.signature(tool_timeline).parameters) - {"scope"}
+    parser = cli.build_parser()
+    cli_dests = {action.dest for action in parser._actions if action.dest not in {"help"}}
+
+    # MCP param names like "anchor_date" should map to CLI dest "anchor_date"
+    # (argparse converts ``--anchor-date`` to ``anchor_date`` via the dest).
+    missing = mcp_params - cli_dests
+    assert not missing, (
+        f"CLI argparse missing MCP-equivalent args: {sorted(missing)}. "
+        f"CLI dests: {sorted(cli_dests)}. MCP params (minus scope): {sorted(mcp_params)}."
+    )
+
     # Use case exposes the typed superset.
+    from kairix.use_cases.timeline import run_timeline
+
+    use_case_params = set(inspect.signature(run_timeline).parameters)
     assert {"query", "anchor_date", "agent", "scope"}.issubset(use_case_params)
 
 

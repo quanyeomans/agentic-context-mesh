@@ -25,6 +25,8 @@ from typing import Any
 
 from kairix.use_cases.timeline import TimelineResult
 
+_ISO_DATE_METAVAR = "YYYY-MM-DD"  # F17 — referenced by --since/--until/--anchor-date
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argparse parser used by ``main``. Pure factory — exposed
@@ -44,12 +46,12 @@ Examples:
     parser.add_argument("query", help="Temporal query string")
     parser.add_argument(
         "--since",
-        metavar="YYYY-MM-DD",
+        metavar=_ISO_DATE_METAVAR,
         help="Override start date (ISO format). If omitted, extracted from query.",
     )
     parser.add_argument(
         "--until",
-        metavar="YYYY-MM-DD",
+        metavar=_ISO_DATE_METAVAR,
         help="Override end date (ISO format). If omitted, extracted from query.",
     )
     parser.add_argument(
@@ -65,6 +67,28 @@ Examples:
         default="all",
         dest="chunk_type",
         help="Filter chunk type (default: all)",
+    )
+    # CLI ↔ MCP parity (#402): match tool_timeline's agent + anchor_date + json kwargs.
+    parser.add_argument(
+        "--agent",
+        default=None,
+        help="Agent name for scope-aware retrieval (matches MCP tool_timeline's ``agent`` kwarg).",
+    )
+    parser.add_argument(
+        "--anchor-date",
+        metavar=_ISO_DATE_METAVAR,
+        dest="anchor_date",
+        help=(
+            "Anchor date used by the temporal rewriter when the query lacks an "
+            "explicit window (matches MCP tool_timeline's ``anchor_date`` kwarg). "
+            "Defaults to today."
+        ),
+    )
+    parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit a JSON envelope on stdout instead of human-readable text.",
     )
     return parser
 
@@ -129,6 +153,26 @@ def _default_timeline_runner(*args: Any, **kwargs: Any) -> Any:
     return run_timeline(*args, **kwargs)
 
 
+def _result_to_envelope(result: Any, *, limit: int) -> dict[str, Any]:
+    """Project a ``TimelineResult`` onto the CLI's ``--json`` envelope.
+
+    Defensive ``getattr`` reads so a fake/partial result from a test
+    runner doesn't crash the renderer. F17-clean: the duplicated
+    ``getattr(result, ...)`` pattern across 6 fields lives in one
+    function instead of being inlined into ``main``.
+    """
+    return {
+        "original_query": getattr(result, "original_query", ""),
+        "rewritten_query": getattr(result, "rewritten_query", ""),
+        "time_window": getattr(result, "time_window", None),
+        "limit": limit,
+        "fell_back": getattr(result, "fell_back", False),
+        "is_temporal": getattr(result, "is_temporal", True),
+        "error": getattr(result, "error", None),
+        "results_count": len(getattr(result, "results", []) or []),
+    }
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -149,15 +193,29 @@ def main(
 
     since = parse_iso_or_die(args.since, "--since")
     until = parse_iso_or_die(args.until, "--until")
+    anchor = parse_iso_or_die(args.anchor_date, "--anchor-date")
     chunk_types: list[str] | None = [args.chunk_type] if args.chunk_type != "all" else None
 
+    # CLI ↔ MCP parity (#402): pass agent + anchor_date through identically
+    # to how tool_timeline does in kairix/agents/mcp/server.py.
     result = timeline_runner(
         args.query,
         since=since,
         until=until,
         chunk_types=chunk_types,
         limit=args.limit,
+        agent=args.agent,
+        anchor_date=anchor,
     )
+
+    if args.as_json:
+        import json as _json
+
+        envelope = _result_to_envelope(result, limit=args.limit)
+        print(_json.dumps(envelope, indent=2, default=str))
+        if envelope["error"]:
+            sys.exit(1)
+        return
 
     print(format_header(result, args.limit))
     print()
