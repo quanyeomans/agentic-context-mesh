@@ -4,6 +4,14 @@ Phase 3c of the CLI/MCP feature parity initiative (#168). Pre-Phase-3c
 ``prep`` was MCP-only — operators couldn't reproduce an agent's prep
 output from a shell. This module wraps the existing tool_prep logic
 so both surfaces call the same ``run_prep``.
+
+Synthesis shape (#397 W-C C2 investigation): ``run_prep`` is a
+single-section synthesis. One ``search(...)`` call + one
+``_format_context(...)`` + one ``chat(messages=..., max_tokens=...)``
+call. There is no per-section fan-out, so no ``asyncio.gather``
+opportunity exists at this layer. The L0/L1 tier selector chooses
+prompt + budget shape, not multiple sections to synthesise.
+Re-evaluate when a future tier requirement adds parallel sub-syntheses.
 """
 
 from __future__ import annotations
