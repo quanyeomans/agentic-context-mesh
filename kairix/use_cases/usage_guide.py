@@ -39,6 +39,39 @@ def _default_resolve_guide(guide_path: Path | None) -> Path:
     return Path(_kairix.__file__).parent.parent / "docs" / "agent-usage-guide.md"
 
 
+# Topic keys that route to a dedicated docs file rather than the main
+# guide's heading-section filter. Agents asking for ``mcp-latency`` want
+# the per-tool p50/p99 table + task-budget formula, which lives in its
+# own doc so the main guide stays short and the operations runbook can
+# link directly to it. Add new entries here when a topic deserves its
+# own file rather than a sub-section of the main guide.
+_DEDICATED_TOPIC_DOCS: dict[str, str] = {
+    "mcp-latency": "MCP-LATENCY-EXPECTATIONS.md",
+}
+
+
+def _resolve_dedicated_topic_path(topic: str) -> Path | None:
+    """Return the on-disk path for a dedicated-topic markdown file, or None.
+
+    Topics in :data:`_DEDICATED_TOPIC_DOCS` live under ``docs/agents/``
+    next to the main usage guide. Production fallback chain mirrors
+    :func:`_default_resolve_guide`: server-relative first, then
+    package-relative. Returns ``None`` when the topic key isn't
+    dedicated; callers fall through to the heading-section filter.
+    """
+    filename = _DEDICATED_TOPIC_DOCS.get(topic.lower())
+    if filename is None:
+        return None
+    import kairix.agents.mcp.server as _server_mod
+
+    server_relative = Path(_server_mod.__file__).parent.parent.parent / "docs" / "agents" / filename
+    if server_relative.exists():
+        return server_relative
+    import kairix as _kairix
+
+    return Path(_kairix.__file__).parent.parent / "docs" / "agents" / filename
+
+
 @dataclass(frozen=True)
 class UsageGuideOutput:
     """Outcome of one ``run_usage_guide`` invocation.
@@ -133,7 +166,13 @@ def run_usage_guide(
     resolve = d.resolve_guide_fn
 
     try:
-        resolved = resolve(guide_path)
+        # Dedicated-topic routing: topics in _DEDICATED_TOPIC_DOCS resolve
+        # to their own markdown file under docs/agents/ rather than a
+        # heading slice of the main guide. The full file is returned
+        # verbatim. Tests opt out by passing an explicit guide_path
+        # (the caller-supplied path always wins).
+        dedicated_path = _resolve_dedicated_topic_path(topic) if guide_path is None and topic else None
+        resolved = resolve(dedicated_path if dedicated_path is not None else guide_path)
         if not resolved.exists():
             return UsageGuideOutput(
                 topic=topic,
@@ -143,6 +182,8 @@ def run_usage_guide(
         full_text = resolved.read_text(encoding="utf-8")
         if not topic:
             return UsageGuideOutput(content=full_text)
+        if dedicated_path is not None:
+            return UsageGuideOutput(topic=topic, content=full_text)
 
         return UsageGuideOutput(topic=topic, content=extract_topic_sections(full_text, topic.lower()))
     except Exception as exc:

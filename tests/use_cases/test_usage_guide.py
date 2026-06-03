@@ -177,3 +177,28 @@ def test_default_deps_resolve_falls_back_to_package_when_no_path(tmp_path: Path)
     # The resolver always returns a path ending in agent-usage-guide.md,
     # whether it picked the server-relative or package-relative candidate.
     assert resolved.name == "agent-usage-guide.md"
+
+
+# ---------------------------------------------------------------------------
+# Dedicated-topic routing — mcp-latency surfaces the per-tool table
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_latency_topic_returns_per_tool_table() -> None:
+    """``topic='mcp-latency'`` routes to docs/agents/MCP-LATENCY-EXPECTATIONS.md
+    and returns the full table verbatim.
+
+    Sabotage proof: remove the ``mcp-latency`` entry from
+    ``_DEDICATED_TOPIC_DOCS`` (in kairix/use_cases/usage_guide.py) and
+    rerun this test — the topic falls through to the heading-section
+    filter against the main guide which does not contain a "p99" header,
+    so the assertion below fails.
+    """
+    out = run_usage_guide(topic="mcp-latency")
+    assert out.error == "", out.error
+    assert out.topic == "mcp-latency"
+    # The latency doc names the brief tool in its per-tool table and
+    # the p99 column header — both are stable surface contracts agents
+    # rely on when reading the doc.
+    assert "brief" in out.content
+    assert "p99" in out.content
