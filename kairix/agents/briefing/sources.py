@@ -16,6 +16,16 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
+# build_search_pipeline is imported at module load (not lazily inside
+# fetch_hybrid_search) so the factory's per-config memoisation kicks in
+# on every brief invocation. With the lazy ``from kairix.core.factory
+# import ...`` pattern, the symbol lookup ran each call but the actual
+# rebuild was guarded by ``_PIPELINE_CACHE``; the original sin wasn't
+# the import latency itself but the fact that with concurrent first
+# calls (#396 W-B Commit 1) two threads could race a fresh rebuild.
+# Hoisting the import keeps the call path tight: cache hit → <1ms
+# memory lookup, cache miss → exactly one build under the cache lock.
+from kairix.core.factory import build_search_pipeline
 from kairix.text import truncate_to_tokens
 
 logger = logging.getLogger(__name__)
@@ -308,10 +318,15 @@ def fetch_hybrid_search(agent: str, max_tokens: int = 600) -> str:
     """
     Run hybrid search on agent name to get top 5 relevant chunks.
     Returns empty string on failure.
+
+    ``build_search_pipeline`` is imported at module load (not lazily
+    inside this function) so the factory's process-shared
+    ``_PIPELINE_CACHE`` is honoured: the first brief call pays the 2.3s
+    construction; every subsequent call observes the cached pipeline
+    instance and short-circuits in <1ms. The race-resistance of that
+    cache is locked by #396 W-B Commit 1's double-checked locking.
     """
     try:
-        from kairix.core.factory import build_search_pipeline
-
         _pipeline = build_search_pipeline()
         result = _pipeline.search(query=agent, agent=agent, scope="shared+agent", budget=max_tokens * 2)
 
