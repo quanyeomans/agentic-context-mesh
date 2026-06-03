@@ -418,6 +418,26 @@ def _reset_client_pool():
     reset_client_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_workstream_b_caches():
+    """Drop the process-shared brief + prep caches between tests (#396 W-B).
+
+    ``kairix.use_cases.brief`` and ``kairix.use_cases.prep`` each own a
+    process-shared TTL LRU added by the MCP perf sprint. Without this
+    reset, a test that calls ``run_brief("builder", ...)`` populates
+    the cache and the next test asserting on generate_fn calls observes
+    a stale hit. Mirrors the pattern established by
+    ``_reset_embed_coalescer`` and the per-directory conftest in
+    ``tests/use_cases/``.
+    """
+    yield
+    from kairix.use_cases.brief import reset_brief_output_cache
+    from kairix.use_cases.prep import reset_prep_summary_cache
+
+    reset_brief_output_cache()
+    reset_prep_summary_cache()
+
+
 @pytest.fixture
 def neo4j_client():
     """FakeNeo4jClient with default test entities. No real Neo4j connection."""

@@ -11,6 +11,7 @@ on-disk path through a uniform dataclass; the new MCP tool
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,10 +24,62 @@ from kairix.core.health import (
     health_to_envelope,
     probe_health,
 )
+from kairix.core.search.brief_output_cache import (
+    DEFAULT_MAX_AGE_S as _BRIEF_DEFAULT_MAX_AGE_S,
+)
+from kairix.core.search.brief_output_cache import (
+    DEFAULT_MAX_ENTRIES as _BRIEF_DEFAULT_MAX_ENTRIES,
+)
+from kairix.core.search.brief_output_cache import (
+    BriefOutputCache,
+    make_brief_cache_key,
+)
 
 logger = logging.getLogger(__name__)
 
 _VALID_AGENTS = {"builder", "shape", "growth", "consultant"}
+
+# Process-shared BriefOutputCache. Lazy-initialised on first run_brief
+# call. Mirrors the prep_summary_cache + query_cache accessor patterns
+# so the operator surface (``probe caches``) finds every cache via the
+# same shape. The 30s TTL is short because briefing content is meant to
+# be near-live (pending items / blocked tags age fast).
+_BRIEF_OUTPUT_CACHE: BriefOutputCache | None = None
+_BRIEF_OUTPUT_CACHE_LOCK = threading.Lock()
+
+# Budget isn't passed to ``generate_briefing`` today; the cache key
+# slot exists so future callers asking for tighter / looser briefs
+# don't collapse into one slot. 0 is the "default budget" sentinel.
+_DEFAULT_BRIEF_BUDGET = 0
+
+
+def _get_or_create_brief_output_cache() -> BriefOutputCache:
+    """Return the process-shared :class:`BriefOutputCache`, building it lazily."""
+    global _BRIEF_OUTPUT_CACHE
+    with _BRIEF_OUTPUT_CACHE_LOCK:
+        if _BRIEF_OUTPUT_CACHE is None:
+            _BRIEF_OUTPUT_CACHE = BriefOutputCache(
+                max_entries=_BRIEF_DEFAULT_MAX_ENTRIES,
+                max_age_s=_BRIEF_DEFAULT_MAX_AGE_S,
+            )
+        return _BRIEF_OUTPUT_CACHE
+
+
+def get_brief_output_cache() -> BriefOutputCache:
+    """Public accessor for the process-shared brief output cache.
+
+    Used by the ``kairix probe caches`` CLI to surface hit / miss /
+    eviction counts. Going through this helper keeps the module-global
+    hidden so callers can't accidentally rebind ``_BRIEF_OUTPUT_CACHE``.
+    """
+    return _get_or_create_brief_output_cache()
+
+
+def reset_brief_output_cache() -> None:
+    """Drop every cached brief output. Tests + operator reload paths call this."""
+    with _BRIEF_OUTPUT_CACHE_LOCK:
+        if _BRIEF_OUTPUT_CACHE is not None:
+            _BRIEF_OUTPUT_CACHE.clear()
 
 
 def _default_generate(agent: str, **kwargs: Any) -> str:
@@ -118,17 +171,36 @@ def run_brief(
         )
 
     try:
+        # Cache-aside on the full :class:`BriefOutput`. The brief
+        # fan-out costs hundreds of ms even with the per-source caches
+        # below; a 30s TTL on the assembled output absorbs repeat calls
+        # within a short session window. Cache hits return the prior
+        # BriefOutput; cache misses run generate_fn + store the result.
+        cache = _get_or_create_brief_output_cache()
+        cache_key = make_brief_cache_key(normalised, _DEFAULT_BRIEF_BUDGET)
+        cached_output = cache.get(cache_key)
+        if cached_output is not None:
+            # The cache's value type is ``Any`` so it can store any kind
+            # of output (the brief cache is the first user; future
+            # callers may layer different shapes); narrow back to
+            # ``BriefOutput`` here at the read boundary because every
+            # ``put`` site below stores exactly that shape.
+            assert isinstance(cached_output, BriefOutput)
+            return cached_output
+
         content = d.generate_fn(normalised)
         out_dir = d.briefing_dir_fn()
         path = str(out_dir / f"{normalised}-latest.md") if out_dir else ""
         preview = "\n".join(content.splitlines()[:30])
-        return BriefOutput(
+        output = BriefOutput(
             agent=normalised,
             content=content,
             path=path,
             preview=preview,
             health=health,
         )
+        cache.put(cache_key, output)
+        return output
     except Exception as exc:
         logger.warning("run_brief failed: %s", exc, exc_info=True)
         return BriefOutput(
