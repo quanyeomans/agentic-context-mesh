@@ -39,7 +39,15 @@ logger = logging.getLogger(__name__)
 # Process-lifetime cache for build_search_pipeline. Key: the resolved
 # RetrievalConfig (frozen dataclass → hashable by field values), so
 # distinct callers passing equal config values share one pipeline.
+#
+# Concurrency model: ``_PIPELINE_CACHE_LOCK`` guards the build path so
+# two threads landing the first MCP request after cold-start can't both
+# miss + both rebuild the 2.3s pipeline. Cache reads stay lock-free —
+# ``dict.get`` is GIL-atomic so the steady-state hit path pays no
+# contention. The lock only serialises the rare miss path (first-call
+# coordination + cache mutation under write).
 _PIPELINE_CACHE: dict[RetrievalConfig, SearchPipeline] = {}
+_PIPELINE_CACHE_LOCK = threading.Lock()
 
 
 # Process-shared QueryResultCache (#281). One instance per process,
@@ -54,8 +62,13 @@ def reset_search_pipeline_cache() -> None:
 
     Also clears the process-shared query cache so cached results from a
     previous fixture-built pipeline don't bleed across tests.
+
+    Acquires ``_PIPELINE_CACHE_LOCK`` so a concurrent first-call build
+    can't interleave with a reset and re-populate the cache with the
+    instance the test was about to discard.
     """
-    _PIPELINE_CACHE.clear()
+    with _PIPELINE_CACHE_LOCK:
+        _PIPELINE_CACHE.clear()
     with _QUERY_CACHE_LOCK:
         if _QUERY_CACHE is not None:
             _QUERY_CACHE.clear()
@@ -687,6 +700,40 @@ def build_search_pipeline(
     if cached is not None:
         return cached
 
+    # Double-checked locking for the build path. The lock-free read above
+    # is the fast path (every steady-state call hits a populated cache).
+    # When the cache misses, threads queue at the lock so only the first
+    # arrival pays the 2.3s pipeline construction; subsequent arrivals
+    # re-check inside the lock and observe the freshly-cached pipeline.
+    # ``flag_reader is not None`` callers always bypass the cache (test
+    # branch) so they're routed past the lock to the build below.
+    if flag_reader is None:
+        with _PIPELINE_CACHE_LOCK:
+            cached = _PIPELINE_CACHE.get(cfg)
+            if cached is not None:
+                return cached
+            built = _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths, flag_reader)
+            _PIPELINE_CACHE[cfg] = built
+            return built
+
+    return _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths, flag_reader)
+
+
+def _build_search_pipeline_uncached(
+    cfg: RetrievalConfig,
+    registry: ProviderRegistry | None,
+    fact_retriever: Any,
+    paths: KairixPaths | None,
+    flag_reader: Any,
+) -> SearchPipeline:
+    """Build a fresh ``SearchPipeline`` for ``cfg`` — never reads the cache.
+
+    Extracted from :func:`build_search_pipeline` so the cache miss path
+    runs the construction sequence under the cache lock without
+    duplicating the wiring. Callers that have already verified the cache
+    is cold (e.g. inside the double-checked-locking critical section)
+    invoke this directly.
+    """
     from kairix.core.search.intent import classify as _classify_fn
 
     class _RuleClassifier:
@@ -721,7 +768,9 @@ def build_search_pipeline(
         fact_retriever if fact_retriever is not None else _auto_wire_fact_retriever(resolved_db_path)
     )
 
-    pipeline = SearchPipeline(
+    # Cache writes are owned by the caller (build_search_pipeline) under
+    # ``_PIPELINE_CACHE_LOCK``; this helper just builds + returns.
+    return SearchPipeline(
         classifier=_RuleClassifier(),
         bm25=bm25,
         vector=vector,
@@ -739,9 +788,6 @@ def build_search_pipeline(
         # Auto-wired above when the operator's data dir contains a facts table.
         fact_retriever=resolved_fact_retriever,
     )
-    if flag_reader is None:
-        _PIPELINE_CACHE[cfg] = pipeline
-    return pipeline
 
 
 # ---------------------------------------------------------------------------
