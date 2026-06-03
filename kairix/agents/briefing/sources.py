@@ -25,8 +25,36 @@ from pathlib import Path
 # calls (#396 W-B Commit 1) two threads could race a fresh rebuild.
 # Hoisting the import keeps the call path tight: cache hit → <1ms
 # memory lookup, cache miss → exactly one build under the cache lock.
+from kairix.agents.briefing._source_caches import (
+    BriefSourceCache,
+    get_brief_source_cache,
+    reset_brief_source_cache,
+)
 from kairix.core.factory import build_search_pipeline
 from kairix.text import truncate_to_tokens
+
+# Re-export the brief-source cache accessors + class so tests + the
+# probe-caches CLI can reach them without an underscore-prefixed
+# import (F5: no internal-name imports in tests).
+__all__ = [
+    "BriefSourceCache",
+    "fetch_entity_stub",
+    "fetch_hybrid_search",
+    "fetch_knowledge_rules",
+    "fetch_memory_logs",
+    "fetch_recent_decisions",
+    "fetch_recent_memory",
+    "get_brief_source_cache",
+    "reset_brief_source_cache",
+]
+
+# Cache keys for the 5 cheap fetchers — one logical name per fetcher so
+# the cache's ``(source_name, agent)`` tuple stays unambiguous.
+_CACHE_KEY_MEMORY_LOGS = "memory_logs"
+_CACHE_KEY_RECENT_MEMORY = "recent_memory"
+_CACHE_KEY_ENTITY_STUB = "entity_stub"
+_CACHE_KEY_KNOWLEDGE_RULES = "knowledge_rules"
+_CACHE_KEY_RECENT_DECISIONS = "recent_decisions"
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +98,30 @@ def fetch_memory_logs(agent: str, max_tokens: int = 500, memory_dir: Path | None
 
     Extracts items tagged [pending], [blocked], [action:], and summaries.
     Returns empty string on failure.
+
+    Cached for 1h per ``(memory_logs, agent)``; explicit ``memory_dir=``
+    overrides bypass the cache so test fixtures stay isolated.
+    """
+    # Cache check — production path only (memory_dir=None). Tests
+    # passing an explicit override bypass the cache so per-tmp_path
+    # state stays isolated across runs.
+    if memory_dir is None:
+        cache = get_brief_source_cache()
+        cached = cache.get(_CACHE_KEY_MEMORY_LOGS, agent)
+        if cached is not None:
+            return cached
+        result = _fetch_memory_logs_impl(agent, max_tokens, memory_dir)
+        cache.put(_CACHE_KEY_MEMORY_LOGS, agent, result)
+        return result
+    return _fetch_memory_logs_impl(agent, max_tokens, memory_dir)
+
+
+def _fetch_memory_logs_impl(agent: str, max_tokens: int, memory_dir: Path | None) -> str:
+    """Cache-free implementation of :func:`fetch_memory_logs`.
+
+    Extracted so the public wrapper owns cache semantics and this
+    helper owns the read logic — keeps each function under F16's
+    cognitive-complexity ceiling.
     """
     try:
         if memory_dir is None:
@@ -148,7 +200,23 @@ def fetch_recent_memory(agent: str, max_tokens: int = 300, memory_dir: Path | No
     """
     Fetch today's and yesterday's memory files for agent (full content).
     Returns empty string on failure.
+
+    Cached for 1h per ``(recent_memory, agent)``; explicit ``memory_dir=``
+    overrides bypass the cache.
     """
+    if memory_dir is None:
+        cache = get_brief_source_cache()
+        cached = cache.get(_CACHE_KEY_RECENT_MEMORY, agent)
+        if cached is not None:
+            return cached
+        result = _fetch_recent_memory_impl(agent, max_tokens, memory_dir)
+        cache.put(_CACHE_KEY_RECENT_MEMORY, agent, result)
+        return result
+    return _fetch_recent_memory_impl(agent, max_tokens, memory_dir)
+
+
+def _fetch_recent_memory_impl(agent: str, max_tokens: int, memory_dir: Path | None) -> str:
+    """Cache-free implementation of :func:`fetch_recent_memory`."""
     try:
         if memory_dir is None:
             from kairix.paths import agent_memory_path
@@ -186,7 +254,23 @@ def fetch_entity_stub(agent: str, max_tokens: int = 400, document_root: Path | N
     """
     Fetch the agent's own entity stub from vault-entities.
     Returns empty string on failure.
+
+    Cached for 1h per ``(entity_stub, agent)``; explicit ``document_root=``
+    overrides bypass the cache.
     """
+    if document_root is None:
+        cache = get_brief_source_cache()
+        cached = cache.get(_CACHE_KEY_ENTITY_STUB, agent)
+        if cached is not None:
+            return cached
+        result = _fetch_entity_stub_impl(agent, max_tokens, document_root)
+        cache.put(_CACHE_KEY_ENTITY_STUB, agent, result)
+        return result
+    return _fetch_entity_stub_impl(agent, max_tokens, document_root)
+
+
+def _fetch_entity_stub_impl(agent: str, max_tokens: int, document_root: Path | None) -> str:
+    """Cache-free implementation of :func:`fetch_entity_stub`."""
     try:
         root = _resolve_document_root(document_root)
         # Try agent-specific entity stub (concept type)
@@ -235,7 +319,23 @@ def fetch_knowledge_rules(agent: str, max_tokens: int = 300, document_root: Path
     """
     Fetch rules/constraints from agent's knowledge collection.
     Returns empty string on failure.
+
+    Cached for 1h per ``(knowledge_rules, agent)``; explicit ``document_root=``
+    overrides bypass the cache.
     """
+    if document_root is None:
+        cache = get_brief_source_cache()
+        cached = cache.get(_CACHE_KEY_KNOWLEDGE_RULES, agent)
+        if cached is not None:
+            return cached
+        result = _fetch_knowledge_rules_impl(agent, max_tokens, document_root)
+        cache.put(_CACHE_KEY_KNOWLEDGE_RULES, agent, result)
+        return result
+    return _fetch_knowledge_rules_impl(agent, max_tokens, document_root)
+
+
+def _fetch_knowledge_rules_impl(agent: str, max_tokens: int, document_root: Path | None) -> str:
+    """Cache-free implementation of :func:`fetch_knowledge_rules`."""
     try:
         root = _resolve_document_root(document_root)
         rules_paths = [
@@ -287,7 +387,23 @@ def fetch_recent_decisions(agent: str, max_tokens: int = 400, document_root: Pat
     """
     Fetch decisions from last 30 days from decisions.md.
     Returns empty string on failure.
+
+    Cached for 1h per ``(recent_decisions, agent)``; explicit ``document_root=``
+    overrides bypass the cache.
     """
+    if document_root is None:
+        cache = get_brief_source_cache()
+        cached = cache.get(_CACHE_KEY_RECENT_DECISIONS, agent)
+        if cached is not None:
+            return cached
+        result = _fetch_recent_decisions_impl(agent, max_tokens, document_root)
+        cache.put(_CACHE_KEY_RECENT_DECISIONS, agent, result)
+        return result
+    return _fetch_recent_decisions_impl(agent, max_tokens, document_root)
+
+
+def _fetch_recent_decisions_impl(agent: str, max_tokens: int, document_root: Path | None) -> str:
+    """Cache-free implementation of :func:`fetch_recent_decisions`."""
     try:
         root = _resolve_document_root(document_root)
         parts: list[str] = []

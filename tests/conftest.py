@@ -420,22 +420,23 @@ def _reset_client_pool():
 
 @pytest.fixture(autouse=True)
 def _reset_workstream_b_caches():
-    """Drop the process-shared brief + prep caches between tests (#396 W-B).
+    """Drop the process-shared brief + prep + source caches between tests (#396 W-B).
 
-    ``kairix.use_cases.brief`` and ``kairix.use_cases.prep`` each own a
-    process-shared TTL LRU added by the MCP perf sprint. Without this
-    reset, a test that calls ``run_brief("builder", ...)`` populates
-    the cache and the next test asserting on generate_fn calls observes
-    a stale hit. Mirrors the pattern established by
-    ``_reset_embed_coalescer`` and the per-directory conftest in
-    ``tests/use_cases/``.
+    ``kairix.use_cases.brief``, ``kairix.use_cases.prep``, and
+    ``kairix.agents.briefing.sources`` each own a process-shared TTL LRU
+    added by the MCP perf sprint. Without these resets, a test that
+    populates the cache leaks state into the next test, breaking
+    deterministic hit/miss assertions. Mirrors the pattern established
+    by ``_reset_embed_coalescer``.
     """
     yield
+    from kairix.agents.briefing.sources import reset_brief_source_cache
     from kairix.use_cases.brief import reset_brief_output_cache
     from kairix.use_cases.prep import reset_prep_summary_cache
 
     reset_brief_output_cache()
     reset_prep_summary_cache()
+    reset_brief_source_cache()
 
 
 @pytest.fixture
