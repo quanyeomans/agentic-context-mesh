@@ -1356,7 +1356,8 @@ def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] |
             "kairix indexes the team's knowledge store and finds relevant prior material. "
             "Use this proactively at session start and whenever a question touches the team's history. "
             "If the result has error_code=KAIRIX_COLD_START, do not answer from memory or fallback; "
-            "wait retry_after_ms and retry the same call once."
+            "wait retry_after_ms and retry the same call once. "
+            "Expected p99: 3s warm, 15s cold. Recommended client timeout: 30s."
         )
     )
     @async_tool_handler
@@ -1381,7 +1382,8 @@ def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] |
     @server.tool(
         description=(
             "Call when you need facts about a specific named entity (person, company, project) — "
-            "direct knowledge-graph lookup, faster than search."
+            "direct knowledge-graph lookup, faster than search. "
+            "Expected p99: 5s warm, 10s cold. Recommended client timeout: 30s."
         )
     )
     @async_tool_handler
@@ -1394,7 +1396,8 @@ def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] |
         description=(
             "Call when you need lightweight context preparation before deeper work. "
             "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry; "
-            "do not substitute memory-only context."
+            "do not substitute memory-only context. "
+            "Expected p99: 10s warm, 30s cold. Recommended client timeout: 60s."
         )
     )
     @async_tool_handler
@@ -1413,7 +1416,8 @@ def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] |
     @server.tool(
         description=(
             "Call for date-aware retrieval when a question depends on timing. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry the same call."
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry the same call. "
+            "Expected p99: 15s warm, 30s cold. Recommended client timeout: 60s."
         )
     )
     @async_tool_handler
@@ -1451,7 +1455,8 @@ def _register_retrieval_tools(server: Any, readiness_check: Callable[[], bool] |
     @server.tool(
         description=(
             "Call before writing new facts to check for contradictions against existing knowledge. "
-            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry before proceeding."
+            "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry before proceeding. "
+            "Expected p99: 30s warm, 90s cold. Recommended client timeout: 120s."
         )
     )
     @async_tool_handler
@@ -1492,7 +1497,10 @@ def _register_synthesis_and_diagnostic_tools(
     @server.tool()
     @async_tool_handler
     def usage_guide(topic: str = "") -> dict[str, Any]:
-        """Return the kairix agent usage guide. Call this when unsure how to use kairix."""
+        """Return the kairix agent usage guide. Call this when unsure how to use kairix.
+
+        Expected p99: 1s warm, 2s cold. Recommended client timeout: 10s.
+        """
         return tool_usage_guide(topic=topic)
 
     @server.tool(
@@ -1501,7 +1509,8 @@ def _register_synthesis_and_diagnostic_tools(
             "across the knowledge store and returns a structured briefing. "
             "Use it when you'd otherwise be tempted to summarise from memory. "
             "If the result has error_code=KAIRIX_COLD_START, do not summarise from memory; "
-            "wait retry_after_ms and retry the same call."
+            "wait retry_after_ms and retry the same call. "
+            "Expected p99: 15s warm, 45s cold. Recommended client timeout: 90s."
         )
     )
     @async_tool_handler
@@ -1519,7 +1528,8 @@ def _register_synthesis_and_diagnostic_tools(
             "orients you in the team's current state. "
             "If health.vector_search != 'ok', surface that to your human. "
             "If the result has error_code=KAIRIX_COLD_START, wait retry_after_ms and retry; "
-            "do not begin the task context-blind."
+            "do not begin the task context-blind. "
+            "Expected p99: 5s warm, 10s cold. Recommended client timeout: 30s."
         )
     )
     @async_tool_handler
@@ -1615,7 +1625,8 @@ def _register_synthesis_and_diagnostic_tools(
             "Warm kairix retrieval caches + pay factory-init costs. Retryable cold-start "
             "affordance: first call constructs the SearchPipeline and runs a tiny read-only "
             "probe; agents and entrypoint scripts call this at session start and retry if "
-            "cold-start is reported (ready=False). Idempotent — subsequent calls are sub-ms."
+            "cold-start is reported (ready=False). Idempotent — subsequent calls are sub-ms. "
+            "Expected p99: 120s warm, 120s cold. Recommended client timeout: 180s."
         )
     )
     @async_tool_handler
