@@ -39,7 +39,9 @@ from _fitness_rule import FitnessRule
 # ``invariant`` is the F72 / ADR-024 Bundle E cross-layer integrity tier;
 # tests under ``tests/integrity_invariants/`` carry it (typically via
 # module-level ``pytestmark``).
-KNOWN_MARKERS = frozenset({"unit", "bdd", "contract", "integration", "e2e", "slow", "soak", "invariant"})
+# ``load`` covers issue #398 W-D load tests (tests/load/) that fire many
+# concurrent MCP-style calls; operators run them via `pytest -m load`.
+KNOWN_MARKERS = frozenset({"unit", "bdd", "contract", "integration", "e2e", "slow", "soak", "invariant", "load"})
 
 REMEDIATION = """Refactor to add ONE category marker per test
 (function-level decorator, class-level decorator, or module-level
