@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -82,6 +83,90 @@ def reset_brief_output_cache() -> None:
             _BRIEF_OUTPUT_CACHE.clear()
 
 
+# ---------------------------------------------------------------------------
+# Health probe cache (#396 W-B Commit 6)
+# ---------------------------------------------------------------------------
+# Each ``probe_health`` call runs four dependency probes (secrets,
+# embed, BM25, neo4j) on daemon threads with a per-probe timeout slice.
+# Production probes are ~50-100ms each; under typical brief / prep call
+# volume that means health resolution alone costs 200-400ms on every
+# tool invocation. The probes don't change second-by-second, so caching
+# the assembled :class:`KairixHealth` for a short TTL turns repeat
+# invocations into a memory lookup. 10s default TTL is the deliberate
+# consistency tradeoff: long enough to absorb a tight burst of MCP
+# calls, short enough that an operator restoring creds sees the
+# refreshed snapshot within a few requests.
+#
+# Module-level explicit state (not ``functools.lru_cache``) mirrors the
+# ``_QUERY_CACHE_LOCK`` pattern in ``kairix.core.factory`` so tests can
+# inject a clock via the public accessor.
+
+_HEALTH_PROBE_CACHE_LOCK = threading.Lock()
+_HEALTH_PROBE_CACHE_TTL_S = 10.0
+
+# Slot layout: ``(inserted_at, KairixHealth)`` or ``None`` when cold.
+_HEALTH_PROBE_CACHE_ENTRY: tuple[float, KairixHealth] | None = None
+# Clock seam — production uses :func:`time.time`; tests inject a
+# controllable callable so TTL-expiry assertions don't need real sleep.
+_HEALTH_PROBE_CACHE_CLOCK: Callable[[], float] = time.time
+
+
+def reset_health_probe_cache() -> None:
+    """Drop the cached :class:`KairixHealth`. Tests + operator reload paths call this."""
+    global _HEALTH_PROBE_CACHE_ENTRY
+    with _HEALTH_PROBE_CACHE_LOCK:
+        _HEALTH_PROBE_CACHE_ENTRY = None
+
+
+def set_health_probe_cache_clock(clock: Callable[[], float]) -> None:
+    """Public DI seam for the health-probe TTL clock.
+
+    Tests pass a controllable callable so a synthetic "11s elapsed"
+    advance triggers the refresh branch without real sleep.
+
+    Production never calls this — the default :func:`time.time` is
+    wired at module load. Mirrors the ``clock=`` constructor kwarg
+    pattern used by :class:`QueryResultCache` etc.
+    """
+    global _HEALTH_PROBE_CACHE_CLOCK
+    with _HEALTH_PROBE_CACHE_LOCK:
+        _HEALTH_PROBE_CACHE_CLOCK = clock
+
+
+def get_health_probe_cache_age_s() -> float | None:
+    """Return how long the cached entry has been live, or None when cold.
+
+    Public accessor for the probe-caches CLI so operators can see the
+    age of the in-process snapshot.
+    """
+    with _HEALTH_PROBE_CACHE_LOCK:
+        if _HEALTH_PROBE_CACHE_ENTRY is None:
+            return None
+        inserted_at, _ = _HEALTH_PROBE_CACHE_ENTRY
+        return max(0.0, _HEALTH_PROBE_CACHE_CLOCK() - inserted_at)
+
+
+def _cached_probe_health(deps: HealthDeps) -> KairixHealth:
+    """Return :class:`KairixHealth` from cache when fresh; else re-probe.
+
+    The lock serialises miss-path probes so two MCP worker threads
+    racing into a cold cache don't both pay the 4-probe cost.
+    """
+    global _HEALTH_PROBE_CACHE_ENTRY
+    with _HEALTH_PROBE_CACHE_LOCK:
+        if _HEALTH_PROBE_CACHE_ENTRY is not None:
+            inserted_at, value = _HEALTH_PROBE_CACHE_ENTRY
+            if (_HEALTH_PROBE_CACHE_CLOCK() - inserted_at) <= _HEALTH_PROBE_CACHE_TTL_S:
+                return value
+        # Miss / expired: re-probe + store. Probe runs under the lock
+        # because it's daemon-thread-based and tight (sub-second);
+        # serialising the rare miss path is cheaper than coordinating
+        # un-locked re-entry.
+        snapshot = probe_health(deps)
+        _HEALTH_PROBE_CACHE_ENTRY = (_HEALTH_PROBE_CACHE_CLOCK(), snapshot)
+        return snapshot
+
+
 def _default_generate(agent: str, **kwargs: Any) -> str:
     from kairix.agents.briefing.pipeline import generate_briefing
 
@@ -150,7 +235,7 @@ def run_brief(
         deps: Injectable dependencies; production callers leave None.
     """
     d = deps or BriefDeps()
-    health = _brief_health(probe_health(d.health_deps))
+    health = _brief_health(_cached_probe_health(d.health_deps))
 
     normalised = (agent or "").lower().strip()
     if normalised not in _VALID_AGENTS:

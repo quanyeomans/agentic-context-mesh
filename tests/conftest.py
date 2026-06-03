@@ -431,12 +431,16 @@ def _reset_workstream_b_caches():
     """
     yield
     from kairix.agents.briefing.sources import reset_brief_source_cache
-    from kairix.use_cases.brief import reset_brief_output_cache
+    from kairix.use_cases.brief import (
+        reset_brief_output_cache,
+        reset_health_probe_cache,
+    )
     from kairix.use_cases.prep import reset_prep_summary_cache
 
     reset_brief_output_cache()
     reset_prep_summary_cache()
     reset_brief_source_cache()
+    reset_health_probe_cache()
 
 
 @pytest.fixture
