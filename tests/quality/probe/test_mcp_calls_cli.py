@@ -40,8 +40,21 @@ def _make_db(tmp_path: Path) -> Path:
 
 
 def _seed(db_path: Path, rows: list[tuple[str, str, str | None, int, int, str | None]]) -> None:
-    """Seed mcp_call_log with the (timestamp, tool, agent, latency_ms, success, error_class) shape."""
+    """Seed mcp_call_log with the (timestamp, tool, agent, latency_ms, success, error_class) shape.
+
+    Idempotently creates the table first so the helper works against
+    both the legacy main-DB shape (where the canonical schema creates
+    the table) and the new dedicated mcp_observability.sqlite shape
+    (where the wrapper creates the table on first write).
+    """
     conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS mcp_call_log ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,"
+        " tool TEXT NOT NULL, agent TEXT, latency_ms INTEGER NOT NULL,"
+        " success INTEGER NOT NULL, error_class TEXT, payload_hash TEXT"
+        ")"
+    )
     try:
         for ts, tool, agent, latency_ms, success, error_class in rows:
             conn.execute(
@@ -182,12 +195,19 @@ def test_since_accepts_h_unit(tmp_path: Path) -> None:
     assert rc == 0
 
 
-def test_missing_table_returns_actionable_error(tmp_path: Path) -> None:
-    """A DB without mcp_call_log emits an actionable migration prompt + exit 2.
+def test_missing_table_emits_no_calls_message(tmp_path: Path) -> None:
+    """A DB without mcp_call_log emits the friendly no-calls message + exit 0.
 
-    Sabotage proof: removed the OperationalError handler — the test
-    fails when sqlite3.OperationalError propagates instead of being
-    surfaced as exit 2. Restored.
+    Post 2026-06-04 fix: the observability table now lives in its own
+    SQLite file (``mcp_observability.sqlite``) and is auto-created on
+    first INSERT by the per-call wrapper. A reader landing on a file
+    without the table means "no MCP calls have run yet" — the honest
+    answer is "no calls" not "missing migration".
+
+    Sabotage proof: removed the ``"no such table" in str(exc).lower()``
+    branch in ``main()`` — this test fails when the operational-error
+    actionable-message path fires for a missing-table read instead of
+    short-circuiting to the empty-rows happy path. Restored.
     """
     db_path = tmp_path / "no-mcp-call-log.sqlite"
     conn = sqlite3.connect(str(db_path))
@@ -196,9 +216,9 @@ def test_missing_table_returns_actionable_error(tmp_path: Path) -> None:
     conn.commit()
     conn.close()
 
-    rc, _out, err = _run_capture([], db_path)
-    assert rc == 2
-    assert "migration" in err.lower()
+    rc, out, _err = _run_capture([], db_path)
+    assert rc == 0
+    assert "no calls recorded" in out.lower()
 
 
 def test_db_path_fn_raises_returns_exit_2(tmp_path: Path) -> None:
@@ -261,9 +281,15 @@ def test_cli_probe_mcp_calls_subprocess(tmp_path: Path) -> None:
     ``kairix.quality.probe.mcp_calls_cli.main`` — the subprocess
     returns 1 and the assertion on rc == 0 fails. Restored.
     """
-    db_path = _make_db(tmp_path)
+    # Post 2026-06-04 fix: the observability DB is a sibling of the main
+    # index DB, at ``db_path().parent / "mcp_observability.sqlite"``.
+    # Set KAIRIX_DB_PATH to a sibling path so the derived observability
+    # file lands in tmp_path, then seed THAT file.
+    main_db_path = tmp_path / "index.sqlite"
+    obs_db_path = tmp_path / "mcp_observability.sqlite"
+    _make_db(tmp_path)  # creates the main DB file at the conventional name
     _seed(
-        db_path,
+        obs_db_path,
         [
             ("2026-06-03T10:00:00Z", "search", "shape", 120, 1, None),
         ],
@@ -271,7 +297,7 @@ def test_cli_probe_mcp_calls_subprocess(tmp_path: Path) -> None:
 
     result = subprocess.run(
         [sys.executable, "-m", "kairix.cli", "probe", "mcp-calls"],
-        env={"KAIRIX_DB_PATH": str(db_path), "PATH": "/usr/bin:/bin"},
+        env={"KAIRIX_DB_PATH": str(main_db_path), "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
         timeout=30,

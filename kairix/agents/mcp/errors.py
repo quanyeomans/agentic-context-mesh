@@ -54,7 +54,14 @@ DbPathFn = Callable[[], Path]
 
 
 def _default_db_path() -> Path:
-    """Production resolver — delegates to ``kairix.paths.db_path()``.
+    """Production resolver — points at a DEDICATED observability SQLite file.
+
+    Sibling to the main index DB but a separate file so per-MCP-call
+    INSERT writes don't compete for the main DB's write lock against the
+    worker's embed pipeline / neo4j drain / FTS rebuild. Production
+    traces (2026-06-03 v2026.6.4a1 deploy) showed ~95% of mcp_call_log
+    INSERTs lost the lock race and were silently dropped — moving the
+    table to its own file eliminates the contention.
 
     Module-level so :class:`AsyncToolHandlerDeps`' default_factory can
     reference it. Tests construct a different ``AsyncToolHandlerDeps``
@@ -62,7 +69,7 @@ def _default_db_path() -> Path:
     """
     from kairix.paths import db_path as _db_path
 
-    return _db_path()
+    return _db_path().parent / "mcp_observability.sqlite"
 
 
 @dataclass(frozen=True)
@@ -124,6 +131,24 @@ def _payload_hash(kwargs: dict[str, Any]) -> str:
     return hashlib.sha256(repr(sorted(kwargs.items())).encode()).hexdigest()[:16]
 
 
+_MCP_CALL_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS mcp_call_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT NOT NULL,
+    tool            TEXT NOT NULL,
+    agent           TEXT,
+    latency_ms      INTEGER NOT NULL,
+    success         INTEGER NOT NULL,
+    error_class     TEXT,
+    payload_hash    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_tool_time
+    ON mcp_call_log(tool, timestamp);
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_time
+    ON mcp_call_log(timestamp);
+"""
+
+
 def _record_mcp_call(
     *,
     db_path: Path,
@@ -137,9 +162,7 @@ def _record_mcp_call(
     """Insert one row into ``mcp_call_log``. Fire-and-forget — never raises.
 
     DB errors are logged at WARNING and swallowed. The contract is:
-    observability MUST NOT break a tool call. If the mcp_call_log table
-    is missing (legacy DB pre-migration), this function logs the
-    OperationalError and returns silently.
+    observability MUST NOT break a tool call.
 
     The connection is opened with ``check_same_thread=False`` because
     ``async_tool_handler`` runs sync handlers in arbitrary worker
@@ -147,6 +170,16 @@ def _record_mcp_call(
     handed off across threads is the simplest correct shape for
     fire-and-forget observability writes. Short-lived: opened, INSERT,
     commit, closed in one function call.
+
+    Production observability runs against a DEDICATED SQLite file
+    (``db_path`` is now ``/data/kairix/mcp_observability.sqlite`` by
+    default, not the main index DB). This decouples per-call INSERT
+    writes from the main DB's write-lock contention (embed pipeline,
+    neo4j drain, FTS rebuild) — production traces showed ~95% of
+    INSERTs lost the lock race against worker writes and were silently
+    dropped. The dedicated file has zero contention. Table + indexes
+    are created on first write via ``executescript(_MCP_CALL_LOG_DDL)``
+    so no migration is required for fresh deploys.
     """
     timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
@@ -160,6 +193,9 @@ def _record_mcp_call(
             check_same_thread=False,
         )
         try:
+            # Idempotent CREATE — the dedicated observability DB starts
+            # empty on first deploy, no migration required.
+            conn.executescript(_MCP_CALL_LOG_DDL)
             conn.execute(
                 "INSERT INTO mcp_call_log "
                 "(timestamp, tool, agent, latency_ms, success, error_class, payload_hash) "

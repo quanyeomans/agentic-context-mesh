@@ -86,10 +86,17 @@ class McpCallsDeps:
 
 
 def _default_db_path() -> Path:
-    """Production resolver — delegates to ``kairix.paths.db_path``."""
+    """Production resolver — points at the dedicated observability SQLite file.
+
+    Sibling to the main index DB. Must match the path
+    ``kairix.agents.mcp.errors._default_db_path`` writes to —
+    ``/data/kairix/mcp_observability.sqlite`` by default. The dedicated
+    file avoids write-lock contention against the worker's writes on
+    the main index DB.
+    """
     from kairix.paths import db_path as _db_path
 
-    return _db_path()
+    return _db_path().parent / "mcp_observability.sqlite"
 
 
 def _parse_since(since: str | None) -> str:
@@ -346,12 +353,22 @@ def main(argv: list[str] | None = None, *, deps: McpCallsDeps | None = None) -> 
     try:
         rows = _query_rows(db_path, since_timestamp=since_timestamp, tool_filter=args.tool)
     except sqlite3.OperationalError as exc:
-        # The most common shape: legacy DB without the mcp_call_log table.
-        return _print_error(
-            f"mcp_call_log read failed: {exc}. "
-            "Has the migration been applied? "
-            "Run: python3 scripts/migrations/2026-06-03-mcp-call-log-schema.py"
-        )
+        # Two shapes:
+        #   1. The observability DB file doesn't exist yet (fresh deploy,
+        #      no MCP traffic has run). Honest answer: "no calls yet".
+        #   2. The file exists but the table doesn't (legacy operator
+        #      writeup or a different mcp-side bug). Same answer — the
+        #      table is now created on first INSERT by
+        #      ``kairix.agents.mcp.errors._record_mcp_call``, so a
+        #      "missing table" reading is just "no calls yet" too.
+        if "no such table" in str(exc).lower() or not db_path.exists():
+            rows = []
+        else:
+            return _print_error(
+                f"mcp_call_log read failed: {exc}. "
+                "fix: check the observability DB file is readable. "
+                "next: ls -la $(kairix paths db | sed 's|/[^/]*$|/mcp_observability.sqlite|')."
+            )
 
     stats = _build_tool_stats(rows)
 

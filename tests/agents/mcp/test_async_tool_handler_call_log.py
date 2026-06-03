@@ -119,14 +119,18 @@ def test_db_failure_does_not_break_tool_call(
     in place, the call succeeds even when the DB path doesn't exist.
     Restored.
     """
-    nonexistent = tmp_path / "no-such.sqlite"
-    # The DB file doesn't exist; sqlite3 will create it but mcp_call_log
-    # won't be there → INSERT fails.
+    # Point db_path_fn at a directory — sqlite3.connect cannot open a
+    # directory as a DB file, so the underlying sqlite3.OperationalError
+    # surfaces. The wrapper must swallow it without breaking the tool.
+    # (Post 2026-06-04 fix: _record_mcp_call now CREATE-TABLE-IF-NOT-EXISTS
+    # before the INSERT, so a previously "missing table" path now auto-heals;
+    # this test needs an unrecoverable failure mode, hence directory-as-DB.)
+    unwritable = tmp_path  # a directory, not a file
 
     def my_tool() -> dict[str, str]:
         return {"ok": "yes"}
 
-    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=lambda: nonexistent))
+    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=lambda: unwritable))
 
     with caplog.at_level(logging.WARNING, logger="kairix.agents.mcp.errors"):
         result = asyncio.run(wrapped())
