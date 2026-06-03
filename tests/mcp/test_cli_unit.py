@@ -146,9 +146,41 @@ def test_serve_http_transport_runs_uvicorn_with_resolved_app(monkeypatch) -> Non
     assert kwargs["workers"] == 1
     # R1 (#387) — uvloop preferred, falls back to "auto" when not installed.
     assert kwargs["loop"] in {"uvloop", "auto"}
+    # R8 (#395) — explicit long timeouts so uvicorn's 5s keep-alive default
+    # cannot cut off long-running MCP tool calls (brief/prep/contradict).
+    assert kwargs["timeout_keep_alive"] == 120
+    assert kwargs["timeout_graceful_shutdown"] == 60
     assert "Starting kairix MCP server on http://127.0.0.1:18099/mcp" in stderr
     assert "+ /sse legacy" in stderr
     assert "warm-up complete" in stderr
+
+
+@pytest.mark.unit
+def test_serve_http_uvicorn_kwargs_block_short_keepalive(monkeypatch) -> None:
+    """R8 (#395) regression guard: ``timeout_keep_alive`` must stay >= 60s.
+
+    Pins the contract so a future revert (silently dropping the kwarg or
+    re-introducing uvicorn's 5s default) is caught at the unit boundary
+    instead of surfacing as a client-side "error" on long brief/prep calls.
+    """
+    monkeypatch.setattr(sys, "argv", ["kairix", "mcp", "serve", "--port", "18095"])
+    deps, _build_calls, runner = _build_deps()
+
+    _stdout, _stderr, code = _drive(["serve", "--transport", "http", "--port", "18095"], deps)
+
+    assert code == 0
+    assert len(runner.calls) == 1
+    _pos, kwargs = runner.calls[0]
+    # The contract: never accept a keep-alive that's anywhere near the 5s
+    # default. 60s is the floor; current default is 120s.
+    assert "timeout_keep_alive" in kwargs, (
+        "uvicorn must be invoked with explicit timeout_keep_alive — "
+        "the implicit 5s default cuts off long MCP tool calls."
+    )
+    assert kwargs["timeout_keep_alive"] >= 60, (
+        f"timeout_keep_alive={kwargs['timeout_keep_alive']} is below the 60s "
+        "floor — long MCP tool calls (brief/prep/contradict) will be cut off."
+    )
 
 
 @pytest.mark.unit

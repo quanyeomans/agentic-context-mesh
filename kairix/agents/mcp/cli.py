@@ -436,4 +436,22 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
         loop_kind = "uvloop"
     except ImportError:
         loop_kind = "auto"
-    uvicorn_run(app, host=args.host, port=port, log_level="info", workers=1, loop=loop_kind)
+    # R8 (#395) — explicit uvicorn timeouts for long MCP tool calls.
+    # Production trace 2026-06-03 showed ASGI ResponseTimeout firing on
+    # long-running ``brief`` / ``prep`` tool calls — uvicorn's default
+    # ``timeout_keep_alive=5s`` was closing the keep-alive socket
+    # mid-streaming-response, surfacing as a client-side "error" even
+    # though the server-side tool work completed successfully.
+    # ``timeout_graceful_shutdown=60`` lets in-flight tool calls drain
+    # cleanly on SIGTERM (systemd ``ExecStop``) instead of being cut
+    # off at the default 0s drain window.
+    uvicorn_run(
+        app,
+        host=args.host,
+        port=port,
+        log_level="info",
+        workers=1,
+        loop=loop_kind,
+        timeout_keep_alive=120,
+        timeout_graceful_shutdown=60,
+    )
