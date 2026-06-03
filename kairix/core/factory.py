@@ -393,6 +393,86 @@ def _build_legacy_collection_resolver() -> Any:
     )
 
 
+class _SerializingSqliteConnection:
+    """Thread-serialising proxy around a shared :class:`sqlite3.Connection`.
+
+    Production wiring for the topology_v2 collection resolver opens one
+    Connection (with ``check_same_thread=False``) and reuses it for the
+    process lifetime — see :func:`_build_topology_v2_collection_resolver`.
+    ``check_same_thread=False`` lets multiple threads call into the
+    connection, but the Python sqlite3 driver still uses a single
+    underlying cursor state per connection: if thread A's
+    ``conn.execute(...)`` is mid-fetch when thread B calls
+    ``conn.execute(...)``, the cursor's internal pointer is clobbered
+    and the second call raises ``sqlite3.InterfaceError: bad parameter
+    or other API misuse``.
+
+    The ScopeCollectionCache deliberately drops its lock around the
+    inner ``resolve()`` call so an in-flight SELECT doesn't block cache
+    reads on other ``(agent, scope)`` keys — which means concurrent
+    cache-miss callers reach the shared connection simultaneously. This
+    proxy puts the missing serialisation back at the connection
+    boundary: every ``execute(...)`` runs under one shared lock. The
+    SELECTs are tiny (≤10ms each), so single-lock serialisation costs
+    sub-millisecond contention even at conc=10.
+    """
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+        self._lock = threading.Lock()
+
+    def execute(self, sql: str, params: Any = ()) -> Any:
+        """Serialised ``Connection.execute`` — materialises rows under the lock.
+
+        The resolver call sites uniformly read every row from the
+        returned cursor in one shot, so we eagerly materialise here
+        while the lock is held and return a pre-fetched stand-in. This
+        keeps the lock-hold time bounded to the SQL roundtrip rather
+        than spanning a lazy iteration that downstream code might fan
+        out before completing. The stand-in supports the same row-set
+        consumption shape sqlite3 would have yielded.
+        """
+        with self._lock:
+            cursor = self._conn.execute(sql, params)
+            # F63-bounded: this proxy is wired only to the topology_v2 collection
+            # resolver Connection (_build_topology_v2_collection_resolver). Every
+            # call site there issues per-actor or operator-config-sized SELECTs
+            # against topology_scope_entries / topology_collections /
+            # topology_cc_pairs — bounded by the actor's profile (≤O(collections),
+            # typically ≤100) and by operator-config size (≤O(100) public collections).
+            rows = cursor.fetchall()
+        return _MaterialisedCursor(rows)
+
+    def close(self) -> None:
+        """Close the wrapped Connection under the serialisation lock.
+
+        Avoids closing a Connection while another thread is mid-execute,
+        which would surface as the same InterfaceError race.
+        """
+        with self._lock:
+            self._conn.close()
+
+
+class _MaterialisedCursor:
+    """Lightweight stand-in for a sqlite3 cursor that has already fetched.
+
+    The topology_v2 + scope-profile resolver call sites only consume
+    rows by eager batch read (or by direct iteration in a single
+    comprehension). This stand-in supports both shapes without holding
+    any database state, so the serialising connection above can release
+    its lock before the caller iterates.
+    """
+
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def fetchall(self) -> list[Any]:
+        return list(self._rows)
+
+    def __iter__(self) -> Any:
+        return iter(self._rows)
+
+
 def _build_topology_v2_collection_resolver(
     db_path: Any,
     *,
@@ -424,9 +504,24 @@ def _build_topology_v2_collection_resolver(
     # ``sqlite3.ProgrammingError`` and the search returns no hits. SQLite
     # serialises internal access; the resolver only issues SELECTs so the
     # serialisation cost is negligible.
-    db = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False)
+    raw_db = sqlite3.connect(str(db_path), timeout=10.0, check_same_thread=False)
+    # InterfaceError fix (#399 Workstream E): ``check_same_thread=False``
+    # alone is not sufficient — it disables Python's thread-affinity check
+    # but the sqlite3 driver still serialises through a single cursor
+    # state per Connection. Concurrent ``conn.execute(...)`` calls from
+    # MCP worker threads (uncovered by ScopeCollectionCache because it
+    # drops its lock around the inner resolver call) interleave and
+    # surface as ``sqlite3.InterfaceError: bad parameter or other API
+    # misuse``. The proxy puts the missing serialisation back at the
+    # connection boundary so the resolver call sites need no change.
+    db = _SerializingSqliteConnection(raw_db)
+    # Rationale for the type: ignore below: the proxy exposes the
+    # execute()+close() subset the resolver actually uses; widening the
+    # resolver signature to Any would weaken the type contract for
+    # every legitimate sqlite3.Connection caller, so we deliberately
+    # bypass the structural-mismatch check at this one call site.
     inner = TopologyV2CollectionResolver(
-        db=db,
+        db=db,  # type: ignore[arg-type]  # see rationale above
         default_in_scope_filter_enabled=default_in_scope_filter_enabled,
     )
     # R2 (#388) — wrap in a TTL cache so the SQLite SELECT on
