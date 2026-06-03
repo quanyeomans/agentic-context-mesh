@@ -46,11 +46,14 @@ if TYPE_CHECKING:
 _HELP_DESCRIPTION = """\
 Concurrent-load probes for the kairix retrieval pipeline.
 
-  search — p50/p95/p99 latency at sustained concurrency; decides which
-           Tier 1 tuning lever to pull (Azure embed pool, query-result
-           cache, connection pool).
-  burst  — sustained-vs-peak QPS drop after warm-up; catches post-warmup
-           resource leaks and cache eviction that p95 averages over.
+  search    — p50/p95/p99 latency at sustained concurrency; decides which
+              Tier 1 tuning lever to pull (Azure embed pool, query-result
+              cache, connection pool).
+  burst     — sustained-vs-peak QPS drop after warm-up; catches post-warmup
+              resource leaks and cache eviction that p95 averages over.
+  mcp-calls — inspect the mcp_call_log per-MCP-tool-call observability
+              table; per-tool count, p50/p95/p99 latency, success rate,
+              top-3 error classes (issue #398 Workstream D).
 
 MCP equivalent: tool_probe_search — hard-capped to queries<=20, concurrency<=3.
                 Agents requesting larger probes receive an OperatorOnlyCapability
@@ -221,6 +224,21 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     _add_burst_args(burst_parser)
+
+    # mcp-calls — operator surface over the mcp_call_log table (#398 W-D).
+    # Argparse parses the bare token here; the actual flag parser lives in
+    # kairix/quality/probe/mcp_calls_cli.py and runs against the leftover
+    # argv slice we pass through ``_run_mcp_calls``.
+    sub.add_parser(
+        "mcp-calls",
+        help="inspect mcp_call_log per-tool latency + error stats",
+        description=(
+            "Operator surface over the mcp_call_log per-MCP-tool-call observability "
+            "table (issue #398 Workstream D). Per-tool count, p50/p95/p99 latency, "
+            "success rate, top-3 error classes. Run --help on the subcommand for flags."
+        ),
+        add_help=False,  # let the inner CLI render its own help with full flag list
+    )
 
     return p
 
@@ -506,10 +524,31 @@ _DEPRECATION_WARNING = (
 )
 
 
+def _run_mcp_calls(argv: list[str] | None) -> int:
+    """Dispatch ``kairix probe mcp-calls`` to its dedicated CLI.
+
+    The mcp-calls subcommand isn't part of the deprecation track (it's
+    new in #398 W-D), so it stands apart from the search/burst flow
+    — its own parser, its own deps shape. Argv is the slice after
+    ``probe mcp-calls`` in the parent's argv.
+    """
+    from kairix.quality.probe.mcp_calls_cli import main as mcp_calls_main
+
+    return mcp_calls_main(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     # P5 unification: emit a deprecation warning on every invocation; the
     # legacy probe/burst behaviour stays unchanged through v2026.6.x.
     sys.stderr.write(_DEPRECATION_WARNING)
+
+    # mcp-calls is handled BEFORE _build_parser().parse_args(argv) because
+    # the subparser uses ``add_help=False`` and forwards the remaining
+    # argv (including --help) straight to the inner CLI. Detect by token.
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "mcp-calls":
+        return _run_mcp_calls(argv[1:])
 
     args = _build_parser().parse_args(argv)
 
