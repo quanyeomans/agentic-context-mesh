@@ -96,6 +96,17 @@ def test_validate_schema_passes_on_valid_db() -> None:
             status TEXT NOT NULL,
             submitted_at TEXT NOT NULL
         );
+        -- Issue #398 (Workstream D) — per-MCP-tool-call observability log.
+        CREATE TABLE mcp_call_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            agent TEXT,
+            latency_ms INTEGER NOT NULL,
+            success INTEGER NOT NULL,
+            error_class TEXT,
+            payload_hash TEXT
+        );
     """)
     errors = validate_schema(db)
     assert errors == []
@@ -168,6 +179,9 @@ def test_validate_schema_detects_missing_column() -> None:
             args_json TEXT NOT NULL, args_hash TEXT NOT NULL,
             status TEXT NOT NULL, submitted_at TEXT NOT NULL
         );
+        -- Issue #398 (Workstream D) — minimal shape so the validator
+        -- reaches the column check on `documents` (the table under test).
+        CREATE TABLE mcp_call_log (id INTEGER PRIMARY KEY);
     """)
     errors = validate_schema(db)
     assert any("hash" in e for e in errors)
@@ -212,11 +226,15 @@ def test_validate_schema_empty_db_reports_all_missing() -> None:
 
     ADR-029 G.1 added the ``pending_queries`` agent-query-queue table
     (one additional required table).
+
+    Issue #398 (Workstream D) added the ``mcp_call_log`` per-call
+    observability table (one additional required table).
     """
     db = sqlite3.connect(":memory:")
     errors = validate_schema(db)
-    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology v2 + 1 ADR-029 = 23
-    assert len(errors) == 23
+    # 3 legacy core + 1 KFEAT-021 + 6 connector-framework + 12 topology v2
+    # + 1 ADR-029 + 1 #398 W-D = 24
+    assert len(errors) == 24
     assert any("documents" in e for e in errors)
     assert any("content" in e for e in errors)
     assert any("content_vectors" in e for e in errors)
@@ -288,6 +306,9 @@ def test_validate_schema_missing_content_vectors_only() -> None:
             args_json TEXT NOT NULL, args_hash TEXT NOT NULL,
             status TEXT NOT NULL, submitted_at TEXT NOT NULL
         );
+        -- Issue #398 (Workstream D) — per-MCP-tool-call observability
+        -- (minimal shape so this test isolates content_vectors as missing).
+        CREATE TABLE mcp_call_log (id INTEGER PRIMARY KEY);
     """)
     errors = validate_schema(db)
     assert len(errors) == 1

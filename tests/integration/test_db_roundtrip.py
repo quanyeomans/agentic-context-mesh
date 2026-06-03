@@ -119,6 +119,13 @@ def create_kairix_schema(db: sqlite3.Connection) -> None:
             args_json TEXT NOT NULL, args_hash TEXT NOT NULL,
             status TEXT NOT NULL, submitted_at TEXT NOT NULL
         );
+        -- Issue #398 (Workstream D) — per-MCP-tool-call observability log.
+        CREATE TABLE IF NOT EXISTS mcp_call_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL, tool TEXT NOT NULL, agent TEXT,
+            latency_ms INTEGER NOT NULL, success INTEGER NOT NULL,
+            error_class TEXT, payload_hash TEXT
+        );
     """)
     db.commit()
 

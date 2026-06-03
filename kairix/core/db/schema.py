@@ -215,6 +215,29 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             UNIQUE(agent_id, args_hash, submitted_at)
         );
 
+        -- Issue #398 (Workstream D): per-MCP-tool-call observability log.
+        -- INSERT site: kairix/agents/mcp/errors.py (_record_mcp_call, fire-and-forget
+        -- from async_tool_handler's finally block; failures swallowed so observability
+        -- never breaks a tool call). Query site: kairix/quality/probe/mcp_calls_cli.py
+        -- (kairix probe mcp-calls). No UPDATE/DELETE in production — the table is
+        -- append-only; operators retention-prune via DELETE WHERE timestamp < ...
+        -- (see docs/operations/runbooks/how-to-read-mcp-call-log.md).
+        CREATE TABLE IF NOT EXISTS mcp_call_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp       TEXT NOT NULL,
+            tool            TEXT NOT NULL,
+            agent           TEXT,
+            latency_ms      INTEGER NOT NULL,
+            success         INTEGER NOT NULL,
+            error_class     TEXT,
+            payload_hash    TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mcp_call_log_tool_time
+            ON mcp_call_log(tool, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_mcp_call_log_time
+            ON mcp_call_log(timestamp);
+
         CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(hash);
         CREATE INDEX IF NOT EXISTS idx_documents_collection ON documents(collection);
         CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
@@ -304,6 +327,8 @@ def validate_schema(db: sqlite3.Connection) -> list[str]:
         "topology_skills",
         # ADR-029 G.1 — agent-facing query queue
         "pending_queries",
+        # Issue #398 (Workstream D) — per-MCP-tool-call observability log
+        "mcp_call_log",
     )
     for required in required_tables:
         if required not in tables:
@@ -469,6 +494,28 @@ CREATE TABLE IF NOT EXISTS pending_queries (
 CREATE INDEX IF NOT EXISTS idx_pending_queries_agent_pending
     ON pending_queries (agent_id, status)
     WHERE status IN ('completed', 'failed');
+
+-- Issue #398 (Workstream D) — per-MCP-tool-call observability log.
+-- INSERT site: kairix/agents/mcp/errors.py (_record_mcp_call from
+-- async_tool_handler's finally block, fire-and-forget). Query site:
+-- kairix/quality/probe/mcp_calls_cli.py (kairix probe mcp-calls).
+-- Append-only; retention-prune via DELETE WHERE timestamp < ...
+-- (see docs/operations/runbooks/how-to-read-mcp-call-log.md).
+CREATE TABLE IF NOT EXISTS mcp_call_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp       TEXT NOT NULL,
+    tool            TEXT NOT NULL,
+    agent           TEXT,
+    latency_ms      INTEGER NOT NULL,
+    success         INTEGER NOT NULL,
+    error_class     TEXT,
+    payload_hash    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_tool_time
+    ON mcp_call_log(tool, timestamp);
+CREATE INDEX IF NOT EXISTS idx_mcp_call_log_time
+    ON mcp_call_log(timestamp);
 """
 
 
