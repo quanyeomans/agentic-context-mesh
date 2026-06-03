@@ -112,8 +112,13 @@ For prod hygiene: store the `.env` file outside the repo (e.g. `/opt/kairix/.env
 The recommended production shape for Azure deployments. The VM's managed identity has `Key Vault Secrets User` on the KV; a systemd one-shot fetches every `kairix-*` secret and writes a bundle file; docker-compose mounts it as `/run/secrets/kairix.env`; kairix reads it on startup.
 
 ```bash
-# 1. Set the KV name in your env file
-echo "KAIRIX_KV_NAME=your-kv-name" >> /opt/kairix/.env
+# 1. Install the etc-default file the systemd unit sources for KAIRIX_KV_NAME.
+#    The unit reads /etc/default/kairix-fetch-secrets via EnvironmentFile=-,
+#    so this file is the canonical place for the vault name on a VM — no
+#    shell-rc / docker-compose .env juggling required.
+sudo install -m 0644 scripts/deploy/etc-default-kairix-fetch-secrets \
+    /etc/default/kairix-fetch-secrets
+sudo $EDITOR /etc/default/kairix-fetch-secrets   # replace KAIRIX_KV_NAME=... with your vault
 
 # 2. Install the fetch-secrets systemd unit
 sudo cp scripts/deploy/kairix-fetch-secrets.service /etc/systemd/system/
@@ -128,6 +133,12 @@ sudo systemctl status kairix-fetch-secrets.service
 # 4. Start kairix — docker-compose mounts /run/secrets into the containers
 docker compose -f /opt/kairix/docker-compose.yml up -d
 ```
+
+`KAIRIX_KV_NAME` lives in `/etc/default/kairix-fetch-secrets` so the systemd
+unit can source it on every `systemctl restart` without depending on the
+operator's interactive shell. Previously the unit could fail on restart
+after a reboot because the vault name was only exported in the operator's
+`.bashrc` — the etc-default file removes that footgun.
 
 The fetch-secrets script reads `az keyvault secret list --query "[?starts_with(name,'kairix-')]"` and writes each one to both `/run/secrets/<name>` (per-file) and `/run/secrets/kairix.env` (bundle). No per-secret list to maintain — adding `kairix-connector-newthing-api-key` to your KV makes it available on the next service restart, with no code change.
 
