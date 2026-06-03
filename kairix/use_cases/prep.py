@@ -9,15 +9,70 @@ so both surfaces call the same ``run_prep``.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from kairix.core.search.prep_summary_cache import (
+    DEFAULT_MAX_AGE_S as _PREP_DEFAULT_MAX_AGE_S,
+)
+from kairix.core.search.prep_summary_cache import (
+    DEFAULT_MAX_ENTRIES as _PREP_DEFAULT_MAX_ENTRIES,
+)
+from kairix.core.search.prep_summary_cache import (
+    PrepSummaryCache,
+    make_prep_cache_key,
+)
 from kairix.core.search.scope import Scope
 from kairix.paths import trace_enabled
 from kairix.text import estimate_tokens
 
 logger = logging.getLogger(__name__)
+
+
+# Process-shared PrepSummaryCache. Lazy-initialised on first prep call
+# so the env-var bounds (if any) are read once at startup. Mirrors the
+# ``_QUERY_CACHE`` pattern in ``kairix.core.factory`` so the operator
+# surface (``probe caches``) sees both caches via the same accessor
+# pattern.
+_PREP_SUMMARY_CACHE: PrepSummaryCache | None = None
+_PREP_SUMMARY_CACHE_LOCK = threading.Lock()
+
+
+def _get_or_create_prep_summary_cache() -> PrepSummaryCache:
+    """Return the process-shared :class:`PrepSummaryCache`, building it lazily.
+
+    Mirrors :func:`kairix.core.factory._get_or_create_query_cache`. The
+    cache's bounds are the module defaults today — env-var overrides
+    can be threaded through the same pattern as ``KAIRIX_QUERY_CACHE_*``
+    when an operator's prep workload demands it.
+    """
+    global _PREP_SUMMARY_CACHE
+    with _PREP_SUMMARY_CACHE_LOCK:
+        if _PREP_SUMMARY_CACHE is None:
+            _PREP_SUMMARY_CACHE = PrepSummaryCache(
+                max_entries=_PREP_DEFAULT_MAX_ENTRIES,
+                max_age_s=_PREP_DEFAULT_MAX_AGE_S,
+            )
+        return _PREP_SUMMARY_CACHE
+
+
+def get_prep_summary_cache() -> PrepSummaryCache:
+    """Public accessor for the process-shared prep summary cache.
+
+    Used by the ``kairix probe caches`` CLI to surface hit / miss /
+    eviction counts. Going through this helper keeps the module-global
+    hidden so callers can't accidentally rebind ``_PREP_SUMMARY_CACHE``.
+    """
+    return _get_or_create_prep_summary_cache()
+
+
+def reset_prep_summary_cache() -> None:
+    """Drop every cached prep summary. Tests + operator reload paths call this."""
+    with _PREP_SUMMARY_CACHE_LOCK:
+        if _PREP_SUMMARY_CACHE is not None:
+            _PREP_SUMMARY_CACHE.clear()
 
 
 _L0_BUDGET = 1500
@@ -280,7 +335,22 @@ def run_prep(
 
         max_tokens = _L0_MAX_TOKENS if tier == "l0" else _L1_MAX_TOKENS
         messages = _build_messages(query, tier, context)
-        summary = chat(messages=messages, max_tokens=max_tokens)
+
+        # Cache-aside: identical ``(query, tier, retrieved-context)``
+        # triples short-circuit the LLM call. Cache miss → call the
+        # chat fn + store; cache hit → return the cached summary. The
+        # cache key folds the context (via sha256) so callers asking
+        # the same question over different retrieved-context blocks
+        # never collide.
+        cache = _get_or_create_prep_summary_cache()
+        cache_key = make_prep_cache_key(query, tier, context)
+        cached_summary = cache.get(cache_key)
+        if cached_summary is not None:
+            summary = cached_summary
+        else:
+            summary = chat(messages=messages, max_tokens=max_tokens)
+            cache.put(cache_key, summary)
+
         return PrepOutput(
             query=query,
             tier=tier,
