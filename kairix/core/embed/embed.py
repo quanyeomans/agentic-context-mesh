@@ -34,6 +34,19 @@ MAX_RETRIES = 6  # used by OpenAI SDK max_retries
 MAX_PARALLEL_BATCHES = 10
 DEFAULT_PARALLEL_BATCHES = 1  # default-safe: today's serial behaviour
 
+# GH #394 — per-batch WAL checkpoint cadence during embed catch-up.
+# R3 (#389) checkpoints WAL every 10 minutes in the maintenance loop, but
+# that tick can't fire while embed is mid-transaction. During a 678K
+# backfill the WAL grew to 3.8 GB before R3 could reclaim. Issuing a
+# PASSIVE checkpoint every Nth batch keeps the WAL bounded without
+# blocking concurrent readers (TRUNCATE would block; PASSIVE returns
+# the (busy, log, checkpointed) tuple without waiting). Tests override
+# the cadence via the ``wal_checkpoint_every_n_batches`` kwarg so 5
+# batches at cadence 2 fires twice deterministically. Set to 0 to
+# disable (production: keep the 10-batch default; tests: set to 0 to
+# isolate the no-checkpoint baseline).
+DEFAULT_WAL_CHECKPOINT_EVERY_N_BATCHES = 10
+
 # F17 — chunk_date appears as a dict key in both producer and consumer paths;
 # extract so renames hit a single edit site.
 _KEY_CHUNK_DATE = "chunk_date"
@@ -687,6 +700,41 @@ def _save_index_checkpoint(vec_index: Any) -> None:
         logger.exception("usearch final save failed: %s", e)
 
 
+def _maybe_wal_checkpoint(db: sqlite3.Connection, batch_idx: int, every_n: int) -> None:
+    """Issue ``PRAGMA wal_checkpoint(PASSIVE)`` every Nth batch (GH #394).
+
+    Fires when ``(batch_idx + 1) % every_n == 0`` so batches=5, every=2
+    triggers after the 2nd and 4th batches. ``every_n <= 0`` disables.
+
+    PASSIVE (not TRUNCATE) — TRUNCATE blocks readers while it shrinks
+    the WAL file; PASSIVE returns the ``(busy, log, checkpointed)``
+    tuple without waiting and is safe to call mid-catch-up with
+    concurrent search-side readers on the same SQLite.
+
+    Swallows ``OperationalError`` (DB locked / busy) so the embed loop
+    never aborts on a checkpoint failure — the next call retries, and
+    R3's maintenance tick reclaims what we miss.
+    """
+    if every_n <= 0:
+        return
+    if (batch_idx + 1) % every_n != 0:
+        return
+    try:
+        row = db.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+    except sqlite3.OperationalError:
+        logger.warning("wal_checkpoint: PASSIVE failed at batch %d (busy?)", batch_idx + 1)
+        return
+    if row:
+        busy, log_pages, checkpointed = int(row[0]), int(row[1]), int(row[2])
+        logger.info(
+            "wal_checkpoint: batch=%d busy=%d log_pages=%d checkpointed=%d",
+            batch_idx + 1,
+            busy,
+            log_pages,
+            checkpointed,
+        )
+
+
 # ── Parallel orchestration ───────────────────────────────────────────────────
 
 
@@ -765,6 +813,7 @@ def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale abov
     embed_batch_fn: Callable[..., list[list[float]]],
     *,
     cache: EmbeddingCache | None = None,
+    wal_checkpoint_every_n_batches: int = DEFAULT_WAL_CHECKPOINT_EVERY_N_BATCHES,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Run the embed loop with up to ``parallel`` concurrent Azure calls.
 
@@ -783,6 +832,7 @@ def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale abov
     embedded = 0
     failed_chunks: list[dict[str, Any]] = []
     db_lock = threading.Lock()
+    batches_persisted = 0
 
     batches = list(enumerate(batched(all_chunks, batch_size)))
 
@@ -828,6 +878,9 @@ def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale abov
                 continue
             failed_chunks.extend(unaccounted)
             embedded += len(matched)
+            batches_persisted += 1
+            with db_lock:
+                _maybe_wal_checkpoint(db, batches_persisted - 1, wal_checkpoint_every_n_batches)
             if matched:
                 logger.info(
                     "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
@@ -873,12 +926,16 @@ def _run_embed_loop_serial(
     embed_batch_fn: Callable[..., list[list[float]]],
     *,
     cache: EmbeddingCache | None = None,
+    wal_checkpoint_every_n_batches: int = DEFAULT_WAL_CHECKPOINT_EVERY_N_BATCHES,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Run the embed loop serially — today's default, ``--parallel 1``.
 
     Lifted out of ``run_embed`` for symmetry with
     ``_run_embed_loop_parallel`` and to keep ``run_embed`` under the F16
     cognitive-complexity ceiling once the parallel branch is added.
+
+    ``wal_checkpoint_every_n_batches`` controls the per-batch WAL
+    checkpoint cadence (GH #394). 0 disables.
     """
     embedded = 0
     failed_chunks: list[dict[str, Any]] = []
@@ -899,6 +956,7 @@ def _run_embed_loop_serial(
         )
         embedded += batch_ok
         failed_chunks.extend(batch_failed)
+        _maybe_wal_checkpoint(db, batch_idx, wal_checkpoint_every_n_batches)
         if batch_ok:
             logger.info(
                 "Embed progress: %d/%d chunks (%.0f%%) — batch %d",
@@ -917,6 +975,7 @@ def run_embed(
     limit: int | None = None,
     deps: EmbedDependencies | None = None,
     parallel: int = DEFAULT_PARALLEL_BATCHES,
+    wal_checkpoint_every_n_batches: int = DEFAULT_WAL_CHECKPOINT_EVERY_N_BATCHES,
 ) -> dict[str, Any]:
     """
     Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
@@ -933,6 +992,13 @@ def run_embed(
                     writes stay serialised under a single-writer lock. See
                     docs/operations/runbooks/worker-memory-and-swap.md for
                     sizing guidance.
+        wal_checkpoint_every_n_batches:
+                    Issue ``PRAGMA wal_checkpoint(PASSIVE)`` after every
+                    Nth committed batch (GH #394). Defaults to 10. Bounds
+                    WAL growth during long catch-ups (R3's 10-minute
+                    maintenance tick can't fire mid-embed-transaction).
+                    0 disables; tests inject smaller values for
+                    deterministic assertions.
 
     Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
     """
@@ -1003,6 +1069,7 @@ def run_embed(
                 total,
                 deps.embed_batch,
                 cache=cache,
+                wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
             )
         else:
             embedded, failed_chunks = _run_embed_loop_parallel(
@@ -1020,6 +1087,7 @@ def run_embed(
                 total,
                 deps.embed_batch,
                 cache=cache,
+                wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
             )
     finally:
         if cache is not None:

@@ -36,6 +36,7 @@ class EmbedPipeline:
         batch_size: int = 250,
         limit: int | None = None,
         parallel: int = 1,
+        wal_checkpoint_every_n_batches: int = 10,
     ) -> dict[str, Any]:
         """Embed pending chunks and return a summary dict.
 
@@ -46,6 +47,11 @@ class EmbedPipeline:
             parallel:   Number of batches to embed concurrently (1..10).
                         Default 1 = serial. See
                         docs/operations/runbooks/worker-memory-and-swap.md.
+            wal_checkpoint_every_n_batches:
+                        Issue ``PRAGMA wal_checkpoint(PASSIVE)`` after
+                        every Nth committed batch (GH #394). Default 10.
+                        0 disables. Tests inject smaller values for
+                        deterministic per-batch assertions.
 
         Returns:
             Dict with keys: embedded, skipped, failed, duration_s,
@@ -60,4 +66,5 @@ class EmbedPipeline:
             limit=limit,
             deps=self.deps,
             parallel=parallel,
+            wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
         )
