@@ -100,7 +100,10 @@ def test_successful_call_records_success_row(tmp_db: Path, obs_executor: ThreadP
         deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db, obs_executor_fn=lambda: obs_executor),
     )
     result = asyncio.run(wrapped(query="ping", agent="shape"))
-    assert result == {"q": "ping"}
+    # Wrapper injects latency_ms (#405) so the strict-equality envelope
+    # check is replaced with a field-level check. Drain the obs queue
+    # before reading rows (#403 fire-and-forget INSERT).
+    assert result["q"] == "ping"
     _drain_obs(obs_executor)
 
     rows = _rows(tmp_db)
@@ -135,7 +138,8 @@ def test_handler_exception_records_failure_row(tmp_db: Path, obs_executor: Threa
     result = asyncio.run(wrapped("anything"))
 
     # Tool call still returns the structured envelope.
-    assert result == {"error": "ValueError: bad"}
+    # Wrapper injects latency_ms (#405); field-level check + drain obs (#403).
+    assert result["error"] == "ValueError: bad"
     _drain_obs(obs_executor)
 
     rows = _rows(tmp_db)
@@ -181,7 +185,8 @@ def test_db_failure_does_not_break_tool_call(
         _drain_obs(obs_executor)
 
     # The tool call still returns the handler's result.
-    assert result == {"ok": "yes"}
+    # Wrapper injects latency_ms (issue #405) — assert handler field directly.
+    assert result["ok"] == "yes"
     # The failure was logged but swallowed.
     assert any("mcp_call_log INSERT failed" in r.message for r in caplog.records), (
         f"expected swallowed-INSERT warning; got: {[r.message for r in caplog.records]}"
@@ -212,7 +217,8 @@ def test_db_path_fn_raises_does_not_break_call(
         result = asyncio.run(wrapped())
         _drain_obs(obs_executor)
 
-    assert result == {"ok": "yes"}
+    # Wrapper injects latency_ms (issue #405) — assert handler field directly.
+    assert result["ok"] == "yes"
     assert any("db_path_fn failed" in r.message for r in caplog.records)
 
 

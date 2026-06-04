@@ -49,7 +49,8 @@ def test_success_returns_handlers_dict() -> None:
 
     wrapped = async_tool_handler(sync_impl)
     result = asyncio.run(wrapped(21))
-    assert result == {"value": 42}
+    # Wrapper injects latency_ms (issue #405) — assert handler fields directly.
+    assert result["value"] == 42
 
 
 @pytest.mark.unit
@@ -61,7 +62,8 @@ def test_exception_is_mapped_to_error_envelope() -> None:
 
     wrapped = async_tool_handler(boom)
     result = asyncio.run(wrapped(1))
-    assert result == {"error": "RuntimeError: kapow"}
+    # Wrapper injects latency_ms (issue #405) — assert error field directly.
+    assert result["error"] == "RuntimeError: kapow"
 
 
 @pytest.mark.unit
@@ -127,7 +129,10 @@ def test_keyword_arguments_are_forwarded() -> None:
 
     wrapped = async_tool_handler(handler)
     result = asyncio.run(wrapped(query="ping", agent="builder", budget=1500))
-    assert result == {"q": "ping", "a": "builder", "b": 1500}
+    # Wrapper injects latency_ms (issue #405) — assert kwarg-forwarded fields directly.
+    assert result["q"] == "ping"
+    assert result["a"] == "builder"
+    assert result["b"] == 1500
 
 
 @pytest.mark.unit

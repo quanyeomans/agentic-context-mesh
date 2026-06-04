@@ -466,6 +466,12 @@ def async_tool_handler(
          single-thread observability executor — fire-and-forget, the
          tool's response path never blocks on the SQLite write (#403).
          Observability failure never breaks the tool call.
+      5. Injects ``latency_ms`` (integer ms of wall-clock through the
+         wrapper) into the result envelope when the handler hasn't
+         already surfaced one (issue #405). Search's use case
+         publishes its own ``latency_ms`` float and is left alone via
+         ``setdefault``; every other tool's envelope now carries the
+         field so agents no longer need external wall-clock measurement.
 
     Concurrent ``/mcp`` requests are scheduled onto the event loop and
     each tool call's blocking work happens on its own thread, so a
@@ -500,6 +506,7 @@ def async_tool_handler(
         error_class: str | None = None
         payload_hash = _payload_hash(kwargs)
         loop = asyncio.get_running_loop()
+        result: dict[str, Any] = {}
         try:
             # #403 — dispatch onto the kairix-owned executor instead of
             # the event loop's default pool. ``asyncio.to_thread`` uses
@@ -516,6 +523,13 @@ def async_tool_handler(
             error_value = result.get("error")
             success = not error_value
             error_class = _extract_error_class(error_value)
+            # #405 — surface ``latency_ms`` in the result envelope so agents
+            # don't need external wall-clock measurement. ``setdefault``
+            # preserves search's existing float; every other tool's envelope
+            # now carries the wrapper-measured integer. Done BEFORE return
+            # so the field is visible to the caller.
+            if isinstance(result, dict):
+                result.setdefault("latency_ms", int((time.monotonic() - started) * 1000))
             return result
         except Exception as exc:
             # `safe` swallows handler exceptions, so reaching here means
