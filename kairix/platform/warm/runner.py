@@ -119,11 +119,28 @@ def _step_ensure_sqlite_stats() -> Any:
     import sqlite3
 
     from kairix.paths import KairixPaths
-    from kairix.platform.warm.sqlite_stats import ensure_sqlite_stats
+    from kairix.platform.warm.sqlite_stats import (
+        DETAIL_SKIPPED_STATS_PRESENT,
+        STEP_NAME,
+        WarmStepResult,
+        ensure_sqlite_stats,
+    )
 
     paths = KairixPaths.resolve()
+    db_path = paths.db_path
+    # Fresh-install path: warm can run before any worker has bootstrapped
+    # the DB file or its parent directory. Treat "no DB yet" as a skip
+    # rather than a hard failure — the planner-stats bootstrap only makes
+    # sense once ingest has written rows.
+    if not db_path.exists() or not db_path.parent.exists():
+        return WarmStepResult(
+            name=STEP_NAME,
+            ok=True,
+            elapsed_ms=0.0,
+            detail=DETAIL_SKIPPED_STATS_PRESENT,
+        )
     # F77-allow: warm-up runs once per container before the worker loop owns its coordinator
-    db = sqlite3.connect(str(paths.db_path))
+    db = sqlite3.connect(str(db_path))
     try:
         return ensure_sqlite_stats(db, paths)
     finally:
