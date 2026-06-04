@@ -144,9 +144,9 @@ def test_legacy_v2_db_migrates_cleanly() -> None:
     # Legacy data preserved
     legacy_count = db.execute("SELECT COUNT(*) FROM documents WHERE path = 'legacy/probe.md'").fetchone()[0]
     assert legacy_count == 1, "legacy documents row lost during migration"
-    # Version bumped
+    # Version bumped to current SCHEMA_VERSION (already imported at module top).
     version = db.execute("SELECT value FROM kairix_meta WHERE key = 'schema_version'").fetchone()[0]
-    assert version == "3", f"expected schema_version=3 post-migration, got {version!r}"
+    assert version == SCHEMA_VERSION, f"expected schema_version={SCHEMA_VERSION} post-migration, got {version!r}"
 
 
 @pytest.mark.integration
