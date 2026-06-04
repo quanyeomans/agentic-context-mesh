@@ -385,11 +385,26 @@ def _cmd_serve(args: argparse.Namespace, *, deps: McpCliDeps) -> None:
     # immediately and ColdStartMiddleware (transport.py) returns a
     # structured 503 + ColdStart envelope for every call during warm —
     # agents get the affordance, not an opaque failure.
+    #
+    # #390 — register a live WarmProgress snapshot at warm-start so the
+    # ColdStart envelope reports the actual remaining time (~120s on a
+    # fresh container, dominated by the vec_index cold-load) instead of
+    # the historical static 8s that caused agents to back off 8s x N
+    # retries and thrash.
+    from kairix.platform.warm.state import WarmProgress, set_warm_progress
+
+    set_warm_progress(WarmProgress(started_at=time.time()))
+
     def _warm_and_mark_ready() -> None:
         warm_result = deps.warm_retrieval_stack_fn()
         _emit_warm_outcome(warm_result)
         if warm_result.get("ready") is True:
             gate.mark_ready()
+            # #390 — clear the WarmProgress holder once ready so any
+            # late-arriving ColdStart envelope (a request that races the
+            # gate flip) falls back cleanly rather than reporting a
+            # negative remaining-seconds value.
+            set_warm_progress(None)
             # GH #355 — also flip the cross-process warm flag so the docker
             # healthcheck (kairix onboard ready) and the ColdStartMiddleware
             # see the same warm signal. Before this call, the MCP server's

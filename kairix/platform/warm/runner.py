@@ -147,11 +147,27 @@ def _time_step(name: str, fn: Callable[[], Any]) -> tuple[WarmStep, Any]:
         )
 
 
+def _emit_progress(callback: Callable[[str], None] | None, stage_name: str) -> None:
+    """Fire ``callback(stage_name)`` if provided, swallowing exceptions.
+
+    Progress reporting is an observability seam — it must never abort
+    the warm-up if a downstream callback misbehaves. Tests assert the
+    callback is invoked; production wires the WarmProgress holder update.
+    """
+    if callback is None:
+        return
+    try:
+        callback(stage_name)
+    except Exception as exc:
+        logger.warning("warm progress callback for stage %s raised: %s", stage_name, exc, exc_info=True)
+
+
 def run_warm(
     *,
     pipeline_builder: Callable[[], Any] | None = None,
     search_probe: Callable[[Any], Any] | None = None,
     graph_client_opener: Callable[[], Any] | None = None,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> WarmResult:
     """Run all warm-up steps and return a structured result.
 
@@ -161,6 +177,12 @@ def run_warm(
         search_probe: injectable; tests pass a no-op that accepts the
             pipeline argument and returns immediately.
         graph_client_opener: injectable; tests pass a fake.
+        progress_callback: optional one-arg callable invoked with the
+            stage name each time a step completes (success or failure).
+            Default ``None`` — preserves prior behaviour. The CLI wires a
+            callback that appends the stage to the live
+            :class:`kairix.platform.warm.state.WarmProgress` so the
+            ColdStart envelope surfaces real elapsed/remaining time (#390).
 
     Returns:
         WarmResult. Never raises — top-level errors populate the
@@ -178,6 +200,7 @@ def run_warm(
 
     step_build, pipeline = _time_step(_STEP_BUILD, build)
     steps.append(step_build)
+    _emit_progress(progress_callback, _STEP_BUILD)
 
     if pipeline is not None:
         step_probe, _ = _time_step(_STEP_PROBE, lambda: probe(pipeline))
@@ -191,9 +214,11 @@ def run_warm(
                 detail="skipped because build_search_pipeline failed",
             )
         )
+    _emit_progress(progress_callback, _STEP_PROBE)
 
     step_graph, _ = _time_step(_STEP_GRAPH, open_graph)
     steps.append(step_graph)
+    _emit_progress(progress_callback, _STEP_GRAPH)
 
     total_duration = round(time.perf_counter() - t_total_start, 3)
     failures = [WarmFailure(step=s.name, detail=s.detail) for s in steps if not s.ok]

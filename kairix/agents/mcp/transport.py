@@ -177,26 +177,20 @@ def _build_cold_start_body(path: str) -> dict[str, Any]:
     same structure here. The ``tool`` field is the request path because
     the transport layer fires before the MCP router has resolved which
     tool the client was reaching.
+
+    Delegates to :func:`kairix.agents.mcp.cold_start.cold_start_envelope`
+    so the live WarmProgress (#390) flows into the transport 503 body —
+    the surface agents actually hit during warm — not just the in-tool
+    envelope. When WarmProgress is unset (warm not started), the static
+    8s fallback preserves the historical Retry-After contract.
     """
-    return {
-        "status": "retryable_not_ready",
-        "error": "ColdStart",
-        "error_code": "KAIRIX_COLD_START",
-        "tool": path,
-        "retry_after_ms": _RETRY_AFTER_SECONDS * 1000,
-        "estimated_seconds_remaining": float(_RETRY_AFTER_SECONDS),
-        "guidance": (
-            f"kairix is warming (one-time cost per process). "
-            f"next: wait ~{_RETRY_AFTER_SECONDS}s and retry — subsequent calls in this process return immediately."
-        ),
-        "agent_instruction": (
-            f"next: pause retry_after_ms then call this same tool again. "
-            f"fix: if the second call still returns ColdStart, surface "
-            f'"kairix still warming after ~{_RETRY_AFTER_SECONDS}s" to the user and ask whether to proceed '
-            f"without retrieval — this is a transient process-boot state, not a hard failure."
-        ),
-        "see_also": ["docs/operations/MCP-DEPLOYMENT.md"],
-    }
+    from kairix.agents.mcp.cold_start import cold_start_envelope
+
+    return cold_start_envelope(
+        tool_name=path,
+        retry_after_ms=_RETRY_AFTER_SECONDS * 1000,
+        estimated_seconds_remaining=float(_RETRY_AFTER_SECONDS),
+    )
 
 
 class ColdStartMiddleware:
@@ -234,6 +228,11 @@ class ColdStartMiddleware:
         if self._readiness_check():
             await self._app(scope, receive, send)
             return
+        body = _build_cold_start_body(path)
+        # #390 — Retry-After mirrors the envelope's live retry hint so HTTP
+        # clients that retry-after the header see the same back-off as agents
+        # that read the JSON body.
+        retry_after_seconds = max(1, int(body.get("retry_after_ms", _RETRY_AFTER_SECONDS * 1000) / 1000))
         # Issue #320 observability — log every cold-start short-circuit with
         # process uptime so operators can correlate post-incident with
         # "did the middleware run?" vs "did the agent's client time out before
@@ -243,12 +242,12 @@ class ColdStartMiddleware:
             "cold_start_middleware_returning_503 path=%s uptime_s=%d retry_after_s=%d",
             path,
             uptime_s,
-            _RETRY_AFTER_SECONDS,
+            retry_after_seconds,
         )
         response = JSONResponse(
-            _build_cold_start_body(path),
+            body,
             status_code=503,
-            headers={"Retry-After": str(_RETRY_AFTER_SECONDS)},
+            headers={"Retry-After": str(retry_after_seconds)},
         )
         await response(scope, receive, send)
 

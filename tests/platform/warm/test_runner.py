@@ -136,3 +136,44 @@ def test_envelope_shape_matches_design_spec() -> None:
     for step in env["steps"]:
         for key in ("name", "ok", "duration_s", "detail"):
             assert key in step, f"step missing {key!r}; got {sorted(step.keys())}"
+
+
+# ---------------------------------------------------------------------------
+# Progress callback — #390 wiring for live ColdStart envelope remaining
+# ---------------------------------------------------------------------------
+
+
+def test_progress_callback_fires_once_per_stage_in_order() -> None:
+    """When ``progress_callback`` is supplied, each stage completion fires it.
+
+    Pins the #390 wiring: the CLI registers a WarmProgress holder at
+    warm-start and the callback appends each completed stage so the live
+    ColdStart envelope can surface elapsed/remaining time. Sabotage-proof:
+    remove an ``_emit_progress`` call after a step and the stage is missing
+    from ``observed``.
+    """
+    observed: list[str] = []
+
+    run_warm(progress_callback=observed.append, **_ok_deps())
+
+    assert observed == ["build_search_pipeline", "probe_search", "open_graph_client"], (
+        f"progress callback must fire once per stage in execution order; got {observed!r}"
+    )
+
+
+def test_progress_callback_exception_does_not_abort_warm() -> None:
+    """A misbehaving callback must not break warm-up.
+
+    Observability seams are best-effort — if the CLI's WarmProgress
+    update raises (e.g. holder mutation race), warm must still complete.
+    Sabotage-proof: drop the ``try/except`` in ``_emit_progress`` and the
+    second stage never runs because the first stage's callback raises.
+    """
+
+    def explode(_stage_name: str) -> None:
+        raise RuntimeError("observer boom")
+
+    result = run_warm(progress_callback=explode, **_ok_deps())
+
+    assert result.ok is True, f"callback exception must not abort warm; got {result.failures!r}"
+    assert {s.name for s in result.steps} == {"build_search_pipeline", "probe_search", "open_graph_client"}

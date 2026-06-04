@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from kairix.paths import warm_flag_path
@@ -47,6 +49,94 @@ logger = logging.getLogger(__name__)
 # agent's "retry in ~N seconds" message slightly over-promises the wait
 # rather than under-promises.
 _ESTIMATED_WARM_SECONDS = 8.0
+
+
+# Realistic full-warm budget on a fresh container. The vec_index cold-load
+# alone is ~116s on production hardware (#390), so the static 8s estimate
+# the in-process envelope returned during warm caused agents to back off
+# 8s x N retries and thrash. WarmProgress carries the live elapsed/remaining
+# so the envelope reports actual remaining time, defaulting to 120s before
+# any stage has completed.
+DEFAULT_WARM_TOTAL_ESTIMATE_SECONDS = 120.0
+
+
+@dataclass(frozen=True)
+class WarmProgress:
+    """Live progress snapshot for an in-flight warm-up.
+
+    Threaded into the ColdStart envelope so agents see a real remaining
+    estimate (#390) rather than the static 8s that pre-dated this type.
+    Frozen + explicit-typed so the shape is immutable per F42 spirit.
+
+    Attributes:
+        started_at: epoch seconds when warm-up began (typically ``time.time()``).
+        total_estimate_seconds: realistic full-warm budget. Defaults to
+            :data:`DEFAULT_WARM_TOTAL_ESTIMATE_SECONDS` (120s on fresh
+            containers); callers tune via constructor kwarg.
+        stages_completed: ordered tuple of stage names that have finished.
+            Tuple (not list) so the dataclass stays frozen-hashable.
+        time_source: injectable wall-clock so tests can advance virtual
+            time without monkey-patching ``time.time``. Production callers
+            leave it at the default ``time.time``.
+    """
+
+    started_at: float
+    total_estimate_seconds: float = DEFAULT_WARM_TOTAL_ESTIMATE_SECONDS
+    stages_completed: tuple[str, ...] = field(default_factory=tuple)
+    time_source: Callable[[], float] = field(default=time.time)
+
+    def elapsed_seconds(self) -> float:
+        """Wall-clock seconds since ``started_at``, never negative."""
+        return max(0.0, self.time_source() - self.started_at)
+
+    def remaining_seconds(self) -> float:
+        """Estimated seconds left in warm-up.
+
+        ``max(0, total - elapsed)`` per #390 — once the budget is blown
+        the envelope reports 0 remaining, not a negative number.
+        """
+        return max(0.0, self.total_estimate_seconds - self.elapsed_seconds())
+
+    def with_stage_completed(self, stage_name: str) -> WarmProgress:
+        """Return a new WarmProgress with ``stage_name`` appended.
+
+        Frozen-immutable update — caller swaps the holder reference rather
+        than mutating in-place.
+        """
+        return WarmProgress(
+            started_at=self.started_at,
+            total_estimate_seconds=self.total_estimate_seconds,
+            stages_completed=(*self.stages_completed, stage_name),
+            time_source=self.time_source,
+        )
+
+
+# Module-level holder for the in-flight WarmProgress. None when no warm-up
+# has been registered yet — the cold_start envelope falls back to its
+# static 8s value in that case, preserving the historical behaviour
+# (test 3 in the issue #390 brief).
+_progress_lock = threading.Lock()
+_warm_progress: WarmProgress | None = None
+
+
+def set_warm_progress(progress: WarmProgress | None) -> None:
+    """Register (or clear) the in-flight WarmProgress snapshot.
+
+    The wiring site at :mod:`kairix.agents.mcp.cli` calls this once when
+    warm-up starts (passing a fresh WarmProgress) and updates it via
+    ``set_warm_progress(progress.with_stage_completed(name))`` from the
+    runner's ``progress_callback``. Tests call it directly with a fixed
+    ``time_source`` to drive deterministic remaining-seconds assertions.
+    """
+    global _warm_progress
+    with _progress_lock:
+        _warm_progress = progress
+
+
+def get_warm_progress() -> WarmProgress | None:
+    """Return the in-flight WarmProgress, or None when warm-up hasn't started."""
+    with _progress_lock:
+        return _warm_progress
 
 
 # State-dict keys — extracted so the same string isn't repeated across
@@ -123,6 +213,7 @@ def reset_warm_state() -> None:
         _state[_K_WARMING] = False
         _state[_K_STARTED_AT] = 0.0
         _state[_K_COMPLETED_AT] = 0.0
+    set_warm_progress(None)
     try:
         warm_flag_path().unlink(missing_ok=True)
     except OSError:
