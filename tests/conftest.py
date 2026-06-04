@@ -77,6 +77,8 @@ pytest_plugins = [
     "tests.bdd.steps.timeline_cli_steps",
     "tests.bdd.steps.soak_steps",
     "tests.bdd.steps.warm_steps",
+    "tests.bdd.steps.sqlite_stats_steps",
+    "tests.bdd.steps.mcp_maintenance_analyze_steps",
     "tests.bdd.steps.probe_steps",
     "tests.bdd.steps.probe_per_query_telemetry_steps",
     "tests.bdd.steps.worker_steps",

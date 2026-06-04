@@ -72,6 +72,7 @@ STAGE_FTS = "fts"
 STAGE_GC = "gc"
 STAGE_BRONZE_REAP = "bronze_reap"
 STAGE_BRONZE_TTL_GC = "bronze_ttl_gc"
+STAGE_PERIODIC_ANALYZE = "periodic_analyze"
 
 # Default per-tick row cap for the orphan scan. At production scale
 # (~2M content_vectors x ~2M documents) the unbounded LEFT JOIN turns
@@ -132,6 +133,15 @@ class MaintenanceTickResult:
         deleted by the TTL GC pass this tick (#316). Always 0 unless
         the ``bronze_ttl_gc`` flag is ON. Bounds bronze growth long-
         term — without this, correctly-registered blobs never expire.
+      * ``periodic_analyze_ran`` — True when this tick re-ran ANALYZE
+        on the SQLite index because stats were stale or doc growth
+        exceeded threshold (#376). Bootstraps + refreshes
+        ``sqlite_stat1`` so the planner picks the right index for
+        hot-path queries.
+      * ``periodic_analyze_reason`` — short string describing which
+        decision branch fired ("never analyzed" / "stale" / "growth" /
+        "fresh"). Operators read this when investigating plan
+        regressions.
 
     The shape is the F39 / F42 boundary contract the worker logs as a
     one-line completion event and the ``kairix worker preflight --json``
@@ -147,6 +157,8 @@ class MaintenanceTickResult:
     elapsed_ms: int
     bronze_orphans_reaped: int = 0
     bronze_ttl_gc_deleted: int = 0
+    periodic_analyze_ran: bool = False
+    periodic_analyze_reason: str = ""
 
 
 def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production boundary
@@ -243,6 +255,21 @@ def _default_bronze_ttl_gc() -> int:  # pragma: no cover — production boundary
     return 0
 
 
+def _default_periodic_analyze(db: sqlite3.Connection) -> tuple[bool, str]:
+    """Production seam — run the periodic-ANALYZE refresh.
+
+    Returns ``(ran, reason)`` so the scheduler can fold the outcome
+    into the tick envelope without importing the result dataclass.
+
+    Lazy import keeps the dependency optional for callers that only
+    want the orphan-prune stages.
+    """
+    from kairix.core.maintenance.periodic_analyze import run_periodic_analyze
+
+    result = run_periodic_analyze(db)
+    return result.ran, result.reason
+
+
 def _default_fts_healer(db: sqlite3.Connection) -> int:  # pragma: no cover — production boundary
     """Production seam — heal FTS5 orphans when the integrity check sees drift.
 
@@ -300,6 +327,14 @@ class MaintenanceSchedulerDeps:
     # The closure itself reads the flag + TTL; the scheduler always
     # invokes it. Default no-op for unit-test sandboxes.
     bronze_ttl_gc: Callable[[], int] = field(default_factory=lambda: _default_bronze_ttl_gc)
+    # Periodic ANALYZE refresh — called every tick. The closure
+    # short-circuits when stats are still fresh (last analyze < 24h ago
+    # AND doc growth within 10% threshold) so the scheduler doesn't
+    # re-run ANALYZE on every tick. Returns ``(ran, reason)`` so the
+    # tick envelope can surface what happened.
+    periodic_analyze: Callable[[sqlite3.Connection], tuple[bool, str]] = field(
+        default_factory=lambda: _default_periodic_analyze
+    )
 
 
 # F66-exempt: scheduler orchestrates ticks; no per-tick budget of its own
@@ -396,6 +431,7 @@ class MaintenanceScheduler:
         fts_healed = self._safe_fts_heal(active_db, pid)
         bronze_orphans_reaped = self._safe_bronze_reap(pid)
         bronze_ttl_gc_deleted = self._safe_bronze_ttl_gc(pid)
+        periodic_analyze_ran, periodic_analyze_reason = self._safe_periodic_analyze(active_db, pid)
 
         # Commit ONCE at the end so the whole tick is atomic from a
         # crash-recovery standpoint. Each stage uses execute() without
@@ -417,11 +453,14 @@ class MaintenanceScheduler:
             elapsed_ms=elapsed_ms,
             bronze_orphans_reaped=bronze_orphans_reaped,
             bronze_ttl_gc_deleted=bronze_ttl_gc_deleted,
+            periodic_analyze_ran=periodic_analyze_ran,
+            periodic_analyze_reason=periodic_analyze_reason,
         )
         logger.info(
             "event=%s pid=%d orphans_pruned=%d pruned_table_size=%d usearch_rebuilt=%s "
             "fts_orphans_healed=%d current_orphan_count=%d elapsed_ms=%d "
-            "bronze_orphans_reaped=%d bronze_ttl_gc_deleted=%d",
+            "bronze_orphans_reaped=%d bronze_ttl_gc_deleted=%d "
+            "periodic_analyze_ran=%s periodic_analyze_reason=%s",
             EVENT_TICK_COMPLETED,
             pid,
             result.orphans_pruned,
@@ -432,6 +471,8 @@ class MaintenanceScheduler:
             result.elapsed_ms,
             result.bronze_orphans_reaped,
             result.bronze_ttl_gc_deleted,
+            result.periodic_analyze_ran,
+            result.periodic_analyze_reason,
         )
         return result
 
@@ -514,6 +555,25 @@ class MaintenanceScheduler:
                 type(exc).__name__,
             )
             return 0
+
+    def _safe_periodic_analyze(self, db: sqlite3.Connection, pid: int) -> tuple[bool, str]:
+        """Stage 7 — periodic ANALYZE refresh boundary, swallows failures.
+
+        Returns ``(ran, reason)``. When the closure raises, returns
+        ``(False, "<ErrorType>: ...")`` so the failure surfaces in the
+        tick envelope without crashing the whole tick.
+        """
+        try:
+            return self._deps.periodic_analyze(db)
+        except Exception as exc:
+            logger.warning(
+                _FAILURE_LOG_FORMAT,
+                EVENT_TICK_FAILED,
+                pid,
+                STAGE_PERIODIC_ANALYZE,
+                type(exc).__name__,
+            )
+            return False, f"{type(exc).__name__}: {exc}"
 
     def _safe_bronze_ttl_gc(self, pid: int) -> int:
         """Stage 6 — bronze TTL GC boundary, swallows failures into the log.
@@ -684,6 +744,8 @@ def tick_to_dict(result: MaintenanceTickResult) -> dict[str, Any]:
         "elapsed_ms": result.elapsed_ms,
         "bronze_orphans_reaped": result.bronze_orphans_reaped,
         "bronze_ttl_gc_deleted": result.bronze_ttl_gc_deleted,
+        "periodic_analyze_ran": result.periodic_analyze_ran,
+        "periodic_analyze_reason": result.periodic_analyze_reason,
     }
 
 
@@ -790,6 +852,7 @@ __all__ = [
     "EVENT_TICK_STARTED",
     "STAGE_FTS",
     "STAGE_GC",
+    "STAGE_PERIODIC_ANALYZE",
     "STAGE_PRUNE",
     "STAGE_USEARCH",
     "MaintenanceScheduler",

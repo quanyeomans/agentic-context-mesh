@@ -32,6 +32,7 @@ def _ok_result() -> WarmResult:
         steps=[
             WarmStep(name="build_search_pipeline", ok=True, duration_s=0.5),
             WarmStep(name="probe_search", ok=True, duration_s=0.1),
+            WarmStep(name="ensure_sqlite_stats", ok=True, duration_s=0.02, detail="stats already present, skipped"),
             WarmStep(name="open_graph_client", ok=True, duration_s=0.05),
         ],
         ok=True,
@@ -44,6 +45,7 @@ def _partial_failure_result() -> WarmResult:
         steps=[
             WarmStep(name="build_search_pipeline", ok=True, duration_s=0.5),
             WarmStep(name="probe_search", ok=True, duration_s=0.1),
+            WarmStep(name="ensure_sqlite_stats", ok=True, duration_s=0.02, detail="stats already present, skipped"),
             WarmStep(name="open_graph_client", ok=False, duration_s=0.0, detail="Neo4j unreachable"),
         ],
         failures=[WarmFailure(step="open_graph_client", detail="Neo4j unreachable")],
@@ -76,7 +78,7 @@ def test_json_mode_emits_envelope() -> None:
     assert rc == 0
     payload = json.loads(stdout)
     assert payload["ok"] is True
-    assert len(payload["steps"]) == 3
+    assert len(payload["steps"]) == 4
     assert payload["total_duration_s"] == 0.65
 
 

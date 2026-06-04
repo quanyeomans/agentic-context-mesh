@@ -142,6 +142,8 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "embed_rebuild_fts",
         # Wave D — topology v2 cc_pair lifecycle escalation stub.
         "cc_pair",
+        # #376 — operator-callable ANALYZE refresh.
+        "maintenance_analyze",
         # Plan B-parity Week 5 Stream A — agent-driven ingest + recall
         "ingest_chat",
         "facts_about",

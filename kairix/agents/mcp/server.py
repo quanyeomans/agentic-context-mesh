@@ -1087,6 +1087,75 @@ def tool_embed_rebuild_fts() -> dict[str, Any]:
     )
 
 
+def tool_maintenance_analyze(
+    *,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run ``ANALYZE`` on the kairix index DB and return the result envelope.
+
+    Operator-callable diagnostic that refreshes ``sqlite_stat1`` so the
+    query planner picks the right index for hot-path queries (#376).
+    Mirrors ``kairix maintenance analyze`` — same envelope shape.
+
+    Parameters
+    ----------
+    db_path:
+        Optional path to the SQLite index. ``None`` resolves via
+        :func:`kairix.paths.db_path`. Tests pass an explicit ``tmp_path``
+        so the call is F2-clean (no env-var manipulation).
+
+    Returns
+    -------
+    dict
+        Success: ``{"analyze_ran", "reason", "rows_analyzed",
+        "previous_doc_count", "elapsed_ms", "plan_before", "plan_after",
+        "sample_query", "error": ""}``. The ``error`` key is always
+        present (empty string on success) so agents can branch on it
+        consistently.
+        Failure: ``{"error": "<Name>", "detail": "...", ...}``.
+    """
+    try:
+        import sqlite3 as _sqlite3
+
+        from kairix.core.maintenance.cli import _count_documents, _explain_plan
+        from kairix.core.maintenance.periodic_analyze import run_periodic_analyze
+
+        if db_path is None:
+            from kairix.paths import db_path as resolved_db_path
+
+            db_path = resolved_db_path()
+
+        db = _sqlite3.connect(str(db_path))
+        try:
+            plan_before = _explain_plan(db)
+            result = run_periodic_analyze(db, stale_seconds=0.0)
+            plan_after = _explain_plan(db)
+            rows_analyzed = _count_documents(db)
+        finally:
+            db.close()
+
+        return {
+            "analyze_ran": result.ran,
+            "reason": result.reason,
+            "rows_analyzed": rows_analyzed,
+            "previous_doc_count": result.previous_doc_count,
+            "elapsed_ms": result.elapsed_ms,
+            "plan_before": plan_before,
+            "plan_after": plan_after,
+            "sample_query": "SELECT id FROM documents WHERE collection=? AND active=1",
+            "error": "",
+        }
+    except Exception as exc:
+        logger.warning("tool_maintenance_analyze failed: %s", exc, exc_info=True)
+        return {
+            "analyze_ran": False,
+            "rows_analyzed": 0,
+            "elapsed_ms": 0.0,
+            "error": type(exc).__name__,
+            "detail": f"{type(exc).__name__}: {exc}",
+        }
+
+
 def tool_cc_pair(verb: str = "list") -> dict[str, Any]:
     """Stub for the cc-pair capability — Wave D lifecycle is operator-owned.
 
@@ -1330,6 +1399,12 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix cc-pair",
                 category=CAP_CATEGORY_KNOWLEDGE_WRITE,
                 escalate_via="cc_pair",
+            ),
+            _cap(
+                name="maintenance_analyze",
+                mcp_tool="maintenance_analyze",
+                cli="kairix maintenance analyze",
+                category=CAP_CATEGORY_DIAGNOSTIC,
             ),
         ],
         "schema_version": "1",
@@ -1782,6 +1857,20 @@ def _register_operator_and_ingest_tools(server: Any) -> None:
     def cc_pair(verb: str = "list") -> dict[str, Any]:
         """Operator-only cc_pair lifecycle. Returns escalation envelope."""
         return tool_cc_pair(verb=verb)
+
+    @server.tool(
+        description=(
+            "Run ANALYZE on the kairix SQLite index to refresh planner statistics. "
+            "Use after large ingests or when query plans look wrong. Reports the "
+            "EXPLAIN QUERY PLAN before/after on a representative hot-path query so "
+            "callers can confirm the planner picked up the new stats. Equivalent of "
+            "the operator-side `kairix maintenance analyze` (#376)."
+        )
+    )
+    @async_tool_handler
+    def maintenance_analyze() -> dict[str, Any]:
+        """Refresh SQLite planner stats. Returns the analyze envelope."""
+        return tool_maintenance_analyze()
 
     # ---- Plan B-parity Week 5 Stream A — agent-driven ingest + recall ----
     # ingest_chat lets the agent push JSONL transcripts into the conversation

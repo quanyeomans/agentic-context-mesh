@@ -35,6 +35,7 @@ Subcommands:
   dead-letter Operator triage view over the connector_deadletter table (status)
   secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
   connect     Operator-only: capture OAuth2 tokens for connectors (Google + GitHub App)
+  maintenance Operator surface for ad-hoc maintenance tasks (analyze: refresh planner stats)
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -78,6 +79,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "dead-letter": ("kairix.dead_letter_cli", "main", True),
     "secrets": ("kairix.secrets.cli", "main", True),
     "connect": ("kairix.connect.cli", "main", True),
+    "maintenance": ("kairix.core.maintenance.cli", "main", True),
 }
 
 

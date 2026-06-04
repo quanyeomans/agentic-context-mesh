@@ -28,6 +28,13 @@ class _FakeGraphClient:
     available = True
 
 
+class _FakeStatsResult:
+    """Stand-in for WarmStepResult — only ``.detail`` is read by the runner."""
+
+    def __init__(self, detail: str = "stats already present, skipped") -> None:
+        self.detail = detail
+
+
 def _ok_deps() -> dict[str, Any]:
     """Builders that all succeed — happy-path injection."""
     fake = _FakePipeline()
@@ -35,6 +42,7 @@ def _ok_deps() -> dict[str, Any]:
         "pipeline_builder": lambda: fake,
         "search_probe": lambda p: p.search(query="__test__"),
         "graph_client_opener": _FakeGraphClient,
+        "sqlite_stats_ensurer": lambda: _FakeStatsResult(),
     }
 
 
@@ -44,11 +52,16 @@ def _ok_deps() -> dict[str, Any]:
 
 
 def test_happy_path_runs_every_step() -> None:
-    """All three steps execute and report ok=True."""
+    """All four steps execute and report ok=True."""
     result = run_warm(**_ok_deps())
     assert result.ok is True
     assert result.failures == []
-    assert {s.name for s in result.steps} == {"build_search_pipeline", "probe_search", "open_graph_client"}
+    assert {s.name for s in result.steps} == {
+        "build_search_pipeline",
+        "probe_search",
+        "ensure_sqlite_stats",
+        "open_graph_client",
+    }
     assert all(s.ok for s in result.steps), [(s.name, s.detail) for s in result.steps]
     assert result.total_duration_s >= 0.0
 
@@ -89,6 +102,7 @@ def test_pipeline_build_failure_skips_probe_but_runs_graph() -> None:
         pipeline_builder=boom,
         search_probe=lambda p: p,
         graph_client_opener=_FakeGraphClient,
+        sqlite_stats_ensurer=lambda: _FakeStatsResult(),
     )
     assert result.ok is False
     by_name = {s.name: s for s in result.steps}
@@ -115,6 +129,7 @@ def test_graph_failure_doesnt_block_search_warmup() -> None:
         pipeline_builder=lambda: fake,
         search_probe=lambda p: p.search(query="__test__"),
         graph_client_opener=boom_graph,
+        sqlite_stats_ensurer=lambda: _FakeStatsResult(),
     )
     assert result.ok is False
     by_name = {s.name: s for s in result.steps}
@@ -156,9 +171,12 @@ def test_progress_callback_fires_once_per_stage_in_order() -> None:
 
     run_warm(progress_callback=observed.append, **_ok_deps())
 
-    assert observed == ["build_search_pipeline", "probe_search", "open_graph_client"], (
-        f"progress callback must fire once per stage in execution order; got {observed!r}"
-    )
+    assert observed == [
+        "build_search_pipeline",
+        "probe_search",
+        "ensure_sqlite_stats",
+        "open_graph_client",
+    ], f"progress callback must fire once per stage in execution order; got {observed!r}"
 
 
 def test_progress_callback_exception_does_not_abort_warm() -> None:
@@ -176,4 +194,9 @@ def test_progress_callback_exception_does_not_abort_warm() -> None:
     result = run_warm(progress_callback=explode, **_ok_deps())
 
     assert result.ok is True, f"callback exception must not abort warm; got {result.failures!r}"
-    assert {s.name for s in result.steps} == {"build_search_pipeline", "probe_search", "open_graph_client"}
+    assert {s.name for s in result.steps} == {
+        "build_search_pipeline",
+        "probe_search",
+        "ensure_sqlite_stats",
+        "open_graph_client",
+    }

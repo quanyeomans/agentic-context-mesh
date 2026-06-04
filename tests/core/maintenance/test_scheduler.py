@@ -362,6 +362,8 @@ def test_tick_to_dict_exports_every_field() -> None:
         elapsed_ms=42,
         bronze_orphans_reaped=7,
         bronze_ttl_gc_deleted=11,
+        periodic_analyze_ran=True,
+        periodic_analyze_reason="stale",
     )
     d = tick_to_dict(result)
     assert d == {
@@ -373,6 +375,8 @@ def test_tick_to_dict_exports_every_field() -> None:
         "elapsed_ms": 42,
         "bronze_orphans_reaped": 7,
         "bronze_ttl_gc_deleted": 11,
+        "periodic_analyze_ran": True,
+        "periodic_analyze_reason": "stale",
     }
 
 

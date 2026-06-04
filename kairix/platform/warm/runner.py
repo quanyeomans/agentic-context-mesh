@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 _STEP_BUILD = "build_search_pipeline"
 _STEP_PROBE = "probe_search"
 _STEP_GRAPH = "open_graph_client"
+_STEP_SQLITE_STATS = "ensure_sqlite_stats"
 
 
 # Workload signature used for the no-op probe — short, lowercase, ASCII,
@@ -103,6 +104,32 @@ def _step_probe_search(pipeline: Any) -> Any:
     return pipeline.search(query=WARMUP_QUERY, budget=500, scope="shared+agent")
 
 
+def _step_ensure_sqlite_stats() -> Any:
+    """Bootstrap SQLite query-planner statistics if missing.
+
+    Idempotent: when ``sqlite_stat1`` is already populated this is a
+    structural no-op. On a fresh install with > 0 documents it runs
+    ``ANALYZE`` once so the planner picks the right index for hot-path
+    queries (avoiding the idx_documents_active vs idx_documents_collection
+    regression the 2026-06-02 production audit found).
+
+    Lazy import keeps the warm runner importable on call sites that
+    don't have ``sqlite3`` linked at module load.
+    """
+    import sqlite3
+
+    from kairix.paths import KairixPaths
+    from kairix.platform.warm.sqlite_stats import ensure_sqlite_stats
+
+    paths = KairixPaths.resolve()
+    # F77-allow: warm-up runs once per container before the worker loop owns its coordinator
+    db = sqlite3.connect(str(paths.db_path))
+    try:
+        return ensure_sqlite_stats(db, paths)
+    finally:
+        db.close()
+
+
 def _step_open_graph_client() -> Any:
     """Open the Neo4j driver connection so the first entity lookup is fast.
 
@@ -167,6 +194,7 @@ def run_warm(
     pipeline_builder: Callable[[], Any] | None = None,
     search_probe: Callable[[Any], Any] | None = None,
     graph_client_opener: Callable[[], Any] | None = None,
+    sqlite_stats_ensurer: Callable[[], Any] | None = None,
     progress_callback: Callable[[str], None] | None = None,
 ) -> WarmResult:
     """Run all warm-up steps and return a structured result.
@@ -177,6 +205,9 @@ def run_warm(
         search_probe: injectable; tests pass a no-op that accepts the
             pipeline argument and returns immediately.
         graph_client_opener: injectable; tests pass a fake.
+        sqlite_stats_ensurer: injectable; tests pass a fake that drives
+            the ANALYZE bootstrap without opening a real SQLite
+            connection. Production omits.
         progress_callback: optional one-arg callable invoked with the
             stage name each time a step completes (success or failure).
             Default ``None`` — preserves prior behaviour. The CLI wires a
@@ -193,6 +224,7 @@ def run_warm(
     build = pipeline_builder or _step_build_pipeline
     probe = search_probe or _step_probe_search
     open_graph = graph_client_opener or _step_open_graph_client
+    ensure_stats = sqlite_stats_ensurer or _step_ensure_sqlite_stats
 
     mark_warming()
     t_total_start = time.perf_counter()
@@ -215,6 +247,22 @@ def run_warm(
             )
         )
     _emit_progress(progress_callback, _STEP_PROBE)
+
+    step_stats, stats_result = _time_step(_STEP_SQLITE_STATS, ensure_stats)
+    # When the ensurer returned a WarmStepResult-shaped object, hoist its
+    # ``detail`` into the WarmStep so operators see "ANALYZE complete" /
+    # "stats already present, skipped" in the envelope without having to
+    # cross-reference a separate field.
+    detail_attr = getattr(stats_result, "detail", None) if stats_result is not None else None
+    if detail_attr:
+        step_stats = WarmStep(
+            name=step_stats.name,
+            ok=step_stats.ok,
+            duration_s=step_stats.duration_s,
+            detail=str(detail_attr),
+        )
+    steps.append(step_stats)
+    _emit_progress(progress_callback, _STEP_SQLITE_STATS)
 
     step_graph, _ = _time_step(_STEP_GRAPH, open_graph)
     steps.append(step_graph)
