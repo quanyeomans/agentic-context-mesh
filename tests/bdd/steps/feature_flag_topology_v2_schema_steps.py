@@ -160,17 +160,24 @@ def _tables_empty(topology_v2_schema_ctx: _TopologyV2Ctx) -> None:
 
 @then("no production behaviour observable to a search caller has changed")
 def _no_observable_change(topology_v2_schema_ctx: _TopologyV2Ctx) -> None:
-    """The schema_version moved 2 → 3 (operator-observable in
+    """The schema_version moved up (operator-observable in
     ``kairix_meta``), but no search-pipeline behaviour or chunk-write
     behaviour has changed. We verify the schema_version is recorded
-    correctly; full observable-behaviour parity is asserted by the
-    integration test in ``tests/integration/test_topology_v2_schema_migration.py``.
+    as the current canonical value; full observable-behaviour parity
+    is asserted by the integration test in
+    ``tests/integration/test_topology_v2_schema_migration.py``.
+
+    GH #409 bumped SCHEMA_VERSION 3 → 4 (path_canonical column +
+    index); this assertion tracks that constant rather than pinning
+    a stale literal.
     """
     db = topology_v2_schema_ctx.db
     assert db is not None
     version_row = db.execute("SELECT value FROM kairix_meta WHERE key = 'schema_version'").fetchone()
     assert version_row is not None, "schema_version row missing"
-    assert version_row[0] == "3"
+    from kairix.core.db.schema import SCHEMA_VERSION
+
+    assert version_row[0] == SCHEMA_VERSION
 
 
 @then("the write succeeds")

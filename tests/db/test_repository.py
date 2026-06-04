@@ -291,8 +291,11 @@ def test_get_chunk_dates_returns_dates_for_known_paths(db_path: Path, repo: SQLi
     """Drives lines 113-133 — the SQL path returns ``{path: chunk_date}``
     for every chunk row that has a non-NULL chunk_date.
 
-    The repo uses a LIKE suffix match (``%path``), so the absolute path
-    stored in the DB is matched by a relative-path query.
+    GH #409 — callers pass the canonical (exact) path as stored in
+    ``documents.path``; the SQL uses ``WHERE path_canonical IN (?)``
+    against the dedicated index. Prefix-wildcard LIKE-suffix matching
+    is no longer supported (it forced a full table scan on every call
+    and made the enrich phase the dominant search cost at 1.1M rows).
     """
     repo.insert_or_update("/abs/docs/dated.md", "notes", "Dated", "body", "hash-dated")
 
@@ -306,9 +309,11 @@ def test_get_chunk_dates_returns_dates_for_known_paths(db_path: Path, repo: SQLi
     finally:
         db.close()
 
-    # Caller passes the relative path; LIKE %docs/dated.md% matches the
-    # absolute path stored in ``documents.path``.
-    result = repo.get_chunk_dates(["docs/dated.md"])
+    # GH #409 — caller passes the canonical (full) path that lives in
+    # ``documents.path``. ``path_canonical`` is a virtual generated column
+    # derived from ``path``, so exact match resolves the row via the
+    # ``idx_documents_path_canonical`` index.
+    result = repo.get_chunk_dates(["/abs/docs/dated.md"])
 
     assert result == {"/abs/docs/dated.md": "2026-05-01"}
 
@@ -334,7 +339,7 @@ def test_get_chunk_dates_skips_paths_with_null_chunk_date(db_path: Path, repo: S
     finally:
         db.close()
 
-    result = repo.get_chunk_dates(["docs/undated.md"])
+    result = repo.get_chunk_dates(["/abs/docs/undated.md"])
 
     assert "/abs/docs/undated.md" not in result
 
@@ -445,10 +450,13 @@ def test_get_chunk_dates_returns_expected_dict(db_path: Path, repo: SQLiteDocume
 
     Sabotage: if the cache-miss path returned ``{}`` instead of running the
     SQL, this assertion would fail with an empty dict.
+
+    GH #409 — caller passes the canonical (full) path stored in
+    ``documents.path``.
     """
     _seed_chunk_dated(db_path, path="/abs/d1.md", chunk_date="2026-05-01", content_hash="h-d1")
 
-    result = repo.get_chunk_dates(["d1.md"])
+    result = repo.get_chunk_dates(["/abs/d1.md"])
 
     assert result == {"/abs/d1.md": "2026-05-01"}
 
@@ -467,8 +475,8 @@ def test_get_chunk_dates_caches_by_path_set(db_path: Path, repo: SQLiteDocumentR
     """
     _seed_chunk_dated(db_path, path="/abs/d2.md", chunk_date="2026-05-02", content_hash="h-d2")
 
-    first = repo.get_chunk_dates(["d2.md"])
-    second = repo.get_chunk_dates(["d2.md"])
+    first = repo.get_chunk_dates(["/abs/d2.md"])
+    second = repo.get_chunk_dates(["/abs/d2.md"])
 
     assert first is second
 
@@ -486,8 +494,8 @@ def test_get_chunk_dates_cache_independent_of_path_order(db_path: Path, repo: SQ
     _seed_chunk_dated(db_path, path="/abs/a.md", chunk_date="2026-05-03", content_hash="h-a")
     _seed_chunk_dated(db_path, path="/abs/b.md", chunk_date="2026-05-04", content_hash="h-b")
 
-    forward = repo.get_chunk_dates(["a.md", "b.md"])
-    reverse = repo.get_chunk_dates(["b.md", "a.md"])
+    forward = repo.get_chunk_dates(["/abs/a.md", "/abs/b.md"])
+    reverse = repo.get_chunk_dates(["/abs/b.md", "/abs/a.md"])
 
     assert forward is reverse
 
@@ -503,8 +511,8 @@ def test_get_chunk_dates_disjoint_paths_dont_collide(db_path: Path, repo: SQLite
     _seed_chunk_dated(db_path, path="/abs/x.md", chunk_date="2026-05-05", content_hash="h-x")
     _seed_chunk_dated(db_path, path="/abs/y.md", chunk_date="2026-05-06", content_hash="h-y")
 
-    only_x = repo.get_chunk_dates(["x.md"])
-    only_y = repo.get_chunk_dates(["y.md"])
+    only_x = repo.get_chunk_dates(["/abs/x.md"])
+    only_y = repo.get_chunk_dates(["/abs/y.md"])
 
     assert only_x is not only_y
     assert only_x == {"/abs/x.md": "2026-05-05"}
@@ -524,7 +532,7 @@ def test_cache_clear_resets_state(db_path: Path, repo: SQLiteDocumentRepository)
     """
     _seed_chunk_dated(db_path, path="/abs/c.md", chunk_date="2026-05-07", content_hash="h-c")
 
-    first = repo.get_chunk_dates(["c.md"])
+    first = repo.get_chunk_dates(["/abs/c.md"])
     assert first == {"/abs/c.md": "2026-05-07"}
 
     # Mutate the chunk_date underneath the cache.
@@ -536,11 +544,11 @@ def test_cache_clear_resets_state(db_path: Path, repo: SQLiteDocumentRepository)
         db.close()
 
     # Without cache_clear, the cached value still wins.
-    cached_again = repo.get_chunk_dates(["c.md"])
+    cached_again = repo.get_chunk_dates(["/abs/c.md"])
     assert cached_again == {"/abs/c.md": "2026-05-07"}
 
     repo.clear_chunk_dates_cache()
-    fresh = repo.get_chunk_dates(["c.md"])
+    fresh = repo.get_chunk_dates(["/abs/c.md"])
     assert fresh == {"/abs/c.md": "2026-05-08"}
 
 
@@ -554,9 +562,9 @@ def test_cache_miss_invokes_sql_exactly_once_per_unique_pathset(db_path: Path, r
     """
     _seed_chunk_dated(db_path, path="/abs/p.md", chunk_date="2026-05-09", content_hash="h-p")
 
-    repo.get_chunk_dates(["p.md"])  # miss
-    repo.get_chunk_dates(["p.md"])  # hit
-    repo.get_chunk_dates(["p.md"])  # hit
+    repo.get_chunk_dates(["/abs/p.md"])  # miss
+    repo.get_chunk_dates(["/abs/p.md"])  # hit
+    repo.get_chunk_dates(["/abs/p.md"])  # hit
 
     info = repo._chunk_dates_cache.cache_info()
     assert info.misses == 1

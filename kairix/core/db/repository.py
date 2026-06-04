@@ -167,22 +167,34 @@ class SQLiteDocumentRepository:
     def _get_chunk_dates_uncached(self, paths: frozenset[str]) -> dict[str, str]:
         """SQL backend for :meth:`get_chunk_dates`. Only called on cache miss.
 
-        Uses LIKE suffix match because the DB stores absolute paths while
-        callers may use collection-relative paths.
+        GH #409 — uses ``WHERE d.path_canonical IN (?, ?, ...)`` against the
+        ``idx_documents_path_canonical`` index. The prior implementation used
+        ``LIKE '%suffix'`` to tolerate callers passing collection-relative
+        paths, which forced a full table scan on every call (14s p50 on
+        1.1M rows in production). ``path_canonical`` is a virtual generated
+        column (``GENERATED ALWAYS AS (path) VIRTUAL``) so callers must
+        now pass the same path shape stored in ``documents.path`` — i.e.
+        the value returned by BM25/vector backends' ``r.path`` field.
         """
-        # Materialise once so the SQL parameter list and the LIKE-clause
+        # Materialise once so the SQL parameter list and the placeholder
         # generator iterate the same elements in the same order.
         path_list = list(paths)
+        placeholders = ",".join("?" * len(path_list))
         try:
             db = self._opener(Path(self._db_path))
             try:
-                like_clauses = " OR ".join("d.path LIKE ?" for _ in path_list)
+                # F63-bounded: ``IN (?,?,...)`` cardinality is naturally
+                # capped by ``len(path_list)``, which is in turn capped
+                # upstream by the caller (search pipeline enrich stage
+                # passes one path per fused result; fused result count
+                # is bounded by retrieval-config limits).
                 rows = db.execute(
                     f"SELECT d.path, cv.chunk_date "
                     f"FROM content_vectors cv "
                     f"JOIN documents d ON d.hash = cv.hash "
-                    f"WHERE cv.chunk_date IS NOT NULL AND ({like_clauses})",
-                    [f"%{p}" for p in path_list],
+                    f"WHERE cv.chunk_date IS NOT NULL "
+                    f"AND d.path_canonical IN ({placeholders})",
+                    path_list,
                 ).fetchall()
             finally:
                 db.close()

@@ -39,9 +39,12 @@ _TOPOLOGY_V2_TABLES = (
 
 
 @pytest.mark.integration
-def test_schema_version_bumps_to_3() -> None:
-    """Wave A bumps SCHEMA_VERSION from "2" to "3"."""
-    assert SCHEMA_VERSION == "3"
+def test_schema_version_bumps_to_4() -> None:
+    """Wave A bumped SCHEMA_VERSION from "2" to "3"; GH #409 bumps to "4"
+    (path_canonical column + idx_documents_path_canonical for the
+    enrich-phase indexed lookup that replaces the LIKE-suffix scan).
+    """
+    assert SCHEMA_VERSION == "4"
 
 
 @pytest.mark.integration

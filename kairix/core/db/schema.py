@@ -29,7 +29,7 @@ from . import EMBED_VECTOR_DIMS
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 # F17 — table names appear in schema validation, migration, and conditional
 # column-add logic; one constant per table keeps the SQL identifier in a single
@@ -77,6 +77,13 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
             source_modified_at TEXT,
             source_page INTEGER,
             sensitivity TEXT NOT NULL DEFAULT 'public',
+            -- GH #409: indexed exact-match column for the search enrich phase.
+            -- Derived from ``path`` so writers never set it explicitly.
+            -- VIRTUAL (not STORED) because SQLite forbids STORED generated
+            -- columns in ALTER TABLE on legacy DBs; VIRTUAL columns ARE
+            -- indexable (the index materialises the value) so the planner
+            -- still gets O(log N) lookup via ``idx_documents_path_canonical``.
+            path_canonical TEXT GENERATED ALWAYS AS (path) VIRTUAL,
             UNIQUE(collection, path)
         );
 
@@ -262,6 +269,13 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
         CREATE INDEX IF NOT EXISTS idx_documents_agent_owner ON documents(agent_owner);
         CREATE INDEX IF NOT EXISTS idx_content_vectors_chunk_date ON content_vectors(chunk_date);
         CREATE INDEX IF NOT EXISTS idx_documents_source_uri ON documents(source_uri);
+        -- GH #409: indexed exact-match lookup for the search enrich phase.
+        -- Replaces ``WHERE path LIKE '%suffix'`` (full table scan on 1.1M
+        -- rows, 14s p50 in production) with ``WHERE path_canonical IN (?)``
+        -- (O(log N) index probe). On a legacy DB the migrate() call above
+        -- has already added the ``path_canonical`` virtual generated column
+        -- before this CREATE INDEX runs.
+        CREATE INDEX IF NOT EXISTS idx_documents_path_canonical ON documents(path_canonical);
     """)
 
     # FTS5 — external content mode is not needed; we populate directly.
@@ -695,6 +709,39 @@ def _migrate_documents_connector_columns(db: sqlite3.Connection, tables: set[str
         _add_column_if_missing(db, "documents", column, column_def)
 
 
+def _migrate_documents_path_canonical(db: sqlite3.Connection, tables: set[str]) -> None:
+    """GH #409 — add ``path_canonical`` virtual generated column.
+
+    On legacy DBs the column is added via ALTER TABLE with a VIRTUAL
+    generated expression (``GENERATED ALWAYS AS (path) VIRTUAL``). SQLite
+    forbids STORED generated columns in ALTER TABLE but permits VIRTUAL
+    ones; VIRTUAL columns are still indexable, which is what makes the
+    enrich-phase query rewrite (``WHERE path_canonical IN (?)``) usable
+    via an index probe instead of a full table scan.
+
+    Idempotent — uses ``PRAGMA table_xinfo`` (rather than ``table_info``)
+    because the latter omits generated columns, which would cause a
+    re-run on a fresh DB to attempt a duplicate ALTER TABLE.
+
+    On a 1.1M-row production DB the bare ALTER TABLE is metadata-only
+    (no row copy); the subsequent ``CREATE INDEX`` materialises one
+    index entry per row (~1.1M rows in single-digit minutes on the
+    target VM). The index is created separately in :func:`create_schema`
+    after this migration runs so it sees the new column.
+    """
+    if "documents" not in tables:
+        return
+    # safe: hardcoded table name; table_xinfo is the variant of table_info
+    # that includes generated columns (table_info omits them, which would
+    # make this migration not idempotent on a fresh DB).
+    existing = {row[1] for row in db.execute("PRAGMA table_xinfo(documents)")}
+    if "path_canonical" in existing:
+        return
+    db.execute("ALTER TABLE documents ADD COLUMN path_canonical TEXT GENERATED ALWAYS AS (path) VIRTUAL")
+    db.commit()
+    logger.info("db.schema: migration — added path_canonical (virtual generated) column to documents")
+
+
 def _migrate_topology_v2_columns(db: sqlite3.Connection, tables: set[str]) -> None:
     """Add topology v2 (Wave A) columns to existing tables.
 
@@ -757,6 +804,12 @@ def migrate(db: sqlite3.Connection) -> None:
     _migrate_documents_connector_columns(db, tables)
     db.executescript(_CONNECTOR_TABLES_DDL)
 
+    # GH #409 — path_canonical virtual column for indexed exact-match
+    # enrich. Must run before the idx_documents_path_canonical CREATE
+    # INDEX in create_schema(), which is the case because create_schema
+    # invokes migrate() first.
+    _migrate_documents_path_canonical(db, tables)
+
     # Streaming-bronze Phase 2: bronze_records.content_hash. SHA-256 of
     # raw bytes computed at write time on both BronzeStore impls; used
     # by Phase 3+ for re-fetch verification + dedupe detection.
@@ -788,6 +841,8 @@ def migrate(db: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(active);
             CREATE INDEX IF NOT EXISTS idx_documents_agent_owner ON documents(agent_owner);
             CREATE INDEX IF NOT EXISTS idx_documents_source_uri ON documents(source_uri);
+            -- GH #409 — exact-match enrich-phase index (see _migrate_documents_path_canonical).
+            CREATE INDEX IF NOT EXISTS idx_documents_path_canonical ON documents(path_canonical);
         """)
     if _TABLE_CONTENT_VECTORS in tables:
         db.execute("CREATE INDEX IF NOT EXISTS idx_content_vectors_chunk_date ON content_vectors(chunk_date)")
