@@ -1,4 +1,4 @@
-"""In-process embed cache for the embed roundtrip.
+"""Restart-resilient embed cache for the embed roundtrip.
 
 Lives in :mod:`kairix.transport.cache` — the universal endpoint
 response cache. See docs/architecture/provider-plugin-architecture.md
@@ -20,6 +20,17 @@ fresh queries still pay the full embed cost; this cache aims to take
 that cost off the hot path whenever the SAME text has been embedded
 recently.
 
+Persistence (#391)
+------------------
+
+Construct with ``path=...`` to back the in-memory LRU with a SQLite
+file on disk. ``put`` is write-through (INSERT OR REPLACE) so the next
+process restart finds the entries already populated; ``__init__``
+replays the on-disk rows into the in-memory ``OrderedDict`` so the
+first ``get`` after restart serves from RAM rather than reloading
+through SQLite. Construction with ``path=None`` keeps the original
+in-memory-only behaviour for tests and ad-hoc instances.
+
 Design notes:
 
 - ``OrderedDict`` backs the LRU. ``move_to_end(key)`` promotes on
@@ -36,8 +47,6 @@ Design notes:
   because embed vectors depend only on the model + text, not on
   changing vault state. Two agents asking the same question 20 min
   apart will share an embedding even though their result sets differ.
-- Invalidation is process-restart-only. A future ticket may add
-  cache-bust on model-version change; that is out of scope here.
 - :func:`normalise_query` is re-used from
   :mod:`kairix.core.search.query_cache` rather than re-defined — the
   result cache and the embed cache MUST agree on what "same text"
@@ -47,11 +56,15 @@ Design notes:
 
 from __future__ import annotations
 
+import logging
+import sqlite3
+import struct
 import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 # Re-export normalise_query so consumers (tests, integration code) can
 # import it from a single canonical location regardless of which cache
@@ -59,6 +72,8 @@ from dataclasses import dataclass
 # share the same normalisation rules — by re-exporting we anchor that
 # invariant in code.
 from kairix.core.search.query_cache import normalise_query
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DEFAULT_MAX_AGE_S",
@@ -73,6 +88,36 @@ __all__ = [
 
 DEFAULT_MAX_ENTRIES = 1000
 DEFAULT_MAX_AGE_S = 1800.0  # 30 minutes — embeddings depend on model + text only.
+
+# SQLite schema for the on-disk persistence layer (#391). One row per
+# normalised-query key; the vector is stored as raw little-endian f32
+# bytes (struct-packed) to keep the schema dependency-free of numpy at
+# the transport layer (numpy lives in kairix.core only). ``inserted_at``
+# is the same wall-clock seconds the in-memory layer uses so the
+# replay-on-startup path can re-apply the age check without translation.
+_TABLE = "embed_cache"
+_CREATE_SQL = (
+    f"CREATE TABLE IF NOT EXISTS {_TABLE} ("
+    "  key          TEXT PRIMARY KEY,"
+    "  inserted_at  REAL NOT NULL,"
+    "  vector       BLOB NOT NULL"
+    ")"
+)
+_UPSERT_SQL = f"INSERT OR REPLACE INTO {_TABLE} (key, inserted_at, vector) VALUES (?, ?, ?)"
+_SELECT_ALL_SQL = f"SELECT key, inserted_at, vector FROM {_TABLE} ORDER BY inserted_at ASC LIMIT ?"
+_DELETE_KEY_SQL = f"DELETE FROM {_TABLE} WHERE key = ?"
+_TRUNCATE_SQL = f"DELETE FROM {_TABLE}"
+
+
+def _encode_vector(embedding: list[float]) -> bytes:
+    """Pack a float list as little-endian f32 bytes for SQLite storage."""
+    return struct.pack(f"<{len(embedding)}f", *embedding)
+
+
+def _decode_vector(blob: bytes) -> list[float]:
+    """Unpack little-endian f32 bytes back into a Python float list."""
+    count = len(blob) // 4
+    return list(struct.unpack(f"<{count}f", blob))
 
 
 @dataclass(frozen=True)
@@ -112,6 +157,7 @@ class EmbedCache:
         max_age_s: float = DEFAULT_MAX_AGE_S,
         *,
         clock: Callable[[], float] = time.time,
+        path: Path | str | None = None,
     ) -> None:
         self._max_entries = max(1, int(max_entries))
         self._max_age_s = float(max_age_s)
@@ -123,6 +169,95 @@ class EmbedCache:
         # Public DI seam — tests pass a controllable clock to drive
         # expiry without monkey-patching ``time.time`` inside this module.
         self._clock = clock
+        # On-disk persistence layer (#391). When ``path`` is None, the
+        # cache stays in-memory-only — keeps the legacy contract for
+        # tests and ad-hoc instances. When set, ``put`` is write-through
+        # and ``__init__`` replays existing rows into the in-memory LRU.
+        self._path: Path | None = Path(path) if path is not None else None
+        self._conn: sqlite3.Connection | None = None
+        if self._path is not None:
+            self._open_and_replay()
+
+    def _open_and_replay(self) -> None:
+        """Open the SQLite file (creating it if needed) and replay rows into the LRU.
+
+        The directory is created if missing — operators occasionally
+        bind-mount the data dir before the cache file has ever been
+        written, and silently failing to create the file would leave
+        the operator-visible 0-byte symptom that triggered #391.
+        Connection is shared across threads (``check_same_thread=False``)
+        because the ``RLock`` already serialises all access at the
+        Python level.
+        """
+        assert self._path is not None
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            # F77-allow: query-embed cache DB; MCP-only writer; #391.
+            conn = sqlite3.connect(str(self._path), check_same_thread=False)
+            conn.execute(_CREATE_SQL)
+            conn.commit()
+            self._conn = conn
+        except (OSError, sqlite3.Error) as exc:
+            # Disk-layer failure should never crash the embed path — the
+            # cache degrades to in-memory-only and logs the cause so the
+            # operator sees the warning rather than a silently-broken
+            # restart-resilient cache.
+            logger.warning(
+                "EmbedCache: failed to open persistence file %s — degrading to in-memory-only. cause: %s",
+                self._path,
+                exc,
+            )
+            self._conn = None
+            return
+
+        # Replay existing rows oldest-first so the in-memory LRU
+        # ordering reflects insertion order on disk. Drop expired
+        # entries during replay so a long-stopped process can't serve
+        # stale embeddings on restart.
+        try:
+            # F63-bounded: LIMIT capped at self._max_entries (replay never
+            # loads more rows than the in-memory LRU can hold; older rows
+            # would be evicted anyway).
+            cursor = self._conn.execute(_SELECT_ALL_SQL, (self._max_entries,))
+            now = self._clock()
+            for key, inserted_at, blob in cursor.fetchall():
+                if (now - inserted_at) > self._max_age_s:
+                    # Drop the expired row on disk so the file doesn't
+                    # accumulate stale entries across restarts.
+                    self._conn.execute(_DELETE_KEY_SQL, (key,))
+                    continue
+                vector = _decode_vector(blob)
+                self._entries[key] = (inserted_at, vector)
+                if len(self._entries) > self._max_entries:
+                    evicted_key, _ = self._entries.popitem(last=False)
+                    self._conn.execute(_DELETE_KEY_SQL, (evicted_key,))
+                    self._evictions += 1
+            self._conn.commit()
+        except sqlite3.Error as exc:  # pragma: no cover — defensive replay fallback.
+            logger.warning(
+                "EmbedCache: failed to replay existing rows from %s — starting with empty in-memory cache. cause: %s",
+                self._path,
+                exc,
+            )
+
+    @property
+    def path(self) -> Path | None:
+        """On-disk persistence path, or ``None`` when in-memory-only."""
+        return self._path
+
+    def close(self) -> None:
+        """Close the underlying SQLite connection (idempotent).
+
+        Tests call this between cases when constructing multiple caches
+        against the same ``tmp_path`` so the OS-level file handle is
+        released before the next construction reopens it.
+        """
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                finally:
+                    self._conn = None
 
     def get(self, query: str) -> list[float] | None:
         """Return the cached embedding or ``None``. Expired entries miss.
@@ -149,6 +284,7 @@ class EmbedCache:
                 # misses, not hits — re-embedding is the same outcome as
                 # serving stale text.
                 del self._entries[key]
+                self._delete_persisted(key)
                 self._misses += 1
                 return None
             self._entries.move_to_end(key)
@@ -163,6 +299,12 @@ class EmbedCache:
         Empty / whitespace-only queries and empty embeddings are NOT
         cached — caching ``[]`` would lock the "embed failed" outcome
         in front of every same-text caller until the entry ages out.
+
+        Write-through to the SQLite persistence layer when ``path``
+        was set at construction (#391). On-disk write failure logs
+        a warning and keeps the in-memory entry — the next process
+        restart loses that entry but production keeps serving from
+        memory in the meantime.
         """
         if not query or not query.strip():
             return
@@ -179,11 +321,42 @@ class EmbedCache:
                 # Existing key: refresh the timestamp and promote to MRU.
                 self._entries[key] = (now, stored)
                 self._entries.move_to_end(key)
+                self._upsert_persisted(key, now, stored)
                 return
             self._entries[key] = (now, stored)
+            self._upsert_persisted(key, now, stored)
             if len(self._entries) > self._max_entries:
-                self._entries.popitem(last=False)
+                evicted_key, _ = self._entries.popitem(last=False)
+                self._delete_persisted(evicted_key)
                 self._evictions += 1
+
+    def _upsert_persisted(self, key: str, inserted_at: float, embedding: list[float]) -> None:
+        """Write a single entry to the SQLite layer. Caller holds the lock."""
+        if self._conn is None:
+            return
+        try:
+            with self._conn:
+                self._conn.execute(_UPSERT_SQL, (key, inserted_at, _encode_vector(embedding)))
+        except sqlite3.Error as exc:  # pragma: no cover — defensive write fallback.
+            logger.warning(
+                "EmbedCache: persistence write failed for key %r — entry kept in-memory only. cause: %s",
+                key,
+                exc,
+            )
+
+    def _delete_persisted(self, key: str) -> None:
+        """Remove a single entry from the SQLite layer. Caller holds the lock."""
+        if self._conn is None:
+            return
+        try:
+            with self._conn:
+                self._conn.execute(_DELETE_KEY_SQL, (key,))
+        except sqlite3.Error as exc:  # pragma: no cover — defensive: stale row on next restart is the only consequence.
+            logger.warning(
+                "EmbedCache: persistence delete failed for key %r — entry will replay on next restart. cause: %s",
+                key,
+                exc,
+            )
 
     def stats(self) -> EmbedCacheStats:
         """Return an atomic snapshot of cache state."""
@@ -213,12 +386,23 @@ class EmbedCache:
 
         Used by tests between cases and by any future cache-bust event
         (e.g. embed-model version change — out of scope here).
+        Truncates the SQLite layer too when persistence is wired so a
+        cache-bust survives process restart.
         """
         with self._lock:
             self._entries.clear()
             self._hits = 0
             self._misses = 0
             self._evictions = 0
+            if self._conn is not None:
+                try:
+                    with self._conn:
+                        self._conn.execute(_TRUNCATE_SQL)
+                except sqlite3.Error as exc:  # pragma: no cover — defensive truncate fallback.
+                    logger.warning(
+                        "EmbedCache: persistence truncate failed — file may still hold stale rows. cause: %s",
+                        exc,
+                    )
 
     def _is_expired(self, inserted_at: float) -> bool:
         """Internal age check — caller already holds the lock."""
@@ -233,12 +417,47 @@ _EMBED_CACHE: EmbedCache | None = None
 _EMBED_CACHE_LOCK = threading.Lock()
 
 
+def _resolve_embed_cache_path() -> Path | None:
+    """Resolve the persistence path for the process-shared singleton.
+
+    Returns ``None`` when running under pytest so test runs don't write
+    embed-cache files into the developer's real data dir — mirrors the
+    ``PYTEST_CURRENT_TEST`` guard used by
+    :func:`kairix.core.embed._deps_defaults.default_open_embedding_cache`.
+    F4-clean — the env read lives at the paths boundary.
+
+    Path failures (no ``KAIRIX_DATA_DIR``, paths module unimportable
+    under partial installs) degrade gracefully to in-memory-only with
+    a logged warning.
+    """
+    import os
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    try:
+        from kairix.paths import embed_cache_path
+
+        return embed_cache_path()
+    except Exception as exc:
+        logger.warning(
+            "EmbedCache: failed to resolve persistence path — degrading to in-memory-only. cause: %s",
+            exc,
+        )
+        return None
+
+
 def get_embed_cache() -> EmbedCache:
     """Return the process-shared :class:`EmbedCache`, building it lazily.
 
     Bounds are read from env vars on first construction:
       - ``KAIRIX_EMBED_CACHE_MAX_ENTRIES`` (int, default 1000)
       - ``KAIRIX_EMBED_CACHE_MAX_AGE_S`` (float seconds, default 1800)
+
+    Persistence path resolves to :func:`kairix.paths.embed_cache_path`
+    (``data_dir() / "embed_cache.sqlite"``) so the cache survives
+    ``docker compose restart`` — closes #391. Test runs (detected via
+    ``PYTEST_CURRENT_TEST``) get a path-less in-memory-only singleton
+    so cache files don't leak into the developer's data dir.
 
     F4-clean: env reads route through :mod:`kairix.paths`.
     """
@@ -249,7 +468,8 @@ def get_embed_cache() -> EmbedCache:
 
             max_entries = read_int_env("KAIRIX_EMBED_CACHE_MAX_ENTRIES", default=DEFAULT_MAX_ENTRIES)
             max_age_s = read_float_env("KAIRIX_EMBED_CACHE_MAX_AGE_S", default=DEFAULT_MAX_AGE_S)
-            _EMBED_CACHE = EmbedCache(max_entries=max_entries, max_age_s=max_age_s)
+            path = _resolve_embed_cache_path()
+            _EMBED_CACHE = EmbedCache(max_entries=max_entries, max_age_s=max_age_s, path=path)
         return _EMBED_CACHE
 
 

@@ -462,6 +462,34 @@ def embedding_cache_path() -> Path:
     return document_root() / ".kairix" / "cache" / "embedding_cache.sqlite"
 
 
+def embed_cache_path() -> Path:
+    """Resolve the SQLite-backed persistent transport-layer embed cache path.
+
+    Distinct from :func:`embedding_cache_path`:
+
+      - :func:`embedding_cache_path` (``embedding_cache.sqlite`` under
+        ``<document_root>/.kairix/cache/``) caches **chunk** embeddings
+        keyed on ``(model, dimension, chunk_hash)`` — the embed-ingest
+        pipeline's restart-resilient store.
+      - :func:`embed_cache_path` (``embed_cache.sqlite`` under
+        :func:`data_dir`) caches **query** embeddings keyed on the
+        normalised query text — the transport-layer cache that sits
+        in front of every search-time embed call.
+
+    Lives under :func:`data_dir` (``/data/kairix`` in Docker;
+    ``/var/lib/kairix`` for service installs; XDG data dir for user
+    installs) so it travels with the kairix data volume across
+    ``docker compose down/up`` cycles. Closes #391: the previous
+    in-process LRU implementation lost its entries on every container
+    restart, so every release fan-out re-paid the ~250-500 ms Azure
+    embed roundtrip for every repeat query.
+
+    F4-clean — the env read for ``KAIRIX_DATA_DIR`` happens inside
+    :func:`data_dir` at the paths boundary.
+    """
+    return data_dir() / "embed_cache.sqlite"
+
+
 def summaries_db_path() -> Path:
     """Get the summaries database path.
 
