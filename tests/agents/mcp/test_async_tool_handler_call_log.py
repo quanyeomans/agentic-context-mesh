@@ -17,6 +17,7 @@ import asyncio
 import logging
 import sqlite3
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,35 @@ def tmp_db(tmp_path: Path) -> Iterator[Path]:
     yield db_path
 
 
+@pytest.fixture
+def obs_executor() -> Iterator[ThreadPoolExecutor]:
+    """Test-owned observability executor.
+
+    #403 moved ``_record_mcp_call`` off the event loop via ``executor.submit``,
+    so the wrapper now returns BEFORE the SQLite row lands on disk. Tests
+    construct ``AsyncToolHandlerDeps(obs_executor_fn=lambda: obs_executor)``
+    so they own the executor and can ``shutdown(wait=True)`` it before
+    asserting on the row contents — turns the fire-and-forget INSERT into
+    a deterministic write for the test's purposes without changing the
+    production code's fire-and-forget contract.
+    """
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-obs")
+    try:
+        yield pool
+    finally:
+        pool.shutdown(wait=True)
+
+
+def _drain_obs(obs_executor: ThreadPoolExecutor) -> None:
+    """Submit a sentinel to force a serialisation point against the queue.
+
+    The single-worker executor processes ``submit`` calls in order, so a
+    ``submit(lambda: None).result()`` returns only after the preceding
+    ``_record_mcp_call`` submission has finished. Read rows afterwards.
+    """
+    obs_executor.submit(lambda: None).result(timeout=5)
+
+
 def _rows(db_path: Path) -> list[tuple[str, str, str | None, int, int, str | None, str | None]]:
     """Read every row from mcp_call_log.
 
@@ -55,7 +85,7 @@ def _rows(db_path: Path) -> list[tuple[str, str, str | None, int, int, str | Non
         conn.close()
 
 
-def test_successful_call_records_success_row(tmp_db: Path) -> None:
+def test_successful_call_records_success_row(tmp_db: Path, obs_executor: ThreadPoolExecutor) -> None:
     """A handler that returns a dict logs one row with success=1, error_class=NULL.
 
     Sabotage proof: changed the wrapper to skip the _record_mcp_call call
@@ -65,9 +95,13 @@ def test_successful_call_records_success_row(tmp_db: Path) -> None:
     def my_tool(query: str, agent: str | None = None) -> dict[str, str]:
         return {"q": query}
 
-    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db))
+    wrapped = async_tool_handler(
+        my_tool,
+        deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db, obs_executor_fn=lambda: obs_executor),
+    )
     result = asyncio.run(wrapped(query="ping", agent="shape"))
     assert result == {"q": "ping"}
+    _drain_obs(obs_executor)
 
     rows = _rows(tmp_db)
     assert len(rows) == 1
@@ -80,7 +114,7 @@ def test_successful_call_records_success_row(tmp_db: Path) -> None:
     assert payload_hash and len(payload_hash) == 16
 
 
-def test_handler_exception_records_failure_row(tmp_db: Path) -> None:
+def test_handler_exception_records_failure_row(tmp_db: Path, obs_executor: ThreadPoolExecutor) -> None:
     """A handler that raises logs one row with success=0, error_class set.
 
     The wrap_tool_errors envelope converts the exception to
@@ -94,11 +128,15 @@ def test_handler_exception_records_failure_row(tmp_db: Path) -> None:
     def boom(_q: str) -> dict[str, str]:
         raise ValueError("bad")
 
-    wrapped = async_tool_handler(boom, deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db))
+    wrapped = async_tool_handler(
+        boom,
+        deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db, obs_executor_fn=lambda: obs_executor),
+    )
     result = asyncio.run(wrapped("anything"))
 
     # Tool call still returns the structured envelope.
     assert result == {"error": "ValueError: bad"}
+    _drain_obs(obs_executor)
 
     rows = _rows(tmp_db)
     assert len(rows) == 1
@@ -111,6 +149,7 @@ def test_handler_exception_records_failure_row(tmp_db: Path) -> None:
 def test_db_failure_does_not_break_tool_call(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    obs_executor: ThreadPoolExecutor,
 ) -> None:
     """DB INSERT failure is logged + swallowed — tool call still returns.
 
@@ -130,10 +169,16 @@ def test_db_failure_does_not_break_tool_call(
     def my_tool() -> dict[str, str]:
         return {"ok": "yes"}
 
-    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=lambda: unwritable))
+    wrapped = async_tool_handler(
+        my_tool,
+        deps=AsyncToolHandlerDeps(db_path_fn=lambda: unwritable, obs_executor_fn=lambda: obs_executor),
+    )
 
     with caplog.at_level(logging.WARNING, logger="kairix.agents.mcp.errors"):
         result = asyncio.run(wrapped())
+        # Drain the obs queue while caplog is still capturing so the
+        # swallowed-INSERT log record is observable from the test.
+        _drain_obs(obs_executor)
 
     # The tool call still returns the handler's result.
     assert result == {"ok": "yes"}
@@ -145,6 +190,7 @@ def test_db_failure_does_not_break_tool_call(
 
 def test_db_path_fn_raises_does_not_break_call(
     caplog: pytest.LogCaptureFixture,
+    obs_executor: ThreadPoolExecutor,
 ) -> None:
     """``db_path_fn`` raising in production code is swallowed — tool call still returns.
 
@@ -158,16 +204,19 @@ def test_db_path_fn_raises_does_not_break_call(
     def _raises() -> Path:
         raise RuntimeError("paths broken")
 
-    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=_raises))
+    wrapped = async_tool_handler(
+        my_tool, deps=AsyncToolHandlerDeps(db_path_fn=_raises, obs_executor_fn=lambda: obs_executor)
+    )
 
     with caplog.at_level(logging.WARNING, logger="kairix.agents.mcp.errors"):
         result = asyncio.run(wrapped())
+        _drain_obs(obs_executor)
 
     assert result == {"ok": "yes"}
     assert any("db_path_fn failed" in r.message for r in caplog.records)
 
 
-def test_payload_hash_is_stable_across_kwarg_order(tmp_db: Path) -> None:
+def test_payload_hash_is_stable_across_kwarg_order(tmp_db: Path, obs_executor: ThreadPoolExecutor) -> None:
     """The same kwargs in different insertion order produce the same payload_hash.
 
     Sabotage proof: changed `sorted(kwargs.items())` to plain
@@ -178,16 +227,20 @@ def test_payload_hash_is_stable_across_kwarg_order(tmp_db: Path) -> None:
     def my_tool(a: int = 0, b: int = 0) -> dict[str, int]:
         return {"sum": a + b}
 
-    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db))
+    wrapped = async_tool_handler(
+        my_tool,
+        deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db, obs_executor_fn=lambda: obs_executor),
+    )
     asyncio.run(wrapped(a=1, b=2))
     asyncio.run(wrapped(b=2, a=1))
+    _drain_obs(obs_executor)
 
     rows = _rows(tmp_db)
     assert len(rows) == 2
     assert rows[0][6] == rows[1][6], "payload hashes must be stable across kwarg order"
 
 
-def test_agent_kwarg_recorded_as_null_when_missing(tmp_db: Path) -> None:
+def test_agent_kwarg_recorded_as_null_when_missing(tmp_db: Path, obs_executor: ThreadPoolExecutor) -> None:
     """When the handler is called without ``agent=`` kwarg, the agent column is NULL.
 
     Sabotage proof: changed the agent extraction to always default
@@ -198,8 +251,12 @@ def test_agent_kwarg_recorded_as_null_when_missing(tmp_db: Path) -> None:
     def my_tool(query: str) -> dict[str, str]:
         return {"q": query}
 
-    wrapped = async_tool_handler(my_tool, deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db))
+    wrapped = async_tool_handler(
+        my_tool,
+        deps=AsyncToolHandlerDeps(db_path_fn=lambda: tmp_db, obs_executor_fn=lambda: obs_executor),
+    )
     asyncio.run(wrapped(query="ping"))
+    _drain_obs(obs_executor)
 
     rows = _rows(tmp_db)
     assert len(rows) == 1
