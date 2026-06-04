@@ -57,7 +57,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-_EXPECTED_STEP_NAMES = {"build_search_pipeline", "probe_search", "open_graph_client"}
+_EXPECTED_STEP_NAMES = {"build_search_pipeline", "probe_search", "open_graph_client", "ensure_sqlite_stats"}
 
 
 def test_warm_cli_subprocess_envelope_outcome(tmp_path: Path) -> None:

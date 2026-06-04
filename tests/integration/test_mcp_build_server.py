@@ -63,6 +63,8 @@ _EXPECTED_TOOLS = {
     # Wave D (topology v2 operator config) — agent-readable cc-pair surface
     # (mutating lifecycle is operator-owned; agents see an escalation stub)
     "cc_pair",
+    # #376 — operator-triggered ANALYZE for SQLite query-planner stats refresh
+    "maintenance_analyze",
 }
 
 
