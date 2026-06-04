@@ -590,13 +590,12 @@ def _embed_and_store_batch(
     batch: list[dict[str, Any]],
     batch_idx: int,
     db: sqlite3.Connection,
-    vec_index: Any,
+    vec_writer: Any,
     api_key: str,
     endpoint: str,
     deployment: str,
     dims: int,
     now: int,
-    save_interval: int,
     embed_batch_fn: Callable[..., list[list[float]]],
     *,
     cache: EmbeddingCache | None = None,
@@ -610,6 +609,11 @@ def _embed_and_store_batch(
     constructs the right callable at the boundary (the ``run_embed``
     function below threads ``deps.embed_batch`` through). Removing the
     legacy ``= None`` default closes the F6 test-seam violation.
+
+    ``vec_writer`` is the :class:`VecIndexBatchWriter` (or test fake)
+    that owns the vec_index lifecycle for the entire run; this helper
+    just calls ``add_batch`` and the writer handles the per-N-batch
+    incremental save cadence itself (#375).
 
     Kept for the ``--parallel 1`` (serial) path and for tests that
     exercise the per-batch boundary directly.
@@ -633,7 +637,7 @@ def _embed_and_store_batch(
         logger.exception("DB write for batch %d failed", batch_idx)
         return 0, list(batch)
 
-    _add_batch_to_vec_index(vec_index, matched, vectors, batch_idx, save_interval)
+    vec_writer.add_batch(matched, vectors, batch_idx)
     return len(matched), failed
 
 
@@ -664,40 +668,122 @@ def _stage_batch_embeddings(
             )
 
 
-def _add_batch_to_vec_index(
-    vec_index: Any,
-    matched: list[dict[str, Any]],
-    vectors: list[list[float]],
-    batch_idx: int,
-    save_interval: int,
-) -> None:
-    """Append batch vectors to the usearch ANN index, optionally checkpointing.
+# GH #375 — default cadence for incremental saves. The previous inline
+# constant inside ``run_embed`` (``save_interval = 10``) is now the
+# default for the ``VecIndexBatchWriter.save_every_n_batches`` kwarg so
+# operators (and tests) can tune it without an embed.py edit. With
+# DEFAULT_BATCH_SIZE=250 the default is one full ``vec_index.save()`` per
+# 2 500 successfully-staged chunks — bounded write-amplification at
+# production scale, the dominant cost on a 10 GB+ on-disk graph (see
+# tests/core/embed/test_embed_vec_index_handle_lifecycle.py for the
+# lifecycle contract this constant participates in).
+DEFAULT_VEC_INDEX_SAVE_EVERY_N_BATCHES = 10
 
-    No-op when ``vec_index`` is None. Any exception is logged and
-    swallowed — usearch failures must not break the SQLite write path.
-    Extracted from ``_embed_and_store_batch`` for the same F16 reason as
-    ``_stage_batch_embeddings`` above.
+
+class VecIndexBatchWriter:
+    """Once-per-run wrapper that owns the vec_index lifecycle.
+
+    GH #375 — the previous shape opened ``vec_index`` once in
+    :func:`run_embed` and fired ``save()`` every ``save_interval``
+    batches via :func:`_add_batch_to_vec_index`. Correct, but the
+    once-per-run invariant lived "by accident of where the call sat":
+    a future refactor that moves the open into the batch loop would
+    pass tests (none assert the lifecycle) while degrading throughput
+    50x at production scale. This class makes the invariant
+    contract-enforced:
+
+      * ``__enter__`` is the single load point — opens / reuses the
+        ``vec_index`` handle passed in, snapshots the inbound batch
+        count, returns ``self``.
+      * ``add_batch(matched, vectors, batch_idx)`` appends vectors and,
+        every ``save_every_n_batches`` calls, fires an incremental
+        ``vec_index.save()``. Failures are logged + swallowed —
+        usearch errors must never break the SQLite write path.
+      * ``__exit__`` fires a final ``vec_index.save()`` unconditionally
+        when at least one batch was added, so the final partial window
+        is durable. No-op when no batches were added (preserves the
+        symmetry: zero-batch run → zero saves, one enter + one exit).
+
+    Tolerates ``vec_index=None`` — the worker may run with the
+    ``worker_writes_vec_index`` feature off (#335), in which case
+    every method short-circuits. ``enter``/``exit`` still fire so the
+    lifecycle counter assertions in the test suite stay symmetrical
+    regardless of writer presence.
+
+    Constructor seam: ``save_every_n_batches`` is the only knob, so
+    tests inject a small value (2 or 3) and assert the save count
+    directly; operators inject a larger value when paying down the
+    per-save 10 GB-write cost on a real corpus. No env-var read, no
+    test-only kwarg — pure F1 / F2 / F6 clean.
     """
-    if vec_index is None:
-        return
-    try:
-        batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in matched]
-        vec_index.add_vectors(batch_hash_seqs, vectors)
-        if (batch_idx + 1) % save_interval == 0:
-            vec_index.save()
-    except Exception:
-        logger.exception("usearch batch %d failed", batch_idx)
 
+    def __init__(
+        self,
+        vec_index: Any,
+        save_every_n_batches: int = DEFAULT_VEC_INDEX_SAVE_EVERY_N_BATCHES,
+    ) -> None:
+        if save_every_n_batches < 1:
+            raise ValueError(
+                f"save_every_n_batches={save_every_n_batches} out of range [1..]. "
+                "fix: pass save_every_n_batches >= 1 — values <1 disable incremental "
+                "saves entirely, which loses bounded write-amplification on crash. "
+                "next: pick 10 (default — balanced) or higher for paydown on a "
+                "10 GB-plus on-disk index. "
+                "run: see kairix.core.embed.embed.VecIndexBatchWriter for the contract."
+            )
+        self._vec_index = vec_index
+        self._save_every_n_batches = save_every_n_batches
+        self._batches_added = 0
 
-def _save_index_checkpoint(vec_index: Any) -> None:
-    """Final save of the usearch ANN index to disk."""
-    if vec_index is None:
-        return
-    try:
-        vec_index.save()
-        logger.info("usearch: saved index with %d vectors", len(vec_index))
-    except Exception as e:
-        logger.exception("usearch final save failed: %s", e)
+    def __enter__(self) -> VecIndexBatchWriter:
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
+        # Context-manager protocol requires three positional params;
+        # this writer doesn't care about exception propagation (we
+        # never suppress) so all three are ``_``-prefixed (F19).
+        #
+        # Final save fires unconditionally when at least one batch was
+        # added so the last partial window is durable. Zero batches
+        # added → zero saves (matches the test_save_count_zero_when_no_batches_processed
+        # symmetry assertion).
+        if self._vec_index is None or self._batches_added == 0:
+            return
+        try:
+            self._vec_index.save()
+            logger.info("usearch: saved index with %d vectors", len(self._vec_index))
+        except Exception as e:
+            logger.exception("usearch final save failed: %s", e)
+
+    def add_batch(
+        self,
+        matched: list[dict[str, Any]],
+        vectors: list[list[float]],
+        batch_idx: int,
+    ) -> None:
+        """Append one batch's vectors and, if the cadence threshold is hit,
+        fire an incremental ``vec_index.save()``.
+
+        ``batch_idx`` is the embed-loop's zero-based index, used only for
+        log lines (the save cadence is governed by the writer's own
+        internal counter so callers can't accidentally skip a save by
+        passing a non-monotonic batch_idx).
+        """
+        if self._vec_index is None:
+            return
+        try:
+            batch_hash_seqs = [build_hash_seq(c["hash"], c["seq"]) for c in matched]
+            self._vec_index.add_vectors(batch_hash_seqs, vectors)
+            self._batches_added += 1
+            if self._batches_added % self._save_every_n_batches == 0:
+                self._vec_index.save()
+        except Exception:
+            logger.exception("usearch batch %d failed", batch_idx)
+
+    @property
+    def batches_added(self) -> int:
+        """Number of successful ``add_batch`` calls so far this run."""
+        return self._batches_added
 
 
 def _maybe_wal_checkpoint(db: sqlite3.Connection, batch_idx: int, every_n: int) -> None:
@@ -764,10 +850,9 @@ def _persist_batch_result(
     vectors: list[list[float]],
     batch_idx: int,
     db: sqlite3.Connection,
-    vec_index: Any,
+    vec_writer: Any,
     deployment: str,
     now: int,
-    save_interval: int,
     db_lock: threading.Lock,
 ) -> bool:
     """Persist one Azure-completed batch under the single-writer lock.
@@ -776,7 +861,7 @@ def _persist_batch_result(
     surfaces the batch's chunks as failed).
 
     The lock guards both SQLite (no shared cursor across threads) and
-    the usearch ``add_vectors`` call (single-threaded today). Running
+    the ``vec_writer.add_batch`` call (single-threaded today). Running
     this body under the lock keeps the writer fast — only the Azure
     call runs outside it, which is exactly where parallelism pays.
     """
@@ -786,29 +871,29 @@ def _persist_batch_result(
         except sqlite3.Error:
             logger.exception("DB write for batch %d failed", batch_idx)
             return False
-        _add_batch_to_vec_index(vec_index, matched, vectors, batch_idx, save_interval)
+        vec_writer.add_batch(matched, vectors, batch_idx)
         return True
 
 
-# S107 waiver — 14 params vs ceiling 13. Each is a distinct concern
-# (chunks / batch_size / parallel / db handle / vec_index handle /
-# 4 Azure-config strings / current time / save_interval / total count /
-# embed_batch fn / optional cache); grouping any subset into a dataclass
-# would obscure the contract more than it clarifies. Paydown: extract
+# S107 waiver — 13 params vs ceiling 13 (post-#375 ``save_interval``
+# fold into ``vec_writer``). Each is a distinct concern (chunks /
+# batch_size / parallel / db handle / vec_writer / 4 Azure-config
+# strings / current time / total count / embed_batch fn / optional
+# cache); grouping any subset into a dataclass would obscure the
+# contract more than it clarifies. Paydown: extract
 # AzureEmbedSpec(api_key, endpoint, deployment, actual_dims) when the
-# next signature change lands so this drops from 14 to 11.
-def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale above def
+# next signature change lands so this drops from 13 to 10.
+def _run_embed_loop_parallel(
     all_chunks: list[dict[str, Any]],
     batch_size: int,
     parallel: int,
     db: sqlite3.Connection,
-    vec_index: Any,
+    vec_writer: Any,
     api_key: str,
     endpoint: str,
     deployment: str,
     actual_dims: int,
     now: int,
-    save_interval: int,
     total: int,
     embed_batch_fn: Callable[..., list[list[float]]],
     *,
@@ -823,6 +908,11 @@ def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale abov
     when many embed futures complete in parallel. This keeps the
     SQLite connection single-threaded (no ``check_same_thread`` games)
     and the usearch index single-writer (matches today's contract).
+
+    ``vec_writer`` is held open by the caller across the entire run
+    (the once-per-run lifecycle locked in by GH #375). Persistence
+    flows ``vec_writer.add_batch(...)`` under the lock; the writer
+    itself owns the per-N-batches save cadence.
 
     F66-exempt: parallel batches are bounded by --parallel (1..10), not
     by per_tick_max_items — the bound is explicit at the CLI surface.
@@ -867,10 +957,9 @@ def _run_embed_loop_parallel(  # NOSONAR — S107 14 params; full rationale abov
                 vectors,
                 batch_idx,
                 db,
-                vec_index,
+                vec_writer,
                 deployment,
                 now,
-                save_interval,
                 db_lock,
             )
             if not persisted:
@@ -915,13 +1004,12 @@ def _run_embed_loop_serial(
     all_chunks: list[dict[str, Any]],
     batch_size: int,
     db: sqlite3.Connection,
-    vec_index: Any,
+    vec_writer: Any,
     api_key: str,
     endpoint: str,
     deployment: str,
     actual_dims: int,
     now: int,
-    save_interval: int,
     total: int,
     embed_batch_fn: Callable[..., list[list[float]]],
     *,
@@ -929,6 +1017,11 @@ def _run_embed_loop_serial(
     wal_checkpoint_every_n_batches: int = DEFAULT_WAL_CHECKPOINT_EVERY_N_BATCHES,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Run the embed loop serially — today's default, ``--parallel 1``.
+
+    ``vec_writer`` is the :class:`VecIndexBatchWriter` opened once by
+    ``run_embed`` and kept open across every batch (GH #375). The loop
+    just calls ``add_batch``; the writer handles the per-N-batches
+    save cadence.
 
     Lifted out of ``run_embed`` for symmetry with
     ``_run_embed_loop_parallel`` and to keep ``run_embed`` under the F16
@@ -944,13 +1037,12 @@ def _run_embed_loop_serial(
             batch,
             batch_idx,
             db,
-            vec_index,
+            vec_writer,
             api_key,
             endpoint,
             deployment,
             actual_dims,
             now,
-            save_interval,
             embed_batch_fn=embed_batch_fn,
             cache=cache,
         )
@@ -975,30 +1067,44 @@ def run_embed(
     limit: int | None = None,
     deps: EmbedDependencies | None = None,
     parallel: int = DEFAULT_PARALLEL_BATCHES,
+    save_every_n_batches: int = DEFAULT_VEC_INDEX_SAVE_EVERY_N_BATCHES,
+    vec_writer: Any | None = None,
     wal_checkpoint_every_n_batches: int = DEFAULT_WAL_CHECKPOINT_EVERY_N_BATCHES,
 ) -> dict[str, Any]:
     """
     Main embedding loop. Reads pending chunks, calls Azure, writes vectors.
 
     Args:
-        db:         Open SQLite connection (caller holds the lock)
-        force:      Re-embed everything, not just pending
-        batch_size: Chunks per Azure API call (Azure supports up to 2048; default 500)
-        limit:      Cap total chunks (for validation/testing)
-        deps:       Injectable dependencies. Defaults to production implementations.
-        parallel:   Number of batches to embed concurrently (1..10). Default 1
-                    is today's serial behaviour. Higher values run the Azure
-                    call on a ThreadPoolExecutor while the SQLite + usearch
-                    writes stay serialised under a single-writer lock. See
-                    docs/operations/runbooks/worker-memory-and-swap.md for
-                    sizing guidance.
-        wal_checkpoint_every_n_batches:
-                    Issue ``PRAGMA wal_checkpoint(PASSIVE)`` after every
-                    Nth committed batch (GH #394). Defaults to 10. Bounds
-                    WAL growth during long catch-ups (R3's 10-minute
-                    maintenance tick can't fire mid-embed-transaction).
-                    0 disables; tests inject smaller values for
-                    deterministic assertions.
+        db:                              Open SQLite connection (caller holds the lock)
+        force:                           Re-embed everything, not just pending
+        batch_size:                      Chunks per Azure API call (Azure supports up to 2048; default 250)
+        limit:                           Cap total chunks (for validation/testing)
+        deps:                            Injectable dependencies. Defaults to production implementations.
+        parallel:                        Number of batches to embed concurrently (1..10). Default 1
+                                         is today's serial behaviour. Higher values run the Azure
+                                         call on a ThreadPoolExecutor while the SQLite + usearch
+                                         writes stay serialised under a single-writer lock. See
+                                         docs/operations/runbooks/worker-memory-and-swap.md for
+                                         sizing guidance.
+        save_every_n_batches:            Per-N-batches incremental save cadence for the
+                                         vec_index. Default 10 (with batch_size=250 → one
+                                         full ``vec_index.save()`` per 2 500 staged
+                                         chunks). Higher values reduce write-amplification
+                                         on a 10 GB-plus on-disk index — see #375.
+                                         Ignored when ``vec_writer`` is supplied (the
+                                         caller-supplied writer owns its cadence).
+        vec_writer:                      Optional pre-constructed :class:`VecIndexBatchWriter`
+                                         (or test-fake context manager) — production
+                                         callers leave this None so the writer is built
+                                         from ``deps.open_usearch_index()`` here. Test
+                                         callers pass a fake to assert on the
+                                         once-per-run lifecycle (GH #375).
+        wal_checkpoint_every_n_batches:  Issue ``PRAGMA wal_checkpoint(PASSIVE)`` after every
+                                         Nth committed batch (GH #394). Defaults to 10. Bounds
+                                         WAL growth during long catch-ups (R3's 10-minute
+                                         maintenance tick can't fire mid-embed-transaction).
+                                         0 disables; tests inject smaller values for
+                                         deterministic assertions.
 
     Returns dict with: embedded, skipped, failed, duration_s, estimated_cost_usd
     """
@@ -1026,8 +1132,29 @@ def run_embed(
         all_chunks = all_chunks[:limit]
 
     total = len(all_chunks)
+
+    # GH #375 — open the vec_index handle ONCE per run and wrap it in a
+    # :class:`VecIndexBatchWriter` whose ``__enter__`` / ``__exit__`` mark
+    # the lifecycle boundaries explicitly. The writer holds the handle
+    # open across every batch (the load + first-write cost happens once,
+    # not 50x as the pre-#375 symptom suggested could be reached if a
+    # future refactor moved the open inside the loop) and fires
+    # incremental saves every ``save_every_n_batches`` batches. The
+    # final save fires on ``__exit__`` regardless of cadence.
+    #
+    # The writer is entered even when ``total == 0`` so the lifecycle
+    # is symmetric: every successful ``run_embed`` invocation yields
+    # exactly one ``__enter__`` + one ``__exit__`` on the writer,
+    # regardless of work to do. This is the contract asserted by
+    # ``tests/core/embed/test_embed_vec_index_handle_lifecycle.py``.
+    if vec_writer is None:
+        vec_index = deps.open_usearch_index()
+        _maybe_clear_vec_index_for_force(force, vec_index)
+        vec_writer = VecIndexBatchWriter(vec_index, save_every_n_batches=save_every_n_batches)
+
     if total == 0:
-        logger.info("Nothing to embed — index is up to date.")
+        with vec_writer:
+            logger.info("Nothing to embed — index is up to date.")
         return {
             "embedded": 0,
             "skipped": 0,
@@ -1047,53 +1174,46 @@ def run_embed(
     start_time = time.time()
     now = int(start_time)
 
-    vec_index = deps.open_usearch_index()
-    _maybe_clear_vec_index_for_force(force, vec_index)
-    save_interval = 10
-
     cache = deps.open_embedding_cache()
 
     try:
-        if parallel == 1:
-            embedded, failed_chunks = _run_embed_loop_serial(
-                all_chunks,
-                batch_size,
-                db,
-                vec_index,
-                api_key,
-                endpoint,
-                deployment,
-                actual_dims,
-                now,
-                save_interval,
-                total,
-                deps.embed_batch,
-                cache=cache,
-                wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
-            )
-        else:
-            embedded, failed_chunks = _run_embed_loop_parallel(
-                all_chunks,
-                batch_size,
-                parallel,
-                db,
-                vec_index,
-                api_key,
-                endpoint,
-                deployment,
-                actual_dims,
-                now,
-                save_interval,
-                total,
-                deps.embed_batch,
-                cache=cache,
-                wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
-            )
+        with vec_writer:
+            if parallel == 1:
+                embedded, failed_chunks = _run_embed_loop_serial(
+                    all_chunks,
+                    batch_size,
+                    db,
+                    vec_writer,
+                    api_key,
+                    endpoint,
+                    deployment,
+                    actual_dims,
+                    now,
+                    total,
+                    deps.embed_batch,
+                    cache=cache,
+                    wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
+                )
+            else:
+                embedded, failed_chunks = _run_embed_loop_parallel(
+                    all_chunks,
+                    batch_size,
+                    parallel,
+                    db,
+                    vec_writer,
+                    api_key,
+                    endpoint,
+                    deployment,
+                    actual_dims,
+                    now,
+                    total,
+                    deps.embed_batch,
+                    cache=cache,
+                    wal_checkpoint_every_n_batches=wal_checkpoint_every_n_batches,
+                )
     finally:
         if cache is not None:
             cache.close()
-
-    _save_index_checkpoint(vec_index)
 
     duration_s = time.time() - start_time
     estimated_tokens = embedded * 200
