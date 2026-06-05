@@ -253,40 +253,20 @@ def test_agent_none_all_agents_path_unaffected_by_default_only() -> None:
     )
 
 
-def test_factory_branch_on_topology_v2_collection_resolver_flag() -> None:
-    """``build_collection_resolver`` returns the v2 Adapter when the
-    ``topology_v2_default_in_scope`` flag is ON.
+def test_factory_always_returns_v2_resolver_post_cutover() -> None:
+    """``build_collection_resolver`` always returns the v2 Adapter.
 
-    Pins the factory's dispatch on the new flag — operators flipping
-    ``topology_v2_default_in_scope`` get the default-only behaviour
-    end-to-end through ``build_search_pipeline``.
+    ``topology_v2_collection_resolver`` + ``topology_v2_default_in_scope``
+    retired post-cutover (task #132); the legacy DefaultCollectionResolver
+    branch is gone and every call returns
+    :class:`TopologyV2CollectionResolver` with default-only routing.
     """
     from kairix.core.factory import build_collection_resolver
 
-    fake_reader_on = FakeScopeProfileResolver  # placeholder — see below
-    del fake_reader_on  # silence F19
-
-    # Flag-reader returns True for topology_v2_default_in_scope → the
-    # factory wires TopologyV2CollectionResolver with default_only routing.
-    def _on_reader(name: str) -> bool:
-        return name in {
-            "topology_v2_collection_resolver",
-            "topology_v2_default_in_scope",
-        }
-
-    resolver = build_collection_resolver(db_path=":memory:", flag_reader=_on_reader)
-
-    # The v2 Adapter has a ``validate_explicit`` method; the legacy resolver
-    # does not. This is the load-bearing branch assertion.
+    resolver = build_collection_resolver(db_path=":memory:")
+    # The v2 Adapter has a ``validate_explicit`` method; the (removed)
+    # legacy resolver did not. This is the load-bearing assertion.
     assert hasattr(resolver, "validate_explicit"), (
-        f"flag ON must yield TopologyV2CollectionResolver (with validate_explicit); got {type(resolver).__name__}"
-    )
-
-    # Inverse: flag OFF → legacy resolver.
-    def _off_reader(_name: str) -> bool:
-        return False
-
-    legacy = build_collection_resolver(db_path=":memory:", flag_reader=_off_reader)
-    assert not hasattr(legacy, "validate_explicit"), (
-        f"flag OFF must yield legacy DefaultCollectionResolver; got {type(legacy).__name__}"
+        f"build_collection_resolver must yield TopologyV2CollectionResolver "
+        f"(with validate_explicit); got {type(resolver).__name__}"
     )

@@ -98,25 +98,6 @@ def _default_known_state(_cursor: Cursor | None) -> Mapping[str, str]:
     return {}
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-obsidian flag check.
-
-    Delegates to :func:`kairix.core.features.flag` so the production
-    path threads through the env-var → config-overlay → registry
-    resolution chain. Tests inject a different callable (typically one
-    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
-    branch under test is pinned without monkey-patching the resolver
-    module (F1-clean / F2-clean).
-
-    Lifted to a module-level helper so the connector's signature can
-    carry a real callable default (F6-clean) without a per-call
-    ``Optional[...] = None`` shape.
-    """
-    from kairix.core.features import flag as _prod_flag
-
-    return _prod_flag(name)
-
-
 class ObsidianConnector:
     """SourceConnector implementation for an Obsidian markdown vault.
 
@@ -152,7 +133,6 @@ class ObsidianConnector:
         known_state_resolver: Callable[[Cursor | None], Mapping[str, str]] = _default_known_state,
         watcher_factory: Callable[[Path], WatchdogSource] | None = None,
         reconcile_every: int = DEFAULT_RECONCILE_EVERY,
-        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         self._vault_root = vault_root.resolve()
         self._collections: tuple[CollectionConfig, ...] = tuple(
@@ -162,7 +142,6 @@ class ObsidianConnector:
         self._known_state_resolver = known_state_resolver
         self._watcher_factory: Callable[[Path], WatchdogSource] = watcher_factory or WatchdogSource
         self._reconcile_every = max(1, reconcile_every)
-        self._flag_reader = flag_reader
 
         self._call_count = 0
         self._watcher: WatchdogSource | None = None
@@ -342,19 +321,15 @@ class ObsidianConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream changes for one Container's subtree.
 
-        When the ``topology_v2_obsidian`` flag is ON: scopes the
-        watchdog drain + reconciler walk to ``vault_root /
+        Scopes the watchdog drain + reconciler walk to ``vault_root /
         container.container_id`` and uses ``container.cursor_token`` as
         the per-container ISO timestamp cursor. Files outside the
         container's subtree are filtered out so a per-folder cc_pair
         only sees its own changes.
 
-        When the flag is OFF: retains the Wave B shim behaviour —
-        delegate to :meth:`list_changes` with the container's cursor so
-        the observable shape is identical to the legacy v1 path.
+        ``topology_v2_obsidian`` retired post-cutover (task #132); the
+        per-container path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_OBSIDIAN_FLAG):
-            return self.list_changes(container.cursor_token)
         return self._list_changes_scoped(container)
 
     def retrieve_all_slim_docs(self, _container: Container) -> Iterator[str]:
@@ -375,15 +350,11 @@ class ObsidianConnector:
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
         """HierarchyConnector — emit FOLDER nodes parent-before-child.
 
-        When the ``topology_v2_obsidian`` flag is ON: walks the vault
-        filesystem with :func:`os.walk` and emits one FOLDER node per
-        directory, parent-before-child per F58. The root folder is
-        emitted first (``raw_parent_id=None``), then every descendant
-        directory with ``raw_parent_id`` referencing the
+        Walks the vault filesystem with :func:`os.walk` and emits one
+        FOLDER node per directory, parent-before-child per F58. The root
+        folder is emitted first (``raw_parent_id=None``), then every
+        descendant directory with ``raw_parent_id`` referencing the
         previously-emitted parent's ``raw_node_id``.
-
-        When the flag is OFF: retains the Wave B shim behaviour — one
-        root FOLDER node only.
 
         ``raw_node_id`` is the vault-root-relative POSIX path of the
         directory (e.g. ``"02-Areas/00-Clients/Inpex"``); for the root
@@ -391,19 +362,10 @@ class ObsidianConnector:
         link to the folder so the search layer can surface a clickable
         affordance. ``sensitivity_hint`` is ``None`` — the operator
         overrides per-folder via the collection mapping.
+
+        ``topology_v2_obsidian`` retired post-cutover (task #132); the
+        per-directory walk is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_OBSIDIAN_FLAG):
-            yield HierarchyNode(
-                cc_pair_id=cc_pair_id,
-                raw_node_id=self._vault_root.name,
-                raw_parent_id=None,
-                display_name=self._vault_root.name,
-                link=None,
-                node_type="FOLDER",
-                external_access_json=None,
-                sensitivity_hint=None,
-            )
-            return
         yield from _walk_hierarchy(
             vault_root=self._vault_root,
             cc_pair_id=cc_pair_id,

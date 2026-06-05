@@ -78,16 +78,6 @@ def _operator_migrated(v2_state: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-@given("the topology_v2_default_in_scope flag is ON")
-def _flag_on(v2_state: dict[str, Any]) -> None:
-    v2_state["flag_on"] = True
-
-
-@given("the topology_v2_default_in_scope flag is OFF")
-def _flag_off(v2_state: dict[str, Any]) -> None:
-    v2_state["flag_on"] = False
-
-
 @given("the operator has configured 7 in-default collections and 1 opt-in collection")
 def _seven_in_default_one_opt_in(v2_state: dict[str, Any]) -> None:
     v2_state["in_default_collections"] = [

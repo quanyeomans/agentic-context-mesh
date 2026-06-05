@@ -16,19 +16,15 @@ from kairix.core.features.registry import REGISTRY, FeatureFlag, validate_regist
 pytestmark = pytest.mark.unit
 
 
-def test_registry_has_obsidian_connector_primary_at_pr6_landing() -> None:
-    """PR-6 lands the first flag — ``obsidian_connector_primary`` at
-    introduce stage. Every future PR that adds a flag appends to this
-    assertion.
+def test_registry_carries_a_representative_connector_flag() -> None:
+    """The registry must hold at least one connector_* flag with the
+    expected shape after the topology_v2_* retirement (task #132).
 
-    Sabotage: rename the registry entry's key → this test fails
-    because ``"obsidian_connector_primary" in REGISTRY`` is False.
-    Verified during PR-6 development.
+    Sabotage: rename the connector_dex_crm registry entry's key → this
+    test fails because ``"connector_dex_crm" in REGISTRY`` is False.
     """
-    assert "obsidian_connector_primary" in REGISTRY, (
-        f"expected the obsidian_connector_primary entry at PR-6 landing; got: {sorted(REGISTRY)}"
-    )
-    entry = REGISTRY["obsidian_connector_primary"]
+    assert "connector_dex_crm" in REGISTRY, f"expected the connector_dex_crm entry; got: {sorted(REGISTRY)}"
+    entry = REGISTRY["connector_dex_crm"]
     assert entry.default is False
     assert entry.stage == "introduce"
     assert entry.related_spec == "docs/architecture/connector-ingestion-architecture.md"

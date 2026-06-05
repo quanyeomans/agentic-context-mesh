@@ -185,25 +185,6 @@ def _default_per_user_client_factory(config: M365CalendarConfig, user_id: str) -
     return M365GraphCalendarClient(user_id=user_id, auth=auth)
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-m365_calendar flag check.
-
-    Delegates to :func:`kairix.core.features.flag` so the production
-    path threads through the env-var → config-overlay → registry
-    resolution chain. Tests inject a different callable (typically one
-    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
-    branch under test is pinned without monkey-patching the resolver
-    module (F1-clean / F2-clean).
-
-    Lifted to a module-level helper so the connector's signature can
-    carry a real callable default (F6-clean) without a per-call
-    ``Optional[...] = None`` shape.
-    """
-    from kairix.core.features import flag as _prod_flag
-
-    return _prod_flag(name)
-
-
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -295,7 +276,6 @@ class M365CalendarConnector:
         client_factory: ClientFactory = _default_client_factory,
         clock: Callable[[], datetime] = _utc_now,
         per_user_client_factory: PerUserClientFactory = _default_per_user_client_factory,
-        flag_reader: Callable[[str], bool] = _default_flag_reader,
         secrets: SecretsResolver | None = None,
     ) -> None:
         self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
@@ -303,7 +283,6 @@ class M365CalendarConnector:
         self._client_factory = client_factory
         self._clock = clock
         self._per_user_client_factory = per_user_client_factory
-        self._flag_reader = flag_reader
         self._client: M365GraphCalendarClient | None = None
         # Track event ids the connector has emitted as ``created`` so a
         # subsequent delta page tagged with the same id is reported as
@@ -512,20 +491,17 @@ class M365CalendarConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream calendar events for one Container.
 
-        When the ``topology_v2_m365_calendar`` flag is ON: builds (or
-        re-uses) a Graph client scoped to ``container.container_id``
-        (the UPN), reads ``container.cursor_token`` as the per-calendar
-        Graph ``@odata.deltaLink`` (None on first sync), and drains the
-        delta pages for THAT calendar only. Per-calendar isolation
-        means adding or removing one user's calendar does not affect
-        the cursor state of the others.
+        Builds (or re-uses) a Graph client scoped to
+        ``container.container_id`` (the UPN), reads
+        ``container.cursor_token`` as the per-calendar Graph
+        ``@odata.deltaLink`` (None on first sync), and drains the delta
+        pages for THAT calendar only. Per-calendar isolation means
+        adding or removing one user's calendar does not affect the
+        cursor state of the others.
 
-        When the flag is OFF: retains the Wave B shim behaviour —
-        delegate to :meth:`list_changes` with the container's cursor so
-        the observable shape is identical to the legacy v1 path.
+        ``topology_v2_m365_calendar`` retired post-cutover (task #132);
+        the per-calendar path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_M365_CALENDAR_FLAG):
-            return self.list_changes(container.cursor_token)
         return self._list_changes_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:

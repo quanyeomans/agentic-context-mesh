@@ -353,13 +353,9 @@ def test_iter_containers_emits_one_per_corpus() -> None:
         assert c.access_state == "ACCESSIBLE"
 
 
-def test_load_hierarchy_flag_off_emits_root_only() -> None:
-    """OFF branch: load_hierarchy emits exactly one FOLDER root."""
-    client = _FakeDriveClient()
-    connector = _build_connector(fake_client=client, flag_reader=lambda _n: False)
-    nodes = list(connector.load_hierarchy(cc_pair_id=11))
-    assert len(nodes) == 1
-    assert nodes[0].raw_parent_id is None
+# NOTE: test_load_hierarchy_flag_off_emits_root_only retired with the
+# topology_v2_google_drive flag (#132). Post-cutover load_hierarchy always
+# emits root + corpus children; the OFF "root only" branch no longer exists.
 
 
 def test_load_hierarchy_flag_on_emits_root_plus_corpus_children() -> None:
@@ -376,20 +372,10 @@ def test_load_hierarchy_flag_on_emits_root_plus_corpus_children() -> None:
     assert {n.raw_node_id for n in nodes[1:]} == {"alpha", "beta"}
 
 
-def test_list_changes_for_container_flag_off_delegates_to_legacy() -> None:
-    """OFF: list_changes_for_container delegates to list_changes()."""
-    client = _FakeDriveClient(changes=[_build_drive_file()])
-    connector = _build_connector(fake_client=client, flag_reader=lambda _n: False)
-    container = Container(
-        cc_pair_id=11,
-        container_id="workspace-unit",
-        access_state="ACCESSIBLE",
-        cursor_token=None,
-        last_synced_at=None,
-    )
-    events = list(connector.list_changes_for_container(container))
-    assert events
-    assert connector._next_cursor is not None
+# NOTE: test_list_changes_for_container_flag_off_delegates_to_legacy retired
+# with the topology_v2_google_drive flag (#132). Post-cutover
+# list_changes_for_container always uses the per-container cursor; the OFF
+# delegate-to-list_changes branch no longer exists.
 
 
 def test_list_changes_for_container_flag_on_scopes_per_container() -> None:

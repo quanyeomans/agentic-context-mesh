@@ -373,42 +373,27 @@ class GoogleDriveConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream changes for one container's Drive corpus.
 
-        When the ``topology_v2_google_drive`` flag is ON: reads
-        ``container.cursor_token`` as the per-corpus newStartPageToken
-        (None on first sync) and walks the changes pages scoped to that
-        corpus only. Per-corpus isolation means adding or removing one
-        corpus does not affect the cursor state of the others.
+        Reads ``container.cursor_token`` as the per-corpus
+        newStartPageToken (None on first sync) and walks the changes
+        pages scoped to that corpus only. Per-corpus isolation means
+        adding or removing one corpus does not affect the cursor state
+        of the others.
 
-        When the flag is OFF: retains the Wave B shim shape — delegate
-        to :meth:`list_changes` so the observable shape is identical to
-        the legacy single-cursor path.
+        ``topology_v2_google_drive`` retired post-cutover (task #132);
+        the per-corpus path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_GOOGLE_DRIVE_FLAG):
-            return self.list_changes(container.cursor_token)
         return self._list_changes_for_container_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
         """HierarchyConnector — emit nodes parent-before-child per F58.
 
-        When the ``topology_v2_google_drive`` flag is ON: emits a root
-        FOLDER node (``raw_node_id="google_drive"``, ``raw_parent_id=None``)
-        followed by one FOLDER child per configured corpus.
+        Emits a root FOLDER node (``raw_node_id="google_drive"``,
+        ``raw_parent_id=None``) followed by one FOLDER child per
+        configured corpus.
 
-        When the flag is OFF: emits one root FOLDER node only (Wave B
-        shim shape).
+        ``topology_v2_google_drive`` retired post-cutover (task #132);
+        the root + per-corpus emission is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_GOOGLE_DRIVE_FLAG):
-            yield HierarchyNode(
-                cc_pair_id=cc_pair_id,
-                raw_node_id=_HIERARCHY_ROOT_ID,
-                raw_parent_id=None,
-                display_name=_HIERARCHY_ROOT_DISPLAY,
-                link=None,
-                node_type="FOLDER",
-                external_access_json=None,
-                sensitivity_hint=None,
-            )
-            return
         yield HierarchyNode(
             cc_pair_id=cc_pair_id,
             raw_node_id=_HIERARCHY_ROOT_ID,

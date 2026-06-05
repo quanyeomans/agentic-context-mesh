@@ -134,21 +134,19 @@ def test_remediation_carries_action_markers() -> None:
     assert "run:" in rem
 
 
-def test_loads_live_registry_names_after_pr6() -> None:
-    """Post-PR-6 the detector loads the live registry name set.
-
-    Pre-PR-2 the registry module was absent and ``_load_registry_names``
-    returned ``None``. PR-2 made it importable (empty set); PR-6 added
-    the first entry. ``main()`` stays green because the production
-    ``flag("obsidian_connector_primary")`` call site in ``kairix.worker``
+def test_loads_live_registry_names() -> None:
+    """The detector loads the live registry name set and ``main()``
+    stays green because every ``flag("...")`` call site in production
     references a name that exists in the registry.
 
-    Sabotage proof: rename the registry entry's name field to something
-    other than ``"obsidian_connector_primary"`` → the worker's call
-    site no longer matches and F52 fires.
+    Sabotage proof: rename the connector_dex_crm registry entry's name
+    field → the call sites pointing at it no longer match and F52 fires.
+
+    ``obsidian_connector_primary`` retired post-cutover (task #132); the
+    test now pins ``connector_dex_crm`` as the representative entry.
     """
     detector = _load_detector()
     names = detector._load_registry_names()  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
-    assert names is not None, "registry must load cleanly post-PR-2"
-    assert "obsidian_connector_primary" in names
+    assert names is not None, "registry must load cleanly"
+    assert "connector_dex_crm" in names
     assert detector.main() == 0  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs

@@ -46,7 +46,6 @@ pytest_plugins = [
     "tests.bdd.steps.eval_gate_steps",
     "tests.bdd.steps.configurable_default_scope_steps",
     "tests.bdd.steps.collection_v2_default_in_scope_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_default_in_scope_steps",
     "tests.bdd.steps.wikilinks_injection_steps",
     "tests.bdd.steps.eval_judge_steps",
     "tests.bdd.steps.eval_generate_steps",
@@ -183,9 +182,6 @@ pytest_plugins = [
     # tool_dead_letter_status MCP). See GH #337 / #351.
     "tests.bdd.steps.cli_dead_letter_steps",
     "tests.bdd.steps.mcp_dead_letter_status_steps",
-    # PR-6 — IM-6 recast: ``obsidian_connector_primary`` flag at introduce
-    # stage. Both-branch coverage per F54.
-    "tests.bdd.steps.feature_flag_obsidian_connector_primary_steps",
     # Wave 5 KP-1 — Dex CRM connector flag at introduce stage. F54.
     "tests.bdd.steps.feature_flag_connector_dex_crm_steps",
     "tests.bdd.steps.connector_dex_crm_steps",
@@ -225,107 +221,47 @@ pytest_plugins = [
     "tests.bdd.steps.feature_flag_connector_notion_steps",
     # Wave E GitHub — greenfield Wave-E build per
     # docs/architecture/connector-scope-topology/connector-design-specs/github.md.
-    # Two flags: ``connector_github`` (introduce stage, gates the
-    # connector slot) + ``topology_v2_github`` (Wave E per-repo
-    # Container emission pilot). F54 both-branch coverage.
+    # ``connector_github`` (introduce stage) gates the connector slot.
+    # ``topology_v2_github`` retired post-cutover (task #132).
     "tests.bdd.steps.connector_github_steps",
     "tests.bdd.steps.feature_flag_connector_github_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_github_steps",
     # Wave E Slack — workspace-channels connector + flag. See
     # docs/architecture/connector-scope-topology/connector-design-specs/slack.md.
     "tests.bdd.steps.connector_slack_steps",
     "tests.bdd.steps.feature_flag_connector_slack_steps",
-    # Topology v2 Wave A — schema additions + new dataclasses behind
-    # ``topology_v2_schema`` flag. F54 both-branch coverage. See
-    # docs/architecture/connector-scope-topology/ADR.md.
-    "tests.bdd.steps.feature_flag_topology_v2_schema_steps",
     # IM-6 FTS-gap regression pin — connector-ingested chunks must be
     # findable via BM25 (the cutover surfaced 68,814 chunks in the
     # ``obsidian`` collection invisible to BM25 because the chunk-writer
     # skipped the FTS5 write).
     "tests.bdd.steps.connector_search_round_trip_steps",
-    # Topology v2 Wave B — capability mix-in Protocols + default-impl
-    # shims behind ``topology_v2_protocol`` flag. F54 both-branch coverage.
-    "tests.bdd.steps.feature_flag_topology_v2_protocol_steps",
-    # Topology v2 Wave C — cc_pair lifecycle + CollectionRouter + Chunker
-    # registry + ScopeProfileResolver + ResultEnvelope behind the
-    # ``topology_v2_runtime`` flag. F54 both-branch coverage.
-    "tests.bdd.steps.feature_flag_topology_v2_runtime_steps",
     # Topology v2 Wave D — operator config promotion (6 YAML blocks +
     # 5 cross-reference validators + kairix cc-pair CLI + topology v2
-    # diagnostics in `kairix features status`) behind the
-    # ``topology_v2_config`` flag. F45 / F54 coverage.
+    # diagnostics in `kairix features status`). Wave A/B/C/D flag gates
+    # retired post-cutover (task #132); CLI/MCP surfaces stay.
     "tests.bdd.steps.cli_cc_pair_steps",
     "tests.bdd.steps.mcp_cc_pair_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_config_steps",
     # KFEAT-018 — release-time paydown doc snapshot currency gate.
     # See docs/features/KFEAT-018-paydown-doc-refresh/BRIEF.md.
     "tests.bdd.steps.check_paydown_doc_currency_steps",
-    # Topology v2 Wave E — per-connector multi-container pilot for the
-    # obsidian connector behind the ``topology_v2_obsidian`` flag.
-    # F45 / F54 coverage. Each top-level vault folder becomes its own
-    # Container with its own delta cursor; load_hierarchy walks the
-    # filesystem parent-before-child per F58.
-    "tests.bdd.steps.feature_flag_topology_v2_obsidian_steps",
-    # Topology v2 Wave E — per-connector multi-container pilot for the
-    # m365_email_headers connector behind the
-    # ``topology_v2_m365_email_headers`` flag. F45 / F54 coverage. Each
-    # configured mailbox becomes its own Container with its own Graph
-    # delta cursor; load_hierarchy emits one root FOLDER plus one
-    # FOLDER per mailbox parent-before-child per F58.
-    "tests.bdd.steps.feature_flag_topology_v2_m365_email_headers_steps",
     # Wave 5 Gmail — Google Workspace mailbox connector. Single-mailbox
     # per cc_pair (Onyx pattern); full-message body + envelope; History
-    # API for change detection. Two flags: ``connector_gmail`` (introduce
-    # stage, gates the connector slot) + ``topology_v2_gmail`` (Wave E
-    # per-mailbox Container emission pilot). F45 / F54 coverage.
+    # API for change detection. ``connector_gmail`` (introduce stage)
+    # gates the connector slot; ``topology_v2_gmail`` retired post-cutover
+    # (task #132).
     "tests.bdd.steps.connector_gmail_steps",
     "tests.bdd.steps.feature_flag_connector_gmail_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_gmail_steps",
-    # Topology v2 Wave E — per-connector multi-container pilot for the
-    # dex_crm connector behind the ``topology_v2_dex_crm`` flag.
-    # F45 / F54 coverage. Dex's API is single-tenant single-cursor so
-    # the connector emits one tenant Container; load_hierarchy emits
-    # the Dex / Person / Organisation / Relationship FOLDER tree
-    # parent-before-child per F58.
-    "tests.bdd.steps.feature_flag_topology_v2_dex_crm_steps",
-    # Topology v2 Wave E — per-connector slice for the m365_calendar
-    # connector behind the ``topology_v2_m365_calendar`` flag. Sibling
-    # to the obsidian pilot. Each configured calendar (per UPN) becomes
-    # its own Container with its own Graph @odata.deltaLink cursor;
-    # load_hierarchy emits a root FOLDER node plus one child per
-    # configured calendar parent-before-child per F58.
-    "tests.bdd.steps.feature_flag_topology_v2_m365_calendar_steps",
-    # Topology v2 Wave E — per-connector slice for the sharepoint
-    # connector behind the ``topology_v2_sharepoint`` flag. Sibling
-    # to the m365_calendar / obsidian / dex_crm pilots. Each configured
-    # Graph drive becomes its own Container with its own
-    # @odata.deltaLink cursor; load_hierarchy emits a root SITE FOLDER
-    # plus one DRIVE FOLDER per configured drive parent-before-child
-    # per F58; Resolver.reindex replays only the supplied failed ids.
-    "tests.bdd.steps.feature_flag_topology_v2_sharepoint_steps",
     # Wave E Google Drive — workspace-files connector + flag. See
     # kairix/connectors/google_drive/README.md for the connector
     # capability surface and operator-side credential provisioning
-    # (tracked under GH #356).
+    # (tracked under GH #356). ``topology_v2_google_drive`` retired.
     "tests.bdd.steps.connector_google_drive_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_google_drive_steps",
-    # Apple iCloud CalDAV connector — greenfield Wave-E build with a
-    # single capability flag (``topology_v2_apple_caldav``). Connector
-    # ingests calendar events via the CalDAV <sync-collection> REPORT
-    # (RFC 6578) against caldav.icloud.com using an Apple-issued
-    # app-specific password (NOT the operator's primary iCloud
-    # password). Each iCloud calendar becomes its own Container with
-    # its own CalDAV sync token; load_hierarchy emits a root FOLDER
-    # plus one child per discovered calendar parent-before-child
-    # per F58.
+    # Apple iCloud CalDAV connector — ``topology_v2_apple_caldav``
+    # retired post-cutover (task #132).
     "tests.bdd.steps.connector_apple_caldav_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_apple_caldav_steps",
-    # Google Calendar connector + topology_v2_google_calendar flag.
-    # Ships OFF until Google Workspace OAuth credentials are
-    # provisioned (GH #356).
+    # Google Calendar connector — ``topology_v2_google_calendar``
+    # retired post-cutover (task #132). Ships OFF until Google Workspace
+    # OAuth credentials are provisioned (GH #356).
     "tests.bdd.steps.connector_google_calendar_steps",
-    "tests.bdd.steps.feature_flag_topology_v2_google_calendar_steps",
     # ADR-028 Wave G.1 — per-type chunkers (paged / structured formats).
     # Three chunker plugins shipping in one batch: SlideChunker (PPTX),
     # SheetRowChunker (XLSX / .xls / .xlsm), DocxHeadingChunker (DOCX).

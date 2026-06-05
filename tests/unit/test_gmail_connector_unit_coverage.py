@@ -399,29 +399,11 @@ def _make_container(*, cursor_token: str | None = None) -> Container:
     )
 
 
-def test_list_changes_for_container_flag_off_delegates_to_list_changes() -> None:
-    """OFF branch — delegates to ``list_changes`` with the container's cursor.
-
-    Sabotage proof: flipping the ``if not self._flag_reader(...)`` condition
-    to ``if self._flag_reader(...)`` would route the OFF case into the
-    Wave E scoped path, breaking observable parity with v1.
-    """
-    msg = _make_message("flag-off-msg")
-    client = _FakeGmailClient(
-        messages=[msg],
-        history_pages=[HistoryPage(message_ids=("flag-off-msg",), next_page_token=None, history_id="t")],
-    )
-    connector = GmailConnector(
-        user_email=_USER,
-        client=client,  # type: ignore[arg-type]  # F3 rationale: test-local stub mirrors GmailClient shape.
-        flag_reader=lambda _name: False,
-    )
-    events = list(connector.list_changes_for_container(_make_container(cursor_token="warm-cursor")))
-    # OFF branch routes through list_changes — events are emitted from the scripted page.
-    assert events
-    assert events[0].item_id == "flag-off-msg"
-    # Wave E next_cursor_for_container stays empty on OFF branch.
-    assert connector.next_cursor_for_container(_USER) is None
+# NOTE: test_list_changes_for_container_flag_off_delegates_to_list_changes
+# was retired alongside the topology_v2_gmail flag (#132). Post-cutover the
+# v2 per-mailbox cursor path is the only path; delegate-to-list_changes
+# behaviour no longer exists. Parity tests covering the v2 path live below
+# (test_list_changes_for_container_flag_on_* renamed in the same commit).
 
 
 def test_list_changes_for_container_flag_on_cold_start_seeds_per_mailbox_cursor() -> None:

@@ -437,17 +437,14 @@ class GmailConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream changes for one mailbox Container.
 
-        When the ``topology_v2_gmail`` flag is ON: drives a History API
-        query starting from ``container.cursor_token`` (the previous
-        tick's historyId for this mailbox). Per-container next-cursor
-        is recorded via :meth:`next_cursor_for_container`.
+        Drives a History API query starting from
+        ``container.cursor_token`` (the previous tick's historyId for
+        this mailbox). Per-container next-cursor is recorded via
+        :meth:`next_cursor_for_container`.
 
-        When the flag is OFF: retains the Wave B shim shape — delegate
-        to :meth:`list_changes` with the container's cursor so the
-        observable shape is identical to the legacy v1 path.
+        ``topology_v2_gmail`` retired post-cutover (task #132); the
+        per-mailbox path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_GMAIL_FLAG):
-            return self.list_changes(container.cursor_token)
         return self._list_changes_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:

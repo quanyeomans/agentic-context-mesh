@@ -1167,12 +1167,11 @@ def check_embed_cache_stats(embed_cache: Any | None = None) -> CheckResult:
 # registry-default chain applies as everywhere else in kairix.
 
 
-_TOPOLOGY_V2_CONFIG_FLAG = "topology_v2_config"
 _CONNECTOR_SHAREPOINT_FLAG = "connector_sharepoint"
 _MAINTENANCE_LOOP_FLAG = "maintenance_loop"
 # F17 — the "flag off, check is inert" detail line shows up on every
-# topology v2 / sharepoint check when the flag is off. Pull to a single
-# constant so the wording stays uniform across the three checks.
+# sharepoint check when the flag is off. Pull to a single constant so
+# the wording stays uniform across the checks.
 _SKIPPED_FLAG_OFF_DETAIL_TEMPLATE = "skipped — {flag} flag is OFF (default-safe)"
 
 # F17 — the three M365 secret names are referenced from both the
@@ -1261,11 +1260,7 @@ def _default_overlay_path_loader() -> dict[str, Any] | None:
 def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
     """topology_v2: block in kairix.config.yaml parses + passes cross-reference validation.
 
-    When the ``topology_v2_config`` flag is OFF, returns ok=True with a
-    "skipped" detail — the Wave D operator-config surface is inert by
-    default and this check should not block fresh deployments.
-
-    When ON, parses the ``topology_v2:`` block out of the active
+    Parses the ``topology_v2:`` block out of the active
     ``kairix.config.yaml`` (resolved via the standard ``KAIRIX_CONFIG_PATH``
     env-var or the ``kairix.config.yaml`` default), runs the 5
     cross-reference rules from
@@ -1275,17 +1270,13 @@ def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> C
 
     ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
     binds the production flag/config readers). Tests construct a Deps
-    with substitute callables to drive the flag-OFF / parse-error /
-    validation-failure / clean branches without touching the live
-    config file.
+    with substitute callables to drive the parse-error / validation-
+    failure / clean branches without touching the live config file.
+
+    ``topology_v2_config`` retired post-cutover (task #132); this check
+    no longer short-circuits on the flag.
     """
     d = deps if deps is not None else TopologyV2CheckDeps()
-    if not d.flag_reader(_TOPOLOGY_V2_CONFIG_FLAG):
-        return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
-            ok=True,
-            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_TOPOLOGY_V2_CONFIG_FLAG),
-        )
 
     try:
         data = d.config_loader()
@@ -1301,7 +1292,7 @@ def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> C
         return CheckResult(
             name=_CHECK_TOPOLOGY_V2_CONFIG_VALID,
             ok=False,
-            detail="kairix.config.yaml not found — topology_v2_config flag is ON but no config to validate",
+            detail="kairix.config.yaml not found — no config to validate",
             fix=(
                 "fix: create kairix.config.yaml at the repo root (or set KAIRIX_CONFIG_PATH) "
                 "with a topology_v2: block per kairix.config.example.yaml. "
@@ -1351,27 +1342,20 @@ def check_topology_v2_config_valid(deps: TopologyV2CheckDeps | None = None) -> C
 def check_topology_v2_cc_pairs_registered(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
     """Every declared cc_pair in kairix.config.yaml has a row in topology_cc_pairs.
 
-    When the ``topology_v2_config`` flag is OFF, returns ok=True with a
-    "skipped" detail.
+    Parses the declared cc_pair names from ``kairix.config.yaml`` and
+    cross-checks against the live ``topology_cc_pairs`` table (read via
+    the production ``list_cc_pairs`` helper). A declared cc_pair without
+    a matching DB row means the apply-bridge hasn't run for it yet —
+    typically the worker hasn't been restarted since the YAML edit (the
+    apply-bridge runs at boot).
 
-    When ON, parses the declared cc_pair names from
-    ``kairix.config.yaml`` and cross-checks against the live
-    ``topology_cc_pairs`` table (read via the production
-    ``list_cc_pairs`` helper). A declared cc_pair without a matching DB
-    row means the apply-bridge hasn't run for it yet — typically the
-    worker hasn't been restarted since the YAML edit (the apply-bridge
-    runs at boot when ``topology_v2_config`` is on).
+    ``topology_v2_config`` retired post-cutover (task #132); this check
+    no longer short-circuits on the flag.
 
     ``deps`` is the public DI seam (default :class:`TopologyV2CheckDeps`
     binds the production flag / config / DB readers).
     """
     d = deps if deps is not None else TopologyV2CheckDeps()
-    if not d.flag_reader(_TOPOLOGY_V2_CONFIG_FLAG):
-        return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_CC_PAIRS_REGISTERED,
-            ok=True,
-            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_TOPOLOGY_V2_CONFIG_FLAG),
-        )
 
     try:
         data = d.config_loader()
@@ -1596,16 +1580,15 @@ def _default_db_scope_actor_ids() -> tuple[str, ...]:
 def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | None = None) -> CheckResult:
     """GH #373 — every wildcard ``applies_to: ["*"]`` is expanded in the DB.
 
-    The Wave B config loader materialises every wildcard into concrete
-    per-actor scope_profile rows so the resolver never sees a literal
-    ``"*"`` actor_id. A ``"*"`` in ``topology_scope_profiles.actor_id``
-    means the loader did not run (or the operator edited the DB
-    directly) — a misconfiguration that silently breaks default-scope
-    resolution for every agent the wildcard was meant to cover.
+    The config loader materialises every wildcard into concrete per-actor
+    scope_profile rows so the resolver never sees a literal ``"*"``
+    actor_id. A ``"*"`` in ``topology_scope_profiles.actor_id`` means
+    the loader did not run (or the operator edited the DB directly) — a
+    misconfiguration that silently breaks default-scope resolution for
+    every agent the wildcard was meant to cover.
 
-    When the ``topology_v2_config`` flag is OFF, returns ok=True with a
-    "skipped" detail — the wildcard expansion is part of the Wave B
-    config-loader surface gated by the same flag.
+    ``topology_v2_config`` retired post-cutover (task #132); this check
+    no longer short-circuits on the flag.
 
     ``deps`` is the public DI seam. Production callers leave ``deps=None``;
     tests substitute the ``db_cc_pair_namer`` slot via a custom callable
@@ -1613,12 +1596,6 @@ def check_topology_v2_wildcard_expansion_resolved(deps: TopologyV2CheckDeps | No
     doesn't need to seed the v2 SQL tables to drive the check's branches).
     """
     d = deps if deps is not None else TopologyV2CheckDeps()
-    if not d.flag_reader(_TOPOLOGY_V2_CONFIG_FLAG):
-        return CheckResult(
-            name=_CHECK_TOPOLOGY_V2_WILDCARD_EXPANSION_RESOLVED,
-            ok=True,
-            detail=_SKIPPED_FLAG_OFF_DETAIL_TEMPLATE.format(flag=_TOPOLOGY_V2_CONFIG_FLAG),
-        )
 
     try:
         actor_ids = d.db_scope_actor_id_reader()

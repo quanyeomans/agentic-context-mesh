@@ -29,24 +29,25 @@ from kairix.agents.mcp.server import tool_features_status
 pytestmark = pytest.mark.integration
 
 
-def test_tool_features_status_envelope_carries_obsidian_connector_primary_at_pr6() -> None:
-    """PR-6 registry → envelope's ``flags`` list contains the
-    obsidian_connector_primary entry; ``error == ""``.
+def test_tool_features_status_envelope_carries_registered_flag() -> None:
+    """Registry → envelope's ``flags`` list contains the connector_dex_crm
+    entry (representative connector_* flag); ``error == ""``.
 
     Drives the production happy path: the MCP tool delegates to
     :func:`kairix.core.features.status`; the resolver projects every
     registry entry to a :class:`FlagStatus`; ``asdict`` yields the
-    JSON-serialisable envelope. Pinning the per-flag name proves the
+    JSON-serialisable envelope. Pinning a per-flag name proves the
     composed surface flows live registry data through the tool — not
     just any list.
+
+    ``obsidian_connector_primary`` retired post-cutover (task #132); the
+    test now pins ``connector_dex_crm`` as the representative entry.
     """
     envelope = tool_features_status()
 
     assert envelope["error"] == "", f"expected empty 'error' string; got: {envelope['error']!r}"
     names = [entry["name"] for entry in envelope["flags"]]
-    assert "obsidian_connector_primary" in names, (
-        f"expected obsidian_connector_primary entry at PR-6 landing; got: {names!r}"
-    )
+    assert "connector_dex_crm" in names, f"expected connector_dex_crm entry in flags; got: {names!r}"
 
 
 def test_tool_features_status_envelope_has_documented_keys() -> None:

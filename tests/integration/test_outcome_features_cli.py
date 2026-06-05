@@ -36,7 +36,11 @@ pytestmark = pytest.mark.integration
 
 
 def test_features_status_subprocess_text_mode_lists_registered_flags() -> None:
-    """Populated registry → exit 0 + the obsidian_connector_primary row on stdout."""
+    """Populated registry → exit 0 + at least one connector_* row on stdout.
+
+    ``obsidian_connector_primary`` retired post-cutover (task #132); this
+    test now asserts the connector_dex_crm representative is present.
+    """
     t0 = time.monotonic()
     proc = subprocess.run(
         [sys.executable, "-m", "kairix.cli", "features", "status"],
@@ -49,9 +53,7 @@ def test_features_status_subprocess_text_mode_lists_registered_flags() -> None:
     assert proc.returncode == 0, (
         f"features status exited {proc.returncode}\n--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout}"
     )
-    assert "obsidian_connector_primary" in proc.stdout, (
-        f"expected the obsidian_connector_primary row in stdout: {proc.stdout!r}"
-    )
+    assert "connector_dex_crm" in proc.stdout, f"expected the connector_dex_crm row in stdout: {proc.stdout!r}"
     # Operator surfaces should stay fast — failing the budget here means
     # the dispatcher is doing real work it shouldn't.
     assert elapsed_ms < 10000.0, f"features status subprocess took {elapsed_ms:.1f}ms (threshold 10000ms)"
@@ -79,9 +81,7 @@ def test_features_status_subprocess_json_mode_emits_envelope() -> None:
     parsed = json.loads(proc.stdout)
     assert "flags" in parsed, f"expected 'flags' key in envelope; got keys: {list(parsed)}"
     assert isinstance(parsed["flags"], list), f"expected 'flags' to be a list; got {type(parsed['flags']).__name__}"
-    # Registry has the obsidian_connector_primary entry at PR-6 landing;
-    # every future PR that adds a flag will see this list grow.
     names = [entry["name"] for entry in parsed["flags"]]
-    assert "obsidian_connector_primary" in names, (
-        f"expected obsidian_connector_primary in flags list at PR-6 landing; got: {names!r}"
-    )
+    # Representative connector_* flag still in the registry after the
+    # topology_v2_* + obsidian_connector_primary retirement (task #132).
+    assert "connector_dex_crm" in names, f"expected connector_dex_crm in flags list; got: {names!r}"

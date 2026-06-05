@@ -127,23 +127,23 @@ def test_remediation_carries_action_markers() -> None:
 
 
 def test_loads_live_registry_after_pr6() -> None:
-    """PR-6 lands the first flag — ``_load_registry`` returns a non-None
-    dict containing the canonical entry.
+    """``_load_registry`` returns a non-None dict containing the
+    canonical connector_* entry. The detector resolves cleanly —
+    ``main()`` returns 0 because every registered flag's
+    ``target_retire_in`` is within 6 months of the current
+    setuptools-scm version.
 
-    Pre-PR-2 the registry module did not exist and ``_load_registry``
-    returned ``None`` (vacuous-green). PR-2 added the empty registry;
-    PR-6 added the first entry. The detector still resolves cleanly —
-    ``main()`` returns 0 because the entry's ``target_retire_in`` is
-    within 6 months of the current setuptools-scm version.
+    Sabotage proof: remove the connector_dex_crm entry from REGISTRY →
+    ``"connector_dex_crm" in registry`` becomes False and this test
+    fails on the explicit-key assertion.
 
-    Sabotage proof: remove the obsidian_connector_primary entry from
-    REGISTRY → ``"obsidian_connector_primary" in registry`` becomes False
-    and this test fails on the explicit-key assertion.
+    ``obsidian_connector_primary`` retired post-cutover (task #132); the
+    test now pins ``connector_dex_crm`` as the representative entry.
     """
     detector = _load_detector()
     registry = detector._load_registry()  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs
-    assert registry is not None, "registry must load cleanly post-PR-2"
-    assert "obsidian_connector_primary" in registry, (
-        f"expected the PR-6 entry; got: {sorted(registry) if registry else 'None'}"
+    assert registry is not None, "registry must load cleanly"
+    assert "connector_dex_crm" in registry, (
+        f"expected connector_dex_crm entry; got: {sorted(registry) if registry else 'None'}"
     )
     assert detector.main() == 0  # type: ignore[attr-defined]  # detector loaded by path; mypy can't see attrs

@@ -310,7 +310,7 @@ def test_capture_baseline_captures_all_four_surfaces(tmp_path: Path) -> None:
             sys.executable,
             str(repo_root / "scripts" / "cutover" / "capture_baseline.py"),
             "--flag",
-            "obsidian_connector_primary",
+            "connector_dex_crm",
             "--out",
             str(out_path),
             "--config",
@@ -331,7 +331,7 @@ def test_capture_baseline_captures_all_four_surfaces(tmp_path: Path) -> None:
     envelope = json.loads(out_path.read_text())
 
     # ── flag + envelope shape ───────────────────────────────────────
-    assert envelope["flag"] == "obsidian_connector_primary"
+    assert envelope["flag"] == "connector_dex_crm"
     assert "captured_at" in envelope
     assert "version" in envelope
 

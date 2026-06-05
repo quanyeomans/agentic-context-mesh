@@ -150,18 +150,6 @@ def test_legacy_v2_db_migrates_cleanly() -> None:
 
 
 @pytest.mark.integration
-def test_topology_v2_schema_flag_registered() -> None:
-    """The ``topology_v2_schema`` flag exists in the registry, default=False, stage=introduce."""
-    from kairix.core.features.registry import REGISTRY
-
-    assert "topology_v2_schema" in REGISTRY
-    flag = REGISTRY["topology_v2_schema"]
-    assert flag.default is False
-    assert flag.stage == "introduce"
-    assert flag.owner == "connector-framework"
-
-
-@pytest.mark.integration
 def test_new_topology_v2_dataclasses_import() -> None:
     """All new topology v2 dataclasses + enums + exceptions import cleanly."""
     from kairix.core.protocols import (

@@ -720,7 +720,6 @@ def test_close_releases_every_per_upn_graph_client() -> None:
     connector = M365CalendarConnector(
         config,
         per_user_client_factory=lambda _c, upn: _ScriptedClient(upn),
-        flag_reader=lambda _name: True,
     )
     for upn in ("alice@example.com", "bob@example.com"):
         container = Container(
@@ -758,3 +757,167 @@ def test_make_connector_accepts_user_ids_for_multi_calendar() -> None:
     connector = make_connector(config)
     containers = list(connector.iter_containers(cc_pair_id=1))
     assert [c.container_id for c in containers] == ["alice@example.com", "bob@example.com"]
+
+
+# ---------------------------------------------------------------------------
+# v2 per-container list_changes_for_container — events emit + payloads cached
+# Phase C (#132) retired the legacy flag-OFF tests; the existing close-test
+# verifies cleanup but never sends events through the per-container loop.
+# This pins the events-loop + payload-cache behaviour (lines 754-772).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_list_changes_for_container_emits_per_event_and_caches_payload() -> None:
+    """v2 per-UPN ``list_changes_for_container`` emits one ChangeEvent per
+    non-removed record and stores the raw payload on the per-event cache.
+
+    The per-event payload cache (``_event_payload_cache``) is what
+    ``fetch`` later reads to construct the RawArtefact — without it, a
+    fetched item would have to re-hit Graph for the body. This test
+    confirms (a) every non-removed record surfaces as a ChangeEvent
+    keyed by the event_id, and (b) the raw_payload is parked in the
+    cache for downstream fetch().
+
+    Sabotage-proof: remove the ``if not record.removed:
+    self._cache_payload(...)`` block; this test fails because the
+    cache stays empty after the events drain.
+    """
+    from kairix.core.protocols import Container
+
+    class _ScriptedClient(M365GraphCalendarClient):
+        def __init__(self, upn: str) -> None:
+            self._user_id = upn
+            self._http = None  # type: ignore[assignment]  # scripted client never makes HTTP calls
+            self._page_size = 50
+            self._upn = upn
+
+        def fetch_initial_delta(self, _start: str, _end: str) -> CalendarDeltaPage:
+            return CalendarDeltaPage(
+                events=(
+                    CalendarEventRecord(
+                        event_id="evt-keep-1",
+                        subject="Sync planning",
+                        start_iso="2026-06-10T09:00:00Z",
+                        end_iso="2026-06-10T10:00:00Z",
+                        location="Online",
+                        attendees=("agent-alpha@example.com",),
+                        organiser="agent-beta@example.com",
+                        last_modified_iso="2026-06-09T12:00:00Z",
+                        cancelled=False,
+                        removed=False,
+                        raw_payload='{"id": "evt-keep-1", "subject": "Sync planning"}',
+                    ),
+                    CalendarEventRecord(
+                        event_id="evt-keep-2",
+                        subject="Design review",
+                        start_iso="2026-06-11T14:00:00Z",
+                        end_iso="2026-06-11T15:00:00Z",
+                        location="Room 4",
+                        attendees=(),
+                        organiser="agent-beta@example.com",
+                        last_modified_iso="2026-06-09T13:00:00Z",
+                        cancelled=False,
+                        removed=False,
+                        raw_payload='{"id": "evt-keep-2", "subject": "Design review"}',
+                    ),
+                ),
+                next_link=None,
+                delta_link="dl-after-2-events",
+            )
+
+        def fetch_delta_page(self, link: str) -> CalendarDeltaPage:  # pragma: no cover  # scripted single-page
+            return CalendarDeltaPage(events=(), next_link=None, delta_link=link)
+
+        def close(self) -> None:
+            return None
+
+    config = M365CalendarConfig(
+        user_id="agent-alpha@example.com",
+        tenant_id="t",
+        client_id="c",
+        client_secret="s",  # pragma: allowlist secret
+        user_ids=("agent-alpha@example.com",),
+    )
+    connector = M365CalendarConnector(
+        config,
+        per_user_client_factory=lambda _c, upn: _ScriptedClient(upn),
+    )
+    container = Container(
+        cc_pair_id=1,
+        container_id="agent-alpha@example.com",
+        access_state="ACCESSIBLE",
+        cursor_token=None,
+        last_synced_at=None,
+    )
+    events = list(connector.list_changes_for_container(container))
+    # Both records emit as ChangeEvent (neither removed nor cancelled).
+    event_ids = sorted(e.item_id for e in events)
+    assert event_ids == ["evt-keep-1", "evt-keep-2"], (
+        f"non-removed records must emit per-event ChangeEvents; got {event_ids!r}"
+    )
+    # Per-event payload cache populated for fetch() downstream.
+    cache = getattr(connector, "_event_payload_cache", {})
+    assert "evt-keep-1" in cache, f"raw_payload must be cached; cache keys: {list(cache)!r}"
+    assert "evt-keep-2" in cache
+    assert '"evt-keep-1"' in cache["evt-keep-1"]
+
+
+@pytest.mark.unit
+def test_list_changes_for_container_delta_link_resume_uses_existing_cursor() -> None:
+    """When a Container carries a cursor_token, the connector resumes via
+    ``fetch_delta_page(link)`` instead of fetching an initial delta window.
+
+    Pins the v2 per-container cursor-resume semantics — the cursor is
+    the operator-persisted handle from the previous sync tick, so
+    each per-UPN cc_pair gets its own delta horizon. Without this branch
+    the connector would re-emit every event in the last window on every
+    tick.
+
+    Sabotage-proof: change ``client.fetch_delta_page(cursor)`` to
+    ``client.fetch_initial_delta(...)``; this test fails because the
+    scripted client records the wrong call.
+    """
+    from kairix.core.protocols import Container
+
+    calls: dict[str, list[str]] = {"initial": [], "delta_page": []}
+
+    class _RecordingClient(M365GraphCalendarClient):
+        def __init__(self, upn: str) -> None:
+            self._user_id = upn
+            self._http = None  # type: ignore[assignment]  # scripted client never makes HTTP calls
+            self._page_size = 50
+            self._upn = upn
+
+        def fetch_initial_delta(self, start: str, end: str) -> CalendarDeltaPage:
+            calls["initial"].append(f"{start}|{end}")
+            return CalendarDeltaPage(events=(), next_link=None, delta_link="dl-initial")
+
+        def fetch_delta_page(self, link: str) -> CalendarDeltaPage:
+            calls["delta_page"].append(link)
+            return CalendarDeltaPage(events=(), next_link=None, delta_link="dl-resumed")
+
+        def close(self) -> None:
+            return None
+
+    config = M365CalendarConfig(
+        user_id="agent-alpha@example.com",
+        tenant_id="t",
+        client_id="c",
+        client_secret="s",  # pragma: allowlist secret
+        user_ids=("agent-alpha@example.com",),
+    )
+    connector = M365CalendarConnector(
+        config,
+        per_user_client_factory=lambda _c, upn: _RecordingClient(upn),
+    )
+    container = Container(
+        cc_pair_id=1,
+        container_id="agent-alpha@example.com",
+        access_state="ACCESSIBLE",
+        cursor_token="dl-prior-tick",
+        last_synced_at=None,
+    )
+    list(connector.list_changes_for_container(container))
+    assert calls["delta_page"] == ["dl-prior-tick"], f"cursor_token must drive fetch_delta_page resume; got {calls!r}"
+    assert calls["initial"] == [], "initial delta must NOT fire when a cursor is present"

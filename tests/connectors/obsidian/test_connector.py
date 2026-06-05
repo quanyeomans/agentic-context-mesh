@@ -409,3 +409,141 @@ def test_reconciliation_emits_creates_then_modifies_then_deletes(vault: Path) ->
     deleted_idx = min(i for i, o in enumerate(ops) if o == "deleted")
     assert created_idx < deleted_idx, f"created must precede deleted in {ops!r}"
     assert modified_idx < deleted_idx, f"modified must precede deleted in {ops!r}"
+
+
+# ---------------------------------------------------------------------------
+# v2 per-container surface — iter_containers + list_changes_for_container
+# Phase C (#132) retired the legacy flag-OFF tests; these pin the v2-only
+# behaviour that's now the production code path.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_iter_containers_emits_one_per_top_level_folder(tmp_path: Path) -> None:
+    """v2 ingest entrypoint: vault with N top-level folders yields N Containers.
+
+    Hidden directories (``.obsidian/``, ``.git/``) are excluded — they're
+    editor state, not indexable content. The connector's ``iter_containers``
+    feeds the topology v2 per-container cc_pair lifecycle so the operator's
+    declared topology lines up with what the connector actually emits.
+
+    Sabotage-proof: remove the ``if entry.name.startswith(".")`` skip in
+    ``_top_level_folders``; this test fails because ``.obsidian`` surfaces
+    as a 4th Container.
+    """
+    vault = tmp_path / "vault"
+    _seed_vault(
+        vault,
+        {
+            "alpha/note.md": "a",
+            "bravo/note.md": "b",
+            "charlie/note.md": "c",
+            ".obsidian/config.json": "{}",
+        },
+    )
+    connector = _connector_with_known(vault, {})
+    containers = list(connector.iter_containers(cc_pair_id=42))
+    container_ids = sorted(c.container_id for c in containers)
+    assert container_ids == ["alpha", "bravo", "charlie"], f"hidden dirs must be excluded; got {container_ids!r}"
+    assert all(c.cc_pair_id == 42 for c in containers)
+    assert all(c.access_state == "ACCESSIBLE" for c in containers)
+    assert all(c.cursor_token is None for c in containers)
+
+
+@pytest.mark.unit
+def test_iter_containers_empty_vault_yields_root_container(tmp_path: Path) -> None:
+    """Flat vault (no top-level dirs) yields one Container with ``container_id=""``.
+
+    Operators with a single-flat-vault setup still need an ingest target;
+    the empty-vault fallback gives them one root Container that the
+    framework can hang cc_pair state off of.
+
+    Sabotage-proof: remove the ``if not top_level: yield Container(...)``
+    branch; this test fails because the connector emits zero Containers
+    on a flat vault.
+    """
+    vault = tmp_path / "flat-vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("flat", encoding="utf-8")
+    connector = _connector_with_known(vault, {})
+    containers = list(connector.iter_containers(cc_pair_id=7))
+    assert len(containers) == 1, f"flat vault must yield exactly one root container, got {containers!r}"
+    assert containers[0].container_id == ""
+    assert containers[0].cc_pair_id == 7
+
+
+@pytest.mark.unit
+def test_list_changes_for_container_dedups_and_filters_by_cursor(tmp_path: Path) -> None:
+    """v2 per-container path dedups duplicate item_ids + filters events at-or-before cursor.
+
+    The scoped path mirrors the legacy ``list_changes`` merge semantics
+    (watchdog wins over reconciler on duplicates; ``modified_at <= cursor``
+    drops the event) but scopes everything to one Container's subtree.
+    Pinning these branches keeps the v2 ingest equivalence.
+
+    Sabotage-proof: remove the ``if cursor is not None and ev.modified_at
+    <= cursor: continue`` filter in ``_list_changes_scoped``; this test
+    fails because a future-cursor returns the reconciler's events instead
+    of being filtered to empty.
+    """
+    from kairix.core.protocols import Container
+
+    vault = tmp_path / "vault"
+    _seed_vault(vault, {"alpha/note.md": "a", "alpha/sub/deep.md": "deep"})
+    known = _hash_snapshot(vault)
+    connector = _connector_with_known(vault, known)
+
+    container = Container(
+        cc_pair_id=1,
+        container_id="alpha",
+        access_state="ACCESSIBLE",
+        cursor_token="2099-01-01T00:00:00Z",  # future cursor — filters everything
+        last_synced_at=None,
+    )
+    events = list(connector.list_changes_for_container(container))
+    assert events == [], f"future cursor must filter all events on scoped path; got {events!r}"
+
+
+@pytest.mark.unit
+def test_load_hierarchy_emits_subdir_folders_in_parent_before_child_order(tmp_path: Path) -> None:
+    """v2 ``load_hierarchy`` walks nested folders parent-before-child (F58).
+
+    The F58 contract test in ``tests/contracts/test_hierarchy_parent_before_child.py``
+    asserts the invariant on a single-root vault only — it never exercises
+    subdirectory emission. This test extends the contract to a multi-level
+    hierarchy so the ``_walk_hierarchy`` child loop is exercised AND the
+    parent-id calculation is verified for nested paths.
+
+    Sabotage-proof: invert the ``parent_id = vault_name if rel_parent in
+    (".", "") else rel_parent`` branch (force the vault-name-only path);
+    this test fails because nested-folder parent_ids stop pointing at
+    intermediate directories and orphan-detection fires.
+    """
+    vault = tmp_path / "vault"
+    _seed_vault(
+        vault,
+        {
+            "alpha/level1.md": "a",
+            "alpha/beta/level2.md": "b",
+            "alpha/beta/gamma/level3.md": "c",
+        },
+    )
+    connector = _connector_with_known(vault, {})
+    nodes = list(connector.load_hierarchy(cc_pair_id=5))
+    # Expect: root + alpha + alpha/beta + alpha/beta/gamma (4 nodes minimum;
+    # may include more if vault root has other dirs, but at least the chain).
+    by_id = {n.raw_node_id: n for n in nodes}
+    assert "alpha" in by_id, f"missing top-level folder; nodes: {[n.raw_node_id for n in nodes]}"
+    assert "alpha/beta" in by_id
+    assert "alpha/beta/gamma" in by_id
+    # Parent-before-child invariant (F58 extended to subdirs).
+    seen: set[str] = set()
+    for node in nodes:
+        if node.raw_parent_id is not None:
+            assert node.raw_parent_id in seen, (
+                f"orphan: {node.raw_node_id} references parent {node.raw_parent_id!r} not yet emitted"
+            )
+        seen.add(node.raw_node_id)
+    # Parent-id correctness for nested levels.
+    assert by_id["alpha/beta"].raw_parent_id == "alpha"
+    assert by_id["alpha/beta/gamma"].raw_parent_id == "alpha/beta"

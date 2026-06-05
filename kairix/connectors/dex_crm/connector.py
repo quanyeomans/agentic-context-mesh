@@ -492,59 +492,37 @@ class DexCrmConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream change events for one Container's cursor horizon.
 
-        When the ``topology_v2_dex_crm`` flag is ON: reads
-        ``container.cursor_token`` as the per-container delta horizon
-        and threads it through :meth:`list_changes`. Each call uses
-        ONLY the supplied Container's cursor — no shared / cached /
+        Reads ``container.cursor_token`` as the per-container delta
+        horizon and threads it through :meth:`list_changes`. Each call
+        uses ONLY the supplied Container's cursor — no shared / cached /
         connector-level cursor leaks across containers.
 
-        When the flag is OFF: retains the Wave B shim behaviour —
-        delegate to :meth:`list_changes` with the container's cursor so
-        the observable shape is identical to the legacy v1 path. The
-        delegation chain still reads the supplied container's cursor
-        (not a shared module-level cursor) so the OFF branch matches
-        the ON branch on isolation while preserving the single-tenant
-        single-cursor wire interaction.
+        ``topology_v2_dex_crm`` retired post-cutover (task #132); the
+        per-container path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_DEX_CRM_FLAG):
-            self._last_path_taken = "legacy"
-            return self.list_changes(container.cursor_token)
         self._last_path_taken = "scoped"
         return self._list_changes_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
         """HierarchyConnector — emit FOLDER nodes parent-before-child.
 
-        When the ``topology_v2_dex_crm`` flag is ON: emits one root
-        FOLDER (``raw_node_id="dex"``, ``raw_parent_id=None``) followed
-        by one FOLDER child per top-level Dex entity type — Person,
-        Organisation, Relationship — each carrying ``raw_parent_id="dex"``
-        so the F58 parent-before-child invariant holds. The display
-        names mirror the Dex web-UI tab labels operators see, so a
-        search-layer client surfacing the hierarchy can render
-        recognisable folder breadcrumbs.
-
-        When the flag is OFF: retains the Wave B shim behaviour — one
-        root FOLDER node only.
+        Emits one root FOLDER (``raw_node_id="dex"``, ``raw_parent_id=None``)
+        followed by one FOLDER child per top-level Dex entity type —
+        Person, Organisation, Relationship — each carrying
+        ``raw_parent_id="dex"`` so the F58 parent-before-child invariant
+        holds. The display names mirror the Dex web-UI tab labels
+        operators see, so a search-layer client surfacing the hierarchy
+        can render recognisable folder breadcrumbs.
 
         ``link`` references the Dex web-UI tab for the root + each
         child; the search layer can surface a clickable affordance
         directly to the operator's tenant. ``sensitivity_hint`` is
         ``None`` because Dex sensitivity is connector-configured, not
         per-folder (per ADR-005).
+
+        ``topology_v2_dex_crm`` retired post-cutover (task #132); the
+        per-entity-type walk is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_DEX_CRM_FLAG):
-            yield HierarchyNode(
-                cc_pair_id=cc_pair_id,
-                raw_node_id=_HIERARCHY_ROOT_ID,
-                raw_parent_id=None,
-                display_name="Dex CRM",
-                link=None,
-                node_type="FOLDER",
-                external_access_json=None,
-                sensitivity_hint=None,
-            )
-            return
         yield from _walk_hierarchy(cc_pair_id=cc_pair_id)
 
     # ------------------------------------------------------------------

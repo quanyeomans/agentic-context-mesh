@@ -355,7 +355,6 @@ def _run_one_connector_batch(
     )
     from kairix.core.connectors.collection_router import _legacy_chunk_writer
     from kairix.core.connectors.registry import build_bronze_from_entry, build_extractor_from_entry
-    from kairix.core.features import flag
 
     name = entry["name"]
     # bronze_root is signature-only; streaming bronze writes no files.
@@ -365,7 +364,10 @@ def _run_one_connector_batch(
     connector = connector_factory(entry.get("config", {}))
     extractor = build_extractor_from_entry(entry)
     bronze_store = build_bronze_from_entry(entry, db=db)
-    chunk_writer = resolve_chunk_writer_for_entry(db, name, flag_on=bool(flag("topology_v2_runtime")))
+    # topology_v2_runtime cutover complete (task #132) — always route through
+    # CollectionRouter when a cc_pair exists for `name`; legacy_chunk_writer
+    # remains the fallback when no cc_pair has been registered for the entry.
+    chunk_writer = resolve_chunk_writer_for_entry(db, name)
     pipeline = ConnectorPipeline(
         db=db,
         bronze=bronze_store,
@@ -383,21 +385,14 @@ def _run_one_connector_batch(
 def resolve_chunk_writer_for_entry(
     db: sqlite3.Connection,
     name: str,
-    *,
-    flag_on: bool,
 ) -> Any:
-    """Resolve the chunk-writer for ``name``, gated by ``flag_on``.
+    """Resolve the chunk-writer for ``name``.
 
-    Flag OFF (default): construct an ``_SqliteChunkWriter`` via the
-    framework-internal :func:`legacy_chunk_writer` helper. This pays
-    down the F61 baseline — worker.py no longer constructs the writer
-    directly; the helper inside ``kairix/core/connectors/`` does.
-
-    Flag ON: look up cc_pair_id for ``name`` in
-    ``topology_cc_pairs.name``. If found, return a
-    :class:`CollectionRouter` adapter for that cc_pair. If not found,
-    fall through to the legacy writer — guarantees bit-for-bit
-    behaviour parity until operator config registers cc_pairs (Wave D).
+    Looks up cc_pair_id for ``name`` in ``topology_cc_pairs.name``. If
+    found, returns a :class:`CollectionRouter` adapter for that cc_pair.
+    If not found (or cc_pair has no mappings), falls through to the
+    legacy writer — guarantees bit-for-bit behaviour parity for entries
+    operator config hasn't yet registered.
 
     Returns ``Any`` because the union of ``_SqliteChunkWriter`` and
     ``_CollectionRouterChunkWriter`` is satisfied via duck-typing on
@@ -406,16 +401,14 @@ def resolve_chunk_writer_for_entry(
     """
     from kairix.core.connectors.collection_router import CollectionRouter, legacy_chunk_writer
 
-    if not flag_on:
-        return legacy_chunk_writer(db, collection=name)
     cc_pair_id = _lookup_cc_pair_id_by_name(db, name)
     if cc_pair_id is None:
         return legacy_chunk_writer(db, collection=name)
     router = CollectionRouter(db, cc_pair_id)
     if router.mapping_count() == 0:
         # cc_pair exists but no collection_sources mapped — preserve legacy
-        # single-collection behaviour. Wave D operator-config validation
-        # will block a cc_pair landing without at least one mapping.
+        # single-collection behaviour. Operator-config validation blocks a
+        # cc_pair landing without at least one mapping.
         return legacy_chunk_writer(db, collection=name)
     return _CollectionRouterChunkWriter(router=router)
 
@@ -1010,75 +1003,6 @@ def _reextract_rows(
     )
 
 
-@dataclass
-class LegacyScannerDeps:
-    """Injectable dependencies for :func:`run_via_legacy_document_scanner`.
-
-    F6-clean: every field carries a ``default_factory`` so production
-    callers construct ``LegacyScannerDeps()`` and get the real boundary
-    functions; tests build ``LegacyScannerDeps(document_root_resolver=...,
-    db_factory=...)`` to sandbox the scanner against a tmp_path-rooted
-    document store. Mirrors :class:`ConnectorSyncDeps`'s discipline for
-    the sibling ON-branch path.
-
-    Fields:
-      * ``document_root_resolver`` — returns the legacy document root;
-        default :func:`kairix.paths.document_root`.
-      * ``db_factory`` — opens the SQLite connection the scanner writes
-        through; default :func:`kairix.core.db.open_db`.
-    """
-
-    document_root_resolver: Callable[[], Path] = field(default_factory=lambda: document_root)
-    db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
-
-
-def run_via_legacy_document_scanner(deps: LegacyScannerDeps | None = None) -> ConnectorSyncResult:
-    """Flag-OFF branch — pre-IM-3 ``DocumentScanner`` indexing path.
-
-    Runs the legacy ``kairix.core.db.scanner.DocumentScanner`` over the
-    configured :func:`document_root`, then reports the scan counters in
-    a :class:`ConnectorSyncResult` so the maintenance-cycle dispatch
-    surface stays uniform across branches:
-
-    * ``synced`` = ``ScanReport.new + ScanReport.updated`` — items the
-      scanner brought into the index this tick.
-    * ``failed`` = ``ScanReport.errors`` — per-file read / hash errors
-      the scanner logged but absorbed.
-    * ``dead_letter_added`` = 0 — the legacy scanner has no dead-letter
-      surface (that's a connector-framework affordance).
-
-    When the document root does not exist the scanner short-circuits to
-    a zero-counter result without raising — same no-op posture as the
-    ``run_connector_sync_pipeline`` empty-config branch, so flipping the
-    flag on/off on an empty deploy is symmetrical.
-
-    ``deps`` is the F6-clean injection seam — production callers omit
-    ``deps`` and the default factory wires real boundary calls; BDD +
-    integration tests pass a ``LegacyScannerDeps`` rooted at tmp_path so
-    the legacy branch never touches the dev's real vault.
-    """
-    logger.info("worker: connector sync routing via legacy document scanner (flag OFF)")
-    deps = deps if deps is not None else LegacyScannerDeps()
-    droot = deps.document_root_resolver()
-    if not droot.exists():
-        return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-    from kairix.core.db.scanner import CollectionConfig, DocumentScanner
-
-    db = deps.db_factory()
-    try:
-        scanner = DocumentScanner(db, document_root=droot)
-        report = scanner.scan([CollectionConfig(name="default", path=".")])
-    finally:
-        db.close()
-
-    return ConnectorSyncResult(
-        synced=report.new + report.updated,
-        failed=report.errors,
-        dead_letter_added=0,
-    )
-
-
 def _default_neo4j_drain() -> Any:
     """Worker-loop dispatch slot for the Neo4j entity-graph drain (GH #334).
 
@@ -1146,34 +1070,23 @@ def _default_wal_checkpoint() -> dict[str, int]:
 def _default_connector_sync() -> ConnectorSyncResult:
     """Worker-loop dispatch slot for the connector-sync maintenance task.
 
-    Branches on the ``obsidian_connector_primary`` feature flag (PR-6
-    of the feature-flag plan; see
-    ``docs/architecture/feature-flag-architecture.md`` §7):
-
-    * Flag **OFF** (default) — legacy ``DocumentScanner`` path. Keeps
-      pre-IM-3 indexing behaviour intact so the cutover is reversible
-      until the flag is retired (see §4 lifecycle).
-    * Flag **ON** — :class:`~kairix.core.connectors.ConnectorPipeline`
-      path. Each configured connector is driven through
-      list_changes → fetch → bronze → silver → cursor.advance.
-
-    Both code paths stay present until the flag retires; F54 requires
-    both branches to carry tests (BDD + integration + E2E).
+    Drives each configured connector through the
+    :class:`~kairix.core.connectors.ConnectorPipeline` path —
+    list_changes → fetch → bronze → silver → cursor.advance. The
+    legacy DocumentScanner path retired with ``obsidian_connector_primary``
+    (task #132 cutover).
 
     Production callers reach this via ``WorkerDeps.connector_sync_fn``
-    default-factory. Tests that need to pin the flag value compose
-    :func:`dispatch_connector_sync` with a ``FakeFeatureFlagResolver``
-    and pass the result through ``WorkerDeps(connector_sync_fn=...)``
-    — see :func:`dispatch_connector_sync` for the composition shape.
+    default-factory.
     """
     return dispatch_connector_sync()
 
 
 def _default_flag_value(name: str) -> bool:
-    """Production default for :func:`dispatch_connector_sync`'s
-    ``read_flag`` argument — delegates to :func:`kairix.core.features.flag`.
+    """Production default for connector-sync dispatchers' ``read_flag`` arg
+    — delegates to :func:`kairix.core.features.flag`.
 
-    Lifted to a module-level helper so the dispatcher's signature can
+    Lifted to a module-level helper so the dispatchers' signatures can
     carry a real callable default (F6-clean) without a per-call
     ``Optional[...] = None`` shape.
     """
@@ -1183,30 +1096,17 @@ def _default_flag_value(name: str) -> bool:
 
 
 def dispatch_connector_sync(
-    read_flag: Callable[[str], bool] = _default_flag_value,
     on_branch: Callable[[], ConnectorSyncResult] = run_via_connector_pipeline,
-    off_branch: Callable[[], ConnectorSyncResult] = run_via_legacy_document_scanner,
 ) -> ConnectorSyncResult:
-    """Compose the flag-branching dispatcher for the connector-sync slot.
+    """Dispatch the connector-sync slot via the connector pipeline.
 
-    Public function that the BDD + integration tests reach to pin a
-    specific flag value through a :class:`FakeFeatureFlagResolver`
-    without monkey-patching the resolver module (F1-clean). The
-    parameter names deliberately avoid the F6 ``_fn`` / ``_resolver``
-    / ``_factory`` / ``_loader`` / ``_builder`` / ``_provider``
-    suffixes because they're real boundary callables on a public
-    composition root, not test-only seams.
-
-    ``on_branch`` / ``off_branch`` default to the real production
-    branch helpers — the BDD step file leaves them unchanged and
-    observes the branch via the distinct INFO logs each helper emits.
-    Integration tests likewise leave them defaulted or pass
-    tmp_path-rooted variants when they need to assert against the
-    resulting ConnectorSyncResult counters.
+    ``obsidian_connector_primary`` retired (task #132); the OFF/legacy
+    DocumentScanner branch is gone. ``on_branch`` defaults to the
+    production pipeline helper and remains injectable so integration
+    tests can pass tmp_path-rooted variants when they need to assert
+    against the resulting ConnectorSyncResult counters.
     """
-    if read_flag("obsidian_connector_primary"):
-        return on_branch()
-    return off_branch()
+    return on_branch()
 
 
 def m365_off_branch_noop() -> ConnectorSyncResult:
@@ -1469,169 +1369,73 @@ def dispatch_gmail_sync(
     return off_branch()
 
 
-def google_drive_off_branch_noop() -> ConnectorSyncResult:
-    """OFF-branch default for :func:`dispatch_google_drive_sync` —
-    return zero counters and emit the operator-visible signal that the
-    Google Drive connector is gated off.
-
-    F6-clean: a real callable default, no ``None``. Public so the
-    feature-flag BDD steps can reach it without an internal-name
-    import (F5).
-    """
-    logger.info("worker: google_drive connector gated off (flag OFF)")
-    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
-
-
 def run_via_google_drive_connector() -> ConnectorSyncResult:
-    """ON-branch default for :func:`dispatch_google_drive_sync` —
-    delegates to the canonical :func:`run_connector_sync_pipeline`
+    """Run the Google Drive connector sync.
+
+    Delegates to the canonical :func:`run_connector_sync_pipeline`
     which resolves the ``google_drive`` plugin via its entry-point
     factory and drives the standard ConnectorPipeline.
-
-    The branch log distinguishes the Google Drive path from the
-    sibling sharepoint / notion / m365 paths so operators can tell
-    which connector ran by grep-ing INFO logs.
     """
-    logger.info("worker: google_drive connector running (flag ON)")
+    logger.info("worker: google_drive connector running")
     return run_connector_sync_pipeline()
 
 
 def dispatch_google_drive_sync(
-    read_flag: Callable[[str], bool] = _default_flag_value,
     on_branch: Callable[[], ConnectorSyncResult] = run_via_google_drive_connector,
-    off_branch: Callable[[], ConnectorSyncResult] = google_drive_off_branch_noop,
 ) -> ConnectorSyncResult:
-    """Compose the flag-branching dispatcher for the Google Drive connector slot.
+    """Dispatch the Google Drive connector sync.
 
-    Reads the ``topology_v2_google_drive`` flag and routes to the ON
-    branch (the standard connector pipeline, which resolves the
-    ``google_drive`` plugin) or the OFF branch (a no-op that skips the
-    connector entirely). Mirrors :func:`dispatch_sharepoint_sync` shape —
-    the BDD + integration tests pin the flag through
-    :class:`FakeFeatureFlagResolver` and observe the branch via the
-    per-helper INFO log.
-
-    Gating happens at the connector-selection boundary — when OFF, the
-    google_drive plugin never runs even if listed in
-    ``kairix.config.yaml``. When ON, the connector is selected via the
-    standard config + entry-point shape.
+    ``topology_v2_google_drive`` retired post-cutover (task #132); the
+    OFF/skip branch is gone. ``on_branch`` defaults to the production
+    helper and remains injectable for tmp_path-rooted integration tests.
     """
-    if read_flag("topology_v2_google_drive"):
-        return on_branch()
-    return off_branch()
-
-
-def apple_caldav_off_branch_noop() -> ConnectorSyncResult:
-    """OFF-branch default for :func:`dispatch_apple_caldav_sync` —
-    return zero counters and emit the operator-visible signal that the
-    Apple CalDAV connector is gated off.
-
-    F6-clean: a real callable default, no ``None``. Public so the
-    feature-flag BDD steps can reach it without an internal-name
-    import (F5).
-    """
-    logger.info("worker: apple_caldav connector gated off (flag OFF)")
-    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+    return on_branch()
 
 
 def run_via_apple_caldav_connector() -> ConnectorSyncResult:
-    """ON-branch default for :func:`dispatch_apple_caldav_sync` —
-    delegate to the canonical :func:`run_connector_sync_pipeline` which
-    resolves the ``apple_caldav`` plugin via its entry-point factory
-    and drives the standard ConnectorPipeline.
+    """Run the Apple CalDAV connector sync.
 
-    The branch log distinguishes the Apple CalDAV path from the
-    sibling m365_calendar / sharepoint / notion paths so operators
-    can tell which connector ran by grep-ing INFO logs.
+    Delegates to the canonical :func:`run_connector_sync_pipeline` which
+    resolves the ``apple_caldav`` plugin via its entry-point factory and
+    drives the standard ConnectorPipeline.
     """
-    logger.info("worker: apple_caldav connector running (flag ON)")
+    logger.info("worker: apple_caldav connector running")
     return run_connector_sync_pipeline()
 
 
 def dispatch_apple_caldav_sync(
-    read_flag: Callable[[str], bool] = _default_flag_value,
     on_branch: Callable[[], ConnectorSyncResult] = run_via_apple_caldav_connector,
-    off_branch: Callable[[], ConnectorSyncResult] = apple_caldav_off_branch_noop,
 ) -> ConnectorSyncResult:
-    """Compose the flag-branching dispatcher for the Apple CalDAV connector slot.
+    """Dispatch the Apple CalDAV connector sync.
 
-    Reads the ``topology_v2_apple_caldav`` flag and routes to the ON
-    branch (the standard connector pipeline, which resolves the
-    ``apple_caldav`` plugin) or the OFF branch (a no-op that skips
-    the connector entirely). Mirrors :func:`dispatch_notion_sync`
-    shape — the BDD + integration tests pin the flag through
-    :class:`FakeFeatureFlagResolver` and observe the branch via the
-    per-helper INFO log.
-
-    Gating happens at the connector-selection boundary — when OFF,
-    the apple_caldav plugin never runs even if listed in
-    ``kairix.config.yaml``. When ON, the connector is selected via
-    the standard config + entry-point shape.
-
-    Unlike the M365 connector flags (which have a separate
-    ``connector_*`` introduce flag distinct from the topology-v2
-    cutover flag), the Apple CalDAV connector ships behind a single
-    capability flag — the connector is brand new at landing time so
-    there's no legacy single-cursor shape to preserve; the
-    ``topology_v2_apple_caldav`` flag gates the entire plugin until
-    it soaks against a production iCloud account.
+    ``topology_v2_apple_caldav`` retired post-cutover (task #132); the
+    OFF/skip branch is gone.
     """
-    if read_flag("topology_v2_apple_caldav"):
-        return on_branch()
-    return off_branch()
-
-
-def google_calendar_off_branch_noop() -> ConnectorSyncResult:
-    """OFF-branch default for :func:`dispatch_google_calendar_sync` —
-    return zero counters and emit the operator-visible signal that the
-    Google Calendar connector is gated off.
-
-    F6-clean: a real callable default, no ``None``. Public so the
-    feature-flag BDD steps can reach it without an internal-name
-    import (F5).
-    """
-    logger.info("worker: google_calendar connector gated off (flag OFF)")
-    return ConnectorSyncResult(synced=0, failed=0, dead_letter_added=0)
+    return on_branch()
 
 
 def run_via_google_calendar_connector() -> ConnectorSyncResult:
-    """ON-branch default for :func:`dispatch_google_calendar_sync` —
-    delegate to the canonical :func:`run_connector_sync_pipeline` which
+    """Run the Google Calendar connector sync.
+
+    Delegates to the canonical :func:`run_connector_sync_pipeline` which
     resolves the ``google_calendar`` plugin via its entry-point factory
     and drives the standard ConnectorPipeline.
-
-    The branch log distinguishes the Google Calendar path from the
-    sibling m365 / obsidian / notion paths so operators can tell which
-    connector ran by grep-ing INFO logs.
     """
-    logger.info("worker: google_calendar connector running (flag ON)")
+    logger.info("worker: google_calendar connector running")
     return run_connector_sync_pipeline()
 
 
 def dispatch_google_calendar_sync(
-    read_flag: Callable[[str], bool] = _default_flag_value,
     on_branch: Callable[[], ConnectorSyncResult] = run_via_google_calendar_connector,
-    off_branch: Callable[[], ConnectorSyncResult] = google_calendar_off_branch_noop,
 ) -> ConnectorSyncResult:
-    """Compose the flag-branching dispatcher for the Google Calendar slot.
+    """Dispatch the Google Calendar connector sync.
 
-    Reads the ``topology_v2_google_calendar`` flag and routes to the ON
-    branch (the standard connector pipeline, which resolves the
-    ``google_calendar`` plugin) or the OFF branch (a no-op that skips
-    the connector entirely). Mirrors :func:`dispatch_m365_email_headers_sync`
-    shape — the BDD + integration tests pin the flag through
-    :class:`FakeFeatureFlagResolver` and observe the branch via the
-    per-helper INFO log.
-
-    Gating happens at the connector-selection boundary — when OFF, the
-    google_calendar plugin never runs even if listed in
-    ``kairix.config.yaml``. When ON, the connector is selected via the
-    standard config + entry-point shape. The flag defaults OFF until
-    Google Workspace OAuth credentials are provisioned (tracked GH #356).
+    ``topology_v2_google_calendar`` retired post-cutover (task #132);
+    the OFF/skip branch is gone. The connector itself still checks
+    whether OAuth credentials have been provisioned (GH #356) and
+    raises a structured error pointing to the fix when they're not.
     """
-    if read_flag("topology_v2_google_calendar"):
-        return on_branch()
-    return off_branch()
+    return on_branch()
 
 
 # ---------------------------------------------------------------------------
@@ -2336,22 +2140,17 @@ class TopologyV2ApplyDeps:
     F6-clean: every field has a ``default_factory`` so production callers
     construct ``TopologyV2ApplyDeps()`` and get the real boundary calls;
     tests construct ``TopologyV2ApplyDeps(config_path_resolver=...,
-    db_factory=..., flag_reader=lambda _name: True)`` and pass it as a
-    single argument to drive the apply step against a tmp_path-rooted
-    config + DB without touching the dev's real vault.
+    db_factory=...)`` and pass it as a single argument to drive the
+    apply step against a tmp_path-rooted config + DB without touching
+    the dev's real vault.
 
     Fields:
-      * ``flag_reader`` — returns the effective value of the named
-        feature flag. Default :func:`_default_flag_value`. Tests pass a
-        lambda returning a deterministic bool to pin the apply path
-        independently of the global registry / env state.
       * ``config_path_resolver`` — returns the ``kairix.config.yaml``
         path or ``None``. Default :func:`_resolve_config_path_default`.
       * ``db_factory`` — opens the SQLite connection the apply step
         writes through; default :func:`kairix.core.db.open_db`.
     """
 
-    flag_reader: Callable[[str], bool] = field(default_factory=lambda: _default_flag_value)
     config_path_resolver: Callable[[], Path | None] = field(default_factory=lambda: _resolve_config_path_default)
     db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
 
@@ -2359,23 +2158,16 @@ class TopologyV2ApplyDeps:
 def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
     """Materialise the operator's ``topology_v2:`` YAML into runtime rows.
 
-    Gated on the ``topology_v2_config`` feature flag — flag OFF makes
-    the function a structural no-op (returns without opening the DB),
-    preserving bit-for-bit pre-Wave-D boot behaviour. Flag ON: loads
-    the parsed config, validates cross-references, and calls
-    :func:`kairix.core.connectors.topology_v2_applier.apply_topology_v2`
-    against the shared SQLite connection.
-
-    Returns None unconditionally — failures are logged but never crash
-    the boot. The worker continues so the operator can fix the config
-    without crashlooping; the cc_pair lookup in
+    ``topology_v2_config`` retired post-cutover (task #132); the
+    apply step now runs unconditionally at boot. Returns None
+    unconditionally — failures are logged but never crash the boot.
+    The worker continues so the operator can fix the config without
+    crashlooping; the cc_pair lookup in
     :func:`resolve_chunk_writer_for_entry` falls back to the legacy
     writer when no cc_pair has been registered, so a failed apply
     degrades gracefully.
     """
     deps = deps if deps is not None else TopologyV2ApplyDeps()
-    if not deps.flag_reader("topology_v2_config"):
-        return
 
     config_path = deps.config_path_resolver()
     if config_path is None or not config_path.exists():

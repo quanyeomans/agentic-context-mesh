@@ -14,31 +14,29 @@ single subclass:
 
 .. code-block:: python
 
-    class ConnectorSyncCapability(FlagGatedCapability[ConnectorSyncResult]):
-        flag_name = "obsidian_connector_primary"
-        on_marker = "worker: obsidian connector running (flag ON)"
-        off_marker = "worker: obsidian connector gated off (flag OFF)"
+    class MaintenanceLoopCapability(FlagGatedCapability[None]):
+        flag_name = "maintenance_loop"
+        on_marker = "worker: maintenance loop running (flag ON)"
+        off_marker = "worker: maintenance loop gated off (flag OFF)"
 
-        def run_on(self) -> ConnectorSyncResult:
-            return run_via_connector_pipeline()
+        def run_on(self) -> None:
+            return run_maintenance_loop_tick()
 
-        def run_off(self) -> ConnectorSyncResult:
-            return run_via_legacy_document_scanner()
+        def run_off(self) -> None:
+            return None
 
 The base's :meth:`dispatch` method does the flag read + branch + log
 in one place. Tests pin the flag via ``capability.dispatch(read_flag=
 FakeFeatureFlagResolver().with_flag(...).get)`` — no monkey-patching,
 no global mutation.
 
-Generic over the return type so all four call-site patterns (audit
-findings §6) fit:
+Generic over the return type so multiple call-site patterns fit:
 
-* Pattern 1 (8 connector-gating flags): ``T = ConnectorSyncResult``
+* Pattern 1 (connector-gating ``connector_*`` flags):
+  ``T = ConnectorSyncResult``
 * Pattern 2 (``maintenance_loop``): ``T = None`` (Deps-injected, no
   return value)
-* Pattern 3 (``topology_v2_runtime``): ``T = ChunkWriter`` (selects
-  which writer to use)
-* Pattern 4 (``pipeline_status_emit``): ``T = sqlite3.Connection | None``
+* Pattern 3 (``pipeline_status_emit``): ``T = sqlite3.Connection | None``
   (selects whether to write the timeline)
 
 This file ships the ABC + tests. Migration of the 11 callsites is

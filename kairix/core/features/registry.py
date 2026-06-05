@@ -8,9 +8,6 @@ Every feature flag declared at landing time is a single entry in
 :data:`REGISTRY`. The registry is the schema — the resolver, CLI, and
 MCP tool all introspect it; no other module declares flags.
 
-PR-2 lands the registry empty. Future PRs add entries (PR-6 adds
-``obsidian_connector_primary``; Wave 5 adds the connector flags).
-
 Per the spec §3.2, fields are:
 
 * ``name`` — snake_case identifier; matches the dict key in REGISTRY.
@@ -47,48 +44,28 @@ class FeatureFlag:
 
 # F17 — extract duplicated string literals so adding flags doesn't churn
 # the literal across every entry. ≥3 occurrences with ≥10 chars triggers
-# the check; these four are the canonical recurring fields.
+# the check; these are the canonical recurring fields.
 _CONNECTOR_FRAMEWORK_OWNER = "connector-framework"
 _CONNECTOR_INGESTION_SPEC = "docs/architecture/connector-ingestion-architecture.md"
-_TOPOLOGY_V2_SPEC = "docs/architecture/connector-scope-topology/ADR.md"
 _FLAG_INTRODUCED_IN_DISPATCH_WINDOW = "v2026.5.23"
 _FLAG_TARGET_RETIRE_IN = "v2026.7.23"
-# Topology v2 retire window is longer — 7-wave migration ramping over ~12 months.
-_TOPOLOGY_V2_TARGET_RETIRE_IN = "v2027.5.23"
+# Long-window retire ceiling for connectors with slower per-customer adoption
+# (Sharepoint / Notion: AAD or workspace re-install consent latency).
+_LONG_RETIRE_WINDOW = "v2027.5.23"
 # Wave E newer-flag dispatch window (slack/github/notion/sharepoint pilots).
 _FLAG_INTRODUCED_WAVE_E_LATER = "v2026.5.24"
-_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER = "v2027.5.24"
-# Wave 5 connector pilots (gmail / google_drive / google_calendar / apple_caldav)
-# all introduced in v2026.5.30 with the 6-month F51 retire ceiling.
+_LONG_RETIRE_WINDOW_WAVE_E = "v2027.5.24"
+# Wave 5 connector pilots (gmail) introduced in v2026.5.30 with the 6-month
+# F51 retire ceiling.
 _FLAG_INTRODUCED_WAVE5_2026_05_30 = "v2026.5.30"
 _FLAG_TARGET_RETIRE_WAVE5_2026_11_30 = "v2026.11.30"
-# Wave E flag description fragments — recurring text across per-connector pilots.
-_WAVE_E_DESC_PREFIX = "Wave E of the connector/collection/scope topology v2 migration — "
-_WAVE_E_OFF_DELEGATES = "list_changes_for_container delegates to the legacy single "
-_WAVE_E_OFF_SHIM_NOTE = "When OFF, the connector retains the Wave B shim shape — "
-_WAVE_E_OFF_HIERARCHY_NOTE = "list_changes call, and load_hierarchy emits one root FOLDER node. "
 
 
-# Public registry. PR-6 lands the first entry — ``obsidian_connector_primary``
-# at introduce stage (default off). Wave 5 KP-1 adds ``connector_dex_crm``
-# at introduce stage (default off); KP-2 / KP-3 follow for the M365 pair.
+# Public registry. The topology_v2_* family + ``obsidian_connector_primary``
+# retired post-cutover (task #132 — production worker logs source='config'
+# effective=True for every member of the family); their gated call sites have
+# been inlined to the post-cutover behaviour and the OFF-branch shims removed.
 REGISTRY: dict[str, FeatureFlag] = {
-    "obsidian_connector_primary": FeatureFlag(
-        name="obsidian_connector_primary",
-        default=False,
-        description=(
-            "Route document indexing through kairix.connectors.obsidian instead of the legacy DocumentScanner."
-        ),
-        stage="introduce",
-        # IM-6 cutover plan (per feature-flag-architecture.md §7):
-        # 4 weeks dogfood UAT at introduce stage → 4 weeks cutover-stage
-        # soak → retire. ``target_retire_in`` is 2 months from the
-        # introduce-stage landing (current 2026-05 dispatch window).
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_FLAG_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_CONNECTOR_INGESTION_SPEC,
-    ),
     "connector_dex_crm": FeatureFlag(
         name="connector_dex_crm",
         default=False,
@@ -151,160 +128,9 @@ REGISTRY: dict[str, FeatureFlag] = {
         # are slower to authorise than the email-headers / calendar
         # siblings because Sites.Read.All needs higher-tier consent.
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        target_retire_in=_LONG_RETIRE_WINDOW,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
-    ),
-    "topology_v2_schema": FeatureFlag(
-        name="topology_v2_schema",
-        default=False,
-        description=(
-            "Wave A of the connector/collection/scope topology v2 migration — "
-            + "controls whether the v2 schema tables (connectors, credentials, "
-            + "cc_pairs, containers, hierarchy_nodes, collections, collection_sources, "
-            + "federated_connectors, group_grants, scope_profiles, skills, task_collections) "
-            + "get POPULATED. Tables exist unconditionally (CREATE IF NOT EXISTS); "
-            + "the flag gates whether anything writes to them. Default-off until "
-            + "Wave B Protocol shims land."
-        ),
-        stage="introduce",
-        # Topology v2 migration plan (per docs/architecture/connector-scope-topology/ADR.md):
-        # Wave A schema → B Protocol → C runtime → D operator config → E per-connector
-        # multi-container → F chunker plugins → G retirement. Each wave gets its own
-        # flag; this one is the foundation.
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_protocol": FeatureFlag(
-        name="topology_v2_protocol",
-        default=False,
-        description=(
-            "Wave B of the connector/collection/scope topology v2 migration — "
-            + "controls whether the worker's connector-sync dispatch routes through "
-            + "the new capability-mix-in path (using PollConnector / CheckpointedConnector "
-            + "etc.) vs the legacy single-cursor SourceConnector path. Wave B lands "
-            + "the Protocols + shims with the flag default-off so existing behaviour "
-            + "is preserved; Wave C runtime activates the routing."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_config": FeatureFlag(
-        name="topology_v2_config",
-        default=False,
-        description=(
-            "Wave D of the connector/collection/scope topology v2 migration — "
-            + "controls whether the 6 operator-config blocks (connectors / credentials / "
-            + "cc_pairs / collections / scope_profiles / skills) are PARSED + APPLIED. "
-            + "When OFF, the parser still loads the YAML but the topology v2 surface "
-            + "is inert (rows aren't written, scope profiles aren't enforced at search, "
-            + "skills aren't dispatched). When ON, the worker startup + `kairix config "
-            + "validate` + `kairix features status` + `kairix cc-pair *` verbs read "
-            + "from the parsed surface. Default-off until the dogfood VM cutover "
-            + "validates the operator-config promotion path."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_runtime": FeatureFlag(
-        name="topology_v2_runtime",
-        default=False,
-        description=(
-            "Wave C of the connector/collection/scope topology v2 migration — "
-            + "controls whether the worker's connector-sync dispatch routes chunk "
-            + "writes through CollectionRouter (per-cc_pair, per-mapping) vs the "
-            + "legacy single-collection chunk writer. When ON, the runtime also "
-            + "wires the ChunkerRegistry dispatch + ScopeProfileResolver + "
-            + "ResultEnvelope freshness signals. When OFF, behaviour is bit-for-bit "
-            + "identical to today. Default-off until the dogfood VM cutover "
-            + "validates per-folder routing + chunker dispatch + HierarchyNode "
-            + "emission for the obsidian-personal cc_pair."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_obsidian": FeatureFlag(
-        name="topology_v2_obsidian",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector pilot for the obsidian connector. When ON, the "
-            + "ObsidianConnector emits one Container per top-level vault folder "
-            + "(each with its own delta cursor) instead of a single "
-            + "connector-wide cursor, and load_hierarchy walks the vault "
-            + "filesystem emitting one FOLDER node per directory parent-before-child. "
-            + _WAVE_E_OFF_SHIM_NOTE
-            + _WAVE_E_OFF_DELEGATES
-            + _WAVE_E_OFF_HIERARCHY_NOTE
-            + "Default-off until the per-folder routing pattern soaks against the "
-            + "dogfood vault; this pilot's shape is the template for the "
-            + "dex_crm / m365_* / sharepoint / notion / slack / github "
-            + "wave-E adoption."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_m365_email_headers": FeatureFlag(
-        name="topology_v2_m365_email_headers",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector pilot for the m365_email_headers connector. When ON, "
-            + "the connector emits one Container per configured mailbox UPN "
-            + "(each with its own Graph deltaLink cursor) instead of a single "
-            + "connector-wide cursor, and load_hierarchy emits one root FOLDER "
-            + "node plus one FOLDER per mailbox parent-before-child per F58. "
-            + _WAVE_E_OFF_SHIM_NOTE
-            + _WAVE_E_OFF_DELEGATES
-            + _WAVE_E_OFF_HIERARCHY_NOTE
-            + "Default-off until the per-mailbox routing pattern soaks against "
-            + "the dogfood tenant; mirrors the obsidian Wave E pilot landed in "
-            + "the topology_v2_obsidian flag."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_dex_crm": FeatureFlag(
-        name="topology_v2_dex_crm",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector pilot for the dex_crm connector. When ON, the "
-            + "DexCrmConnector emits one Container (single-tenant Dex API has no "
-            + "per-organisation delta) whose cursor_token threads through Wave C's "
-            + "CollectionRouter rather than the legacy connector-wide cursor, and "
-            + "load_hierarchy emits one root FOLDER (Dex CRM) with one FOLDER "
-            + "child per top-level entity type (Person, Organisation, "
-            + "Relationship) parent-before-child per F58. When OFF, the connector "
-            + "retains the Wave B shim shape — list_changes_for_container "
-            + "delegates to the legacy single list_changes call, and "
-            + "load_hierarchy emits one root FOLDER node. "
-            + "Default-off until the per-container routing pattern soaks against "
-            + "the dogfood Dex tenant; mirrors the topology_v2_obsidian pilot "
-            + "for the dex_crm wave-E adoption."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
     ),
     "connector_notion": FeatureFlag(
         name="connector_notion",
@@ -324,7 +150,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         # Resolver, sensitivity routing, webhooks — land as separate commits
         # behind the same flag with per-step cutover discipline).
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
+        target_retire_in=_LONG_RETIRE_WINDOW,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/notion.md",
     ),
@@ -344,146 +170,10 @@ REGISTRY: dict[str, FeatureFlag] = {
         # introduce-stage soak focuses on the proactive failure modes —
         # secondary-rate-limit backoff, installation-token rotation under
         # cc_pair lock, and force-push full-container reconcile (Break #7).
-        # Target retire 12 months ahead matches the topology_v2_* fleet so
-        # retirement batches roll together once Wave F chunker plugins
-        # land across every connector.
         introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
+        target_retire_in=_LONG_RETIRE_WINDOW_WAVE_E,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/github.md",
-    ),
-    "topology_v2_github": FeatureFlag(
-        name="topology_v2_github",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector slice for the github connector. When ON, the "
-            + "GitHubConnector emits one Container per installation-accessible "
-            + "repository (each carrying its own per-repo SHA + issues since= "
-            + "cursor pair), list_changes_for_container scopes the drain to "
-            + "that single repo, and load_hierarchy walks Org → repo → "
-            + "top-level-directory parent-before-child per F58. When OFF, "
-            + "the connector retains the Wave B shim shape — "
-            + _WAVE_E_OFF_DELEGATES
-            + "list_changes call (which drains every repo as one flat batch), "
-            + "and load_hierarchy emits one root ORG node. "
-            + "Default-off until the per-repo routing pattern soaks against "
-            + "the dogfood GitHub installation; mirrors the topology_v2_obsidian "
-            + "pilot shape for the github wave-E adoption."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_m365_calendar": FeatureFlag(
-        name="topology_v2_m365_calendar",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector slice for the m365_calendar connector. When ON, the "
-            + "M365CalendarConnector emits one Container per configured calendar "
-            + "(per UPN, e.g. dan@example.com) with each carrying its own Graph "
-            + "@odata.deltaLink as cursor_token, and list_changes_for_container "
-            + "scopes the Graph delta query to that calendar only. When OFF, the "
-            + "connector retains the Wave B shim shape — list_changes_for_container "
-            + "delegates to the legacy single-cursor list_changes call that uses "
-            + "one shared deltaLink across every configured calendar. "
-            + "load_hierarchy emits a root FOLDER node plus one child FOLDER per "
-            + "configured calendar on both branches (single calendar-as-folder "
-            + "depth; per-calendar sub-folder hierarchy is a Wave-E+1 enhancement). "
-            + "Default-off until per-calendar isolation soaks against the dogfood "
-            + "tenant; mirrors the obsidian Wave E pilot's shape and shares the "
-            + "Azure AD app registration with the m365_email_headers sibling."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_sharepoint": FeatureFlag(
-        name="topology_v2_sharepoint",
-        default=False,
-        description=(
-            "Wave E of the connector/collection/scope topology v2 migration — "
-            "per-connector slice for the sharepoint connector. When ON, the "
-            "SharePointConnector emits one Container per configured Graph drive "
-            "(each with its own @odata.deltaLink as cursor_token) instead of a "
-            "single packed JSON cursor map; list_changes_for_container scopes "
-            "the Graph delta query to that drive ONLY using the container's own "
-            "cursor; load_hierarchy emits a root SITE FOLDER plus one DRIVE "
-            "child per configured drive parent-before-child per F58; the "
-            "Resolver.reindex method replays only the supplied failed item ids "
-            "instead of re-running a delta window. When OFF, the connector "
-            "retains the Wave B shim shape — list_changes_for_container "
-            "delegates to the legacy single-cursor list_changes, load_hierarchy "
-            "emits one root FOLDER node, and reindex is unavailable. Default-off "
-            "until the per-drive routing pattern soaks against the dogfood "
-            "tenant; mirrors the obsidian / m365_calendar / m365_email_headers "
-            "Wave E pilots and shares the Azure AD app registration with the "
-            "M365 siblings per ADR-019."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_google_drive": FeatureFlag(
-        name="topology_v2_google_drive",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector slice for the google_drive connector. When ON, the "
-            + "GoogleDriveConnector emits one Container per configured Drive "
-            + "corpus (each with its own newStartPageToken as cursor_token) "
-            + "instead of a single connector-wide cursor; "
-            + "list_changes_for_container scopes the Drive changes drain to "
-            + "that corpus only; load_hierarchy emits a root FOLDER plus one "
-            + "FOLDER child per configured corpus parent-before-child per F58; "
-            + "the Resolver.reindex method replays only the supplied failed "
-            + "item ids instead of re-running a changes window. "
-            + _WAVE_E_OFF_SHIM_NOTE
-            + _WAVE_E_OFF_DELEGATES
-            + _WAVE_E_OFF_HIERARCHY_NOTE
-            + "Default-off until the OAuth credential provisioning lands (GH #356) "
-            + "and the per-corpus routing pattern soaks against the dogfood "
-            + "workspace; mirrors the sharepoint / m365_calendar / "
-            + "m365_email_headers Wave E pilots."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_apple_caldav": FeatureFlag(
-        name="topology_v2_apple_caldav",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector slice for the apple_caldav connector. When ON, the "
-            + "AppleCalDavConnector emits one Container per discovered (or "
-            + "operator-pinned) iCloud calendar with each carrying its own CalDAV "
-            + "sync token as cursor_token, and list_changes_for_container scopes "
-            + "the CalDAV <sync-collection> REPORT to that calendar URL only. "
-            + "When OFF, the connector retains the legacy shim shape — "
-            + "list_changes_for_container delegates to the legacy single-cursor "
-            + "list_changes call that folds every calendar's token into one "
-            + "composite cursor. load_hierarchy emits a root FOLDER node plus one "
-            + "child FOLDER per configured calendar on both branches "
-            + "(single calendar-as-folder depth; per-calendar event grouping is a "
-            + "Wave-E+1 enhancement). Default-off until per-calendar isolation "
-            + "soaks against a production iCloud account; mirrors the sibling "
-            + "m365_calendar Wave E pilot shape."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
     ),
     "connector_slack": FeatureFlag(
         name="connector_slack",
@@ -505,10 +195,9 @@ REGISTRY: dict[str, FeatureFlag] = {
         stage="introduce",
         # Slack cutover plan (per docs/architecture/feature-flag-architecture.md §7):
         # 12-month retire window — Slack workspace re-installs are slower to authorise
-        # than the M365 sibling flows (admin consent + bot scope review per workspace),
-        # so the retire deadline matches the Wave E topology fleet at v2027.5.24.
+        # than the M365 sibling flows (admin consent + bot scope review per workspace).
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in="v2027.5.24",
+        target_retire_in=_LONG_RETIRE_WINDOW_WAVE_E,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/architecture/connector-scope-topology/connector-design-specs/slack.md",
     ),
@@ -531,11 +220,8 @@ REGISTRY: dict[str, FeatureFlag] = {
         stage="introduce",
         # KFEAT-021 cutover plan (per docs/architecture/feature-flag-architecture.md §7):
         # 2 weeks dogfood UAT at introduce stage → 2 weeks cutover-stage soak → retire.
-        # 12-month target_retire_in matches the topology_v2_* fleet so retirement
-        # batches can roll together once Phase 2 (connector-side delete
-        # propagation) lands across every connector wave.
         introduced_in=_FLAG_INTRODUCED_WAVE_E_LATER,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
+        target_retire_in=_LONG_RETIRE_WINDOW_WAVE_E,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec="docs/features/KFEAT-021-automated-orphan-cleanup/BRIEF.md",
     ),
@@ -590,100 +276,6 @@ REGISTRY: dict[str, FeatureFlag] = {
         target_retire_in=_FLAG_TARGET_RETIRE_WAVE5_2026_11_30,
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
-    ),
-    "topology_v2_gmail": FeatureFlag(
-        name="topology_v2_gmail",
-        default=False,
-        description=(
-            _WAVE_E_DESC_PREFIX
-            + "per-connector pilot for the gmail connector. When ON, the "
-            + "GmailConnector emits one Container per authorised mailbox (carrying "
-            + "its own Gmail historyId as cursor_token) and "
-            + "list_changes_for_container drains the History API against that "
-            + "mailbox only. When OFF, the connector retains the Wave B shim shape "
-            + "— "
-            + _WAVE_E_OFF_DELEGATES
-            + "list_changes call. load_hierarchy emits a single root FOLDER node "
-            + "on both branches (per-label hierarchy is a Wave-E+1 enhancement). "
-            + "Default-off until per-mailbox isolation soaks against the dogfood "
-            + "Workspace tenant; mirrors the topology_v2_m365_email_headers pilot's "
-            + "shape and shares the same per-mailbox cursor pattern."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_WAVE5_2026_05_30,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_WAVE_E_LATER,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_google_calendar": FeatureFlag(
-        name="topology_v2_google_calendar",
-        default=False,
-        description=(
-            "Enable the Google Calendar connector — pulls events from one "
-            "Google Calendar (calendar_id, defaulting to primary) via the "
-            "Calendar API v3 events.list endpoint and persists the returned "
-            "nextSyncToken as the incremental-sync cursor. Ships OFF until "
-            "Google Workspace OAuth credentials are provisioned in the "
-            "operator's Key Vault (tracked GH #356); flipping ON without "
-            "provisioning is a no-op because make_connector raises with a fix "
-            "pointer when the access_token resolves to empty. When ON, the "
-            "connector emits one created/modified ChangeEvent per event "
-            "(cancelled events are skipped); recurring masters surface once "
-            "with the RRULE captured in SourceMetadata.properties.recurrence_rule "
-            "per ADR-028 (no per-occurrence expansion). On Google 410 Gone "
-            "(syncToken too old), the connector transparently falls back to a "
-            "fresh initial sync per Google's docs."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_WAVE5_2026_05_30,
-        target_retire_in=_FLAG_TARGET_RETIRE_WAVE5_2026_11_30,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec="docs/architecture/connector-ingestion-architecture.md",
-    ),
-    "topology_v2_collection_resolver": FeatureFlag(
-        name="topology_v2_collection_resolver",
-        default=False,
-        description=(
-            "GH #372 — route the search pipeline's collection-resolver through "
-            "the topology v2 ScopeProfileResolver superset adapter instead of "
-            "the legacy DefaultCollectionResolver. When OFF, the legacy resolver "
-            "reads collections.shared[].in_default from kairix.config.yaml "
-            "(today's behaviour). When ON, `agent=X, collections=None` returns "
-            "the superset of every collection the agent's scope_profile grants "
-            "read access to, via ScopeProfileResolver.resolve(actors=(X,)). "
-            "Default-off until the scope-profile path has soaked against the "
-            "dogfood VM; the cutover is a separate deliberate action per the "
-            "default-safe principle in feature-flag-architecture.md §2.1."
-        ),
-        stage="introduce",
-        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
-        target_retire_in=_TOPOLOGY_V2_TARGET_RETIRE_IN,
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
-    ),
-    "topology_v2_default_in_scope": FeatureFlag(
-        name="topology_v2_default_in_scope",
-        default=False,
-        description=(
-            "GH #373 — gate the new per-scope-entry default_in_scope filter. "
-            "When OFF (default), ScopeProfileResolver.resolve(default_only=True) "
-            "behaves like default_only=False — every read-eligible entry surfaces "
-            "regardless of the default_in_scope column (back-compat). When ON, "
-            "TopologyV2CollectionResolver invokes the resolver with "
-            "default_only=True for the collections=None code path, so default "
-            "search returns only entries where default_in_scope=1 (the broad "
-            "superset of in-default sources). Explicit collections=[...] still "
-            "validates against the full read scope (default_only=False), so "
-            "opt-in collections like reflib remain reachable by explicit name. "
-            "Default-off until the dogfood VM cutover validates the operator-"
-            "config promotion path per the default-safe principle in "
-            "feature-flag-architecture.md §2.1."
-        ),
-        stage="introduce",
-        introduced_in="v2026.6.2",
-        target_retire_in="v2027.6.30",
-        owner=_CONNECTOR_FRAMEWORK_OWNER,
-        related_spec=_TOPOLOGY_V2_SPEC,
     ),
 }
 

@@ -390,50 +390,24 @@ def test_search_explicit_other_agent_memory_returns_empty_with_error_logged(
     )
 
 
-def test_flag_off_uses_legacy_default_collection_resolver(tmp_path: Path) -> None:
-    """Feature flag OFF → SearchPipeline routes through the legacy
-    :class:`DefaultCollectionResolver`.
+def test_build_collection_resolver_returns_topology_v2_resolver(tmp_path: Path) -> None:
+    """``build_collection_resolver`` always returns the v2 resolver
+    post-cutover (task #132 — ``topology_v2_collection_resolver`` +
+    ``topology_v2_default_in_scope`` retired).
 
-    The legacy resolver reads ``collections.shared[].in_default`` from
-    ``kairix.config.yaml`` (today's behaviour). With the flag OFF the
-    factory MUST wire that resolver, not the v2 Adapter — operators get
-    bit-for-bit identical behaviour to v2026.5.x.
+    The (removed) legacy resolver did not carry ``validate_explicit``;
+    the v2 resolver does. Asserting on type-shape is the cleanest pin
+    without importing private classes.
     """
     from kairix.core.factory import build_collection_resolver
 
-    def _off_reader(_name: str) -> bool:
-        return False
-
     db_path, _registry = _build_pipeline(tmp_path)
     _bootstrap_db(db_path).close()
 
-    resolver = build_collection_resolver(db_path=db_path, flag_reader=_off_reader)
-
-    # The legacy resolver does NOT carry validate_explicit (a v2 affordance).
-    # Asserting on type-shape is the cleanest factory-branch pin without
-    # importing the legacy class directly.
-    assert not hasattr(resolver, "validate_explicit"), (
-        f"flag OFF must yield legacy DefaultCollectionResolver; got {type(resolver).__name__}"
-    )
-
-
-def test_flag_on_uses_topology_v2_collection_resolver(tmp_path: Path) -> None:
-    """Feature flag ON → SearchPipeline routes through TopologyV2CollectionResolver."""
-    from kairix.core.factory import build_collection_resolver
-
-    def _on_reader(name: str) -> bool:
-        return name in {
-            "topology_v2_collection_resolver",
-            "topology_v2_default_in_scope",
-        }
-
-    db_path, _registry = _build_pipeline(tmp_path)
-    _bootstrap_db(db_path).close()
-
-    resolver = build_collection_resolver(db_path=db_path, flag_reader=_on_reader)
+    resolver = build_collection_resolver(db_path=db_path)
 
     assert hasattr(resolver, "validate_explicit"), (
-        f"flag ON must yield TopologyV2CollectionResolver; got {type(resolver).__name__}"
+        f"build_collection_resolver must yield TopologyV2CollectionResolver; got {type(resolver).__name__}"
     )
 
 
@@ -463,10 +437,7 @@ def test_topology_v2_resolver_usable_from_a_different_thread(tmp_path: Path) -> 
     _seed_scope_profile_seven_in_default_one_opt_in(db, actor_id="shape")
     db.close()
 
-    def _flag_on(name: str) -> bool:
-        return name == "topology_v2_collection_resolver"
-
-    resolver = build_collection_resolver(db_path=db_path, flag_reader=_flag_on)
+    resolver = build_collection_resolver(db_path=db_path)
 
     captured: dict[str, Exception | None] = {"error": None}
 

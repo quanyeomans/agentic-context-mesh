@@ -36,28 +36,15 @@ def _write_yaml(path: Path, body: str) -> Path:
     return path
 
 
-def test_apply_at_boot_flag_off_is_structural_noop(tmp_path: Path) -> None:
-    """Flag OFF: function returns True without invoking config_path or db factories."""
-    calls = {"config": 0, "db": 0}
-
-    def _cfg_resolver() -> Path | None:
-        calls["config"] += 1
-        return None
-
-    def _db_factory() -> sqlite3.Connection:
-        calls["db"] += 1
-        raise AssertionError("db_factory must not be invoked when flag is OFF")
-
-    deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: False,
-        config_path_resolver=_cfg_resolver,
-        db_factory=_db_factory,
-    )
-    assert apply_topology_v2_at_boot(deps) is None
-    assert calls == {"config": 0, "db": 0}
+# NOTE: test_apply_at_boot_flag_off_is_structural_noop was retired alongside
+# the topology_v2_config flag (#132). Post-cutover apply_topology_v2_at_boot
+# runs unconditionally; the OFF branch no longer exists. The "skip cleanly
+# when there's no config on disk" behaviour is now exercised by
+# test_apply_at_boot_skips_when_config_path_resolver_returns_none below
+# (renamed from its flag_on_ predecessor).
 
 
-def test_apply_at_boot_flag_on_skips_when_config_path_resolver_returns_none(
+def test_apply_at_boot_skips_when_config_path_resolver_returns_none(
     tmp_path: Path,
 ) -> None:
     """Flag ON + no config on disk: skipped, returns True."""
@@ -66,14 +53,13 @@ def test_apply_at_boot_flag_on_skips_when_config_path_resolver_returns_none(
         raise AssertionError("db_factory must not be invoked when no config exists")
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: None,
         db_factory=_db_factory,
     )
     assert apply_topology_v2_at_boot(deps) is None
 
 
-def test_apply_at_boot_flag_on_skips_when_config_path_does_not_exist(
+def test_apply_at_boot_skips_when_config_path_does_not_exist(
     tmp_path: Path,
 ) -> None:
     """Flag ON + config path resolver returns a missing file: skipped."""
@@ -83,14 +69,13 @@ def test_apply_at_boot_flag_on_skips_when_config_path_does_not_exist(
 
     missing = tmp_path / "no-such-file.yaml"
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: missing,
         db_factory=_db_factory,
     )
     assert apply_topology_v2_at_boot(deps) is None
 
 
-def test_apply_at_boot_flag_on_skips_when_yaml_unparseable(tmp_path: Path) -> None:
+def test_apply_at_boot_skips_when_yaml_unparseable(tmp_path: Path) -> None:
     """Flag ON + malformed YAML: caught, logged, returns True without crashing."""
     config_path = _write_yaml(tmp_path / "kairix.config.yaml", "::not valid yaml::")
 
@@ -98,14 +83,13 @@ def test_apply_at_boot_flag_on_skips_when_yaml_unparseable(tmp_path: Path) -> No
         raise AssertionError("db_factory must not be invoked when YAML parse fails")
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: config_path,
         db_factory=_db_factory,
     )
     assert apply_topology_v2_at_boot(deps) is None
 
 
-def test_apply_at_boot_flag_on_skips_when_config_parse_fails(tmp_path: Path) -> None:
+def test_apply_at_boot_skips_when_config_parse_fails(tmp_path: Path) -> None:
     """Flag ON + structurally-wrong config: caught, returns True.
 
     The parser raises TopologyV2ParseError on a `connectors:` block that
@@ -121,14 +105,13 @@ def test_apply_at_boot_flag_on_skips_when_config_parse_fails(tmp_path: Path) -> 
         raise AssertionError("db_factory must not be invoked when parse fails")
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: config_path,
         db_factory=_db_factory,
     )
     assert apply_topology_v2_at_boot(deps) is None
 
 
-def test_apply_at_boot_flag_on_skips_when_no_blocks_declared(tmp_path: Path) -> None:
+def test_apply_at_boot_skips_when_no_blocks_declared(tmp_path: Path) -> None:
     """Flag ON + empty topology_v2 block: short-circuits before DB open."""
     config_path = _write_yaml(tmp_path / "kairix.config.yaml", "topology_v2: {}\n")
 
@@ -136,14 +119,13 @@ def test_apply_at_boot_flag_on_skips_when_no_blocks_declared(tmp_path: Path) -> 
         raise AssertionError("db_factory must not be invoked when no blocks are declared")
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: config_path,
         db_factory=_db_factory,
     )
     assert apply_topology_v2_at_boot(deps) is None
 
 
-def test_apply_at_boot_flag_on_rolls_back_on_validation_failure(tmp_path: Path) -> None:
+def test_apply_at_boot_rolls_back_on_validation_failure(tmp_path: Path) -> None:
     """Flag ON + dangling cross-reference: caught, rolled back, returns True."""
     config_path = _write_yaml(
         tmp_path / "kairix.config.yaml",
@@ -157,7 +139,6 @@ def test_apply_at_boot_flag_on_rolls_back_on_validation_failure(tmp_path: Path) 
     db_path = tmp_path / "kairix.sqlite"
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: config_path,
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
@@ -171,7 +152,7 @@ def test_apply_at_boot_flag_on_rolls_back_on_validation_failure(tmp_path: Path) 
     assert rows[0] == 0
 
 
-def test_apply_at_boot_flag_on_happy_path_commits_rows(tmp_path: Path) -> None:
+def test_apply_at_boot_happy_path_commits_rows(tmp_path: Path) -> None:
     """Flag ON + valid config: rows committed; ``cc_pair`` lookup succeeds."""
     config_path = _write_yaml(
         tmp_path / "kairix.config.yaml",
@@ -188,7 +169,6 @@ def test_apply_at_boot_flag_on_happy_path_commits_rows(tmp_path: Path) -> None:
     )
     db_path = tmp_path / "kairix.sqlite"
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: config_path,
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )
@@ -204,7 +184,7 @@ def test_apply_at_boot_flag_on_happy_path_commits_rows(tmp_path: Path) -> None:
 def test_apply_at_boot_default_deps_constructs_without_raising() -> None:
     """Default ``TopologyV2ApplyDeps()`` constructs every default_factory."""
     deps = TopologyV2ApplyDeps()
-    # All three fields resolved to callables; can be invoked at boot time.
-    assert callable(deps.flag_reader)
+    # Both fields resolved to callables; can be invoked at boot time.
+    # ``flag_reader`` retired with the topology_v2_config flag (#132).
     assert callable(deps.config_path_resolver)
     assert callable(deps.db_factory)

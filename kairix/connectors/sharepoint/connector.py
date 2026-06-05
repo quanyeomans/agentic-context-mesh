@@ -144,25 +144,6 @@ class SharePointDriveSpec:
     exclude_paths: tuple[str, ...] = ()
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-sharepoint flag check.
-
-    Delegates to :func:`kairix.core.features.flag` so the production
-    path threads through the env-var → config-overlay → registry
-    resolution chain. Tests inject a different callable (typically one
-    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
-    branch under test is pinned without monkey-patching the resolver
-    module (F1-clean / F2-clean).
-
-    Lifted to a module-level helper so the connector's signature can
-    carry a real callable default (F6-clean) without a per-call
-    ``Optional[...] = None`` shape.
-    """
-    from kairix.core.features import flag as _prod_flag
-
-    return _prod_flag(name)
-
-
 def _resolve_credentials_from_secrets(secrets: SecretsResolver) -> SharePointCredentials:
     """Resolve the three required secrets via the canonical :class:`SecretsResolver`.
 
@@ -218,7 +199,6 @@ class SharePointConnector:
         client_builder: Callable[[OAuth2ClientCredsAuth], SharePointGraphClient] | None = None,
         auth: OAuth2ClientCredsAuth | None = None,
         default_sensitivity: Sensitivity = DEFAULT_SENSITIVITY,
-        flag_reader: Callable[[str], bool] = _default_flag_reader,
         secrets: SecretsResolver | None = None,
     ) -> None:
         if not drives:
@@ -231,7 +211,6 @@ class SharePointConnector:
         self._drives: tuple[SharePointDriveSpec, ...] = tuple(drives)
         self._spec_by_drive_id: dict[str, SharePointDriveSpec] = {spec.drive_id: spec for spec in self._drives}
         self._default_sensitivity: Sensitivity = default_sensitivity
-        self._flag_reader = flag_reader
 
         self._secrets: SecretsResolver = secrets if secrets is not None else SecretsLoader()
         resolved_auth: OAuth2ClientCredsAuth
@@ -476,64 +455,34 @@ class SharePointConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream changes for one container's Graph drive.
 
-        When the ``topology_v2_sharepoint`` flag is ON: reads
-        ``container.cursor_token`` as the per-drive Graph deltaLink
-        (None on first sync) and walks the delta pages for THAT drive
-        only. Per-drive isolation means adding or removing one drive
-        does not affect the cursor state of the others — bypasses the
-        legacy packed JSON cursor map entirely so a single-drive 403
-        cannot poison the shared cursor.
+        Reads ``container.cursor_token`` as the per-drive Graph
+        deltaLink (None on first sync) and walks the delta pages for
+        THAT drive only. Per-drive isolation means adding or removing
+        one drive does not affect the cursor state of the others —
+        bypasses the legacy packed JSON cursor map entirely so a
+        single-drive 403 cannot poison the shared cursor.
 
-        When the flag is OFF: retains the Wave B shim behaviour —
-        delegate to :meth:`list_changes` with the container's cursor
-        (serialised through ``_serialise_cursor`` so the legacy
-        per-drive map shape round-trips) so the observable shape is
-        identical to the legacy v1 path.
+        ``topology_v2_sharepoint`` retired post-cutover (task #132);
+        the per-drive path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_SHAREPOINT_FLAG):
-            # OFF branch — bit-for-bit Wave B shim. Wrap the container's
-            # cursor as a single-drive JSON map and forward to the
-            # legacy single-cursor list_changes path so the observable
-            # shape (events emitted, _next_cursor populated) matches v1.
-            legacy_cursor: Cursor | None = (
-                _serialise_cursor({container.container_id: container.cursor_token})
-                if container.cursor_token is not None
-                else None
-            )
-            return self.list_changes(legacy_cursor)
         return self._list_changes_for_container_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
         """HierarchyConnector — emit nodes parent-before-child per F58.
 
-        When the ``topology_v2_sharepoint`` flag is ON: emits a root
-        SITE-typed FOLDER node (``raw_node_id="sharepoint"``,
+        Emits a root SITE-typed FOLDER node (``raw_node_id="sharepoint"``,
         ``raw_parent_id=None``) followed by one DRIVE-typed FOLDER per
         configured drive, with ``raw_node_id`` set to the drive id and
         ``raw_parent_id`` pointing at the root. Parent-before-child per
         F58.
 
-        When the flag is OFF: emits one root FOLDER node only (Wave B
-        shim shape) so the observable shape matches the sibling
-        connectors' OFF-branch behaviour.
-
         Per-drive sub-folder hierarchy (Documents / Shared with me /
-        custom libraries) is a Wave-E+1 enhancement — this slice keeps
-        the hierarchy at drive-as-folder granularity to mirror the
-        obsidian / m365_calendar / dex_crm Wave E pilots.
+        custom libraries) is a later-wave enhancement — this slice keeps
+        the hierarchy at drive-as-folder granularity.
+
+        ``topology_v2_sharepoint`` retired post-cutover (task #132);
+        the SITE + DRIVE per-drive emission is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_SHAREPOINT_FLAG):
-            yield HierarchyNode(
-                cc_pair_id=cc_pair_id,
-                raw_node_id=_HIERARCHY_ROOT_ID,
-                raw_parent_id=None,
-                display_name=_HIERARCHY_ROOT_DISPLAY,
-                link=None,
-                node_type="FOLDER",
-                external_access_json=None,
-                sensitivity_hint=None,
-            )
-            return
         yield HierarchyNode(
             cc_pair_id=cc_pair_id,
             raw_node_id=_HIERARCHY_ROOT_ID,

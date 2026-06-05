@@ -328,17 +328,10 @@ def test_composed_alpha_path_apply_then_dual_connector_routing(tmp_path: Path) -
     BM25 search. Both connectors' content lands scoped to its YAML-
     declared collection.
     """
-    # ---- Flags pinned ON via the canonical fake resolver (no monkey-patch).
-    resolver = (
-        FakeFeatureFlagResolver()
-        .with_flag("topology_v2_config", True)
-        .with_flag("topology_v2_runtime", True)
-        .with_flag("topology_v2_obsidian", True)
-        .with_flag("connector_sharepoint", True)
-    )
-    assert resolver.get("topology_v2_config") is True
-    assert resolver.get("topology_v2_runtime") is True
-    assert resolver.get("topology_v2_obsidian") is True
+    # ---- ``topology_v2_config`` / ``topology_v2_runtime`` /
+    # ``topology_v2_obsidian`` retired post-cutover (task #132); only
+    # ``connector_sharepoint`` remains as a real gate.
+    resolver = FakeFeatureFlagResolver().with_flag("connector_sharepoint", True)
     assert resolver.get("connector_sharepoint") is True
 
     # ---- Wave D config: YAML → parse → apply-bridge.

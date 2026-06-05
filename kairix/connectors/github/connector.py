@@ -428,14 +428,11 @@ class GitHubConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream changes for one repo (Container).
 
-        Wave E ON-branch: scoped to ``container.container_id`` (the
-        repo full_name) and uses ``container.cursor_token`` as the
-        per-repo cursor. Off-branch delegates to :meth:`list_changes`
-        with the container's cursor (legacy single-cursor shape).
+        Scoped to ``container.container_id`` (the repo full_name) and
+        uses ``container.cursor_token`` as the per-repo cursor.
+        ``topology_v2_github`` retired post-cutover (task #132); the
+        per-repo path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_GITHUB_FLAG):
-            self._last_path_taken = "legacy"
-            return self.list_changes(container.cursor_token)
         self._last_path_taken = "scoped"
         return self._drain_one_container(container)
 
@@ -509,32 +506,17 @@ class GitHubConnector:
         """HierarchyConnector — emit Org → repo → dir nodes parent-before-child.
 
         Per spec §1: hierarchy is Org → repo → branch/ref → tree(dir) →
-        file. The Wave E v1 emits the first three levels (Org → repo →
-        top-level dir); per-file emission is deferred to Wave F+ where
-        the per-blob HierarchyNode cost is justified by per-file ACL
-        retrieval.
+        file. The v1 emits the first three levels (Org → repo →
+        top-level dir); per-file emission is deferred to a later wave
+        where the per-blob HierarchyNode cost is justified by per-file
+        ACL retrieval.
 
         F58 — every emitted node's ``raw_parent_id`` is None (root org)
         or references a previously-emitted node's ``raw_node_id``.
-        Sabotage target #5 — flipping repo + org emission order flunks
-        the contract test.
 
-        When the ``topology_v2_github`` flag is OFF: emits one root
-        ORG node only (Wave B shim shape). When ON: emits the full
-        Org → repo → dir tree.
+        ``topology_v2_github`` retired post-cutover (task #132); the
+        full Org → repo → dir walk is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_GITHUB_FLAG):
-            yield HierarchyNode(
-                cc_pair_id=cc_pair_id,
-                raw_node_id="github",
-                raw_parent_id=None,
-                display_name="GitHub",
-                link=_GITHUB_WEB_BASE,
-                node_type=_HIERARCHY_NODE_TYPE_FOLDER,
-                external_access_json=None,
-                sensitivity_hint=None,
-            )
-            return
         repos = self._apply_repos_allowlist(self._client.list_installation_repositories())
         emitted: set[str] = set()
         # Wave E: emit org nodes first (parent), then repos under each

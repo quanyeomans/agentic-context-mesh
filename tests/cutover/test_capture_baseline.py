@@ -168,11 +168,11 @@ def test_build_baseline_missing_config_returns_null_surfaces(tmp_path: Path) -> 
     PATH, but the row itself is present.
     """
     envelope = _build_baseline(
-        flag="obsidian_connector_primary",
+        flag="connector_dex_crm",
         config_path=tmp_path / "missing.yaml",
         surfaces=list(ALL_SURFACES),
     )
-    assert envelope["flag"] == "obsidian_connector_primary"
+    assert envelope["flag"] == "connector_dex_crm"
     assert envelope["state"] is None
     # The sample-journey surface ships the canned-fallback row when the
     # config block is absent. top_paths is empty in a sandbox where the

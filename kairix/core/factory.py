@@ -312,97 +312,25 @@ def _build_search_logger() -> Any:
     )
 
 
-def build_collection_resolver(
-    db_path: Any = None,
-    *,
-    flag_reader: Any = None,
-) -> Any:
+def build_collection_resolver(db_path: Any = None) -> Any:
     """Construct the production ``CollectionResolver``.
 
-    Branches on the ``topology_v2_collection_resolver`` feature flag
-    (GH #372):
+    Always returns :class:`TopologyV2CollectionResolver`, which reads
+    the ``topology_scope_profiles`` + ``topology_scope_entries`` v2
+    tables; default search returns the superset of every collection
+    the agent's scope_profile grants read access to, filtered by the
+    per-scope-entry ``default_in_scope`` column.
 
-      * **OFF (default)** — :class:`DefaultCollectionResolver` reads
-        ``collections.shared[].in_default`` from ``kairix.config.yaml``;
-        ``KAIRIX_EXTRA_COLLECTIONS`` is still honoured for ad-hoc
-        deployments without a full config file.
-      * **ON** — :class:`TopologyV2CollectionResolver` reads the
-        ``topology_scope_profiles`` + ``topology_scope_entries`` v2
-        tables; default search returns the superset of every collection
-        the agent's scope_profile grants read access to.
-
-    The cutover is a separate deliberate action per the default-safe
-    principle (docs/architecture/feature-flag-architecture.md §2.1).
+    ``topology_v2_collection_resolver`` + ``topology_v2_default_in_scope``
+    retired post-cutover (task #132).
 
     ``db_path`` is the resolved SQLite path threaded from
-    :func:`build_search_pipeline`; the v2 branch opens a connection
-    against it. The legacy branch ignores ``db_path``.
-
-    ``flag_reader`` is the DI seam — tests pass a
-    :class:`tests.fakes.FakeFeatureFlagResolver`'s ``.get`` method to
-    drive the OFF/ON branch deterministically without env-var or
-    overlay-file manipulation. Production passes ``None`` and the
-    factory consults the real :func:`kairix.core.features.flag` resolver.
+    :func:`build_search_pipeline`; the resolver opens a connection
+    against it.
     """
-    use_v2 = False
-    default_in_scope_enabled = False
-    try:
-        if flag_reader is not None:
-            use_v2 = bool(flag_reader("topology_v2_collection_resolver"))
-            default_in_scope_enabled = bool(flag_reader("topology_v2_default_in_scope"))
-        else:
-            from kairix.core.features import flag as _feature_flag
-
-            use_v2 = _feature_flag("topology_v2_collection_resolver")
-            default_in_scope_enabled = _feature_flag("topology_v2_default_in_scope")
-    except Exception as e:
-        logger.warning(
-            "factory: topology_v2 flag lookup failed — %s; defaulting to legacy resolver",
-            e,
-        )
-
-    if use_v2:
-        return _build_topology_v2_collection_resolver(
-            db_path,
-            default_in_scope_filter_enabled=default_in_scope_enabled,
-        )
-    return _build_legacy_collection_resolver()
-
-
-def _build_legacy_collection_resolver() -> Any:
-    """Construct the legacy :class:`DefaultCollectionResolver`.
-
-    Reads ``collections.shared[].in_default`` from ``kairix.config.yaml``;
-    ``KAIRIX_EXTRA_COLLECTIONS`` is still honoured.
-    """
-    from kairix.core.search.config_loader import load_collections, resolve_config_path
-    from kairix.core.search.registry import parse_agent_registry
-    from kairix.core.search.resolver import DefaultCollectionResolver
-    from kairix.paths import extra_collections as _extra_collections
-
-    collections_config = None
-    try:
-        collections_config = load_collections()
-    except Exception as e:
-        logger.warning("factory: load_collections failed — %s", e)
-
-    agent_registry = None
-    config_path = resolve_config_path()
-    if config_path is not None:
-        try:
-            import yaml
-
-            with config_path.open(encoding="utf-8") as f:
-                raw_yaml = yaml.safe_load(f) or {}
-            pattern = collections_config.agent_pattern if collections_config else "{agent}-memory"
-            agent_registry = parse_agent_registry(raw_yaml, default_pattern=pattern)
-        except Exception as e:
-            logger.warning("factory: parse_agent_registry failed — %s", e)
-
-    return DefaultCollectionResolver(
-        collections_config=collections_config,
-        extra_collections=_extra_collections(),
-        agent_registry=agent_registry,
+    return _build_topology_v2_collection_resolver(
+        db_path,
+        default_in_scope_filter_enabled=True,
     )
 
 
@@ -503,11 +431,17 @@ def _build_topology_v2_collection_resolver(
     default-in-scope filter on the collections=None path. The factory
     reads the ``topology_v2_default_in_scope`` feature flag and threads
     its value here.
+
+    Reads ``KAIRIX_EXTRA_COLLECTIONS`` at the factory boundary (F4)
+    and passes the parsed list into the resolver — preserves the
+    operator-facing env-var contract that the retired legacy resolver
+    used to honour.
     """
     import sqlite3
 
     from kairix.core.search.scope_collection_cache import ScopeCollectionCache
     from kairix.core.search.topology_v2_resolver import TopologyV2CollectionResolver
+    from kairix.paths import extra_collections as _extra_collections
 
     # ``check_same_thread=False`` is mandatory here: build_search_pipeline
     # memoises its result for the process lifetime, so the same Connection
@@ -536,6 +470,7 @@ def _build_topology_v2_collection_resolver(
     inner = TopologyV2CollectionResolver(
         db=db,  # type: ignore[arg-type]  # see rationale above
         default_in_scope_filter_enabled=default_in_scope_filter_enabled,
+        extra_collections=_extra_collections(),
     )
     # R2 (#388) — wrap in a TTL cache so the SQLite SELECT on
     # topology_scope_profiles + topology_scope_entries doesn't run on
@@ -712,11 +647,11 @@ def build_search_pipeline(
             cached = _PIPELINE_CACHE.get(cfg)
             if cached is not None:
                 return cached
-            built = _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths, flag_reader)
+            built = _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths)
             _PIPELINE_CACHE[cfg] = built
             return built
 
-    return _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths, flag_reader)
+    return _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths)
 
 
 def _build_search_pipeline_uncached(
@@ -724,7 +659,6 @@ def _build_search_pipeline_uncached(
     registry: ProviderRegistry | None,
     fact_retriever: Any,
     paths: KairixPaths | None,
-    flag_reader: Any,
 ) -> SearchPipeline:
     """Build a fresh ``SearchPipeline`` for ``cfg`` — never reads the cache.
 
@@ -778,7 +712,7 @@ def _build_search_pipeline_uncached(
         fusion=_build_fusion(cfg),
         boosts=select_boosts(cfg, graph),
         logger=_build_search_logger(),
-        resolver=build_collection_resolver(db_path=resolved_db_path, flag_reader=flag_reader),
+        resolver=build_collection_resolver(db_path=resolved_db_path),
         config=cfg,
         # #281 — wire the process-shared LRU so repeat queries from
         # teaming agents skip the Azure embed roundtrip.

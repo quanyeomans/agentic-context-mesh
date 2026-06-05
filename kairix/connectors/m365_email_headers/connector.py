@@ -582,20 +582,16 @@ class M365EmailHeadersConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream changes for one mailbox Container.
 
-        When the ``topology_v2_m365_email_headers`` flag is ON: drives a
-        Graph ``/users/{container.container_id}/messages/delta`` query
-        starting from ``container.cursor_token`` (the previous tick's
-        deltaLink for that mailbox). Emits ChangeEvents only for
+        Drives a Graph ``/users/{container.container_id}/messages/delta``
+        query starting from ``container.cursor_token`` (the previous
+        tick's deltaLink for that mailbox). Emits ChangeEvents only for
         messages in that mailbox; per-container deltaLink is recorded
         via :meth:`next_cursor_for_container` so the framework can
         persist it independently from sibling containers.
 
-        When the flag is OFF: retains the Wave B shim shape — delegate
-        to :meth:`list_changes` with the container's cursor so the
-        observable shape is identical to the legacy v1 path.
+        ``topology_v2_m365_email_headers`` retired post-cutover
+        (task #132); the per-mailbox path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_M365_EMAIL_HEADERS_FLAG):
-            return self.list_changes(container.cursor_token)
         return self._list_changes_scoped(container)
 
     def retrieve_all_slim_docs(self, _container: Container) -> Iterator[str]:
@@ -634,15 +630,11 @@ class M365EmailHeadersConnector:
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:
         """HierarchyConnector — emit one root FOLDER + one FOLDER per mailbox.
 
-        When the ``topology_v2_m365_email_headers`` flag is ON: emits a
-        synthetic root FOLDER node (``raw_node_id="m365-email-headers"``,
+        Emits a synthetic root FOLDER node (``raw_node_id="m365-email-headers"``,
         ``raw_parent_id=None``) followed by one FOLDER per configured
         mailbox as children of root. Order is root-first then mailboxes
         in sorted UPN order so parent-before-child per F58 holds
         trivially in a single pass.
-
-        When the flag is OFF: retains the Wave B shim shape — one root
-        FOLDER node only.
 
         ``raw_node_id`` for the per-mailbox FOLDER is the mailbox UPN
         itself (e.g. ``alice@contoso.com``) so the topology v2 hierarchy
@@ -656,8 +648,11 @@ class M365EmailHeadersConnector:
         slice as separate hierarchy nodes — the per-folder delta loop
         (#380) drains each Graph mail folder for messages, but the
         hierarchy emits one synthetic FOLDER per mailbox (not per Graph
-        mail folder). A Wave-E+1 enhancement could emit one FOLDER per
-        Graph mail folder under each mailbox.
+        mail folder).
+
+        ``topology_v2_m365_email_headers`` retired post-cutover
+        (task #132); the root + per-mailbox emission is now the only
+        behaviour.
         """
         # Root node first — F58 parent-before-child invariant.
         yield HierarchyNode(
@@ -670,8 +665,6 @@ class M365EmailHeadersConnector:
             external_access_json=None,
             sensitivity_hint=None,
         )
-        if not self._flag_reader(TOPOLOGY_V2_M365_EMAIL_HEADERS_FLAG):
-            return
         # ``sensitivity_hint`` uses the F39 tier vocabulary
         # (public/internal/confidential/restricted) which doesn't include
         # the legacy ``personal`` literal. Map the connector's locked

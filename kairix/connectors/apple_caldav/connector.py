@@ -132,21 +132,6 @@ def _default_client_factory(config: AppleCalDavConfig) -> AppleCalDavClient:
     )
 
 
-def _default_flag_reader(name: str) -> bool:
-    """Production default for the topology-v2-apple_caldav flag check.
-
-    Delegates to :func:`kairix.core.features.flag` so the production
-    path threads through the env-var → config-overlay → registry
-    resolution chain. Tests inject a different callable (typically one
-    backed by :class:`tests.fakes.FakeFeatureFlagResolver`) so the
-    branch under test is pinned without monkey-patching the resolver
-    module (F1-clean / F2-clean).
-    """
-    from kairix.core.features import flag as _prod_flag
-
-    return _prod_flag(name)
-
-
 _UTC_OFFSET_SUFFIX = "+00:00"
 
 
@@ -192,9 +177,6 @@ class AppleCalDavConnector:
     * ``clock`` — returns the current UTC datetime. Tests substitute a
       :class:`tests.fakes.FakeClock`-like callable so the modified_at
       defaults stay deterministic. F6-clean: the default is a real callable.
-    * ``flag_reader`` — reads feature-flag values. Tests inject the
-      :class:`tests.fakes.FakeFeatureFlagResolver` so the topology v2
-      flag is pinned without env-var monkey-patching.
     """
 
     name: str = CONNECTOR_NAME
@@ -211,12 +193,10 @@ class AppleCalDavConnector:
         *,
         client_factory: ClientFactory = _default_client_factory,
         clock: Callable[[], datetime] = _utc_now,
-        flag_reader: Callable[[str], bool] = _default_flag_reader,
     ) -> None:
         self._config = config
         self._client_factory = client_factory
         self._clock = clock
-        self._flag_reader = flag_reader
         self._client: AppleCalDavClient | None = None
         # Track event ids the connector has emitted as ``created`` so a
         # subsequent sync page tagged with the same id is reported as
@@ -422,19 +402,15 @@ class AppleCalDavConnector:
     def list_changes_for_container(self, container: Container) -> Iterator[ChangeEvent]:
         """Stream calendar events for one Container.
 
-        When the ``topology_v2_apple_caldav`` flag is ON: reads
-        ``container.cursor_token`` as the per-calendar CalDAV sync
-        token (``None`` on first sync) and drains the sync REPORT for
-        THAT calendar only. Per-calendar isolation means adding or
+        Reads ``container.cursor_token`` as the per-calendar CalDAV
+        sync token (``None`` on first sync) and drains the sync REPORT
+        for THAT calendar only. Per-calendar isolation means adding or
         removing one calendar does not affect the cursor state of the
         others.
 
-        When the flag is OFF: retains the legacy shim behaviour —
-        delegate to :meth:`list_changes` with the container's cursor
-        so the observable shape is identical to the legacy path.
+        ``topology_v2_apple_caldav`` retired post-cutover (task #132);
+        the per-calendar path is now the only behaviour.
         """
-        if not self._flag_reader(TOPOLOGY_V2_APPLE_CALDAV_FLAG):
-            return self.list_changes(container.cursor_token)
         return self._list_changes_scoped(container)
 
     def load_hierarchy(self, cc_pair_id: int) -> Iterator[HierarchyNode]:

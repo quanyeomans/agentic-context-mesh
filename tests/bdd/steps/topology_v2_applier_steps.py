@@ -1,10 +1,12 @@
-"""Step definitions for topology_v2_applier.feature (Wave D apply-bridge).
+"""Step definitions for topology_v2_applier.feature (apply-bridge).
 
 F1-clean: no @patch on kairix internals.
-F2-clean: no env-var manipulation — flag value pinned via FakeFeatureFlagResolver.
 F46-clean: step impls compose via ``kairix.core.factory.build_*`` /
 ``kairix.core.connectors.topology_v2_applier.apply_topology_v2``
 (call-graph depth ≤ 2). No direct ``ConnectorPipeline(...)`` construction.
+
+``topology_v2_config`` retired post-cutover (task #132); the apply step
+now runs unconditionally at boot.
 """
 
 from __future__ import annotations
@@ -18,7 +20,6 @@ from pytest_bdd import given, scenarios, then, when
 from kairix.config import parse_topology_v2
 from kairix.core.connectors.topology_v2_applier import ApplyResult, apply_topology_v2
 from kairix.core.db.schema import create_schema
-from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.bdd
 
@@ -65,11 +66,8 @@ def topology_v2_applier_ctx() -> _ApplierCtx:
     "the operator has declared a topology_v2 config with one connector, one credential, one cc_pair, and one collection"
 )
 def _operator_declares_config(topology_v2_applier_ctx: _ApplierCtx) -> None:
-    # Flag is read but not strictly required for the applier — we still pin
-    # the resolver here so the BDD intent (operator has cutover-promoted)
-    # is explicit, matching every other feature_flag_topology_v2_*_steps file.
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_config", True)
-    assert resolver.get("topology_v2_config") is True
+    # ``topology_v2_config`` retired post-cutover (task #132); the applier
+    # now runs unconditionally at boot.
     db = sqlite3.connect(":memory:")
     create_schema(db, dims=4)
     topology_v2_applier_ctx.db = db

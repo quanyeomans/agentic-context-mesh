@@ -24,7 +24,6 @@ import pytest
 
 from kairix.connectors.github import GitHubConnector
 from kairix.core.protocols import HierarchyConnector, HierarchyNode
-from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.contract
 
@@ -103,22 +102,21 @@ class _ScriptedClient:
 def test_github_hierarchy_parent_before_child_orgs_then_repos_then_dirs() -> None:
     """Every emitted HierarchyNode's parent must be in the prior-emitted set.
 
-    Wave E ON-branch (flag = True) emits the full Org → repo → top-level-dir
-    tree. The contract under test:
+    Post-cutover (task #132 — ``topology_v2_github`` retired) the
+    connector always emits the full Org → repo → top-level-dir tree.
+    The contract under test:
 
       * Every ``raw_parent_id`` that is not None must reference a
         previously-yielded ``raw_node_id`` within the same call.
       * Orgs emit before any of their repos; repos emit before any of
         their dirs.
     """
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_github", True)
     connector = GitHubConnector(
         client=_ScriptedClient(),  # type: ignore[arg-type]  # F3 rationale: ScriptedClient is shape-equivalent to GitHubApiClient for the bounded test surface; full Protocol inheritance is overkill for the fixture seam
-        flag_reader=resolver.get,
     )
     assert isinstance(connector, HierarchyConnector)
     nodes: list[HierarchyNode] = list(connector.load_hierarchy(cc_pair_id=7))
-    assert nodes, "expected non-empty hierarchy when flag ON"
+    assert nodes, "expected non-empty hierarchy"
     emitted: set[str] = set()
     by_id: dict[str, HierarchyNode] = {}
     for node in nodes:
@@ -139,23 +137,6 @@ def test_github_hierarchy_parent_before_child_orgs_then_repos_then_dirs() -> Non
         assert repo_node.raw_parent_id is not None
         parent = by_id[repo_node.raw_parent_id]
         assert "/" not in parent.display_name, f"repo {repo_node.raw_node_id!r} parent should be an org, not a repo"
-
-
-def test_github_hierarchy_flag_off_emits_single_root() -> None:
-    """OFF-branch shim: load_hierarchy emits one root ORG node only.
-
-    Default-safe semantics — the Wave B shim shape stays bit-for-bit
-    identical to today until an operator flips the flag.
-    """
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_github", False)
-    connector = GitHubConnector(
-        client=_ScriptedClient(),  # type: ignore[arg-type]  # F3 rationale: ScriptedClient is shape-equivalent to GitHubApiClient for the bounded test surface; full Protocol inheritance is overkill for the fixture seam
-        flag_reader=resolver.get,
-    )
-    nodes: list[HierarchyNode] = list(connector.load_hierarchy(cc_pair_id=7))
-    assert len(nodes) == 1, f"flag OFF must emit one root node; got {len(nodes)}"
-    assert nodes[0].raw_parent_id is None
-    assert nodes[0].raw_node_id == "github"
 
 
 def _bind_for_f58_detector(_: Any) -> HierarchyConnector:

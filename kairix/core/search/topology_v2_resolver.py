@@ -93,6 +93,7 @@ class TopologyV2CollectionResolver:
         scope_profile_resolver: ScopeProfileResolver | None = None,
         max_sensitivity_cap: F39Tier | None = None,
         default_in_scope_filter_enabled: bool = True,
+        extra_collections: list[str] | None = None,
     ) -> None:
         """Construct the Adapter against ``db``.
 
@@ -112,14 +113,21 @@ class TopologyV2CollectionResolver:
         ``default_only=True`` so only ``default_in_scope=1`` entries
         surface. When False, the Adapter passes ``default_only=False``
         and every read-eligible entry surfaces (back-compat with
-        pre-#373 behaviour). The factory wires the
-        ``topology_v2_default_in_scope`` feature flag into this kwarg so
-        operators can stage the cutover.
+        pre-#373 behaviour).
+
+        ``extra_collections`` — appended verbatim to every non-None
+        ``resolve()`` result. Preserves the operator-facing
+        ``KAIRIX_EXTRA_COLLECTIONS`` env-var contract that the legacy
+        ``DefaultCollectionResolver`` honoured before the
+        ``topology_v2_collection_resolver`` flag retirement. The factory
+        reads the env var at the boundary and passes the parsed list in
+        here; nothing else in the v2 path knows about env vars.
         """
         self._db = db
         self._resolver = scope_profile_resolver if scope_profile_resolver is not None else ScopeProfileResolver(db)
         self._cap = max_sensitivity_cap
         self._default_in_scope_filter_enabled = default_in_scope_filter_enabled
+        self._extra: list[str] = list(extra_collections or [])
 
     def resolve(self, agent: str | None, scope: object) -> list[str] | None:
         """Return the concrete collection list for ``(agent, scope)``.
@@ -149,7 +157,11 @@ class TopologyV2CollectionResolver:
             actors=(agent,),
             default_only=self._default_in_scope_filter_enabled,
         )
-        names = self._filter_by_scope(resolved.collections, scope_enum, agent)
+        names = list(self._filter_by_scope(resolved.collections, scope_enum, agent))
+        # Append operator-supplied extras (KAIRIX_EXTRA_COLLECTIONS) so
+        # ad-hoc deployments without a full topology can still surface
+        # additional buckets at default-search time.
+        names.extend(self._extra)
         return names or None
 
     def validate_explicit(

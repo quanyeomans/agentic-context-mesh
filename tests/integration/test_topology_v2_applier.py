@@ -96,15 +96,14 @@ def _open_sqlite(tmp_path: Path) -> sqlite3.Connection:
     return db
 
 
-def test_flag_off_apply_at_boot_is_noop(tmp_path: Path) -> None:
-    """Flag OFF: apply_topology_v2_at_boot returns None without opening the DB.
+def test_apply_at_boot_with_no_config_is_noop(tmp_path: Path) -> None:
+    """Missing kairix.config.yaml → apply_topology_v2_at_boot returns
+    None without opening the DB.
 
-    Default-safe principle — when the operator hasn't promoted the
-    ``topology_v2_config`` flag yet, the worker boot path is bit-for-bit
-    identical to today. The applier shouldn't read the config, shouldn't
-    touch the DB, shouldn't even glance at the YAML.
+    ``topology_v2_config`` retired post-cutover (task #132); the applier
+    runs unconditionally but still short-circuits cleanly when there is
+    nothing to apply.
     """
-    config_path = _write_config_yaml(tmp_path, _TWO_CONNECTOR_CONFIG)
     db_path = tmp_path / "kairix.sqlite"
     db_factory_calls: list[int] = []
 
@@ -113,23 +112,21 @@ def test_flag_off_apply_at_boot_is_noop(tmp_path: Path) -> None:
         return sqlite3.connect(str(db_path))
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: False,
-        config_path_resolver=lambda: config_path,
+        config_path_resolver=lambda: None,  # no kairix.config.yaml on disk
         db_factory=_fake_db_factory,
     )
     result = apply_topology_v2_at_boot(deps)
     assert result is None
-    # The flag-off branch must never open the DB.
+    # The no-config branch must never open the DB.
     assert db_factory_calls == []
 
 
-def test_flag_on_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
-    """Flag ON: every declared block lands as a row; cc_pair is registered."""
+def test_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
+    """Every declared block lands as a row; cc_pair is registered."""
     config_path = _write_config_yaml(tmp_path, _TWO_CONNECTOR_CONFIG)
     db_path = tmp_path / "kairix.sqlite"
 
     deps = TopologyV2ApplyDeps(
-        flag_reader=lambda _name: True,
         config_path_resolver=lambda: config_path,
         db_factory=lambda: sqlite3.connect(str(db_path)),
     )

@@ -1128,14 +1128,9 @@ def _deps_for_topology(
 
 
 @pytest.mark.unit
-def test_topology_v2_config_valid_skipped_when_flag_off() -> None:
-    """Flag OFF → ok=True with 'skipped' detail (default-safe)."""
-    from kairix.platform.onboard.check import check_topology_v2_config_valid
-
-    result = check_topology_v2_config_valid(deps=_deps_for_topology(flag_target=None, config=None))
-    assert result.ok is True
-    assert "skipped" in result.detail
-    assert _FLAG_TOPOLOGY_V2 in result.detail
+# NOTE: test_topology_v2_config_valid_skipped_when_flag_off retired with the
+# topology_v2_config flag (#132). Post-cutover the check runs unconditionally;
+# the flag-off skip path no longer exists.
 
 
 @pytest.mark.unit
@@ -1236,13 +1231,8 @@ def test_topology_v2_config_valid_loader_raises() -> None:
 
 
 @pytest.mark.unit
-def test_topology_v2_cc_pairs_registered_skipped_when_flag_off() -> None:
-    """Flag OFF → ok=True with skipped detail."""
-    from kairix.platform.onboard.check import check_topology_v2_cc_pairs_registered
-
-    result = check_topology_v2_cc_pairs_registered(deps=_deps_for_topology(flag_target=None, config=None))
-    assert result.ok is True
-    assert "skipped" in result.detail
+# NOTE: test_topology_v2_cc_pairs_registered_skipped_when_flag_off retired
+# with the topology_v2_config flag (#132).
 
 
 @pytest.mark.unit
@@ -1436,24 +1426,8 @@ def test_new_checks_appear_in_all_checks() -> None:
     assert "check_topology_v2_wildcard_expansion_resolved" in names
 
 
-@pytest.mark.unit
-def test_topology_v2_wildcard_expansion_skipped_when_flag_off() -> None:
-    """Flag OFF → ok=True with 'skipped' detail (default-safe)."""
-    from kairix.platform.onboard.check import (
-        TopologyV2CheckDeps,
-        check_topology_v2_wildcard_expansion_resolved,
-    )
-
-    deps = TopologyV2CheckDeps(
-        flag_reader=_flag_off,
-        config_loader=lambda: None,
-        db_cc_pair_namer=lambda: frozenset(),
-        secret_reader=lambda _n: None,
-        db_scope_actor_id_reader=lambda: ("*",),  # would fail if read; flag-off short-circuits
-    )
-    result = check_topology_v2_wildcard_expansion_resolved(deps=deps)
-    assert result.ok is True
-    assert "skipped" in result.detail
+# NOTE: test_topology_v2_wildcard_expansion_skipped_when_flag_off retired
+# with the topology_v2_config flag (#132).
 
 
 @pytest.mark.unit

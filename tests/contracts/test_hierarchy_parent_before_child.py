@@ -30,7 +30,6 @@ from kairix.connectors.sharepoint.connector import (
     SharePointDriveSpec,
 )
 from kairix.core.protocols import HierarchyConnector
-from tests.fakes import FakeFeatureFlagResolver
 
 
 @pytest.mark.contract
@@ -67,7 +66,6 @@ def test_m365_email_headers_hierarchy_parent_before_child() -> None:
     per-mailbox FOLDER yield runs ahead of the root yield makes this
     assertion fail — each mailbox node references the unseen root.
     """
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_m365_email_headers", True)
     connector = M365EmailHeadersConnector(
         user_principal_name="agent-alpha@example.com",
         credentials=M365Credentials(
@@ -76,7 +74,6 @@ def test_m365_email_headers_hierarchy_parent_before_child() -> None:
             client_secret="fake-secret-value",  # pragma: allowlist secret — test fixture
         ),
         mailboxes=["agent-beta@example.com", "agent-gamma@example.com"],
-        flag_reader=resolver.get,
     )
     assert isinstance(connector, HierarchyConnector)
     nodes = list(connector.load_hierarchy(cc_pair_id=1))
@@ -100,7 +97,6 @@ def test_sharepoint_hierarchy_parent_before_child() -> None:
     children emit before the root fails the orphan assertion because
     each child references the unseen root.
     """
-    resolver = FakeFeatureFlagResolver().with_flag("topology_v2_sharepoint", True)
     connector = SharePointConnector(
         drives=[
             SharePointDriveSpec(drive_id="drive-alpha"),
@@ -111,7 +107,6 @@ def test_sharepoint_hierarchy_parent_before_child() -> None:
             client_id="fake-client",
             client_secret="fake-secret-value",  # pragma: allowlist secret — test fixture
         ),
-        flag_reader=resolver.get,
     )
     assert isinstance(connector, HierarchyConnector)
     nodes = list(connector.load_hierarchy(cc_pair_id=1))
@@ -147,7 +142,7 @@ def test_m365_calendar_hierarchy_parent_before_child() -> None:
         client_secret="secret-placeholder",  # pragma: allowlist secret
         user_ids=("alice@example.com", "bob@example.com"),
     )
-    connector = M365CalendarConnector(config, flag_reader=lambda _name: True)
+    connector = M365CalendarConnector(config)
     assert isinstance(connector, HierarchyConnector)
     nodes = list(connector.load_hierarchy(cc_pair_id=1))
     assert len(nodes) == 3, f"expected root + 2 calendar children, got {len(nodes)}"

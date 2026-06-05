@@ -957,3 +957,122 @@ def test_init_probe_swallows_transient_errors_without_failing_init() -> None:
         SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Foo",)),
     )
     assert connector is not None
+
+
+# ---------------------------------------------------------------------------
+# v2 per-container surface — iter_containers + list_changes_for_container
+# Phase C (#132) retired the legacy flag-OFF tests; these pin the v2-only
+# behaviour that's now the production code path.
+# ---------------------------------------------------------------------------
+
+
+def test_iter_containers_emits_one_per_configured_drive() -> None:
+    """v2 ingest entrypoint: SharePointConnector with N drives yields N Containers.
+
+    The topology v2 cc_pair lifecycle treats each drive as its own
+    Container so that scope decisions, cursor persistence, and
+    per-drive disk-watermark backpressure all work per-drive rather
+    than per-connector. ``iter_containers`` is the surface the framework
+    calls to enumerate the drives the connector knows about.
+
+    Sabotage-proof: change ``for spec in self._drives: yield Container(...)``
+    to yield just one Container regardless of drive count; this test
+    fails because two configured drives produce one Container instead of two.
+    """
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token is not None:
+            return token
+        return httpx.Response(200, json={"value": [], "@odata.deltaLink": "drives/x/root/delta?$deltatoken=t"})
+
+    transport = httpx.MockTransport(_handler)
+    shared = httpx.Client(transport=transport)
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    connector = SharePointConnector(
+        drives=[
+            SharePointDriveSpec(drive_id="drive-alpha"),
+            SharePointDriveSpec(drive_id="drive-beta"),
+        ],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — test fixture
+        ),
+        auth=auth,
+        client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+    )
+    containers = list(connector.iter_containers(cc_pair_id=3))
+    container_ids = sorted(c.container_id for c in containers)
+    assert container_ids == ["drive-alpha", "drive-beta"], (
+        f"each configured drive must yield its own Container; got {container_ids!r}"
+    )
+    assert all(c.cc_pair_id == 3 for c in containers)
+
+
+def test_list_changes_for_container_filters_by_spec_and_routes_via_scoped_path() -> None:
+    """v2 per-container surface: ``list_changes_for_container`` filters items
+    by the drive's ``SharePointDriveSpec.include_paths`` and emits per-item
+    ChangeEvents.
+
+    The scoped path is wired through ``_list_changes_for_container_scoped``;
+    items outside the include-paths are dropped at ``_item_passes_spec_filter``.
+    This test confirms (a) the dispatch picks the scoped helper, (b) the
+    spec filter drops out-of-scope items, and (c) in-scope items emit as
+    ``created`` events.
+
+    Sabotage-proof: replace ``_item_passes_spec_filter``'s ``return False``
+    with ``return True``; this test fails because the out-of-scope item
+    surfaces as an extra event.
+    """
+
+    in_scope_item = {
+        **_file_envelope("scoped-keep", name="report.pdf"),
+        "parentReference": {"driveId": _DRIVE_ID, "path": "/drive/root:/Reports"},
+    }
+    out_of_scope_item = {
+        **_file_envelope("scoped-drop", name="other.pdf"),
+        "parentReference": {"driveId": _DRIVE_ID, "path": "/drive/root:/Other"},
+    }
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        token = _token_response(request)
+        if token is not None:
+            return token
+        return httpx.Response(200, json=_delta_response([in_scope_item, out_of_scope_item]))
+
+    transport = httpx.MockTransport(_handler)
+    shared = httpx.Client(transport=transport)
+    auth = OAuth2ClientCredsAuth(
+        tenant_id="t",
+        client_id="c",
+        client_secret="s-value",  # pragma: allowlist secret — test fixture
+        scope="https://graph.microsoft.com/.default",
+        http_client=shared,
+    )
+    connector = SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id=_DRIVE_ID, include_paths=("/Reports",))],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — test fixture
+        ),
+        auth=auth,
+        client_builder=lambda a: SharePointGraphClient(auth=a, http_client=shared),
+    )
+    container = Container(
+        cc_pair_id=1,
+        container_id=_DRIVE_ID,
+        access_state="ACCESSIBLE",
+        cursor_token=None,
+        last_synced_at=None,
+    )
+    events = list(connector.list_changes_for_container(container))
+    item_ids = sorted(e.item_id for e in events)
+    assert item_ids == ["scoped-keep"], f"include_paths filter must drop out-of-scope items; got {item_ids!r}"
