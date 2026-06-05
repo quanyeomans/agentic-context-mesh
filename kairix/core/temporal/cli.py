@@ -156,21 +156,18 @@ def _default_timeline_runner(*args: Any, **kwargs: Any) -> Any:
 def _result_to_envelope(result: Any, *, limit: int) -> dict[str, Any]:
     """Project a ``TimelineResult`` onto the CLI's ``--json`` envelope.
 
-    Defensive ``getattr`` reads so a fake/partial result from a test
-    runner doesn't crash the renderer. F17-clean: the duplicated
-    ``getattr(result, ...)`` pattern across 6 fields lives in one
-    function instead of being inlined into ``main``.
+    Delegates to ``timeline_output_to_envelope`` (the canonical SoT
+    shared with MCP ``tool_timeline``, #412) and overlays the CLI-only
+    ``limit`` field. Pre-#412 this function dropped ``results`` and
+    emitted only ``results_count`` — operators calling ``--json`` got
+    the hit count but lost the actual hits and had to re-run via MCP
+    or parse text mode to recover them.
     """
-    return {
-        "original_query": getattr(result, "original_query", ""),
-        "rewritten_query": getattr(result, "rewritten_query", ""),
-        "time_window": getattr(result, "time_window", None),
-        "limit": limit,
-        "fell_back": getattr(result, "fell_back", False),
-        "is_temporal": getattr(result, "is_temporal", True),
-        "error": getattr(result, "error", None),
-        "results_count": len(getattr(result, "results", []) or []),
-    }
+    from kairix.use_cases.timeline import timeline_output_to_envelope
+
+    envelope = timeline_output_to_envelope(result)
+    envelope["limit"] = limit
+    return envelope
 
 
 def main(

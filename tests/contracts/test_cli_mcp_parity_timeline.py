@@ -154,10 +154,14 @@ def test_use_case_returns_documented_result_dataclass() -> None:
 def test_mcp_envelope_keys_match_run_timeline_result_fields() -> None:
     """The MCP JSON envelope keys are exactly the use case's TimelineResult fields,
     keyed `path/title/snippet/score` for each hit. If either surface drifts, this fails.
-    """
-    from kairix.agents.mcp import server
 
-    src = inspect.getsource(server.tool_timeline)
+    Post-#412: both CLI ``--json`` and MCP delegate to ``timeline_output_to_envelope``
+    in ``kairix.use_cases.timeline`` — the single source of truth for the envelope
+    shape. Check the canonical helper, not the per-adapter inlined dicts.
+    """
+    from kairix.use_cases import timeline as timeline_uc
+
+    src = inspect.getsource(timeline_uc.timeline_output_to_envelope)
     for key in (
         "original_query",
         "rewritten_query",
@@ -167,6 +171,17 @@ def test_mcp_envelope_keys_match_run_timeline_result_fields() -> None:
         "results",
         "error",
     ):
-        assert f'"{key}"' in src, f"MCP envelope missing key {key!r}"
+        assert f'"{key}"' in src, f"timeline_output_to_envelope missing key {key!r}"
     for hit_key in ("path", "title", "snippet", "score"):
-        assert f'"{hit_key}"' in src, f"MCP hit envelope missing key {hit_key!r}"
+        assert f'"{hit_key}"' in src, f"timeline_output_to_envelope hit envelope missing key {hit_key!r}"
+
+    # Sanity: both surfaces delegate to the canonical helper (#412 SoT).
+    from kairix.agents.mcp import server as mcp_server
+    from kairix.core.temporal import cli as cli_mod
+
+    assert "timeline_output_to_envelope" in inspect.getsource(mcp_server.tool_timeline), (
+        "MCP tool_timeline must delegate envelope construction to timeline_output_to_envelope (#412)"
+    )
+    assert "timeline_output_to_envelope" in inspect.getsource(cli_mod._result_to_envelope), (
+        "CLI _result_to_envelope must delegate to timeline_output_to_envelope (#412)"
+    )

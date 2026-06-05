@@ -467,7 +467,7 @@ def tool_timeline(
     """
     from datetime import date as _date
 
-    from kairix.use_cases.timeline import run_timeline
+    from kairix.use_cases.timeline import run_timeline, timeline_output_to_envelope
 
     anchor: _date | None = None
     if anchor_date:
@@ -483,23 +483,7 @@ def tool_timeline(
         scope=scope,
     )
 
-    return {
-        "original_query": result.original_query,
-        "rewritten_query": result.rewritten_query,
-        "is_temporal": result.is_temporal,
-        "fell_back": result.fell_back,
-        "time_window": result.time_window,
-        "results": [
-            {
-                "path": h.path,
-                "title": h.title,
-                "snippet": h.snippet,
-                "score": h.score,
-            }
-            for h in result.results
-        ],
-        "error": result.error,
-    }
+    return timeline_output_to_envelope(result)
 
 
 def tool_research(

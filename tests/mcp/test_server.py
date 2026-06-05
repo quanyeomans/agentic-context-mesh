@@ -231,7 +231,7 @@ def test_tool_usage_guide_empty_topic(guide_file: Path) -> None:
     import kairix.agents.mcp.server as _mod
 
     server_file = Path(_mod.__file__)
-    expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
+    expected = server_file.parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
     if expected.exists():
         result = tool_usage_guide(topic="")
         assert result["error"] == ""
@@ -253,7 +253,7 @@ def test_tool_usage_guide_topic_filter(guide_file: Path) -> None:
     import kairix.agents.mcp.server as _mod
 
     server_file = Path(_mod.__file__)
-    expected = server_file.parent.parent.parent / "docs" / "agent-usage-guide.md"
+    expected = server_file.parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
     if expected.exists():
         result = tool_usage_guide(topic="budget")
         assert result["error"] == ""

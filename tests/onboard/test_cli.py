@@ -498,7 +498,7 @@ def guide_source_in_pkg_root(tmp_path):
     fake_pkg.mkdir(parents=True)
     fake_init = fake_pkg / "__init__.py"
     fake_init.write_text("")
-    guide = fake_pkg_root / "docs" / "agent-usage-guide.md"
+    guide = fake_pkg_root / "docs" / "user-guide" / "agent-usage-guide.md"
     guide.parent.mkdir(parents=True)
     guide.write_text("# placeholder agent usage guide\n")
 
@@ -570,13 +570,15 @@ def test_guide_falls_back_to_kairix_pkg_root_when_pkg_root_kwarg_unset(tmp_path,
     """Production path: ``main(["guide"])`` without ``pkg_root=`` injection
     derives the package root from ``Path(kairix.__file__).parent.parent``.
 
-    The in-tree probe `<repo>/docs/agent-usage-guide.md` doesn't exist (real
-    location is `<repo>/docs/user-guide/agent-usage-guide.md`), so the
-    fallback path is exercised and the "guide not found" error fires.
+    The in-tree probe ``<repo>/docs/user-guide/agent-usage-guide.md`` exists
+    in this repo, so the production fallback resolves the guide and installs
+    it. Pre-fix the probe pointed at ``<repo>/docs/agent-usage-guide.md``
+    (wrong path) and this test asserted the "not found" error — that
+    mismatch was the root cause of the operator-facing usage_guide install
+    failure on the deployed VM.
 
-    Sabotage-prove: skip the import-kairix fallback (force ``pkg_root = None``
-    past the in-tree check) and the function ``UnboundLocalError`` on the
-    ``guide_src`` line below.
+    Sabotage-prove: change the resolver path back to ``docs/agent-usage-guide.md``
+    and the in-tree probe misses → "not found" error returns.
     """
     doc_root = tmp_path / "vault"
     doc_root.mkdir()
@@ -584,8 +586,9 @@ def test_guide_falls_back_to_kairix_pkg_root_when_pkg_root_kwarg_unset(tmp_path,
     rc = main(["guide", "--document-root", str(doc_root)])
     captured = capsys.readouterr()
 
-    assert rc == 1
-    assert "not found" in captured.err.lower()
+    # Resolver now finds the in-tree guide → success
+    assert rc == 0, f"expected success after #usage-guide-resolver-fix; stderr={captured.err!r}"
+    assert "installed at:" in captured.out, f"expected 'installed at:' in stdout, got: {captured.out!r}"
 
 
 @pytest.mark.unit

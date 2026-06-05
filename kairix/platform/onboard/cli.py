@@ -365,14 +365,14 @@ def _resolve_guide_src(args: argparse.Namespace) -> Path | None:
     # lets tests pin a tmp-path layout without monkey-patching kairix.__file__.
     pkg_root = getattr(args, "_pkg_root", None)
     if pkg_root is None:
-        in_tree = Path(__file__).parent.parent.parent / "docs" / "agent-usage-guide.md"
+        in_tree = Path(__file__).parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
         if in_tree.exists():
             return in_tree
         import kairix
 
         pkg_root = Path(kairix.__file__).parent.parent
 
-    guide_src = pkg_root / "docs" / "agent-usage-guide.md"
+    guide_src = pkg_root / "docs" / "user-guide" / "agent-usage-guide.md"
     if guide_src.exists():
         return guide_src
 

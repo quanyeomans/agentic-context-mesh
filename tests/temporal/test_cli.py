@@ -330,3 +330,80 @@ def test_main_passes_none_chunk_types_when_type_all() -> None:
 
     _run_main(["topic"], timeline_runner=_fake_run_timeline)
     assert seen["chunk_types"] is None
+
+
+@pytest.mark.unit
+def test_main_json_envelope_carries_full_results_list() -> None:
+    """``kairix timeline <q> --json`` emits the full ``results`` array.
+
+    Pre-#412 the CLI envelope dropped ``results`` and emitted only
+    ``results_count`` (the integer). This test pins the post-fix shape:
+    every TimelineHit field flows through to JSON.
+    """
+    import json as _json
+
+    def _fake_run_timeline(query: str, **_kw) -> TimelineResult:
+        return TimelineResult(
+            original_query=query,
+            rewritten_query=query,
+            is_temporal=True,
+            fell_back=False,
+            time_window={"start": "2026-04-01", "end": "2026-04-30"},
+            results=[
+                TimelineHit(
+                    path="boards/sprint.md",
+                    title="Done",
+                    snippet="card body",
+                    score=2.5,
+                    date="2026-04-15",
+                    chunk_type="board_card",
+                ),
+            ],
+        )
+
+    stdout, _stderr, code = _run_main(["topic", "--json"], timeline_runner=_fake_run_timeline)
+    assert code == 0
+    envelope = _json.loads(stdout)
+    assert envelope["original_query"] == "topic"
+    assert envelope["time_window"] == {"start": "2026-04-01", "end": "2026-04-30"}
+    assert envelope["limit"] == 10
+    assert envelope["fell_back"] is False
+    assert envelope["is_temporal"] is True
+    assert envelope["error"] == ""
+    # The bug fixed by #412: results must be present + populated, not dropped to a count
+    assert isinstance(envelope["results"], list), "envelope must carry full results list (#412)"
+    assert len(envelope["results"]) == 1
+    hit = envelope["results"][0]
+    assert hit["path"] == "boards/sprint.md"
+    assert hit["title"] == "Done"
+    assert hit["snippet"] == "card body"
+    assert hit["score"] == 2.5
+    assert hit["date"] == "2026-04-15"
+    assert hit["chunk_type"] == "board_card"
+
+
+@pytest.mark.unit
+def test_main_json_envelope_error_sets_nonzero_exit() -> None:
+    """``--json`` with use-case error emits the envelope AND exits 1.
+
+    The CLI must not silently swallow ``error`` in JSON mode — operators
+    parsing the envelope can branch on the field, but pipelines that
+    only check exit code must also see the failure.
+    """
+    import json as _json
+
+    def _fake_run_timeline(query: str, **_kw) -> TimelineResult:
+        return TimelineResult(
+            original_query=query,
+            rewritten_query=query,
+            is_temporal=False,
+            fell_back=True,
+            time_window={},
+            results=[],
+            error="ValueError: bad query",
+        )
+
+    stdout, _stderr, code = _run_main(["topic", "--json"], timeline_runner=_fake_run_timeline)
+    assert code == 1
+    envelope = _json.loads(stdout)
+    assert envelope["error"] == "ValueError: bad query"

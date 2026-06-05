@@ -126,6 +126,35 @@ class TimelineResult:
     error: str = ""
 
 
+def timeline_output_to_envelope(result: TimelineResult) -> dict[str, Any]:
+    """Project ``TimelineResult`` onto the canonical JSON envelope.
+
+    Single source of truth for CLI ``--json`` and MCP ``tool_timeline``
+    output shape (#412 — pre-fix the CLI dropped ``results`` and emitted
+    only ``results_count``; the MCP envelope inlined its own dict literal).
+    Both surfaces now call this helper so the envelope can't drift.
+    """
+    return {
+        "original_query": result.original_query,
+        "rewritten_query": result.rewritten_query,
+        "is_temporal": result.is_temporal,
+        "fell_back": result.fell_back,
+        "time_window": result.time_window,
+        "results": [
+            {
+                "path": h.path,
+                "title": h.title,
+                "snippet": h.snippet,
+                "score": h.score,
+                "date": h.date,
+                "chunk_type": h.chunk_type,
+            }
+            for h in result.results
+        ],
+        "error": result.error,
+    }
+
+
 @dataclass(frozen=True)
 class TimelineDeps:
     """Injectable dependencies for ``run_timeline``.

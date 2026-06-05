@@ -31,12 +31,12 @@ def _default_resolve_guide(guide_path: Path | None) -> Path:
         return guide_path
     import kairix.agents.mcp.server as _server_mod
 
-    candidate = Path(_server_mod.__file__).parent.parent.parent / "docs" / "agent-usage-guide.md"
+    candidate = Path(_server_mod.__file__).parent.parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
     if candidate.exists():
         return candidate
     import kairix as _kairix
 
-    return Path(_kairix.__file__).parent.parent / "docs" / "agent-usage-guide.md"
+    return Path(_kairix.__file__).parent.parent / "docs" / "user-guide" / "agent-usage-guide.md"
 
 
 # Topic keys that route to a dedicated docs file rather than the main
