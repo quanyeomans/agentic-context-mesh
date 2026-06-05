@@ -779,6 +779,18 @@ def build_connector_pipeline(
     pipeline's production default (queries ``/data``; falls back to
     ``sys.maxsize`` when ``/data`` isn't mounted).
     """
+    # Auto-hydrate secrets at the factory boundary so Python-API consumers
+    # (eval harnesses, integration tests outside the worker, ad-hoc scripts)
+    # don't hit SecretNotFoundError. Worker entry points already call this
+    # at startup, but the factory is the universal entry — centralising
+    # bootstrap here closes the structural gap surfaced by 3874bf7e.
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    try:
+        bootstrap_secrets()
+    except Exception as exc:
+        logger.debug("factory: bootstrap_secrets soft-failed in build_connector_pipeline: %s", exc)
+
     # Phase 7: streaming bronze writes no files; bronze_root is accepted
     # for backward-compat call-signature but unused. New callers should
     # omit it. Logged at debug if passed so the deprecation is visible.
@@ -845,6 +857,16 @@ def build_neo4j_drainer(
     F47-sanctioned entry point so integration tests can compose the
     drain without importing :class:`Neo4jDrainer` directly.
     """
+    # Auto-hydrate secrets at the factory boundary so Python-API consumers
+    # don't hit SecretNotFoundError when the Neo4j repo lazily resolves its
+    # connection credentials. See build_search_pipeline for the same pattern.
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    try:
+        bootstrap_secrets()
+    except Exception as exc:
+        logger.debug("factory: bootstrap_secrets soft-failed in build_neo4j_drainer: %s", exc)
+
     from kairix.core.curator.drain import DEFAULT_DRAIN_BATCH_SIZE, Neo4jDrainer
 
     effective_batch = batch_size if batch_size is not None else DEFAULT_DRAIN_BATCH_SIZE

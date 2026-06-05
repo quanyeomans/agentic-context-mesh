@@ -285,27 +285,73 @@ def _default_secrets_loader() -> SecretsResolver:
     return SecretsLoader()
 
 
+def _resolve_credentials_for_scope(
+    loader: SecretsResolver,
+    *,
+    api_key_scope: tuple[Scope, str, str | None, str],
+    endpoint_scope: tuple[Scope, str, str | None, str],
+    model_scope: tuple[Scope, str, str | None, str],
+    fallback_api_key_scope: tuple[Scope, str, str | None, str] | None = None,
+    fallback_endpoint_scope: tuple[Scope, str, str | None, str] | None = None,
+    default_model: str,
+) -> tuple[str, str, str]:
+    """Resolve ``(api_key, endpoint, model)`` for one provider scope.
+
+    Shared skeleton extracted from ``_resolve_llm`` and ``_resolve_embed``
+    (which differed only in the per-scope tuples + the embed-tier's
+    fallback to LLM credentials). Single source of truth for the
+    canonical resolve sequence: prefer primary scope; fall back to
+    secondary if primary missing; require non-empty result for api_key
+    + endpoint; default-string for model.
+
+    The ``require`` semantics on the fallback (rather than the primary)
+    preserves the embed-tier behaviour: an operator who only configured
+    LLM creds (and skipped embed creds entirely) gets the LLM creds for
+    both tiers, with a useful ``SecretNotFoundError`` naming the LLM
+    scope (not the embed scope) when nothing is configured.
+    """
+    api_key = loader.get(*api_key_scope)
+    endpoint = loader.get(*endpoint_scope)
+    model = loader.get(*model_scope)
+
+    if not api_key:
+        if fallback_api_key_scope is not None:
+            api_key = loader.require(*fallback_api_key_scope)
+        else:
+            api_key = loader.require(*api_key_scope)
+    if not endpoint:
+        if fallback_endpoint_scope is not None:
+            endpoint = loader.require(*fallback_endpoint_scope)
+        else:
+            endpoint = loader.require(*endpoint_scope)
+    if not model:
+        model = default_model
+    return api_key, endpoint, model
+
+
 def _resolve_llm(loader: SecretsResolver) -> Credentials:
-    api_key = loader.require(*_SCOPE_LLM_API_KEY)
-    endpoint = loader.require(*_SCOPE_LLM_ENDPOINT)
-    model = loader.get(*_SCOPE_LLM_MODEL) or "gpt-4o-mini"
+    api_key, endpoint, model = _resolve_credentials_for_scope(
+        loader,
+        api_key_scope=_SCOPE_LLM_API_KEY,
+        endpoint_scope=_SCOPE_LLM_ENDPOINT,
+        model_scope=_SCOPE_LLM_MODEL,
+        default_model="gpt-4o-mini",
+    )
     return Credentials(api_key=api_key, endpoint=endpoint, model=model)
 
 
 def _resolve_embed(loader: SecretsResolver) -> Credentials:
     from kairix.core.db import EMBED_VECTOR_DIMS
 
-    api_key = loader.get(*_SCOPE_EMBED_API_KEY)
-    endpoint = loader.get(*_SCOPE_EMBED_ENDPOINT)
-    model = loader.get(*_SCOPE_EMBED_MODEL)
-
-    if not api_key:
-        api_key = loader.require(*_SCOPE_LLM_API_KEY)
-    if not endpoint:
-        endpoint = loader.require(*_SCOPE_LLM_ENDPOINT)
-    if not model:
-        model = "text-embedding-3-large"
-
+    api_key, endpoint, model = _resolve_credentials_for_scope(
+        loader,
+        api_key_scope=_SCOPE_EMBED_API_KEY,
+        endpoint_scope=_SCOPE_EMBED_ENDPOINT,
+        model_scope=_SCOPE_EMBED_MODEL,
+        fallback_api_key_scope=_SCOPE_LLM_API_KEY,
+        fallback_endpoint_scope=_SCOPE_LLM_ENDPOINT,
+        default_model="text-embedding-3-large",
+    )
     return Credentials(api_key=api_key, endpoint=endpoint, model=model, dims=EMBED_VECTOR_DIMS)
 
 

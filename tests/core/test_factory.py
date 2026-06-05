@@ -699,3 +699,134 @@ def test_build_search_pipeline_auto_hydrates_secrets_via_bootstrap() -> None:
         )
     finally:
         bootstrap_mod.bootstrap_secrets = real_bootstrap
+
+
+@pytest.mark.unit
+def test_build_connector_pipeline_auto_hydrates_secrets() -> None:
+    """``build_connector_pipeline`` calls ``bootstrap_secrets()`` at the
+    factory boundary so Python-API consumers (eval harnesses, integration
+    tests outside the worker, ad-hoc scripts) don't hit ``SecretNotFoundError``
+    when the pipeline's downstream credential resolution fires.
+
+    Sabotage-proof: comment out the ``bootstrap_secrets()`` call in
+    ``build_connector_pipeline``; the call-counter doesn't observe a fire.
+    """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+    from kairix.core.factory import build_connector_pipeline
+    from kairix.secrets import bootstrap as bootstrap_mod
+
+    bootstrap_calls: list[int] = []
+    real = bootstrap_mod.bootstrap_secrets
+
+    def _counting(*args: Any, **kwargs: Any) -> int:
+        bootstrap_calls.append(1)
+        return real(*args, **kwargs)
+
+    bootstrap_mod.bootstrap_secrets = _counting
+    try:
+        db = sqlite3.connect(":memory:")
+        create_schema(db)
+        try:
+            build_connector_pipeline(db=db, collection="probe-collection")
+        except Exception:
+            pass  # downstream may fail in unit env; we only assert bootstrap fired
+        assert len(bootstrap_calls) >= 1, "build_connector_pipeline must auto-bootstrap"
+    finally:
+        bootstrap_mod.bootstrap_secrets = real
+
+
+@pytest.mark.unit
+def test_build_neo4j_drainer_auto_hydrates_secrets() -> None:
+    """``build_neo4j_drainer`` calls ``bootstrap_secrets()`` at the factory
+    boundary — same pattern as ``build_search_pipeline`` /
+    ``build_connector_pipeline``. The drainer's Neo4j repo lazily resolves
+    its connection credentials; without bootstrap, Python-API callers hit
+    ``SecretNotFoundError``.
+
+    Sabotage-proof: comment out the ``bootstrap_secrets()`` call in
+    ``build_neo4j_drainer``; the call-counter doesn't observe a fire.
+    """
+    import sqlite3
+
+    from kairix.core.factory import build_neo4j_drainer
+    from kairix.secrets import bootstrap as bootstrap_mod
+    from tests.fakes import FakeDrainGraphRepository
+
+    bootstrap_calls: list[int] = []
+    real = bootstrap_mod.bootstrap_secrets
+
+    def _counting(*args: Any, **kwargs: Any) -> int:
+        bootstrap_calls.append(1)
+        return real(*args, **kwargs)
+
+    bootstrap_mod.bootstrap_secrets = _counting
+    try:
+        db = sqlite3.connect(":memory:")
+        try:
+            build_neo4j_drainer(db=db, repo=FakeDrainGraphRepository())
+        except Exception:
+            pass  # downstream may fail; we only assert bootstrap fired
+        assert len(bootstrap_calls) >= 1, "build_neo4j_drainer must auto-bootstrap"
+    finally:
+        bootstrap_mod.bootstrap_secrets = real
+
+
+@pytest.mark.unit
+def test_build_pipelines_tolerate_bootstrap_secrets_raising() -> None:
+    """All 3 factory entry points (``build_search_pipeline``,
+    ``build_connector_pipeline``, ``build_neo4j_drainer``) soft-fail when
+    ``bootstrap_secrets()`` raises — the factory continues + downstream
+    handles missing creds with a clearer error. Production deploys
+    always have the bundle; local dev may not.
+
+    Sabotage-proof: remove the ``try/except`` around the bootstrap call;
+    this test fails because the factory propagates the synthetic
+    exception instead of swallowing it.
+    """
+    import sqlite3
+
+    from kairix.core.db.schema import create_schema
+    from kairix.core.factory import build_connector_pipeline, build_neo4j_drainer, build_search_pipeline
+    from kairix.secrets import bootstrap as bootstrap_mod
+    from tests.fakes import FakeDrainGraphRepository
+
+    def _raises(*_a: Any, **_kw: Any) -> int:
+        raise RuntimeError("synthetic bundle-missing")
+
+    real = bootstrap_mod.bootstrap_secrets
+    bootstrap_mod.bootstrap_secrets = _raises
+    try:
+        # build_search_pipeline soft-fails through to downstream resolution.
+        # In unit test env downstream then raises (no real creds) — that's
+        # fine; the assertion is that bootstrap's raise didn't propagate.
+        try:
+            build_search_pipeline(config=RetrievalConfig(provider="fake"), registry=_provider_registry())
+        except RuntimeError as exc:
+            assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_search_pipeline"
+        except Exception:
+            pass
+
+        # Same contract for connector pipeline.
+        db = sqlite3.connect(":memory:")
+        create_schema(db)
+        try:
+            build_connector_pipeline(db=db, collection="probe")
+        except RuntimeError as exc:
+            assert "synthetic bundle-missing" not in str(exc), (
+                "bootstrap exception leaked from build_connector_pipeline"
+            )
+        except Exception:
+            pass
+
+        # Same for neo4j drainer.
+        db2 = sqlite3.connect(":memory:")
+        try:
+            build_neo4j_drainer(db=db2, repo=FakeDrainGraphRepository())
+        except RuntimeError as exc:
+            assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_neo4j_drainer"
+        except Exception:
+            pass
+    finally:
+        bootstrap_mod.bootstrap_secrets = real
