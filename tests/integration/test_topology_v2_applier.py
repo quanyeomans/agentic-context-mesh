@@ -178,7 +178,7 @@ def test_apply_then_resolve_chunk_writer_routes_through_collection_router(tmp_pa
     parsed = parse_topology_v2(_TWO_CONNECTOR_CONFIG)
     apply_topology_v2(db, parsed)
     db.commit()
-    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal", flag_on=True)
+    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal")
     # CollectionRouter adapter exposes the underlying router; legacy writer
     # does not. We discriminate by checking the writer carries _router.
     assert hasattr(writer, "_router"), (

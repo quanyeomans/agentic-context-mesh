@@ -34,7 +34,6 @@ import pytest
 from kairix.core.db.schema import create_schema
 from kairix.core.factory import build_collection_resolver
 from kairix.core.search.scope import Scope
-from tests.fakes import FakeFeatureFlagResolver
 
 pytestmark = pytest.mark.integration
 
@@ -103,9 +102,8 @@ def test_concurrent_resolve_does_not_raise_interface_error(tmp_path: Path) -> No
     and the ``concurrent.futures.Executor.result()`` re-raises here.
     """
     db_path = _seeded_db_path(tmp_path)
-    flag_resolver = FakeFeatureFlagResolver().with_flag("topology_v2_collection_resolver", True)
 
-    resolver = build_collection_resolver(db_path=db_path, flag_reader=flag_resolver.get)
+    resolver = build_collection_resolver(db_path=db_path)
 
     def _one_call(actor_index: int) -> tuple[str, list[str] | None]:
         actor_id = f"agent-{actor_index % _NUM_ACTORS:02d}"

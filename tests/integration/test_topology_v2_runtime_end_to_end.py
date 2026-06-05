@@ -101,10 +101,13 @@ def _read_collection_for_path(db: sqlite3.Connection, path: str) -> str | None:
     return None if row is None else str(row[0])
 
 
-def test_flag_off_chunks_land_in_legacy_single_collection(tmp_path: Path) -> None:
-    """Flag OFF: writer is the legacy single-collection adapter; chunks land in entry name."""
+def test_unmapped_entry_chunks_land_in_legacy_single_collection(tmp_path: Path) -> None:
+    """When an entry has no cc_pair (no topology v2 wiring), the writer falls
+    through to the legacy single-collection adapter and chunks land under the
+    entry name. Pins the legacy fallthrough — post-#132 cutover the flag is gone
+    but the fallthrough remains because not every entry has a cc_pair."""
     db = _build_db(tmp_path)
-    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal", flag_on=False)
+    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal")
     chunk = _chunk(source_uri="01-Projects/Client-X/note.md")
     written = writer.upsert([chunk])
     db.commit()
@@ -130,7 +133,7 @@ def test_flag_on_chunks_land_in_mapped_collection(tmp_path: Path) -> None:
         cc_pair_id=cc_pair.id,
         filter_glob="01-Projects/*",
     )
-    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal", flag_on=True)
+    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal")
     chunk = _chunk(source_uri="01-Projects/Client-X/note.md")
     written = writer.upsert([chunk])
     db.commit()
@@ -173,7 +176,7 @@ def test_flag_on_router_drops_when_unmapped_and_drop_policy(tmp_path: Path) -> N
         filter_glob="restricted/*",
         on_unmapped="drop",
     )
-    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal", flag_on=True)
+    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal")
     chunk = _chunk(source_uri="open/note.md")
     written = writer.upsert([chunk])
     db.commit()
@@ -188,7 +191,7 @@ def test_flag_on_with_cc_pair_but_no_mappings_falls_back_to_legacy(tmp_path: Pat
     connector_id = _seed_connector(db, kind="obsidian", name="obsidian-personal-conn")
     create_cc_pair(db, connector_id=connector_id, credential_id=None, name="obsidian-personal")
     db.commit()
-    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal", flag_on=True)
+    writer = resolve_chunk_writer_for_entry(db, "obsidian-personal")
     chunk = _chunk(source_uri="01-Projects/note.md")
     written = writer.upsert([chunk])
     db.commit()
