@@ -289,7 +289,7 @@ def _run_connector_through_router(
     # The router-backed writer is the apply-bridge's whole point — the
     # legacy single-collection writer is the fallback the bridge is
     # designed to replace. Swap into the pipeline's chunk-writer slot.
-    router_writer = resolve_chunk_writer_for_entry(db, cc_pair_name, flag_on=True)
+    router_writer = resolve_chunk_writer_for_entry(db, cc_pair_name)
     # F3-rationale: test-only substitution of the chunk_writer on a
     # factory-built pipeline; the field is the documented composition
     # seam used by the sibling Wave C E2E test.
