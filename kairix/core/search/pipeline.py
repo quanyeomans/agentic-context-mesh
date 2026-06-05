@@ -18,6 +18,7 @@ import datetime
 import hashlib
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +39,28 @@ from kairix.core.search.rrf import FusedResult
 from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
+
+# Module-level thread pool for parallel BM25 + vector dispatch (#perf-dispatch).
+# Profile data (post-#409): dispatch=2384ms = bm25 (~605ms) + vector (~1780ms)
+# strictly sequential. Both legs are I/O-bound (SQLite FTS5 + Azure embed HTTP)
+# and have no inter-dependency — running them on the same thread serialises
+# wall-clock for no good reason. Overlapping them cuts the per-search dispatch
+# floor to ~max(bm25, vector); on warm-cache miss that's ~600ms saved off the
+# critical path (≈25% of dispatch budget) with no result-set change.
+#
+# Sized at 2 workers: exactly one BM25 + one vector futures per search call.
+# A bigger pool would spend memory on idle workers; a smaller (single-worker)
+# pool collapses back to sequential.
+#
+# Hoisted to module scope (not per-call) so the pool's thread initialisation
+# (~0.5-1ms per worker) is paid once at import time and amortised across
+# every subsequent search call. Per-call ``ThreadPoolExecutor(max_workers=2)``
+# would re-pay that cost on every query.
+#
+# Thread-name prefix makes the pool's workers visible in py-spy / stack dumps
+# so future profiling can tell parallel-dispatch workers apart from coalescer,
+# embed-batch, or factory-build threads.
+_DISPATCH_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="search-dispatch")
 
 
 @dataclass
@@ -269,28 +292,56 @@ class SearchPipeline:
         collections: list[str] | None,
         stages: dict[str, float] | None = None,
     ) -> tuple[list[dict], list[dict], bool]:
-        """Run BM25 + vector search; isolate each failure so one can't break the other.
+        """Run BM25 + vector search in parallel; isolate each failure so one can't break the other.
+
+        Both legs are I/O-bound (SQLite FTS5 + Azure embed HTTP + usearch ANN)
+        with no inter-dependency. The previous implementation ran them
+        sequentially on the request thread; this version submits both to the
+        module-level ``_DISPATCH_POOL`` so wall-clock collapses to ~max(bm25,
+        vector) instead of bm25 + vector. On the production warm-cache miss
+        path (bm25 ~605ms, vector ~1780ms) that saves ~600ms per search.
 
         When ``stages`` is supplied, records ``bm25`` and ``vector`` wall-clock
         deltas into it so the caller can decompose the ``dispatch`` stage in
-        SearchResult.stage_latency_ms (#282 follow-up: probe data showed the
-        dispatch stage owns 92% of total wall-clock; this split says how much
-        is BM25 vs embed+vector).
+        SearchResult.stage_latency_ms (#282 follow-up). The per-leg values now
+        report leg-internal wall-clock; the outer ``dispatch`` value
+        (measured in :meth:`search`) reports the parallel-collapsed total,
+        so ``bm25 + vector > dispatch`` is the expected post-parallelism
+        shape and signals genuine overlap to operators reading probe data.
+
+        Per-leg timing is captured inside each leg's worker thread (around
+        the actual ``.search()`` call) so the recorded duration reflects
+        what each backend really spent — pool queueing delay sits outside
+        the leg timer and shows up as the difference between the parent
+        ``dispatch`` and the larger of the two leg values.
         """
         cfg = self.config
-        bm25_results: list[dict] = []
-        t = time.monotonic()
-        try:
-            bm25_results = self.bm25.search(query, collections=collections, limit=cfg.bm25_limit)
-        except Exception as e:
-            _logger.warning("pipeline: BM25 search failed — %s", e)
-        if stages is not None:
-            stages["bm25"] = round((time.monotonic() - t) * 1000.0, 2)
 
-        t = time.monotonic()
-        vec_results, vec_failed = self._dispatch_vector(query, collections, stages=stages)
-        if stages is not None:
-            stages["vector"] = round((time.monotonic() - t) * 1000.0, 2)
+        def _run_bm25() -> list[dict]:
+            t0 = time.monotonic()
+            try:
+                rows = self.bm25.search(query, collections=collections, limit=cfg.bm25_limit)
+            except Exception as e:
+                _logger.warning("pipeline: BM25 search failed — %s", e)
+                rows = []
+            finally:
+                if stages is not None:
+                    stages["bm25"] = round((time.monotonic() - t0) * 1000.0, 2)
+            return rows
+
+        def _run_vector() -> tuple[list[dict], bool]:
+            t0 = time.monotonic()
+            try:
+                rows, failed = self._dispatch_vector(query, collections, stages=stages)
+            finally:
+                if stages is not None:
+                    stages["vector"] = round((time.monotonic() - t0) * 1000.0, 2)
+            return rows, failed
+
+        bm25_future = _DISPATCH_POOL.submit(_run_bm25)
+        vector_future = _DISPATCH_POOL.submit(_run_vector)
+        bm25_results = bm25_future.result()
+        vec_results, vec_failed = vector_future.result()
         return bm25_results, vec_results, vec_failed
 
     def _dispatch_vector(

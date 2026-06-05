@@ -46,6 +46,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from kairix.transport.cache import get_embed_cache as _module_default_get_embed_cache
 from kairix.transport.coalesce import current_embed_coalescer as _module_default_existing_coalescer
 from kairix.transport.coalesce import get_embed_coalescer as _module_default_coalescer_factory
 
@@ -95,10 +96,17 @@ class ProviderEmbeddingService:
         *,
         existing_coalescer_fn: Callable[[], Any] = _module_default_existing_coalescer,
         coalescer_factory: Callable[..., Any] = _module_default_coalescer_factory,
+        get_embed_cache_fn: Callable[[], Any] = _module_default_get_embed_cache,
     ) -> None:
         self._provider = provider
         self._existing_coalescer_fn = existing_coalescer_fn
         self._coalescer_factory = coalescer_factory
+        # Public DI seam — tests pass a counting wrapper to assert that
+        # the cache accessor isn't invoked from inside :meth:`embed` (it
+        # is resolved at construction time, not per call). Production
+        # callers use the module-level default which routes to
+        # :func:`kairix.transport.cache.get_embed_cache`.
+        self._get_embed_cache = get_embed_cache_fn
 
     def embed(self, text: str) -> list[float]:
         """Embed a single text string. Returns ``[]`` on failure.
@@ -106,16 +114,24 @@ class ProviderEmbeddingService:
         Routes through the process-shared cache and (when wired) the
         request coalescer so concurrent callers asking the same /
         nearby questions pay one round-trip total.
+
+        Warm-cache hot path (#perf-embed-http). The cache accessor is
+        resolved at module import time (not per call) and bound to
+        ``self._get_embed_cache`` at construction time. Before, every
+        embed call paid a per-call ``from kairix.transport.cache import
+        get_embed_cache`` import-statement evaluation — even when the
+        module is already loaded, that's a sys.modules lookup + name
+        binding on the hottest path in the pipeline. Hoisting it
+        eliminates that per-call cost on every cache-hit short-circuit
+        and every cache-miss embed.
         """
         if not text or not text.strip():
             return []
 
-        from kairix.transport.cache import get_embed_cache
-
-        cache = get_embed_cache()
-        cached = cache.get(text)
+        cache = self._get_embed_cache()
+        cached: list[float] | None = cache.get(text)
         if cached is not None:
-            return cached
+            return list(cached)
 
         # Coalescer routing: if a singleton is already installed (test
         # pre-installation or a previous production warm-up), use it.

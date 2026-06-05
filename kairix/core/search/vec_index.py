@@ -15,12 +15,13 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
 
-from kairix.core.db import EMBED_VECTOR_DIMS, open_db
+from kairix.core.db import EMBED_VECTOR_DIMS
 from kairix.text import strip_frontmatter
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,22 @@ class VectorIndex:
         self._key_to_hash_seq: dict[int, str] = {}
         self._next_key: int = 0
         self._mutable: bool = False
+        # Persistent read-only metadata connection (#perf-vector-ann).
+        # Before: every ``_fetch_metadata_batched`` call paid
+        # ``sqlite3.connect`` + ``PRAGMA journal_mode=WAL`` + ``PRAGMA
+        # foreign_keys=ON`` + ``db.close()`` per search — measurable
+        # (5-30ms) per query on the warm-cache path. After: the connection
+        # is opened once on first use and reused for the lifetime of the
+        # VectorIndex instance (production: the read-only singleton built
+        # by ``get_vector_index``; one connection per process).
+        #
+        # ``check_same_thread=False`` paired with the lock makes the
+        # connection safe for the parallel-dispatch worker thread
+        # (search-dispatch pool from pipeline.py) — symmetrical with the
+        # treatment ``_build_topology_v2_collection_resolver`` already
+        # applies to its resolver Connection.
+        self._meta_conn: sqlite3.Connection | None = None
+        self._meta_conn_lock = threading.Lock()
 
     def __len__(self) -> int:
         if self._index is None:
@@ -369,20 +386,71 @@ class VectorIndex:
         (newer). We chunk at :data:`_IN_CLAUSE_BATCH_SIZE` so absurd
         ``k`` values still work. The common path (k ≤ 20) issues a
         single query.
+
+        Uses the persistent read-only metadata connection (see
+        ``__init__``) so the hot path doesn't pay
+        ``sqlite3.connect`` + WAL/foreign-keys PRAGMA roundtrips on every
+        vector search. The connection is opened lazily on first use and
+        kept open for the lifetime of the VectorIndex instance.
         """
         rows_by_hash: dict[str, sqlite3.Row] = {}
-        db = open_db(Path(self._db_path))
-        try:
-            db.row_factory = sqlite3.Row
-            for start in range(0, len(unique_hashes), _IN_CLAUSE_BATCH_SIZE):
-                chunk = unique_hashes[start : start + _IN_CLAUSE_BATCH_SIZE]
-                placeholders = ",".join("?" * len(chunk))
-                sql = _METADATA_SELECT_SQL.format(placeholders=placeholders)
+        db = self._get_meta_conn()
+        for start in range(0, len(unique_hashes), _IN_CLAUSE_BATCH_SIZE):
+            chunk = unique_hashes[start : start + _IN_CLAUSE_BATCH_SIZE]
+            placeholders = ",".join("?" * len(chunk))
+            sql = _METADATA_SELECT_SQL.format(placeholders=placeholders)
+            # Serialise execute calls on the shared connection — the
+            # sqlite3 driver enforces single-cursor state per Connection
+            # even with ``check_same_thread=False``. The metadata query is
+            # tiny (~ms), so the lock-hold cost is dominated by the SELECT
+            # itself; no contention concern even at conc=10.
+            with self._meta_conn_lock:
                 for row in db.execute(sql, tuple(chunk)).fetchall():
                     rows_by_hash[row["hash"]] = row
-        finally:
-            db.close()
         return rows_by_hash
+
+    def _get_meta_conn(self) -> sqlite3.Connection:
+        """Return the persistent read-only metadata SQLite connection.
+
+        Opens the connection on first call (under the lock so concurrent
+        first-arrivals don't both build it) and reuses it for every
+        subsequent search. ``row_factory`` is set once at open time —
+        callers consume rows via ``row["hash"]`` / ``row["path"]`` etc.
+
+        ``check_same_thread=False`` lets the parallel-dispatch worker
+        thread (search-dispatch pool from pipeline.py) execute against
+        this connection; the per-execute serialisation above provides
+        the missing cursor-state safety the sqlite3 driver requires.
+        WAL + foreign-keys PRAGMA are applied once at open time so the
+        per-search hot path pays nothing for them.
+        """
+        if self._meta_conn is not None:
+            return self._meta_conn
+        with self._meta_conn_lock:
+            if self._meta_conn is not None:
+                return self._meta_conn
+            # F77-allow: VectorIndex metadata reader; MCP/search-only singleton; one connection per process.
+            conn = sqlite3.connect(str(self._db_path), timeout=10.0, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            # Mirror open_db's PRAGMA setup — paid once at open time.
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            self._meta_conn = conn
+            return conn
+
+    def close_meta_conn(self) -> None:
+        """Close the persistent metadata connection. Idempotent.
+
+        Tests + ``reset_vector_index_singleton`` call this so the OS-level
+        file handle is released between test cases that open multiple
+        VectorIndex instances against the same DB.
+        """
+        with self._meta_conn_lock:
+            if self._meta_conn is not None:
+                try:
+                    self._meta_conn.close()
+                finally:
+                    self._meta_conn = None
 
     def _build_results(
         self,
@@ -614,6 +682,16 @@ def get_vector_index(db_path: Path | None = None) -> Any:
 
 
 def reset_vector_index_singleton() -> None:
-    """Clear the cached singleton. For test isolation."""
+    """Clear the cached singleton. For test isolation.
+
+    Closes the persistent metadata connection first so the OS-level
+    file handle is released before the next ``get_vector_index`` call
+    opens a fresh one against the same DB.
+    """
     global _VECTOR_INDEX
+    if _VECTOR_INDEX is not None and hasattr(_VECTOR_INDEX, "close_meta_conn"):
+        try:
+            _VECTOR_INDEX.close_meta_conn()
+        except Exception as exc:
+            logger.debug("reset_vector_index_singleton: close_meta_conn failed (continuing): %s", exc)
     _VECTOR_INDEX = None
