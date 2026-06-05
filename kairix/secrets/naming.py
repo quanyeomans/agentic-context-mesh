@@ -37,13 +37,10 @@ Forbidden:   ``kairix-connector-obsidian-tcv-encryption-password`` →
              would mis-split).
 
 Resolution:  leaf names of more than one slot use underscore-style
-             single tokens (``encryptionpassword``) OR — preferred —
-             callers that want such a leaf register the instance form
-             via :data:`kairix.secrets._legacy_aliases.LEGACY_ALIASES`
-             so the loader doesn't need to round-trip through the
-             parser at all. The canonical names emitted by
-             :func:`canonical_secret_name` are always unambiguous; the
-             parser is for inspection-tool round-tripping only.
+             single tokens (``encryptionpassword``). The canonical
+             names emitted by :func:`canonical_secret_name` are always
+             unambiguous; the parser is for inspection-tool
+             round-tripping only.
 
 In practice the codebase keeps all leaves to single-slot identifiers
 and the loader never round-trips through the parser. The parser
@@ -119,10 +116,9 @@ def parse_canonical_name(name: str) -> tuple[Scope, str, str | None, str]:
     cannot tell ``kairix-connector-sharepoint-tenant-id`` apart from
     ``kairix-connector-sharepoint-tenant`` with an ``id`` instance.
     Round-trip safety is therefore conditional on the leaf being a
-    single slot, or on the caller round-tripping through
-    :data:`kairix.secrets._legacy_aliases.LEGACY_ALIASES` (which
-    stores the well-formed identity tuple directly so the parser is
-    never needed for actual resolution).
+    single slot. Callers that need a multi-slot leaf should store the
+    well-formed identity tuple directly (the loader keys on the tuple,
+    not the parsed name).
 
     Raises ``ValueError`` for malformed names (wrong prefix, fewer
     than four parts, unknown scope).

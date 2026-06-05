@@ -80,13 +80,13 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         # transcript supplied by the operator; not safe to expose to agents
         # even as an escalation stub (the operator runs it from the host).
         "ingest-chat",
-        # secrets migrate-list is pre-deploy operator-only — it dumps the
-        # entire legacy → canonical mapping which agents have no use for and
-        # which could help an attacker enumerate env-var names. The verify
-        # subcommand, by contrast, IS exposed via tool_secrets_verify
-        # (kairix/agents/mcp/secrets_status.py) with the legacy_used alias
-        # redacted, so agents can answer "is auth healthy?" without leaking
-        # the operator-facing legacy-secret map.
+        # secrets is pre-deploy operator-only — the verify subcommand IS
+        # exposed via tool_secrets_verify (kairix/agents/mcp/secrets_status.py)
+        # so agents can answer "is auth healthy?" without docker exec access.
+        # The CLI surface stays operator-only because the verify table is
+        # most useful during pre-deploy wiring (after the operator has set
+        # KV secrets); agents querying the deployed instance just need the
+        # status envelope, not the CLI wrapper.
         "secrets",
         # connect is operator-only — opens a browser, captures OAuth2 tokens via
         # the consent flow, and writes them to the operator's chosen store

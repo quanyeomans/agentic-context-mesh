@@ -89,10 +89,10 @@ def test_get_credentials_unknown_purpose_raises() -> None:
 
 @pytest.mark.unit
 def test_resolve_llm_with_explicit_model(monkeypatch, tmp_path) -> None:
-    """When all three env vars set, returns a Credentials with that model."""
-    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")  # pragma: allowlist secret
-    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://api.openai.com/v1")
-    monkeypatch.setenv("KAIRIX_LLM_MODEL", "gpt-4o")
+    """When all three canonical env vars set, returns a Credentials with that model."""
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_API_KEY", "test-key")  # pragma: allowlist secret
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_ENDPOINT", "https://api.openai.com/v1")
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_MODEL", "gpt-4o")
     # Point secrets dir at non-existent path so file/KV steps short-circuit
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
@@ -106,10 +106,10 @@ def test_resolve_llm_with_explicit_model(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.unit
 def test_resolve_llm_uses_default_model(monkeypatch, tmp_path) -> None:
-    """When KAIRIX_LLM_MODEL is unset, falls back to 'gpt-4o-mini'."""
-    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "test-key")  # pragma: allowlist secret
-    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://api.openai.com/v1")
-    monkeypatch.delenv("KAIRIX_LLM_MODEL", raising=False)
+    """When KAIRIX_PROVIDER_LLM_MODEL is unset, falls back to 'gpt-4o-mini'."""
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_API_KEY", "test-key")  # pragma: allowlist secret
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_ENDPOINT", "https://api.openai.com/v1")
+    monkeypatch.delenv("KAIRIX_PROVIDER_LLM_MODEL", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
 
@@ -120,14 +120,12 @@ def test_resolve_llm_uses_default_model(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.unit
 def test_resolve_llm_raises_when_missing(monkeypatch, tmp_path) -> None:
-    """When required secret missing via legacy env-var path, raises SecretNotFoundError.
+    """When required canonical env var missing, raises SecretNotFoundError.
 
-    Post-loader migration the credentials module surfaces the loader's
-    typed :class:`SecretNotFoundError` (LookupError subclass) — message
+    The credentials module surfaces the loader's typed
+    :class:`SecretNotFoundError` (LookupError subclass) — message
     carries the canonical KV name + the loader's F21 fix/next/run markers.
     """
-    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
     monkeypatch.delenv("KAIRIX_PROVIDER_LLM_API_KEY", raising=False)
     monkeypatch.delenv("KAIRIX_PROVIDER_LLM_ENDPOINT", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
@@ -143,11 +141,11 @@ def test_resolve_llm_raises_when_missing(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.unit
 def test_resolve_embed_uses_embed_specific_secrets(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("KAIRIX_EMBED_API_KEY", "embed-key")
-    monkeypatch.setenv("KAIRIX_EMBED_ENDPOINT", "https://embed.example.com")
-    monkeypatch.setenv("KAIRIX_EMBED_MODEL", "text-embedding-3-small")
-    monkeypatch.delenv("KAIRIX_LLM_API_KEY", raising=False)
-    monkeypatch.delenv("KAIRIX_LLM_ENDPOINT", raising=False)
+    monkeypatch.setenv("KAIRIX_PROVIDER_EMBED_API_KEY", "embed-key")
+    monkeypatch.setenv("KAIRIX_PROVIDER_EMBED_ENDPOINT", "https://embed.example.com")
+    monkeypatch.setenv("KAIRIX_PROVIDER_EMBED_MODEL", "text-embedding-3-small")
+    monkeypatch.delenv("KAIRIX_PROVIDER_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_PROVIDER_LLM_ENDPOINT", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
 
@@ -162,11 +160,11 @@ def test_resolve_embed_uses_embed_specific_secrets(monkeypatch, tmp_path) -> Non
 @pytest.mark.unit
 def test_resolve_embed_falls_back_to_llm_secrets(monkeypatch, tmp_path) -> None:
     """When embed-specific creds are missing, falls back to LLM creds."""
-    monkeypatch.delenv("KAIRIX_EMBED_API_KEY", raising=False)
-    monkeypatch.delenv("KAIRIX_EMBED_ENDPOINT", raising=False)
-    monkeypatch.delenv("KAIRIX_EMBED_MODEL", raising=False)
-    monkeypatch.setenv("KAIRIX_LLM_API_KEY", "llm-key")
-    monkeypatch.setenv("KAIRIX_LLM_ENDPOINT", "https://api.openai.com/v1")
+    monkeypatch.delenv("KAIRIX_PROVIDER_EMBED_API_KEY", raising=False)
+    monkeypatch.delenv("KAIRIX_PROVIDER_EMBED_ENDPOINT", raising=False)
+    monkeypatch.delenv("KAIRIX_PROVIDER_EMBED_MODEL", raising=False)
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_API_KEY", "llm-key")
+    monkeypatch.setenv("KAIRIX_PROVIDER_LLM_ENDPOINT", "https://api.openai.com/v1")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
 
@@ -185,7 +183,7 @@ def test_resolve_embed_falls_back_to_llm_secrets(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.unit
 def test_resolve_graph_returns_none_without_password(monkeypatch, tmp_path) -> None:
-    monkeypatch.delenv("KAIRIX_NEO4J_PASSWORD", raising=False)
+    monkeypatch.delenv("KAIRIX_INFRA_NEO4J_PASSWORD", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     assert get_credentials("graph") is None
@@ -193,9 +191,9 @@ def test_resolve_graph_returns_none_without_password(monkeypatch, tmp_path) -> N
 
 @pytest.mark.unit
 def test_resolve_graph_returns_credentials_with_password(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("KAIRIX_NEO4J_PASSWORD", "secret-pw")
-    monkeypatch.setenv("KAIRIX_NEO4J_URI", "bolt://neo4j.test:7687")
-    monkeypatch.setenv("KAIRIX_NEO4J_USER", "alice")
+    monkeypatch.setenv("KAIRIX_INFRA_NEO4J_PASSWORD", "secret-pw")
+    monkeypatch.setenv("KAIRIX_INFRA_NEO4J_URI", "bolt://neo4j.test:7687")
+    monkeypatch.setenv("KAIRIX_INFRA_NEO4J_USER", "alice")
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     creds = get_credentials("graph")
@@ -207,10 +205,10 @@ def test_resolve_graph_returns_credentials_with_password(monkeypatch, tmp_path) 
 
 @pytest.mark.unit
 def test_resolve_graph_uses_default_uri_when_unset(monkeypatch, tmp_path) -> None:
-    """KAIRIX_NEO4J_URI defaults to bolt://localhost:7687 when unset."""
-    monkeypatch.setenv("KAIRIX_NEO4J_PASSWORD", "pw")
-    monkeypatch.delenv("KAIRIX_NEO4J_URI", raising=False)
-    monkeypatch.delenv("KAIRIX_NEO4J_USER", raising=False)
+    """KAIRIX_INFRA_NEO4J_URI defaults to bolt://localhost:7687 when unset."""
+    monkeypatch.setenv("KAIRIX_INFRA_NEO4J_PASSWORD", "pw")
+    monkeypatch.delenv("KAIRIX_INFRA_NEO4J_URI", raising=False)
+    monkeypatch.delenv("KAIRIX_INFRA_NEO4J_USER", raising=False)
     monkeypatch.setenv("KAIRIX_SECRETS_DIR", str(tmp_path / "no-such-dir"))
     monkeypatch.delenv("KAIRIX_KV_NAME", raising=False)
     creds = get_credentials("graph")

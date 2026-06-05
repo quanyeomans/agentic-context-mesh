@@ -27,8 +27,8 @@ pytestmark = pytest.mark.contract
 
 
 def _make_real() -> SecretsLoader:
-    """Build a real loader with a stub legacy chain (returns None always)."""
-    return SecretsLoader(env={}, kv_mount=Path("/dev/null"), legacy_chain=lambda _c: None)
+    """Build a real loader scoped to an empty env + unused KV mount."""
+    return SecretsLoader(env={}, kv_mount=Path("/dev/null"))
 
 
 def _make_fake() -> FakeSecretsLoader:
@@ -39,7 +39,6 @@ def _make_real_with_value() -> SecretsLoader:
     return SecretsLoader(
         env={"KAIRIX_CONNECTOR_M365_TENANT_ID": "tenant-x"},
         kv_mount=Path("/dev/null"),
-        legacy_chain=lambda _c: None,
     )
 
 

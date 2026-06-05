@@ -189,9 +189,9 @@ def _resolve_credentials_from_secrets(
 
     ADR-031 canonical-naming: each leaf below routes through the
     injected resolver (production: :class:`SecretsLoader`; tests:
-    :class:`tests.fakes.FakeSecretsLoader`). Production keeps working
-    unchanged because the loader's alias fallback still resolves the
-    legacy env vars (``CONNECTOR_SLACK_BOT_TOKEN`` etc.).
+    :class:`tests.fakes.FakeSecretsLoader`). Operators supply the
+    credentials under the canonical ``KAIRIX_CONNECTOR_SLACK_*`` env
+    vars or matching KV-mount file names.
 
     The Slack credential triple lives under four canonical leaves
     (mirrors the M365 sibling shape):

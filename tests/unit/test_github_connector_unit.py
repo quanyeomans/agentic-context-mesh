@@ -1211,12 +1211,12 @@ def test_github_loads_secrets_via_loader() -> None:
     """Constructor reads every credential leaf through the injected ``secrets`` resolver.
 
     Pins ADR-031: the connector calls ``secrets.get(...)`` for each of
-    the canonical leaves named in ``kairix.secrets._legacy_aliases``
-    (``pat``, ``app-id``, ``installation-id``, ``app-private-key``,
-    ``webhook-secret``). Asserting on the loader's call history proves
-    that ``_resolve_credentials_from_secrets`` actually rode the
-    injected seam rather than reaching for ``kairix.secrets.get_secret``
-    behind the test's back.
+    the canonical leaves it cares about (``pat``, ``app-id``,
+    ``installation-id``, ``app-private-key``, ``webhook-secret``).
+    Asserting on the loader's call history proves that
+    ``_resolve_credentials_from_secrets`` actually rode the injected
+    seam rather than reaching for ``kairix.secrets.get_secret`` behind
+    the test's back.
 
     Sabotage proof (executed): in the connector module, change
     ``leaf="pat"`` to ``leaf="not-pat"`` in the PAT resolution call —

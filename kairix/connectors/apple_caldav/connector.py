@@ -61,10 +61,9 @@ CONNECTOR_NAME = "apple_caldav"
 _AREA_APPLE_CALDAV = "apple-caldav"
 
 # Canonical secret identity tuples for the apple_caldav connector. The
-# legacy alias map (``kairix.secrets._legacy_aliases.LEGACY_ALIASES``)
-# resolves both via the legacy ``CONNECTOR_APPLE_CALDAV_*`` env vars,
-# so production deployments keep working unchanged through the
-# loader's alias-fallback path.
+# loader resolves both via the canonical ``KAIRIX_CONNECTOR_APPLE_CALDAV_*``
+# env vars or a KV-mount file at
+# ``/run/kairix/secrets/kairix-connector-apple-caldav-<leaf>``.
 _SECRET_SCOPE_USERNAME: tuple[Scope, str, str | None, str] = ("connector", _AREA_APPLE_CALDAV, None, "username")
 _SECRET_SCOPE_ACCESS: tuple[Scope, str, str | None, str] = ("connector", _AREA_APPLE_CALDAV, None, "access")
 

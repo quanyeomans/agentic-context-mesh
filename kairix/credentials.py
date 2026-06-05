@@ -33,10 +33,11 @@ from kairix.secrets import Scope, SecretsResolver
 
 logger = logging.getLogger(__name__)
 
-# Canonical secret identity tuples — the loader's legacy alias map
-# (``kairix.secrets._legacy_aliases.LEGACY_ALIASES``) covers each of
-# these with the historical ``KAIRIX_*`` env-var fallback, so legacy
-# operator deployments keep working through the alias path.
+# Canonical secret identity tuples. The loader resolves each via the
+# canonical ``KAIRIX_<SCOPE>_<AREA>_<LEAF>`` env var or a KV-mount
+# file at ``/run/kairix/secrets/<canonical-name>``. The historical
+# alias chain was retired in #369; operators with pre-canonical env
+# vars must rotate to the canonical names.
 _SCOPE_LLM_API_KEY: tuple[Scope, str, str | None, str] = ("provider", "llm", None, "api-key")
 _SCOPE_LLM_ENDPOINT: tuple[Scope, str, str | None, str] = ("provider", "llm", None, "endpoint")
 _SCOPE_LLM_MODEL: tuple[Scope, str, str | None, str] = ("provider", "llm", None, "model")
@@ -246,7 +247,7 @@ def get_credentials(
         purpose: "llm" (chat completions), "embed" (embeddings), or "graph" (Neo4j).
         secrets: optional :class:`SecretsResolver` injection seam. When
             ``None`` (production default), a :class:`SecretsLoader` is
-            constructed lazily — its env / KV mount / legacy alias chain
+            constructed lazily — its canonical env-var / KV mount chain
             resolves the credentials. Tests inject
             :class:`tests.fakes.FakeSecretsLoader` so no env-var monkey-
             patching is needed (F2-clean).
@@ -255,8 +256,6 @@ def get_credentials(
     For "graph": returns None if Neo4j password is not configured.
 
     Raises:
-        OSError: When required credentials (llm, embed) cannot be resolved
-            via the legacy chain (raised by :func:`kairix.secrets.get_secret`).
         kairix.secrets.SecretNotFoundError: When required credentials cannot
             be resolved via the injected loader (canonical surface).
         ValueError: When purpose is not recognised.
@@ -277,9 +276,9 @@ def _default_secrets_loader() -> SecretsResolver:
 
     Local import keeps the credentials module importable without paying
     for the loader's env-snapshot work on every kairix import. The
-    loader's resolution chain (env -> legacy aliases -> KV mount ->
-    legacy chain) is unchanged from the canonical secrets package, so
-    existing operator deployments keep working through the alias path.
+    loader's resolution chain (canonical env var -> KV mount) is the
+    canonical secrets package's only surface; operators must supply
+    credentials under the canonical names.
     """
     from kairix.secrets import SecretsLoader
 

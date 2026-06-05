@@ -1,8 +1,8 @@
 """BDD step impls for tests/bdd/features/mcp_secrets_verify.feature.
 
 F46-compliant: composes via the actual MCP module function (no direct
-internal-state poking, no monkeypatch). The envelope shape + redaction
-contract are the unit of behaviour.
+internal-state poking, no monkeypatch). The envelope shape contract
+is the unit of behaviour.
 """
 
 from __future__ import annotations
@@ -35,16 +35,6 @@ def envelope_has_field(bdd_state: dict[str, Any], field: str) -> None:
     envelope = bdd_state["envelope"]
     actual_field = field.replace(" list", "")
     assert actual_field in envelope, f"envelope missing {actual_field!r}; keys: {list(envelope)}"
-
-
-@then("no row in the secrets list carries the legacy_used field")
-def no_legacy_used_in_rows(bdd_state: dict[str, Any]) -> None:
-    rows = bdd_state["envelope"]["secrets"]
-    assert rows, "expected at least one row in the secrets list"
-    for row in rows:
-        assert "legacy_used" not in row, (
-            f"legacy_used MUST be redacted from MCP envelope to prevent alias-map leak; row: {row}"
-        )
 
 
 @then(parsers.parse("every row carries the {field} field"))

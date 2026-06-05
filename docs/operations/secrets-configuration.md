@@ -51,7 +51,7 @@ Examples:
 
 The env var form is the canonical name uppercased with `-` → `_`: `kairix-provider-llm-api-key` → `KAIRIX_PROVIDER_LLM_API_KEY`. One rule, one function — see `kairix.secrets.naming.canonical_env_var()`.
 
-> **Legacy aliases:** existing deployments using older env var names (`KAIRIX_LLM_API_KEY`, `CONNECTOR_M365_TENANT_ID`, `APPLE_CALDAV_USERNAME`, etc.) keep working — kairix's loader tries the canonical name first, then the legacy alias, emitting a `DeprecationWarning` on the legacy hit. The migration table lives in `kairix.secrets._legacy_aliases.LEGACY_ALIASES`. Run `kairix secrets migrate-list` to print the full TSV.
+> **Legacy aliases retired:** older env var names (`KAIRIX_LLM_API_KEY`, `CONNECTOR_M365_TENANT_ID`, `APPLE_CALDAV_USERNAME`, etc.) are no longer recognised. Rotate to the canonical `KAIRIX_<SCOPE>_<AREA>[_<INSTANCE>]_<LEAF>` form (see the canonical-name table above). Run `kairix secrets verify` after rotating to confirm every credential resolves.
 
 > **Multi-instance connectors:** when you run multiple instances of the same connector (multiple Obsidian vaults, multiple Slack workspaces, multiple GitHub PATs), the `<instance>` slot disambiguates them. The instance ids come from your `kairix.config.yaml` connector blocks — kairix doesn't enumerate them on its own.
 
@@ -349,12 +349,6 @@ To see what canonical names kairix is expecting (vs what's actually present), ru
 kairix secrets verify   # walks every loaded connector + provider, reports each required secret
 ```
 
-To see the migration table for legacy → canonical names (useful when provisioning a fresh KV):
-
-```bash
-kairix secrets migrate-list   # TSV: LEGACY_ENV_VAR<TAB>CANONICAL_KV_NAME
-```
-
 ## Rotating a secret
 
 The mechanics depend on your source:
@@ -421,7 +415,7 @@ The canonical-name convention is load-bearing — there's no central registry to
 3. **Restart** the fetch-secrets sidecar (if you're using one) or restart kairix directly. The convention-driven fetch script picks up every `kairix-*` prefix automatically.
 4. **In code**, the connector calls `secrets.require(scope="connector", area="linear", instance=None, leaf="api-key")` — and that's it. No manifest, no glue.
 
-For connectors that don't yet exist in kairix, the canonical name is still useful documentation: `kairix secrets migrate-list` and `kairix secrets verify` both inspect what's loaded vs what's needed, so adding a new secret to your KV pre-deploy is reflected in `verify`'s "missing" report after the connector ships.
+For connectors that don't yet exist in kairix, the canonical name is still useful documentation: `kairix secrets verify` inspects what's loaded vs what's needed, so adding a new secret to your KV pre-deploy is reflected in `verify`'s "missing" report after the connector ships.
 
 ## Reference
 

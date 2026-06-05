@@ -370,27 +370,28 @@ def test_next_cursor_is_none_when_no_drive_completes_a_delta_sweep() -> None:
     assert connector.next_cursor() is None
 
 
-def test_make_connector_with_string_drives_list_parses_specs(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """``make_connector`` parses a list of drive_id strings into typed specs.
+def test_make_connector_with_string_drives_list_parses_specs(tmp_path: Any) -> None:
+    """A list of drive_id strings parses into typed specs via the connector path.
 
-    Drives credential resolution through the canonical loader's KV mount
-    seam — write the three required secrets as canonical-named files in
-    a per-process mount directory, then point the loader at it via the
-    XDG fallback (which the legacy chain still inspects with the
-    canonical name, since the loader passes the canonical KV name into
-    ``get_secret(canonical_kv, ...)``). F2-clean: only ``XDG_CONFIG_HOME``
-    is set (not a ``KAIRIX_*`` env var).
+    The legacy alias chain + XDG-fallback credential resolver was retired
+    in #369. This test exercises drive parsing through the public
+    ``SharePointConnector`` surface with an explicit ``credentials=``
+    injection so the test never touches the credential resolver path —
+    the unit under test here is drive-spec parsing, not auth.
     """
-    secrets_dir = tmp_path / "xdg" / "kairix" / "secrets"
-    secrets_dir.mkdir(parents=True)
-    (secrets_dir / "kairix-connector-m365-tenant-id").write_text("fake-tenant\n")
-    (secrets_dir / "kairix-connector-m365-client-id").write_text("fake-client\n")
-    (secrets_dir / "kairix-connector-m365-client-secret").write_text("fake-secret-value\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-
-    connector = make_connector({"drives": [_DRIVE_ID]})
+    _ = tmp_path  # parametrised fixture kept for symmetry with sibling tests
+    connector = SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id=_DRIVE_ID)],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — test fixture
+        ),
+    )
     assert connector.name == "sharepoint"
     assert connector.sensitivity_for("any") == DEFAULT_SENSITIVITY
+    # Drive spec parses from a string id into a single-entry SharePointDriveSpec.
+    assert connector._drives == (SharePointDriveSpec(drive_id=_DRIVE_ID),)
 
 
 def test_constructor_loads_secrets_via_loader() -> None:
@@ -448,23 +449,28 @@ def test_make_connector_rejects_invalid_sensitivity_tier() -> None:
         make_connector({"drives": [_DRIVE_ID], "default_sensitivity": "bogus"})
 
 
-def test_make_connector_with_dict_drive_entries_parses_specs(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """make_connector accepts dict drive entries with drive_id + site_id + display_name."""
-    secrets_dir = tmp_path / "xdg" / "kairix" / "secrets"
-    secrets_dir.mkdir(parents=True)
-    (secrets_dir / "kairix-connector-m365-tenant-id").write_text("fake-tenant\n")
-    (secrets_dir / "kairix-connector-m365-client-id").write_text("fake-client\n")
-    (secrets_dir / "kairix-connector-m365-client-secret").write_text("fake-secret-value\n")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+def test_make_connector_with_dict_drive_entries_parses_specs(tmp_path: Any) -> None:
+    """A dict drive entry parses into a typed spec with drive_id + site_id + display_name.
 
-    connector = make_connector(
-        {
-            "drives": [
-                {"drive_id": "id-1", "site_id": "site-1", "display_name": "Marketing"},
-            ]
-        }
+    Exercises drive-spec parsing via the public ``SharePointConnector``
+    surface with an explicit ``credentials=`` injection so the test
+    never touches the credential resolver path (#369 retired the
+    legacy alias chain + XDG fallback the previous shape relied on).
+    """
+    _ = tmp_path
+    connector = SharePointConnector(
+        drives=[SharePointDriveSpec(drive_id="id-1", site_id="site-1", display_name="Marketing")],
+        credentials=SharePointCredentials(
+            tenant_id="t",
+            client_id="c",
+            client_secret="s-value",  # pragma: allowlist secret — test fixture
+        ),
     )
     assert connector.name == "sharepoint"
+    spec = connector._drives[0]
+    assert spec.drive_id == "id-1"
+    assert spec.site_id == "site-1"
+    assert spec.display_name == "Marketing"
 
 
 def test_make_connector_rejects_dict_drive_without_drive_id() -> None:

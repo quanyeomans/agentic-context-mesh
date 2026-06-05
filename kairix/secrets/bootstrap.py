@@ -3,30 +3,21 @@
 Why this exists
 ---------------
 
-Pre-ADR-031, ``kairix.secrets._legacy.get_secret(name)`` hydrated the
-bundle file (``$KAIRIX_SECRETS_FILE``, default
-``/run/secrets/kairix.env``) on its first call. Lazy + implicit.
-Connectors that called ``get_secret`` got hydration for free.
-
-ADR-031 (v2026.5.31) added ``SecretsLoader`` as the single canonical
+ADR-031 (v2026.5.31) made ``SecretsLoader`` the single canonical
 resolution surface. The Wave-2 refactors moved connector + provider
-credential reads onto ``SecretsLoader.require(...)`` (commits
-``5b9344dd``, ``30cfc1b9``, ``fa3c3295``, ``c808e1b4``). But the
-loader's resolution path checks ``os.environ`` BEFORE delegating to
-the legacy chain — and ``SecretsLoader.__init__`` snapshotted env
-at construction. So if any caller constructed a loader BEFORE the
-bundle was hydrated, every ``get()`` returned None for bundle-only
-secrets.
+credential reads onto ``SecretsLoader.require(...)``. The loader's
+resolution path checks ``os.environ`` first via the canonical
+``KAIRIX_<SCOPE>_<AREA>[_<INSTANCE>]_<LEAF>`` form. Operators write
+their canonical secrets either into env directly or into a bundle
+file at ``$KAIRIX_SECRETS_FILE`` (default ``/run/secrets/kairix.env``)
+that this module hydrates into ``os.environ`` at process boot.
 
-The 2026-06-01 production crash hit this: ``kairix.credentials.
-_resolve_embed`` constructed a loader and called ``require("provider",
-"llm", None, "api-key")`` — the canonical env-var
-``KAIRIX_PROVIDER_LLM_API_KEY`` wasn't in env (only the legacy
-``KAIRIX_LLM_API_KEY`` was in the bundle), the bundle hadn't been
-hydrated yet (no caller had triggered it), and the loader raised
-``SecretNotFoundError``.
-
-The structural fix is two-part:
+The 2026-06-01 production crash that prompted this module's creation:
+``kairix.credentials._resolve_embed`` constructed a loader and called
+``require("provider", "llm", None, "api-key")`` before any caller
+triggered bundle hydration — the canonical env-var wasn't in env yet
+and the loader raised ``SecretNotFoundError``. The structural fix has
+two parts:
 
 1. ``SecretsLoader`` reads ``os.environ`` LIVE on each ``get()``
    call (no snapshot). Any hydration that happens between

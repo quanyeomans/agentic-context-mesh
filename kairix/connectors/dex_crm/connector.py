@@ -119,8 +119,7 @@ class _PreBoundApiKeyAuth(ApiKeyAuth):
     :meth:`headers` call via :func:`kairix.secrets.get_secret`. When the
     connector has already resolved the api key via the canonical
     :class:`SecretsLoader`, this subclass surfaces the value directly so
-    the per-request path never re-walks the legacy chain (and never
-    re-fires the loader's DeprecationWarning on alias hits).
+    the per-request path never re-walks the resolver chain.
 
     Frozen dataclass — the bound token is held as a field rather than
     on a mutable attribute, so the auth instance stays safely shareable
@@ -135,8 +134,8 @@ class _PreBoundApiKeyAuth(ApiKeyAuth):
         # The secret_name kwarg is accepted for Protocol-shape compatibility
         # with the base ApiKeyAuth but is intentionally unused: the token is
         # already bound at construction time via the canonical SecretsLoader,
-        # so re-walking the legacy chain on every request would be redundant
-        # work and would re-fire the loader's DeprecationWarning on alias hits.
+        # so re-walking the resolver chain on every request would be redundant
+        # work.
         return BearerHeaders(mapping={"Authorization": f"Bearer {self.api_key}"})
 
 

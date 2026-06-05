@@ -173,8 +173,10 @@ pytest_plugins = [
     # See docs/architecture/feature-flag-architecture.md.
     "tests.bdd.steps.cli_features_steps",
     "tests.bdd.steps.mcp_features_status_steps",
-    # Canonical-credential-naming CLI (kairix secrets verify + migrate-list).
-    # See kairix/secrets/cli.py + ADR-031.
+    # Canonical-credential-naming CLI (kairix secrets verify).
+    # See kairix/secrets/cli.py + ADR-031. The legacy alias migration
+    # surface (migrate-list) was retired in #369 once operators
+    # migrated to canonical KAIRIX_* env-var names.
     "tests.bdd.steps.secrets_cli_steps",
     # MCP tool_secrets_verify — agent-callable preflight envelope.
     "tests.bdd.steps.mcp_secrets_verify_steps",
