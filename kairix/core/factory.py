@@ -121,7 +121,29 @@ def _auto_wire_fact_retriever(db_path: Any) -> Any:
     return None
 
 
-def _get_or_create_query_cache() -> QueryResultCache:
+def _resolve_query_cache_path() -> Any:
+    """Resolve the persistent query-cache path, or ``None`` under pytest.
+
+    Mirrors :func:`kairix.transport.cache.embed_cache._resolve_embed_cache_path`.
+    F4-clean: env reads stay at the paths boundary.
+    """
+    import os
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    try:  # pragma: no cover  # F4 test-bypass: production path resolution only fires outside pytest
+        from kairix.paths import query_cache_path
+
+        return query_cache_path()
+    except Exception as exc:  # pragma: no cover  # same — production-only branch
+        logger.warning(
+            "QueryResultCache: failed to resolve persistence path — degrading to in-memory-only. cause: %s",
+            exc,
+        )
+        return None
+
+
+def _get_or_create_query_cache(cfg_hash: str = "") -> QueryResultCache:
     """Return the process-shared :class:`QueryResultCache`, building it lazily.
 
     Bounds are read from env vars on first construction (#281):
@@ -129,6 +151,12 @@ def _get_or_create_query_cache() -> QueryResultCache:
       - ``KAIRIX_QUERY_CACHE_MAX_AGE_S`` (float seconds, default 300)
 
     F4-clean: env reads route through :mod:`kairix.paths`.
+
+    ``cfg_hash`` scopes the persistent cache rows to the current
+    pipeline configuration (#411 Phase 2). Passing the empty string
+    keeps the cache cfg-scope-disabled — rows persist under the empty
+    bucket. Production callers thread the resolved cfg_hash through
+    so a config change invalidates persisted entries automatically.
     """
     global _QUERY_CACHE
     with _QUERY_CACHE_LOCK:
@@ -137,7 +165,13 @@ def _get_or_create_query_cache() -> QueryResultCache:
 
             max_entries = read_int_env("KAIRIX_QUERY_CACHE_MAX_ENTRIES", default=DEFAULT_MAX_ENTRIES)
             max_age_s = read_float_env("KAIRIX_QUERY_CACHE_MAX_AGE_S", default=DEFAULT_MAX_AGE_S)
-            _QUERY_CACHE = QueryResultCache(max_entries=max_entries, max_age_s=max_age_s)
+            path = _resolve_query_cache_path()
+            _QUERY_CACHE = QueryResultCache(
+                max_entries=max_entries,
+                max_age_s=max_age_s,
+                path=path,
+                cfg_hash=cfg_hash,
+            )
         return _QUERY_CACHE
 
 
@@ -719,6 +753,12 @@ def _build_search_pipeline_uncached(
         fact_retriever if fact_retriever is not None else _auto_wire_fact_retriever(resolved_db_path)
     )
 
+    # #411 Phase 2 — record the pipeline-build marker BEFORE constructing
+    # the query cache, so the marker's cfg_hash is the one scoping the
+    # persistent cache rows. Marker writes are best-effort (defensive
+    # against disk failures inside the marker module itself).
+    _record_pipeline_build_marker(cfg)
+
     # Cache writes are owned by the caller (build_search_pipeline) under
     # ``_PIPELINE_CACHE_LOCK``; this helper just builds + returns.
     return SearchPipeline(
@@ -732,13 +772,55 @@ def _build_search_pipeline_uncached(
         resolver=build_collection_resolver(db_path=resolved_db_path),
         config=cfg,
         # #281 — wire the process-shared LRU so repeat queries from
-        # teaming agents skip the Azure embed roundtrip.
-        query_cache=_get_or_create_query_cache(),
+        # teaming agents skip the Azure embed roundtrip. #411 Phase 2
+        # — pass the resolved cfg_hash so persistent rows are scoped
+        # to the current pipeline configuration.
+        query_cache=_get_or_create_query_cache(cfg_hash=_compute_cfg_hash(cfg)),
         # Plan B-parity Capability #5 — opt-in fact federation. ``None``
         # preserves today's chunk-only behaviour for vault-only deployments.
         # Auto-wired above when the operator's data dir contains a facts table.
         fact_retriever=resolved_fact_retriever,
     )
+
+
+def _compute_cfg_hash(cfg: RetrievalConfig) -> str:
+    """Lazy proxy for ``pipeline_cache_marker.compute_cfg_hash`` (#411 Phase 2).
+
+    Local helper so this module doesn't pay the marker-module import
+    cost when persistence isn't wired (e.g. tests passing in fakes).
+    """
+    from kairix.core.pipeline_cache_marker import compute_cfg_hash
+
+    return compute_cfg_hash(cfg)
+
+
+def _record_pipeline_build_marker(cfg: RetrievalConfig) -> None:
+    """Record the pipeline-build marker on disk (#411 Phase 2).
+
+    Best-effort — disk failures inside the marker module are swallowed.
+    Skipped under pytest so test runs don't write the marker file into
+    the developer's real data dir (same guard pattern as the embed
+    cache; see :func:`_resolve_query_cache_path`).
+    """
+    import os
+    import time as _time
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    try:  # pragma: no cover  # F4 test-bypass: marker write only fires outside pytest
+        from kairix.core.pipeline_cache_marker import PipelineCacheMarker
+        from kairix.paths import pipeline_cache_path
+
+        marker = PipelineCacheMarker(path=pipeline_cache_path())
+        try:
+            marker.record(_compute_cfg_hash(cfg), _time.time())
+        finally:
+            marker.close()
+    except Exception as exc:  # pragma: no cover  # same — production-only branch
+        logger.debug(
+            "factory: pipeline-build marker write skipped — %s",
+            exc,
+        )
 
 
 # ---------------------------------------------------------------------------

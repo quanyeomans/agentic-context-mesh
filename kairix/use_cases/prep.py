@@ -48,6 +48,53 @@ _PREP_SUMMARY_CACHE: PrepSummaryCache | None = None
 _PREP_SUMMARY_CACHE_LOCK = threading.Lock()
 
 
+def _resolve_prep_cache_path() -> Any:
+    """Resolve the persistent prep-cache path, or ``None`` under pytest.
+
+    Mirrors the embed_cache / query_cache singleton-path-resolver
+    pattern. F4-clean: env reads stay at the paths boundary.
+    """
+    import os
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    try:  # pragma: no cover  # F4 test-bypass: production path resolution only fires outside pytest
+        from kairix.paths import prep_cache_path
+
+        return prep_cache_path()
+    except Exception as exc:  # pragma: no cover  # same — production-only branch
+        logger.warning(
+            "PrepSummaryCache: failed to resolve persistence path — degrading to in-memory-only. cause: %s",
+            exc,
+        )
+        return None
+
+
+def _resolve_current_cfg_hash() -> str:
+    """Return the cfg_hash of the most recent pipeline build (#411 Phase 2).
+
+    Reads the on-disk marker written by :func:`kairix.core.factory._record_pipeline_build_marker`.
+    When no marker exists or the file is unreadable, returns the empty
+    string — the prep cache then writes rows under the empty cfg
+    scope, preserving today's behaviour for clean installs.
+    """
+    try:  # pragma: no cover  # F4 test-bypass: marker read only fires outside pytest (under pytest path is None)
+        from kairix.core.pipeline_cache_marker import PipelineCacheMarker
+        from kairix.paths import pipeline_cache_path
+
+        marker = PipelineCacheMarker(path=pipeline_cache_path())
+        try:
+            last = marker.last()
+        finally:
+            marker.close()
+    except Exception as exc:  # pragma: no cover  # same — production-only branch
+        logger.debug("PrepSummaryCache: failed to read marker — using empty cfg_hash. cause: %s", exc)
+        return ""
+    if last is None:  # pragma: no cover  # same
+        return ""
+    return last[0]  # pragma: no cover  # same
+
+
 def _get_or_create_prep_summary_cache() -> PrepSummaryCache:
     """Return the process-shared :class:`PrepSummaryCache`, building it lazily.
 
@@ -55,13 +102,22 @@ def _get_or_create_prep_summary_cache() -> PrepSummaryCache:
     cache's bounds are the module defaults today — env-var overrides
     can be threaded through the same pattern as ``KAIRIX_QUERY_CACHE_*``
     when an operator's prep workload demands it.
+
+    #411 Phase 2 — wires the persistent SQLite layer when a real path
+    is resolvable (not under pytest). The cfg_hash comes from the
+    pipeline-build marker so prep cache rows invalidate when the
+    pipeline cfg changes.
     """
     global _PREP_SUMMARY_CACHE
     with _PREP_SUMMARY_CACHE_LOCK:
         if _PREP_SUMMARY_CACHE is None:
+            path = _resolve_prep_cache_path()
+            cfg_hash = _resolve_current_cfg_hash() if path is not None else ""
             _PREP_SUMMARY_CACHE = PrepSummaryCache(
                 max_entries=_PREP_DEFAULT_MAX_ENTRIES,
                 max_age_s=_PREP_DEFAULT_MAX_AGE_S,
+                path=path,
+                cfg_hash=cfg_hash,
             )
         return _PREP_SUMMARY_CACHE
 

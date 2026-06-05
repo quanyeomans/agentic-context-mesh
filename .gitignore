@@ -55,3 +55,4 @@ PRD.md
 .confidential-patterns
 .private-infra-patterns
 *.DS_Store
+cov.xml

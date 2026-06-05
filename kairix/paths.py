@@ -490,6 +490,58 @@ def embed_cache_path() -> Path:
     return data_dir() / "embed_cache.sqlite"
 
 
+def pipeline_cache_path() -> Path:
+    """Resolve the SQLite-backed marker file for the pipeline build cache (#411 Phase 2).
+
+    The pipeline itself can't be persisted — it owns live SQLite handles,
+    HNSW indexes, and OAuth tokens. What we persist instead is a marker:
+    "config X was last built at time T". The next process consults this
+    marker to validate that any persisted query / prep cache entries are
+    still keyed against the same pipeline shape.
+
+    Lives under :func:`data_dir` next to :func:`embed_cache_path`, so a
+    ``docker compose restart`` (and the cold CLI starts that follow when
+    no MCP is up) inherits the marker the previous warm process wrote.
+
+    F4-clean — env reads stay inside :func:`data_dir`.
+    """
+    return data_dir() / "pipeline_cache.sqlite"
+
+
+def query_cache_path() -> Path:
+    """Resolve the SQLite-backed persistent query-result cache path (#411 Phase 2).
+
+    Sibling to :func:`embed_cache_path`. The query-result cache holds
+    full :class:`SearchResult` envelopes keyed on
+    ``(cfg_hash, query_hash)``; a cold CLI start that finds a non-expired
+    row for the same cfg + query skips the ~1-3 s search dispatch
+    entirely.
+
+    Lives under :func:`data_dir` so the file rides the kairix data
+    volume across restarts.
+
+    F4-clean — env reads stay inside :func:`data_dir`.
+    """
+    return data_dir() / "query_cache.sqlite"
+
+
+def prep_cache_path() -> Path:
+    """Resolve the SQLite-backed persistent prep-summary cache path (#411 Phase 2).
+
+    Sibling to :func:`embed_cache_path` and :func:`query_cache_path`.
+    The prep cache holds LLM-synthesised summaries keyed on
+    ``(cfg_hash, prep_key_hash)`` (where ``prep_key_hash`` folds
+    ``(query, tier, context)``). A cold CLI ``kairix prep`` that hits
+    a persisted row skips the 2-4 s LLM synthesis call.
+
+    Lives under :func:`data_dir` so the file rides the kairix data
+    volume across restarts.
+
+    F4-clean — env reads stay inside :func:`data_dir`.
+    """
+    return data_dir() / "prep_cache.sqlite"
+
+
 def summaries_db_path() -> Path:
     """Get the summaries database path.
 
