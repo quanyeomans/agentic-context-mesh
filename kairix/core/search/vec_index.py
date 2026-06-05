@@ -216,7 +216,15 @@ class VectorIndex:
         if meta is not None:
             try:
                 self._key_to_hash_seq = {int(k): v for k, v in meta["keys"].items()}
-                self._next_key = meta.get("next_key", max(self._key_to_hash_seq.keys(), default=-1) + 1)
+                # #413 defence-in-depth: trust meta when consistent, but fall
+                # back to (max actual key) + 1 if meta lags. A stale meta
+                # caused 'Duplicate keys not allowed' in add_vectors after
+                # #375 kept the handle open across batches — pre-#375 each
+                # batch reopened the handle, masking drift by recomputing on
+                # every restore.
+                meta_next_key = int(meta.get("next_key", 0))
+                inferred_next_key = max(self._key_to_hash_seq.keys(), default=-1) + 1
+                self._next_key = max(meta_next_key, inferred_next_key)
             except (KeyError, ValueError) as e:
                 logger.warning("vec_index: meta missing 'keys' — index loaded without key mapping (%s)", e)
         return len(self._index)
