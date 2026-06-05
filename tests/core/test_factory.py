@@ -656,3 +656,46 @@ def test_build_search_pipeline_propagates_provider_not_registered() -> None:
 
     assert excinfo.value.name == "nonexistent"
     assert "fake" in excinfo.value.available
+
+
+@pytest.mark.unit
+def test_build_search_pipeline_auto_hydrates_secrets_via_bootstrap() -> None:
+    """Every Python-API entry into ``build_search_pipeline`` auto-bootstraps
+    the secrets bundle so a fresh process resolves canonical credentials
+    without the caller having to import ``bootstrap_secrets`` first.
+
+    Pre-fix the probe runner (``kairix.quality.probe.runner.run_probe_search``)
+    failed with ``SecretNotFoundError: kairix-provider-llm-api-key`` because
+    the bundle hydration only fired from CLI/MCP entry points. CLI users
+    saw search work; Python-API users saw probe errors. The fix lives in
+    the factory so every consumer (probe, eval harnesses, notebooks,
+    ad-hoc scripts) inherits the contract.
+
+    Sabotage-proof: comment out the ``bootstrap_secrets()`` call in
+    ``build_search_pipeline``; this test fails because the import-counter
+    fake doesn't observe the call.
+    """
+    from kairix.core.factory import build_search_pipeline
+    from kairix.secrets import bootstrap as bootstrap_mod
+
+    bootstrap_calls: list[int] = []
+    real_bootstrap = bootstrap_mod.bootstrap_secrets
+
+    def _counting_bootstrap(*args: Any, **kwargs: Any) -> int:
+        bootstrap_calls.append(1)
+        return real_bootstrap(*args, **kwargs)
+
+    bootstrap_mod.bootstrap_secrets = _counting_bootstrap
+    try:
+        # The factory call may fail later in the dependency chain (no real
+        # creds in unit test env) — that's fine. We only assert the
+        # bootstrap_secrets() call fired BEFORE any credential resolution.
+        try:
+            build_search_pipeline(config=RetrievalConfig(provider="fake"), registry=_provider_registry())
+        except Exception:
+            pass
+        assert len(bootstrap_calls) >= 1, (
+            "build_search_pipeline must auto-bootstrap secrets before credential resolution"
+        )
+    finally:
+        bootstrap_mod.bootstrap_secrets = real_bootstrap

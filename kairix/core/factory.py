@@ -626,6 +626,23 @@ def build_search_pipeline(
     Returns:
         A fully wired SearchPipeline ready for search() calls.
     """
+    # Auto-hydrate secrets from the bundle file before any provider/credential
+    # resolution. Idempotent (bootstrap_secrets has its own once-guard). CLI
+    # and MCP entry points already call this at startup; Python-API consumers
+    # (eval harnesses, probe runners, notebooks, ad-hoc scripts) used to fail
+    # with SecretNotFoundError because secrets were only on disk in
+    # /run/secrets/kairix.env not in env. Centralising here means every
+    # consumer of build_search_pipeline gets the same hydration contract.
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    try:
+        bootstrap_secrets()
+    except Exception as exc:
+        # Best-effort: a missing/unreadable bundle isn't fatal — the loader
+        # falls back to env-only resolution. Production deploys always have
+        # the bundle; local dev may not.
+        logger.debug("factory: bootstrap_secrets soft-failed (continuing): %s", exc)
+
     cfg = _resolve_retrieval_config(config)
 
     # When ``flag_reader`` is supplied, callers are wiring an explicit
