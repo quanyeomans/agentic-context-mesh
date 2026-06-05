@@ -73,6 +73,7 @@ pytest_plugins = [
     "tests.bdd.steps.entity_audit_steps",
     "tests.bdd.steps.curator_cli_steps",
     "tests.bdd.steps.mcp_cli_steps",
+    "tests.bdd.steps.cli_route_via_mcp_steps",
     "tests.bdd.steps.embed_cli_steps",
     "tests.bdd.steps.timeline_cli_steps",
     "tests.bdd.steps.soak_steps",

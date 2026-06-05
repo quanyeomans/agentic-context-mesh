@@ -4657,3 +4657,77 @@ def seed_bulk_scope_entries(
             inserted += 1
     db.commit()
     return inserted
+
+
+# ---------------------------------------------------------------------------
+# FakeMcpDispatchClient — for tests/cli/test_route_via_mcp.py (#411)
+# ---------------------------------------------------------------------------
+
+
+class FakeMcpDispatchClient:
+    """Fake :class:`kairix.agents.mcp.client_dispatcher.McpDispatchClient`.
+
+    Tests configure ``responsive`` and ``envelope`` upfront; the fake
+    records every call so assertions can inspect the dispatched tool
+    name and kwargs. Replaces ad-hoc ``@patch`` of ``requests.head`` —
+    F1-clean by construction. Mirrors the Protocol surface defined in
+    ``kairix/agents/mcp/client_dispatcher.py``: ``is_responsive`` +
+    ``call_tool``.
+
+    Example:
+        >>> client = FakeMcpDispatchClient(
+        ...     responsive=True,
+        ...     envelope={"results": [{"id": "doc-1"}]},
+        ... )
+        >>> deps = DispatcherDeps(client=client)
+        >>> exit_code = try_dispatch_via_mcp("search", ["foo", "--json"], deps=deps)
+        >>> assert exit_code == 0
+        >>> assert client.calls == [("search", {"query": "foo"})]
+    """
+
+    def __init__(
+        self,
+        *,
+        responsive: bool = True,
+        envelope: dict[str, Any] | None = None,
+        is_error: bool = False,
+        responsiveness_delay_s: float = 0.0,
+        raise_on_call: Exception | None = None,
+    ) -> None:
+        self._responsive = responsive
+        self._envelope = envelope if envelope is not None else {"status": "fake-ok"}
+        self._is_error = is_error
+        self._responsiveness_delay_s = responsiveness_delay_s
+        self._raise_on_call = raise_on_call
+        # Recorders — tests assert on these.
+        self.responsive_calls: list[tuple[str, float]] = []
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def is_responsive(self, endpoint: str, timeout_s: float) -> bool:
+        self.responsive_calls.append((endpoint, timeout_s))
+        if self._responsiveness_delay_s > 0:
+            import time as _time
+
+            _time.sleep(self._responsiveness_delay_s)
+        return self._responsive
+
+    def call_tool(
+        self,
+        endpoint: str,
+        tool_name: str,
+        kwargs: dict[str, Any],
+    ) -> Any:
+        """Return a configured :class:`McpToolResult`-shaped object.
+
+        Returns the dataclass from ``client_dispatcher`` (lazy import to
+        avoid coupling fakes.py to the dispatcher module at import
+        time — keeps the fake usable from tests that don't import the
+        dispatcher).
+        """
+        _ = endpoint
+        self.calls.append((tool_name, dict(kwargs)))
+        if self._raise_on_call is not None:
+            raise self._raise_on_call
+        from kairix.agents.mcp.client_dispatcher import McpToolResult
+
+        return McpToolResult(payload=dict(self._envelope), is_error=self._is_error)

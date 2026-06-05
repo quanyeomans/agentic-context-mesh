@@ -838,6 +838,59 @@ def mcp_port_raw() -> str | None:
     return raw if raw else None
 
 
+# Default MCP endpoint for the CLI-routes-via-MCP dispatcher (#411). The
+# CLI does a sub-100ms HEAD probe against ``<endpoint>/healthz/ready``
+# and, when responsive, routes subcommands through the warm MCP process
+# instead of paying the cold-start cost in-process. F4 keeps the env
+# read inside ``paths.py`` rather than scattering it through cli.py.
+_DEFAULT_MCP_ENDPOINT = "http://localhost:8080/mcp"
+_FALSY_FLAG_VALUES = frozenset({"0", "false", "off", "no"})
+
+
+def mcp_endpoint(
+    default: str = _DEFAULT_MCP_ENDPOINT,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the MCP server endpoint from ``KAIRIX_MCP_ENDPOINT``, or ``default``.
+
+    Used by the CLI dispatcher (#411) to decide whether a warm MCP server
+    is reachable. The endpoint is the streamable-HTTP base URL (e.g.
+    ``http://localhost:8080/mcp``) — the dispatcher derives the readiness
+    probe URL (``<endpoint-host>/healthz/ready``) from this.
+
+    ``environ`` is the test seam: production callers leave it None and
+    the function reads ``os.environ`` once. Tests pass an explicit dict
+    so F2 (no ``monkeypatch.setenv("KAIRIX_*")``) stays clean — the env
+    var read still lives inside paths.py (F4) but the test never has to
+    mutate process env to exercise the parsing.
+    """
+    env = environ if environ is not None else os.environ
+    raw = env.get("KAIRIX_MCP_ENDPOINT")
+    if raw:
+        return raw
+    return default
+
+
+def mcp_routing_enabled(*, environ: Mapping[str, str] | None = None) -> bool:
+    """Whether CLI-routes-via-MCP dispatch is enabled (#411).
+
+    Defaults to True: when a warm MCP server is detected on
+    :func:`mcp_endpoint`, subcommands route through it. Operators that
+    want to disable the optimisation entirely (force every CLI call to
+    run in-process) set ``KAIRIX_MCP_ROUTING=0``. Any other value (or
+    unset) leaves the optimisation on.
+
+    ``environ`` mirrors :func:`mcp_endpoint`'s test seam — production
+    leaves it None; tests pass an explicit dict to stay F2-clean.
+    """
+    env = environ if environ is not None else os.environ
+    raw = env.get("KAIRIX_MCP_ROUTING")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _FALSY_FLAG_VALUES
+
+
 def reflib_root_override() -> str | None:
     """Operator override for the reference-library root via
     ``KAIRIX_REFLIB_ROOT``. ``None`` when unset so callers can demand

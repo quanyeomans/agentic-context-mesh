@@ -41,6 +41,39 @@ See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
 
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+
+def _default_mcp_dispatch(subcommand: str, argv: list[str]) -> int | None:
+    """Production default for ``CliDeps.mcp_dispatch``.
+
+    Lazy-imports the dispatcher so the CLI doesn't pay the cost when
+    routing isn't reachable. Returns ``None`` (in-process fall-through)
+    when the optional ``mcp`` extra isn't installed — bit-identical to
+    today's behaviour.
+    """
+    from kairix.agents.mcp.client_dispatcher import try_dispatch_via_mcp
+
+    return try_dispatch_via_mcp(subcommand, argv)
+
+
+@dataclass(frozen=True)
+class CliDeps:
+    """Injection seam for :func:`main`.
+
+    Production callers leave it ``None`` and the dispatcher constructs
+    the default Deps which wires the real :func:`try_dispatch_via_mcp`.
+    Tests pass a fake callable so they can drive the wiring without
+    monkey-patching the dispatcher module.
+
+    F6-clean: lives on a Deps dataclass (canonical shape per
+    ``WorkerDeps``), not as a ``*_fn=None`` test-only kwarg on
+    :func:`main`.
+    """
+
+    mcp_dispatch: Callable[[str, list[str]], int | None] = field(default=_default_mcp_dispatch)
+
 
 # Dispatch table: command name → (module_path, function_name, accepts_args)
 # Lazy imports keep startup fast — only the selected command is imported.
@@ -83,15 +116,25 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
 }
 
 
-def main(*, commands: dict[str, tuple[str, str, bool]] | None = None) -> None:
+def main(
+    *,
+    commands: dict[str, tuple[str, str, bool]] | None = None,
+    deps: CliDeps | None = None,
+) -> None:
     """Top-level ``kairix`` CLI dispatcher.
 
     The ``commands`` kwarg is the public DI seam: production callers leave
     it ``None`` and the dispatcher reads :data:`COMMANDS` from this module;
     tests pass a synthetic dispatch table to drive the routing logic
     without monkey-patching the module attribute.
+
+    The ``deps`` kwarg is the #411 DI seam — leave it ``None`` and the
+    real MCP dispatcher is used; tests pass a ``CliDeps`` carrying a
+    fake ``mcp_dispatch`` callable to drive the wiring without patching
+    the dispatcher module.
     """
     table = commands if commands is not None else COMMANDS
+    effective_deps = deps if deps is not None else CliDeps()
 
     # Hydrate the secrets bundle into os.environ ONCE per CLI invocation,
     # before any subcommand runs. After this call, every SecretsLoader
@@ -131,6 +174,17 @@ def main(*, commands: dict[str, tuple[str, str, bool]] | None = None) -> None:
     if entry is None:
         print(f"Unknown command: {cmd}\n{__doc__}", file=sys.stderr)
         sys.exit(1)
+
+    # #411 — opt-in shortcut: when a warm MCP server is reachable, route
+    # the subcommand through it instead of paying the cold-start cost
+    # in-process. The dispatcher returns None (and we fall through to
+    # in-process) when: routing is disabled, the subcommand has no MCP
+    # equivalent, the user didn't pass --json, args don't translate, or
+    # the server isn't responsive within the 100ms detection budget.
+    # Bit-identical fallback to today's behaviour in every other case.
+    mcp_exit_code = effective_deps.mcp_dispatch(cmd, sys.argv[2:])
+    if mcp_exit_code is not None:
+        sys.exit(mcp_exit_code)
 
     module_path, func_name, accepts_args = entry
     import importlib
