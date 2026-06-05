@@ -59,9 +59,9 @@ class InProcessSearchClient:
 
     Important caveat: this is the **Python-pipeline regression** measurement,
     not the agent-experienced measurement. Agents over MCP talk to a
-    long-running already-warm server; the CLI subprocess shape used by
-    ``kairix probe search`` doesn't reflect that. For agent-experienced
-    numbers use the PVT layer (docs/architecture/performance-testing-approach.md).
+    long-running already-warm server; the in-process subprocess shape used
+    by callers of ``run_probe_search`` doesn't reflect that. For agent-
+    experienced numbers use the PVT layer (docs/architecture/performance-testing-approach.md).
     """
 
     def search(self, query: SampledQuery) -> Any:  # pragma: no cover — production path

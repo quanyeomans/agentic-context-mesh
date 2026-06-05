@@ -1,9 +1,9 @@
-"""Unit + outcome tests for ``kairix probe mcp-calls`` (#398 W-D).
+"""Unit + outcome tests for ``kairix mcp-calls`` (#398 W-D).
 
 Drives :func:`kairix.quality.probe.mcp_calls_cli.main` against a
 tmp-path SQLite seeded with rows that mirror the production INSERT
 shape. Plus an F30 subprocess outcome test that boots the whole
-``python -m kairix.cli probe mcp-calls`` binary.
+``python -m kairix.cli mcp-calls`` binary.
 
 F1-clean (no @patch), F2-clean (no env var), F5-clean (no private
 imports). Each test documents its sabotage proof in the docstring.
@@ -296,7 +296,7 @@ def test_cli_probe_mcp_calls_subprocess(tmp_path: Path) -> None:
     )
 
     result = subprocess.run(
-        [sys.executable, "-m", "kairix.cli", "probe", "mcp-calls"],
+        [sys.executable, "-m", "kairix.cli", "mcp-calls"],
         env={"KAIRIX_DB_PATH": str(main_db_path), "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,

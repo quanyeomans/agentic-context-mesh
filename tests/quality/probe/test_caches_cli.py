@@ -1,8 +1,8 @@
-"""Unit + outcome tests for ``kairix probe caches`` (#396 W-B).
+"""Unit + outcome tests for ``kairix caches`` (#396 W-B).
 
 Drives :func:`kairix.quality.probe.caches_cli.main` and asserts on the
 stdout / JSON shape, then runs an F30 subprocess outcome test that
-boots the whole ``python -m kairix.cli probe caches`` binary.
+boots the whole ``python -m kairix.cli caches`` binary.
 
 F1-clean (no @patch), F2-clean (no env var), F5-clean (no private
 imports). Each test documents its sabotage proof in the docstring.
@@ -40,7 +40,7 @@ def test_text_mode_lists_every_cache() -> None:
     """
     rc, out = _run_capture([])
     assert rc == 0
-    assert "kairix probe caches" in out
+    assert "kairix caches" in out
     for name in (
         "query_result_cache",
         "prep_summary_cache",
@@ -97,20 +97,17 @@ def test_since_flag_accepted_but_ignored() -> None:
 def test_subprocess_outcome_path() -> None:
     """F30 subprocess outcome test — boots the real CLI binary end-to-end.
 
-    Sabotage proof: removing the ``caches`` dispatch branch in
-    ``kairix.quality.probe.cli._run_caches`` makes this test fail —
-    the subcommand isn't recognised and the parser surfaces an error.
+    Sabotage proof: removing the ``caches`` entry from
+    ``kairix.cli.COMMANDS`` makes this test fail — the subcommand isn't
+    recognised and the parser surfaces "Unknown command".
     """
     result = subprocess.run(
-        [sys.executable, "-m", "kairix.cli", "probe", "caches", "--json"],
+        [sys.executable, "-m", "kairix.cli", "caches", "--json"],
         capture_output=True,
         text=True,
         timeout=30,
         check=False,
     )
-    # The CLI emits a deprecation banner to stderr but still exits 0.
-    assert result.returncode == 0, (
-        f"probe caches subprocess exited non-zero: rc={result.returncode} stderr={result.stderr!r}"
-    )
+    assert result.returncode == 0, f"caches subprocess exited non-zero: rc={result.returncode} stderr={result.stderr!r}"
     envelope = json.loads(result.stdout)
     assert "caches" in envelope

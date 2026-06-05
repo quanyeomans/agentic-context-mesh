@@ -11,7 +11,7 @@ Four classes of structural debt across the four code-reviewer-confirmed surfaces
 2. **Security findings.** SonarCloud BLOCKER S2083 path-traversal with NOSONAR misplaced. Prompt-injection vectors where caller-supplied query / document content is interpolated into LLM prompts without delimited boundaries. f-string injection of BM25 weights into raw SQL with no `nan` / `inf` guard.
 
 3. **Monkeypatch-shaped APIs at scale.** `*_fn=None` kwargs as the only substitution mechanism, no protocols, no fakes. Same anti-pattern the paths-DI initiative is removing from path resolution, replicated across the eval module:
-   - `hybrid_sweep._retrieve` exists as a module-level indirection so tests can `@patch` it
+   - `hybrid_sweep._retrieve` exists as a module-level indirection so tests can `@patch` it (removed in v2026.6; new code uses the `Retriever` protocol injected via `evaluate_single_config(retriever=...)`)
    - `judge._call_llm(chat_fn=…)` for test substitution
    - `gold_builder.pool_candidates(search_fns=…)` / `grade_candidates(judge_fn=…)` / `build_independent_gold(calibrate_fn=…, grade_fn=…)`
    - `generate.generate_queries(llm_fn=…)` / `process_sampled_docs(query_fn=…, retrieve_fn=…, judge_fn=…)`

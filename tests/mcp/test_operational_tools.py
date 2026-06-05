@@ -57,7 +57,15 @@ def test_worker_status_returns_available_or_error_envelope() -> None:
 
 # (tool, kwargs, expected_capability_field, expected_command_substring)
 _STUB_CASES = [
-    (tool_soak_run, {"suite": "reflib", "repeat": 3}, "soak run", "kairix soak run --suite reflib --repeat 3"),
+    # The legacy ``kairix soak run`` and ``kairix probe burst`` CLIs were
+    # retired in v2026.6; both envelopes now name the Python-API entry point
+    # as a one-liner the operator can paste verbatim.
+    (
+        tool_soak_run,
+        {"suite": "reflib", "repeat": 3},
+        "soak run",
+        "python -c 'from kairix.quality.soak import run_soak; print(run_soak(suite=\"reflib\", repeat=3))'",
+    ),
     (tool_benchmark_run, {"suite": "reflib"}, "benchmark run", "kairix benchmark run --suite reflib"),
     (tool_embed, {"limit": 0}, "embed", "kairix embed"),
     (tool_embed, {"limit": 100}, "embed", "kairix embed --limit 100"),
@@ -67,7 +75,10 @@ _STUB_CASES = [
         tool_probe_burst,
         {"suite": "reflib", "total_queries": 200, "peak_concurrency": 20},
         "probe burst",
-        "kairix probe burst --suite reflib --total-queries 200 --peak-concurrency 20",
+        (
+            "python -c 'from kairix.quality.probe import run_probe_burst; "
+            'print(run_probe_burst(suite="reflib", total_queries=200, peak_concurrency=20))\''
+        ),
     ),
 ]
 

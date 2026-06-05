@@ -56,8 +56,8 @@ class SearchResult:
     # Per-stage wall-clock latency (ms) — populated by SearchPipeline.search.
     # Keys: classify, resolve, dispatch (bm25+vec parallel), fuse, enrich,
     # boost, budget. Sums approximately to total latency_ms minus a few ms
-    # of bookkeeping. Used by ``kairix probe search --json`` to surface
-    # which pipeline stage dominates the wall-clock cost (#282).
+    # of bookkeeping. Surfaced via ``run_probe_search(... json_out=True)`` —
+    # the legacy ``kairix probe search`` CLI was retired in v2026.6 (#282).
     stage_latency_ms: dict[str, float] = field(default_factory=dict)
     collections: list[str] = field(default_factory=list)
     tiers_used: list[str] = field(default_factory=list)

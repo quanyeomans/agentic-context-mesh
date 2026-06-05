@@ -119,8 +119,11 @@ def test_queries_over_cap_escalates(captured_probe_calls: tuple[list[dict[str, A
 
     assert envelope["error"] == ESCALATION_ERROR
     assert envelope["capability"] == "probe search (above cap)"
-    assert "kairix probe search" in envelope["operator_command"]
-    assert "--queries 21" in envelope["operator_command"]
+    # The legacy ``kairix probe search`` CLI was retired in v2026.6; the
+    # envelope now names the Python API entry point.
+    assert "kairix.quality.probe" in envelope["operator_command"]
+    assert "run_probe_search" in envelope["operator_command"]
+    assert "queries=21" in envelope["operator_command"]
     assert captured == []
 
 
@@ -130,7 +133,7 @@ def test_concurrency_over_cap_escalates(captured_probe_calls: tuple[list[dict[st
     envelope = tool_probe_search(queries=5, concurrency=4, probe_runner=runner)
 
     assert envelope["error"] == ESCALATION_ERROR
-    assert "--concurrency 4" in envelope["operator_command"]
+    assert "concurrency=4" in envelope["operator_command"]
     assert captured == []
 
 
@@ -143,10 +146,12 @@ def test_both_dimensions_over_cap_returns_single_envelope(
 
     assert envelope["error"] == ESCALATION_ERROR
     cmd = envelope["operator_command"]
-    assert "--queries 50" in cmd
-    assert "--concurrency 10" in cmd
-    assert "--suite reflib" in cmd
-    assert "--seed 99" in cmd
+    # The legacy ``kairix probe search`` CLI was retired in v2026.6; every arg
+    # is now embedded as a kwarg on the ``run_probe_search`` Python-API call.
+    assert "queries=50" in cmd
+    assert "concurrency=10" in cmd
+    assert 'suite="reflib"' in cmd
+    assert "seed=99" in cmd
     assert captured == []
 
 

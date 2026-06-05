@@ -1,4 +1,4 @@
-"""``kairix probe caches`` — operator surface over the W-B cache stats (#396).
+"""``kairix caches`` — operator surface over the W-B cache stats (#396).
 
 Surfaces per-cache observability for the TTL LRUs added by Workstream B
 of the MCP performance sprint:
@@ -12,7 +12,7 @@ of the MCP performance sprint:
 
 The CLI shape::
 
-    kairix probe caches [--json]
+    kairix caches [--json]
 
 Text mode (default) prints one row per cache with name, size, hits,
 misses, evictions, hit_rate %. JSON mode emits the same data as a
@@ -179,7 +179,7 @@ def _format_text(rows: list[_CacheRow]) -> str:
         return "probe caches: no caches reported.\n"
 
     longest = max(len(r.name) for r in rows)
-    lines = ["kairix probe caches"]
+    lines = ["kairix caches"]
     header = (
         f"  {'name'.ljust(longest)}  "
         f"{'size'.rjust(6)}  "
@@ -225,7 +225,7 @@ def _envelope_for_json(rows: list[_CacheRow]) -> dict[str, object]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="kairix probe caches",
+        prog="kairix caches",
         description=(
             "Inspect every TTL LRU added by issue #396 Workstream B. "
             "Run this after a load-test or dogfood session to see "
@@ -243,7 +243,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "operator affordance flag — accepted for parity with "
-            "``kairix probe mcp-calls`` but caches are point-in-time "
+            "``kairix mcp-calls`` but caches are point-in-time "
             "snapshots, so the value is ignored. Documented here so "
             "operators piping cache + mcp-calls reports through the "
             "same shell loop don't see an argparse error."
@@ -253,7 +253,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point invoked from ``kairix.quality.probe.cli.main()``.
+    """Entry point dispatched from ``kairix.cli.COMMANDS``.
 
     Args:
         argv: argv slice after the ``caches`` token; None means the

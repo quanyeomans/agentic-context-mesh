@@ -163,16 +163,16 @@ def test_cmd_run_mode_concurrent_emits_stub_affordance(bundled_suites: Path) -> 
     text = err.getvalue()
     assert "--mode concurrent" in text
     assert "fix:" in text and "next:" in text and "run:" in text
-    assert "kairix probe search" in text
+    assert "kairix.quality.probe.runner.run_probe_search" in text
 
 
 @pytest.mark.unit
 def test_cmd_run_mode_soak_emits_stub_affordance(bundled_suites: Path) -> None:
     """--mode soak emits the F21-formatted affordance and exits 1.
 
-    sabotage: change the alias selector to ``kairix probe search``
-    unconditionally — the assertion below trips because the affordance
-    points at the wrong subcommand.
+    sabotage: change the api-hint selector to point at the concurrent
+    helper unconditionally — the assertion below trips because the
+    affordance points at the wrong Python API.
     """
     runner = _CapturingRunner()
     args = _ns(str(bundled_suites / "unified.yaml"), mode="soak")
@@ -184,7 +184,7 @@ def test_cmd_run_mode_soak_emits_stub_affordance(bundled_suites: Path) -> None:
     assert rc == 1
     text = err.getvalue()
     assert "--mode soak" in text
-    assert "kairix soak run" in text
+    assert "kairix.quality.soak.run_soak" in text
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +462,8 @@ def test_main_run_accepts_new_flags(bundled_suites: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Deprecation warnings on legacy CLIs — kairix eval, probe, soak.
+# Deprecation warning on legacy `kairix eval` CLI.
+# (`kairix probe` + `kairix soak` were removed in v2026.6 — see CHANGELOG.)
 # ---------------------------------------------------------------------------
 
 
@@ -487,40 +488,3 @@ def test_kairix_eval_emits_deprecation_warning() -> None:
     assert "kairix benchmark run" in text
     assert "v2026.6.x" in text
     assert "fix:" in text and "next:" in text and "run:" in text
-
-
-@pytest.mark.unit
-def test_kairix_probe_emits_deprecation_warning(capsys: pytest.CaptureFixture[str]) -> None:
-    """``kairix probe`` writes a migration warning to stderr at main() entry.
-
-    sabotage: drop the ``sys.stderr.write(...)`` line in probe.cli.main —
-    the assertion below trips because stderr is empty.
-    """
-    from kairix.quality.probe.cli import main as probe_main
-
-    # Probe's argparse requires --suite — invoke with no args, expect SystemExit.
-    with pytest.raises(SystemExit):
-        probe_main([])
-
-    captured = capsys.readouterr()
-    assert "DEPRECATION:" in captured.err
-    assert "kairix benchmark run --mode concurrent" in captured.err
-
-
-@pytest.mark.unit
-def test_kairix_soak_emits_deprecation_warning(capsys: pytest.CaptureFixture[str]) -> None:
-    """``kairix soak`` writes a migration warning to stderr at main() entry.
-
-    sabotage: drop the ``sys.stderr.write(...)`` line in soak.cli.main —
-    the assertion below trips because stderr is empty.
-    """
-    from kairix.quality.soak.cli import main as soak_main
-
-    # Soak's argparse requires the 'run' positional + --suite; invoke with
-    # no args, expect SystemExit BEFORE the body runs.
-    with pytest.raises(SystemExit):
-        soak_main([])
-
-    captured = capsys.readouterr()
-    assert "DEPRECATION:" in captured.err
-    assert "kairix benchmark run --mode soak" in captured.err

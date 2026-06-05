@@ -909,9 +909,15 @@ def tool_soak_run(suite: str = "reflib", repeat: int = 3) -> dict[str, Any]:
     Agents that hit this tool receive the exact CLI command and
     runbook pointer so they can escalate to an operator.
     """
+    # The legacy ``kairix soak run`` CLI was retired in v2026.6; until the
+    # unified ``kairix benchmark run --mode soak`` dispatcher lands (P3.c),
+    # operators drive soak from the Python API. The envelope names the
+    # canonical entry point and the runbook for context.
     return _operator_only_envelope(
         capability="soak run",
-        operator_command=f"kairix soak run --suite {suite} --repeat {repeat}",
+        operator_command=(
+            f"python -c 'from kairix.quality.soak import run_soak; print(run_soak(suite=\"{suite}\", repeat={repeat}))'"
+        ),
         reason="Soak runs take minutes and stress the system under sustained load. Agents must escalate.",
         expected_runtime_seconds=60 * repeat,
         see_also=[_RETRIEVAL_RUNBOOK],
@@ -956,10 +962,16 @@ def tool_probe_search(
     runner instead of monkey-patching the production module attribute.
     """
     if queries > MCP_PROBE_QUERIES_CAP or concurrency > MCP_PROBE_CONCURRENCY_CAP:
+        # The legacy ``kairix probe search`` CLI was retired in v2026.6;
+        # operators drive the probe directly from the Python API until the
+        # unified ``kairix benchmark run --mode concurrent`` dispatcher
+        # lands (P3.b).
         return _operator_only_envelope(
             capability="probe search (above cap)",
             operator_command=(
-                f"kairix probe search --suite {suite} --queries {queries} --concurrency {concurrency} --seed {seed}"
+                f"python -c 'from kairix.quality.probe import run_probe_search; "
+                f'print(run_probe_search(suite="{suite}", queries={queries}, '
+                f"concurrency={concurrency}, seed={seed}))'"
             ),
             reason=(
                 f"Probe above the agent-safe cap (queries<={MCP_PROBE_QUERIES_CAP}, "
@@ -990,10 +1002,14 @@ def tool_probe_burst(
     post-warmup throughput drop). Agents calling this tool receive the
     OperatorOnlyCapability envelope with the exact CLI command for the operator.
     """
+    # The legacy ``kairix probe burst`` CLI was retired in v2026.6; operators
+    # drive the burst probe directly from the Python API.
     return _operator_only_envelope(
         capability="probe burst",
         operator_command=(
-            f"kairix probe burst --suite {suite} --total-queries {total_queries} --peak-concurrency {peak_concurrency}"
+            f"python -c 'from kairix.quality.probe import run_probe_burst; "
+            f'print(run_probe_burst(suite="{suite}", total_queries={total_queries}, '
+            f"peak_concurrency={peak_concurrency}))'"
         ),
         reason=(
             "Probe burst injects queries as fast as possible against the "
@@ -1302,11 +1318,14 @@ def tool_capabilities() -> dict[str, Any]:
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
             _cap(name="warm", mcp_tool="warm", cli="kairix warm", category=CAP_CATEGORY_DIAGNOSTIC),
-            # Probe search — capped MCP variant
+            # Probe search — capped MCP variant. The legacy ``kairix probe
+            # search`` CLI was retired in v2026.6; the diagnostic registry
+            # entry now names the Python-API entry point until the unified
+            # ``kairix benchmark run --mode concurrent`` dispatcher lands.
             _cap(
                 name="probe_search",
                 mcp_tool="probe_search",
-                cli="kairix probe search",
+                cli="python -c 'from kairix.quality.probe import run_probe_search; ...'",
                 category=CAP_CATEGORY_DIAGNOSTIC,
                 mcp_caps={
                     "queries_max": MCP_PROBE_QUERIES_CAP,
@@ -1317,7 +1336,7 @@ def tool_capabilities() -> dict[str, Any]:
             _cap(
                 name="soak_run",
                 mcp_tool=None,
-                cli="kairix soak run",
+                cli="python -c 'from kairix.quality.soak import run_soak; ...'",
                 category=CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY,
                 escalate_via="soak_run",
             ),
@@ -1331,7 +1350,7 @@ def tool_capabilities() -> dict[str, Any]:
             _cap(
                 name="probe_burst",
                 mcp_tool=None,
-                cli="kairix probe burst",
+                cli="python -c 'from kairix.quality.probe import run_probe_burst; ...'",
                 category=CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY,
                 escalate_via="probe_burst",
             ),
@@ -1751,7 +1770,8 @@ def _register_operator_and_ingest_tools(server: Any) -> None:
     @server.tool(
         description=(
             "Soak test escalation — soak runs are multi-minute load tests. Returns the "
-            "OperatorOnlyCapability envelope with the exact `kairix soak run` command."
+            "OperatorOnlyCapability envelope pointing the operator at the "
+            "`kairix.quality.soak.run_soak` Python API (the legacy `kairix soak run` CLI was retired in v2026.6)."
         )
     )
     @async_tool_handler
@@ -1762,7 +1782,9 @@ def _register_operator_and_ingest_tools(server: Any) -> None:
     @server.tool(
         description=(
             "Burst-probe escalation — load-generating throughput-drop probe. Returns the "
-            "OperatorOnlyCapability envelope with the exact `kairix probe burst` command."
+            "OperatorOnlyCapability envelope pointing the operator at the "
+            "`kairix.quality.probe.run_probe_burst` Python API "
+            "(the legacy `kairix probe burst` CLI was retired in v2026.6)."
         )
     )
     @async_tool_handler

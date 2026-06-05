@@ -2,8 +2,11 @@
 CLI entry point for `kairix benchmark` — the canonical, unified quality CLI.
 
 Per the unified benchmark architecture, ``kairix benchmark run`` is the
-canonical entry point that supersedes ``kairix eval``, ``kairix probe``,
-and ``kairix soak`` (kept as deprecation-warned aliases through v2026.6.x).
+canonical entry point that supersedes ``kairix eval``. The deprecated
+``kairix probe`` and ``kairix soak`` CLIs were retired in v2026.6 — the
+underlying Python APIs (``kairix.quality.probe.run_probe_search``,
+``kairix.quality.soak.run_soak``) remain available pending the
+``--mode concurrent`` / ``--mode soak`` dispatcher wiring (P3.b / P3.c).
 
 Usage:
   kairix benchmark run     --suite SUITE
@@ -172,8 +175,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "'single-shot' additionally surfaces per-query QueryRunResult rows in "
             "the diagnostics envelope via the unified mode dispatcher. "
             "'concurrent' and 'soak' are reserved for P3.b / P3.c slices — invoking "
-            "them today emits an affordance pointing at 'kairix probe search' / "
-            "'kairix soak run' until the unified dispatchers land."
+            "them today emits an affordance pointing at the underlying Python API "
+            "(kairix.quality.probe.run_probe_search / kairix.quality.soak.run_soak) "
+            "until the unified dispatchers land. The legacy `kairix probe` and "
+            "`kairix soak` CLIs were retired in v2026.6."
         ),
     )
 
@@ -349,18 +354,23 @@ def _emit_baseline_compare(result: Any, baseline_path: str) -> None:
 def _emit_mode_stub(mode: str) -> int:
     """Emit the affordance + exit code for not-yet-implemented modes.
 
-    Concurrent + soak modes are reserved for P3.b / P3.c. Until the
-    unified dispatchers wire those paths, point the operator at the legacy
-    surface so they can still answer the question. Affordance follows the
-    F21 template (``fix:`` / ``next:`` / ``run:`` markers).
+    Concurrent + soak modes are reserved for P3.b / P3.c. The legacy
+    ``kairix probe`` / ``kairix soak`` CLIs have been retired; until the
+    unified dispatcher wires these paths, point the operator at the
+    Python API so they can still answer the question. Affordance follows
+    the F21 template (``fix:`` / ``next:`` / ``run:`` markers).
     """
-    alias = "kairix probe search" if mode == _MODE_CONCURRENT else "kairix soak run"
+    if mode == _MODE_CONCURRENT:
+        api_hint = "kairix.quality.probe.runner.run_probe_search"
+    else:
+        api_hint = "kairix.quality.soak.run_soak"
+    module_path, _, fn_name = api_hint.rpartition(".")
     print(
         f"❌ --mode {mode} is not yet wired into the unified dispatcher.\n"
-        f"   fix: use the legacy CLI for now: {alias}\n"
+        f"   fix: drive the Python API directly: {api_hint}\n"
         f"   next: track the P3.b (concurrent) / P3.c (soak) slices in the "
         f"unified benchmark roadmap.\n"
-        f"   run: {alias} --help",
+        f"   run: python -c 'from {module_path} import {fn_name}; help({fn_name})'",
         file=sys.stderr,
     )
     return 1

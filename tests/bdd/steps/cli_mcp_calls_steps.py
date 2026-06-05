@@ -1,4 +1,4 @@
-"""Step definitions for probe_mcp_calls.feature (#398 Workstream D).
+"""Step definitions for cli_mcp_calls.feature (#398 Workstream D).
 
 Drives :func:`kairix.quality.probe.mcp_calls_cli.main` against a
 tmp-path SQLite seeded with rows that mimic what
@@ -46,7 +46,7 @@ from kairix.core.db.schema import create_schema
 from kairix.quality.probe.mcp_calls_cli import McpCallsDeps
 from kairix.quality.probe.mcp_calls_cli import main as mcp_calls_main
 
-scenarios("../features/probe_mcp_calls.feature")
+scenarios("../features/cli_mcp_calls.feature")
 
 
 def _make_db(tmp_path: Path) -> Path:
@@ -128,17 +128,17 @@ def _run(ctx: dict[str, Any], argv: list[str]) -> None:
     ctx["rc"] = rc
 
 
-@when("the operator runs probe mcp-calls")
+@when("the operator runs the mcp-calls command")
 def _when_default(ctx: dict[str, Any]) -> None:
     _run(ctx, [])
 
 
-@when("the operator runs probe mcp-calls with the json flag")
+@when("the operator runs the mcp-calls command with the json flag")
 def _when_json(ctx: dict[str, Any]) -> None:
     _run(ctx, ["--json"])
 
 
-@when(parsers.parse("the operator runs probe mcp-calls with --since {value}"))
+@when(parsers.parse("the operator runs the mcp-calls command with --since {value}"))
 def _when_since(ctx: dict[str, Any], value: str) -> None:
     _run(ctx, ["--since", value])
 

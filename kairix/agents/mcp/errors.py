@@ -29,7 +29,7 @@ This module exposes two callables:
 ``async_tool_handler`` also records one row per call into the
 ``mcp_call_log`` SQLite table (issue #398 Workstream D). The write is
 fire-and-forget — DB failures NEVER break the tool call. Operators
-query the table via ``kairix probe mcp-calls``.
+query the table via ``kairix mcp-calls``.
 
 Tested through public surface only: register a handler that raises,
 call it, observe the dict.

@@ -12,8 +12,8 @@ Module API:
         for cat, lat in result.per_category.items():
             print(f"{cat}: p95={lat.p95_ms}ms")
 
-Bindings (CLI + MCP land in subsequent chunks):
-    CLI:  kairix probe search --suite reflib --queries 100 --concurrency 5
+Bindings:
+    CLI:  kairix benchmark run --suite reflib --mode concurrent --concurrency 5
     MCP:  tool_probe_search (hard-capped: queries<=20, concurrency<=3)
 """
 

@@ -6,7 +6,7 @@ Implements the Generative Pseudo Labeling pipeline (Wang et al. 2022):
   1. sample_documents  — draw representative docs from the kairix SQLite index
   2. generate_queries  — prompt gpt-4o-mini to write queries the doc answers
   3. retrieve          — run hybrid_search for each generated query
-  4. judge             — call judge.judge_batch() to grade retrieved docs
+  4. judge             — call LLMJudge.grade() to grade retrieved docs
   5. build_case        — emit a BenchmarkCase with gold_titles (0/1/2 graded)
   6. enrich_suite      — convert an existing single-gold-path suite to graded
 
@@ -48,9 +48,8 @@ from kairix.quality.eval.judge import (
     JUDGE_DEPLOYMENT,
     JudgeCalibrationError,
     JudgeResult,
-    calibrate,
+    LLMJudge,
     fetch_llm_credentials,
-    judge_batch,
 )
 
 if TYPE_CHECKING:
@@ -559,7 +558,7 @@ def build_case(
     Args:
         query:        The search query.
         intent:       The intent category.
-        judge_result: Output of judge_batch().
+        judge_result: Output of LLMJudge.grade().
         paths:        Retrieved paths (parallel to judge candidates).
         snippets:     Retrieved snippets — accepted for caller symmetry
                       with the upstream judge call; this builder uses
@@ -664,9 +663,10 @@ def process_sampled_docs(
     """Production-default shim — see ``SuiteGenerator.process_sampled_docs``.
 
     Constructs a SuiteGenerator with no injected protocols (so each step uses
-    the production free functions: ``generate_queries``, ``_retrieve``,
-    ``judge_batch``) and delegates. Test code constructs SuiteGenerator
-    explicitly with FakeXxx implementations rather than calling here.
+    the production free functions: ``generate_queries``, ``_retrieve`` —
+    and ``LLMJudge`` for judging, built via ``ProviderEvalChatBackend``)
+    and delegates. Test code constructs SuiteGenerator explicitly with
+    FakeXxx implementations rather than calling here.
     """
     return SuiteGenerator().process_sampled_docs(
         docs,
@@ -782,9 +782,10 @@ class SuiteGenerator:
     Owns the pipeline body for ``process_sampled_docs`` / ``generate_suite`` /
     ``enrich_suite``. When a protocol implementation is injected via the
     constructor, it is called directly; when omitted (``None``), the method
-    falls back to the production free functions (``generate_queries``,
-    ``_retrieve``, ``judge_batch``) so a bare ``SuiteGenerator()`` runs
-    against real Azure / SQLite / hybrid-search.
+    falls back to the production free functions (``generate_queries`` and
+    ``_retrieve``) and an ``LLMJudge`` constructed from the configured
+    provider, so a bare ``SuiteGenerator()`` runs against real Azure /
+    SQLite / hybrid-search.
 
     Tests inject ``FakeQueryGenerator`` / ``FakeLLMJudge`` / ``FakeRetriever``
     from ``tests/fakes.py``. There are no ``*_fn=`` substitution kwargs on
@@ -855,12 +856,19 @@ class SuiteGenerator:
         if self._llm_judge is not None:
             result: JudgeResult = self._llm_judge.grade(query, candidates)
             return result
-        return judge_batch(
-            query=query,
-            candidates=candidates,
+        # Production fallback: build an LLMJudge from the configured provider.
+        # Replaces the legacy ``judge_batch`` free-function shim retired in
+        # v2026.6 — same behaviour, explicit construction.
+        from kairix.quality.eval.chat_backend import ProviderEvalChatBackend
+
+        return LLMJudge(
+            chat_backend=ProviderEvalChatBackend.from_config(),
+            deployment=deployment,
+        ).grade(
+            query,
+            candidates,
             api_key=api_key,
             endpoint=endpoint,
-            deployment=deployment,
         )
 
     # --- public methods ----------------------------------------------------
@@ -1146,4 +1154,12 @@ class SuiteGenerator:
     def _calibrate(self, api_key: str, endpoint: str, deployment: str) -> bool:
         if self._llm_judge is not None:
             return bool(self._llm_judge.calibrate())
-        return calibrate(api_key, endpoint, deployment)
+        # Production fallback: build an LLMJudge from the configured provider.
+        # Replaces the legacy ``calibrate`` free-function shim retired in
+        # v2026.6 — same behaviour, explicit construction.
+        from kairix.quality.eval.chat_backend import ProviderEvalChatBackend
+
+        return LLMJudge(
+            chat_backend=ProviderEvalChatBackend.from_config(),
+            deployment=deployment,
+        ).calibrate(api_key=api_key, endpoint=endpoint)

@@ -1,4 +1,4 @@
-"""``kairix probe mcp-calls`` — operator surface over the mcp_call_log table.
+"""``kairix mcp-calls`` — operator surface over the mcp_call_log table.
 
 Issue #398 (Workstream D). Surfaces per-MCP-tool-call observability
 written by ``kairix.agents.mcp.errors.async_tool_handler`` into
@@ -7,7 +7,7 @@ latency tails, error rates, and per-tool call volume.
 
 The CLI shape:
 
-  kairix probe mcp-calls [--since DURATION] [--tool NAME] [--json]
+  kairix mcp-calls [--since DURATION] [--tool NAME] [--json]
 
 Text mode (default): one row per tool with count, p50/p95/p99
 latency (ms), success rate (%), and the top-3 error classes.
@@ -19,9 +19,8 @@ The implementation is read-only (SELECT only) — no risk of corrupting
 the call log. A missing ``mcp_call_log`` table surfaces an F21-shaped
 error (operator hasn't run the migration yet).
 
-Wire-up: this module's ``main()`` is dispatched from
-``kairix.quality.probe.cli.main()`` when the user runs
-``kairix probe mcp-calls``.
+Wire-up: this module's ``main()`` is dispatched directly from the top-level
+``kairix.cli.COMMANDS`` table when the user runs ``kairix mcp-calls``.
 """
 
 from __future__ import annotations
@@ -237,7 +236,7 @@ def _format_text(stats: list[ToolStats], *, since: str, tool_filter: str | None)
         return f"mcp-calls: no calls recorded{suffix}.\n"
 
     longest_tool = max(len(s.tool) for s in stats)
-    lines = ["kairix probe mcp-calls"]
+    lines = ["kairix mcp-calls"]
     header = (
         f"  {'tool'.ljust(longest_tool)}  "
         f"{'count'.rjust(6)}  "
@@ -281,7 +280,7 @@ def _envelope_for_json(stats: list[ToolStats]) -> dict[str, Any]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="kairix probe mcp-calls",
+        prog="kairix mcp-calls",
         description=(
             "Inspect the mcp_call_log per-tool observability table. "
             "Run this when a dogfood report flags a brief failure or "
@@ -318,13 +317,13 @@ def _print_error(reason: str) -> int:
         "fix: pass --since with a positive integer + s/m/h/d suffix (e.g. '1h', '30m').",
         file=sys.stderr,
     )
-    print("next: see `kairix probe mcp-calls --help` for the accepted shape.", file=sys.stderr)
-    print("run: kairix probe mcp-calls --help", file=sys.stderr)
+    print("next: see `kairix mcp-calls --help` for the accepted shape.", file=sys.stderr)
+    print("run: kairix mcp-calls --help", file=sys.stderr)
     return 2
 
 
 def main(argv: list[str] | None = None, *, deps: McpCallsDeps | None = None) -> int:
-    """Entry point invoked from ``kairix.quality.probe.cli.main()``.
+    """Entry point dispatched from ``kairix.cli.COMMANDS``.
 
     Args:
         argv: argv slice after the ``mcp-calls`` token; None means

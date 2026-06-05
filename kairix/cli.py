@@ -19,10 +19,10 @@ Subcommands:
   prep        Tiered L0/L1 context summary for a topic
   research    Iterative research over the knowledge store with LLM synthesis
   usage-guide Read the kairix agent usage guide (full text or topic-filtered)
-  benchmark   Run retrieval quality benchmark
-  probe       Concurrent-load latency probe (decide which Tier 1 tuning lever to pull)
+  benchmark   Run retrieval quality benchmark (concurrent latency + soak modes folded in here — formerly `kairix probe` / `kairix soak`)
   probe-config  Probe the configured provider for health + tuning recommendations
-  soak        Repeat a workload and assert it holds together (memory, log volume, fd, determinism)
+  mcp-calls   Inspect the mcp_call_log per-MCP-tool-call observability table
+  caches      Inspect the in-memory cache stats (prep summary cache, brief output cache)
   warm        Pre-load caches + pay factory-init costs (run at container start, before /healthz/ready=200)
   wikilinks   Inject [[wikilinks]] on first mention in agent-written document store files
   reference-library  Reference library: install entities, check status, run extraction
@@ -51,9 +51,9 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "curator": ("kairix.agents.curator.cli", "main", True),
     "search": ("kairix.core.search.cli", "main", True),
     "benchmark": ("kairix.quality.benchmark.cli", "main", True),
-    "probe": ("kairix.quality.probe.cli", "main", True),
     "probe-config": ("kairix.quality.probe.config_cli", "main", True),
-    "soak": ("kairix.quality.soak.cli", "main", True),
+    "mcp-calls": ("kairix.quality.probe.mcp_calls_cli", "main", True),
+    "caches": ("kairix.quality.probe.caches_cli", "main", True),
     "warm": ("kairix.platform.warm.cli", "main", True),
     "summarise": ("kairix.knowledge.summaries.cli", "main", True),
     "timeline": ("kairix.core.temporal.cli", "main", True),

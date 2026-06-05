@@ -95,6 +95,14 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         # writes credential material — categorically not safe to expose even
         # as an escalation stub.
         "connect",
+        # mcp-calls + caches are local-only diagnostic CLIs over the in-process
+        # mcp_call_log SQLite table and in-memory cache stats. Operators run
+        # them from a shell to inspect tooling health; agents have no use case
+        # (the data lives only on the box where the kairix CLI runs, and the
+        # MCP server itself is the thing being observed — exposing the
+        # observability table over MCP would be circular).
+        "mcp-calls",
+        "caches",
     }
 )
 

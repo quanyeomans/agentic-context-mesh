@@ -69,7 +69,7 @@ def _get_or_create_brief_output_cache() -> BriefOutputCache:
 def get_brief_output_cache() -> BriefOutputCache:
     """Public accessor for the process-shared brief output cache.
 
-    Used by the ``kairix probe caches`` CLI to surface hit / miss /
+    Used by the ``kairix caches`` CLI to surface hit / miss /
     eviction counts. Going through this helper keeps the module-global
     hidden so callers can't accidentally rebind ``_BRIEF_OUTPUT_CACHE``.
     """

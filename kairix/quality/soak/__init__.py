@@ -12,7 +12,7 @@ Module API:
             print(f.detail)
 
 Bindings:
-    CLI:  kairix soak run --suite reflib --repeat 3
+    CLI:  kairix benchmark run --suite reflib --mode soak --repeat 3
     MCP:  tool_soak_run (stub — returns OperatorOnlyCapability envelope)
 """
 

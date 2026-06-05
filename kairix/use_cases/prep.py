@@ -69,7 +69,7 @@ def _get_or_create_prep_summary_cache() -> PrepSummaryCache:
 def get_prep_summary_cache() -> PrepSummaryCache:
     """Public accessor for the process-shared prep summary cache.
 
-    Used by the ``kairix probe caches`` CLI to surface hit / miss /
+    Used by the ``kairix caches`` CLI to surface hit / miss /
     eviction counts. Going through this helper keeps the module-global
     hidden so callers can't accidentally rebind ``_PREP_SUMMARY_CACHE``.
     """

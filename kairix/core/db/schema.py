@@ -226,7 +226,7 @@ def create_schema(db: sqlite3.Connection, *, dims: int = EMBED_VECTOR_DIMS) -> N
         -- INSERT site: kairix/agents/mcp/errors.py (_record_mcp_call, fire-and-forget
         -- from async_tool_handler's finally block; failures swallowed so observability
         -- never breaks a tool call). Query site: kairix/quality/probe/mcp_calls_cli.py
-        -- (kairix probe mcp-calls). No UPDATE/DELETE in production — the table is
+        -- (kairix mcp-calls). No UPDATE/DELETE in production — the table is
         -- append-only; operators retention-prune via DELETE WHERE timestamp < ...
         -- (see docs/operations/runbooks/how-to-read-mcp-call-log.md).
         CREATE TABLE IF NOT EXISTS mcp_call_log (
@@ -512,7 +512,7 @@ CREATE INDEX IF NOT EXISTS idx_pending_queries_agent_pending
 -- Issue #398 (Workstream D) — per-MCP-tool-call observability log.
 -- INSERT site: kairix/agents/mcp/errors.py (_record_mcp_call from
 -- async_tool_handler's finally block, fire-and-forget). Query site:
--- kairix/quality/probe/mcp_calls_cli.py (kairix probe mcp-calls).
+-- kairix/quality/probe/mcp_calls_cli.py (kairix mcp-calls).
 -- Append-only; retention-prune via DELETE WHERE timestamp < ...
 -- (see docs/operations/runbooks/how-to-read-mcp-call-log.md).
 CREATE TABLE IF NOT EXISTS mcp_call_log (

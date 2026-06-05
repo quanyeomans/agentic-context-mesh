@@ -317,12 +317,12 @@ kairix/platform/setup/cli.py
 kairix/platform/warm/cli.py
 ```
 
-### Group F — Quality (4 CLIs)
+### Group F — Quality (4 CLIs; `probe/cli.py` + `soak/cli.py` retired in v2026.6, replaced by `kairix mcp-calls` + `kairix caches` top-level surfaces and the `kairix benchmark run --mode concurrent|soak` dispatcher)
 ```
 kairix/quality/benchmark/cli.py
-kairix/quality/probe/cli.py
 kairix/quality/probe/config_cli.py
-kairix/quality/soak/cli.py
+kairix/quality/probe/mcp_calls_cli.py
+kairix/quality/probe/caches_cli.py
 ```
 
 ### Group G — Top-level CLIs (1 CLI; `bootstrap_cli.py` paid down 2026-05-22, commit `2334a49d`)

@@ -1,27 +1,23 @@
 """Step definitions for soak.feature.
 
-Drives ``kairix.quality.soak.run_soak`` and ``kairix.quality.soak.cli.main``
-through injected workload fakes (no @patch on kairix internals; the soak
-CLI test uses ``mock.patch.object`` on the CLI module's binding site for
-``run_soak`` — same shape as ``tests/quality/probe/test_cli.py``).
+Drives ``kairix.quality.soak.run_soak`` through injected workload fakes
+(no @patch on kairix internals). The legacy ``kairix soak`` CLI was
+removed in v2026.6; the CLI-output affordance scenario was deleted with
+it.
 
 Each scenario builds a fresh workload closure with a controlled envelope
 or side-effect (memory allocation, drifting envelope) and asserts on the
-returned :class:`SoakResult` or the CLI's stdout/stderr output.
+returned :class:`SoakResult`.
 """
 
 from __future__ import annotations
 
-import io
 import time
-from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
-from unittest import mock
 
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.quality.soak import cli as soak_cli
 from kairix.quality.soak import run_soak
 from kairix.quality.soak.runner import SoakFailure, SoakIteration, SoakResult
 
@@ -35,7 +31,6 @@ _PHRASE_TIME_DRIFT = "time_drift"
 _PHRASE_SAME_ENVELOPE = "a workload that returns the same envelope on every call"
 _PHRASE_DIFFERENT_ENVELOPES = "a workload that returns different envelopes on each call"
 _PHRASE_SLOWS_DOWN = "a workload that runs progressively slower on each iteration"
-_PHRASE_FIRES_A_GATE = "a workload that fires a soak gate"
 
 
 @pytest.fixture
@@ -44,9 +39,6 @@ def _soak_state() -> dict[str, Any]:
     return {
         "workload_runner": None,
         "result": None,
-        "cli_stdout": "",
-        "cli_stderr": "",
-        "cli_exit_code": 0,
     }
 
 
@@ -76,7 +68,6 @@ def _given_drifting_workload(_soak_state: dict[str, Any]) -> None:
 
 
 @given(_PHRASE_SLOWS_DOWN)
-@given(_PHRASE_FIRES_A_GATE)
 def _given_slowing_workload(_soak_state: dict[str, Any]) -> None:
     """Workload that runs progressively slower → fires the time_drift gate.
 
@@ -102,7 +93,7 @@ def _given_slowing_workload(_soak_state: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# When — invoke run_soak / soak CLI
+# When — invoke run_soak
 # ---------------------------------------------------------------------------
 
 
@@ -112,34 +103,8 @@ def _when_run_soak(_soak_state: dict[str, Any], n: int) -> None:
     _soak_state["result"] = run_soak(suite="fake", repeat=n, workload_runner=runner)
 
 
-@when(parsers.parse("the operator invokes the soak CLI with repeat {n:d}"))
-def _when_invoke_soak_cli(_soak_state: dict[str, Any], n: int) -> None:
-    """Drive the CLI's ``main`` directly. ``run_soak`` is rebound on the
-    CLI module so the fake workload's effect is reflected in the CLI output.
-
-    ``mock.patch.object`` against the CLI module's binding site is the
-    documented seam — F1 forbids @patch on ``kairix.<...>`` *target strings*,
-    not patch.object on a local module reference (same pattern as
-    tests/quality/probe/test_cli.py).
-    """
-    fake_workload = _soak_state["workload_runner"]
-
-    def _fake_run_soak(*args: Any, **kwargs: Any) -> SoakResult:
-        # Forward every arg the CLI passed, just inject our workload runner.
-        kwargs["workload_runner"] = fake_workload
-        return run_soak(*args, **kwargs)
-
-    out, err = io.StringIO(), io.StringIO()
-    with mock.patch.object(soak_cli, "run_soak", side_effect=_fake_run_soak):
-        with redirect_stdout(out), redirect_stderr(err):
-            rc = soak_cli.main(["run", "--suite", "fake", "--repeat", str(n)])
-    _soak_state["cli_exit_code"] = rc
-    _soak_state["cli_stdout"] = out.getvalue()
-    _soak_state["cli_stderr"] = err.getvalue()
-
-
 # ---------------------------------------------------------------------------
-# Then — assertions on SoakResult / CLI output
+# Then — assertions on SoakResult
 # ---------------------------------------------------------------------------
 
 
@@ -195,15 +160,3 @@ def _then_failure_mentions_iter(_soak_state: dict[str, Any]) -> None:
     for f in drift_failures:
         assert isinstance(f, SoakFailure)
         assert f.iteration is not None and f.iteration >= 1, f"time_drift failure missing iteration index: {f}"
-
-
-@then(parsers.parse('the stderr or stdout contains "{marker}"'))
-def _then_output_contains(_soak_state: dict[str, Any], marker: str) -> None:
-    combined = _soak_state["cli_stdout"] + _soak_state["cli_stderr"]
-    # Sabotage: remove the "fix:" / "next:" lines from soak_cli._format_text
-    # and an operator reading the failure output loses the F21 affordance —
-    # this assertion catches that regression.
-    assert marker in combined, (
-        f"expected affordance marker {marker!r} in CLI output; "
-        f"stdout={_soak_state['cli_stdout']!r} stderr={_soak_state['cli_stderr']!r}"
-    )

@@ -7,6 +7,31 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### Retired
+
+- **`kairix probe` and `kairix soak` CLIs.** Both shipped with a deprecation
+  notice in v2026.5.18. The CLIs are gone; the underlying Python APIs
+  (`kairix.quality.probe.run_probe_search`, `kairix.quality.probe.run_probe_burst`,
+  `kairix.quality.soak.run_soak`) remain and stay the canonical entry points
+  until the `kairix benchmark run --mode concurrent|soak` dispatcher wires
+  through (P3.b / P3.c slices).
+- **`kairix probe mcp-calls` and `kairix probe caches` subcommands.** These
+  weren't on the deprecation track but routed through `kairix probe`. They
+  are now top-level CLI commands: `kairix mcp-calls` and `kairix caches`,
+  same flags and same output shape.
+- **`kairix.quality.eval.hybrid_sweep._retrieve` shim and
+  `kairix.quality.eval.judge.judge_batch` / `judge.calibrate` free-function
+  shims.** Callers construct `LLMJudge(chat_backend=...)` directly; the
+  fallback path inside `SuiteGenerator` builds an `LLMJudge` from
+  `ProviderEvalChatBackend.from_config()`.
+
+### Operator-facing
+
+- **MCP `tool_soak_run` / `tool_probe_search` / `tool_probe_burst` escalation
+  envelopes name the Python API.** The `operator_command` field is now a
+  pasteable `python -c '...'` one-liner instead of the retired
+  `kairix soak run` / `kairix probe search` / `kairix probe burst` CLIs.
+
 ## [2026.6.2a2] - 2026-06-02 — Search reads more sources by default, three connector fixes
 
 > **Upgrading?** Two things need attention: the M365 calendar window now caps at ~13 months total (defaults reduced from 455 to 360 days; configs over the cap fail validation with a clear message), and SharePoint deploys on the prior alpha should run the one-shot backfill migration to retag legacy rows. Everything else is drop-in.

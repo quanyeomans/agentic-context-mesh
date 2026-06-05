@@ -264,9 +264,8 @@ def _parse_grade_response(content: str, labels: list[str]) -> dict[str, int]:
 #
 # Production: LLMJudge(chat_backend=ProviderEvalChatBackend.from_config()) at
 # the CLI / pipeline entry point. Tests: LLMJudge(chat_backend=FakeChatBackend(...))
-# from tests/fakes.py. The class owns the implementation — the module-level
-# judge_batch / calibrate functions below are thin shims for legacy callers
-# in generate.py / gold_builder.py and disappear when those drop.
+# from tests/fakes.py. The class owns the implementation; the legacy
+# module-level ``judge_batch`` / ``calibrate`` shims were removed in v2026.6.
 # ---------------------------------------------------------------------------
 
 
@@ -429,48 +428,3 @@ class LLMJudge:
             + ", ".join(f'"{lbl}": <grade>' for lbl in labels)
             + "}"
         )
-
-
-# ---------------------------------------------------------------------------
-# Free-function shims — new code should construct ``LLMJudge`` directly.
-# ---------------------------------------------------------------------------
-
-
-def judge_batch(
-    query: str,
-    candidates: list[tuple[str, str]],
-    api_key: str,
-    endpoint: str,
-    deployment: str = JUDGE_DEPLOYMENT,
-    shuffle: bool = True,
-    chat_backend: ChatBackend | None = None,
-) -> JudgeResult:
-    """DEPRECATED shim — use ``LLMJudge.grade``. Kept for legacy callers."""
-    if chat_backend is None:
-        from kairix.quality.eval.chat_backend import ProviderEvalChatBackend
-
-        chat_backend = ProviderEvalChatBackend.from_config()
-    return LLMJudge(chat_backend=chat_backend, deployment=deployment).grade(
-        query,
-        candidates,
-        api_key=api_key,
-        endpoint=endpoint,
-        shuffle=shuffle,
-    )
-
-
-def calibrate(
-    api_key: str,
-    endpoint: str,
-    deployment: str = JUDGE_DEPLOYMENT,
-    chat_backend: ChatBackend | None = None,
-) -> bool:
-    """DEPRECATED shim — use ``LLMJudge.calibrate``. Kept for legacy callers."""
-    if chat_backend is None:
-        from kairix.quality.eval.chat_backend import ProviderEvalChatBackend
-
-        chat_backend = ProviderEvalChatBackend.from_config()
-    return LLMJudge(chat_backend=chat_backend, deployment=deployment).calibrate(
-        api_key=api_key,
-        endpoint=endpoint,
-    )

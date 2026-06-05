@@ -5,7 +5,7 @@ Provides:
   - QueryLogger: writes structured JSONL query logs
   - NDCG, MRR, Hit@K metrics
   - PerformanceReporter: generates per-category NDCG markdown reports
-  - JudgeResult, judge_batch: per-document LLM relevance grading (gpt-4o-mini)
+  - LLMJudge, JudgeResult: per-document LLM relevance grading (ChatBackend-injected)
   - JudgeCalibrationError: raised when calibration anchor check fails
   - GeneratedQuery, GenerationResult, EnrichmentResult: GPL suite generation
   - generate_suite: generate a benchmark suite from the kairix corpus
@@ -20,7 +20,7 @@ from kairix.quality.eval.generate import (
     enrich_suite,
     generate_suite,
 )
-from kairix.quality.eval.judge import JudgeCalibrationError, JudgeResult, judge_batch
+from kairix.quality.eval.judge import JudgeCalibrationError, JudgeResult, LLMJudge
 from kairix.quality.eval.logger import QueryLogger
 from kairix.quality.eval.metrics import hit_at_k, mean_reciprocal_rank, ndcg_score
 from kairix.quality.eval.monitor import MonitorResult, run_monitor
@@ -33,6 +33,7 @@ __all__ = [
     "GenerationResult",
     "JudgeCalibrationError",
     "JudgeResult",
+    "LLMJudge",
     "MonitorResult",
     "PerformanceReporter",
     "QueryLogEntry",
@@ -40,7 +41,6 @@ __all__ = [
     "enrich_suite",
     "generate_suite",
     "hit_at_k",
-    "judge_batch",
     "mean_reciprocal_rank",
     "ndcg_score",
     "run_monitor",

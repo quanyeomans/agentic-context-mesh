@@ -341,26 +341,6 @@ class _DefaultHybridRetriever:
         )
 
 
-# DEPRECATED — retained as a thin module-level shim for one release window
-# so any external callers / scripts that imported `_retrieve` directly do
-# not break. Phase 4 of #143 removes this entirely; new code should depend
-# on the `Retriever` protocol via constructor / kwarg injection instead.
-def _retrieve(
-    query: str,
-    collections: list[str] | None,
-    cfg: HybridSweepConfig,
-) -> tuple[list[str], dict[str, Any]]:
-    """Run retrieval via the shared retrieval module (deprecated shim)."""
-    config = sweep_config_to_retrieval_config(cfg)
-    result = _DefaultHybridRetriever().retrieve(query, collections=collections, cfg=config)
-    return result.paths, {
-        _KEY_BM25_COUNT: result.meta.get(_KEY_BM25_COUNT, 0),
-        "vec_count": result.meta.get("vec_count", 0),
-        _KEY_FUSED_COUNT: result.meta.get(_KEY_FUSED_COUNT, 0),
-        _KEY_VEC_FAILED: result.meta.get(_KEY_VEC_FAILED, False),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Extracted helpers for sweep_hybrid_params (reduce cognitive complexity)
 # ---------------------------------------------------------------------------

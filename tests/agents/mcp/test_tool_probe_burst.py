@@ -45,19 +45,22 @@ def test_returns_escalation_envelope_with_defaults() -> None:
 
 
 def test_operator_command_forwards_all_args() -> None:
-    """The operator_command names ``kairix probe burst`` and includes every CLI flag.
+    """The operator_command names the burst-probe Python API and forwards every arg.
 
-    Sabotage: drop --total-queries or --peak-concurrency from the f-string in
-    the stub and an operator copy-pasting the command runs the default
-    sized burst, not the agent's requested shape.
+    The legacy ``kairix probe burst`` CLI was retired in v2026.6; the envelope
+    now points at ``run_probe_burst`` so the operator can drive the probe from
+    a one-liner. Sabotage: drop total_queries or peak_concurrency from the
+    f-string in the stub and an operator copy-pasting the command runs the
+    default sized burst, not the agent's requested shape.
     """
     envelope = tool_probe_burst(suite="reflib", total_queries=500, peak_concurrency=50)
 
     cmd = envelope["operator_command"]
-    assert cmd.startswith("kairix probe burst ")
-    assert "--suite reflib" in cmd
-    assert "--total-queries 500" in cmd
-    assert "--peak-concurrency 50" in cmd
+    assert "kairix.quality.probe" in cmd
+    assert "run_probe_burst" in cmd
+    assert 'suite="reflib"' in cmd
+    assert "total_queries=500" in cmd
+    assert "peak_concurrency=50" in cmd
 
 
 def test_runtime_estimate_scales_with_total_queries() -> None:

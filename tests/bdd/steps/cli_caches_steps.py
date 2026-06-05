@@ -1,4 +1,4 @@
-"""Step definitions for probe_caches.feature (#396 Workstream B).
+"""Step definitions for cli_caches.feature (#396 Workstream B).
 
 Drives :func:`kairix.quality.probe.caches_cli.main` and asserts on the
 operator-facing report shape. The W-B caches are process-global
@@ -39,7 +39,7 @@ from kairix.use_cases.brief import (
 )
 from kairix.use_cases.prep import reset_prep_summary_cache
 
-scenarios("../features/probe_caches.feature")
+scenarios("../features/cli_caches.feature")
 
 
 @pytest.fixture
@@ -61,16 +61,16 @@ def _given_fresh_process(ctx: dict[str, Any]) -> None:
     _ = ctx
 
 
-@when("the operator runs probe caches")
-def _when_probe_caches(ctx: dict[str, Any]) -> None:
+@when("the operator runs the caches command")
+def _when_caches_command(ctx: dict[str, Any]) -> None:
     buf = io.StringIO()
     with redirect_stdout(buf):
         ctx["rc"] = caches_main([])
     ctx["stdout"] = buf.getvalue()
 
 
-@when("the operator runs probe caches with the json flag")
-def _when_probe_caches_json(ctx: dict[str, Any]) -> None:
+@when("the operator runs the caches command with the json flag")
+def _when_caches_command_json(ctx: dict[str, Any]) -> None:
     buf = io.StringIO()
     with redirect_stdout(buf):
         ctx["rc"] = caches_main(["--json"])

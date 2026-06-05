@@ -21,9 +21,3 @@ Feature: Soak test — does kairix hold together under repeated load?
     When the operator runs soak with repeat 2
     Then soak fails
     And the failure kind is "signature_mismatch"
-
-  Scenario: Soak CLI failure output carries F21 affordance markers
-    Given a workload that fires a soak gate
-    When the operator invokes the soak CLI with repeat 3
-    Then the stderr or stdout contains "fix:"
-    And the stderr or stdout contains "next:"

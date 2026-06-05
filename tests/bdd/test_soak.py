@@ -23,8 +23,3 @@ def test_soak_fires_time_drift_gate():
 @scenario(FEATURE, "Soak fires the signature_mismatch gate when the workload drifts")
 def test_soak_fires_signature_mismatch_gate():
     """Body populated by @scenario from the .feature file."""
-
-
-@scenario(FEATURE, "Soak CLI failure output carries F21 affordance markers")
-def test_soak_cli_failure_output_has_affordance_markers():
-    """Body populated by @scenario from the .feature file."""
