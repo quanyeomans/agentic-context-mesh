@@ -75,6 +75,7 @@ def get_pending_chunks(db: sqlite3.Connection) -> list[dict[str, Any]]:
 
     Returns list of dicts: {hash, text, path}
     """
+    # F63-bounded: embed worker tick consumes pending candidates by design; bounded by per-batch processing upstream.
     rows = db.execute("""
         SELECT c.hash, c.doc, d.path
         FROM content c
@@ -106,6 +107,7 @@ def get_all_chunks_needing_embedding(db: sqlite3.Connection) -> list[dict[str, A
     that have been staged but not yet written to the usearch index.
     Used for incremental catch-up after partial failures.
     """
+    # F63-bounded: incremental catch-up after partial failures; consumed by embed pipeline in batches.
     rows = db.execute("""
         SELECT cv.hash, cv.seq, cv.pos, c.doc
         FROM content_vectors cv
@@ -201,6 +203,7 @@ def get_date_filtered_paths(
         params.append(end.isoformat())
 
     try:
+        # F63-bounded: date-range filter narrows to active period documents (caller-supplied window).
         rows = db.execute(
             "SELECT DISTINCT d.path "
             "FROM content_vectors cv "

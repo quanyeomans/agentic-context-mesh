@@ -49,9 +49,11 @@ def analyse_corpus(db: sqlite3.Connection) -> CorpusProfile:
     """Analyse indexed documents to determine corpus profile."""
     total = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
     collections: dict[str, int] = {}
+    # F63-bounded: GROUP BY collection yields one row per collection (operator-config-sized, ≤O(20)).
     for row in db.execute("SELECT collection, COUNT(*) FROM documents WHERE active=1 GROUP BY collection").fetchall():
         collections[row[0]] = row[1]
 
+    # F63-bounded: auto_gold is a CLI build tool (kairix eval auto-gold), not a tick-loop call.
     paths = db.execute("SELECT path, title FROM documents WHERE active=1").fetchall()
     procedural_paths = [(p, t) for p, t in paths if _PROCEDURAL_PATTERNS.search(p)]
     procedural = len(procedural_paths)

@@ -183,11 +183,7 @@ class SQLiteDocumentRepository:
         try:
             db = self._opener(Path(self._db_path))
             try:
-                # F63-bounded: ``IN (?,?,...)`` cardinality is naturally
-                # capped by ``len(path_list)``, which is in turn capped
-                # upstream by the caller (search pipeline enrich stage
-                # passes one path per fused result; fused result count
-                # is bounded by retrieval-config limits).
+                # F63-bounded: IN (?,?,...) cardinality is capped by len(path_list), bounded by retrieval-config limits.
                 rows = db.execute(
                     f"SELECT d.path, cv.chunk_date "
                     f"FROM content_vectors cv "

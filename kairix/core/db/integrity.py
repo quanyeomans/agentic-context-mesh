@@ -111,6 +111,7 @@ def _sample(rows: list[tuple[str, ...]], idx: int = 0) -> tuple[str, ...]:
 
 def _check_documents_without_content(db: sqlite3.Connection) -> IntegrityGap | None:
     """Every active document must have a matching ``content`` row keyed by hash."""
+    # F63-bounded: preflight integrity check (operator/startup-invoked); enumerates the gap by design.
     rows = db.execute(
         "SELECT d.path FROM documents d LEFT JOIN content c ON c.hash = d.hash WHERE d.active = 1 AND c.hash IS NULL"
     ).fetchall()
@@ -138,6 +139,7 @@ def _check_documents_without_fts(db: sqlite3.Connection) -> IntegrityGap | None:
     is the contract every write path must uphold.
     """
     try:
+        # F63-bounded: preflight integrity check (IM-6 invariant); enumerates the integrity gap by design.
         rows = db.execute(
             "SELECT d.path FROM documents d "
             "LEFT JOIN documents_fts fts ON fts.rowid = d.id "
@@ -176,6 +178,7 @@ def _check_documents_without_fts(db: sqlite3.Connection) -> IntegrityGap | None:
 
 def _check_documents_without_vectors(db: sqlite3.Connection) -> IntegrityGap | None:
     """Every active document must have at least one ``content_vectors`` row keyed by hash."""
+    # F63-bounded: preflight integrity check; enumerates the gap by design (sample bounded by _MAX_SAMPLE later).
     rows = db.execute(
         "SELECT d.path FROM documents d "
         "LEFT JOIN content_vectors v ON v.hash = d.hash "
@@ -198,6 +201,7 @@ def _check_documents_without_vectors(db: sqlite3.Connection) -> IntegrityGap | N
 
 def _check_content_vectors_without_documents(db: sqlite3.Connection) -> IntegrityGap | None:
     """Every ``content_vectors`` row's hash must appear in ``documents``."""
+    # F63-bounded: preflight integrity check; enumerates the orphan-vector gap by design.
     rows = db.execute(
         "SELECT DISTINCT v.hash FROM content_vectors v LEFT JOIN documents d ON d.hash = v.hash WHERE d.hash IS NULL"
     ).fetchall()
@@ -220,6 +224,7 @@ def _check_content_vectors_without_documents(db: sqlite3.Connection) -> Integrit
 def _check_fts_without_documents(db: sqlite3.Connection) -> IntegrityGap | None:
     """Every ``documents_fts.rowid`` must map to an active row in ``documents``."""
     try:
+        # F63-bounded: preflight integrity check; enumerates the FTS-orphan gap by design.
         rows = db.execute(
             "SELECT fts.rowid FROM documents_fts fts "
             "LEFT JOIN documents d ON d.id = fts.rowid "
@@ -411,6 +416,7 @@ def _check_connector_cursors_vs_bronze(db: sqlite3.Connection) -> IntegrityGap |
     blocking boot. Wave 3 swaps in the real connector-name lookup.
     """
     try:
+        # F63-bounded: connector_cursors has one row per configured source (operator-config-sized, ≤O(10)).
         rows = db.execute("SELECT source_name FROM connector_cursors").fetchall()
     except sqlite3.OperationalError:
         return None

@@ -101,11 +101,13 @@ class DeadLetterStore:
         oldest failure surfaces first.
         """
         if source_name is None:
+            # F63-bounded: operator-triage surface; bounded by failure-volume policy, not a tick-loop.
             rows = self._db.execute(
                 "SELECT source_name, item_id, failure_count, last_error, last_attempt "
                 "FROM connector_deadletter ORDER BY last_attempt ASC"
             ).fetchall()
         else:
+            # F63-bounded: operator-triage surface; per-source filter further reduces row count.
             rows = self._db.execute(
                 "SELECT source_name, item_id, failure_count, last_error, last_attempt "
                 "FROM connector_deadletter WHERE source_name = ? "

@@ -146,8 +146,10 @@ def list_cc_pairs(
 ) -> tuple[ConnectorCredentialPair, ...]:
     """Return every cc_pair row (optionally filtered by ``status``)."""
     if status is None:
+        # F63-bounded: topology_cc_pairs is operator-config-sized (≤O(100) rows).
         rows = db.execute(f"SELECT {_SELECT_ALL_COLUMNS} FROM topology_cc_pairs ORDER BY id").fetchall()
     else:
+        # F63-bounded: topology_cc_pairs is operator-config-sized; additionally filtered by status.
         rows = db.execute(
             f"SELECT {_SELECT_ALL_COLUMNS} FROM topology_cc_pairs WHERE status = ? ORDER BY id",
             (status,),

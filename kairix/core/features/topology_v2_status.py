@@ -75,6 +75,7 @@ def _read_cc_pair_snapshots(db: sqlite3.Connection) -> tuple[CCPairSnapshot, ...
 
 def _read_actor_ids(db: sqlite3.Connection) -> tuple[tuple[str, str], ...]:
     """Read every declared (actor_id, actor_kind) tuple from scope_profiles."""
+    # F63-bounded: scope_profiles is operator-config-sized (≤O(actors) ≤O(20)).
     rows = db.execute(
         f"SELECT {_ACTOR_ID_COL}, actor_kind FROM topology_scope_profiles ORDER BY {_ACTOR_ID_COL}"
     ).fetchall()

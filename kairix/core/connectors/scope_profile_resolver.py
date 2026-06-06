@@ -250,6 +250,7 @@ class ScopeProfileResolver:
         placeholders = ",".join("?" for _ in actors)
         has_default_col = self._scope_entries_has_default_in_scope()
         if has_default_col:
+            # F63-bounded: scope entries are operator-config-sized per actor; filtered by IN clause.
             rows = self._db.execute(
                 "SELECT sp.actor_id, se.collection_name, se.can_read, se.can_write, "
                 "se.max_sensitivity, se.default_in_scope "
@@ -271,6 +272,7 @@ class ScopeProfileResolver:
             )
         # Pre-migration shape — column missing; back-compat treats every
         # legacy row as in-default.
+        # F63-bounded: same shape as above, scope entries are operator-config-sized.
         rows = self._db.execute(
             "SELECT sp.actor_id, se.collection_name, se.can_read, se.can_write, se.max_sensitivity "
             "FROM topology_scope_profiles sp "
@@ -299,6 +301,7 @@ class ScopeProfileResolver:
         """
         if self._has_default_col_cached is not None:
             return self._has_default_col_cached
+        # F63-bounded: PRAGMA table_info returns one row per column (schema-bounded, ≤O(10) rows).
         cols = {row[1] for row in self._db.execute("PRAGMA table_info(topology_scope_entries)").fetchall()}
         self._has_default_col_cached = "default_in_scope" in cols
         return self._has_default_col_cached

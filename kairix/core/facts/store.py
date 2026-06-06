@@ -191,6 +191,7 @@ class SQLiteFactStore:
         ``ADD COLUMN`` (3.35+).
         """
         cursor = conn.execute("PRAGMA table_info(facts)")
+        # F63-bounded: PRAGMA table_info returns one row per column (schema-bounded).
         existing_columns = {row[1] for row in cursor.fetchall()}
         for column_name, ddl in _MIGRATIONS:
             if column_name not in existing_columns:
@@ -304,6 +305,7 @@ class SQLiteFactStore:
             if namespace is not None:
                 sql += " AND namespace = ?"
                 params.append(namespace)
+            # F63-bounded: per-entity+attribute lookup (typically returns 1 active fact + few superseded).
             rows = conn.execute(sql, params).fetchall()
         finally:
             conn.close()

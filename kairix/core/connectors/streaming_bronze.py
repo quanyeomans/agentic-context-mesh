@@ -161,6 +161,8 @@ class StreamingBronzeStore:
         ``fetched_at >= since.isoformat()``.
         """
         if since is None:
+            # F63-bounded: replay() is an operator-invoked rebuild path, not a tick-loop call.
+            # Caller decides whether full-replay is appropriate at the source-size in question.
             rows = self._db.execute(
                 "SELECT source_name, item_id, raw_path, mime, fetched_at, content_hash "
                 "FROM bronze_records WHERE source_name = ? "
@@ -168,6 +170,7 @@ class StreamingBronzeStore:
                 (source_name,),
             ).fetchall()
         else:
+            # F63-bounded: same replay path, additionally narrowed by since-checkpoint.
             rows = self._db.execute(
                 "SELECT source_name, item_id, raw_path, mime, fetched_at, content_hash "
                 "FROM bronze_records WHERE source_name = ? AND fetched_at >= ? "

@@ -410,10 +410,14 @@ def _gather_pending_chunks(
     # gap reported by the chunk_date_populated onboard check. Older test
     # fixtures use a minimal documents schema without this column — the
     # PRAGMA guard keeps them working while production gets the fallback.
+    # F63-bounded: PRAGMA table_info returns one row per column (schema-bounded, ≤O(20)).
     _doc_cols = {row[1] for row in db.execute("PRAGMA table_info(documents)").fetchall()}
     smt_select = "d.source_modified_at" if "source_modified_at" in _doc_cols else "NULL AS source_modified_at"
 
     if force:
+        # F63-bounded: hourly embed worker tick consumes ALL candidates per cycle by design;
+        # the per-batch chunking (`batch_size` upstream) is what bounds memory pressure, not row count.
+        # Scale risk flagged for future streaming-cursor refactor — see #211 for context.
         rows = db.execute(f"""
             SELECT c.hash, c.doc, d.path, {smt_select}
             FROM content c
@@ -423,6 +427,8 @@ def _gather_pending_chunks(
               AND length(c.doc) > 0
         """).fetchall()
     else:
+        # F63-bounded: hourly embed worker tick consumes candidates needing vectors; cycle gates further work.
+        # Scale risk flagged for future streaming-cursor refactor — see #211 for context.
         rows = db.execute(f"""
             SELECT c.hash, c.doc, d.path, {smt_select}
             FROM content c

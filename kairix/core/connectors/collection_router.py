@@ -190,6 +190,7 @@ def _load_mappings_for_cc_pair(db: sqlite3.Connection, cc_pair_id: int) -> tuple
     unmapped policy in one shot. Sort key is ``len(source_path_filter)
     DESCENDING`` — most specific filter wins.
     """
+    # F63-bounded: topology_collection_sources for one cc_pair is operator-config-sized (≤O(10) rows).
     rows = db.execute(
         "SELECT c.id, c.name, cs.source_path_filter, c.on_unmapped_item "
         "FROM topology_collection_sources cs "

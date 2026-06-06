@@ -413,6 +413,7 @@ class VectorIndex:
             # tiny (~ms), so the lock-hold cost is dominated by the SELECT
             # itself; no contention concern even at conc=10.
             with self._meta_conn_lock:
+                # F63-bounded: chunk-size capped by upstream `_BATCH_SIZE` (search-time IN-clause batching).
                 for row in db.execute(sql, tuple(chunk)).fetchall():
                     rows_by_hash[row["hash"]] = row
         return rows_by_hash
