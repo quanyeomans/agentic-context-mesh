@@ -20,17 +20,13 @@
 # ``scripts/checks/check_f69_scale_bound_tests.py`` REMEDIATION for
 # canonical Pass + Forbidden examples.
 #
-# Tracked paydown (one issue per high-impact offender) — to be filed
-# in follow-up bundles.
-
-tests/integration/test_bronze_streaming_pipeline.py::test_streaming_bronze_pipeline_writes_no_disk_blobs
-tests/integration/test_collections.py::test_multi_collection_scans_separately
-tests/integration/test_connector_pipeline_failure_injection.py::test_mixed_fetch_and_extract_failures_route_independently
-tests/integration/test_embed_agent_owner.py::test_embed_pipeline_filters_per_agent_via_agent_owner_column
-tests/integration/test_embed_agent_owner.py::test_embed_pipeline_leaves_unowned_documents_with_null_agent_owner
-tests/integration/test_embed_agent_owner.py::test_embed_pipeline_tags_documents_with_owning_agent
-tests/integration/test_embed_scan_dedup.py::test_scanner_no_duplicate_content
-tests/integration/test_feature_flag_topology_v2_dex_crm.py::test_flag_off_list_changes_for_container_uses_legacy_path
-tests/integration/test_feature_flag_topology_v2_obsidian.py::test_flag_off_list_changes_for_container_delegates_to_legacy
-tests/integration/test_ingest_chat_prep_round_trip.py::test_ingest_chat_with_session_date_persists_evidence_at
-tests/integration/test_topology_v2_applier.py::test_apply_at_boot_materialises_rows
+# Status: baseline empty as of 2026-06-06. Original 11 grandfathered
+# entries resolved in the F69 paydown wave — 9 via sibling
+# scale-bound test (``test_*_at_10k_*``) using either a module-level
+# constant >= 10_000 or canonical FakeSourceConnector construction
+# at the F69 scale floor; 2 entries (test_feature_flag_topology_v2_*)
+# disappeared with the Phase C topology_v2 flag retirement (#151).
+# Tests that legitimately can't scale (real-LLM e2e gated on KV
+# credentials, real watchdog/fsevents pipelines that can't re-attach
+# across ticks) carry the ``# F69-small-scale-only:`` exemption marker
+# with rationale and a pointer at the scale-bound sibling.

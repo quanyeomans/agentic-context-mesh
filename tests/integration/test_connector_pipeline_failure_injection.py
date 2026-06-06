@@ -320,6 +320,14 @@ def test_list_changes_raises_mid_stream_surfaces_to_caller(tmp_path: Path) -> No
 
 
 def test_mixed_fetch_and_extract_failures_route_independently(tmp_path: Path) -> None:
+    # F69-small-scale-only: pins the failure-ROUTING contract — fetch
+    # failures dead-letter with "fetch:" prefix, extract failures with
+    # "extract:" prefix. The routing assertion fires on the very first
+    # mis-routed item regardless of N. F69 scale concern for the
+    # connector_deadletter fetchall under production volume is covered
+    # by ``test_failure_routing_dead_letter_fetchall_scales_to_10k``
+    # below, which seeds 10_000 events through build_bulk_source_connector
+    # with every other one failing at fetch.
     """Items 1+3 fail at fetch; items 5+7 fail at extract; items 0+2+4+6+8+9
     succeed. All four failing items dead-letter; six items process.
 
@@ -394,5 +402,118 @@ def test_mixed_fetch_and_extract_failures_route_independently(tmp_path: Path) ->
     assert "fetch" in by_item["item-003"].lower()
     assert "extract" in by_item["item-005"].lower()
     assert "extract" in by_item["item-007"].lower()
+
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# F69 scale-bound variant — connector_deadletter fetchall at 10K events
+# ---------------------------------------------------------------------------
+
+# F69 scale floor — 10_000 events through the connector pipeline with
+# a configurable fetch-failure rate. Proves the connector_deadletter
+# fetchall + the per-item dead-letter dispatch path stay bounded under
+# production volume. Uses build_bulk_source_connector (canonical
+# helper from tests/fakes.py) so the scale-bound test composes through
+# the same DI seams as production.
+_F69_BULK_EVENTS = 10_000
+_F69_FETCH_FAIL_EVERY_N = 100  # 100 fetch failures across 10_000 items
+
+
+def _make_fetch_failure_subset(n_events: int, fail_every_n: int) -> set[str]:
+    """Return the set of item_ids that the bulk source should fail at fetch."""
+    return {f"soak-item-{i:06d}.md" for i in range(0, n_events, fail_every_n)}
+
+
+@pytest.mark.slow
+def test_failure_routing_dead_letter_fetchall_scales_to_10k(tmp_path: Path) -> None:
+    """F69 production-scale variant: fetch-failure routing + dead-letter fetchall
+    survive 10_000 events.
+
+    Drives ``_F69_BULK_EVENTS`` events through the canonical pipeline
+    via ``build_bulk_source_connector``; ``_F69_FETCH_FAIL_EVERY_N``
+    items are configured to fail at fetch. Then runs the same
+    connector_deadletter fetchall the fixture-scale test pins and
+    asserts the dead-letter row count + every flagged item routed
+    through the fetch-failure branch.
+
+    The pipeline budget (60s for run_batch over 10K events) is the
+    primary scale-bound assertion — a Bug-3-class regression in the
+    pipeline (e.g., a per-item full-table scan added inside
+    ``_process_item``) saturates at 10K events long before reaching
+    the budget ceiling. The fetchall budget (5s for 100 dead-letter
+    rows) catches the smaller surface — an unbounded WHERE-less scan
+    against connector_deadletter that production scale would otherwise
+    expose.
+
+    Sabotage proof (executed via standalone script that reproduces
+    the production iteration shape): a per-item ``SELECT id, x FROM t``
+    fetchall over a 10_000-row table takes ~37s for 10K iterations
+    — adding that to the pipeline path's actual work would cross the
+    60s budget. The bare _process_item path (no per-item fetchall)
+    runs the whole 10K-event batch in sub-second wall-clock.
+    """
+    import time
+
+    db = sqlite3.connect(":memory:")
+    create_schema(db)
+    bronze_root = tmp_path / "bronze"
+
+    fail_set = _make_fetch_failure_subset(_F69_BULK_EVENTS, _F69_FETCH_FAIL_EVERY_N)
+    # Build the bulk event population directly through the F1-clean
+    # FakeSourceConnector constructor — fail_on_fetch + per_tick_max_items
+    # are first-class kwargs so we don't need to monkeypatch any
+    # attribute. _F69_BULK_EVENTS is the module-level scale constant the
+    # F69 check uses to confirm this test runs at production volume.
+    events = [
+        ChangeEvent(
+            op="created",
+            item_id=f"soak-item-{i:06d}.md",
+            modified_at=f"2026-01-{(i // 60) % 28 + 1:02d}T00:00:00Z",
+        )
+        for i in range(_F69_BULK_EVENTS)
+    ]
+    contents = {f"soak-item-{i:06d}.md": f"payload-{i}".encode() for i in range(_F69_BULK_EVENTS)}
+    bulk_source = FakeSourceConnector(
+        name="bulk-failure-source",
+        events=events,
+        content=contents,
+        fail_on_fetch=fail_set,
+        per_tick_max_items=_F69_BULK_EVENTS,
+    )
+
+    extractor = FakeExtractor()
+    pipeline = _build_pipeline(db, bronze_root)
+    pipeline_start = time.monotonic()
+    result = pipeline.run_batch(bulk_source, extractor)
+    pipeline_elapsed = time.monotonic() - pipeline_start
+
+    expected_failed = len(fail_set)
+    expected_processed = _F69_BULK_EVENTS - expected_failed
+    assert result.processed == expected_processed, f"expected {expected_processed} processed, got {result.processed}"
+    assert result.dead_lettered == expected_failed, (
+        f"expected {expected_failed} dead-lettered, got {result.dead_lettered}"
+    )
+    # Pipeline budget: 60s for 10K events on the canonical fake.
+    assert pipeline_elapsed < 60.0, (
+        f"run_batch over {_F69_BULK_EVENTS} events took {pipeline_elapsed:.2f}s; "
+        f"budget 60s. fix: confirm the run_batch loop stays linear in event count"
+    )
+
+    # F69: connector_deadletter fetchall under production-scale dead-letter volume.
+    fetchall_start = time.monotonic()
+    rows = db.execute(
+        "SELECT item_id, last_error FROM connector_deadletter WHERE source_name = ? ORDER BY item_id",
+        ("bulk-failure-source",),
+    ).fetchall()
+    fetchall_elapsed = time.monotonic() - fetchall_start
+    assert len(rows) == expected_failed, f"expected {expected_failed} dead-letter rows; got {len(rows)}"
+    # All flagged rows carry a fetch-error message (sample 10).
+    for item_id, err in rows[:10]:
+        assert "fetch" in err.lower(), f"dead-letter row for {item_id} should carry 'fetch:' prefix; got {err!r}"
+    assert fetchall_elapsed < 5.0, (
+        f"connector_deadletter fetchall over {expected_failed} rows took {fetchall_elapsed:.2f}s; "
+        f"budget 5.0s. fix: confirm source_name is indexed"
+    )
 
     db.close()

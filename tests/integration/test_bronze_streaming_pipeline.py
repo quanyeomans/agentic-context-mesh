@@ -51,6 +51,16 @@ def _write_obsidian_config(tmp_path: Path, vault_root: Path) -> Path:
 
 
 def test_streaming_bronze_pipeline_writes_no_disk_blobs(tmp_path: Path) -> None:
+    # F69-small-scale-only: structural-contract test — the
+    # ``raw_path==""`` sentinel + 64-char content_hash invariants fire on
+    # row 1 regardless of N. The real obsidian connector here uses
+    # watchdog/fsevents which (a) cap at per_tick_max_items=500 per F66
+    # and (b) cannot re-attach to the same vault path across ticks
+    # (fsevents raises "watch is already scheduled"). Driving 10K events
+    # through this pipeline would force multi-tick orchestration that
+    # adds wall-clock without changing the contract under test. The Bug 3
+    # scale concern for bronze_records reads is covered by the canonical
+    # 10K-row tests in test_bronze_records_scan_at_scale.py.
     """Phase 7 contract: connector sync writes zero on-disk bronze blobs.
 
     Sabotage proof: re-introduce FilesystemBronzeStore in worker.py

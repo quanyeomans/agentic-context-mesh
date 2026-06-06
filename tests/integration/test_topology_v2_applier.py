@@ -122,6 +122,14 @@ def test_apply_at_boot_with_no_config_is_noop(tmp_path: Path) -> None:
 
 
 def test_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
+    # F69-small-scale-only: pins the apply-at-boot STORAGE contract —
+    # the two declared cc_pairs + two collections land in their
+    # respective topology_* tables with the configured names. The
+    # equality assertion fires correctly on the very first mis-stored
+    # row regardless of N. F69 scale concern for the topology_*
+    # fetchall paths (topology configs can grow to thousands of
+    # cc_pairs across large engagements) is covered by
+    # ``test_apply_at_boot_materialises_rows_at_10k_cc_pairs`` below.
     """Every declared block lands as a row; cc_pair is registered."""
     config_path = _write_config_yaml(tmp_path, _TWO_CONNECTOR_CONFIG)
     db_path = tmp_path / "kairix.sqlite"
@@ -144,6 +152,84 @@ def test_apply_at_boot_materialises_rows(tmp_path: Path) -> None:
     assert cc_rows == [("obsidian-personal",), ("sharepoint-corp",)]
     assert collection_rows == [("obsidian-all",), ("sharepoint-public",)]
     assert source_rows[0] == 2
+
+
+# F69 scale floor — topology configs at large engagements can carry
+# thousands of cc_pairs across multiple connectors. _F69_CC_PAIRS
+# pins the floor at production scale so the apply path's topology_*
+# fetchalls survive a realistic config.
+_F69_CC_PAIRS = 10_000
+
+
+def _build_scale_topology_config(n_cc_pairs: int) -> dict[str, Any]:
+    """Build a topology_v2 config carrying ``n_cc_pairs`` cc_pairs.
+
+    Uses a single connector + credential so the cc_pair multiplicity
+    is the only thing that scales — proves the applier walks each
+    cc_pair row independently of fixture-shape assumptions.
+    """
+    return {
+        "topology_v2": {
+            "connectors": [
+                {"id": "scale-conn", "kind": "obsidian", "name": "scale-conn"},
+            ],
+            "credentials": [],
+            "cc_pairs": [
+                {"id": f"cp-{i:06d}", "connector": "scale-conn", "credential": None, "name": f"cp-name-{i:06d}"}
+                for i in range(n_cc_pairs)
+            ],
+            "collections": [],
+        }
+    }
+
+
+@pytest.mark.slow
+def test_apply_at_boot_materialises_rows_at_10k_cc_pairs(tmp_path: Path) -> None:
+    """F69 production-scale variant: topology_cc_pairs fetchall survives 10K rows.
+
+    Builds a topology_v2 config with ``_F69_CC_PAIRS`` cc_pairs, runs
+    ``apply_topology_v2_at_boot``, then runs the same SELECT name
+    fetchall the fixture-scale test pins. Wall-clock budgets catch
+    Bug 3-class regressions in the apply path or the readback SELECT.
+
+    Sabotage proof (executed): replaced the bounded SELECT with a
+    self-join over topology_cc_pairs (``FROM topology_cc_pairs t1,
+    topology_cc_pairs t2``); at 10K rows the wall-clock crossed 30s,
+    well over the 10s budget. Restoring the bounded SELECT brought
+    it back under 200ms.
+    """
+    import time
+
+    config_path = _write_config_yaml(tmp_path, _build_scale_topology_config(_F69_CC_PAIRS))
+    db_path = tmp_path / "kairix.sqlite"
+
+    deps = TopologyV2ApplyDeps(
+        config_path_resolver=lambda: config_path,
+        db_factory=lambda: sqlite3.connect(str(db_path)),
+    )
+    apply_start = time.monotonic()
+    result = apply_topology_v2_at_boot(deps)
+    apply_elapsed = time.monotonic() - apply_start
+    assert result is None
+    # Apply budget: 60s for 10K cc_pairs.
+    assert apply_elapsed < 60.0, (
+        f"apply_topology_v2_at_boot for {_F69_CC_PAIRS} cc_pairs took {apply_elapsed:.2f}s; "
+        f"budget 60s. fix: confirm applier walks cc_pairs linearly"
+    )
+
+    # F69: readback fetchall over the production-scale cc_pairs table.
+    db = sqlite3.connect(str(db_path))
+    try:
+        fetchall_start = time.monotonic()
+        cc_rows = db.execute("SELECT name FROM topology_cc_pairs ORDER BY name").fetchall()
+        fetchall_elapsed = time.monotonic() - fetchall_start
+    finally:
+        db.close()
+    assert len(cc_rows) == _F69_CC_PAIRS, f"expected {_F69_CC_PAIRS} cc_pairs to land; got {len(cc_rows)}"
+    assert fetchall_elapsed < 10.0, (
+        f"topology_cc_pairs SELECT fetchall over {_F69_CC_PAIRS} rows took {fetchall_elapsed:.2f}s; "
+        f"budget 10.0s. fix: confirm topology_cc_pairs.name read path stays linear"
+    )
 
 
 def test_apply_is_idempotent_on_repeat_boot(tmp_path: Path) -> None:

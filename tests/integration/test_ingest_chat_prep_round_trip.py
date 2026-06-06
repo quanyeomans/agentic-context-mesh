@@ -264,6 +264,19 @@ def test_ingest_chat_then_prep_surfaces_agent_alpha_fact(tmp_path: Path) -> None
 
 
 def test_ingest_chat_with_session_date_persists_evidence_at(tmp_path: Path) -> None:
+    # F69-small-scale-only: e2e test gated on real Azure KV
+    # credentials + live LLM (skips when KAIRIX_E2E=1 / KAIRIX_KV_NAME
+    # / az login aren't all set). The fetchall scans the facts table
+    # for the single session-date-anchored fact; scaling to 10_000
+    # facts would require ingesting 10_000 transcripts through a
+    # real Azure OpenAI call, which costs real $$ on every CI run and
+    # adds tens of minutes of wall-clock without changing the
+    # field-level wiring contract under test (session_metadata →
+    # evidence_at). Production-scale facts-table read pressure is
+    # better covered by a dedicated soak-tier test that bypasses the
+    # LLM and seeds facts directly — that lives under tests/soak/
+    # (the canonical home for production-scale path coverage per
+    # ADR-024).
     """End-to-end: ingest-chat with --metadata pins evidence_at on facts.
 
     Stream A Lever A F30 surface: ``kairix ingest-chat --metadata`` →
