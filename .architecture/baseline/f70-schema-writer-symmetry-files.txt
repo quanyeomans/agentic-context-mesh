@@ -9,27 +9,14 @@
 # (kairix/core/connectors/silver.py:SqliteDocumentPagesWriter). F70 will
 # fire on any future schema additions per F50.
 #
-# Remaining grandfathered entries (GH #339) are 7 Wave A topology v2
-# tables that are forward-armed for unshipped Wave C/D/E runtime:
-#
-#   * topology_containers, topology_hierarchy_nodes — populated by
-#     HierarchyConnector at sync time (Wave E)
-#   * topology_federated_connectors, topology_group_grants — populated
-#     by Wave C federation + grants subsystems
-#   * topology_scope_profiles, topology_scope_entries, topology_skills —
-#     populated by Wave D scope + skills runtime
-#
-# These are NOT "missing writers" — the writers belong in unshipped
-# code paths. Adding stub writers that read empty optional config blocks
-# would mechanically satisfy F70 without value. The honest position:
-# grandfather here, the matching Wave ships the writer + clears the
-# baseline entry. F50 still blocks net-new tables from accreting to
-# this list.
-
-kairix/core/db/schema.py::topology_containers
-kairix/core/db/schema.py::topology_federated_connectors
-kairix/core/db/schema.py::topology_group_grants
-kairix/core/db/schema.py::topology_hierarchy_nodes
-kairix/core/db/schema.py::topology_scope_entries
-kairix/core/db/schema.py::topology_scope_profiles
-kairix/core/db/schema.py::topology_skills
+# As of 2026-06-06: empty. The previously-listed 7 topology v2/v3 scaffold
+# tables (topology_containers, topology_hierarchy_nodes, topology_federated_connectors,
+# topology_group_grants, topology_scope_profiles, topology_scope_entries,
+# topology_skills) each carry a same-block ``-- table-is-derived:
+# operator-curated config; <Wave-X wiring planned>`` comment on the
+# CREATE TABLE line, naming the future writer wave (E for hierarchy
+# connector, C for federation + grants, D for scope + skills runtime).
+# These are operator-curated config tables, not derived in the SQL sense,
+# but the F70 marker honestly captures "not auto-INSERTed by kairix code
+# today; will be when the matching capability ships". F50 still blocks
+# net-new tables from accreting here.

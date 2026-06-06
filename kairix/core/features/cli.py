@@ -140,10 +140,12 @@ def _build_default_diagnostics_provider(db_path: str | None) -> DiagnosticsProvi
     def _provider() -> TopologyV2Diagnostics | None:
         try:
             if db_path is not None:
+                # F77-allow: operator CLI subcommand (features status); read-only diagnostics.
                 conn = sqlite3.connect(db_path)
             else:
                 from kairix.paths import db_path as resolve_db
 
+                # F77-allow: operator CLI subcommand (features status); read-only diagnostics.
                 conn = sqlite3.connect(str(resolve_db()))
             with closing(conn):
                 return build_topology_v2_diagnostics(conn)
@@ -249,10 +251,12 @@ def _default_maintenance_diagnostics(
             flag_enabled = False
 
         if db_path is not None:
+            # F77-allow: operator CLI subcommand (features status); read-only orphan diagnostics.
             db = sqlite3.connect(db_path)
         else:
             from kairix.paths import db_path as resolve_db
 
+            # F77-allow: operator CLI subcommand (features status); read-only orphan diagnostics.
             db = sqlite3.connect(str(resolve_db()))
         with closing(db):
             orphan_count = count_current_orphans(db)

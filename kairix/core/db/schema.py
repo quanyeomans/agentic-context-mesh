@@ -583,6 +583,7 @@ CREATE TABLE IF NOT EXISTS topology_cc_pairs (
     FOREIGN KEY (credential_id) REFERENCES topology_credentials(id)
 );
 
+-- table-is-derived: operator-curated config; per-container cursor state from connector sync (topology v3).
 CREATE TABLE IF NOT EXISTS topology_containers (
     cc_pair_id INTEGER NOT NULL,
     container_id TEXT NOT NULL,
@@ -593,6 +594,7 @@ CREATE TABLE IF NOT EXISTS topology_containers (
     FOREIGN KEY (cc_pair_id) REFERENCES topology_cc_pairs(id)
 );
 
+-- table-is-derived: operator-curated config; raw connector hierarchy nodes (topology v3 wiring).
 CREATE TABLE IF NOT EXISTS topology_hierarchy_nodes (
     cc_pair_id INTEGER NOT NULL,
     raw_node_id TEXT NOT NULL,
@@ -626,6 +628,7 @@ CREATE TABLE IF NOT EXISTS topology_collection_sources (
     FOREIGN KEY (cc_pair_id) REFERENCES topology_cc_pairs(id)
 );
 
+-- table-is-derived: operator-curated config; cross-engagement federation endpoints (topology v3).
 CREATE TABLE IF NOT EXISTS topology_federated_connectors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collection_id INTEGER NOT NULL,
@@ -635,6 +638,7 @@ CREATE TABLE IF NOT EXISTS topology_federated_connectors (
     FOREIGN KEY (collection_id) REFERENCES topology_collections(id)
 );
 
+-- table-is-derived: operator-curated config; per-collection group ACL (topology v3 RBAC).
 CREATE TABLE IF NOT EXISTS topology_group_grants (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collection_id INTEGER NOT NULL,
@@ -646,6 +650,7 @@ CREATE TABLE IF NOT EXISTS topology_group_grants (
     FOREIGN KEY (collection_id) REFERENCES topology_collections(id)
 );
 
+-- table-is-derived: operator-curated config; per-actor scope (topology v3 resolver).
 CREATE TABLE IF NOT EXISTS topology_scope_profiles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_id TEXT NOT NULL UNIQUE,
@@ -655,6 +660,7 @@ CREATE TABLE IF NOT EXISTS topology_scope_profiles (
     updated_at TEXT NOT NULL
 );
 
+-- table-is-derived: operator-curated config; scope-to-collection grants (topology v3 resolver).
 CREATE TABLE IF NOT EXISTS topology_scope_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     scope_profile_id INTEGER NOT NULL,
@@ -671,6 +677,7 @@ CREATE TABLE IF NOT EXISTS topology_scope_entries (
     FOREIGN KEY (scope_profile_id) REFERENCES topology_scope_profiles(id)
 );
 
+-- table-is-derived: operator-curated config; skill-to-ranking registry (topology v3 skill-driven retrieval).
 CREATE TABLE IF NOT EXISTS topology_skills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,

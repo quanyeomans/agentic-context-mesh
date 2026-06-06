@@ -209,6 +209,7 @@ def _run_post_embed_summarise() -> None:
         )
         from kairix.paths import summaries_db_path
 
+        # F77-allow: summaries DB (separate file from worker DB); CLI-only writer.
         db = sqlite3.connect(str(summaries_db_path()))
         init_summaries_db(db)
 

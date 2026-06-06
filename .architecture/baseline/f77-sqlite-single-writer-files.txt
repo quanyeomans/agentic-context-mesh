@@ -1,7 +1,11 @@
-kairix/agents/curator/cli.py
-kairix/core/curator/drain.py
-kairix/core/embed/cli.py
-kairix/core/facts/store.py
-kairix/core/features/cli.py
-kairix/core/search/budget.py
-kairix/knowledge/summaries/cli.py
+# F77 baseline — sqlite3.connect call sites outside the writer-coordinator
+# allow-list and without an inline ``# F77-allow:`` rationale.
+# Grandfathered; shrink-only per F49.
+#
+# As of 2026-06-06: empty. Every previously-listed call site (curator CLI,
+# curator drain default-factory, embed CLI summary opener, facts store
+# per-collection opener, features CLI diagnostics openers, search budget
+# summaries reader, summaries CLI opener) carries a same-line
+# ``# F77-allow: <rationale>`` comment naming why the connection is
+# legitimate (operator CLI subcommand, separate-file DB, read-only
+# diagnostic, etc.) rather than a second writer to the engagement DB.

@@ -50,9 +50,11 @@ def _default_drain_db_factory(db_path: Path | None) -> sqlite3.Connection:
     in subprocess invocations).
     """
     if db_path is not None:
+        # F77-allow: operator CLI subcommand (curator drain); per-invocation read of the worker DB.
         return sqlite3.connect(str(db_path))
     from kairix.paths import db_path as _db_path
 
+    # F77-allow: operator CLI subcommand (curator drain); per-invocation read of the worker DB.
     return sqlite3.connect(str(_db_path()))
 
 

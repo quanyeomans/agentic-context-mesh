@@ -321,6 +321,7 @@ def _open_summaries_db() -> sqlite3.Connection | None:  # pragma: no cover — r
             _summaries_warned = True
         return None
     try:
+        # F77-allow: summaries DB (separate file from worker DB); read-only lookup for token budgeting.
         conn = sqlite3.connect(str(db_path))
         if not _summaries_warned:
             count = conn.execute("SELECT COUNT(*) FROM summaries").fetchone()[0]

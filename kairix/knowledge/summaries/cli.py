@@ -50,6 +50,7 @@ def _discover_vault_docs(document_root: Path) -> list[str]:
 
 def _open_db(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    # F77-allow: operator CLI subcommand (summarise); per-invocation summary DB writer.
     conn = sqlite3.connect(str(db_path))
     from kairix.knowledge.summaries.staleness import init_summaries_db
 

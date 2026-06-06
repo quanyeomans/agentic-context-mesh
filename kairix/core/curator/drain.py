@@ -450,6 +450,7 @@ def _default_open_db() -> sqlite3.Connection:
     """Production-default SQLite connection factory."""
     from kairix.paths import db_path
 
+    # F77-allow: default-factory for worker-tick neo4j-drain; called by orchestrator at startup.
     return sqlite3.connect(str(db_path()))
 
 
