@@ -144,6 +144,88 @@ def format_validate_table(out: Any, *, with_update_hint: bool) -> str:
     return "\n".join(lines)
 
 
+def cmd_enrich(
+    args: argparse.Namespace,
+    *,
+    deps: Any = None,
+) -> int:
+    """kairix entity enrich — write Wikidata descriptions to n.summary (#415).
+
+    Two modes:
+      * ``--name NAME`` enriches one entity by name.
+      * ``--all-missing`` iterates every entity with a ``wikidata_qid``
+        and missing summary, up to ``--limit``.
+
+    Idempotent: re-runs skip entities that already have a summary unless
+    ``--overwrite`` is passed.
+    """
+    import json as _json
+
+    from kairix.use_cases.entity import (
+        entity_enrich_batch_to_envelope,
+        entity_enrich_output_to_envelope,
+        run_entity_enrich,
+        run_entity_enrich_batch,
+    )
+
+    if args.all_missing:
+        batch = run_entity_enrich_batch(limit=args.limit, overwrite=args.overwrite, deps=deps)
+        if batch.error:
+            print(f"ERROR: {batch.error}", file=sys.stderr)
+            return 1
+        if args.format == "json":
+            print(_json.dumps(entity_enrich_batch_to_envelope(batch), indent=2))
+        else:
+            print(format_enrich_batch_text(batch))
+        return 0
+
+    out = run_entity_enrich(args.name, overwrite=args.overwrite, deps=deps)
+    if out.error:
+        print(f"ERROR: {out.error}", file=sys.stderr)
+        return 1
+    if args.format == "json":
+        print(_json.dumps(entity_enrich_output_to_envelope(out), indent=2))
+    else:
+        print(format_enrich_text(out))
+    return 0
+
+
+def format_enrich_text(out: Any) -> str:
+    """Render a single-entity EntityEnrichOutput as operator-facing text."""
+    lines: list[str] = [""]
+    lines.append(f"Entity: {out.name}")
+    lines.append(f"QID:    {out.qid or '(none)'}")
+    if out.updated:
+        lines.append(f"Updated: n.summary set ({len(out.description)} chars)")
+        lines.append("")
+        lines.append(out.description)
+    elif out.skipped_reason == "no_qid":
+        lines.append("Skipped: entity has no wikidata_qid — run `kairix entity validate --update` first")
+    elif out.skipped_reason == "already_summary":
+        lines.append("Skipped: summary already populated — pass --overwrite to replace")
+    elif out.skipped_reason == "not_found":
+        lines.append("Skipped: entity not found in Neo4j")
+    elif out.skipped_reason == "no_description":
+        lines.append("Skipped: Wikidata has no English description for this qid")
+    return "\n".join(lines)
+
+
+def format_enrich_batch_text(batch: Any) -> str:
+    """Render an EntityEnrichBatchOutput summary line + per-entity rollup."""
+    lines: list[str] = [""]
+    lines.append(
+        f"Processed {batch.requested} entit{'y' if batch.requested == 1 else 'ies'}: "
+        f"{batch.updated} updated, {batch.skipped} skipped, {batch.failed} failed."
+    )
+    if batch.failed:
+        lines.append("")
+        lines.append("Failures:")
+        for r in batch.results:
+            if r.error:
+                lines.append(f"  {r.name} (qid={r.qid or '?'}) — {r.error}")
+    return "\n".join(lines)
+
+
 def cmd_seed(args: argparse.Namespace, *, db_path: Any = None, neo4j_client: Any = None) -> int:
     """kairix entity seed — discover entities from indexed documents and seed Neo4j.
 
@@ -234,6 +316,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("--update", action=_STORE_TRUE, help="Write wikidata_qid to Neo4j node")
     p_validate.add_argument("--format", choices=["table", "json"], default="table")
     p_validate.set_defaults(func=cmd_validate)
+
+    # enrich subcommand (#415) — fetch Wikidata description into n.summary
+    p_enrich = sub.add_parser(
+        "enrich",
+        help="Fetch Wikidata descriptions and SET n.summary for entities with a wikidata_qid",
+    )
+    enrich_target = p_enrich.add_mutually_exclusive_group(required=True)
+    enrich_target.add_argument("--name", help="Enrich a single entity by name")
+    enrich_target.add_argument(
+        "--all-missing",
+        action=_STORE_TRUE,
+        dest="all_missing",
+        help="Enrich every entity with a wikidata_qid and missing summary (bounded by --limit)",
+    )
+    p_enrich.add_argument(
+        "--limit",
+        type=int,
+        default=100,
+        help="Max entities to process when using --all-missing (default: 100)",
+    )
+    p_enrich.add_argument(
+        "--overwrite",
+        action=_STORE_TRUE,
+        help="Replace existing summary even when populated",
+    )
+    p_enrich.add_argument("--format", choices=["table", "json"], default="table")
+    p_enrich.set_defaults(func=cmd_enrich, name=None, all_missing=False)
 
     # seed subcommand
     p_seed = sub.add_parser("seed", help="Discover entities from indexed documents and seed Neo4j")
@@ -503,6 +612,8 @@ def main(argv: list[str] | None = None, *, db_path: Any = None, neo4j_client: An
         return cmd_suggest(args)
     if args.command == "validate":
         return cmd_validate(args)
+    if args.command == "enrich":
+        return cmd_enrich(args)
     if args.command == "get":
         return cmd_get(args)
     if args.command == "count":

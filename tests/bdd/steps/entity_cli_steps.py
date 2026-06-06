@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from pytest_bdd import parsers, then, when
 
-_SUBCOMMANDS = ("suggest", "validate", "seed")
+_SUBCOMMANDS = ("suggest", "validate", "seed", "enrich")
 
 
 @dataclass
@@ -83,3 +83,19 @@ def _assert_stderr_names_missing_index(entity_cli_ctx: _EntityCliCtx) -> None:
         f"stderr did not name the missing index with the canonical operator phrase: {err!r}"
     )
     assert "kairix embed" in err, f"stderr did not name the remediation command 'kairix embed': {err!r}"
+
+
+@then("stdout shows the entity enrich skip notice")
+def _assert_enrich_skip_notice(entity_cli_ctx: _EntityCliCtx) -> None:
+    out = entity_cli_ctx.stdout
+    assert "Entity: Acme Corp" in out, f"expected entity header, got: {out!r}"
+    assert "Skipped" in out, f"expected Skipped marker, got: {out!r}"
+
+
+@then("stdout shows the batch enrichment summary")
+def _assert_enrich_batch_summary(entity_cli_ctx: _EntityCliCtx) -> None:
+    out = entity_cli_ctx.stdout
+    assert "Processed" in out, f"expected 'Processed N entities' summary, got: {out!r}"
+    assert "updated" in out and "skipped" in out and "failed" in out, (
+        f"expected updated/skipped/failed buckets in summary, got: {out!r}"
+    )

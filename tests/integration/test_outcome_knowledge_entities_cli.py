@@ -102,3 +102,61 @@ def test_entity_count_subprocess_returns_nonzero_without_neo4j(tmp_path: Path) -
     )
     assert "ERROR" in proc.stderr, f"expected ERROR prefix on stderr, got: {proc.stderr!r}"
     assert "Neo4j" in proc.stderr, f"expected Neo4j keyword in error, got: {proc.stderr!r}"
+
+
+def test_entity_enrich_subprocess_requires_target_flag(tmp_path: Path) -> None:
+    """``kairix entity enrich`` without --name or --all-missing must fail
+    at argparse (the target flags are mutually-exclusive + required).
+
+    Pins the binary surface contract for #415: operators can't
+    accidentally run enrichment with no scope. Argparse exits 2 on
+    missing-required and writes the usage line to stderr.
+
+    Sabotage-proof: dropping ``required=True`` from the
+    mutually_exclusive_group → argparse exits 0 and the test fails on
+    the exit-code assertion.
+    """
+    del tmp_path
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "entity", "enrich"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 2, (
+        f"entity enrich without target should exit 2, got {proc.returncode}. stderr={proc.stderr!r}"
+    )
+    # argparse emits "one of the arguments --name --all-missing is required" on stderr.
+    assert "--name" in proc.stderr and "--all-missing" in proc.stderr, (
+        f"expected mutually-exclusive arg names in stderr, got: {proc.stderr!r}"
+    )
+
+
+def test_entity_enrich_subprocess_degrades_gracefully_without_neo4j(tmp_path: Path) -> None:
+    """``kairix entity enrich --name X`` without a live Neo4j client emits
+    the "Skipped: entity not found" message and exits 0 — graceful
+    degradation matches the validate/suggest pattern (no Neo4j = empty
+    lookup, not crash).
+
+    Pins the binary surface for #415: operators in dev environments
+    (no Neo4j password) get a clear no-op message rather than a stack
+    trace. Sabotage-proof: changing format_enrich_text to drop the
+    "Skipped:" branch makes this assertion fail.
+    """
+    del tmp_path
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "entity", "enrich", "--name", "Acme Corp"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, (
+        f"entity enrich graceful degradation expected exit 0, got {proc.returncode}. "
+        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    )
+    assert "Entity: Acme Corp" in proc.stdout, f"expected entity header in stdout, got: {proc.stdout!r}"
+    assert "Skipped" in proc.stdout, f"expected Skipped marker in stdout, got: {proc.stdout!r}"

@@ -273,3 +273,142 @@ def entity_validate_output_to_envelope(out: EntityValidateOutput) -> dict[str, A
         "updated": out.updated,
         "error": out.error,
     }
+
+
+# ---------------------------------------------------------------------------
+# entity_enrich (#415 — write Wikidata descriptions to n.summary)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EntityEnrichOutput:
+    """Use-case output for a single ``kairix entity enrich`` invocation.
+
+    Mirrors the per-entity ``EnrichResult`` shape with ``error`` for the
+    use-case-level boundary (e.g. neo4j_client_fn raised).
+    """
+
+    name: str
+    qid: str = ""
+    description: str = ""
+    updated: bool = False
+    skipped_reason: str = ""
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class EntityEnrichBatchOutput:
+    """Use-case output for ``kairix entity enrich --all-missing``."""
+
+    requested: int = 0
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+    results: list[EntityEnrichOutput] = field(default_factory=list)
+    error: str = ""
+
+
+@dataclass(frozen=True)
+class EntityEnrichDeps:
+    """Injectable dependencies for ``run_entity_enrich``.
+
+    Mirrors :class:`EntityValidateDeps` — defaults wire the production
+    helpers; tests inject Fake* + a fake ``enrich_fn`` to avoid network.
+    """
+
+    enrich_fn: Callable[..., Any] = field(default_factory=lambda: _default_enrich)
+    enrich_batch_fn: Callable[..., Any] = field(default_factory=lambda: _default_enrich_batch)
+    neo4j_client_fn: Callable[[], Any] = field(default_factory=lambda: _default_neo4j_client)
+
+
+def _default_enrich(name: str, neo4j_client: Any, *, overwrite: bool = False) -> Any:
+    from kairix.knowledge.entities.enrich import enrich_entity
+
+    return enrich_entity(name, neo4j_client, overwrite=overwrite)
+
+
+def _default_enrich_batch(neo4j_client: Any, *, limit: int = 100, overwrite: bool = False) -> Any:
+    from kairix.knowledge.entities.enrich import enrich_all_missing
+
+    return enrich_all_missing(neo4j_client, limit=limit, overwrite=overwrite)
+
+
+def _project_enrich(r: Any) -> EntityEnrichOutput:
+    return EntityEnrichOutput(
+        name=str(getattr(r, "name", "")),
+        qid=str(getattr(r, "qid", "")),
+        description=str(getattr(r, _KEY_DESCRIPTION, "")),
+        updated=bool(getattr(r, "updated", False)),
+        skipped_reason=str(getattr(r, "skipped_reason", "")),
+        error=str(getattr(r, "error", "") or ""),
+    )
+
+
+def run_entity_enrich(
+    name: str,
+    *,
+    overwrite: bool = False,
+    deps: EntityEnrichDeps | None = None,
+) -> EntityEnrichOutput:
+    """Enrich a single entity by fetching its Wikidata description.
+
+    Never raises — failures populate ``error``.
+    """
+    d = deps or EntityEnrichDeps()
+    try:
+        neo4j = d.neo4j_client_fn()
+        result = d.enrich_fn(name, neo4j, overwrite=overwrite)
+        return _project_enrich(result)
+    except Exception as exc:
+        logger.warning("run_entity_enrich failed: %s", exc, exc_info=True)
+        return EntityEnrichOutput(name=name, error=f"{type(exc).__name__}: {exc}")
+
+
+def run_entity_enrich_batch(
+    *,
+    limit: int = 100,
+    overwrite: bool = False,
+    deps: EntityEnrichDeps | None = None,
+) -> EntityEnrichBatchOutput:
+    """Enrich every entity with a wikidata_qid but missing summary, up to ``limit``.
+
+    Never raises — failures populate ``error`` on the batch output.
+    """
+    d = deps or EntityEnrichDeps()
+    try:
+        neo4j = d.neo4j_client_fn()
+        batch = d.enrich_batch_fn(neo4j, limit=limit, overwrite=overwrite)
+        results = [_project_enrich(r) for r in getattr(batch, "results", [])]
+        return EntityEnrichBatchOutput(
+            requested=int(getattr(batch, "requested", 0)),
+            updated=int(getattr(batch, "updated", 0)),
+            skipped=int(getattr(batch, "skipped", 0)),
+            failed=int(getattr(batch, "failed", 0)),
+            results=results,
+            error=str(getattr(batch, "error", "") or ""),
+        )
+    except Exception as exc:
+        logger.warning("run_entity_enrich_batch failed: %s", exc, exc_info=True)
+        return EntityEnrichBatchOutput(error=f"{type(exc).__name__}: {exc}")
+
+
+def entity_enrich_output_to_envelope(out: EntityEnrichOutput) -> dict[str, Any]:
+    return {
+        "name": out.name,
+        "qid": out.qid,
+        _KEY_DESCRIPTION: out.description,
+        "updated": out.updated,
+        "skipped_reason": out.skipped_reason,
+        "error": out.error,
+    }
+
+
+def entity_enrich_batch_to_envelope(out: EntityEnrichBatchOutput) -> dict[str, Any]:
+    return {
+        "requested": out.requested,
+        "updated": out.updated,
+        "skipped": out.skipped,
+        "failed": out.failed,
+        "results": [entity_enrich_output_to_envelope(r) for r in out.results],
+        "error": out.error,
+    }
