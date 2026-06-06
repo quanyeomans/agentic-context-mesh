@@ -4,15 +4,22 @@ Individual source fetchers for the briefing pipeline.
 Each fetcher is independent and safe to run concurrently.
 All functions return strings (may be empty on failure) and never raise.
 
-Each fetcher accepts an optional ``memory_dir`` / ``document_root`` Path
-override so tests can pass a tmp_path-rooted layout without monkeypatching
+Each fetcher accepts an optional ``memory_dirs`` / ``document_root`` test
+seam so tests can pass a tmp_path-rooted layout without monkeypatching
 the kairix.paths helpers. Production callers leave them ``None`` and the
-helpers resolve via ``kairix.paths``.
+fetchers resolve via :func:`kairix.core.agents.scope.get_agent_scope`
+(which honours the ``agents:`` block in ``kairix.config.yaml``).
+
+The memory-reading fetchers (``fetch_memory_logs`` /
+``fetch_recent_memory``) iterate every surface returned by
+:meth:`AgentScope.memory_paths` — multi-surface agents must not silently
+drop content from any configured location.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -42,10 +49,12 @@ __all__ = [
     "fetch_hybrid_search",
     "fetch_knowledge_rules",
     "fetch_memory_logs",
+    "fetch_memory_logs_via_scope",
     "fetch_recent_decisions",
     "fetch_recent_memory",
     "get_brief_source_cache",
     "reset_brief_source_cache",
+    "resolve_memory_dirs",
 ]
 
 # Cache keys for the 5 cheap fetchers — one logical name per fetcher so
@@ -92,58 +101,148 @@ def _extract_tagged_lines(path: Path, day_label: str) -> list[str]:
     return out
 
 
-def fetch_memory_logs(agent: str, max_tokens: int = 500, memory_dir: Path | None = None) -> str:
+def resolve_memory_dirs(agent: str, config: dict[str, object] | None = None) -> list[Path]:
+    """Return every surface path declared by the agent's :class:`AgentScope`.
+
+    Wraps :func:`kairix.core.agents.scope.get_agent_scope` so the brief
+    source fetchers don't depend on the scope module's import path more
+    than once. ``config`` is the test seam — production callers leave it
+    None and the scope loader reads ``kairix.config.yaml`` itself.
+
+    Returns an empty list when scope resolution raises (missing
+    ``agents:`` and ``agent_defaults:`` blocks — the operator hasn't
+    onboarded the agent yet); the caller logs the empty-result.
     """
-    Fetch last 7 days of memory log files for agent.
+    from kairix.core.agents.scope import get_agent_scope
+
+    effective_config = _load_config() if config is None else config
+    try:
+        scope = get_agent_scope(agent, config=effective_config)
+    except ValueError as exc:
+        logger.warning(
+            "sources: no AgentScope for %r — %s. Add an agents.%s entry "
+            "or an agent_defaults block in kairix.config.yaml.",
+            agent,
+            exc,
+            agent,
+        )
+        return []
+    return list(scope.memory_paths())
+
+
+def _load_config() -> dict[str, object] | None:
+    """Read ``kairix.config.yaml`` as a top-level dict, or None on missing.
+
+    Thin alias over :func:`kairix.paths.load_top_level_config` so the
+    sources module doesn't have to spell out the env-var + yaml machinery.
+    """
+    from kairix.paths import load_top_level_config
+
+    return load_top_level_config()
+
+
+def fetch_memory_logs(
+    agent: str,
+    max_tokens: int = 500,
+    memory_dirs: Iterable[Path] | None = None,
+    config: dict[str, object] | None = None,
+) -> str:
+    """
+    Fetch last 7 days of memory log files for agent across every configured surface.
 
     Extracts items tagged [pending], [blocked], [action:], and summaries.
     Returns empty string on failure.
 
-    Cached for 1h per ``(memory_logs, agent)``; explicit ``memory_dir=``
-    overrides bypass the cache so test fixtures stay isolated.
+    Test seams:
+      * ``memory_dirs`` — pass an explicit iterable of Paths to bypass
+        scope resolution entirely (the simplest seam for tests with
+        a single tmp_path-rooted directory).
+      * ``config`` — pass a parsed ``kairix.config.yaml`` dict to drive
+        AgentScope resolution against an inline config instead of the
+        on-disk file. Useful when the test wants to exercise the
+        synthesis / multi-surface paths through the public surface.
+
+    When both seams are ``None`` (production path) surfaces are resolved
+    via :meth:`kairix.core.agents.scope.AgentScope.memory_paths` using
+    the on-disk ``kairix.config.yaml``.
+
+    Cached for 1h per ``(memory_logs, agent)``; explicit ``memory_dirs=``
+    or ``config=`` overrides bypass the cache so test fixtures stay
+    isolated.
     """
-    # Cache check — production path only (memory_dir=None). Tests
+    # Cache check — production path only (both seams=None). Tests
     # passing an explicit override bypass the cache so per-tmp_path
     # state stays isolated across runs.
-    if memory_dir is None:
+    if memory_dirs is None and config is None:
         cache = get_brief_source_cache()
         cached = cache.get(_CACHE_KEY_MEMORY_LOGS, agent)
         if cached is not None:
             return cached
-        result = _fetch_memory_logs_impl(agent, max_tokens, memory_dir)
+        result = fetch_memory_logs_via_scope(agent, max_tokens, config=None)
         cache.put(_CACHE_KEY_MEMORY_LOGS, agent, result)
         return result
-    return _fetch_memory_logs_impl(agent, max_tokens, memory_dir)
+    if memory_dirs is not None:
+        return _fetch_memory_logs_impl(agent, max_tokens, list(memory_dirs))
+    return fetch_memory_logs_via_scope(agent, max_tokens, config=config)
 
 
-def _fetch_memory_logs_impl(agent: str, max_tokens: int, memory_dir: Path | None) -> str:
+def fetch_memory_logs_via_scope(
+    agent: str,
+    max_tokens: int,
+    config: dict[str, object] | None,
+) -> str:
+    """Resolve the agent's memory surfaces via AgentScope, then read them.
+
+    Public symbol (F5-clean) so tests can drive the scope-driven path
+    without reaching into underscore-prefixed helpers. The brief
+    pipeline uses this directly when it wants to surface a missing-
+    memory note; the cached ``fetch_memory_logs`` delegates here for
+    production reads.
+    """
+    dirs = resolve_memory_dirs(agent, config=config)
+    if not dirs:
+        return ""
+    return _fetch_memory_logs_impl(agent, max_tokens, dirs)
+
+
+def _collect_last_seven_days_lines(memory_dir: Path) -> list[str]:
+    """Read last-7-days tagged lines from a single surface.
+
+    Extracted from ``_fetch_memory_logs_impl`` so the parent's per-surface
+    loop stays under F16's cognitive-complexity ceiling — three nested
+    loops (per surface x per day x per line) push the parent over 15.
+    """
+    today = date.today()
+    out: list[str] = []
+    for days_back in range(7):
+        day = today - timedelta(days=days_back)
+        path = memory_dir / f"{day.isoformat()}.md"
+        if path.exists():
+            out.extend(_extract_tagged_lines(path, day.isoformat()))
+    return out
+
+
+def _fetch_memory_logs_impl(agent: str, max_tokens: int, memory_dirs: list[Path]) -> str:
     """Cache-free implementation of :func:`fetch_memory_logs`.
 
-    Extracted so the public wrapper owns cache semantics and this
-    helper owns the read logic — keeps each function under F16's
-    cognitive-complexity ceiling.
+    Iterates every surface in ``memory_dirs`` and collects last-7-days
+    tagged lines from each. Surfaces that don't exist are logged once
+    (so operators see the missing directory) but do not abort the read
+    — a multi-surface agent with one missing workspace dir still gets
+    a useful brief from its memory dir.
     """
     try:
-        if memory_dir is None:
-            from kairix.paths import agent_memory_path
-
-            memory_dir = agent_memory_path(agent)
-        if not memory_dir.exists():
-            logger.warning(
-                "sources: memory dir not found for agent %r at %s — create it with: mkdir -p %s",
-                agent,
-                memory_dir,
-                memory_dir,
-            )
-            return ""
-
-        today = date.today()
         lines: list[str] = []
-        for days_back in range(7):
-            day = today - timedelta(days=days_back)
-            path = memory_dir / f"{day.isoformat()}.md"
-            if path.exists():
-                lines.extend(_extract_tagged_lines(path, day.isoformat()))
+        for memory_dir in memory_dirs:
+            if not memory_dir.exists():
+                logger.warning(
+                    "sources: memory dir not found for agent %r at %s — create it with: mkdir -p %s",
+                    agent,
+                    memory_dir,
+                    memory_dir,
+                )
+                continue
+            lines.extend(_collect_last_seven_days_lines(memory_dir))
 
         if not lines:
             return ""
@@ -196,36 +295,61 @@ def _collect_recent_memory_sections(memory_dir: Path) -> list[str]:
     return parts
 
 
-def fetch_recent_memory(agent: str, max_tokens: int = 300, memory_dir: Path | None = None) -> str:
+def fetch_recent_memory(
+    agent: str,
+    max_tokens: int = 300,
+    memory_dirs: Iterable[Path] | None = None,
+) -> str:
     """
-    Fetch today's and yesterday's memory files for agent (full content).
+    Fetch today's and yesterday's memory files for agent (full content)
+    across every configured surface.
+
     Returns empty string on failure.
 
-    Cached for 1h per ``(recent_memory, agent)``; explicit ``memory_dir=``
+    ``memory_dirs`` is the test seam; production callers leave it None
+    and surfaces are resolved via
+    :meth:`kairix.core.agents.scope.AgentScope.memory_paths`.
+
+    Cached for 1h per ``(recent_memory, agent)``; explicit ``memory_dirs=``
     overrides bypass the cache.
     """
-    if memory_dir is None:
+    if memory_dirs is None:
         cache = get_brief_source_cache()
         cached = cache.get(_CACHE_KEY_RECENT_MEMORY, agent)
         if cached is not None:
             return cached
-        result = _fetch_recent_memory_impl(agent, max_tokens, memory_dir)
+        result = _fetch_recent_memory_via_scope(agent, max_tokens, config=None)
         cache.put(_CACHE_KEY_RECENT_MEMORY, agent, result)
         return result
-    return _fetch_recent_memory_impl(agent, max_tokens, memory_dir)
+    return _fetch_recent_memory_impl(agent, max_tokens, list(memory_dirs))
 
 
-def _fetch_recent_memory_impl(agent: str, max_tokens: int, memory_dir: Path | None) -> str:
-    """Cache-free implementation of :func:`fetch_recent_memory`."""
+def _fetch_recent_memory_via_scope(
+    agent: str,
+    max_tokens: int,
+    config: dict[str, object] | None,
+) -> str:
+    """Production read path — resolve surfaces via AgentScope then read."""
+    dirs = resolve_memory_dirs(agent, config=config)
+    if not dirs:
+        return ""
+    return _fetch_recent_memory_impl(agent, max_tokens, dirs)
+
+
+def _fetch_recent_memory_impl(agent: str, max_tokens: int, memory_dirs: list[Path]) -> str:
+    """Cache-free implementation of :func:`fetch_recent_memory`.
+
+    Iterates every surface; missing dirs are skipped silently here (the
+    log-once happens in ``fetch_memory_logs``'s impl — duplicating the
+    warning at two source fetchers spams operator logs).
+    """
     try:
-        if memory_dir is None:
-            from kairix.paths import agent_memory_path
+        parts: list[str] = []
+        for memory_dir in memory_dirs:
+            if not memory_dir.exists():
+                continue
+            parts.extend(_collect_recent_memory_sections(memory_dir))
 
-            memory_dir = agent_memory_path(agent)
-        if not memory_dir.exists():
-            return ""
-
-        parts = _collect_recent_memory_sections(memory_dir)
         if not parts:
             return ""
 

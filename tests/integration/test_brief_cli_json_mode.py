@@ -11,10 +11,10 @@ shape. This test exercises the subprocess binary surface for both modes:
   from pre-PR-2.1 behaviour. Regression net against the dispatcher
   flip-over breaking text mode.
 
-The ``--memory-root`` flag is the F2-clean subprocess seam (mirrors
-``test_outcome_briefing_cli.py``): the operator-supplied root is
-threaded through ``set_agent_memory_root_override`` without any
-``KAIRIX_*`` env-var manipulation.
+PR 1.2 / #420 — the legacy ``--memory-root`` flag has been removed.
+Tests now seed a ``kairix.config.yaml`` in ``tmp_path`` and run the
+subprocess with ``cwd=tmp_path`` so the cwd-relative config is picked
+up — the F2-clean replacement for the old per-subprocess env-var hack.
 
 The subprocess env strips ``KAIRIX_LLM_API_KEY`` so the health probe
 takes the deterministic ``chat=offline`` branch — the test doesn't
@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -37,10 +38,26 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def _seed_minimal_memory_root(root: Path, agent: str) -> None:
-    """Seed the minimum vault layout the brief use case + sources read."""
-    agent_dir = root / agent
-    (agent_dir / "memory").mkdir(parents=True, exist_ok=True)
+def _seed_minimal_brief_workspace(tmp_path: Path, agent: str) -> None:
+    """Seed a ``kairix.config.yaml`` + the agent surface the brief reads.
+
+    Mirrors the helper in ``test_outcome_briefing_cli.py`` — operators
+    who used to pass ``--memory-root`` now declare the directory under
+    ``agents.<name>.surfaces`` in ``kairix.config.yaml``.
+    """
+    agent_dir = tmp_path / agent
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    config_yaml = tmp_path / "kairix.config.yaml"
+    config_yaml.write_text(
+        textwrap.dedent(f"""\
+            agents:
+              {agent}:
+                surfaces:
+                  - path: {agent_dir}
+                    label: memory
+            """),
+        encoding="utf-8",
+    )
 
 
 def _subprocess_env_without_llm_keys() -> dict[str, str]:
@@ -57,14 +74,14 @@ def _subprocess_env_without_llm_keys() -> dict[str, str]:
 # ``json.loads(proc.stdout)`` assertion fired with JSONDecodeError;
 # restored.
 def test_brief_cli_subprocess_json_mode_emits_envelope_dict(tmp_path: Path) -> None:
-    """Drive the real ``kairix brief --json`` binary against a tmp memory root.
+    """Drive the real ``kairix brief --json`` binary against a tmp config.
 
     Asserts stdout parses as JSON and carries the envelope-shape keys
     (F30: outcome on stdout, not just returncode). Degraded health
     (no LLM cred) still produces a well-formed envelope — that's the
     contract the MCP dispatcher will rely on once PR 2.8 lands.
     """
-    _seed_minimal_memory_root(tmp_path, "builder")
+    _seed_minimal_brief_workspace(tmp_path, "builder")
 
     proc = subprocess.run(
         [
@@ -74,13 +91,12 @@ def test_brief_cli_subprocess_json_mode_emits_envelope_dict(tmp_path: Path) -> N
             "brief",
             "builder",
             "--json",
-            "--memory-root",
-            str(tmp_path),
         ],
         capture_output=True,
         text=True,
         timeout=30,
         env=_subprocess_env_without_llm_keys(),
+        cwd=str(tmp_path),
         check=False,
     )
 
@@ -109,7 +125,7 @@ def test_brief_cli_subprocess_text_mode_unchanged(tmp_path: Path) -> None:
     pre-PR-2.1 behaviour: degraded happy-path emits the operator trace
     on stderr and an empty content body on stdout (no JSON braces).
     """
-    _seed_minimal_memory_root(tmp_path, "builder")
+    _seed_minimal_brief_workspace(tmp_path, "builder")
 
     proc = subprocess.run(
         [
@@ -118,13 +134,12 @@ def test_brief_cli_subprocess_text_mode_unchanged(tmp_path: Path) -> None:
             "kairix.cli",
             "brief",
             "builder",
-            "--memory-root",
-            str(tmp_path),
         ],
         capture_output=True,
         text=True,
         timeout=30,
         env=_subprocess_env_without_llm_keys(),
+        cwd=str(tmp_path),
         check=False,
     )
 

@@ -190,6 +190,21 @@ def _resolve_cached() -> KairixPaths:
 
 def load_paths_from_config() -> dict[str, str]:
     """Load the paths: section from kairix.config.yaml if it exists."""
+    data = load_top_level_config() or {}
+    raw = data.get("paths", {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def load_top_level_config() -> dict[str, object] | None:
+    """Return the full parsed ``kairix.config.yaml`` as a dict, or None.
+
+    Callers that need a top-level block other than ``paths:`` (e.g. the
+    ``agents:`` block consumed by
+    :func:`kairix.core.agents.scope.load_agent_scopes`) use this helper
+    so the env-var read + yaml parse stays inside :mod:`kairix.paths`.
+    Returns None when the file is missing or malformed — callers
+    fall back to their own default behaviour.
+    """
     config_path = os.environ.get(_KAIRIX_CONFIG_PATH_ENV) or "kairix.config.yaml"
     try:
         import yaml
@@ -198,11 +213,10 @@ def load_paths_from_config() -> dict[str, str]:
         if p.exists():
             with open(p) as f:
                 data = yaml.safe_load(f) or {}
-            result: dict[str, str] = data.get("paths", {})
-            return result
-    except Exception:  # noqa: S110 — graceful fallback when config is missing or malformed
+            return data if isinstance(data, dict) else None
+    except Exception:  # noqa: S110 — graceful fallback when config is missing or malformed; callers tolerate None
         pass
-    return {}
+    return None
 
 
 def clear_cache() -> None:
@@ -554,18 +568,6 @@ def summaries_db_path() -> Path:
             str(Path.home() / _USER_CACHE_DIR / "kairix" / "summaries.db"),
         )
     )
-
-
-def set_agent_memory_root_override(root: str) -> None:
-    """Set the ``KAIRIX_AGENT_MEMORY_ROOT`` env var so subsequent calls to
-    :func:`agent_memory_path` see the override.
-
-    Used by CLI entry points (``kairix brief --memory-root ...``) to thread
-    an operator-supplied memory root through the use case. The write
-    lives here so F4's "env reads stay in paths.py" gate covers both
-    sides of the env-var boundary.
-    """
-    os.environ["KAIRIX_AGENT_MEMORY_ROOT"] = root
 
 
 def read_int_env(name: str, *, default: int) -> int:
@@ -1293,35 +1295,12 @@ def agent_memory_glob(*, config: dict[str, Any] | None = None) -> str:
     return str(paths_cfg.get("agent_memory_glob") or "**/*.md")
 
 
-def agent_memory_path(agent: str, *, root: Path | str | None = None) -> Path:
-    """Get the memory directory for an agent.
-
-    Default: {document_root}/04-Agent-Knowledge/{agent}/memory
-    Override via the ``root`` kwarg, or via ``KAIRIX_AGENT_MEMORY_ROOT``
-    env var for custom layouts.
-
-    If the override path already ends with /{agent}/memory (a common
-    misuse — passing the full agent-memory path rather than the parent
-    of agent directories), the function detects this and returns the
-    path as-is rather than double-appending. Silently handling the
-    misuse with a warning is friendlier than failing.
-
-    ``root`` is the test seam (F2-clean): tests pass an explicit root
-    instead of monkeypatching ``KAIRIX_AGENT_MEMORY_ROOT``.
-    Production callers leave it None and the env-var path applies.
-    """
-    if root is None:
-        root = os.environ.get("KAIRIX_AGENT_MEMORY_ROOT")
-    if root:
-        override_path = Path(root)
-        if override_path.parts[-2:] == (agent, "memory"):
-            logger.warning(
-                "agent_memory_path: root override already ends with "
-                "/%s/memory; using it as-is to avoid path-doubling. Pass the "
-                "parent of the agent directories (e.g. .../04-Agent-Knowledge) "
-                "to silence this warning.",
-                agent,
-            )
-            return override_path
-        return override_path / agent / "memory"
-    return document_root() / _AGENT_KNOWLEDGE_DIR / agent / "memory"
+# PR 1.2 / #420 — the legacy memory-root helpers (and their backing env var)
+# have been deleted. The hardcoded ``<root>/<agent>/memory`` convention no
+# longer reflects production vault shapes (operators run flat ``<agent>/``
+# layouts or multi-surface scopes that include workspace directories
+# alongside memory). Every callsite now resolves via
+# :func:`kairix.core.agents.scope.get_agent_scope`, which reads operator
+# config from ``agents:`` / ``agent_defaults:`` in ``kairix.config.yaml``.
+# The regression guard against re-adding the legacy helpers lives at
+# ``tests/contracts/`` — see the no-legacy-helper contract test there.

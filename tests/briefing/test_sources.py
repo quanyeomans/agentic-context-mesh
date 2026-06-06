@@ -1,9 +1,9 @@
 """
 Tests for briefing source fetchers (kairix/briefing/sources.py).
 
-Tests pass tmp_path-rooted ``memory_dir`` / ``document_root`` Path
-arguments rather than @patch'ing the agent_memory_path / _DOCUMENT_ROOT
-imports — the public fetchers expose these as DI seams.
+PR 1.2 / #420 — the memory-reading fetchers take an iterable of
+``memory_dirs`` (the surfaces declared on the agent's AgentScope).
+Tests pass a tmp_path-rooted list rather than monkeypatching internals.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ class TestFetchMemoryLogs:
             "Normal log entry\n"
         )
         (memory_dir / f"{today.isoformat()}.md").write_text(content)
-        result = fetch_memory_logs("builder", memory_dir=memory_dir)
+        result = fetch_memory_logs("builder", memory_dirs=[memory_dir])
 
         assert "[pending]" in result or "pending" in result.lower()
         assert "[blocked]" in result or "blocked" in result.lower()
@@ -91,7 +91,7 @@ class TestFetchMemoryLogs:
         today = date.today()
         bad_file = memory_dir / f"{today.isoformat()}.md"
         bad_file.write_bytes(b"\xff\xfe invalid utf-8")
-        result = fetch_memory_logs("builder", memory_dir=memory_dir)
+        result = fetch_memory_logs("builder", memory_dirs=[memory_dir])
         # Should not raise — may return empty or partial content
         assert isinstance(result, str)
 
@@ -104,7 +104,7 @@ class TestFetchMemoryLogs:
         # Create large content
         content = "\n".join([f"[pending] item {i}" for i in range(1000)])
         (memory_dir / f"{today.isoformat()}.md").write_text(content)
-        result = fetch_memory_logs("builder", max_tokens=50, memory_dir=memory_dir)
+        result = fetch_memory_logs("builder", max_tokens=50, memory_dirs=[memory_dir])
 
         assert estimate_tokens(result) <= 100  # some buffer
 
@@ -130,7 +130,7 @@ class TestFetchRecentMemory:
 
         (memory_dir / f"{today.isoformat()}.md").write_text("Today's content here")
         (memory_dir / f"{yesterday.isoformat()}.md").write_text("Yesterday content here")
-        result = fetch_recent_memory("builder", memory_dir=memory_dir)
+        result = fetch_recent_memory("builder", memory_dirs=[memory_dir])
 
         assert today.isoformat() in result
         assert yesterday.isoformat() in result
@@ -240,7 +240,7 @@ class TestFetchMemoryLogsErrorPaths:
             def exists(self):
                 raise RuntimeError("disk gone")
 
-        result = fetch_memory_logs("builder", memory_dir=_ExplodingPath())  # type: ignore[arg-type]  # exploding fake to trip outer except
+        result = fetch_memory_logs("builder", memory_dirs=[_ExplodingPath()])  # type: ignore[list-item]  # exploding fake to trip outer except
         assert result == ""
 
 
@@ -254,7 +254,7 @@ class TestFetchRecentMemoryErrorPaths:
             def exists(self):
                 raise RuntimeError("disk gone")
 
-        result = fetch_recent_memory("builder", memory_dir=_ExplodingPath())  # type: ignore[arg-type]  # exploding fake to trip outer except
+        result = fetch_recent_memory("builder", memory_dirs=[_ExplodingPath()])  # type: ignore[list-item]  # exploding fake to trip outer except
         assert result == ""
 
     @pytest.mark.unit
@@ -270,7 +270,7 @@ class TestFetchRecentMemoryErrorPaths:
         bad.write_bytes(b"\xff\xfe garbage")  # invalid utf-8 still readable with errors=replace
         bad.chmod(0o000)
         try:
-            result = fetch_recent_memory("builder", memory_dir=memory_dir)
+            result = fetch_recent_memory("builder", memory_dirs=[memory_dir])
             # When the file is unreadable, the function returns "" (no parts collected)
             assert isinstance(result, str)
         finally:

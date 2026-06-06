@@ -71,45 +71,69 @@ def _date_in_range(log_date: date, start: date | None, end: date | None) -> bool
     return True
 
 
-def _iter_agent_memory_dirs(agent_knowledge_dir: Path) -> Iterator[Path]:
-    """Yield ``{agent}/memory`` directories under the agent-knowledge root."""
-    for agent_dir in agent_knowledge_dir.iterdir():
-        if not agent_dir.is_dir():
-            continue
-        memory_dir = agent_dir / "memory"
-        if memory_dir.is_dir():
-            yield memory_dir
+def _iter_scope_memory_dirs(config: dict[str, object] | None) -> Iterator[Path]:
+    """Yield every memory surface declared in the parsed ``agents:`` config.
+
+    Replaces the pre-PR-1.2 ``<agent>/memory`` filesystem scan: the
+    surfaces now come from operator config (``agents.<name>.surfaces``)
+    via :func:`kairix.core.agents.scope.load_agent_scopes`, so flat
+    vault layouts and multi-surface scopes (memory + workspace) are
+    both honoured. Surfaces that don't exist on disk are skipped so
+    a partially-onboarded scope doesn't break the temporal index.
+    """
+    from kairix.core.agents.scope import load_agent_scopes
+
+    scopes = load_agent_scopes(config)
+    for scope in scopes.values():
+        for path in scope.memory_paths():
+            if path.is_dir():
+                yield path
+
+
+def _load_top_level_config() -> dict[str, object] | None:
+    """Read ``kairix.config.yaml`` as a top-level dict, or None on missing.
+
+    Thin alias over :func:`kairix.paths.load_top_level_config`.
+    """
+    from kairix.paths import load_top_level_config
+
+    return load_top_level_config()
 
 
 def get_memory_log_paths(
     start: date | None,
     end: date | None,
     document_root: Path | None = None,
+    config: dict[str, object] | None = None,
 ) -> list[str]:
     """
-    Return all memory log paths across agent knowledge dirs, filtered by date range.
+    Return all memory log paths across every configured agent surface,
+    filtered by date range.
 
-    Scans {document_root}/04-Agent-Knowledge/*/memory/ for YYYY-MM-DD.md files.
-    If start is None, returns all logs up to end.
-    If end is None, returns all logs from start.
-    If both are None, returns all logs found.
+    Each surface returned by
+    :meth:`kairix.core.agents.scope.AgentScope.memory_paths` is scanned
+    for ``YYYY-MM-DD.md`` files. If start is None, returns all logs up
+    to end. If end is None, returns all logs from start. If both are
+    None, returns all logs found.
 
     Args:
         start:         Inclusive start date (or None for no lower bound).
         end:           Inclusive end date (or None for no upper bound).
-        document_root: Override for the document root directory.
-                       Defaults to paths.document_root() when None.
+        document_root: Reserved seam — currently unused, retained for
+                       caller compatibility. PR 1.2 routes via AgentScope
+                       which carries absolute paths.
+        config:        Test seam — pass a parsed ``kairix.config.yaml``
+                       dict (with an ``agents:`` block) to drive
+                       discovery without reading the on-disk config.
+                       Production callers leave None.
 
     Returns:
         Sorted list of matching file paths.
     """
-    doc_root = document_root or _doc_root_fn()
-    agent_knowledge_dir = doc_root / "04-Agent-Knowledge"
-    if not agent_knowledge_dir.is_dir():
-        return []
-
+    _ = document_root  # reserved seam — surfaces are absolute in AgentScope
+    cfg = config if config is not None else _load_top_level_config()
     paths: list[str] = []
-    for memory_dir in _iter_agent_memory_dirs(agent_knowledge_dir):
+    for memory_dir in _iter_scope_memory_dirs(cfg):
         for log_file in memory_dir.iterdir():
             log_date = _memory_log_date(log_file.name)
             if log_date is None or not _date_in_range(log_date, start, end):
@@ -198,10 +222,15 @@ def _collect_board_chunks(document_root: Path | None) -> list[TemporalChunk]:
     return chunks
 
 
-def _collect_memory_chunks(start: date | None, end: date | None, document_root: Path | None) -> list[TemporalChunk]:
+def _collect_memory_chunks(
+    start: date | None,
+    end: date | None,
+    document_root: Path | None,
+    config: dict[str, object] | None = None,
+) -> list[TemporalChunk]:
     """Scan in-range memory logs and emit their chunks; per-file errors logged."""
     chunks: list[TemporalChunk] = []
-    for log_path in get_memory_log_paths(start, end, document_root=document_root):
+    for log_path in get_memory_log_paths(start, end, document_root=document_root, config=config):
         try:
             chunks.extend(chunk_memory_log(log_path))
         except Exception as e:
@@ -252,13 +281,16 @@ def query_temporal_chunks(
     chunk_types: list[str] | None = None,
     limit: int = 20,
     document_root: Path | None = None,
+    config: dict[str, object] | None = None,
 ) -> list[TemporalChunk]:
     """
     Query the temporal chunk store for chunks matching topic in the date range.
 
     Strategy:
-      1. Scan all board files for Kanban cards
-      2. Scan memory logs in the date range
+      1. Scan all board files for Kanban cards (driven by ``document_root``)
+      2. Scan memory logs across every configured agent surface (driven by
+         the ``agents:`` block in the parsed ``config`` dict — falling back
+         to ``kairix.config.yaml`` on disk when ``config`` is None)
       3. Filter by date range and optional chunk_types
       4. Score each chunk with BM25 x recency
       5. Return top-N by combined score
@@ -270,15 +302,20 @@ def query_temporal_chunks(
         chunk_types:   Optional filter — "board_card" and/or "memory_section".
                        If None, both types are included.
         limit:         Maximum number of chunks to return.
-        document_root: Override for the document root directory.
+        document_root: Override for the boards document root directory.
                        Defaults to paths.document_root() when None.
+        config:        Optional parsed ``kairix.config.yaml`` dict — test
+                       seam for driving memory-surface discovery without
+                       reading the on-disk config.
 
     Returns:
         List of TemporalChunk objects sorted by score (best first).
         Returns [] on any failure.
     """
     try:
-        all_chunks = _collect_board_chunks(document_root) + _collect_memory_chunks(start, end, document_root)
+        all_chunks = _collect_board_chunks(document_root) + _collect_memory_chunks(
+            start, end, document_root, config=config
+        )
         filtered = _filter_chunks(all_chunks, start, end, chunk_types)
         if not filtered:
             return []

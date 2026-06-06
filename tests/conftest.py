@@ -66,6 +66,7 @@ pytest_plugins = [
     "tests.bdd.steps.kairix_cli_top_level_steps",
     "tests.bdd.steps.store_cli_steps",
     "tests.bdd.steps.brief_cli_steps",
+    "tests.bdd.steps.agent_scope_callsites_steps",
     "tests.bdd.steps.setup_cli_steps",
     "tests.bdd.steps.wikilinks_cli_steps",
     "tests.bdd.steps.entity_cli_steps",

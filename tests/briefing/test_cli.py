@@ -38,14 +38,23 @@ def test_build_parser_minimal_invocation() -> None:
     args = build_parser().parse_args(["builder"])
     assert args.agent == "builder"
     assert args.print_output is False
-    assert args.memory_root is None
+    assert args.as_json is False
 
 
-def test_build_parser_accepts_print_and_memory_root() -> None:
-    args = build_parser().parse_args(["shape", "--print", "--memory-root", "/path/to/agents"])
+def test_build_parser_accepts_print_and_json_flags() -> None:
+    args = build_parser().parse_args(["shape", "--print", "--json"])
     assert args.agent == "shape"
     assert args.print_output is True
-    assert args.memory_root == "/path/to/agents"
+    assert args.as_json is True
+
+
+def test_build_parser_rejects_dropped_memory_root_flag() -> None:
+    """PR 1.2 / #420 — ``--memory-root`` was removed; memory location
+    now flows through ``agents:`` in ``kairix.config.yaml``. argparse
+    must reject the flag so operators see the deprecation.
+    """
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["builder", "--memory-root", "/anywhere"])
 
 
 def test_build_parser_requires_agent() -> None:

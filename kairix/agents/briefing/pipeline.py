@@ -330,17 +330,22 @@ def generate_briefing(
     sources_count = len(context)
     logger.info("pipeline: collected %d sources for %r", sources_count, agent)
 
-    # Surface missing memory — helps users diagnose stale briefings
+    # Surface missing memory — helps users diagnose stale briefings.
+    # PR 1.2 / #420 — resolve the memory surface via AgentScope (which
+    # honours the operator's ``agents:`` / ``agent_defaults:`` blocks)
+    # rather than the deleted hardcoded ``<root>/<agent>/memory`` formula.
     memory_keys = {_KEY_MEMORY_LOGS, _KEY_RECENT_MEMORY}
     if not (memory_keys & context.keys()):
-        from kairix.paths import agent_memory_path
+        from kairix.agents.briefing.sources import resolve_memory_dirs
 
-        mem_path = agent_memory_path(agent)
+        surfaces = resolve_memory_dirs(agent)
+        surfaces_text = ", ".join(str(p) for p in surfaces) if surfaces else "<no surfaces configured>"
+        first_surface = str(surfaces[0]) if surfaces else "<surface>"
         context["_missing_memory_note"] = (
-            f"No agent memory logs found at {mem_path}. "
+            f"No agent memory logs found at: {surfaces_text}. "
             f"Briefing is based on knowledge store and entity data only. "
             f"To enable memory-based briefing, create daily log files at "
-            f"{mem_path}/YYYY-MM-DD.md"
+            f"{first_surface}/YYYY-MM-DD.md"
         )
         logger.warning(
             "pipeline: no memory sources for agent %r — briefing may be stale",
