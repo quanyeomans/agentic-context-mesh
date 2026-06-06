@@ -225,6 +225,32 @@ class PrepOutput:
     sources: list[str] = field(default_factory=list)
     error: str = ""
 
+    @classmethod
+    def from_envelope(cls, envelope: dict[str, Any]) -> PrepOutput:
+        """Rebuild a ``PrepOutput`` from the dict ``prep_output_to_envelope`` emits.
+
+        The seam for warm-MCP text-mode routing (#421 PR 2.4). The CLI
+        dispatcher receives a JSON envelope from the MCP worker; this
+        adapter projects it back to the dataclass shape ``format_text``
+        already consumes, so the in-process and warm paths render
+        byte-identical text.
+
+        ``sources`` is coerced through ``list(...)`` because JSON has
+        no tuple/list distinction — callers that pass the raw envelope
+        get the same list-shaped attribute the dataclass default
+        produces, so ``format_text`` iterates either way.
+        """
+        sources_raw = envelope.get("sources", [])
+        sources: list[str] = [str(s) for s in sources_raw] if sources_raw else []
+        return cls(
+            query=str(envelope.get("query", "")),
+            tier=str(envelope.get("tier", "")),
+            summary=str(envelope.get("summary", "")),
+            tokens=int(envelope.get("tokens", 0)),
+            sources=sources,
+            error=str(envelope.get("error", "")),
+        )
+
 
 @dataclass(frozen=True)
 class PrepDeps:
