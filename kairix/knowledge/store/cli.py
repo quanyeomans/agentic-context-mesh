@@ -13,11 +13,54 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 # F17 — argparse action keyword repeated across boolean-flag declarations; one
 # constant keeps the well-known sentinel in a single edit site.
 _STORE_TRUE = "store_true"
+
+
+def _default_crawl(**kw: Any) -> Any:
+    from kairix.knowledge.store.crawler import crawl
+
+    return crawl(**kw)
+
+
+def _default_neo4j_client() -> Any:
+    from kairix.knowledge.graph.client import get_client
+
+    return get_client()
+
+
+def _default_run_store_health(**kw: Any) -> Any:
+    from kairix.knowledge.store.health import run_store_health
+
+    return run_store_health(**kw)
+
+
+def _default_format_health_text(report: Any) -> str:
+    from kairix.knowledge.store.health import format_health_text
+
+    return format_health_text(report)
+
+
+@dataclass(frozen=True)
+class StoreCliDeps:
+    """Injectable dependencies for the ``kairix store`` CLI subcommands.
+
+    Mirrors ``CliDeps`` / ``EntityValidateDeps``: each callable defaults
+    via ``default_factory`` to the production helper. Tests construct
+    ``StoreCliDeps(crawl_fn=..., ...)`` and pass ``deps=`` to
+    :func:`main`; production callers leave ``deps=None`` and the real
+    helpers wire up. F6-clean — the seam lives on a Deps dataclass, not
+    on per-handler ``*_fn=None`` kwargs.
+    """
+
+    crawl_fn: Callable[..., Any] = field(default_factory=lambda: _default_crawl)
+    get_neo4j_client_fn: Callable[[], Any] = field(default_factory=lambda: _default_neo4j_client)
+    run_store_health_fn: Callable[..., Any] = field(default_factory=lambda: _default_run_store_health)
+    format_health_text_fn: Callable[[Any], str] = field(default_factory=lambda: _default_format_health_text)
 
 
 def main(
@@ -26,6 +69,7 @@ def main(
     neo4j_client: Any = None,
     noninteractive: bool | None = None,
     crawler: Callable[..., Any] | None = None,
+    deps: StoreCliDeps | None = None,
 ) -> None:
     """Entry point for `kairix store`.
 
@@ -40,15 +84,20 @@ def main(
     pipelines. Tests pass an explicit bool to exercise both paths without
     monkeypatching the environment.
 
-    ``crawler`` is the public DI seam for the crawl adapter. Production
-    callers leave it ``None`` and the CLI lazy-imports
-    ``kairix.knowledge.store.crawler.crawl``; tests pass a stub to drive
-    ``_cmd_crawl`` without monkey-patching the crawler.
-    """
-    if crawler is None:
-        from kairix.knowledge.store.crawler import crawl
+    ``crawler`` is a back-compat DI seam for the crawl adapter; new
+    callers should use ``deps=StoreCliDeps(crawl_fn=...)`` instead.
 
-        crawler = crawl
+    ``deps`` is the F1-clean DI seam: tests construct
+    ``StoreCliDeps(crawl_fn=..., get_neo4j_client_fn=..., ...)`` and pass
+    it here to drive the CLI without monkey-patching internal modules.
+    The explicit ``crawler`` / ``neo4j_client`` kwargs override their
+    respective deps fields so the older signature still works.
+    """
+    effective_deps = deps if deps is not None else StoreCliDeps()
+    if crawler is not None:
+        from dataclasses import replace as _dc_replace
+
+        effective_deps = _dc_replace(effective_deps, crawl_fn=crawler)
 
     parser = argparse.ArgumentParser(
         prog="kairix store",
@@ -88,9 +137,9 @@ def main(
     args = parser.parse_args(argv)
 
     if args.subcommand == "crawl":
-        _cmd_crawl(args, neo4j_client=neo4j_client, noninteractive=noninteractive, crawler=crawler)
+        _cmd_crawl(args, neo4j_client=neo4j_client, noninteractive=noninteractive, deps=effective_deps)
     elif args.subcommand == "health":
-        _cmd_health(args, neo4j_client=neo4j_client)
+        _cmd_health(args, neo4j_client=neo4j_client, deps=effective_deps)
     else:
         parser.print_help()
         sys.exit(1)
@@ -209,14 +258,11 @@ def _cmd_crawl(
     *,
     neo4j_client: Any = None,
     noninteractive: bool | None = None,
-    crawler: Callable[..., Any] | None = None,
+    deps: StoreCliDeps | None = None,
 ) -> None:
     import logging
 
-    if crawler is None:
-        from kairix.knowledge.store.crawler import crawl
-
-        crawler = crawl
+    d = deps if deps is not None else StoreCliDeps()
 
     level = logging.DEBUG if args.verbose else logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s %(message)s")
@@ -227,9 +273,7 @@ def _cmd_crawl(
     document_root = _resolve_document_root(args.document_root)
 
     if neo4j_client is None:
-        from kairix.knowledge.graph.client import get_client
-
-        neo4j_client = get_client()
+        neo4j_client = d.get_neo4j_client_fn()
 
     if not neo4j_client.available and not args.dry_run:
         print("Warning: Neo4j unavailable — running in dry-run mode", file=sys.stderr)
@@ -237,7 +281,7 @@ def _cmd_crawl(
 
     overrides = _resolve_overrides(document_root)
 
-    report = crawler(
+    report = d.crawl_fn(
         document_root=document_root,
         neo4j_client=neo4j_client,
         dry_run=args.dry_run,
@@ -255,16 +299,19 @@ def _cmd_crawl(
     sys.exit(0)
 
 
-def _cmd_health(args: argparse.Namespace, *, neo4j_client: Any = None) -> None:
-    from kairix.knowledge.store.health import run_store_health
+def _cmd_health(
+    args: argparse.Namespace,
+    *,
+    neo4j_client: Any = None,
+    deps: StoreCliDeps | None = None,
+) -> None:
+    d = deps if deps is not None else StoreCliDeps()
 
     document_root = args.document_root  # optional for health check
 
     if neo4j_client is None:
-        from kairix.knowledge.graph.client import get_client
-
-        neo4j_client = get_client()
-    report = run_store_health(neo4j_client=neo4j_client, document_root=document_root)
+        neo4j_client = d.get_neo4j_client_fn()
+    report = d.run_store_health_fn(neo4j_client=neo4j_client, document_root=document_root)
 
     if args.json_out:
         import dataclasses
@@ -274,8 +321,6 @@ def _cmd_health(args: argparse.Namespace, *, neo4j_client: Any = None) -> None:
         payload["total_entities"] = report.total_entities
         print(json.dumps(payload, indent=2))
     else:
-        from kairix.knowledge.store.health import format_health_text
-
-        print(format_health_text(report))
+        print(d.format_health_text_fn(report))
 
     sys.exit(0 if report.ok else 1)

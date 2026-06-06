@@ -2,5 +2,3 @@ tests/embed/test_cli_unit.py
 tests/embed/test_deps.py
 tests/embed/test_use_cases_defaults.py
 tests/eval/test_cli_unit.py
-tests/knowledge/store/test_cli_unit.py
-tests/summaries/test_cli_unit.py

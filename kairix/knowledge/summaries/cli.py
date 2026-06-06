@@ -14,11 +14,73 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 # F17 — argparse action keyword repeated across boolean-flag declarations; one
 # constant keeps the well-known sentinel in a single edit site.
 _STORE_TRUE = "store_true"
+
+
+def default_get_credentials(kind: str) -> Any:
+    from kairix.credentials import get_credentials
+
+    return get_credentials(kind)
+
+
+def default_write_summary(result: Any, db: sqlite3.Connection) -> None:
+    from kairix.knowledge.summaries.staleness import write_summary
+
+    write_summary(result, db)
+
+
+def default_get_stale_paths(all_paths: list[str], db: sqlite3.Connection) -> list[str]:
+    from kairix.knowledge.summaries.staleness import get_stale_paths
+
+    return get_stale_paths(all_paths, db)
+
+
+def default_generate_summaries(**kw: Any) -> list[Any]:
+    from kairix.knowledge.summaries.generate import generate_summaries
+
+    return generate_summaries(**kw)
+
+
+def default_document_root_path() -> Path:
+    from kairix.paths import document_root
+
+    return document_root()
+
+
+def default_summaries_db_path_fn() -> Path:
+    from kairix.paths import summaries_db_path
+
+    return summaries_db_path()
+
+
+@dataclass(frozen=True)
+class SummariesCliDeps:
+    """Injectable dependencies for the ``kairix summarise`` CLI.
+
+    Mirrors ``CliDeps`` / ``StoreCliDeps``: every callable defaults via
+    ``default_factory`` to the production helper. Tests construct
+    ``SummariesCliDeps(get_credentials_fn=..., ...)`` and pass ``deps=``
+    to :func:`main` to drive the CLI without monkey-patching
+    ``kairix.credentials`` / ``kairix.knowledge.summaries.staleness`` /
+    ``kairix.knowledge.summaries.generate`` / ``kairix.paths``.
+    """
+
+    get_credentials_fn: Callable[[str], Any] = field(default_factory=lambda: default_get_credentials)
+    write_summary_fn: Callable[[Any, sqlite3.Connection], None] = field(default_factory=lambda: default_write_summary)
+    get_stale_paths_fn: Callable[[list[str], sqlite3.Connection], list[str]] = field(
+        default_factory=lambda: default_get_stale_paths
+    )
+    generate_summaries_fn: Callable[..., list[Any]] = field(default_factory=lambda: default_generate_summaries)
+    document_root_fn: Callable[[], Path] = field(default_factory=lambda: default_document_root_path)
+    summaries_db_path_fn: Callable[[], Path] = field(default_factory=lambda: default_summaries_db_path_fn)
+
 
 # ---------------------------------------------------------------------------
 # Credential helper
@@ -81,13 +143,11 @@ def _run_generate(
     endpoint: str,
     deployment: str,
     db: sqlite3.Connection,
+    deps: SummariesCliDeps,
 ) -> None:
     """Generate summaries for paths and persist to DB."""
-    from kairix.knowledge.summaries.generate import generate_summaries
-    from kairix.knowledge.summaries.staleness import write_summary
-
     print(f"Generating summaries for {len(paths)} file(s) (include_l1={include_l1})...")
-    results = generate_summaries(
+    results = deps.generate_summaries_fn(
         paths=paths,
         api_key=api_key,
         endpoint=endpoint,
@@ -98,7 +158,7 @@ def _run_generate(
     )
 
     for result in results:
-        write_summary(result, db)
+        deps.write_summary_fn(result, db)
 
     print(f"Done: {len(results)} / {len(paths)} succeeded.")
 
@@ -112,11 +172,13 @@ def _resolve_paths(
     args: argparse.Namespace,
     document_root: Path | None,
     db_path: Path | None,
+    deps: SummariesCliDeps,
 ) -> tuple[Path, Path]:
     """Pick the effective ``document_root`` and ``db_path`` for this run.
 
     Precedence (highest wins): in-process kwarg → ``--document-root`` /
-    ``--summaries-cache`` argparse flag → kairix.paths default chain.
+    ``--summaries-cache`` argparse flag → ``deps.document_root_fn`` /
+    ``deps.summaries_db_path_fn`` (default: ``kairix.paths``).
     Extracted from ``main`` to keep its cognitive complexity below F16's
     ceiling.
     """
@@ -126,13 +188,9 @@ def _resolve_paths(
         db_path = Path(args.summaries_cache)
 
     if document_root is None:
-        from kairix.paths import document_root as _resolve_document_root
-
-        document_root = _resolve_document_root()
+        document_root = deps.document_root_fn()
     if db_path is None:
-        from kairix.paths import summaries_db_path
-
-        db_path = summaries_db_path()
+        db_path = deps.summaries_db_path_fn()
     return document_root, db_path
 
 
@@ -141,13 +199,22 @@ def main(
     *,
     document_root: Path | None = None,
     db_path: Path | None = None,
+    deps: SummariesCliDeps | None = None,
 ) -> None:
     """Entry point for `kairix summarise`.
 
     ``document_root`` and ``db_path`` are DI seams for tests; production
     callers leave them ``None`` and the CLI resolves them from the
     environment via ``kairix.paths``.
+
+    ``deps`` is the F1-clean DI seam: tests construct
+    ``SummariesCliDeps(get_credentials_fn=..., write_summary_fn=..., ...)``
+    and pass it here to drive the CLI without monkey-patching
+    ``kairix.credentials``, ``kairix.knowledge.summaries.staleness``,
+    ``kairix.knowledge.summaries.generate``, or ``kairix.paths``.
+    Production callers leave it ``None``.
     """
+    d = deps if deps is not None else SummariesCliDeps()
     parser = argparse.ArgumentParser(
         prog="kairix summarise",
         description="Generate L0/L1 tiered summaries for vault documents.",
@@ -193,7 +260,7 @@ def main(
 
     args = parser.parse_args(argv if argv is not None else sys.argv[2:])
 
-    document_root, db_path = _resolve_paths(args, document_root, db_path)
+    document_root, db_path = _resolve_paths(args, document_root, db_path, d)
 
     db = _open_db(db_path)
 
@@ -204,9 +271,7 @@ def main(
 
     # Fetch credentials (only needed for generation)
     try:
-        from kairix.credentials import get_credentials
-
-        llm_creds = get_credentials("llm")
+        llm_creds = d.get_credentials_fn("llm")
         api_key = llm_creds.api_key
         endpoint = llm_creds.endpoint
     except Exception as exc:
@@ -218,26 +283,24 @@ def main(
         if not paths:
             print("No vault docs found.", file=sys.stderr)
             sys.exit(1)
-        _run_generate(paths, args.include_l1, api_key, endpoint, args.deployment, db)
+        _run_generate(paths, args.include_l1, api_key, endpoint, args.deployment, db, d)
 
     elif args.stale:
         all_paths = _discover_vault_docs(document_root)
-        from kairix.knowledge.summaries.staleness import get_stale_paths
-
-        paths = get_stale_paths(all_paths, db)
+        paths = d.get_stale_paths_fn(all_paths, db)
         print(f"Stale/missing: {len(paths)} of {len(all_paths)}")
         if not paths:
             print("Nothing to do.")
             db.close()
             return
-        _run_generate(paths, args.include_l1, api_key, endpoint, args.deployment, db)
+        _run_generate(paths, args.include_l1, api_key, endpoint, args.deployment, db, d)
 
     elif args.path:
         p = Path(args.path)
         if not p.exists():
             print(f"File not found: {args.path}", file=sys.stderr)
             sys.exit(1)
-        _run_generate([str(p)], args.include_l1, api_key, endpoint, args.deployment, db)
+        _run_generate([str(p)], args.include_l1, api_key, endpoint, args.deployment, db, d)
 
     db.close()
 

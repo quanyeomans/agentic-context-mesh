@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+from kairix.knowledge.store.cli import StoreCliDeps
 from kairix.knowledge.store.cli import main as store_cli_main
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
@@ -147,15 +148,11 @@ def test_crawl_document_root_arg_wins_over_env(_no_docroot_env, tmp_path: Path) 
 # ---------------------------------------------------------------------------
 
 
-def test_crawl_verbose_path_runs_to_exit_0(monkeypatch, tmp_path: Path) -> None:
+def test_crawl_verbose_path_runs_to_exit_0(tmp_path: Path) -> None:
     from types import SimpleNamespace
 
-    import kairix.knowledge.store.crawler as crawler
-
-    monkeypatch.setattr(
-        crawler,
-        "crawl",
-        lambda **kw: SimpleNamespace(
+    def _fake_crawl(**_kw: Any) -> Any:
+        return SimpleNamespace(
             dry_run=True,
             organisations_found=0,
             organisations_upserted=0,
@@ -166,25 +163,25 @@ def test_crawl_verbose_path_runs_to_exit_0(monkeypatch, tmp_path: Path) -> None:
             edges_found=0,
             edges_upserted=0,
             errors=[],
-        ),
-    )
+        )
 
     _stdout, _stderr, code = _drive(
         ["crawl", "--document-root", str(tmp_path), "--dry-run", "--verbose"],
         neo4j_client=FakeNeo4jClient(entities=[]),
+        deps=StoreCliDeps(crawl_fn=_fake_crawl),
     )
     assert code == 0
 
 
-def test_crawl_default_neo4j_client_calls_get_client(monkeypatch, tmp_path: Path) -> None:
-    """When no neo4j_client passed, _cmd_crawl resolves via graph_client.get_client."""
+def test_crawl_default_neo4j_client_calls_get_client(tmp_path: Path) -> None:
+    """When no neo4j_client passed, _cmd_crawl resolves via deps.get_neo4j_client_fn.
+
+    Sabotage: drop the ``neo4j_client = d.get_neo4j_client_fn()`` line in
+    ``_cmd_crawl`` and ``seen_clients`` no longer contains the fake.
+    """
     from types import SimpleNamespace
 
-    import kairix.knowledge.graph.client as graph_client
-    import kairix.knowledge.store.crawler as crawler
-
     fake = FakeNeo4jClient(entities=[])
-    monkeypatch.setattr(graph_client, "get_client", lambda: fake)
     seen_clients: list[Any] = []
 
     def _crawl(**kw: Any) -> Any:
@@ -202,18 +199,17 @@ def test_crawl_default_neo4j_client_calls_get_client(monkeypatch, tmp_path: Path
             errors=[],
         )
 
-    monkeypatch.setattr(crawler, "crawl", _crawl)
-
-    _stdout, _stderr, code = _drive(["crawl", "--document-root", str(tmp_path)])
+    _stdout, _stderr, code = _drive(
+        ["crawl", "--document-root", str(tmp_path)],
+        deps=StoreCliDeps(crawl_fn=_crawl, get_neo4j_client_fn=lambda: fake),
+    )
     assert code == 0
     assert seen_clients == [fake]
 
 
-def test_crawl_neo4j_unavailable_forces_dry_run(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_crawl_neo4j_unavailable_forces_dry_run(tmp_path: Path) -> None:
     """When neo4j_client.available is False and dry_run is False, CLI auto-flips to dry-run."""
     from types import SimpleNamespace
-
-    import kairix.knowledge.store.crawler as crawler
 
     seen: list[bool] = []
 
@@ -232,30 +228,25 @@ def test_crawl_neo4j_unavailable_forces_dry_run(monkeypatch, tmp_path: Path, cap
             errors=[],
         )
 
-    monkeypatch.setattr(crawler, "crawl", _crawl)
-
     class _Unavailable(FakeNeo4jClient):
         available = False
 
     _stdout, stderr, code = _drive(
         ["crawl", "--document-root", str(tmp_path)],
         neo4j_client=_Unavailable(entities=[]),
+        deps=StoreCliDeps(crawl_fn=_crawl),
     )
     assert code == 0
     assert seen == [True], "expected dry_run to flip True when Neo4j unavailable"
     assert "Neo4j unavailable" in stderr
 
 
-def test_crawl_with_errors_exits_1(monkeypatch, tmp_path: Path) -> None:
+def test_crawl_with_errors_exits_1(tmp_path: Path) -> None:
     """When the crawl report has errors, CLI prints them and exits 1."""
     from types import SimpleNamespace
 
-    import kairix.knowledge.store.crawler as crawler
-
-    monkeypatch.setattr(
-        crawler,
-        "crawl",
-        lambda **kw: SimpleNamespace(
+    def _crawl(**_kw: Any) -> Any:
+        return SimpleNamespace(
             dry_run=False,
             organisations_found=1,
             organisations_upserted=1,
@@ -266,12 +257,12 @@ def test_crawl_with_errors_exits_1(monkeypatch, tmp_path: Path) -> None:
             edges_found=0,
             edges_upserted=0,
             errors=["err1: invalid frontmatter", "err2: missing field"],
-        ),
-    )
+        )
 
     stdout, stderr, code = _drive(
         ["crawl", "--document-root", str(tmp_path)],
         neo4j_client=FakeNeo4jClient(entities=[]),
+        deps=StoreCliDeps(crawl_fn=_crawl),
     )
     assert code == 1
     assert "Errors (2)" in stdout
@@ -279,16 +270,12 @@ def test_crawl_with_errors_exits_1(monkeypatch, tmp_path: Path) -> None:
     assert "err2" in stderr
 
 
-def test_crawl_non_dry_run_prints_upsert_counts(monkeypatch, tmp_path: Path) -> None:
+def test_crawl_non_dry_run_prints_upsert_counts(tmp_path: Path) -> None:
     """Non-dry-run report prints the 'upserted' continuation on each counter line."""
     from types import SimpleNamespace
 
-    import kairix.knowledge.store.crawler as crawler
-
-    monkeypatch.setattr(
-        crawler,
-        "crawl",
-        lambda **kw: SimpleNamespace(
+    def _crawl(**_kw: Any) -> Any:
+        return SimpleNamespace(
             dry_run=False,
             organisations_found=2,
             organisations_upserted=2,
@@ -299,12 +286,12 @@ def test_crawl_non_dry_run_prints_upsert_counts(monkeypatch, tmp_path: Path) -> 
             edges_found=4,
             edges_upserted=4,
             errors=[],
-        ),
-    )
+        )
 
     stdout, _stderr, code = _drive(
         ["crawl", "--document-root", str(tmp_path)],
         neo4j_client=FakeNeo4jClient(entities=[]),
+        deps=StoreCliDeps(crawl_fn=_crawl),
     )
     assert code == 0
     assert "Organisations: 2 found, 2 upserted" in stdout
@@ -399,11 +386,9 @@ def test_crawl_override_coverage_truncates_long_never_matched_list(tmp_path: Pat
 # ---------------------------------------------------------------------------
 
 
-def test_health_text_format_prints_human_summary(monkeypatch) -> None:
+def test_health_text_format_prints_human_summary() -> None:
     """Without --json, _cmd_health prints the human-readable summary via format_health_text."""
     from types import SimpleNamespace
-
-    import kairix.knowledge.store.health as health_mod
 
     fake_report = SimpleNamespace(
         ok=True,
@@ -416,27 +401,31 @@ def test_health_text_format_prints_human_summary(monkeypatch) -> None:
         document_root="/d",
         issues=[],
     )
-    fake_report.ok = True  # property-like
-    fake_report.total_entities = 5
 
-    monkeypatch.setattr(health_mod, "run_store_health", lambda **kw: fake_report)
-    monkeypatch.setattr(health_mod, "format_health_text", lambda r: "HEALTH-TEXT")
+    def _run(**_kw: Any) -> Any:
+        return fake_report
 
-    stdout, _stderr, code = _drive(["health"], neo4j_client=FakeNeo4jClient(entities=[]))
+    def _fmt(_r: Any) -> str:
+        return "HEALTH-TEXT"
+
+    stdout, _stderr, code = _drive(
+        ["health"],
+        neo4j_client=FakeNeo4jClient(entities=[]),
+        deps=StoreCliDeps(run_store_health_fn=_run, format_health_text_fn=_fmt),
+    )
     assert code == 0
     assert "HEALTH-TEXT" in stdout
 
 
-def test_health_default_neo4j_client_calls_get_client(monkeypatch) -> None:
-    """When no neo4j_client passed, _cmd_health resolves via graph_client.get_client."""
+def test_health_default_neo4j_client_calls_get_client() -> None:
+    """When no neo4j_client passed, _cmd_health resolves via deps.get_neo4j_client_fn.
+
+    Sabotage: drop the ``neo4j_client = d.get_neo4j_client_fn()`` line in
+    ``_cmd_health`` and ``seen`` stays empty.
+    """
     from types import SimpleNamespace
 
-    import kairix.knowledge.graph.client as graph_client
-    import kairix.knowledge.store.health as health_mod
-
     fake = FakeNeo4jClient(entities=[])
-    monkeypatch.setattr(graph_client, "get_client", lambda: fake)
-
     seen: list[Any] = []
 
     def _run(**kw: Any) -> Any:
@@ -453,10 +442,17 @@ def test_health_default_neo4j_client_calls_get_client(monkeypatch) -> None:
             issues=["Neo4j unavailable"],
         )
 
-    monkeypatch.setattr(health_mod, "run_store_health", _run)
-    monkeypatch.setattr(health_mod, "format_health_text", lambda r: "bad")
+    def _fmt(_r: Any) -> str:
+        return "bad"
 
-    _stdout, _stderr, code = _drive(["health"])
+    _stdout, _stderr, code = _drive(
+        ["health"],
+        deps=StoreCliDeps(
+            get_neo4j_client_fn=lambda: fake,
+            run_store_health_fn=_run,
+            format_health_text_fn=_fmt,
+        ),
+    )
     # ok=False → exit 1.
     assert code == 1
     assert seen == [fake]
