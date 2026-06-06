@@ -65,10 +65,10 @@ kairix.use_cases.prep::default_chat_callable::chat_backend_factory
 # scope once the alpha-rollout partial-install scenarios stabilise; for
 # now the kwarg is the documented composition swap point between
 # ``_resolve_deps`` and the wiring layer. See:
-#   - kairix/use_cases/eval_suite.py:571 (_resolve_production_fact_extractor)
-#   - kairix/use_cases/eval_suite.py:287 (_resolve_search_pipeline)
-kairix.use_cases.eval_suite::_resolve_production_fact_extractor::factory_loader
-kairix.use_cases.eval_suite::_resolve_search_pipeline::builder_loader
+#   - kairix/use_cases/eval_suite.py:571 (resolve_production_fact_extractor)
+#   - kairix/use_cases/eval_suite.py:287 (resolve_search_pipeline)
+kairix.use_cases.eval_suite::resolve_production_fact_extractor::factory_loader
+kairix.use_cases.eval_suite::resolve_search_pipeline::builder_loader
 
 # ADR-020 — connector tick budget + disk-watermark gate. Production
 # default resolves via shutil.disk_usage("/data").free (the standard

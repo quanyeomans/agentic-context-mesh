@@ -383,18 +383,19 @@ def test_wizard_json_mode_emits_config_to_stdout(tmp_path: Path, capsys) -> None
 
 
 @pytest.mark.unit
-def test_test_llm_connection_returns_false_on_exception() -> None:
-    """_test_llm_connection catches exceptions and returns False.
+def test_probe_llm_connection_returns_false_on_exception() -> None:
+    """``probe_llm_connection`` catches exceptions and returns False.
 
     Drives the public ``set_llm_endpoint_fn`` / ``set_llm_api_key_fn``
-    kwarg seams on _test_llm_connection — F1-clean.
+    kwarg seams on the public ``probe_llm_connection`` surface — F1
+    + F5 clean.
     """
-    from kairix.platform.setup import wizard as wiz
+    from kairix.platform.setup.wizard import probe_llm_connection
 
     def _raise(_value: object) -> None:
         raise RuntimeError("secrets backend down")
 
-    result = wiz._test_llm_connection(
+    result = probe_llm_connection(
         provider="azure",
         endpoint="https://x.openai.azure.com",
         api_key="key",  # pragma: allowlist secret

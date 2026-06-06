@@ -40,7 +40,7 @@ See: docs/architecture/operational-tests-design.md
 """
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="kairix warm",
         description=_HELP_DESCRIPTION,
@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _resolve_paths_overlay(db_path: str | None, document_root: str | None) -> Any:
+def resolve_paths_overlay(db_path: str | None, document_root: str | None) -> Any:
     """Build a :class:`kairix.paths.KairixPaths` overlay reflecting CLI args.
 
     Resolves the unset fields from :meth:`KairixPaths.resolve` so the
@@ -96,7 +96,7 @@ def _resolve_paths_overlay(db_path: str | None, document_root: str | None) -> An
     )
 
 
-def _build_pipeline_builder_for_paths(db_path: str | None, document_root: str | None) -> Any:
+def build_pipeline_builder_for_paths(db_path: str | None, document_root: str | None) -> Any:
     """Construct the ``pipeline_builder`` callable for ``run_warm``.
 
     When neither override is supplied, returns ``None`` — ``run_warm``
@@ -104,7 +104,7 @@ def _build_pipeline_builder_for_paths(db_path: str | None, document_root: str | 
     from env / config / platform default. When at least one override is
     supplied, returns a callable that calls
     :func:`kairix.core.factory.build_search_pipeline` with the overlay
-    from :func:`_resolve_paths_overlay`.
+    from :func:`resolve_paths_overlay`.
 
     F30 subprocess seam: outcome tests pass ``--db-path tmp/index.sqlite``
     and ``--document-root tmp`` to drive the warm-up against a tmp
@@ -113,7 +113,7 @@ def _build_pipeline_builder_for_paths(db_path: str | None, document_root: str | 
     if db_path is None and document_root is None:
         return None
 
-    overlay = _resolve_paths_overlay(db_path, document_root)
+    overlay = resolve_paths_overlay(db_path, document_root)
 
     def _builder() -> Any:
         from kairix.core.factory import build_search_pipeline
@@ -144,8 +144,8 @@ def _format_text(result: WarmResult) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    builder = _build_pipeline_builder_for_paths(args.db_path, args.document_root)
+    args = build_parser().parse_args(argv)
+    builder = build_pipeline_builder_for_paths(args.db_path, args.document_root)
     result = run_warm(pipeline_builder=builder) if builder is not None else run_warm()
     if args.json:
         print(json.dumps(result.to_envelope(), indent=2))

@@ -180,11 +180,11 @@ def _default_usearch_rebuilder() -> bool:  # pragma: no cover — production bou
     exist in test sandboxes.
     """
     try:
-        from kairix.core.embed.embed import _open_usearch_index
+        from kairix.core.embed.embed import open_default_usearch_index
         from kairix.paths import db_path as get_db_path
 
         db_p = get_db_path()
-        idx = _open_usearch_index()
+        idx = open_default_usearch_index()
         if idx is None:
             # No index on disk yet — nothing to rebuild against. Treat as
             # a no-op success; the next embed pass will create it.

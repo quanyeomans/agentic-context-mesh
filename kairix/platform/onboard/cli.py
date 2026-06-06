@@ -61,7 +61,7 @@ _KNOWN_ENV_PATHS = (
 )
 
 
-def _load_env_file(path: str) -> list[str]:
+def load_env_file(path: str) -> list[str]:
     """
     Load KEY=VALUE pairs from *path* into os.environ.
 
@@ -86,7 +86,7 @@ def _load_env_file(path: str) -> list[str]:
     return loaded
 
 
-def _self_load_env(
+def self_load_env(
     explicit_path: str | None,
     *,
     env_file_override_fn: Callable[[], str | None] = env_file_override,
@@ -110,18 +110,18 @@ def _self_load_env(
       tuple; when ``None`` the production constant is used.
     """
     if explicit_path:
-        loaded = _load_env_file(explicit_path)
+        loaded = load_env_file(explicit_path)
         return (explicit_path, loaded)
 
     env_var_path = env_file_override_fn() or ""
     if env_var_path:
-        loaded = _load_env_file(env_var_path)
+        loaded = load_env_file(env_var_path)
         return (env_var_path, loaded)
 
     probes = known_env_paths if known_env_paths is not None else _KNOWN_ENV_PATHS
     for probe in probes:
         if Path(probe).exists():
-            loaded = _load_env_file(probe)
+            loaded = load_env_file(probe)
             return (probe, loaded)
 
     return (None, [])
@@ -175,7 +175,7 @@ def cmd_ready(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     # Self-load env files so check results are context-independent (ERR-003)
-    env_source, env_keys = _self_load_env(
+    env_source, env_keys = self_load_env(
         getattr(args, "env_file", None),
         env_file_override_fn=getattr(args, "_env_file_override_fn", env_file_override),
         known_env_paths=getattr(args, "_known_env_paths", None),

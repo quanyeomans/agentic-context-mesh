@@ -46,7 +46,7 @@ class EmbedCliDeps:
     """
 
     pipeline_runner_factory: Callable[[], Callable[..., Any]] = field(default_factory=lambda: _default_pipeline_runner)
-    post_embed_summarise: Callable[[], None] = field(default_factory=lambda: _run_post_embed_summarise)
+    post_embed_summarise: Callable[[], None] = field(default_factory=lambda: run_post_embed_summarise)
 
 
 LOG_FILE = Path(
@@ -187,7 +187,7 @@ def cmd_embed(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> 
     return 0
 
 
-def _run_post_embed_summarise() -> None:
+def run_post_embed_summarise() -> None:
     """Generate L0 summaries for documents that don't have them yet.
 
     Non-critical: failures are logged but don't block the embed return code.

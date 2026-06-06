@@ -169,7 +169,7 @@ def reset_executors() -> None:
             _OBS_EXECUTOR = None
 
 
-def _default_db_path() -> Path:
+def default_db_path() -> Path:
     """Production resolver — points at a DEDICATED observability SQLite file.
 
     Sibling to the main index DB but a separate file so per-MCP-call
@@ -208,7 +208,7 @@ class AsyncToolHandlerDeps:
     asserts pool-size behaviour without touching the process-level pool.
     """
 
-    db_path_fn: DbPathFn = field(default_factory=lambda: _default_db_path)
+    db_path_fn: DbPathFn = field(default_factory=lambda: default_db_path)
     dispatch_executor_fn: ExecutorFn = field(default_factory=lambda: _default_dispatch_executor)
     obs_executor_fn: ExecutorFn = field(default_factory=lambda: _default_obs_executor)
 

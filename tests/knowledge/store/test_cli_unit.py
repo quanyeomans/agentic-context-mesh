@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-import kairix.knowledge.store.cli as store_cli
+from kairix.knowledge.store.cli import main as store_cli_main
 from tests.fixtures.neo4j_mock import FakeNeo4jClient
 
 pytestmark = pytest.mark.unit
@@ -34,7 +34,7 @@ def _drive(args: list[str], **kw: Any) -> tuple[str, str, int]:
     code = 0
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            store_cli.main(args, **kw)
+            store_cli_main(args, **kw)
     except SystemExit as e:
         code = int(e.code) if e.code is not None else 0
     return out.getvalue(), err.getvalue(), code
@@ -51,31 +51,95 @@ def _no_docroot_env():
             os.environ["KAIRIX_DOCUMENT_ROOT"] = prev
 
 
-def test_resolve_document_root_exits_1_when_missing(_no_docroot_env) -> None:
-    """_resolve_document_root with no arg + no env → exit 1."""
-    err = io.StringIO()
-    with pytest.raises(SystemExit) as info, redirect_stderr(err):
-        store_cli._resolve_document_root(None)
-    assert info.value.code == 1
-    assert "KAIRIX_DOCUMENT_ROOT" in err.getvalue()
+def test_crawl_exits_1_when_document_root_missing(_no_docroot_env) -> None:
+    """Public surface: ``kairix store crawl`` with no --document-root and
+    no KAIRIX_DOCUMENT_ROOT env → exit 1 with the expected error.
+
+    Sabotage: drop the ``sys.exit(1)`` in ``_resolve_document_root`` →
+    the CLI proceeds and code is no longer 1 / stderr message is missing.
+    """
+    _stdout, stderr, code = _drive(["crawl"])
+    assert code == 1
+    assert "KAIRIX_DOCUMENT_ROOT" in stderr
 
 
-def test_resolve_document_root_returns_env_value(_no_docroot_env, tmp_path: Path) -> None:
-    """When --document-root is missing, the env var is consulted."""
+def test_crawl_uses_document_root_from_env_when_arg_missing(_no_docroot_env, tmp_path: Path) -> None:
+    """Public surface: when --document-root is omitted, the env var is the
+    fallback the crawler sees.
+
+    Sabotage: drop the ``env = document_root_override(); if env: return env``
+    branch → the crawler captures None / wrong value, this assertion fails.
+    """
     os.environ["KAIRIX_DOCUMENT_ROOT"] = str(tmp_path)
+    captured: dict[str, Any] = {}
+
+    def _capturing_crawl(**kw: Any) -> Any:
+        captured["document_root"] = kw["document_root"]
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            dry_run=True,
+            organisations_found=0,
+            organisations_upserted=0,
+            persons_found=0,
+            persons_upserted=0,
+            outcomes_found=0,
+            outcomes_upserted=0,
+            edges_found=0,
+            edges_upserted=0,
+            errors=[],
+        )
+
     try:
-        assert store_cli._resolve_document_root(None) == str(tmp_path)
+        _stdout, _stderr, code = _drive(
+            ["crawl", "--dry-run"],
+            neo4j_client=FakeNeo4jClient(entities=[]),
+            crawler=_capturing_crawl,
+        )
     finally:
         del os.environ["KAIRIX_DOCUMENT_ROOT"]
+    assert code == 0
+    assert captured["document_root"] == str(tmp_path)
 
 
-def test_resolve_document_root_arg_wins_over_env(_no_docroot_env) -> None:
+def test_crawl_document_root_arg_wins_over_env(_no_docroot_env, tmp_path: Path) -> None:
+    """Public surface: --document-root takes precedence over the env var.
+
+    Sabotage: invert the priority (``return env if env else arg``) → the
+    crawler sees ``/env-path`` and this assertion fails.
+    """
+    arg_path = tmp_path / "arg-target"
+    arg_path.mkdir()
     os.environ["KAIRIX_DOCUMENT_ROOT"] = "/env-path"
+    captured: dict[str, Any] = {}
+
+    def _capturing_crawl(**kw: Any) -> Any:
+        captured["document_root"] = kw["document_root"]
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            dry_run=True,
+            organisations_found=0,
+            organisations_upserted=0,
+            persons_found=0,
+            persons_upserted=0,
+            outcomes_found=0,
+            outcomes_upserted=0,
+            edges_found=0,
+            edges_upserted=0,
+            errors=[],
+        )
+
     try:
-        # Arg takes precedence over env var.
-        assert store_cli._resolve_document_root("/arg-path") == "/arg-path"
+        _stdout, _stderr, code = _drive(
+            ["crawl", "--document-root", str(arg_path), "--dry-run"],
+            neo4j_client=FakeNeo4jClient(entities=[]),
+            crawler=_capturing_crawl,
+        )
     finally:
         del os.environ["KAIRIX_DOCUMENT_ROOT"]
+    assert code == 0
+    assert captured["document_root"] == str(arg_path)
 
 
 # ---------------------------------------------------------------------------

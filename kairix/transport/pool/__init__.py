@@ -21,7 +21,8 @@ batch dispatches.
 from kairix.transport.pool.client_pool import (
     ClientPool,
     get_client,
+    install_production_builder,
     reset_client_cache,
 )
 
-__all__ = ["ClientPool", "get_client", "reset_client_cache"]
+__all__ = ["ClientPool", "get_client", "install_production_builder", "reset_client_cache"]

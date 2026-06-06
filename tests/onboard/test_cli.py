@@ -203,7 +203,7 @@ def test_json_failure_remediation_uses_canonical_string(monkeypatch, capsys) -> 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
-    assert payload["failures"][0]["remediation"] == check_mod._CANONICAL_REMEDIATIONS["secrets_loaded"]
+    assert payload["failures"][0]["remediation"] == check_mod.CANONICAL_REMEDIATIONS["secrets_loaded"]
     assert "WRONG" not in payload["failures"][0]["remediation"]
 
 
@@ -358,13 +358,13 @@ def test_human_output_when_no_env_source_detected(monkeypatch, capsys) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _self_load_env / _load_env_file — env file plumbing
+# self_load_env / load_env_file — env file plumbing
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_load_env_file_returns_loaded_keys(tmp_path) -> None:
-    """_load_env_file returns the list of keys it actually set in os.environ.
+    """load_env_file returns the list of keys it actually set in os.environ.
 
     Existing keys are skipped (do-not-override semantics).
     """
@@ -375,7 +375,7 @@ def test_load_env_file_returns_loaded_keys(tmp_path) -> None:
         '# a comment\n\nKAIRIX_TEST_NEW_KEY_42=hello\nMALFORMED_NO_EQUALS\n"KAIRIX_TEST_QUOTED_42"="quoted-value"\n'
     )
 
-    loaded = cli_mod._load_env_file(str(env_file))
+    loaded = cli_mod.load_env_file(str(env_file))
 
     # The known-novel key (won't already be in env) was loaded
     assert "KAIRIX_TEST_NEW_KEY_42" in loaded
@@ -385,22 +385,22 @@ def test_load_env_file_returns_loaded_keys(tmp_path) -> None:
 
 @pytest.mark.unit
 def test_load_env_file_silently_returns_empty_on_missing(tmp_path) -> None:
-    """_load_env_file returns [] without raising when the file does not exist."""
+    """load_env_file returns [] without raising when the file does not exist."""
     from kairix.platform.onboard import cli as cli_mod
 
-    loaded = cli_mod._load_env_file(str(tmp_path / "nonexistent.env"))
+    loaded = cli_mod.load_env_file(str(tmp_path / "nonexistent.env"))
     assert loaded == []
 
 
 @pytest.mark.unit
 def test_self_load_env_explicit_path_wins(tmp_path) -> None:
-    """When --env-file is passed, _self_load_env always returns that path."""
+    """When --env-file is passed, self_load_env always returns that path."""
     from kairix.platform.onboard import cli as cli_mod
 
     env_file = tmp_path / "explicit.env"
     env_file.write_text("KAIRIX_EXPLICIT_NEW=yes\n")
 
-    source, _loaded = cli_mod._self_load_env(str(env_file))
+    source, _loaded = cli_mod.self_load_env(str(env_file))
     assert source == str(env_file)
     # Loaded keys list may include KAIRIX_EXPLICIT_NEW (if not previously set)
     # Sabotage-prove: source is exactly the explicit path, not a probe path
@@ -415,7 +415,7 @@ def test_self_load_env_falls_back_to_known_path(tmp_path, monkeypatch) -> None:
     known_file = tmp_path / "service.env"
     known_file.write_text("KAIRIX_FALLBACK_NEW=ok\n")
 
-    source, _loaded = cli_mod._self_load_env(
+    source, _loaded = cli_mod.self_load_env(
         None,
         env_file_override_fn=lambda: None,
         known_env_paths=(str(known_file),),
@@ -428,7 +428,7 @@ def test_self_load_env_returns_none_when_nothing_found(monkeypatch) -> None:
     """When no env file is present anywhere, source is None and loaded is []."""
     from kairix.platform.onboard import cli as cli_mod
 
-    source, loaded = cli_mod._self_load_env(
+    source, loaded = cli_mod.self_load_env(
         None,
         env_file_override_fn=lambda: None,
         known_env_paths=(),
@@ -439,13 +439,13 @@ def test_self_load_env_returns_none_when_nothing_found(monkeypatch) -> None:
 
 @pytest.mark.unit
 def test_self_load_env_uses_env_file_override(monkeypatch, tmp_path) -> None:
-    """When env_file_override() returns a path, _self_load_env uses it."""
+    """When env_file_override() returns a path, self_load_env uses it."""
     from kairix.platform.onboard import cli as cli_mod
 
     target = tmp_path / "via-override.env"
     target.write_text("KAIRIX_OVERRIDE_NEW=set\n")
 
-    source, _loaded = cli_mod._self_load_env(
+    source, _loaded = cli_mod.self_load_env(
         None,
         env_file_override_fn=lambda: str(target),
         known_env_paths=(),

@@ -35,29 +35,29 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# _default_db_path — wraps ``kairix.core.db.get_db_path``.
+# default_db_path — wraps ``kairix.core.db.get_db_path``.
 # ---------------------------------------------------------------------------
 
 
 def test_default_db_path_delegates_to_get_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_db_path`` calls ``kairix.core.db.get_db_path`` and stringifies."""
+    """``default_db_path`` calls ``kairix.core.db.get_db_path`` and stringifies."""
     import kairix.core.db as db_mod
 
     monkeypatch.setattr(db_mod, "get_db_path", lambda: Path("/tmp/test-path.sqlite"))
 
-    out = uc_mod._default_db_path()
+    out = uc_mod.default_db_path()
 
     assert out == "/tmp/test-path.sqlite"
     assert isinstance(out, str)
 
 
 # ---------------------------------------------------------------------------
-# _default_open_db — wraps ``kairix.core.db.open_db``.
+# default_open_db — wraps ``kairix.core.db.open_db``.
 # ---------------------------------------------------------------------------
 
 
 def test_default_open_db_delegates_to_open_db(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_open_db`` forwards the path to ``open_db``."""
+    """``default_open_db`` forwards the path to ``open_db``."""
     import kairix.core.db as db_mod
 
     captured: list[Path] = []
@@ -73,20 +73,20 @@ def test_default_open_db_delegates_to_open_db(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(db_mod, "open_db", _fake_open_db)
 
-    out = uc_mod._default_open_db(Path("/tmp/x.sqlite"))
+    out = uc_mod.default_open_db(Path("/tmp/x.sqlite"))
 
     assert out is sentinel
     assert captured == [Path("/tmp/x.sqlite")]
 
 
 # ---------------------------------------------------------------------------
-# _default_create_schema and _default_validate_schema — wrap
+# default_create_schema and default_validate_schema — wrap
 # kairix.core.db.schema.create_schema / validate_schema.
 # ---------------------------------------------------------------------------
 
 
 def test_default_create_schema_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_create_schema`` forwards its db argument to
+    """``default_create_schema`` forwards its db argument to
     ``kairix.core.db.schema.create_schema``."""
     import kairix.core.db.schema as schema_mod
 
@@ -94,13 +94,13 @@ def test_default_create_schema_delegates(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(schema_mod, "create_schema", lambda db: seen.append(db))
 
     db_sentinel = object()
-    uc_mod._default_create_schema(db_sentinel)
+    uc_mod.default_create_schema(db_sentinel)
 
     assert seen == [db_sentinel]
 
 
 def test_default_validate_schema_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_validate_schema`` forwards its db argument to
+    """``default_validate_schema`` forwards its db argument to
     ``kairix.core.db.schema.validate_schema``."""
     import kairix.core.db.schema as schema_mod
 
@@ -108,65 +108,65 @@ def test_default_validate_schema_delegates(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(schema_mod, "validate_schema", lambda db: seen.append(db))
 
     db_sentinel = object()
-    uc_mod._default_validate_schema(db_sentinel)
+    uc_mod.default_validate_schema(db_sentinel)
 
     assert seen == [db_sentinel]
 
 
 # ---------------------------------------------------------------------------
-# _default_acquire_lock and _default_release_lock — wrap
+# default_acquire_lock and default_release_lock — wrap
 # kairix.core.embed.cli.acquire_lock / release_lock.
 # ---------------------------------------------------------------------------
 
 
 def test_default_acquire_lock_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_acquire_lock`` returns whatever ``cli.acquire_lock`` returns."""
+    """``default_acquire_lock`` returns whatever ``cli.acquire_lock`` returns."""
     import kairix.core.embed.cli as cli_mod
 
     sentinel = object()
     monkeypatch.setattr(cli_mod, "acquire_lock", lambda: sentinel)
 
-    assert uc_mod._default_acquire_lock() is sentinel
+    assert uc_mod.default_acquire_lock() is sentinel
 
 
 def test_default_release_lock_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_release_lock`` forwards the lock handle to ``cli.release_lock``."""
+    """``default_release_lock`` forwards the lock handle to ``cli.release_lock``."""
     import kairix.core.embed.cli as cli_mod
 
     seen: list[Any] = []
     monkeypatch.setattr(cli_mod, "release_lock", lambda fh: seen.append(fh))
 
     handle = object()
-    uc_mod._default_release_lock(handle)
+    uc_mod.default_release_lock(handle)
 
     assert seen == [handle]
 
 
 # ---------------------------------------------------------------------------
-# _default_save_run_log — wraps kairix.core.embed.schema.save_run_log.
+# default_save_run_log — wraps kairix.core.embed.schema.save_run_log.
 # ---------------------------------------------------------------------------
 
 
 def test_default_save_run_log_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_save_run_log`` forwards the log entry dict verbatim."""
+    """``default_save_run_log`` forwards the log entry dict verbatim."""
     import kairix.core.embed.schema as schema_mod
 
     seen: list[dict[str, Any]] = []
     monkeypatch.setattr(schema_mod, "save_run_log", lambda entry: seen.append(entry))
 
     entry = {"command": "embed", "embedded": 7}
-    uc_mod._default_save_run_log(entry)
+    uc_mod.default_save_run_log(entry)
 
     assert seen == [entry]
 
 
 # ---------------------------------------------------------------------------
-# _default_run_embed — wraps kairix.core.embed.embed.run_embed.
+# default_run_embed — wraps kairix.core.embed.embed.run_embed.
 # ---------------------------------------------------------------------------
 
 
 def test_default_run_embed_delegates_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_run_embed`` forwards every kwarg to ``run_embed``."""
+    """``default_run_embed`` forwards every kwarg to ``run_embed``."""
     import kairix.core.embed.embed as embed_mod
 
     captured: list[dict[str, Any]] = []
@@ -177,19 +177,19 @@ def test_default_run_embed_delegates_kwargs(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(embed_mod, "run_embed", _fake_run_embed)
 
-    out = uc_mod._default_run_embed(db=None, force=False, batch_size=100, limit=None, deps=None)
+    out = uc_mod.default_run_embed(db=None, force=False, batch_size=100, limit=None, deps=None)
 
     assert out["embedded"] == 1
     assert captured == [{"db": None, "force": False, "batch_size": 100, "limit": None, "deps": None}]
 
 
 # ---------------------------------------------------------------------------
-# _default_run_recall_gate — wraps kairix.core.embed.recall_check.run_recall_gate.
+# default_run_recall_gate — wraps kairix.core.embed.recall_check.run_recall_gate.
 # ---------------------------------------------------------------------------
 
 
 def test_default_run_recall_gate_delegates_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_default_run_recall_gate`` forwards kwargs to ``run_recall_gate``."""
+    """``default_run_recall_gate`` forwards kwargs to ``run_recall_gate``."""
     import kairix.core.embed.recall_check as recall_mod
 
     captured: list[dict[str, Any]] = []
@@ -200,7 +200,7 @@ def test_default_run_recall_gate_delegates_kwargs(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(recall_mod, "run_recall_gate", _fake_gate)
 
-    passed, result = uc_mod._default_run_recall_gate(alert_callback=None, rebuild_canaries=False)
+    passed, result = uc_mod.default_run_recall_gate(alert_callback=None, rebuild_canaries=False)
 
     assert passed is True
     assert result["score"] == 0.95
@@ -220,16 +220,16 @@ def test_pipeline_deps_defaults_wire_lazy_production_callables() -> None:
     checks would fail.
     """
     deps = uc_mod.PipelineDeps()
-    assert deps.db_path_fn is uc_mod._default_db_path
-    assert deps.open_db_fn is uc_mod._default_open_db
-    assert deps.schema_fn is uc_mod._default_create_schema
-    assert deps.validate_schema_fn is uc_mod._default_validate_schema
-    assert deps.acquire_lock_fn is uc_mod._default_acquire_lock
-    assert deps.release_lock_fn is uc_mod._default_release_lock
-    assert deps.save_run_log_fn is uc_mod._default_save_run_log
-    assert deps.run_embed_fn is uc_mod._default_run_embed
-    assert deps.run_recall_gate_fn is uc_mod._default_run_recall_gate
-    assert deps.scan_documents_fn is uc_mod._default_scan_documents
+    assert deps.db_path_fn is uc_mod.default_db_path
+    assert deps.open_db_fn is uc_mod.default_open_db
+    assert deps.schema_fn is uc_mod.default_create_schema
+    assert deps.validate_schema_fn is uc_mod.default_validate_schema
+    assert deps.acquire_lock_fn is uc_mod.default_acquire_lock
+    assert deps.release_lock_fn is uc_mod.default_release_lock
+    assert deps.save_run_log_fn is uc_mod.default_save_run_log
+    assert deps.run_embed_fn is uc_mod.default_run_embed
+    assert deps.run_recall_gate_fn is uc_mod.default_run_recall_gate
+    assert deps.scan_documents_fn is uc_mod.default_scan_documents
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ def test_embed_pipeline_result_default_diagnostics_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _default_scan_documents — wraps DocumentScanner + collection config loader.
+# default_scan_documents — wraps DocumentScanner + collection config loader.
 #
 # This wrapper is the production hook ``PipelineDeps`` points at by default.
 # It composes five collaborators (DocumentScanner, load_collections,
@@ -296,7 +296,7 @@ def test_embed_pipeline_result_default_diagnostics_empty() -> None:
 
 class _FakeScanReport:
     """Stand-in for ``kairix.core.db.scanner.ScanReport`` — only the
-    fields :func:`_default_scan_documents` reads."""
+    fields :func:`default_scan_documents` reads."""
 
     def __init__(self, *, new: int = 0, updated: int = 0, unchanged: int = 0, errors: int = 0) -> None:
         self.new = new
@@ -331,7 +331,7 @@ def _install_scan_stubs(
     yaml_raises: BaseException | None = None,
     rebuild_fts_count: int = 0,
 ) -> tuple[_FakeScanner, dict[str, Any]]:
-    """Wire stand-ins for every collaborator ``_default_scan_documents`` uses.
+    """Wire stand-ins for every collaborator ``default_scan_documents`` uses.
 
     Returns the installed ``_FakeScanner`` plus a dict of recorders the
     test can assert against (FTS calls, registry calls, etc.).
@@ -443,7 +443,7 @@ def test_default_scan_documents_no_config_no_reflib_no_changes(
     scanner, recorders = _install_scan_stubs(monkeypatch, report=report)
 
     diagnostics: list[str] = []
-    new, updated, errors = uc_mod._default_scan_documents(object(), diagnostics)
+    new, updated, errors = uc_mod.default_scan_documents(object(), diagnostics)
 
     assert (new, updated, errors) == (0, 0, 0)
     # Default branch when no config: a single "default" collection rooted at ".".
@@ -474,7 +474,7 @@ def test_default_scan_documents_loads_shared_collections_from_config(
     scanner, _ = _install_scan_stubs(monkeypatch, report=report, collections_cfg=cfg)
 
     diagnostics: list[str] = []
-    uc_mod._default_scan_documents(object(), diagnostics)
+    uc_mod.default_scan_documents(object(), diagnostics)
 
     names = sorted(c.name for c in scanner.collections_scanned)
     assert names == ["alpha", "beta"]
@@ -487,7 +487,7 @@ def test_default_scan_documents_appends_reflib_when_present(
     report = _FakeScanReport(new=0, updated=0)
     scanner, _ = _install_scan_stubs(monkeypatch, report=report, reflib_is_dir=True)
 
-    uc_mod._default_scan_documents(object(), [])
+    uc_mod.default_scan_documents(object(), [])
 
     names = [c.name for c in scanner.collections_scanned]
     # The reference-library collection is appended after the default.
@@ -510,7 +510,7 @@ def test_default_scan_documents_rebuilds_fts_when_new_or_updated(
     _, recorders = _install_scan_stubs(monkeypatch, report=report, rebuild_fts_count=42)
 
     db_sentinel = object()
-    new, updated, errors = uc_mod._default_scan_documents(db_sentinel, [])
+    new, updated, errors = uc_mod.default_scan_documents(db_sentinel, [])
 
     assert (new, updated, errors) == (1, 0, 0)
     assert recorders["fts_calls"] == [db_sentinel], "FTS rebuild must run with the same db handle"
@@ -523,7 +523,7 @@ def test_default_scan_documents_rebuilds_fts_when_only_updated(
     report = _FakeScanReport(new=0, updated=3, unchanged=0, errors=0)
     _, recorders = _install_scan_stubs(monkeypatch, report=report, rebuild_fts_count=7)
 
-    uc_mod._default_scan_documents(object(), [])
+    uc_mod.default_scan_documents(object(), [])
 
     assert len(recorders["fts_calls"]) == 1
 
@@ -546,7 +546,7 @@ def test_default_scan_documents_builds_agent_resolver_from_registry(
         raw_yaml={"agents": [{"name": "alpha"}, {"name": "beta"}]},
     )
 
-    uc_mod._default_scan_documents(object(), [])
+    uc_mod.default_scan_documents(object(), [])
 
     # The build_agent_owner_resolver stub returns a tuple sentinel ("resolver", reg);
     # we just need to know the wrapper used it (vs. None).
@@ -572,7 +572,7 @@ def test_default_scan_documents_skips_resolver_when_registry_empty(
         raw_yaml={"agents": []},
     )
 
-    uc_mod._default_scan_documents(object(), [])
+    uc_mod.default_scan_documents(object(), [])
 
     assert recorders["scanner_kwargs"]["agent_owner_resolver"] is None
 
@@ -595,7 +595,7 @@ def test_default_scan_documents_appends_diagnostic_on_resolver_failure(
     )
 
     diagnostics: list[str] = []
-    new, updated, errors = uc_mod._default_scan_documents(object(), diagnostics)
+    new, updated, errors = uc_mod.default_scan_documents(object(), diagnostics)
 
     assert (new, updated, errors) == (0, 0, 0)
     assert recorders["scanner_kwargs"]["agent_owner_resolver"] is None
@@ -618,7 +618,7 @@ def test_default_scan_documents_handles_yaml_returning_none(
         raw_yaml=None,
     )
 
-    uc_mod._default_scan_documents(object(), [])
+    uc_mod.default_scan_documents(object(), [])
 
     # registry was constructed with {} (the wrapper's ``or {}`` fallback).
     assert recorders["registry_calls"] == [{}]

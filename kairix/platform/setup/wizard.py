@@ -37,7 +37,7 @@ def _default_set_llm_api_key(api_key: str) -> None:
     set_llm_api_key(api_key)
 
 
-def _test_llm_connection(
+def probe_llm_connection(
     provider: str,
     endpoint: str,
     api_key: str,
@@ -47,6 +47,12 @@ def _test_llm_connection(
     set_llm_api_key_fn: Callable[[str], None] = _default_set_llm_api_key,
 ) -> bool:
     """Test LLM connectivity with a single embed + chat call.
+
+    Public surface for the wizard's connectivity probe — wired through
+    :class:`WizardDeps` ``connection_test`` so production callers leave
+    the defaults and ``run_setup`` invokes it transparently. Exposed
+    directly so tests can exercise the exception-handling branch
+    without reaching past a ``_``-prefix (F5).
 
     ``set_llm_endpoint_fn`` / ``set_llm_api_key_fn`` are public DI seams
     — production callers leave the defaults and the function uses the
@@ -122,7 +128,7 @@ class WizardDeps:
     ``assert deps.x is not None`` ladder is needed inside the wizard.
     """
 
-    connection_test: Callable[[str, str, str, str], bool] = field(default_factory=lambda: _test_llm_connection)
+    connection_test: Callable[[str, str, str, str], bool] = field(default_factory=lambda: probe_llm_connection)
     # Public DI seam for the initial-embed run — tests inject a fake to
     # exercise the "indexing failed" branch in _maybe_run_initial_index
     # without monkey-patching ``kairix.core.embed.cli.main``. The default
@@ -494,7 +500,7 @@ def run_setup(
     Args:
         deps: Injectable dependencies. Tests construct
               ``WizardDeps(connection_test=fake)``; production omits the kwarg
-              and the default factory wires ``_test_llm_connection``.
+              and the default factory wires ``probe_llm_connection``.
 
     Returns True if setup completed successfully.
     """

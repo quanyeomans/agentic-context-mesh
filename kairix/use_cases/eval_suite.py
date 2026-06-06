@@ -175,7 +175,7 @@ def main(
     args = _build_parser().parse_args(argv_list)
     suite_path = Path(args.suite_path)
 
-    deps = _resolve_deps(
+    deps = resolve_deps(
         paths=paths,
         fact_store=fact_store,
         fact_extractor=fact_extractor,
@@ -209,7 +209,7 @@ def _dispatch_legacy(argv_list: list[str]) -> int:
     return 0
 
 
-def _resolve_deps(
+def resolve_deps(
     *,
     paths: KairixPaths | None,
     fact_store: FactStore | None,
@@ -227,14 +227,14 @@ def _resolve_deps(
 
     if fact_store is None:
         try:
-            fact_store = _resolve_production_fact_store(resolved_paths.db_path)
+            fact_store = resolve_production_fact_store(resolved_paths.db_path)
         except ImportError as exc:
             err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
             return 2
 
     if llm is None:
         try:
-            llm = _resolve_production_llm()
+            llm = resolve_production_llm()
         except ImportError as exc:
             err_sink.write(f"{_ERROR_PREFIX}{exc}\n")
             return 2
@@ -246,10 +246,10 @@ def _resolve_deps(
     # root in :mod:`kairix.corpus.wiring` builds the real
     # :class:`LLMFactExtractor` wired to the resolved LLM backend.
     resolved_extractor: FactExtractor = (
-        fact_extractor if fact_extractor is not None else _resolve_production_fact_extractor(llm, err_sink=err_sink)
+        fact_extractor if fact_extractor is not None else resolve_production_fact_extractor(llm, err_sink=err_sink)
     )
 
-    resolved_pipeline = _resolve_search_pipeline(
+    resolved_pipeline = resolve_search_pipeline(
         override=search_pipeline,
         via_prep=via_prep,
         err_sink=err_sink,
@@ -274,11 +274,11 @@ def _resolve_deps(
     )
 
 
-def _import_search_pipeline_builder() -> Callable[[], SearchPipeline]:
+def import_search_pipeline_builder() -> Callable[[], SearchPipeline]:
     """Import :func:`kairix.core.factory.build_search_pipeline`.
 
     Extracted so the import is a single seam tests can swap by passing
-    a ``builder_loader`` to :func:`_resolve_search_pipeline`. Raises
+    a ``builder_loader`` to :func:`resolve_search_pipeline`. Raises
     :class:`ImportError` straight through; the caller handles the
     operator-visible warning.
     """
@@ -288,7 +288,7 @@ def _import_search_pipeline_builder() -> Callable[[], SearchPipeline]:
     return builder
 
 
-def _resolve_search_pipeline(
+def resolve_search_pipeline(
     *,
     override: SearchPipeline | None,
     via_prep: bool,
@@ -309,13 +309,13 @@ def _resolve_search_pipeline(
 
     ``builder_loader`` is the documented composition seam — tests inject
     a raising loader to drive the ImportError branch. NOT test-only
-    (F6 clean): same swap-point shape as ``_resolve_production_fact_extractor``.
+    (F6 clean): same swap-point shape as ``resolve_production_fact_extractor``.
     """
     if override is not None:
         return override
     if not via_prep:
         return None
-    loader = builder_loader if builder_loader is not None else _import_search_pipeline_builder
+    loader = builder_loader if builder_loader is not None else import_search_pipeline_builder
     try:
         builder = loader()
     except ImportError as exc:
@@ -453,10 +453,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _format_human(result: SuiteResult, *, suite_path: Path) -> str:
     """Render the human-readable summary documented in the brief."""
-    pct = _pct(result.n_passed, result.n_questions)
+    overall_pct = pct(result.n_passed, result.n_questions)
     lines: list[str] = [
         f"Suite: {result.suite_name} (path={suite_path})",
-        f"  Questions  : {result.n_passed}/{result.n_questions} ({pct}%)",
+        f"  Questions  : {result.n_passed}/{result.n_questions} ({overall_pct}%)",
         f"  Mean score : {result.mean_score:.3f}",
         "  By category:",
     ]
@@ -464,7 +464,7 @@ def _format_human(result: SuiteResult, *, suite_path: Path) -> str:
         n = int(stats["n"])
         passed = int(stats["passed"])
         mean = stats["mean"]
-        cat_pct = _pct(passed, n)
+        cat_pct = pct(passed, n)
         lines.append(f"    {cat:<14} {passed}/{n} ({cat_pct}%) mean={mean:.3f}")
     if result.per_extraction_f1 is not None:
         lines.append(
@@ -475,7 +475,7 @@ def _format_human(result: SuiteResult, *, suite_path: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _pct(passed: int, total: int) -> int:
+def pct(passed: int, total: int) -> int:
     """Integer percentage; 0 when total is zero (avoids divide-by-zero)."""
     if total <= 0:
         return 0
@@ -538,7 +538,7 @@ def _check_regression(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_production_fact_store(db_path: Path) -> FactStore:
+def resolve_production_fact_store(db_path: Path) -> FactStore:
     """Return a production FactStore or raise ImportError with actionable hint.
 
     The ImportError rewrap is defensive: ``kairix.core.facts`` is a Cap
@@ -559,7 +559,7 @@ def _resolve_production_fact_store(db_path: Path) -> FactStore:
     return store
 
 
-def _import_production_extractor_factory() -> Callable[[LLMBackend], FactExtractor]:
+def import_production_extractor_factory() -> Callable[[LLMBackend], FactExtractor]:
     """Import :func:`kairix.corpus.wiring.make_production_fact_extractor`.
 
     Extracted so the import + lookup is a single atomic step the caller
@@ -572,7 +572,7 @@ def _import_production_extractor_factory() -> Callable[[LLMBackend], FactExtract
     return factory
 
 
-def _resolve_production_fact_extractor(
+def resolve_production_fact_extractor(
     llm: LLMBackend,
     *,
     err_sink: TextIO,
@@ -604,15 +604,15 @@ def _resolve_production_fact_extractor(
         Writable text sink — operator-visible warnings land here.
     factory_loader:
         Composition seam — when ``None``, production resolves via
-        :func:`_import_production_extractor_factory`. Tests inject a
+        :func:`import_production_extractor_factory`. Tests inject a
         raising loader to drive the ImportError fallback OR a loader
         that returns a raising factory to drive the broad-except
         fallback. This kwarg is NOT test-only (F6 clean): it is the
-        documented swap point between the ``_resolve_deps`` orchestrator
+        documented swap point between the ``resolve_deps`` orchestrator
         and the wiring layer, used by any future caller wanting to
         pin a non-default factory resolution strategy.
     """
-    loader = factory_loader if factory_loader is not None else _import_production_extractor_factory
+    loader = factory_loader if factory_loader is not None else import_production_extractor_factory
     try:
         factory = loader()
     except ImportError as exc:
@@ -638,7 +638,7 @@ def _resolve_production_fact_extractor(
         return _NullFactExtractor()
 
 
-def _resolve_production_llm() -> LLMBackend:
+def resolve_production_llm() -> LLMBackend:
     """Return the configured production LLM backend.
 
     Resolves via :func:`kairix.platform.llm.get_default_backend` so the

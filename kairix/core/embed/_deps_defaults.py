@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 
 def default_get_azure_config() -> tuple[str, str, str]:
     """Production default for ``EmbedDependencies.get_azure_config``."""
-    from kairix.core.embed.embed import _get_azure_config
+    from kairix.core.embed.embed import get_azure_config_from_credentials
 
-    return _get_azure_config()
+    return get_azure_config_from_credentials()
 
 
 def default_preflight_check(api_key: str, endpoint: str, deployment: str) -> int:
@@ -61,9 +61,9 @@ def default_embed_batch(
 
 def default_open_usearch_index() -> Any:
     """Production default for ``EmbedDependencies.open_usearch_index``."""
-    from kairix.core.embed.embed import _open_usearch_index
+    from kairix.core.embed.embed import open_default_usearch_index
 
-    return _open_usearch_index()
+    return open_default_usearch_index()
 
 
 def default_migrate_content_vectors(db: sqlite3.Connection) -> None:

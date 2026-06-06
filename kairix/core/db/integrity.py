@@ -254,13 +254,13 @@ def _check_fts_without_documents(db: sqlite3.Connection) -> IntegrityGap | None:
 def _default_vector_store_loader() -> Any:
     """Production default for the vector-store loader injection seam.
 
-    Wraps :func:`kairix.core.embed.embed._open_usearch_index` so tests
+    Wraps :func:`kairix.core.embed.embed.open_default_usearch_index` so tests
     can pass an alternate callable through ``check_integrity`` without
     monkey-patching the embed module (F1-clean).
     """
-    from kairix.core.embed.embed import _open_usearch_index
+    from kairix.core.embed.embed import open_default_usearch_index
 
-    return _open_usearch_index()
+    return open_default_usearch_index()
 
 
 # F71-truthfulness-exempt: the gap's ``count`` field carries the delta vs

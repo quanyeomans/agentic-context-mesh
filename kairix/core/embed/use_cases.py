@@ -53,55 +53,55 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _default_db_path() -> str:
+def default_db_path() -> str:
     from kairix.core.db import get_db_path
 
     return str(get_db_path())
 
 
-def _default_open_db(path: Path) -> Any:
+def default_open_db(path: Path) -> Any:
     from kairix.core.db import open_db
 
     return open_db(path)
 
 
-def _default_create_schema(db: Any) -> None:
+def default_create_schema(db: Any) -> None:
     from kairix.core.db.schema import create_schema
 
     create_schema(db)
 
 
-def _default_validate_schema(db: Any) -> None:
+def default_validate_schema(db: Any) -> None:
     from kairix.core.db.schema import validate_schema
 
     validate_schema(db)
 
 
-def _default_acquire_lock() -> Any:
+def default_acquire_lock() -> Any:
     from kairix.core.embed.cli import acquire_lock
 
     return acquire_lock()
 
 
-def _default_release_lock(lock_fh: Any) -> None:
+def default_release_lock(lock_fh: Any) -> None:
     from kairix.core.embed.cli import release_lock
 
     release_lock(lock_fh)
 
 
-def _default_save_run_log(entry: dict[str, Any]) -> None:
+def default_save_run_log(entry: dict[str, Any]) -> None:
     from kairix.core.embed.schema import save_run_log
 
     save_run_log(entry)
 
 
-def _default_run_embed(**kwargs: Any) -> dict[str, Any]:
+def default_run_embed(**kwargs: Any) -> dict[str, Any]:
     from kairix.core.embed.embed import run_embed
 
     return run_embed(**kwargs)
 
 
-def _default_run_recall_gate(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
+def default_run_recall_gate(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
     from kairix.core.embed.recall_check import run_recall_gate
 
     return run_recall_gate(**kwargs)
@@ -150,7 +150,7 @@ def harmonise_reference_library(
             break
 
     if found_at is None:
-        out.append(_default_reflib_collection(reflib_root))
+        out.append(default_reflib_collection(reflib_root))
         return out
 
     c = out[found_at]
@@ -174,13 +174,13 @@ def harmonise_reference_library(
     return out
 
 
-def _default_reflib_collection(reflib_root: Path) -> Any:
+def default_reflib_collection(reflib_root: Path) -> Any:
     from kairix.core.db.scanner import CollectionConfig
 
     return CollectionConfig(name=REFERENCE_LIBRARY_NAME, path=str(reflib_root), glob="**/*.md")
 
 
-def _default_scan_documents(db: Any, diagnostics: list[str]) -> tuple[int, int, int]:
+def default_scan_documents(db: Any, diagnostics: list[str]) -> tuple[int, int, int]:
     """Scan the document root for new/changed files and rebuild FTS.
 
     Lives in the use-case module so ``PipelineDeps``' default factory
@@ -311,19 +311,19 @@ class PipelineDeps:
     without a None-fallback ladder.
     """
 
-    db_path_fn: Callable[[], str] = field(default_factory=lambda: _default_db_path)
-    open_db_fn: Callable[[Path], Any] = field(default_factory=lambda: _default_open_db)
-    schema_fn: Callable[[Any], None] = field(default_factory=lambda: _default_create_schema)
-    validate_schema_fn: Callable[[Any], None] = field(default_factory=lambda: _default_validate_schema)
-    acquire_lock_fn: Callable[[], Any] = field(default_factory=lambda: _default_acquire_lock)
-    release_lock_fn: Callable[[Any], None] = field(default_factory=lambda: _default_release_lock)
-    save_run_log_fn: Callable[[dict[str, Any]], None] = field(default_factory=lambda: _default_save_run_log)
-    run_embed_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: _default_run_embed)
+    db_path_fn: Callable[[], str] = field(default_factory=lambda: default_db_path)
+    open_db_fn: Callable[[Path], Any] = field(default_factory=lambda: default_open_db)
+    schema_fn: Callable[[Any], None] = field(default_factory=lambda: default_create_schema)
+    validate_schema_fn: Callable[[Any], None] = field(default_factory=lambda: default_validate_schema)
+    acquire_lock_fn: Callable[[], Any] = field(default_factory=lambda: default_acquire_lock)
+    release_lock_fn: Callable[[Any], None] = field(default_factory=lambda: default_release_lock)
+    save_run_log_fn: Callable[[dict[str, Any]], None] = field(default_factory=lambda: default_save_run_log)
+    run_embed_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: default_run_embed)
     run_recall_gate_fn: Callable[..., tuple[bool, dict[str, Any]]] = field(
-        default_factory=lambda: _default_run_recall_gate
+        default_factory=lambda: default_run_recall_gate
     )
     scan_documents_fn: Callable[[Any, list[str]], tuple[int, int, int]] = field(
-        default_factory=lambda: _default_scan_documents
+        default_factory=lambda: default_scan_documents
     )
 
 

@@ -42,7 +42,7 @@ _MD_TABLE_DIVIDER_3COL = "|---|---|---|"
 # ---------------------------------------------------------------------------
 
 
-def _build_target_to_path(entities: list[WikiEntity]) -> dict[str, str]:
+def build_target_to_path(entities: list[WikiEntity]) -> dict[str, str]:
     """Map each entity's wikilink target (``[[target]]``) onto its vault_path."""
     target_to_path: dict[str, str] = {}
     for entity in entities:
@@ -52,7 +52,7 @@ def _build_target_to_path(entities: list[WikiEntity]) -> dict[str, str]:
     return target_to_path
 
 
-def _broken_link_rows(
+def broken_link_rows(
     md_file: Path,
     content: str,
     doc_path: Path,
@@ -94,7 +94,7 @@ def find_broken_links(
     """
     from kairix.knowledge.wikilinks.resolver import get_entities
 
-    target_to_path = _build_target_to_path(get_entities())
+    target_to_path = build_target_to_path(get_entities())
     doc_path = Path(vault_root or document_root)
     results: list[dict[str, Any]] = []
     for md_file in doc_path.rglob("*.md"):
@@ -102,7 +102,7 @@ def find_broken_links(
             content = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        results.extend(_broken_link_rows(md_file, content, doc_path, target_to_path))
+        results.extend(broken_link_rows(md_file, content, doc_path, target_to_path))
     return results
 
 
@@ -111,7 +111,7 @@ def find_broken_links(
 # ---------------------------------------------------------------------------
 
 
-def _gather_audit_files(doc_path: Path, paths: KairixPaths) -> list[Path]:
+def gather_audit_files(doc_path: Path, paths: KairixPaths) -> list[Path]:
     """Collect every ``should_inject``-eligible .md file under doc_path + workspaces."""
     eligible: list[Path] = []
     for md_file in doc_path.rglob("*.md"):
@@ -125,7 +125,7 @@ def _gather_audit_files(doc_path: Path, paths: KairixPaths) -> list[Path]:
     return eligible
 
 
-def _read_audit_file(md_file: Path, *, max_file_size: int = MAX_FILE_SIZE) -> str | None:
+def read_audit_file(md_file: Path, *, max_file_size: int = MAX_FILE_SIZE) -> str | None:
     """Read an audit-eligible .md file; return None when oversize or unreadable.
 
     ``max_file_size`` is the public threshold seam — production callers
@@ -141,7 +141,7 @@ def _read_audit_file(md_file: Path, *, max_file_size: int = MAX_FILE_SIZE) -> st
         return None
 
 
-def _already_linked_names(content: str) -> set[str]:
+def already_linked_names(content: str) -> set[str]:
     """Collect every entity-name that already appears inside ``[[wikilinks]]``."""
     already_linked: set[str] = set()
     for m in _WIKILINK_RE.finditer(content):
@@ -153,7 +153,7 @@ def _already_linked_names(content: str) -> set[str]:
     return already_linked
 
 
-def _count_plain_mentions(entity: WikiEntity, content: str) -> int:
+def count_plain_mentions(entity: WikiEntity, content: str) -> int:
     """Count whole-word plain-text mentions of every trigger for ``entity``."""
     total = 0
     for trigger in entity.all_triggers():
@@ -163,29 +163,29 @@ def _count_plain_mentions(entity: WikiEntity, content: str) -> int:
     return total
 
 
-def _relative_audit_path(md_file: Path, doc_path: Path) -> str:
+def relative_audit_path(md_file: Path, doc_path: Path) -> str:
     """Convert an absolute path to one relative to ``doc_path`` when nested under it."""
     md_str = str(md_file)
     doc_str = str(doc_path)
     return str(md_file.relative_to(doc_path)) if md_str.startswith(doc_str) else md_str
 
 
-def _scan_file_for_unlinked(
+def scan_file_for_unlinked(
     md_file: Path,
     doc_path: Path,
     entities: list[WikiEntity],
 ) -> list[dict[str, Any]]:
     """Emit one row per (entity, count>0) pair for unlinked mentions in this file."""
-    content = _read_audit_file(md_file)
+    content = read_audit_file(md_file)
     if content is None:
         return []
-    already_linked = _already_linked_names(content)
-    rel_file = _relative_audit_path(md_file, doc_path)
+    already_linked = already_linked_names(content)
+    rel_file = relative_audit_path(md_file, doc_path)
     rows: list[dict[str, Any]] = []
     for entity in entities:
         if any(t in already_linked for t in entity.all_triggers()):
             continue
-        count = _count_plain_mentions(entity, content)
+        count = count_plain_mentions(entity, content)
         if count > 0:
             rows.append({"file": rel_file, "entity_name": entity.name, _KEY_MENTION_COUNT: count})
     return rows
@@ -214,7 +214,7 @@ def find_unlinked_mentions(
     """
     paths = paths or KairixPaths.resolve()
     doc_path = Path(document_root)
-    eligible = _gather_audit_files(doc_path, paths)
+    eligible = gather_audit_files(doc_path, paths)
 
     if len(eligible) > sample_size:
         # NOSONAR: non-security audit sampling — picking a representative
@@ -225,7 +225,7 @@ def find_unlinked_mentions(
 
     results: list[dict[str, Any]] = []
     for md_file in sampled:
-        results.extend(_scan_file_for_unlinked(md_file, doc_path, entities))
+        results.extend(scan_file_for_unlinked(md_file, doc_path, entities))
 
     results.sort(key=lambda x: -x[_KEY_MENTION_COUNT])
     return results
@@ -236,7 +236,7 @@ def find_unlinked_mentions(
 # ---------------------------------------------------------------------------
 
 
-def _render_broken_links(broken: list[dict[str, Any]]) -> list[str]:
+def render_broken_links(broken: list[dict[str, Any]]) -> list[str]:
     """Render the 'Broken Links' section as markdown lines."""
     lines = ["## Broken Links", ""]
     if not broken:
@@ -256,7 +256,7 @@ def _render_broken_links(broken: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _render_unlinked_mentions(unlinked: list[dict[str, Any]]) -> list[str]:
+def render_unlinked_mentions(unlinked: list[dict[str, Any]]) -> list[str]:
     """Render the 'Unlinked Mentions' sample section."""
     lines = ["## Unlinked Mentions (sample)", ""]
     if not unlinked:
@@ -276,7 +276,7 @@ def _render_unlinked_mentions(unlinked: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _render_recent_injections(recent: list[dict[str, Any]]) -> list[str]:
+def render_recent_injections(recent: list[dict[str, Any]]) -> list[str]:
     """Render the 'Recent Injections' summary + per-file table."""
     lines = ["## Recent Injections (last 7 days)", ""]
     if not recent:
@@ -344,7 +344,7 @@ def weekly_report(
 
     broken = find_broken_links(document_root)
     unlinked = find_unlinked_mentions(document_root, entities, sample_size=50, paths=paths)
-    recent_injections = _read_recent_log(days=7, log_path=log_path)
+    recent_injections = read_recent_log(days=7, log_path=log_path)
 
     lines: list[str] = [
         f"# Wikilink Audit Report — {report_date}",
@@ -360,9 +360,9 @@ def weekly_report(
         f"| Without vault_path (not linked) | {without_vault_path} |",
         "",
     ]
-    lines += _render_broken_links(broken)
-    lines += _render_unlinked_mentions(unlinked)
-    lines += _render_recent_injections(recent_injections)
+    lines += render_broken_links(broken)
+    lines += render_unlinked_mentions(unlinked)
+    lines += render_recent_injections(recent_injections)
     lines += [
         "---",
         "_Report generated by `kairix wikilinks audit`_",
@@ -370,10 +370,10 @@ def weekly_report(
     return "\n".join(lines)
 
 
-def _parse_log_lines_since(lines: Iterable[str], cutoff: float) -> list[dict[str, Any]]:
+def parse_log_lines_since(lines: Iterable[str], cutoff: float) -> list[dict[str, Any]]:
     """Parse JSONL ``lines``, keeping entries whose ``ts`` is >= ``cutoff``.
 
-    Extracted from ``_read_recent_log`` to keep that function under F16's
+    Extracted from ``read_recent_log`` to keep that function under F16's
     cognitive-complexity ceiling — the open/for-line/strip/per-line
     try-decode/ts-window check chain nested above 15 when inlined.
     """
@@ -391,7 +391,7 @@ def _parse_log_lines_since(lines: Iterable[str], cutoff: float) -> list[dict[str
     return entries
 
 
-def _read_recent_log(days: int = 7, *, log_path: str | None = None) -> list[dict[str, Any]]:
+def read_recent_log(days: int = 7, *, log_path: str | None = None) -> list[dict[str, Any]]:
     """Read injection log entries from the last N days.
 
     ``log_path`` is the public seam — production callers leave it
@@ -404,6 +404,6 @@ def _read_recent_log(days: int = 7, *, log_path: str | None = None) -> list[dict
     effective_path = log_path if log_path is not None else _LOG_PATH
     try:
         with open(effective_path, encoding="utf-8") as fh:
-            return _parse_log_lines_since(fh, cutoff)
+            return parse_log_lines_since(fh, cutoff)
     except OSError:
         return []

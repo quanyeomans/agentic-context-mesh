@@ -403,9 +403,9 @@ def _maintenance_verb_usearch_rebuilder(db: sqlite3.Connection) -> bool:
     propagates from the underlying usearch boundary.
     """
     try:
-        from kairix.core.embed.embed import _open_usearch_index
+        from kairix.core.embed.embed import open_default_usearch_index
 
-        idx = _open_usearch_index()
+        idx = open_default_usearch_index()
         if idx is None:
             return True
         try:

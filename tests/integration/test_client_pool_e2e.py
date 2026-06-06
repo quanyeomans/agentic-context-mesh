@@ -24,9 +24,8 @@ same TLS-handshake amortisation applies regardless of which provider
 is configured.
 
 F1-clean (no @patch), F2-clean (no env monkeypatch — we substitute
-the builder via direct attribute write on the pool's own surface,
-same pattern as ``test_embed_coalescer_e2e``'s setattr on
-``_EMBED_COALESCER``). F5-clean — only public-surface imports.
+the builder via the public :func:`install_production_builder` seam),
+F5-clean — only public-surface imports.
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ from typing import Any
 
 import pytest
 
-from kairix.transport.pool import client_pool as client_pool_mod
+from kairix.transport.pool import install_production_builder, reset_client_cache
 
 pytestmark = pytest.mark.integration
 
@@ -79,26 +78,23 @@ class _CountingBuilder:
 def _pool_builder() -> Iterator[_CountingBuilder]:
     """Swap the production pool's builder for a counter; restore on teardown.
 
-    We write to the pool's own ``_builder`` attribute rather than
-    monkeypatching a module function — this keeps the production
-    surface (``kairix.transport.pool.get_client``) load-bearing in
-    the test while letting us count and verify without going to
-    Azure.
+    Uses the public :func:`install_production_builder` seam — the
+    test never reaches into the singleton's ``_builder`` attribute
+    directly. The seam returns the previous builder so we can
+    restore it on teardown without touching private state.
 
-    F2-clean: no env monkeypatch. The autouse
-    ``_reset_client_pool`` fixture in ``tests/conftest.py`` drops
-    cached state at teardown.
+    F2-clean: no env monkeypatch. F5-clean: only public-surface
+    imports. The autouse ``_reset_client_pool`` fixture in
+    ``tests/conftest.py`` drops cached state at teardown as a
+    second-line defence.
     """
     counter = _CountingBuilder()
-    pool = client_pool_mod._PRODUCTION_CLIENT_POOL
-    original = pool._builder
-    pool._builder = counter
-    pool.reset()
+    original = install_production_builder(counter)
     try:
         yield counter
     finally:
-        pool._builder = original
-        pool.reset()
+        install_production_builder(original)
+        reset_client_cache()
 
 
 def test_ten_concurrent_get_client_calls_invoke_builder_once(

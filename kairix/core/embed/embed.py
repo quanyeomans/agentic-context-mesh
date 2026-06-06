@@ -119,7 +119,7 @@ def chunk_text(
 # ── Azure API ─────────────────────────────────────────────────────────────────
 
 
-def _get_azure_config() -> tuple[str, str, str]:  # pragma: no cover  # prod lazy default; deps injection
+def get_azure_config_from_credentials() -> tuple[str, str, str]:  # pragma: no cover — lazy DI default
     """
     Read embed API config via ``get_credentials("embed")``. Supports Azure,
     OpenRouter, or any OpenAI-compatible endpoint.
@@ -349,7 +349,7 @@ def open_usearch_index_for_paths(
     return idx
 
 
-def _open_usearch_index() -> Any:  # pragma: no cover  # prod lazy default; deps injection
+def open_default_usearch_index() -> Any:  # pragma: no cover  # prod lazy default; deps injection
     """Production default for ``EmbedDependencies.open_usearch_index``.
 
     Thin wrapper that resolves canonical paths from ``KairixPaths`` and

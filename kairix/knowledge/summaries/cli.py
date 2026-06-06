@@ -25,14 +25,6 @@ _STORE_TRUE = "store_true"
 # ---------------------------------------------------------------------------
 
 
-def _get_cred(secret_name: str) -> str:
-    from kairix.secrets import get_secret
-
-    value = get_secret(secret_name, required=True)
-    assert value is not None  # get_secret raises if required and missing
-    return value
-
-
 # ---------------------------------------------------------------------------
 # Vault doc discovery
 # ---------------------------------------------------------------------------

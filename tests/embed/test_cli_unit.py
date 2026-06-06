@@ -474,7 +474,7 @@ def test_main_dispatches_rebuild_fts(monkeypatch, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _run_post_embed_summarise
+# run_post_embed_summarise (public — wired into EmbedCliDeps.post_embed_summarise)
 # ---------------------------------------------------------------------------
 
 
@@ -485,7 +485,7 @@ def test_run_post_embed_summarise_no_docs_returns_early(monkeypatch, tmp_path: P
 
     monkeypatch.setattr(paths, "document_root", lambda: tmp_path)
     # No files in tmp_path → all_docs is empty → early return; no exception.
-    embed_cli._run_post_embed_summarise()
+    embed_cli.run_post_embed_summarise()
 
 
 @pytest.mark.unit
@@ -506,7 +506,7 @@ def test_run_post_embed_summarise_no_stale_docs_returns_after_init(monkeypatch, 
 
     # sqlite3.connect(":memory:") should work fine.
     with caplog.at_level("INFO"):
-        embed_cli._run_post_embed_summarise()
+        embed_cli.run_post_embed_summarise()
     assert any("all 1 docs have current summaries" in r.message for r in caplog.records)
 
 
@@ -536,7 +536,7 @@ def test_run_post_embed_summarise_generates_summaries_for_stale_docs(monkeypatch
     )
 
     with caplog.at_level("INFO"):
-        embed_cli._run_post_embed_summarise()
+        embed_cli.run_post_embed_summarise()
     assert len(written) == 2
     assert any("L0 summaries generated" in r.message for r in caplog.records)
 
@@ -551,7 +551,7 @@ def test_run_post_embed_summarise_swallows_exception(monkeypatch, caplog) -> Non
 
     monkeypatch.setattr(paths, "document_root", _raises)
     with caplog.at_level("WARNING"):
-        embed_cli._run_post_embed_summarise()
+        embed_cli.run_post_embed_summarise()
     assert any("Post-embed summarise failed" in r.message for r in caplog.records)
 
 

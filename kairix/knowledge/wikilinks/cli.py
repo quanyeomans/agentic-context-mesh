@@ -152,7 +152,7 @@ def _inject_cmd(argv: list[str], *, paths: KairixPaths) -> None:
         _inject_all(entities, dry_run, paths=paths)
 
     if not dry_run:
-        _write_last_run()
+        write_last_run_marker()
 
 
 def _inject_single(path: str, entities: list[Any], dry_run: bool, *, paths: KairixPaths) -> None:
@@ -189,7 +189,7 @@ def _inject_files(files: list[str], entities: list[Any], dry_run: bool, *, paths
 
 def _inject_all(entities: list[Any], dry_run: bool, *, paths: KairixPaths) -> None:
     """Inject wikilinks into all eligible vault and workspace files."""
-    _inject_files(_gather_eligible_files(paths), entities, dry_run, paths=paths)
+    _inject_files(gather_eligible_files(paths), entities, dry_run, paths=paths)
 
 
 def _filter_changed_since(files: list[str], cutoff: float) -> list[str]:
@@ -206,18 +206,18 @@ def _filter_changed_since(files: list[str], cutoff: float) -> list[str]:
 
 def _inject_changed(entities: list[Any], dry_run: bool, *, paths: KairixPaths) -> None:
     """Inject only files modified since last run."""
-    last_run = _read_last_run()
+    last_run = read_last_run_marker()
     if last_run is None:
         print("No previous run found — processing all eligible files.")
         _inject_all(entities, dry_run, paths=paths)
         return
 
-    changed = _filter_changed_since(_gather_eligible_files(paths), last_run)
+    changed = _filter_changed_since(gather_eligible_files(paths), last_run)
     if not changed:
-        print(f"No files modified since last run ({_fmt_ts(last_run)}). Nothing to do.")
+        print(f"No files modified since last run ({fmt_ts(last_run)}). Nothing to do.")
         return
 
-    print(f"Processing {len(changed)} files modified since {_fmt_ts(last_run)}.\n")
+    print(f"Processing {len(changed)} files modified since {fmt_ts(last_run)}.\n")
     _inject_files(changed, entities, dry_run, paths=paths)
 
 
@@ -237,7 +237,7 @@ def _eligible_md_files_under(root: str, paths: KairixPaths) -> Iterator[str]:
             continue
 
 
-def _gather_eligible_files(paths: KairixPaths) -> list[str]:
+def gather_eligible_files(paths: KairixPaths) -> list[str]:
     """Collect all eligible .md files from vault and workspaces."""
     result: list[str] = []
     for root in (str(paths.document_root), str(paths.workspace_root)):
@@ -286,13 +286,13 @@ def _status_cmd(_argv: list[str]) -> None:
     inject/audit handlers; status takes no per-invocation options.
     """
     entities = get_entities()
-    last_run = _read_last_run()
-    log_entries = _read_log_entries()
+    last_run = read_last_run_marker()
+    log_entries = read_log_entries()
 
     print("🔗 kairix Wikilinks Status")
     print("─" * 40)
     print(f"Entities loaded:    {len(entities)}")
-    print(f"Last run:           {_fmt_ts(last_run) if last_run else 'never'}")
+    print(f"Last run:           {fmt_ts(last_run) if last_run else 'never'}")
 
     if log_entries:
         total_files = len(log_entries)
@@ -314,7 +314,7 @@ def _status_cmd(_argv: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _write_last_run() -> None:
+def write_last_run_marker() -> None:
     """Write current timestamp to last-run marker file."""
     try:
         Path(_LAST_RUN_PATH).parent.mkdir(parents=True, exist_ok=True)
@@ -323,7 +323,7 @@ def _write_last_run() -> None:
         pass
 
 
-def _read_last_run() -> float | None:
+def read_last_run_marker() -> float | None:
     """Read timestamp from last-run marker file. Returns None if not found."""
     try:
         text = Path(_LAST_RUN_PATH).read_text(encoding="utf-8").strip()
@@ -332,7 +332,7 @@ def _read_last_run() -> float | None:
         return None
 
 
-def _read_log_entries() -> list[dict[str, Any]]:
+def read_log_entries() -> list[dict[str, Any]]:
     """Read all entries from injection log."""
     entries: list[dict[str, Any]] = []
     try:
@@ -349,7 +349,7 @@ def _read_log_entries() -> list[dict[str, Any]]:
     return entries
 
 
-def _fmt_ts(ts: float | None) -> str:
+def fmt_ts(ts: float | None) -> str:
     """Format a Unix timestamp as a human-readable string."""
     if ts is None:
         return "never"

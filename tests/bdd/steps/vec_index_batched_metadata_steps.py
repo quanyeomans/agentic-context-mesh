@@ -1,10 +1,14 @@
 """Step definitions for vec_index_batched_metadata.feature.
 
 Drives the real ``VectorIndex._resolve_match_metadata`` against a real
-on-disk SQLite (no fakes, no @patch) and counts SQL via SQLite's own
-``set_trace_callback`` hook. The connection is wired inside a thin
-test-only fetch wrapper — production internals are untouched, so we
-catch genuine regressions, not test-fixture noise (#287).
+on-disk SQLite (no fakes, no @patch) and counts SQL via the public
+``set_metadata_trace_callback`` seam on ``VectorIndex``. Production
+internals are exercised end-to-end — we catch genuine regressions,
+not test-fixture noise (#287).
+
+F5-clean: only public-surface module access. F1-clean: no @patch /
+monkeypatch on kairix internals — the trace seam is a documented
+public method.
 """
 
 from __future__ import annotations
@@ -16,8 +20,6 @@ from typing import Any
 import pytest
 from pytest_bdd import given, then, when
 
-from kairix.core.db import open_db
-from kairix.core.search import vec_index as vi
 from kairix.core.search.vec_index import VectorIndex
 
 pytestmark = pytest.mark.bdd
@@ -54,35 +56,18 @@ def _resolve_with_sql_trace(
     collections: list[str] | None,
     sql_log: list[str],
 ) -> list[dict]:
-    """Re-implement ``_fetch_metadata_batched`` with ``set_trace_callback``.
+    """Resolve metadata for ``matches`` while tracing every SQL string.
 
-    The production helper is then called through ``_resolve_match_metadata``
-    with the traced helper swapped onto the instance — no module-level
-    monkeypatch, no production seam.
+    Installs the trace on the production ``_meta_conn`` via the public
+    ``set_metadata_trace_callback`` seam — the production
+    ``_fetch_metadata_batched`` runs unchanged, so the trace counts the
+    exact SQL the production code issues (not a re-implementation).
     """
-    original_fetch = idx._fetch_metadata_batched
-
-    def traced_fetch(unique_hashes: list[str]) -> dict[str, sqlite3.Row]:
-        rows_by_hash: dict[str, sqlite3.Row] = {}
-        db = open_db(Path(idx._db_path))
-        try:
-            db.row_factory = sqlite3.Row
-            db.set_trace_callback(sql_log.append)
-            for start in range(0, len(unique_hashes), vi._IN_CLAUSE_BATCH_SIZE):
-                chunk = unique_hashes[start : start + vi._IN_CLAUSE_BATCH_SIZE]
-                placeholders = ",".join("?" * len(chunk))
-                sql = vi._METADATA_SELECT_SQL.format(placeholders=placeholders)
-                for row in db.execute(sql, tuple(chunk)).fetchall():
-                    rows_by_hash[row["hash"]] = row
-        finally:
-            db.close()
-        return rows_by_hash
-
-    idx._fetch_metadata_batched = traced_fetch  # type: ignore[method-assign]  # instance-level wrapper attaches trace callback; production module untouched
+    idx.set_metadata_trace_callback(sql_log.append)
     try:
         return idx._resolve_match_metadata(matches, k, collections)
     finally:
-        idx._fetch_metadata_batched = original_fetch  # type: ignore[method-assign]  # restore original bound method
+        idx.set_metadata_trace_callback(None)
 
 
 def _seed_db(db_path: Path, n_docs: int = 10) -> None:

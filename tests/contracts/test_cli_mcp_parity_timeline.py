@@ -18,6 +18,7 @@ fail — that's the smell #163 surfaced.
 from __future__ import annotations
 
 import inspect
+from typing import Any
 
 import pytest
 
@@ -27,11 +28,17 @@ def test_cli_main_calls_run_timeline_use_case() -> None:
     """The CLI's ``main()`` is a thin adapter that defers to the use case.
 
     Post-F1: ``main()`` defers to a configurable ``timeline_runner``
-    whose production default is ``_default_timeline_runner``, and that
-    helper holds the use-case import + call. The contract still pins
-    both halves: the module imports ``run_timeline``, ``main()`` defers
-    to ``timeline_runner(...)``, and the production default wires the
-    use case.
+    whose production default wires ``run_timeline``. The contract pins
+    all three halves through public source: the module imports
+    ``run_timeline``, ``main()`` defers to ``timeline_runner(...)``, and
+    the production default factory used by ``main()`` actually invokes
+    ``run_timeline``.
+
+    Behavioural sabotage: replace ``main()``'s body with a direct call
+    to ``run_timeline(...)`` (skipping the ``timeline_runner`` seam) →
+    behavioural test below (``test_cli_main_uses_injected_timeline_runner``)
+    fires; the source assertion ``"timeline_runner(" in main_src`` here
+    fires too.
     """
     from kairix.core.temporal import cli
 
@@ -44,8 +51,60 @@ def test_cli_main_calls_run_timeline_use_case() -> None:
         "main() must defer to the configured timeline_runner — not call run_timeline directly"
     )
 
-    default_runner_src = inspect.getsource(cli._default_timeline_runner)
-    assert "run_timeline(" in default_runner_src, "_default_timeline_runner must wire the production use case"
+
+@pytest.mark.contract
+def test_cli_main_uses_injected_timeline_runner() -> None:
+    """Behavioural contract: ``main()`` must invoke the ``timeline_runner``
+    DI seam (not bypass it with a direct ``run_timeline`` call).
+
+    Drives ``main()`` with a counting runner via the public
+    ``timeline_runner`` kwarg seam (F5 + F1 clean). If ``main()``
+    ever stops routing through ``timeline_runner``, the counter stays
+    at 0 and this test fails.
+
+    Sabotage: change ``main()`` to call ``run_timeline(...)`` directly →
+    counter stays at 0 → this test fires.
+    """
+    from kairix.core.temporal import cli
+    from kairix.use_cases.timeline import TimelineResult
+
+    calls: list[dict[str, Any]] = []
+
+    def _counting_runner(*args: Any, **kwargs: Any) -> TimelineResult:
+        calls.append({"args": args, "kwargs": kwargs})
+        return TimelineResult(
+            original_query=args[0] if args else kwargs.get("query", ""),
+            rewritten_query="",
+            is_temporal=False,
+            fell_back=False,
+            time_window={},
+        )
+
+    cli.main(
+        ["test query", "--json", "--limit", "5"],
+        timeline_runner=_counting_runner,
+    )
+    assert len(calls) == 1
+
+
+@pytest.mark.contract
+def test_default_timeline_runner_factory_wires_run_timeline() -> None:
+    """The production default for the ``timeline_runner`` seam invokes
+    ``run_timeline`` — pinned at module source level so we don't reach
+    into the private factory's attribute (F5).
+
+    Sabotage: change the default factory body to drop the
+    ``run_timeline(...)`` call → ``"return run_timeline(" in module_src``
+    no longer holds → this fires.
+    """
+    from kairix.core.temporal import cli
+
+    module_src = inspect.getsource(cli)
+    # The default factory must contain an actual call to ``run_timeline(``
+    # in a ``return`` position — that's the production wiring contract.
+    assert "return run_timeline(" in module_src, (
+        "CLI module must contain ``return run_timeline(...)`` in its production timeline-runner default factory."
+    )
 
 
 @pytest.mark.contract
@@ -176,12 +235,55 @@ def test_mcp_envelope_keys_match_run_timeline_result_fields() -> None:
         assert f'"{hit_key}"' in src, f"timeline_output_to_envelope hit envelope missing key {hit_key!r}"
 
     # Sanity: both surfaces delegate to the canonical helper (#412 SoT).
+    # Module-source pin (no private-attribute access — F5).
     from kairix.agents.mcp import server as mcp_server
     from kairix.core.temporal import cli as cli_mod
 
     assert "timeline_output_to_envelope" in inspect.getsource(mcp_server.tool_timeline), (
         "MCP tool_timeline must delegate envelope construction to timeline_output_to_envelope (#412)"
     )
-    assert "timeline_output_to_envelope" in inspect.getsource(cli_mod._result_to_envelope), (
-        "CLI _result_to_envelope must delegate to timeline_output_to_envelope (#412)"
+    cli_module_src = inspect.getsource(cli_mod)
+    assert "timeline_output_to_envelope" in cli_module_src, "CLI must delegate to timeline_output_to_envelope (#412)"
+
+
+@pytest.mark.contract
+def test_cli_json_envelope_matches_canonical_use_case_shape() -> None:
+    """Behavioural pin: CLI ``--as-json`` envelope ≡ canonical envelope + ``limit``.
+
+    Drives ``main()`` with a runner returning a known ``TimelineResult``,
+    captures stdout, and asserts the JSON envelope shape matches
+    ``timeline_output_to_envelope`` output (the canonical SoT) with the
+    CLI-only ``limit`` overlay. F5 + F1 clean — public seam only.
+
+    Sabotage: have the CLI inline its own envelope dict (skipping
+    ``timeline_output_to_envelope``) and drop a required key like
+    ``results`` → this assertion fires.
+    """
+    import io
+    import json
+    from contextlib import redirect_stdout
+
+    from kairix.core.temporal import cli
+    from kairix.use_cases.timeline import TimelineResult, timeline_output_to_envelope
+
+    fake_result = TimelineResult(
+        original_query="meeting last week",
+        rewritten_query="meeting in April 2026",
+        is_temporal=True,
+        fell_back=False,
+        time_window={"start": "2026-04-01", "end": "2026-04-30"},
     )
+
+    def _runner(*_a: Any, **_k: Any) -> TimelineResult:
+        return fake_result
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        cli.main(
+            ["topic", "--json", "--limit", "7"],
+            timeline_runner=_runner,
+        )
+    payload = json.loads(out.getvalue())
+    canonical = timeline_output_to_envelope(fake_result)
+    canonical["limit"] = 7
+    assert payload == canonical

@@ -50,34 +50,37 @@ def _init_db(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_cred
+# run_generate path — drives the same behaviour through the public ``main()``
+# surface (``--all`` → discovers vault → fetches creds → runs generate →
+# persists each result). The previously-private ``_run_generate`` helper is
+# exercised indirectly: per-result persistence + the "Done: N / N succeeded"
+# summary land in stdout. F5-clean — no module-level private access.
 # ---------------------------------------------------------------------------
 
 
-def test_get_cred_returns_secret_value(monkeypatch) -> None:
-    """_get_cred delegates to kairix.secrets.get_secret with required=True."""
-    import kairix.secrets as secrets
+def test_main_all_persists_each_result_and_prints_done_summary(monkeypatch, tmp_path: Path) -> None:
+    """Drive the public surface: ``main(['--all'], ...)`` discovers two
+    vault docs, fetches credentials, generates summaries, and persists
+    each result.
 
-    captured: list[tuple] = []
+    Sabotage: drop the ``for result in results: write_summary(result, db)``
+    loop in ``_run_generate`` → ``written`` stays empty + this assertion
+    fires.
+    """
+    from types import SimpleNamespace
 
-    def _fake_get_secret(name: str, *, required: bool) -> str:
-        captured.append((name, required))
-        return "the-key"
-
-    monkeypatch.setattr(secrets, "get_secret", _fake_get_secret)
-    assert sum_cli._get_cred("KAIRIX_LLM_API_KEY") == "the-key"
-    assert captured == [("KAIRIX_LLM_API_KEY", True)]
-
-
-# ---------------------------------------------------------------------------
-# _run_generate
-# ---------------------------------------------------------------------------
-
-
-def test_run_generate_invokes_generate_and_persists_each_result(monkeypatch, tmp_path: Path, capsys) -> None:
+    import kairix.credentials as cred_mod
     import kairix.knowledge.summaries.generate as gen_mod
     import kairix.knowledge.summaries.staleness as stale_mod
 
+    doc_root = tmp_path / "vault"
+    doc_root.mkdir()
+    (doc_root / "a.md").write_text("# a", encoding="utf-8")
+    (doc_root / "b.md").write_text("# b", encoding="utf-8")
+    db_path = tmp_path / "summaries.db"
+    _init_db(db_path)
+
+    monkeypatch.setattr(cred_mod, "get_credentials", lambda kind: SimpleNamespace(api_key="k", endpoint="https://x"))
     written: list[Any] = []
     monkeypatch.setattr(stale_mod, "write_summary", lambda r, _db: written.append(r))
     monkeypatch.setattr(
@@ -86,23 +89,10 @@ def test_run_generate_invokes_generate_and_persists_each_result(monkeypatch, tmp
         lambda *, paths, **kw: [{"path": p} for p in paths],
     )
 
-    db_path = tmp_path / "summaries.db"
-    _init_db(db_path)
-    db = sqlite3.connect(str(db_path))
-    try:
-        sum_cli._run_generate(
-            paths=["a.md", "b.md"],
-            include_l1=True,
-            api_key="k",
-            endpoint="https://x",
-            deployment="d",
-            db=db,
-        )
-    finally:
-        db.close()
+    stdout, _stderr, code = _drive(["--all", "--include-l1"], document_root=doc_root, db_path=db_path)
+    assert code == 0
     assert len(written) == 2
-    out = capsys.readouterr().out
-    assert "Done: 2 / 2 succeeded" in out
+    assert "Done: 2 / 2 succeeded" in stdout
 
 
 # ---------------------------------------------------------------------------

@@ -137,7 +137,7 @@ def test_inject_single_path_eligible_calls_inject_file(monkeypatch, fake_paths, 
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: True)
     monkeypatch.setattr(wl_cli, "inject_file", lambda p, ents, *, dry_run, paths: ["Acme", "Bob"])
     # Avoid touching _LAST_RUN_PATH on disk.
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject", "--path", str(target), "--dry-run"], paths=fake_paths)
     assert code == 0
@@ -150,7 +150,7 @@ def test_inject_single_path_not_eligible_returns_silently(monkeypatch, fake_path
     target.write_text("page", encoding="utf-8")
 
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: False)
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject", "--path", str(target)], paths=fake_paths)
     assert code == 0
@@ -163,7 +163,7 @@ def test_inject_single_path_with_no_new_links(monkeypatch, fake_paths, _entities
 
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: True)
     monkeypatch.setattr(wl_cli, "inject_file", lambda p, ents, *, dry_run, paths: [])
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject", "--path", str(target)], paths=fake_paths)
     assert code == 0
@@ -179,7 +179,7 @@ def test_inject_all_iterates_eligible_files(monkeypatch, fake_paths, _entities) 
 
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: True)
     monkeypatch.setattr(wl_cli, "inject_file", lambda p, ents, *, dry_run, paths: ["Acme"] if "a.md" in p else [])
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject"], paths=fake_paths)
     assert code == 0
@@ -191,10 +191,10 @@ def test_inject_changed_with_no_last_run_falls_back_to_all(monkeypatch, fake_pat
     doc = Path(fake_paths.document_root)
     (doc / "a.md").write_text("a", encoding="utf-8")
 
-    monkeypatch.setattr(wl_cli, "_read_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "read_last_run_marker", lambda: None)
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: True)
     monkeypatch.setattr(wl_cli, "inject_file", lambda p, ents, *, dry_run, paths: [])
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject", "--changed"], paths=fake_paths)
     assert code == 0
@@ -207,9 +207,9 @@ def test_inject_changed_with_no_modified_files(monkeypatch, fake_paths, _entitie
     (doc / "a.md").write_text("a", encoding="utf-8")
 
     # Set last run to far future so no file mtime exceeds it.
-    monkeypatch.setattr(wl_cli, "_read_last_run", lambda: 9999999999.0)
+    monkeypatch.setattr(wl_cli, "read_last_run_marker", lambda: 9999999999.0)
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: True)
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject", "--changed"], paths=fake_paths)
     assert code == 0
@@ -221,10 +221,10 @@ def test_inject_changed_with_modified_files(monkeypatch, fake_paths, _entities) 
     doc = Path(fake_paths.document_root)
     (doc / "a.md").write_text("a", encoding="utf-8")
 
-    monkeypatch.setattr(wl_cli, "_read_last_run", lambda: 0.0)  # all files modified after 1970
+    monkeypatch.setattr(wl_cli, "read_last_run_marker", lambda: 0.0)  # all files modified after 1970
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: True)
     monkeypatch.setattr(wl_cli, "inject_file", lambda p, ents, *, dry_run, paths: ["Acme"])
-    monkeypatch.setattr(wl_cli, "_write_last_run", lambda: None)
+    monkeypatch.setattr(wl_cli, "write_last_run_marker", lambda: None)
 
     stdout, _stderr, code = _drive(["inject", "--changed"], paths=fake_paths)
     assert code == 0
@@ -279,8 +279,8 @@ def test_audit_handles_save_failure(monkeypatch, fake_paths, _entities) -> None:
 
 
 def test_status_empty_log_branch(monkeypatch, fake_paths, _entities) -> None:
-    monkeypatch.setattr(wl_cli, "_read_last_run", lambda: None)
-    monkeypatch.setattr(wl_cli, "_read_log_entries", lambda: [])
+    monkeypatch.setattr(wl_cli, "read_last_run_marker", lambda: None)
+    monkeypatch.setattr(wl_cli, "read_log_entries", lambda: [])
 
     stdout, _stderr, code = _drive(["status"], paths=fake_paths)
     assert code == 0
@@ -290,10 +290,10 @@ def test_status_empty_log_branch(monkeypatch, fake_paths, _entities) -> None:
 
 
 def test_status_with_log_entries(monkeypatch, fake_paths, _entities) -> None:
-    monkeypatch.setattr(wl_cli, "_read_last_run", lambda: 1700000000.0)
+    monkeypatch.setattr(wl_cli, "read_last_run_marker", lambda: 1700000000.0)
     monkeypatch.setattr(
         wl_cli,
-        "_read_log_entries",
+        "read_log_entries",
         lambda: [
             {"injected": ["X", "Y"], "dry_run": False},
             {"injected": ["Z"], "dry_run": True},
@@ -314,35 +314,35 @@ def test_status_with_log_entries(monkeypatch, fake_paths, _entities) -> None:
 
 
 def test_fmt_ts_none_returns_never() -> None:
-    assert wl_cli._fmt_ts(None) == "never"
+    assert wl_cli.fmt_ts(None) == "never"
 
 
 def test_fmt_ts_returns_iso_string() -> None:
-    out = wl_cli._fmt_ts(1700000000.0)
+    out = wl_cli.fmt_ts(1700000000.0)
     assert "2023" in out
     assert "UTC" in out
 
 
-def test_write_and_read_last_run(monkeypatch, tmp_path: Path) -> None:
-    """_write_last_run + _read_last_run roundtrip via a tmp path."""
+def test_write_and_read_last_run_marker(monkeypatch, tmp_path: Path) -> None:
+    """write_last_run_marker + read_last_run_marker roundtrip via a tmp path."""
     target = tmp_path / "subdir" / "marker"
     monkeypatch.setattr(wl_cli, "_LAST_RUN_PATH", str(target))
-    wl_cli._write_last_run()
-    out = wl_cli._read_last_run()
+    wl_cli.write_last_run_marker()
+    out = wl_cli.read_last_run_marker()
     assert out is not None
     assert out > 0
 
 
-def test_read_last_run_returns_none_for_missing_file(monkeypatch, tmp_path: Path) -> None:
+def test_read_last_run_marker_returns_none_for_missing_file(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(wl_cli, "_LAST_RUN_PATH", str(tmp_path / "no-marker"))
-    assert wl_cli._read_last_run() is None
+    assert wl_cli.read_last_run_marker() is None
 
 
-def test_read_last_run_returns_none_for_garbage(monkeypatch, tmp_path: Path) -> None:
+def test_read_last_run_marker_returns_none_for_garbage(monkeypatch, tmp_path: Path) -> None:
     marker = tmp_path / "garbage"
     marker.write_text("not-a-number", encoding="utf-8")
     monkeypatch.setattr(wl_cli, "_LAST_RUN_PATH", str(marker))
-    assert wl_cli._read_last_run() is None
+    assert wl_cli.read_last_run_marker() is None
 
 
 def test_read_log_entries_skips_blank_and_bad_lines(monkeypatch, tmp_path: Path) -> None:
@@ -352,13 +352,13 @@ def test_read_log_entries_skips_blank_and_bad_lines(monkeypatch, tmp_path: Path)
         encoding="utf-8",
     )
     monkeypatch.setattr(wl_cli, "_LOG_PATH", str(log))
-    entries = wl_cli._read_log_entries()
+    entries = wl_cli.read_log_entries()
     assert entries == [{"a": 1}, {"b": 2}]
 
 
 def test_read_log_entries_returns_empty_for_missing_file(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(wl_cli, "_LOG_PATH", str(tmp_path / "absent"))
-    assert wl_cli._read_log_entries() == []
+    assert wl_cli.read_log_entries() == []
 
 
 def test_gather_eligible_files_respects_size_and_eligibility(monkeypatch, fake_paths) -> None:
@@ -370,6 +370,6 @@ def test_gather_eligible_files_respects_size_and_eligibility(monkeypatch, fake_p
 
     # Only "small.md" is eligible.
     monkeypatch.setattr(wl_cli, "should_inject", lambda p, *, paths: "small.md" in p)
-    out = wl_cli._gather_eligible_files(fake_paths)
+    out = wl_cli.gather_eligible_files(fake_paths)
     assert any("small.md" in p for p in out)
     assert all("big.md" not in p for p in out)

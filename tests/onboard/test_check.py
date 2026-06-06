@@ -662,7 +662,7 @@ def test_check_mcp_service_handles_invalid_openclaw_json(tmp_path: Path, monkeyp
     # seam — F1-clean. The check_mcp_service public surface accepts a
     # custom OpenClaw probe.
     result = check_mod.check_mcp_service(
-        openclaw_probe=lambda: check_mod._probe_openclaw_harness(config_paths=(str(bogus),)),
+        openclaw_probe=lambda: check_mod.probe_openclaw_harness(config_paths=(str(bogus),)),
     )
     assert isinstance(result, CheckResult)
 
@@ -757,7 +757,7 @@ def test_probe_openclaw_registered_with_executable_command(tmp_path: Path, monke
     )
 
     # Drive the OpenClaw probe through its public ``config_paths`` kwarg.
-    ok, detail = check_mod._probe_openclaw_harness(config_paths=(str(config),))
+    ok, detail = check_mod.probe_openclaw_harness(config_paths=(str(config),))
     assert ok is True
     assert "OpenClaw" in detail
 
@@ -785,7 +785,7 @@ def test_probe_openclaw_registered_but_command_missing(tmp_path: Path, monkeypat
         )
     )
 
-    ok, detail = check_mod._probe_openclaw_harness(config_paths=(str(config),))
+    ok, detail = check_mod.probe_openclaw_harness(config_paths=(str(config),))
     assert ok is False
     assert "missing" in detail.lower() or "not executable" in detail.lower()
 
@@ -800,7 +800,7 @@ def test_probe_claude_desktop_registered(tmp_path: Path, monkeypatch) -> None:
 
     config.write_text(json.dumps({"mcpServers": {"kairix": {"command": "kairix"}}}))
 
-    ok, detail = check_mod._probe_claude_desktop_harness(config_paths=(config,))
+    ok, detail = check_mod.probe_claude_desktop_harness(config_paths=(config,))
     assert ok is True
     assert "Claude Desktop" in detail
 
@@ -827,7 +827,7 @@ def test_probe_sse_harness_port_listening(monkeypatch) -> None:
 
     monkeypatch.setattr(socket, "create_connection", _fake_create_connection)
 
-    ok, detail = check_mod._probe_sse_harness()
+    ok, detail = check_mod.probe_sse_harness()
     assert ok is True
     assert "listening" in detail.lower()
 
@@ -854,7 +854,7 @@ def test_probe_sse_harness_systemctl_active(monkeypatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    ok, detail = check_mod._probe_sse_harness()
+    ok, detail = check_mod.probe_sse_harness()
     assert ok is True
     assert "active" in detail.lower()
 
@@ -950,7 +950,7 @@ def test_run_onboard_check_failure_check_id_matches_a_known_check() -> None:
     """Every CheckFailure.check matches the .name of an executed CheckResult.
 
     Sabotage check: if the failure check ID ever drifts from CheckResult.name
-    (e.g. someone renames a check but doesn't update _CANONICAL_REMEDIATIONS),
+    (e.g. someone renames a check but doesn't update CANONICAL_REMEDIATIONS),
     this catches the mismatch.
     """
     from kairix.platform.onboard.check import run_all_checks, run_onboard_check
@@ -972,10 +972,10 @@ def test_run_onboard_check_uses_canonical_remediation_strings() -> None:
 
     # Build a synthetic ALL_CHECKS where every check fails with a deliberately
     # weird fix value. The remediation surfaced should still be the canonical
-    # one (matching _CANONICAL_REMEDIATIONS), not the weird value.
+    # one (matching CANONICAL_REMEDIATIONS), not the weird value.
     fake_results = [
         check_mod.CheckResult(name=name, ok=False, detail="x", fix="WRONG-DO-NOT-USE")
-        for name in check_mod._CANONICAL_REMEDIATIONS
+        for name in check_mod.CANONICAL_REMEDIATIONS
     ]
 
     def _fake_run_all(*, checks=None) -> list[check_mod.CheckResult]:
@@ -988,7 +988,7 @@ def test_run_onboard_check_uses_canonical_remediation_strings() -> None:
         mp.setattr(check_mod, "run_all_checks", _fake_run_all)
         result = check_mod.run_onboard_check()
 
-    canonical = check_mod._CANONICAL_REMEDIATIONS
+    canonical = check_mod.CANONICAL_REMEDIATIONS
     for failure in result.failures:
         assert failure.remediation == canonical[failure.check], (
             f"non-canonical remediation for {failure.check!r}: {failure.remediation!r}"
@@ -1008,7 +1008,7 @@ def test_canonical_remediations_cover_every_registered_check() -> None:
     from kairix.platform.onboard import check as check_mod
 
     expected_names = {fn.__name__.removeprefix("check_") for fn in check_mod.ALL_CHECKS}
-    canonical_names = set(check_mod._CANONICAL_REMEDIATIONS)
+    canonical_names = set(check_mod.CANONICAL_REMEDIATIONS)
     missing = expected_names - canonical_names
     assert not missing, f"checks without canonical remediation: {sorted(missing)}"
 
@@ -1022,7 +1022,7 @@ def test_every_canonical_remediation_is_actionable() -> None:
     from kairix.platform.onboard import check as check_mod
 
     actionable_tokens = ("Run ", "Set ", "Check ", "Confirm ", "Add ", "Register ", "`")
-    for name, remediation in check_mod._CANONICAL_REMEDIATIONS.items():
+    for name, remediation in check_mod.CANONICAL_REMEDIATIONS.items():
         assert any(token in remediation for token in actionable_tokens), (
             f"remediation for {name!r} contains no actionable token: {remediation!r}"
         )

@@ -280,7 +280,7 @@ def test_default_db_path_resolves_via_paths_module(tmp_path: Path) -> None:
     by calling its returned callable's ``__name__`` shape.
 
     Sabotage proof: replaced the default-resolver argument's lookup
-    name from ``_default_db_path`` to a typo'd helper — pytest fails
+    name from ``default_db_path`` to a typo'd helper — pytest fails
     at import time (NameError). Restored.
     """
 

@@ -16,6 +16,7 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -232,7 +233,7 @@ class VectorIndex:
     def load_or_recreate(self) -> tuple[int, str]:
         """Load the existing index; if corrupt, delete it and return fresh empty state.
 
-        Closes the production bug where ``_open_usearch_index()`` caught
+        Closes the production bug where ``open_default_usearch_index()`` caught
         the load exception and returned None — every subsequent vector
         write was silently no-op'd because the orchestration code
         guarded on ``vec_index is not None``. The whole ``--force`` run
@@ -461,6 +462,23 @@ class VectorIndex:
                 finally:
                     self._meta_conn = None
 
+    def set_metadata_trace_callback(
+        self,
+        callback: Callable[[str], None] | None,
+    ) -> None:
+        """Install (or clear) a SQL-trace callback on the metadata connection.
+
+        Public test seam: BDD/regression tests counting the SELECTs
+        issued during ``_resolve_match_metadata`` install a counter
+        through this surface instead of reaching past the underscore-
+        prefixed ``_meta_conn`` attribute (F5). Forces the lazy-open
+        path so the callback is installed on a real connection.
+
+        Pass ``None`` to clear the trace.
+        """
+        conn = self._get_meta_conn()
+        conn.set_trace_callback(callback)
+
     def _build_results(
         self,
         ordered: list[tuple[str, float, str]],
@@ -544,7 +562,7 @@ class VectorIndex:
                 "fix: construct a separate VectorIndex(read_only=False) for the writer process; "
                 "the read_only mode is intended for search-side consumers (MCP / eval / probe). "
                 "next: in the worker path use VectorIndex(..., read_only=False) (the default). "
-                "run: see kairix/core/embed/embed.py:_open_usearch_index for the production wiring."
+                "run: see kairix/core/embed/embed.py:open_default_usearch_index for the production wiring."
             )
 
         if self._index is None:
@@ -676,7 +694,7 @@ def get_vector_index(db_path: Path | None = None) -> Any:
         # read_only=True opens via mmap (cheap startup, low RSS); any
         # accidental mutation surfaces as a typed error from
         # _ensure_mutable. The worker's mutate-capable instance is
-        # constructed separately in kairix.core.embed.embed._open_usearch_index.
+        # constructed separately in kairix.core.embed.embed.open_default_usearch_index.
         idx = VectorIndex(index_path=index_path, meta_path=meta_path, db_path=db_path, read_only=True)
         count = idx.load()
         if count > 0:

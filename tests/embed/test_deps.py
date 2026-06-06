@@ -13,6 +13,10 @@ sibling module — F5):
     embed/schema/paths modules. The wrappers are swapped at their
     underlying module's public attribute so the lazy imports inside
     the wrappers see our stand-in implementations.
+
+The default-callable tests verify the wiring via the public renamed
+helpers ``get_azure_config_from_credentials`` /
+``open_default_usearch_index`` on ``kairix.core.embed.embed``.
 """
 
 from __future__ import annotations
@@ -146,7 +150,7 @@ def test_deps_two_instances_share_default_callables() -> None:
 @pytest.mark.unit
 def test_default_get_azure_config_calls_through_to_embed_module() -> None:
     """The default ``get_azure_config`` wrapper delegates to
-    ``kairix.core.embed.embed._get_azure_config`` (the function-local
+    ``kairix.core.embed.embed.get_azure_config_from_credentials`` (the function-local
     lazy import resolves freshly each call, so swapping the embed
     module attribute is sufficient).
 
@@ -155,13 +159,13 @@ def test_default_get_azure_config_calls_through_to_embed_module() -> None:
     """
     from kairix.core.embed import embed as embed_mod
 
-    real = embed_mod._get_azure_config
-    embed_mod._get_azure_config = lambda: ("KEY", "https://e", "DEPLOY")  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
+    real = embed_mod.get_azure_config_from_credentials
+    embed_mod.get_azure_config_from_credentials = lambda: ("KEY", "https://e", "DEPLOY")  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
     try:
         deps = EmbedDependencies()
         result = deps.get_azure_config()
     finally:
-        embed_mod._get_azure_config = real  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
+        embed_mod.get_azure_config_from_credentials = real  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
 
     assert result == ("KEY", "https://e", "DEPLOY")
 
@@ -227,19 +231,19 @@ def test_default_embed_batch_calls_through_to_embed_module() -> None:
 @pytest.mark.unit
 def test_default_open_usearch_index_calls_through_to_embed_module() -> None:
     """The default ``open_usearch_index`` wrapper returns whatever
-    ``kairix.core.embed.embed._open_usearch_index`` returns (incl.
+    ``kairix.core.embed.embed.open_default_usearch_index`` returns (incl.
     ``None``).
     """
     from kairix.core.embed import embed as embed_mod
 
     sentinel = object()
-    real = embed_mod._open_usearch_index
-    embed_mod._open_usearch_index = lambda: sentinel  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
+    real = embed_mod.open_default_usearch_index
+    embed_mod.open_default_usearch_index = lambda: sentinel  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
     try:
         deps = EmbedDependencies()
         result = deps.open_usearch_index()
     finally:
-        embed_mod._open_usearch_index = real  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
+        embed_mod.open_default_usearch_index = real  # type: ignore[assignment]  # module-attribute swap to drive failure paths; restored in finally
 
     assert result is sentinel
 

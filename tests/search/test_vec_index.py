@@ -450,46 +450,19 @@ class _SqlCountingVectorIndex:
     """Drop-in test wrapper that counts the SELECT statements issued during
     ``_resolve_match_metadata``.
 
-    Wraps a real ``VectorIndex`` and proxies the metadata helper so the
-    production batching logic is exercised end-to-end while a
-    ``set_trace_callback`` on the live connection captures every executed
-    SQL string. Subclassing isn't used because ``_fetch_metadata_batched``
-    opens its own connection inside the function body; we re-implement
-    the helper locally with the same behaviour PLUS the trace hook.
+    Wraps a real ``VectorIndex`` and installs a SQL trace via the public
+    ``set_metadata_trace_callback`` seam — production ``_fetch_metadata_batched``
+    runs unchanged, so the trace captures the exact SQL the production
+    code issues against the persistent metadata connection (no
+    re-implementation).
+
+    F5-clean: only public attribute access on the kairix module surface.
     """
 
     def __init__(self, inner: Any) -> None:
-        from kairix.core.search import vec_index as vi
-
         self._inner = inner
-        self._vi = vi
         self.sql_calls: list[str] = []
-        # Replace the inner's helper bound method with one that records SQL.
-        original_fetch = inner._fetch_metadata_batched
-
-        def traced_fetch(unique_hashes: list[str]) -> dict:
-            from kairix.core.db import open_db as _open_db
-
-            rows_by_hash: dict[str, sqlite3.Row] = {}
-            db = _open_db(Path(inner._db_path))
-            try:
-                db.row_factory = sqlite3.Row
-                db.set_trace_callback(self.sql_calls.append)
-                for start in range(0, len(unique_hashes), vi._IN_CLAUSE_BATCH_SIZE):
-                    chunk = unique_hashes[start : start + vi._IN_CLAUSE_BATCH_SIZE]
-                    placeholders = ",".join("?" * len(chunk))
-                    sql = vi._METADATA_SELECT_SQL.format(placeholders=placeholders)
-                    for row in db.execute(sql, tuple(chunk)).fetchall():
-                        rows_by_hash[row["hash"]] = row
-            finally:
-                db.close()
-            return rows_by_hash
-
-        # Use object.__setattr__ to avoid touching the production class.
-        inner._fetch_metadata_batched = traced_fetch  # type: ignore[method-assign]  # test wrapper records SQL via set_trace_callback; no production internals patched
-
-        # Keep a handle to the original to allow restoration if needed.
-        self._original_fetch = original_fetch
+        inner.set_metadata_trace_callback(self.sql_calls.append)
 
     def resolve(self, matches: Any, k: int, collections: list[str] | None) -> list[dict]:
         return self._inner._resolve_match_metadata(matches, k, collections)

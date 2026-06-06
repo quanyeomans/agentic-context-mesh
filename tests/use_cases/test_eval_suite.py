@@ -329,8 +329,8 @@ def test_main_default_fact_extractor_uses_production_wiring(tmp_path: Path) -> N
     production :class:`LLMFactExtractor` via :mod:`kairix.corpus.wiring`
     and drives it against the configured ``llm`` backend.
 
-    Sabotage-proof: revert the new ``_resolve_production_fact_extractor``
-    branch in ``_resolve_deps`` back to ``_NullFactExtractor()`` and this
+    Sabotage-proof: revert the new ``resolve_production_fact_extractor``
+    branch in ``resolve_deps`` back to ``_NullFactExtractor()`` and this
     fails because the FakeLLMBackend's ``chat`` is never called (the Null
     extractor short-circuits without dispatching to the LLM, leaving
     ``fake_llm.chat_calls`` empty).
@@ -355,14 +355,14 @@ def test_main_default_fact_extractor_uses_production_wiring(tmp_path: Path) -> N
     assert code == 0, err.getvalue()
     assert fake_llm.chat_calls, (
         "production wiring should have dispatched at least one chat() call "
-        "to the LLM backend. fix: ensure _resolve_deps wires "
+        "to the LLM backend. fix: ensure resolve_deps wires "
         "make_production_fact_extractor instead of _NullFactExtractor."
     )
 
 
 @pytest.mark.unit
 def test_resolve_production_fact_extractor_happy_path_returns_llm_extractor() -> None:
-    """``_resolve_production_fact_extractor`` returns the real
+    """``resolve_production_fact_extractor`` returns the real
     :class:`LLMFactExtractor` (NOT a Null fallback) when wiring resolves
     cleanly and writes nothing to stderr.
 
@@ -371,7 +371,7 @@ def test_resolve_production_fact_extractor_happy_path_returns_llm_extractor() ->
     the helper returns it unchanged, and ``err_sink`` stays empty.
 
     Sabotage-proof: change the happy-path return in
-    ``_resolve_production_fact_extractor`` to ``_NullFactExtractor()``
+    ``resolve_production_fact_extractor`` to ``_NullFactExtractor()``
     and this fails because the isinstance check no longer matches.
     """
     from kairix.core.facts.extractor import LLMFactExtractor
@@ -379,7 +379,7 @@ def test_resolve_production_fact_extractor_happy_path_returns_llm_extractor() ->
     err = io.StringIO()
     fake_llm = FakeLLMBackend(chat_response="[]")
 
-    extractor = _use_case._resolve_production_fact_extractor(fake_llm, err_sink=err)
+    extractor = _use_case.resolve_production_fact_extractor(fake_llm, err_sink=err)
 
     assert isinstance(extractor, LLMFactExtractor), (
         f"expected LLMFactExtractor on the production-default path, got {type(extractor).__name__}. "
@@ -391,7 +391,7 @@ def test_resolve_production_fact_extractor_happy_path_returns_llm_extractor() ->
 @pytest.mark.unit
 def test_resolve_production_fact_extractor_falls_back_on_import_error() -> None:
     """When the wiring-factory loader raises :class:`ImportError`,
-    ``_resolve_production_fact_extractor`` returns a Null fallback AND
+    ``resolve_production_fact_extractor`` returns a Null fallback AND
     writes an F21-shaped warning to ``err_sink``.
 
     Drives the ImportError branch by injecting a ``factory_loader`` that
@@ -400,7 +400,7 @@ def test_resolve_production_fact_extractor_falls_back_on_import_error() -> None:
     inside the loader degrades cleanly with operator-visible warning.
 
     Sabotage-proof: drop the ``except ImportError`` branch in
-    ``_resolve_production_fact_extractor`` and this fails because the
+    ``resolve_production_fact_extractor`` and this fails because the
     ImportError escapes uncaught.
     """
     err = io.StringIO()
@@ -409,7 +409,7 @@ def test_resolve_production_fact_extractor_falls_back_on_import_error() -> None:
     def _broken_loader() -> object:
         raise ImportError("simulated wiring-import failure")
 
-    extractor = _use_case._resolve_production_fact_extractor(
+    extractor = _use_case.resolve_production_fact_extractor(
         fake_llm,
         err_sink=err,
         factory_loader=_broken_loader,  # type: ignore[arg-type] — stub deliberately violates loader Protocol to exercise failure path
@@ -428,7 +428,7 @@ def test_resolve_production_fact_extractor_falls_back_on_import_error() -> None:
 
 @pytest.mark.unit
 def test_resolve_production_llm_returns_backend_when_platform_resolves() -> None:
-    """``_resolve_production_llm`` returns the platform-resolved backend.
+    """``resolve_production_llm`` returns the platform-resolved backend.
 
     The helper just routes through
     :func:`kairix.platform.llm.get_default_backend`; we assert the call
@@ -439,7 +439,7 @@ def test_resolve_production_llm_returns_backend_when_platform_resolves() -> None
     because the chat-attribute assertion no longer matches.
     """
     try:
-        backend = _use_case._resolve_production_llm()
+        backend = _use_case.resolve_production_llm()
     except (ImportError, Exception):
         # Skip if the platform LLM resolver itself can't run in this
         # environment (no creds, no kv access). The point of this test
@@ -451,13 +451,13 @@ def test_resolve_production_llm_returns_backend_when_platform_resolves() -> None
 
 @pytest.mark.unit
 def test_resolve_production_fact_store_returns_sqlite_store(tmp_path: Path) -> None:
-    """``_resolve_production_fact_store`` returns a real SQLiteFactStore.
+    """``resolve_production_fact_store`` returns a real SQLiteFactStore.
 
     Sabotage-proof: swap the body to return ``None`` and this fails
     because the ``add`` attribute assertion no longer holds.
     """
     db_path = tmp_path / "fact-store.db"
-    store = _use_case._resolve_production_fact_store(db_path)
+    store = _use_case.resolve_production_fact_store(db_path)
     # SQLiteFactStore satisfies the FactStore Protocol — has add + search.
     assert hasattr(store, "add")
     assert hasattr(store, "search")
@@ -506,9 +506,9 @@ def test_main_legacy_subcommand_dispatches_to_legacy_cli(tmp_path: Path) -> None
 @pytest.mark.unit
 def test_main_via_prep_default_resolves_search_pipeline(tmp_path: Path) -> None:
     """In the default ``--via-prep`` mode (no ``--legacy-direct``),
-    ``_resolve_search_pipeline`` calls :func:`build_search_pipeline`.
+    ``resolve_search_pipeline`` calls :func:`build_search_pipeline`.
 
-    Sabotage-proof: drop the import in ``_resolve_search_pipeline`` and
+    Sabotage-proof: drop the import in ``resolve_search_pipeline`` and
     this fails because the helper returns the int exit code 2 instead of
     a pipeline.
 
@@ -565,15 +565,15 @@ def test_main_extractor_f1_reported_when_ground_truth_facts_present(tmp_path: Pa
 
 @pytest.mark.unit
 def test_pct_returns_zero_on_zero_total() -> None:
-    """``_pct(passed, total=0)`` returns 0 — guards divide-by-zero in
+    """``pct(passed, total=0)`` returns 0 — guards divide-by-zero in
     the human-readable category breakdown.
 
     Sabotage-proof: remove the ``if total <= 0: return 0`` guard and
     this fails with a ZeroDivisionError.
     """
-    assert _use_case._pct(passed=0, total=0) == 0
-    assert _use_case._pct(passed=3, total=0) == 0
-    assert _use_case._pct(passed=2, total=4) == 50
+    assert _use_case.pct(passed=0, total=0) == 0
+    assert _use_case.pct(passed=3, total=0) == 0
+    assert _use_case.pct(passed=2, total=4) == 50
 
 
 @pytest.mark.unit
@@ -587,7 +587,7 @@ def test_resolve_search_pipeline_default_invokes_builder() -> None:
     function reference uncalled.
 
     Sabotage-proof: change ``return builder()`` to ``return builder``
-    in ``_resolve_search_pipeline`` and this fails because the helper
+    in ``resolve_search_pipeline`` and this fails because the helper
     returns the function object, not the pipeline.
     """
     from tests.fakes import FakeSearchPipeline
@@ -601,7 +601,7 @@ def test_resolve_search_pipeline_default_invokes_builder() -> None:
         return _builder
 
     err = io.StringIO()
-    result = _use_case._resolve_search_pipeline(
+    result = _use_case.resolve_search_pipeline(
         override=None,
         via_prep=True,
         err_sink=err,
@@ -613,7 +613,7 @@ def test_resolve_search_pipeline_default_invokes_builder() -> None:
 
 @pytest.mark.unit
 def test_import_search_pipeline_builder_returns_factory_callable() -> None:
-    """The default ``_import_search_pipeline_builder`` returns a callable
+    """The default ``import_search_pipeline_builder`` returns a callable
     that builds a real :class:`SearchPipeline`.
 
     Direct unit test for the production-default loader. The loader
@@ -623,10 +623,10 @@ def test_import_search_pipeline_builder_returns_factory_callable() -> None:
     this unit-test context, so we stop at the callable assertion.
 
     Sabotage-proof: change ``return builder`` to ``return None`` in
-    ``_import_search_pipeline_builder`` and this fails because the
+    ``import_search_pipeline_builder`` and this fails because the
     callable assertion no longer holds.
     """
-    builder = _use_case._import_search_pipeline_builder()
+    builder = _use_case.import_search_pipeline_builder()
     assert callable(builder)
     # The production factory is `build_search_pipeline` — covers the
     # documented import path even if instantiation fails downstream.
@@ -635,24 +635,24 @@ def test_import_search_pipeline_builder_returns_factory_callable() -> None:
 
 @pytest.mark.unit
 def test_import_production_extractor_factory_returns_make_function() -> None:
-    """The default ``_import_production_extractor_factory`` returns a
+    """The default ``import_production_extractor_factory`` returns a
     callable pointing at the wiring factory.
 
     Sabotage-proof: change the import target to a different symbol and
     this fails because the function-name pin no longer matches.
     """
-    factory = _use_case._import_production_extractor_factory()
+    factory = _use_case.import_production_extractor_factory()
     assert callable(factory)
     assert getattr(factory, "__name__", "") == "make_production_fact_extractor"
 
 
 @pytest.mark.unit
 def test_resolve_search_pipeline_falls_back_on_import_error() -> None:
-    """``_resolve_search_pipeline`` returns exit code 2 + an F21 warning
+    """``resolve_search_pipeline`` returns exit code 2 + an F21 warning
     when the :func:`build_search_pipeline` import raises.
 
     Sabotage-proof: drop the ImportError catch in
-    ``_resolve_search_pipeline`` and this fails because the import
+    ``resolve_search_pipeline`` and this fails because the import
     exception escapes uncaught.
     """
     err = io.StringIO()
@@ -660,7 +660,7 @@ def test_resolve_search_pipeline_falls_back_on_import_error() -> None:
     def _broken_loader() -> object:
         raise ImportError("simulated factory module missing")
 
-    result = _use_case._resolve_search_pipeline(
+    result = _use_case.resolve_search_pipeline(
         override=None,
         via_prep=True,
         err_sink=err,
@@ -676,8 +676,8 @@ def test_resolve_search_pipeline_falls_back_on_import_error() -> None:
 
 @pytest.mark.unit
 def test_main_propagates_search_pipeline_exit_code(tmp_path: Path) -> None:
-    """When ``_resolve_search_pipeline`` returns an int exit code,
-    ``_resolve_deps`` returns it AND ``main`` returns it unchanged.
+    """When ``resolve_search_pipeline`` returns an int exit code,
+    ``resolve_deps`` returns it AND ``main`` returns it unchanged.
 
     Sabotage-proof: drop the ``isinstance(deps, int): return deps``
     branch in ``main`` and this fails because the use case proceeds
@@ -685,7 +685,7 @@ def test_main_propagates_search_pipeline_exit_code(tmp_path: Path) -> None:
 
     We force a builder_loader to raise by going through the public
     main() — main() doesn't expose the builder_loader kwarg, so this
-    test instead exercises ``_resolve_deps`` directly to pin the
+    test instead exercises ``resolve_deps`` directly to pin the
     propagation behaviour.
     """
     err = io.StringIO()
@@ -693,18 +693,18 @@ def test_main_propagates_search_pipeline_exit_code(tmp_path: Path) -> None:
     def _broken_loader() -> object:
         raise ImportError("simulated factory module missing")
 
-    # _resolve_deps signature requires us to drive the search-pipeline
+    # resolve_deps signature requires us to drive the search-pipeline
     # resolution through it. We pass an override=None + via_prep=True
     # via the use case's internal helpers; the broken loader trips
-    # the ImportError fallback and surfaces 2 up through _resolve_deps.
+    # the ImportError fallback and surfaces 2 up through resolve_deps.
     fake_paths = _paths(tmp_path)
-    # Replicate _resolve_deps's first two branches inline so we don't
+    # Replicate resolve_deps's first two branches inline so we don't
     # depend on the full main() dispatch — keeps the assertion sharp.
     fake_llm = FakeLLMBackend(chat_response="[]")
     fake_extractor = FakeFactExtractor()
     fake_store = FakeFactStore()
 
-    result_pipeline = _use_case._resolve_search_pipeline(
+    result_pipeline = _use_case.resolve_search_pipeline(
         override=None,
         via_prep=True,
         err_sink=err,
@@ -712,13 +712,13 @@ def test_main_propagates_search_pipeline_exit_code(tmp_path: Path) -> None:
     )
     assert result_pipeline == 2
 
-    # Confirm _resolve_deps with this scenario returns the same int.
+    # Confirm resolve_deps with this scenario returns the same int.
     # The function re-resolves the pipeline internally — to drive THIS
-    # scenario through _resolve_deps without the seam, we'd need a
+    # scenario through resolve_deps without the seam, we'd need a
     # broken factory; we already proved the helper returns 2 above.
-    # Spot-check shape: _resolve_deps returns _ResolvedDeps when
+    # Spot-check shape: resolve_deps returns _ResolvedDeps when
     # everything resolves.
-    deps = _use_case._resolve_deps(
+    deps = _use_case.resolve_deps(
         paths=fake_paths,
         fact_store=fake_store,
         fact_extractor=fake_extractor,
@@ -730,7 +730,7 @@ def test_main_propagates_search_pipeline_exit_code(tmp_path: Path) -> None:
         via_prep=False,  # legacy-direct, skip the import path
         err_sink=err,
     )
-    assert not isinstance(deps, int), "happy-path _resolve_deps must return _ResolvedDeps"
+    assert not isinstance(deps, int), "happy-path resolve_deps must return _ResolvedDeps"
 
 
 @pytest.mark.unit
@@ -762,7 +762,7 @@ def test_main_regression_gate_malformed_baseline_is_actionable(tmp_path: Path) -
 # kairix.corpus.wiring — the composition root reached by the helpers above.
 #
 # Co-located with the eval-suite tests because the wiring module is the
-# upstream dep of ``_resolve_production_fact_extractor``; a future
+# upstream dep of ``resolve_production_fact_extractor``; a future
 # dedicated test file under ``tests/core/corpus/`` will own these once
 # the F7 backfill burns down. Marked ``unit`` so safe-commit's
 # ``-m unit or bdd or contract`` selector covers them.
@@ -846,7 +846,7 @@ def test_wiring_make_production_consolidation_raises_with_f21_markers() -> None:
 @pytest.mark.unit
 def test_resolve_production_fact_extractor_falls_back_on_factory_construction_error() -> None:
     """When the wiring factory itself raises during construction,
-    ``_resolve_production_fact_extractor`` returns a Null fallback AND
+    ``resolve_production_fact_extractor`` returns a Null fallback AND
     writes an F21-shaped warning to ``err_sink``.
 
     Exercises the broad-except branch — covers the future case where
@@ -866,7 +866,7 @@ def test_resolve_production_fact_extractor_falls_back_on_factory_construction_er
     def _loader_returning_raising_factory() -> object:
         return _raising_factory
 
-    extractor = _use_case._resolve_production_fact_extractor(
+    extractor = _use_case.resolve_production_fact_extractor(
         fake_llm,
         err_sink=err,
         factory_loader=_loader_returning_raising_factory,  # type: ignore[arg-type] — stub returns a factory that raises; exercises factory-runtime-failure branch
@@ -883,7 +883,7 @@ def test_resolve_production_fact_extractor_falls_back_on_factory_construction_er
     assert "make_production_fact_extractor raised" in warning
 
 
-# _resolve_production_fact_store and _resolve_production_llm have
+# resolve_production_fact_store and resolve_production_llm have
 # defensive ImportError-rewrap branches that are unreachable in any
 # valid kairix install — both kairix.core.facts and kairix.platform.llm
 # ship with every release. Driving those branches via injected loader

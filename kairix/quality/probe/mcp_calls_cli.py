@@ -81,14 +81,14 @@ class McpCallsDeps:
     ``KAIRIX_DB_PATH``.
     """
 
-    db_path_fn: Callable[[], Path] = field(default_factory=lambda: _default_db_path)
+    db_path_fn: Callable[[], Path] = field(default_factory=lambda: default_db_path)
 
 
-def _default_db_path() -> Path:
+def default_db_path() -> Path:
     """Production resolver — points at the dedicated observability SQLite file.
 
     Sibling to the main index DB. Must match the path
-    ``kairix.agents.mcp.errors._default_db_path`` writes to —
+    ``kairix.agents.mcp.errors.default_db_path`` writes to —
     ``/data/kairix/mcp_observability.sqlite`` by default. The dedicated
     file avoids write-lock contention against the worker's writes on
     the main index DB.

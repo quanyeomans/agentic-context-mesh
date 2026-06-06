@@ -2,7 +2,7 @@
 
 The existing ``tests/benchmark/test_cli.py`` exercises the subcommand handlers
 through ``BenchmarkCLIDeps``. The S3776/F6 refactor extracted small helpers
-(``_direction_marker``, ``_parse_args``, ``BenchmarkCLIDeps`` defaults, the
+(``direction_marker``, ``parse_args``, ``BenchmarkCLIDeps`` defaults, the
 ``main()`` dispatch fallthroughs) that Sonar's new-code coverage measures
 per line. These tests drive those helpers directly so every branch lands in
 ``new_coverage`` for PR #247.
@@ -34,55 +34,55 @@ pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------
-# _direction_marker — pure helper used by cmd_compare.
+# direction_marker — pure helper used by cmd_compare.
 # ---------------------------------------------------------------------------
 
 
 def test_direction_marker_positive_delta_returns_up_arrow() -> None:
     """A positive delta above threshold → up arrow."""
-    assert cli_mod._direction_marker(0.5) == "▲"
+    assert cli_mod.direction_marker(0.5) == "▲"
 
 
 def test_direction_marker_negative_delta_returns_down_arrow() -> None:
     """A negative delta below ``-threshold`` → down arrow."""
-    assert cli_mod._direction_marker(-0.5) == "▼"
+    assert cli_mod.direction_marker(-0.5) == "▼"
 
 
 def test_direction_marker_zero_delta_zero_threshold_returns_equals() -> None:
     """Zero delta with zero threshold renders the equality marker."""
-    assert cli_mod._direction_marker(0.0) == "="
+    assert cli_mod.direction_marker(0.0) == "="
 
 
 def test_direction_marker_within_nonzero_threshold_returns_space() -> None:
     """Delta within a non-zero threshold band renders blank (no marker)."""
     # |0.005| < threshold 0.01 → neither arrow; threshold not isclose to 0.0.
-    assert cli_mod._direction_marker(0.005, 0.01) == " "
+    assert cli_mod.direction_marker(0.005, 0.01) == " "
 
 
 def test_direction_marker_positive_just_above_threshold() -> None:
     """A delta exceeding the threshold by any amount still surfaces an arrow."""
-    assert cli_mod._direction_marker(0.011, 0.01) == "▲"
+    assert cli_mod.direction_marker(0.011, 0.01) == "▲"
 
 
 def test_direction_marker_negative_just_below_threshold() -> None:
     """A delta below ``-threshold`` surfaces the down arrow."""
-    assert cli_mod._direction_marker(-0.011, 0.01) == "▼"
+    assert cli_mod.direction_marker(-0.011, 0.01) == "▼"
 
 
 # ---------------------------------------------------------------------------
-# _parse_args — argparse construction (all five subcommands).
+# parse_args — argparse construction (all five subcommands).
 # ---------------------------------------------------------------------------
 
 
 def test_parse_args_run_requires_suite() -> None:
     """``run`` without ``--suite`` exits — argparse enforces the required flag."""
     with pytest.raises(SystemExit):
-        cli_mod._parse_args(["run"])
+        cli_mod.parse_args(["run"])
 
 
 def test_parse_args_run_defaults_system_to_hybrid() -> None:
     """The default --system is 'hybrid' (matches the docstring contract)."""
-    args = cli_mod._parse_args(["run", "--suite", "any"])
+    args = cli_mod.parse_args(["run", "--suite", "any"])
     assert args.system == "hybrid"
     assert args.agent is None
     assert args.collection is None
@@ -91,7 +91,7 @@ def test_parse_args_run_defaults_system_to_hybrid() -> None:
 
 def test_parse_args_run_captures_all_flags() -> None:
     """Every operator-supplied flag lands on the namespace verbatim."""
-    args = cli_mod._parse_args(
+    args = cli_mod.parse_args(
         [
             "run",
             "--suite",
@@ -119,25 +119,25 @@ def test_parse_args_run_captures_all_flags() -> None:
 def test_parse_args_validate_requires_suite() -> None:
     """``validate`` without --suite exits — required flag is enforced."""
     with pytest.raises(SystemExit):
-        cli_mod._parse_args(["validate"])
+        cli_mod.parse_args(["validate"])
 
 
 def test_parse_args_compare_requires_both_results() -> None:
     """``compare`` needs two positional arguments."""
     with pytest.raises(SystemExit):
-        cli_mod._parse_args(["compare", "only-one.json"])
+        cli_mod.parse_args(["compare", "only-one.json"])
 
 
 def test_parse_args_init_captures_agent_and_collections() -> None:
     """``init`` accepts --agent (required) and --collections (optional)."""
-    args = cli_mod._parse_args(["init", "--agent", "alpha", "--collections", "a,b"])
+    args = cli_mod.parse_args(["init", "--agent", "alpha", "--collections", "a,b"])
     assert args.agent == "alpha"
     assert args.collections == "a,b"
 
 
 def test_parse_args_list_has_no_required_flags() -> None:
     """``list`` parses with no flags — bundled-suite enumeration only."""
-    args = cli_mod._parse_args(["list"])
+    args = cli_mod.parse_args(["list"])
     assert args.subcommand == "list"
 
 
@@ -147,15 +147,15 @@ def test_parse_args_list_has_no_required_flags() -> None:
 
 
 def test_default_list_suites_wrapper_returns_a_list() -> None:
-    """``_default_list_suites`` lazy-imports and returns a list (production
+    """``default_list_suites`` lazy-imports and returns a list (production
     seam). Resolved against whatever ``bundled_suites_root`` resolves to on
     the test host — may be empty but must always be a list."""
-    out = cli_mod._default_list_suites()
+    out = cli_mod.default_list_suites()
     assert isinstance(out, list)
 
 
 def test_default_run_benchmark_wrapper_imports_runner() -> None:
-    """``_default_run_benchmark`` lazy-imports and delegates to
+    """``default_run_benchmark`` lazy-imports and delegates to
     ``runner.run_benchmark``. We pass a minimal suite + fake retrieve so
     no real retrieval runs — the goal is to cover the wrapper, not the
     benchmark."""
@@ -178,7 +178,7 @@ def test_default_run_benchmark_wrapper_imports_runner() -> None:
     def _fake_retrieve(**_):
         return ([], [], {})
 
-    out = cli_mod._default_run_benchmark(suite=suite, deps=BenchmarkDeps(retrieve=_fake_retrieve))
+    out = cli_mod.default_run_benchmark(suite=suite, deps=BenchmarkDeps(retrieve=_fake_retrieve))
     assert out is not None  # lazy import + delegation succeeded
 
 
@@ -353,7 +353,7 @@ def test_main_unknown_subcommand_branch() -> None:
 
     Drives the public ``parse_args`` kwarg seam with a stub that returns a
     namespace argparse would normally reject — no monkeypatching of the
-    private ``_parse_args``.
+    private ``parse_args``.
     """
 
     def _stub_parse(_argv: list[str] | None) -> argparse.Namespace:

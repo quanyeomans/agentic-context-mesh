@@ -77,7 +77,7 @@ _KEY_WEIGHTED_TOTAL = "weighted_total"
 _MODE_CONCURRENT = "concurrent"
 
 
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="kairix benchmark",
         description="Retrieval quality benchmark for kairix.",
@@ -222,7 +222,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 
-def _default_run_benchmark(**kwargs: Any) -> Any:
+def default_run_benchmark(**kwargs: Any) -> Any:
     """Production benchmark runner — lazy import so tests that inject a fake
     never load the heavy retrieval stack."""
     from kairix.quality.benchmark.runner import run_benchmark
@@ -230,9 +230,9 @@ def _default_run_benchmark(**kwargs: Any) -> Any:
     return run_benchmark(**kwargs)
 
 
-def _default_list_suites() -> list[dict]:
+def default_list_suites() -> list[dict]:
     """Production bundled-suites lister — lazy import for symmetry with
-    ``_default_run_benchmark``."""
+    ``default_run_benchmark``."""
     from kairix.quality.benchmark.suite import list_bundled_suites
 
     return list_bundled_suites()
@@ -258,8 +258,8 @@ class BenchmarkCLIDeps:
                        root (F2-clean).
     """
 
-    run_benchmark: Callable[..., Any] = field(default_factory=lambda: _default_run_benchmark)
-    list_suites: Callable[[], list[dict]] = field(default_factory=lambda: _default_list_suites)
+    run_benchmark: Callable[..., Any] = field(default_factory=lambda: default_run_benchmark)
+    list_suites: Callable[[], list[dict]] = field(default_factory=lambda: default_list_suites)
 
 
 # ---------------------------------------------------------------------------
@@ -583,7 +583,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _direction_marker(delta: float, threshold: float = 0.0) -> str:
+def direction_marker(delta: float, threshold: float = 0.0) -> str:
     """Return an arrow marker for a numeric delta."""
     if delta > threshold:
         return "▲"
@@ -624,13 +624,13 @@ def cmd_compare(args: argparse.Namespace) -> int:
     print(f"  B: {b_label}  total={b_total:.3f}  [{score_tier(b_total)}]")
 
     delta = b_sum.get(_KEY_WEIGHTED_TOTAL, 0) - a_sum.get(_KEY_WEIGHTED_TOTAL, 0)
-    print(f"\n  Delta: {_direction_marker(delta)} {abs(delta):.3f}")
+    print(f"\n  Delta: {direction_marker(delta)} {abs(delta):.3f}")
     a_ndcg = a_sum.get("ndcg_at_10")
     b_ndcg = b_sum.get("ndcg_at_10")
     if a_ndcg is not None and b_ndcg is not None:
         ndcg_delta = b_ndcg - a_ndcg
         print(
-            f"  NDCG@10 delta: {_direction_marker(ndcg_delta)} {abs(ndcg_delta):.3f}  (A={a_ndcg:.3f}  B={b_ndcg:.3f})"
+            f"  NDCG@10 delta: {direction_marker(ndcg_delta)} {abs(ndcg_delta):.3f}  (A={a_ndcg:.3f}  B={b_ndcg:.3f})"
         )
     print("")
     print(f"  {'Category':12}  {'A':>6}  {'B':>6}  {'Δ':>6}")
@@ -642,7 +642,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         a_s = a_cats.get(cat, 0.0)
         b_s = b_cats.get(cat, 0.0)
         d = b_s - a_s
-        print(f"  {cat:12}  {a_s:6.3f}  {b_s:6.3f}  {_direction_marker(d, 0.01)}{abs(d):5.3f}")
+        print(f"  {cat:12}  {a_s:6.3f}  {b_s:6.3f}  {direction_marker(d, 0.01)}{abs(d):5.3f}")
 
     print("=" * 60)
     return 0
@@ -736,7 +736,7 @@ def main(
     argv: list[str] | None = None,
     deps: BenchmarkCLIDeps | None = None,
     *,
-    parse_args: Callable[..., argparse.Namespace] = _parse_args,
+    parse_args: Callable[..., argparse.Namespace] = parse_args,
 ) -> int:
     """Dispatch a single ``kairix benchmark`` invocation.
 

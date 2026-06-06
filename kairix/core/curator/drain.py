@@ -446,7 +446,7 @@ def _default_get_client() -> Any:
     return get_client()
 
 
-def _default_open_db() -> sqlite3.Connection:
+def default_open_db() -> sqlite3.Connection:
     """Production-default SQLite connection factory."""
     from kairix.paths import db_path
 
@@ -474,7 +474,7 @@ class Neo4jDrainTickDeps:
     """
 
     client_factory: Any = field(default=_default_get_client)
-    db_factory: Any = field(default=_default_open_db)
+    db_factory: Any = field(default=default_open_db)
     repo_factory: Any = field(default=_default_make_repo)
 
 

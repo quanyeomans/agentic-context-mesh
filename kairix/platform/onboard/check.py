@@ -126,7 +126,7 @@ class OnboardResult:
 # detailed multi-line guidance for human readers; CheckFailure.remediation
 # is the one-line "run this now" command an agent or healthcheck can act on.
 
-_CANONICAL_REMEDIATIONS: dict[str, str] = {
+CANONICAL_REMEDIATIONS: dict[str, str] = {
     _CHECK_QUERY_CACHE_STATS: (
         "Diagnostic check — no remediation required. Cache hit-rate is informational; "
         "tune `KAIRIX_QUERY_CACHE_MAX_ENTRIES` / `KAIRIX_QUERY_CACHE_MAX_AGE_S` if needed."
@@ -248,7 +248,7 @@ def _remediation_for(check_name: str, fix: str | None) -> str:
     no canonical entry (which should never happen for production checks —
     the dict above is the source of truth). Never returns empty.
     """
-    canonical = _CANONICAL_REMEDIATIONS.get(check_name)
+    canonical = CANONICAL_REMEDIATIONS.get(check_name)
     if canonical:
         return canonical
     if fix and fix.strip():
@@ -878,7 +878,7 @@ def _check_openclaw_config_file(p: Path) -> tuple[bool, str] | None:
 
     Returns a (ok, detail) verdict when the file registers kairix,
     otherwise ``None`` so the caller continues to the next candidate.
-    Extracted from ``_probe_openclaw_harness`` so the per-candidate
+    Extracted from ``probe_openclaw_harness`` so the per-candidate
     parse + dispatch chain doesn't have to live inside the outer
     for-loop's try/except — that nesting pushed the parent over F16.
     """
@@ -900,7 +900,7 @@ def _check_openclaw_config_file(p: Path) -> tuple[bool, str] | None:
     return False, f"OpenClaw: registered but start command missing/not executable: {cmd}"
 
 
-def _probe_openclaw_harness(*, config_paths: tuple[Path | str, ...] | None = None) -> tuple[bool, str]:
+def probe_openclaw_harness(*, config_paths: tuple[Path | str, ...] | None = None) -> tuple[bool, str]:
     """Return (ok, detail) for the OpenClaw stdio harness.
 
     ``config_paths`` is the public seam — production callers leave it
@@ -938,7 +938,7 @@ def _probe_openclaw_harness(*, config_paths: tuple[Path | str, ...] | None = Non
     return False, "OpenClaw: not detected"
 
 
-def _probe_claude_desktop_harness(*, config_paths: tuple[Path, ...] | None = None) -> tuple[bool, str]:
+def probe_claude_desktop_harness(*, config_paths: tuple[Path, ...] | None = None) -> tuple[bool, str]:
     """Return (ok, detail) for the Claude Desktop stdio harness.
 
     ``config_paths`` is the public seam — production callers leave it
@@ -964,7 +964,7 @@ def _probe_claude_desktop_harness(*, config_paths: tuple[Path, ...] | None = Non
     return False, "Claude Desktop: not detected"
 
 
-def _probe_sse_harness() -> tuple[bool, str]:
+def probe_sse_harness() -> tuple[bool, str]:
     """Return (ok, detail) for the SSE/HTTP persistent service harness."""
     import socket
 
@@ -1024,9 +1024,9 @@ def check_mcp_service(
     ``_probe_*_harness`` defaults; tests inject stubs to drive each
     harness's outcome without monkey-patching the module attributes.
     """
-    openclaw_ok, openclaw_detail = (openclaw_probe or _probe_openclaw_harness)()
-    claude_ok, claude_detail = (claude_desktop_probe or _probe_claude_desktop_harness)()
-    sse_ok, sse_detail = (sse_probe or _probe_sse_harness)()
+    openclaw_ok, openclaw_detail = (openclaw_probe or probe_openclaw_harness)()
+    claude_ok, claude_detail = (claude_desktop_probe or probe_claude_desktop_harness)()
+    sse_ok, sse_detail = (sse_probe or probe_sse_harness)()
 
     active = [
         d
@@ -1964,7 +1964,7 @@ def run_onboard_check(*, checks: list[Callable[..., CheckResult]] | None = None)
       - any caller that needs to act on individual failures programmatically
 
     Each failed check produces a CheckFailure with a populated, non-empty
-    ``remediation`` string sourced from _CANONICAL_REMEDIATIONS. The set of
+    ``remediation`` string sourced from CANONICAL_REMEDIATIONS. The set of
     checks (and their order) is identical to run_all_checks() — this
     function only restructures the output. ``checks`` forwards through to
     ``run_all_checks`` as the public DI seam.
