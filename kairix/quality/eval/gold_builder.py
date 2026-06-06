@@ -712,7 +712,7 @@ def grade_candidates(
     judge_runs: int = 2,
 ) -> list[PooledCandidate]:
     """Production-default shim — see ``GoldBuilder.grade``."""
-    del deployment  # owned by the LLMJudge instance constructed inside GoldBuilder
+    _ = deployment  # F19 — owned by the LLMJudge instance constructed inside GoldBuilder
     return GoldBuilder().grade(
         query,
         candidates,

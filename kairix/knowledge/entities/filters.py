@@ -84,7 +84,7 @@ class RolePhraseFilter:
 
     def apply(self, suggestions: list[Suggestion], context: str) -> list[Suggestion]:
         """Return a new list with role-phrase entries removed."""
-        del context  # unused — we only inspect each suggestion's text
+        _ = context  # F19 — unused — we only inspect each suggestion's text
         return [s for s in suggestions if not self._is_role_phrase(s)]
 
     def _is_role_phrase(self, suggestion: Suggestion) -> bool:
@@ -220,7 +220,7 @@ class NerLabelFilter:
         self._org_overrides: set[str] = set(org_overrides)
 
     def apply(self, suggestions: list[Suggestion], context: str) -> list[Suggestion]:
-        del context  # unused — overrides are looked up by text alone
+        _ = context  # F19 — unused — overrides are looked up by text alone
         return [self._relabel(s) for s in suggestions]
 
     def _relabel(self, suggestion: Suggestion) -> Suggestion:

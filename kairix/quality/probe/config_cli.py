@@ -185,6 +185,7 @@ def _invalid_args(message: str) -> int:
     fix: correct the flag value or env var; next: see
     ``kairix probe-config --help``; run: ``kairix probe-config --help``.
     """
+    # F76-allow: ``message`` is an operator-facing argparse-style error string from this same module, not user content
     print(f"error: {message}", file=sys.stderr)
     print("fix: correct the flag value and re-run", file=sys.stderr)
     print("next: see `kairix probe-config --help` for the accepted ranges", file=sys.stderr)

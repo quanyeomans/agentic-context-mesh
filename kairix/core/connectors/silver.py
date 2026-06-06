@@ -78,6 +78,12 @@ _TARGET_CHUNK_CHARS = 1000
 _ENTITY_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b")
 _ORG_SUFFIXES: frozenset[str] = frozenset({"Corp", "Inc", "Ltd", "LLC", "GmbH", "Plc", "Company", "Group"})
 
+# F55 — chunker_version literals threaded into every Chunk(...) construction
+# below. Bump these when changing the chunking algorithm so the
+# maintenance-tick re-chunk sweep picks up affected documents (#415-adjacent).
+SILVER_MARKDOWN_CHUNKER_VERSION = "silver-markdown-v1"
+SILVER_PAGE_CHUNKER_VERSION = "silver-page-v1"
+
 
 def _chunk_markdown(markdown: str) -> tuple[str, ...]:
     """Split ``markdown`` on paragraph boundaries, ~``_TARGET_CHUNK_CHARS`` each.
@@ -487,6 +493,7 @@ class DefaultSilverProcessor:
                     source_modified_at=chunk_modified_at,
                     source_page=page_number,
                     sensitivity=sensitivity,
+                    chunker_version=SILVER_PAGE_CHUNKER_VERSION,
                     author=merged.author,
                     author_email=merged.author_email,
                     tags=merged.tags,
@@ -505,6 +512,7 @@ class DefaultSilverProcessor:
                     source_modified_at=chunk_modified_at,
                     source_page=None,
                     sensitivity=sensitivity,
+                    chunker_version=SILVER_MARKDOWN_CHUNKER_VERSION,
                     author=merged.author,
                     author_email=merged.author_email,
                     tags=merged.tags,

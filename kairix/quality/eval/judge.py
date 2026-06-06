@@ -303,7 +303,7 @@ class LLMJudge:
         parse failure — never raises. ``runs`` is accepted for protocol
         conformance; current implementation runs once.
         """
-        del runs  # protocol-conformance kwarg; multi-run aggregation is future work
+        _ = runs  # F19 — protocol-conformance kwarg; multi-run aggregation is future work
         if not candidates:
             return JudgeResult(
                 query=query,

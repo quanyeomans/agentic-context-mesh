@@ -52,7 +52,11 @@ def _test_llm_connection(
     — production callers leave the defaults and the function uses the
     ``kairix.secrets`` versions; tests pass raising fakes to drive the
     exception branch without monkey-patching ``kairix.secrets``.
+
+    ``embed_model`` is accepted for signature symmetry with the wizard's
+    other provider-probe helpers (which DO use it); F19 ack.
     """
+    _ = embed_model
     try:
         if provider == "azure":
             set_llm_endpoint_fn(endpoint)

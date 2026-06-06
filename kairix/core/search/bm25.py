@@ -378,6 +378,12 @@ def bm25_search(
         List of BM25Result dicts. Returns [] on any failure.
         Never raises.
     """
+    # F19 — agent kwarg is reserved for future per-agent collection scoping
+    # (see docstring). Acknowledge it here so the unused-params rule passes
+    # without renaming a public-API kwarg that downstream callers already
+    # bind by name.
+    _ = agent
+
     if not query or not query.strip():
         return []
 

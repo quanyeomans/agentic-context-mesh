@@ -1,5 +1,14 @@
-kairix/core/search/bm25.py
-kairix/knowledge/entities/filters.py
-kairix/platform/setup/wizard.py
-kairix/quality/eval/gold_builder.py
-kairix/quality/eval/judge.py
+# F19 baseline — files containing functions with an unused positional /
+# kwarg parameter that is NOT _-prefixed and NOT acknowledged via
+# ``_ = param`` at the function head. Grandfathered; shrink-only per F49.
+#
+# As of 2026-06-06: empty. The five previously-listed files —
+#   kairix/core/search/bm25.py (agent kwarg, reserved for scoping)
+#   kairix/knowledge/entities/filters.py (Suggestion-chain Protocol context arg)
+#   kairix/platform/setup/wizard.py (_test_llm_connection embed_model)
+#   kairix/quality/eval/gold_builder.py (grade_candidates deployment)
+#   kairix/quality/eval/judge.py (grade runs)
+# — were each marked with ``_ = <param>  # F19 — <reason>`` at the
+# function head, signalling the param is deliberately unused-today and
+# kept for API stability / Protocol-shape conformance. F19 reads
+# ``_ = name`` as a Load reference; ``del name`` does not satisfy.
