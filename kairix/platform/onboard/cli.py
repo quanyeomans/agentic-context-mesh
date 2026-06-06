@@ -5,6 +5,9 @@ Subcommands:
   check   Run all deployment health checks and report status.
   guide   Install the agent usage guide into the vault's shared knowledge base.
   verify  Run the acceptance test suite against the live deployment.
+  ready   Narrow readiness probe used as the Docker compose healthcheck target.
+  scan    Discover agent scopes on disk and propose kairix.config.yaml blocks.
+  agent   Discover surfaces for one named agent.
 
 Usage:
   kairix onboard check
@@ -12,6 +15,8 @@ Usage:
   kairix onboard check --env-file /opt/kairix/service.env
   kairix onboard guide --document-root /data/documents
   kairix onboard verify --agent builder
+  kairix onboard scan --memory-root /data/agents --yaml
+  kairix onboard agent --name agent-alpha --memory-root /data/agents --json
 """
 
 from __future__ import annotations
@@ -552,6 +557,14 @@ def main(
         help="Exit 0 when kairix is warm; exit 1 while still warming (Docker healthcheck target).",
     )
 
+    # scan + agent — PR 1.4 agent scope discovery surface. Subparsers
+    # live under ``kairix.agents.onboarding.cli`` so the domain logic
+    # for proposed-scope rendering stays colocated with the scanner.
+    from kairix.agents.onboarding.cli import add_agent_parser, add_scan_parser
+
+    add_scan_parser(sub)
+    add_agent_parser(sub)
+
     args = parser.parse_args(argv)
     # Thread the DI seams onto the args namespace so the sub-command
     # helpers pick them up through getattr in their existing signatures.
@@ -571,6 +584,14 @@ def main(
         return cmd_verify(args)
     if args.subcommand == "ready":
         return cmd_ready(args)
+    if args.subcommand == "scan":
+        from kairix.agents.onboarding.cli import cmd_scan
+
+        return cmd_scan(args)
+    if args.subcommand == "agent":
+        from kairix.agents.onboarding.cli import cmd_agent
+
+        return cmd_agent(args)
     # argparse with required=True makes this unreachable in practice;
     # surface as a non-zero exit if argparse semantics ever change.
     return 2

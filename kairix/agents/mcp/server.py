@@ -690,6 +690,71 @@ def tool_onboard_check() -> dict[str, Any]:
         }
 
 
+def tool_onboard_scan(
+    memory_root: str,
+    workspace_root: str = "",
+) -> dict[str, Any]:
+    """Discover agent scopes on disk and return them as an envelope.
+
+    Mirrors ``kairix onboard scan --json``. Wraps
+    :func:`kairix.agents.onboarding.scanner.scan_for_agents` so the
+    CLI + MCP return byte-identical envelopes for the same disk state.
+
+    Never raises — disk IO failures collapse into an empty ``agents``
+    list with the exception string preserved on ``error``.
+    """
+    from kairix.agents.onboarding.cli import scope_to_envelope
+    from kairix.agents.onboarding.scanner import scan_for_agents
+
+    try:
+        scopes = scan_for_agents(
+            memory_root=Path(memory_root),
+            workspace_root=Path(workspace_root) if workspace_root else None,
+        )
+        return {
+            "agents": [scope_to_envelope(s) for s in scopes],
+            "error": "",
+        }
+    except Exception as exc:
+        logger.warning("tool_onboard_scan failed: %s", exc, exc_info=True)
+        return {
+            "agents": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def tool_onboard_agent(
+    agent_name: str,
+    memory_root: str,
+    workspace_root: str = "",
+    harness: str = "",
+) -> dict[str, Any]:
+    """Discover surfaces for one named agent and return as an envelope.
+
+    Mirrors ``kairix onboard agent --name <name> --json``. Returns
+    ``{"agent": None, "error": "..."}`` when the agent has no detector
+    matches AND no .md files at ``memory_root/<name>`` — never raises.
+    """
+    from kairix.agents.onboarding.cli import scope_to_envelope
+    from kairix.agents.onboarding.scanner import discover_single_agent
+
+    try:
+        scope = discover_single_agent(
+            agent_name,
+            memory_root=Path(memory_root),
+            workspace_root=Path(workspace_root) if workspace_root else None,
+            harness=harness or None,
+        )
+        return {"agent": scope_to_envelope(scope), "error": ""}
+    except ValueError as exc:
+        # ValueError is the documented "no proposal" signal; surface
+        # the agent name so callers can branch on it.
+        return {"agent": None, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("tool_onboard_agent failed: %s", exc, exc_info=True)
+        return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def tool_warm() -> dict[str, Any]:
     """Pre-load kairix caches + pay factory-init costs.
 
@@ -1202,6 +1267,10 @@ CAP_CATEGORY_DIAGNOSTIC = "diagnostic"
 CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY = "diagnostic-operator-only"
 CAP_CATEGORY_KNOWLEDGE_WRITE = "knowledge-write"
 CAP_CATEGORY_AGENT = "agent"
+# PR 1.4 / #420 — agent scope discovery + proposal tools live under
+# their own category so agents grouping by category can find them
+# without scanning the diagnostic bucket.
+CAP_CATEGORY_CONFIGURATION = "configuration"
 
 
 def _cap(
@@ -1292,6 +1361,19 @@ def tool_capabilities() -> dict[str, Any]:
                 mcp_tool="onboard_check",
                 cli="kairix onboard check",
                 category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
+            # PR 1.4 / #420 — agent scope discovery + proposal
+            _cap(
+                name="onboard_scan",
+                mcp_tool="onboard_scan",
+                cli="kairix onboard scan",
+                category=CAP_CATEGORY_CONFIGURATION,
+            ),
+            _cap(
+                name="onboard_agent",
+                mcp_tool="onboard_agent",
+                cli="kairix onboard agent",
+                category=CAP_CATEGORY_CONFIGURATION,
             ),
             _cap(
                 name="worker_status",
@@ -1643,6 +1725,44 @@ def _register_synthesis_and_diagnostic_tools(
     def onboard_check() -> dict[str, Any]:
         """Health-probe envelope. Read-only. Identical to `kairix onboard check --json`."""
         return tool_onboard_check()
+
+    @server.tool(
+        description=(
+            "Discover agent scopes on disk under memory_root and propose "
+            "`agents:` config blocks for kairix.config.yaml. Read-only. "
+            "Identical envelope to `kairix onboard scan --json`. Call this "
+            "during first-time onboarding or when adding a new agent to "
+            "an existing kairix install."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/onboard_scan_discovers_agents.feature
+    def onboard_scan(memory_root: str, workspace_root: str = "") -> dict[str, Any]:
+        """Discovery envelope. Read-only. Identical to `kairix onboard scan --json`."""
+        return tool_onboard_scan(memory_root=memory_root, workspace_root=workspace_root)
+
+    @server.tool(
+        description=(
+            "Discover surfaces for one named agent — single-target counterpart "
+            "to `onboard_scan`. Returns {agent: {...}, error: ''} or "
+            "{agent: None, error: '<why>'} when nothing matches. Read-only."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/onboard_scan_discovers_agents.feature
+    def onboard_agent(
+        agent_name: str,
+        memory_root: str,
+        workspace_root: str = "",
+        harness: str = "",
+    ) -> dict[str, Any]:
+        """Single-agent discovery envelope. Read-only."""
+        return tool_onboard_agent(
+            agent_name=agent_name,
+            memory_root=memory_root,
+            workspace_root=workspace_root,
+            harness=harness,
+        )
 
     @server.tool(
         description=(

@@ -29,6 +29,7 @@ pytest_plugins = [
     "tests.bdd.steps.normalisation_steps",
     "tests.bdd.steps.entity_steps",
     "tests.bdd.steps.onboard_steps",
+    "tests.bdd.steps.onboard_scan_steps",
     "tests.bdd.steps.mcp_timeline_steps",
     "tests.bdd.steps.eval_tune_steps",
     "tests.bdd.steps.mcp_entity_steps",

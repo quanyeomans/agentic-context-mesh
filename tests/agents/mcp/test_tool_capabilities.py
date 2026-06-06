@@ -21,6 +21,7 @@ import pytest
 import kairix.agents.mcp.server as server_module
 from kairix.agents.mcp.server import (
     CAP_CATEGORY_AGENT,
+    CAP_CATEGORY_CONFIGURATION,
     CAP_CATEGORY_DIAGNOSTIC,
     CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY,
     CAP_CATEGORY_KNOWLEDGE_WRITE,
@@ -42,6 +43,8 @@ _WELL_KNOWN_CATEGORIES = {
     CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY,
     CAP_CATEGORY_KNOWLEDGE_WRITE,
     CAP_CATEGORY_AGENT,
+    # PR 1.4 / #420 — onboard_scan + onboard_agent agent-config tools.
+    CAP_CATEGORY_CONFIGURATION,
 }
 
 

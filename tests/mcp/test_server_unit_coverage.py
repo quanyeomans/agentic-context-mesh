@@ -123,6 +123,9 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "bootstrap",
         # Diagnostic capabilities (read-only)
         "onboard_check",
+        # PR 1.4 / #420 — agent scope discovery + proposal
+        "onboard_scan",
+        "onboard_agent",
         "worker_status",
         "features_status",
         "secrets_verify",
