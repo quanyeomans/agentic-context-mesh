@@ -14,9 +14,10 @@ Adapter only — business logic lives in
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
-from kairix.use_cases.brief import BriefDeps, BriefOutput, run_brief
+from kairix.use_cases.brief import BriefDeps, BriefOutput, brief_output_to_envelope, run_brief
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -40,6 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
         dest="memory_root",
         default=None,
         help="Root directory containing agent subdirectories (e.g. /path/to/04-Agent-Knowledge).",
+    )
+    parser.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        default=False,
+        help=(
+            "Emit the brief envelope dict as JSON to stdout. The same shape "
+            "``tool_brief`` returns over MCP — use to drive automation or "
+            "to inspect the warm-MCP routing path (#421)."
+        ),
     )
     return parser
 
@@ -74,6 +86,18 @@ def main(args: list[str] | None = None, *, deps: BriefDeps | None = None) -> Non
 
     print(f"Generating briefing for agent: {parsed.agent} ...", file=sys.stderr)
     out = run_brief(parsed.agent, deps=deps)
+
+    if parsed.as_json:
+        # JSON mode short-circuits the human-facing branches: the
+        # envelope carries the error / path / content fields the caller
+        # needs to parse. Operator-facing stderr trace ("Generating
+        # briefing...") stays so the subprocess narration still appears
+        # in interactive use, but nothing else writes to stderr/stdout.
+        # Exit non-zero on error so shell pipelines can branch on it.
+        print(json.dumps(brief_output_to_envelope(out), indent=2))
+        if out.error:
+            sys.exit(1)
+        return
 
     if out.error:
         print(f"Error generating briefing: {out.error}", file=sys.stderr)

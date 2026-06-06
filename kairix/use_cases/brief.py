@@ -204,6 +204,32 @@ class BriefOutput:
     health: KairixHealth = field(default_factory=KairixHealth)
     error: str = ""
 
+    @classmethod
+    def from_envelope(cls, envelope: dict[str, Any]) -> BriefOutput:
+        """Rebuild a ``BriefOutput`` from the dict ``brief_output_to_envelope`` emits.
+
+        The seam for warm-MCP text-mode routing (#421 PR 2.1). The CLI
+        dispatcher receives a JSON envelope from the MCP worker; this
+        adapter projects it back to the dataclass shape ``format_output``
+        already consumes, so the in-process and warm paths render
+        byte-identical text.
+
+        ``health`` is NOT round-tripped — ``format_output`` reads only
+        ``content`` / ``path``; reconstructing a ``KairixHealth`` from
+        its envelope dict would require an inverse of ``health_to_envelope``
+        that doesn't exist today. The dataclass default ``KairixHealth()``
+        is acceptable because the CLI's rendering path never reads it.
+        Any future caller that needs the round-tripped health snapshot
+        should add an explicit ``envelope_to_health`` and wire it here.
+        """
+        return cls(
+            agent=str(envelope.get("agent", "")),
+            content=str(envelope.get("content", "")),
+            path=str(envelope.get("path", "")),
+            preview=str(envelope.get("preview", "")),
+            error=str(envelope.get("error", "")),
+        )
+
 
 @dataclass(frozen=True)
 class BriefDeps:
