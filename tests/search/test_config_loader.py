@@ -1,4 +1,10 @@
-"""Tests for kairix YAML config loader."""
+"""Tests for kairix YAML config loader.
+
+All env-driven resolution goes through the documented ``env=`` and
+``config_path=`` test seams (F2-clean alternatives to monkey-patching
+``KAIRIX_CONFIG_PATH``). The single ``tmp_path`` chdir per test prevents
+the cwd-fallback from picking up a stray ``kairix.config.yaml``.
+"""
 
 from __future__ import annotations
 
@@ -140,7 +146,7 @@ class TestValidateConfig:
         assert "entity.cap" in msg
 
     @pytest.mark.unit
-    def test_invalid_config_not_silently_swallowed(self, tmp_path, monkeypatch):
+    def test_invalid_config_not_silently_swallowed(self, tmp_path):
         """ConfigValidationError must propagate — never fall back to defaults on invalid config."""
         pytest.importorskip("yaml", reason="config loader uses PyYAML; skip when not installed (optional via [dev])")
         config_file = tmp_path / "kairix.config.yaml"
@@ -152,29 +158,27 @@ class TestValidateConfig:
                   factor: 999.0
         """)
         )
-        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
         from kairix.core.search import config_loader
 
         config_loader.load_cached.cache_clear()
         with pytest.raises(ConfigValidationError):
-            load_config()
+            load_config(config_path=config_file)
 
 
 @pytest.mark.unit
 class TestLoadConfig:
     @pytest.mark.unit
     def test_returns_defaults_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("KAIRIX_CONFIG_PATH", raising=False)
         monkeypatch.chdir(tmp_path)
         # Clear lru_cache so path is re-resolved
         from kairix.core.search import config_loader
 
-        config_loader.load_cached.cache_clear()
-        cfg = load_config()
+        config_loader.reset_config_cache()
+        cfg = load_config(env={})
         assert isinstance(cfg, RetrievalConfig)
 
     @pytest.mark.unit
-    def test_loads_from_env_var(self, tmp_path, monkeypatch):
+    def test_loads_from_env_var(self, tmp_path):
         pytest.importorskip("yaml", reason="config loader uses PyYAML; skip when not installed (optional via [dev])")
         config_file = tmp_path / "my-kairix.yaml"
         config_file.write_text(
@@ -185,34 +189,31 @@ class TestLoadConfig:
                   enabled: false
         """)
         )
-        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
         from kairix.core.search import config_loader
 
-        config_loader.load_cached.cache_clear()
-        cfg = load_config()
+        config_loader.reset_config_cache()
+        cfg = load_config(env={"KAIRIX_CONFIG_PATH": str(config_file)})
         assert cfg.entity.enabled is False
 
     @pytest.mark.unit
-    def test_invalid_yaml_falls_back_to_defaults(self, tmp_path, monkeypatch):
+    def test_invalid_yaml_falls_back_to_defaults(self, tmp_path):
         """Malformed YAML falls back to defaults (not a validation error)."""
         config_file = tmp_path / "bad.yaml"
         config_file.write_text("{{{{invalid yaml content::::")
-        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
         from kairix.core.search import config_loader
 
-        config_loader.load_cached.cache_clear()
-        cfg = load_config()
+        config_loader.reset_config_cache()
+        cfg = load_config(env={"KAIRIX_CONFIG_PATH": str(config_file)})
         defaults = RetrievalConfig.defaults()
         assert cfg.entity.enabled == defaults.entity.enabled
 
     @pytest.mark.unit
-    def test_env_path_nonexistent_falls_back(self, tmp_path, monkeypatch):
+    def test_env_path_nonexistent_falls_back(self, tmp_path):
         """KAIRIX_CONFIG_PATH pointing to nonexistent file falls back to defaults."""
-        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(tmp_path / "missing.yaml"))
         from kairix.core.search import config_loader
 
-        config_loader.load_cached.cache_clear()
-        cfg = load_config()
+        config_loader.reset_config_cache()
+        cfg = load_config(env={"KAIRIX_CONFIG_PATH": str(tmp_path / "missing.yaml")})
         assert isinstance(cfg, RetrievalConfig)
 
 
@@ -220,28 +221,27 @@ class TestLoadConfig:
 class TestResolveConfigPath:
     @pytest.mark.unit
     def test_returns_none_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("KAIRIX_CONFIG_PATH", raising=False)
         monkeypatch.chdir(tmp_path)
         result = resolve_config_path()
         assert result is None
 
     @pytest.mark.unit
-    def test_returns_env_path_when_file_exists(self, tmp_path, monkeypatch):
+    def test_returns_env_path_when_file_exists(self, tmp_path):
+        """Explicit ``config_path=`` arg is the F2-clean alternative to the env var."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("retrieval: {}")
-        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(config_file))
-        result = resolve_config_path()
+        result = resolve_config_path(explicit=config_file)
         assert result == config_file
 
     @pytest.mark.unit
-    def test_returns_none_when_env_path_missing(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(tmp_path / "nope.yaml"))
-        result = resolve_config_path()
+    def test_returns_none_when_env_path_missing(self, tmp_path):
+        """Explicit path pointing at a missing file returns None — same
+        contract as the env-var path."""
+        result = resolve_config_path(explicit=tmp_path / "nope.yaml")
         assert result is None
 
     @pytest.mark.unit
     def test_finds_cwd_config(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("KAIRIX_CONFIG_PATH", raising=False)
         monkeypatch.chdir(tmp_path)
         (tmp_path / "kairix.config.yaml").write_text("retrieval: {}")
         result = resolve_config_path()
@@ -351,7 +351,12 @@ class TestLoadCachedEdgeCases:
 
     @pytest.mark.unit
     def test_yaml_not_installed_falls_back(self, tmp_path, monkeypatch):
-        """When PyYAML is not installed, falls back to defaults."""
+        """When PyYAML is not installed, falls back to defaults.
+
+        This test patches ``builtins.__import__`` (a stdlib boundary) to
+        simulate the optional-dep-missing path; that's an exempt root under
+        F1 (stdlib patches are legitimate boundary fakes).
+        """
         from kairix.core.search import config_loader
 
         config_loader.load_cached.cache_clear()

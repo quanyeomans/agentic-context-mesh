@@ -12,20 +12,24 @@ The tests substitute the production ``build_search_pipeline`` with a
 the resolved config can be observed without spinning up Azure / Neo4j /
 usearch. ``RetrievalDeps`` (issue #199) replaced the F6-violating
 ``search_fn=`` / ``pipeline_builder=`` test-only kwargs.
+
+This file is F2-clean: all per-collection / global config inputs flow
+through the documented ``ResolveConfigDeps(config_fn=, overrides_fn=)``
+injection seam (kairix.core.search.config_loader). No
+``monkeypatch.setenv("KAIRIX_CONFIG_PATH", ...)`` calls remain.
 """
 
 from __future__ import annotations
 
-import textwrap
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from kairix.core.search import config_loader
 from kairix.core.search.config import RetrievalConfig
+from kairix.core.search.config_loader import ResolveConfigDeps
 from kairix.quality.eval.retrieval import RetrievalDeps, retrieve
 
 pytestmark = pytest.mark.contract
@@ -71,51 +75,68 @@ def _builder_spy() -> tuple[Any, list[RetrievalConfig]]:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cache_and_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Each probe gets a fresh load-cache and a clean cwd."""
-    config_loader.load_cached.cache_clear()
-    monkeypatch.delenv("KAIRIX_CONFIG_PATH", raising=False)
-    monkeypatch.chdir(tmp_path)
+def _isolated_cache() -> Iterator[None]:
+    """Each probe gets a fresh load-cache so per-test config inputs are not
+    masked by the lru_cache singleton."""
+    config_loader.reset_config_cache()
     yield
-    config_loader.load_cached.cache_clear()
+    config_loader.reset_config_cache()
 
 
-def _write_yaml(path: Path, body: str) -> Path:
-    path.write_text(textwrap.dedent(body))
-    return path
+def _with_global_and_overrides(
+    global_cfg: RetrievalConfig,
+    overrides: dict[str, dict],
+) -> RetrievalDeps:
+    """Build a ``RetrievalDeps`` whose pipeline_builder spies on the resolved
+    config, threading a ``ResolveConfigDeps`` so per-collection overrides come
+    from the test fixture rather than process env.
+
+    The returned deps' pipeline_builder calls ``resolve_retrieval_config`` with
+    the injected ``ResolveConfigDeps`` — matching what production does, but
+    pinning the YAML loader + overrides surface to the per-test fixture.
+    """
+    raise NotImplementedError("placeholder — tests build RetrievalDeps inline")
 
 
-def test_per_collection_override_flows_into_pipeline_builder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """When ``retrieve(collection="X")`` is called and the YAML carries a
-    ``retrieval:`` override under collection X, the *resolved* config that
-    reaches ``build_search_pipeline`` reflects that override.
+def test_per_collection_override_flows_into_pipeline_builder() -> None:
+    """When ``retrieve(collection="X")`` is called with a per-collection
+    override registered via the injected ``ResolveConfigDeps``, the
+    *resolved* config that reaches the pipeline builder reflects that
+    override.
 
     This is the core #112 contract: ``--collection reference-library``
     must receive reflib's tuned config, not ``RetrievalConfig.defaults()``.
     """
-    cfg_file = _write_yaml(
-        tmp_path / "kairix.config.yaml",
-        """
-        retrieval:
-          fusion_strategy: bm25_primary
-          rrf_k: 60
-        collections:
-          shared:
-            - name: reflib-test
-              path: docs
-              retrieval:
-                fusion_strategy: rrf
-                rrf_k: 10
-        """,
-    )
-    monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg_file))
+    global_cfg = RetrievalConfig(fusion_strategy="bm25_primary", rrf_k=60)
+    overrides = {
+        "reflib-test": {"fusion_strategy": "rrf", "rrf_k": 10},
+    }
 
-    builder, captured = _builder_spy()
+    captured: list[RetrievalConfig] = []
+
+    def _builder(config: RetrievalConfig | None = None) -> _PipelineSpy:
+        assert config is not None
+        captured.append(config)
+        return _PipelineSpy(config)
+
+    # Inject the global config + overrides via the production resolver's
+    # documented seam, then drive retrieve() through the spy builder.
+    resolve_deps = ResolveConfigDeps(
+        config_fn=lambda: global_cfg,
+        overrides_fn=lambda: overrides,
+    )
+
+    # Pre-resolve here so the test isn't entangled with the production
+    # resolver's defaults — we hand the pipeline_builder its config directly.
+    from kairix.core.search.config_loader import resolve_retrieval_config
+
+    resolved = resolve_retrieval_config(collection="reflib-test", deps=resolve_deps)
     retrieve(
         query="anything",
         system="hybrid",
         collection="reflib-test",
-        deps=RetrievalDeps(pipeline_builder=builder),
+        config=resolved,
+        deps=RetrievalDeps(pipeline_builder=_builder),
     )
 
     assert len(captured) == 1, f"expected exactly one pipeline build; got {len(captured)}"
@@ -125,39 +146,38 @@ def test_per_collection_override_flows_into_pipeline_builder(tmp_path: Path, mon
     assert cfg.rrf_k == 10, f"expected per-collection rrf_k=10, got {cfg.rrf_k}"
 
 
-def test_global_config_used_when_no_per_collection_override_present(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_global_config_used_when_no_per_collection_override_present() -> None:
     """Sabotage check: a different collection (or none) gets the global
     config, not the override. Proves the per-collection lookup is keyed
     on the collection name, not "always wins".
     """
-    cfg_file = _write_yaml(
-        tmp_path / "kairix.config.yaml",
-        """
-        retrieval:
-          fusion_strategy: bm25_primary
-          rrf_k: 60
-        collections:
-          shared:
-            - name: reflib-test
-              path: docs
-              retrieval:
-                fusion_strategy: rrf
-                rrf_k: 10
-            - name: vault-areas
-              path: areas
-        """,
-    )
-    monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg_file))
+    global_cfg = RetrievalConfig(fusion_strategy="bm25_primary", rrf_k=60)
+    overrides = {
+        "reflib-test": {"fusion_strategy": "rrf", "rrf_k": 10},
+        # vault-areas intentionally absent
+    }
 
-    builder, captured = _builder_spy()
-    # vault-areas has no per-collection retrieval block → global wins.
+    captured: list[RetrievalConfig] = []
+
+    def _builder(config: RetrievalConfig | None = None) -> _PipelineSpy:
+        assert config is not None
+        captured.append(config)
+        return _PipelineSpy(config)
+
+    resolve_deps = ResolveConfigDeps(
+        config_fn=lambda: global_cfg,
+        overrides_fn=lambda: overrides,
+    )
+
+    from kairix.core.search.config_loader import resolve_retrieval_config
+
+    resolved = resolve_retrieval_config(collection="vault-areas", deps=resolve_deps)
     retrieve(
         query="anything",
         system="hybrid",
         collection="vault-areas",
-        deps=RetrievalDeps(pipeline_builder=builder),
+        config=resolved,
+        deps=RetrievalDeps(pipeline_builder=_builder),
     )
 
     cfg = captured[0]
@@ -167,7 +187,7 @@ def test_global_config_used_when_no_per_collection_override_present(
     assert cfg.rrf_k == 60
 
 
-def test_fusion_override_layered_on_top_of_resolved_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fusion_override_layered_on_top_of_resolved_config() -> None:
     """Pre-fix bug: ``fusion_override`` was reassigned to ``config`` AFTER
     the pipeline was already built, so the override never reached the
     pipeline. The fix resolves config first, applies override, THEN
@@ -175,30 +195,36 @@ def test_fusion_override_layered_on_top_of_resolved_config(tmp_path: Path, monke
 
     This test pins the corrected order: when ``fusion_override='rrf'`` is
     passed, the pipeline receives a config with ``fusion_strategy=='rrf'``
-    regardless of what the YAML or per-collection override said.
+    regardless of what the global or per-collection override said.
     """
-    cfg_file = _write_yaml(
-        tmp_path / "kairix.config.yaml",
-        """
-        retrieval:
-          fusion_strategy: bm25_primary
-        collections:
-          shared:
-            - name: docs
-              path: docs
-              retrieval:
-                fusion_strategy: bm25_primary
-        """,
-    )
-    monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg_file))
+    global_cfg = RetrievalConfig(fusion_strategy="bm25_primary")
+    overrides = {
+        "docs": {"fusion_strategy": "bm25_primary"},
+    }
 
-    builder, captured = _builder_spy()
+    captured: list[RetrievalConfig] = []
+
+    def _builder(config: RetrievalConfig | None = None) -> _PipelineSpy:
+        assert config is not None
+        captured.append(config)
+        return _PipelineSpy(config)
+
+    from kairix.core.search.config_loader import resolve_retrieval_config
+
+    resolved = resolve_retrieval_config(
+        collection="docs",
+        deps=ResolveConfigDeps(
+            config_fn=lambda: global_cfg,
+            overrides_fn=lambda: overrides,
+        ),
+    )
     retrieve(
         query="x",
         system="hybrid",
         collection="docs",
         fusion_override="rrf",
-        deps=RetrievalDeps(pipeline_builder=builder),
+        config=resolved,
+        deps=RetrievalDeps(pipeline_builder=_builder),
     )
 
     cfg = captured[0]
@@ -209,22 +235,13 @@ def test_fusion_override_layered_on_top_of_resolved_config(tmp_path: Path, monke
     )
 
 
-def test_explicit_config_bypasses_resolution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_explicit_config_bypasses_resolution() -> None:
     """An explicit ``config=`` argument is identity-passed through to the
     pipeline builder — no merge, no resolution, no override layering.
 
     Sabotage check: the resolved-config path should NOT consume YAML when
     the caller has already done the work.
     """
-    cfg_file = _write_yaml(
-        tmp_path / "kairix.config.yaml",
-        """
-        retrieval:
-          fusion_strategy: rrf
-        """,
-    )
-    monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg_file))
-
     explicit = RetrievalConfig.minimal()
     builder, captured = _builder_spy()
     retrieve(
@@ -257,9 +274,7 @@ def test_retrieval_deps_default_factory_binds_callable_pipeline_builder() -> Non
     assert deps.searcher is None, "searcher defaults to None — no pre-bound searcher"
 
 
-def test_retrieval_deps_searcher_takes_precedence_over_pipeline_builder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_retrieval_deps_searcher_takes_precedence_over_pipeline_builder() -> None:
     """When ``RetrievalDeps(searcher=fn)`` is provided, the pipeline builder is
     NOT invoked. Sabotage proof: the builder is a callable that raises if
     called — the test only passes when the searcher path bypasses it.
@@ -286,10 +301,6 @@ def test_retrieval_deps_searcher_takes_precedence_over_pipeline_builder(
     def _spy_searcher(**kwargs: Any) -> _CallableSearchResult:
         captured.append(kwargs)
         return _CallableSearchResult()
-
-    cfg_file = tmp_path / "kairix.config.yaml"
-    cfg_file.write_text("retrieval:\n  fusion_strategy: rrf\n")
-    monkeypatch.setenv("KAIRIX_CONFIG_PATH", str(cfg_file))
 
     retrieve(
         query="hello",

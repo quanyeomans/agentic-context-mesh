@@ -624,28 +624,47 @@ def embed_vector_dims(default: int = 1536) -> int:
         return default
 
 
-def is_docker_env() -> bool:
+def is_docker_env(env: Mapping[str, str] | None = None) -> bool:
     """Return True when running inside a Docker container.
 
     Detection: ``/.dockerenv`` exists, ``KAIRIX_DOCKER=1``, or the generic
     ``container`` env var is set. Used by factories that want to swap log
     paths between container and host layouts.
+
+    Args:
+        env: Optional explicit env mapping (F2-clean test seam). When
+            ``None``, the live ``os.environ`` is consulted (production
+            default). Tests pass a dict so the env-driven branches can
+            be exercised without monkey-patching ``os.environ``.
     """
-    return is_docker_runtime_check()
+    if env is None:
+        return is_docker_runtime_check()
+    return os.path.exists("/.dockerenv") or env.get("KAIRIX_DOCKER", "") == "1" or env.get("container", "") != ""
 
 
-def log_queries_enabled() -> bool:
+def log_queries_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Privacy-gated query-log toggle: ``KAIRIX_LOG_QUERIES=1`` enables the
-    raw-query JSONL emitter. Off by default."""
-    return os.environ.get("KAIRIX_LOG_QUERIES") == "1"
+    raw-query JSONL emitter. Off by default.
+
+    Args:
+        env: Optional explicit env mapping (F2-clean test seam). When
+            ``None``, the live ``os.environ`` is consulted.
+    """
+    e = env if env is not None else os.environ
+    return e.get("KAIRIX_LOG_QUERIES") == "1"
 
 
-def extra_collections() -> list[str]:
+def extra_collections(env: Mapping[str, str] | None = None) -> list[str]:
     """Operator-supplied extra collection names — ad-hoc additions when
     there's no full config file. Parses ``KAIRIX_EXTRA_COLLECTIONS`` as a
     comma-separated list and returns the non-empty entries.
+
+    Args:
+        env: Optional explicit env mapping (F2-clean test seam). When
+            ``None``, the live ``os.environ`` is consulted.
     """
-    raw = os.environ.get("KAIRIX_EXTRA_COLLECTIONS", "")
+    e = env if env is not None else os.environ
+    raw = e.get("KAIRIX_EXTRA_COLLECTIONS", "")
     return [c.strip() for c in raw.split(",") if c.strip()]
 
 

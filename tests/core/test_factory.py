@@ -12,10 +12,15 @@ Coverage targets:
     spinning up real services.
 
 We deliberately do NOT use ``@patch`` (F1) or pytest ``monkeypatch``
-on ``KAIRIX_*`` env vars (F2). The ``KAIRIX_DOCKER`` and
-``KAIRIX_LOG_QUERIES`` paths are exercised by swapping the
-lazily-imported ``os`` module attribute on ``factory``, which is a
-third-party-namespace substitution (``os`` is stdlib, not ``kairix.*``).
+on ``KAIRIX_*`` env vars (F2). Tests that need to drive env-var-driven
+branches (``KAIRIX_DOCKER``, ``KAIRIX_EXTRA_COLLECTIONS``,
+``KAIRIX_LOG_QUERIES``) thread an explicit ``env={...}`` mapping through
+``build_search_pipeline``; the factory passes it down to
+``kairix.paths.is_docker_env`` / ``extra_collections`` /
+``log_queries_enabled``. Tests that need to inject a stand-in for the
+vector index, graph client, or secrets bootstrap construct a
+``FactoryDeps`` with the relevant field overridden and pass it as
+``deps=``. No module-attribute swap, no env mutation.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from kairix.core.factory import build_search_pipeline, select_boosts
+from kairix.core.factory import FactoryDeps, build_search_pipeline, select_boosts
 from kairix.core.search.boosts import (
     ChunkDateBoost,
     EntityBoost,
@@ -284,36 +289,17 @@ def test_build_search_pipeline_resolver_honours_extra_collections_env() -> None:
     """``KAIRIX_EXTRA_COLLECTIONS`` is comma-split and threaded through
     to the resolver.
 
-    F2 forbids monkeypatch on KAIRIX env vars. The factory delegates the
-    env read to ``kairix.paths.extra_collections``; the test swaps that
-    module's ``os`` attribute to a stand-in carrying the sentinel. The
-    swap targets a stdlib namespace (``os``) rather than a kairix
-    internal, so F1/F2 stay clean.
+    Threads an explicit env dict via ``build_search_pipeline(env={...})``
+    so the factory's call to :func:`kairix.paths.extra_collections` reads
+    from the test fixture rather than ``os.environ``. F1/F2-clean — no
+    module-attribute swap, no env mutation.
     """
-    import os
-    import types
-
-    from kairix import paths as paths_mod
-    from kairix.core import factory as factory_mod
-
-    # Build a stand-in os module that carries a tweaked environ but
-    # delegates everything else to the real os.
-    fake_environ = dict(os.environ)
-    fake_environ["KAIRIX_EXTRA_COLLECTIONS"] = "alpha-collection, beta-collection"
-    fake_environ.pop("KAIRIX_DOCKER", None)
-    fake_environ.pop("KAIRIX_LOG_QUERIES", None)
-
-    fake_os = types.ModuleType("os")
-    fake_os.environ = fake_environ  # type: ignore[attr-defined]  # synthetic stand-in module; mypy doesn't know our test attrs
-    fake_os.path = os.path  # type: ignore[attr-defined]  # synthetic stand-in module; mypy doesn't know our test attrs
-
-    real_paths_os = paths_mod.os
-    paths_mod.os = fake_os  # type: ignore[assignment]  # stdlib substitution at the paths.py boundary
-    try:
-        cfg = RetrievalConfig(fusion_strategy="rrf")
-        pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
-    finally:
-        paths_mod.os = real_paths_os
+    cfg = RetrievalConfig(fusion_strategy="rrf")
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        env={"KAIRIX_EXTRA_COLLECTIONS": "alpha-collection, beta-collection"},
+    )
 
     # Post topology_v2 flag retirement, the resolver shape is
     # ``ScopeCollectionCache(TopologyV2CollectionResolver(extra_collections=...))``
@@ -326,42 +312,26 @@ def test_build_search_pipeline_resolver_honours_extra_collections_env() -> None:
     extras = getattr(inner, "_extra", [])
     assert "alpha-collection" in extras
     assert "beta-collection" in extras
-    # Sanity: the factory module reference is untouched after the swap.
-    assert factory_mod is not None
 
 
 @pytest.mark.unit
 def test_build_search_pipeline_uses_docker_log_path_when_dockerenv_marker_present(
     tmp_path: Any,
 ) -> None:
-    """Drives the Docker-detection branch by swapping ``kairix.paths.os``
-    so :func:`kairix.paths.is_docker_env` sees ``KAIRIX_DOCKER=1``.
+    """Drives the Docker-detection branch by threading an explicit
+    ``env={"KAIRIX_DOCKER": "1"}`` mapping through ``build_search_pipeline``.
 
     The env-read boundary moved from ``factory.py`` into
-    ``kairix.paths.is_docker_env`` (F4); the test follows by swapping the
-    ``os`` reference inside ``kairix.paths``. Stdlib substitution at the
-    boundary keeps F1/F2 clean.
+    :func:`kairix.paths.is_docker_env` (F4); the factory threads its
+    optional ``env`` kwarg through to that helper. F1/F2-clean — no
+    module-attribute swap, no env mutation.
     """
-    import os
-    import types
-
-    from kairix import paths as paths_mod
-
-    fake_environ = dict(os.environ)
-    fake_environ["KAIRIX_DOCKER"] = "1"
-    fake_environ.pop("KAIRIX_LOG_QUERIES", None)
-
-    fake_os = types.ModuleType("os")
-    fake_os.environ = fake_environ  # type: ignore[attr-defined]  # synthetic stand-in module
-    fake_os.path = os.path  # type: ignore[attr-defined]  # synthetic stand-in module
-
-    real_paths_os = paths_mod.os
-    paths_mod.os = fake_os  # type: ignore[assignment]  # stdlib substitution at the paths.py boundary
-    try:
-        cfg = RetrievalConfig(fusion_strategy="rrf")
-        pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
-    finally:
-        paths_mod.os = real_paths_os
+    cfg = RetrievalConfig(fusion_strategy="rrf")
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        env={"KAIRIX_DOCKER": "1"},
+    )
 
     # The search logger's path is rooted at /data/kairix/logs when the
     # docker marker is detected. We don't write to it; we only check
@@ -395,12 +365,10 @@ def test_build_search_pipeline_uses_real_vector_index_when_available() -> None:
     """Drives line 118 — the ``index is not None`` branch wraps the
     real index in ``UsearchVectorRepository``.
 
-    We swap ``kairix.core.search.vec_index.get_vector_index`` (lazily
-    imported by the factory) for a stand-in that returns a tiny
-    in-memory index-like object. The factory's ``UsearchVectorRepository``
-    just stores the index reference, so any object works.
+    Threads a stand-in vector-index factory through the ``vec_index_factory=``
+    kwarg (F1-clean DI seam). The factory's ``UsearchVectorRepository`` just
+    stores the index reference, so any object works.
     """
-    from kairix.core.search import vec_index as vec_index_mod
 
     class _StandInIndex:
         """Minimal usearch-shaped stand-in. The factory does not call
@@ -410,13 +378,12 @@ def test_build_search_pipeline_uses_real_vector_index_when_available() -> None:
         def __len__(self) -> int:
             return 1
 
-    real = vec_index_mod.get_vector_index
-    vec_index_mod.get_vector_index = lambda *a, **kw: _StandInIndex()
-    try:
-        cfg = RetrievalConfig(fusion_strategy="rrf")
-        pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
-    finally:
-        vec_index_mod.get_vector_index = real
+    cfg = RetrievalConfig(fusion_strategy="rrf")
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        deps=FactoryDeps(vec_index_factory=lambda: _StandInIndex()),
+    )
 
     # Confirm the vector backend received a UsearchVectorRepository wired
     # to our stand-in — pinned via repr inspection so we don't import
@@ -437,18 +404,16 @@ def test_build_search_pipeline_falls_back_when_get_vector_index_raises() -> None
     factory call would raise; this test asserts a well-formed
     pipeline whose vector search degrades silently.
     """
-    from kairix.core.search import vec_index as vec_index_mod
 
-    def _boom(*_a: object, **_kw: object) -> object:
+    def _boom() -> object:
         raise RuntimeError("simulated usearch load failure")
 
-    real = vec_index_mod.get_vector_index
-    vec_index_mod.get_vector_index = _boom
-    try:
-        cfg = RetrievalConfig(fusion_strategy="rrf")
-        pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
-    finally:
-        vec_index_mod.get_vector_index = real
+    cfg = RetrievalConfig(fusion_strategy="rrf")
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        deps=FactoryDeps(vec_index_factory=_boom),
+    )
 
     # The factory threaded a null vector repo in instead of crashing.
     repo = pipeline.vector._vector_repo
@@ -462,11 +427,10 @@ def test_build_search_pipeline_uses_neo4j_graph_when_client_available() -> None:
     factory wraps the client in ``Neo4jGraphRepository`` instead of
     falling back to ``FakeGraphRepository``.
 
-    We provide a stand-in client whose ``cypher`` method satisfies
-    ``Neo4jGraphRepository``'s minimal contract; the factory does not
-    actually call cypher at construction time.
+    Threads a stand-in client through the ``graph_client_factory=`` kwarg
+    (F1-clean DI seam). The factory does not actually call cypher at
+    construction time — structural typing is sufficient at the boundary.
     """
-    from kairix.knowledge.graph import client as client_mod
 
     class _StandInClient:
         @property
@@ -476,15 +440,12 @@ def test_build_search_pipeline_uses_neo4j_graph_when_client_available() -> None:
         def cypher(self, query: str, **_kw: object) -> list[dict[str, Any]]:
             return []
 
-    real = client_mod.get_client
-    # The factory only stores the client reference; structural typing
-    # is sufficient at the boundary.
-    client_mod.get_client = lambda: _StandInClient()  # type: ignore[assignment, return-value]  # structural stand-in for boundary type check; not callable in test path
-    try:
-        cfg = RetrievalConfig(fusion_strategy="rrf")
-        pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
-    finally:
-        client_mod.get_client = real
+    cfg = RetrievalConfig(fusion_strategy="rrf")
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        deps=FactoryDeps(graph_client_factory=_StandInClient),
+    )
 
     # Pipeline graph is a Neo4jGraphRepository, not a FakeGraphRepository.
     assert type(pipeline.graph).__name__ == "Neo4jGraphRepository"
@@ -512,19 +473,20 @@ def test_build_search_pipeline_falls_back_to_fake_graph_when_get_client_raises()
 
     Sabotage proof: removing the except clause would propagate the
     RuntimeError; the test asserts a clean pipeline instead.
-    """
-    from kairix.knowledge.graph import client as client_mod
 
-    def _boom() -> client_mod.Neo4jClient:
+    Threads a raising stand-in through the ``graph_client_factory=`` kwarg
+    (F1-clean DI seam) instead of mutating ``kairix.knowledge.graph.client``.
+    """
+
+    def _boom() -> Any:
         raise RuntimeError("simulated neo4j driver failure at boundary")
 
-    real = client_mod.get_client
-    client_mod.get_client = _boom
-    try:
-        cfg = RetrievalConfig(fusion_strategy="rrf")
-        pipeline = build_search_pipeline(config=_wire_cfg(cfg), registry=_provider_registry())
-    finally:
-        client_mod.get_client = real
+    cfg = RetrievalConfig(fusion_strategy="rrf")
+    pipeline = build_search_pipeline(
+        config=_wire_cfg(cfg),
+        registry=_provider_registry(),
+        deps=FactoryDeps(graph_client_factory=_boom),
+    )
 
     # Pipeline still constructed — graph fell back to a null repo.
     # Asserts the protocol surface (available=False) rather than the
@@ -676,29 +638,26 @@ def test_build_search_pipeline_auto_hydrates_secrets_via_bootstrap() -> None:
     fake doesn't observe the call.
     """
     from kairix.core.factory import build_search_pipeline
-    from kairix.secrets import bootstrap as bootstrap_mod
+    from kairix.secrets.bootstrap import bootstrap_secrets as real_bootstrap
 
     bootstrap_calls: list[int] = []
-    real_bootstrap = bootstrap_mod.bootstrap_secrets
 
     def _counting_bootstrap(*args: Any, **kwargs: Any) -> int:
         bootstrap_calls.append(1)
         return real_bootstrap(*args, **kwargs)
 
-    bootstrap_mod.bootstrap_secrets = _counting_bootstrap
+    # The factory call may fail later in the dependency chain (no real
+    # creds in unit test env) — that's fine. We only assert the
+    # bootstrap_secrets() call fired BEFORE any credential resolution.
     try:
-        # The factory call may fail later in the dependency chain (no real
-        # creds in unit test env) — that's fine. We only assert the
-        # bootstrap_secrets() call fired BEFORE any credential resolution.
-        try:
-            build_search_pipeline(config=RetrievalConfig(provider="fake"), registry=_provider_registry())
-        except Exception:
-            pass
-        assert len(bootstrap_calls) >= 1, (
-            "build_search_pipeline must auto-bootstrap secrets before credential resolution"
+        build_search_pipeline(
+            config=RetrievalConfig(provider="fake"),
+            registry=_provider_registry(),
+            deps=FactoryDeps(bootstrap_secrets_fn=_counting_bootstrap),
         )
-    finally:
-        bootstrap_mod.bootstrap_secrets = real_bootstrap
+    except Exception:
+        pass
+    assert len(bootstrap_calls) >= 1, "build_search_pipeline must auto-bootstrap secrets before credential resolution"
 
 
 @pytest.mark.unit
@@ -715,26 +674,21 @@ def test_build_connector_pipeline_auto_hydrates_secrets() -> None:
 
     from kairix.core.db.schema import create_schema
     from kairix.core.factory import build_connector_pipeline
-    from kairix.secrets import bootstrap as bootstrap_mod
+    from kairix.secrets.bootstrap import bootstrap_secrets as real
 
     bootstrap_calls: list[int] = []
-    real = bootstrap_mod.bootstrap_secrets
 
     def _counting(*args: Any, **kwargs: Any) -> int:
         bootstrap_calls.append(1)
         return real(*args, **kwargs)
 
-    bootstrap_mod.bootstrap_secrets = _counting
+    db = sqlite3.connect(":memory:")
+    create_schema(db)
     try:
-        db = sqlite3.connect(":memory:")
-        create_schema(db)
-        try:
-            build_connector_pipeline(db=db, collection="probe-collection")
-        except Exception:
-            pass  # downstream may fail in unit env; we only assert bootstrap fired
-        assert len(bootstrap_calls) >= 1, "build_connector_pipeline must auto-bootstrap"
-    finally:
-        bootstrap_mod.bootstrap_secrets = real
+        build_connector_pipeline(db=db, collection="probe-collection", deps=FactoryDeps(bootstrap_secrets_fn=_counting))
+    except Exception:
+        pass  # downstream may fail in unit env; we only assert bootstrap fired
+    assert len(bootstrap_calls) >= 1, "build_connector_pipeline must auto-bootstrap"
 
 
 @pytest.mark.unit
@@ -751,26 +705,21 @@ def test_build_neo4j_drainer_auto_hydrates_secrets() -> None:
     import sqlite3
 
     from kairix.core.factory import build_neo4j_drainer
-    from kairix.secrets import bootstrap as bootstrap_mod
+    from kairix.secrets.bootstrap import bootstrap_secrets as real
     from tests.fakes import FakeDrainGraphRepository
 
     bootstrap_calls: list[int] = []
-    real = bootstrap_mod.bootstrap_secrets
 
     def _counting(*args: Any, **kwargs: Any) -> int:
         bootstrap_calls.append(1)
         return real(*args, **kwargs)
 
-    bootstrap_mod.bootstrap_secrets = _counting
+    db = sqlite3.connect(":memory:")
     try:
-        db = sqlite3.connect(":memory:")
-        try:
-            build_neo4j_drainer(db=db, repo=FakeDrainGraphRepository())
-        except Exception:
-            pass  # downstream may fail; we only assert bootstrap fired
-        assert len(bootstrap_calls) >= 1, "build_neo4j_drainer must auto-bootstrap"
-    finally:
-        bootstrap_mod.bootstrap_secrets = real
+        build_neo4j_drainer(db=db, repo=FakeDrainGraphRepository(), deps=FactoryDeps(bootstrap_secrets_fn=_counting))
+    except Exception:
+        pass  # downstream may fail; we only assert bootstrap fired
+    assert len(bootstrap_calls) >= 1, "build_neo4j_drainer must auto-bootstrap"
 
 
 @pytest.mark.unit
@@ -789,44 +738,40 @@ def test_build_pipelines_tolerate_bootstrap_secrets_raising() -> None:
 
     from kairix.core.db.schema import create_schema
     from kairix.core.factory import build_connector_pipeline, build_neo4j_drainer, build_search_pipeline
-    from kairix.secrets import bootstrap as bootstrap_mod
     from tests.fakes import FakeDrainGraphRepository
 
     def _raises(*_a: Any, **_kw: Any) -> int:
         raise RuntimeError("synthetic bundle-missing")
 
-    real = bootstrap_mod.bootstrap_secrets
-    bootstrap_mod.bootstrap_secrets = _raises
+    # build_search_pipeline soft-fails through to downstream resolution.
+    # In unit test env downstream then raises (no real creds) — that's
+    # fine; the assertion is that bootstrap's raise didn't propagate.
     try:
-        # build_search_pipeline soft-fails through to downstream resolution.
-        # In unit test env downstream then raises (no real creds) — that's
-        # fine; the assertion is that bootstrap's raise didn't propagate.
-        try:
-            build_search_pipeline(config=RetrievalConfig(provider="fake"), registry=_provider_registry())
-        except RuntimeError as exc:
-            assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_search_pipeline"
-        except Exception:
-            pass
+        build_search_pipeline(
+            config=RetrievalConfig(provider="fake"),
+            registry=_provider_registry(),
+            deps=FactoryDeps(bootstrap_secrets_fn=_raises),
+        )
+    except RuntimeError as exc:
+        assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_search_pipeline"
+    except Exception:
+        pass
 
-        # Same contract for connector pipeline.
-        db = sqlite3.connect(":memory:")
-        create_schema(db)
-        try:
-            build_connector_pipeline(db=db, collection="probe")
-        except RuntimeError as exc:
-            assert "synthetic bundle-missing" not in str(exc), (
-                "bootstrap exception leaked from build_connector_pipeline"
-            )
-        except Exception:
-            pass
+    # Same contract for connector pipeline.
+    db = sqlite3.connect(":memory:")
+    create_schema(db)
+    try:
+        build_connector_pipeline(db=db, collection="probe", deps=FactoryDeps(bootstrap_secrets_fn=_raises))
+    except RuntimeError as exc:
+        assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_connector_pipeline"
+    except Exception:
+        pass
 
-        # Same for neo4j drainer.
-        db2 = sqlite3.connect(":memory:")
-        try:
-            build_neo4j_drainer(db=db2, repo=FakeDrainGraphRepository())
-        except RuntimeError as exc:
-            assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_neo4j_drainer"
-        except Exception:
-            pass
-    finally:
-        bootstrap_mod.bootstrap_secrets = real
+    # Same for neo4j drainer.
+    db2 = sqlite3.connect(":memory:")
+    try:
+        build_neo4j_drainer(db=db2, repo=FakeDrainGraphRepository(), deps=FactoryDeps(bootstrap_secrets_fn=_raises))
+    except RuntimeError as exc:
+        assert "synthetic bundle-missing" not in str(exc), "bootstrap exception leaked from build_neo4j_drainer"
+    except Exception:
+        pass

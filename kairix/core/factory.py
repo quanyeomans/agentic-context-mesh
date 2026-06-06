@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from kairix.core.search.config import RetrievalConfig
@@ -288,14 +290,64 @@ class _NullGraphRepository:
         return []
 
 
-def _build_vector_repo() -> Any:
+def _default_vec_index_factory() -> Any:
+    """Production default for ``FactoryDeps.vec_index_factory``."""
+    from kairix.core.search.vec_index import get_vector_index
+
+    return get_vector_index()
+
+
+def _default_graph_client_factory() -> Any:
+    """Production default for ``FactoryDeps.graph_client_factory``."""
+    from kairix.knowledge.graph.client import get_client
+
+    return get_client()
+
+
+def _default_bootstrap_secrets(*args: Any, **kwargs: Any) -> Any:
+    """Production default for ``FactoryDeps.bootstrap_secrets_fn``."""
+    from kairix.secrets.bootstrap import bootstrap_secrets
+
+    return bootstrap_secrets(*args, **kwargs)
+
+
+@dataclass
+class FactoryDeps:
+    """Injectable dependencies for the factory entry points.
+
+    Replaces the F6-violating per-kwarg test seams on
+    ``build_search_pipeline`` / ``build_connector_pipeline`` /
+    ``build_neo4j_drainer``. Production code calls the entry points
+    without ``deps`` and the dataclass's ``default_factory`` wires the
+    real callables. Tests construct
+    ``FactoryDeps(vec_index_factory=lambda: _StandInIndex())`` (etc.)
+    and pass it through.
+
+    Each callable field is non-Optional with a ``default_factory`` (per
+    CLAUDE.md F6 guidance — same shape as ``WorkerDeps``) so mypy sees
+    the production callable directly. The fields:
+
+    - ``vec_index_factory`` returns the usearch vector-index handle (or
+      ``None`` when the index is not available); raising falls back to a
+      null vector repo.
+    - ``graph_client_factory`` returns the Neo4j client; raising falls
+      back to a null graph repo.
+    - ``bootstrap_secrets_fn`` runs the secrets-bundle hydration once
+      before any credential resolution; raising is logged and swallowed
+      so a missing bundle in local dev doesn't crash the factory.
+    """
+
+    vec_index_factory: Callable[[], Any] = field(default_factory=lambda: _default_vec_index_factory)
+    graph_client_factory: Callable[[], Any] = field(default_factory=lambda: _default_graph_client_factory)
+    bootstrap_secrets_fn: Callable[..., Any] = field(default_factory=lambda: _default_bootstrap_secrets)
+
+
+def _build_vector_repo(vec_index_factory: Callable[[], Any]) -> Any:
     """Construct the usearch vector repo, falling back to a null repo on failure."""
     from kairix.core.search.vector_repository import UsearchVectorRepository
 
     try:
-        from kairix.core.search.vec_index import get_vector_index
-
-        index = get_vector_index()
+        index = vec_index_factory()
         if index is not None:
             return UsearchVectorRepository(index=index)
         logger.warning("factory: usearch index not available — vector search disabled")
@@ -304,13 +356,12 @@ def _build_vector_repo() -> Any:
     return _NullVectorRepository()
 
 
-def _build_graph() -> Any:
+def _build_graph(graph_client_factory: Callable[[], Any]) -> Any:
     """Construct the Neo4j graph repo, falling back to a null repo on failure."""
     try:
-        from kairix.knowledge.graph.client import get_client
         from kairix.knowledge.graph.repository import Neo4jGraphRepository
 
-        return Neo4jGraphRepository(client=get_client())
+        return Neo4jGraphRepository(client=graph_client_factory())
     except Exception as e:
         logger.warning("factory: Neo4j unavailable — %s", e)
         return _NullGraphRepository()
@@ -325,28 +376,38 @@ def _build_fusion(cfg: RetrievalConfig) -> Any:
     return BM25PrimaryFusion()
 
 
-def _build_search_logger() -> Any:
+def _build_search_logger(env: Mapping[str, str] | None = None) -> Any:
     """Construct the JSONL search logger, honouring docker-vs-host log paths.
 
     Path resolution lives at the boundary so business logic never reads env vars
     (G4). Query log is privacy-gated via KAIRIX_LOG_QUERIES (off by default).
     Env reads route through kairix.paths (F4).
+
+    Args:
+        env: Optional env mapping (F2-clean test seam). Threaded into
+            :func:`kairix.paths.is_docker_env` and
+            :func:`kairix.paths.log_queries_enabled`. Production callers
+            leave this ``None``.
     """
     from pathlib import Path
 
     from kairix.core.search.logger import JsonlSearchLogger, default_search_log_paths
     from kairix.paths import is_docker_env, log_queries_enabled
 
-    log_base = Path("/data/kairix/logs") if is_docker_env() else Path.home() / ".cache" / "kairix" / "logs"
+    log_base = Path("/data/kairix/logs") if is_docker_env(env) else Path.home() / ".cache" / "kairix" / "logs"
     search_log_path, query_log_path = default_search_log_paths(base=log_base)
-    enable_query_log = log_queries_enabled()
+    enable_query_log = log_queries_enabled(env)
     return JsonlSearchLogger(
         search_log_path=search_log_path,
         query_log_path=query_log_path if enable_query_log else None,
     )
 
 
-def build_collection_resolver(db_path: Any = None) -> Any:
+def build_collection_resolver(
+    db_path: Any = None,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> Any:
     """Construct the production ``CollectionResolver``.
 
     Always returns :class:`TopologyV2CollectionResolver`, which reads
@@ -361,10 +422,15 @@ def build_collection_resolver(db_path: Any = None) -> Any:
     ``db_path`` is the resolved SQLite path threaded from
     :func:`build_search_pipeline`; the resolver opens a connection
     against it.
+
+    ``env`` is an optional F2-clean test seam threaded into
+    :func:`kairix.paths.extra_collections` so callers can drive the
+    ``KAIRIX_EXTRA_COLLECTIONS`` parsing without mutating ``os.environ``.
     """
     return _build_topology_v2_collection_resolver(
         db_path,
         default_in_scope_filter_enabled=True,
+        env=env,
     )
 
 
@@ -452,6 +518,7 @@ def _build_topology_v2_collection_resolver(
     db_path: Any,
     *,
     default_in_scope_filter_enabled: bool = False,
+    env: Mapping[str, str] | None = None,
 ) -> Any:
     """Construct :class:`TopologyV2CollectionResolver` against ``db_path``.
 
@@ -504,7 +571,7 @@ def _build_topology_v2_collection_resolver(
     inner = TopologyV2CollectionResolver(
         db=db,  # type: ignore[arg-type]  # see rationale above
         default_in_scope_filter_enabled=default_in_scope_filter_enabled,
-        extra_collections=_extra_collections(),
+        extra_collections=_extra_collections(env),
     )
     # R2 (#388) — wrap in a TTL cache so the SQLite SELECT on
     # topology_scope_profiles + topology_scope_entries doesn't run on
@@ -596,6 +663,23 @@ def _build_embedding_service(
     return ProviderEmbeddingService(provider)
 
 
+def _run_bootstrap_secrets(deps: FactoryDeps, *, caller: str) -> None:
+    """Run the secrets bootstrap once, swallowing any exception.
+
+    Args:
+        deps: ``FactoryDeps`` whose ``bootstrap_secrets_fn`` is invoked.
+        caller: Name of the factory entry point — used in the debug log
+            message so soft-failures are attributable.
+    """
+    try:
+        deps.bootstrap_secrets_fn()
+    except Exception as exc:
+        # Best-effort: a missing/unreadable bundle isn't fatal — the loader
+        # falls back to env-only resolution. Production deploys always have
+        # the bundle; local dev may not.
+        logger.debug("factory: bootstrap_secrets soft-failed in %s: %s", caller, exc)
+
+
 def build_search_pipeline(
     config: RetrievalConfig | None = None,
     *,
@@ -603,6 +687,8 @@ def build_search_pipeline(
     fact_retriever: Any = None,
     paths: KairixPaths | None = None,
     flag_reader: Any = None,
+    deps: FactoryDeps | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> SearchPipeline:
     """Construct the production search pipeline.
 
@@ -660,6 +746,11 @@ def build_search_pipeline(
     Returns:
         A fully wired SearchPipeline ready for search() calls.
     """
+    # Resolve deps once — production callers pass None and the default
+    # factories wire the real implementations. Tests pass a FactoryDeps
+    # with Fake* callables.
+    deps = deps if deps is not None else FactoryDeps()
+
     # Auto-hydrate secrets from the bundle file before any provider/credential
     # resolution. Idempotent (bootstrap_secrets has its own once-guard). CLI
     # and MCP entry points already call this at startup; Python-API consumers
@@ -667,22 +758,20 @@ def build_search_pipeline(
     # with SecretNotFoundError because secrets were only on disk in
     # /run/secrets/kairix.env not in env. Centralising here means every
     # consumer of build_search_pipeline gets the same hydration contract.
-    from kairix.secrets.bootstrap import bootstrap_secrets
-
-    try:
-        bootstrap_secrets()
-    except Exception as exc:
-        # Best-effort: a missing/unreadable bundle isn't fatal — the loader
-        # falls back to env-only resolution. Production deploys always have
-        # the bundle; local dev may not.
-        logger.debug("factory: bootstrap_secrets soft-failed (continuing): %s", exc)
+    _run_bootstrap_secrets(deps, caller="build_search_pipeline")
 
     cfg = _resolve_retrieval_config(config)
 
     # When ``flag_reader`` is supplied, callers are wiring an explicit
     # resolver branch — skip the cache so the chosen branch is honoured
-    # per call (tests reset the cache between branches anyway).
-    cached = _lookup_cached_pipeline(cfg, flag_reader)
+    # per call. Non-default ``deps`` (test stand-ins for vec_index /
+    # graph_client / bootstrap) also bypass the cache; the cache key is
+    # the resolved RetrievalConfig only, so tests asserting wiring
+    # expect a fresh build each call. An explicit ``env`` likewise
+    # bypasses the cache so KAIRIX_DOCKER / KAIRIX_EXTRA_COLLECTIONS
+    # branches are exercised cleanly.
+    bypass_cache = flag_reader is not None or not _is_default_deps(deps) or env is not None
+    cached = _lookup_cached_pipeline(cfg, flag_reader) if not bypass_cache else None
     if cached is not None:
         return cached
 
@@ -691,18 +780,34 @@ def build_search_pipeline(
     # When the cache misses, threads queue at the lock so only the first
     # arrival pays the 2.3s pipeline construction; subsequent arrivals
     # re-check inside the lock and observe the freshly-cached pipeline.
-    # ``flag_reader is not None`` callers always bypass the cache (test
-    # branch) so they're routed past the lock to the build below.
-    if flag_reader is None:
+    if not bypass_cache:
         with _PIPELINE_CACHE_LOCK:
             cached = _PIPELINE_CACHE.get(cfg)
             if cached is not None:
                 return cached
-            built = _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths)
+            built = _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths, deps, env)
             _PIPELINE_CACHE[cfg] = built
             return built
 
-    return _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths)
+    return _build_search_pipeline_uncached(cfg, registry, fact_retriever, paths, deps, env)
+
+
+def _is_default_deps(deps: FactoryDeps) -> bool:
+    """Return True iff ``deps`` is structurally the production default.
+
+    The dataclass holds ``default_factory``-bound callables that differ
+    in identity per ``FactoryDeps()`` instance; equality of the three
+    factory references against the production defaults is the
+    structural test. Production callers omit ``deps`` and the entry
+    point constructs ``FactoryDeps()`` — :func:`build_search_pipeline`
+    then treats it as "default" and honours the process-shared pipeline
+    cache.
+    """
+    return (
+        deps.vec_index_factory is _default_vec_index_factory
+        and deps.graph_client_factory is _default_graph_client_factory
+        and deps.bootstrap_secrets_fn is _default_bootstrap_secrets
+    )
 
 
 def _build_search_pipeline_uncached(
@@ -710,6 +815,8 @@ def _build_search_pipeline_uncached(
     registry: ProviderRegistry | None,
     fact_retriever: Any,
     paths: KairixPaths | None,
+    deps: FactoryDeps,
+    env: Mapping[str, str] | None = None,
 ) -> SearchPipeline:
     """Build a fresh ``SearchPipeline`` for ``cfg`` — never reads the cache.
 
@@ -739,8 +846,8 @@ def _build_search_pipeline_uncached(
     doc_repo = SQLiteDocumentRepository(db_path=resolved_db_path)
     bm25 = BM25SearchBackend(doc_repo)
     embed_service = _build_embedding_service(cfg, registry=registry)
-    vector = VectorSearchBackend(embed_service, _build_vector_repo())
-    graph = _build_graph()
+    vector = VectorSearchBackend(embed_service, _build_vector_repo(deps.vec_index_factory))
+    graph = _build_graph(deps.graph_client_factory)
 
     # Auto-wire the fact retriever when the operator's data dir contains a
     # facts table. The SQLiteFactStore uses the same SQLite database file as
@@ -768,8 +875,8 @@ def _build_search_pipeline_uncached(
         graph=graph,
         fusion=_build_fusion(cfg),
         boosts=select_boosts(cfg, graph),
-        logger=_build_search_logger(),
-        resolver=build_collection_resolver(db_path=resolved_db_path),
+        logger=_build_search_logger(env),
+        resolver=build_collection_resolver(db_path=resolved_db_path, env=env),
         config=cfg,
         # #281 — wire the process-shared LRU so repeat queries from
         # teaming agents skip the Azure embed roundtrip. #411 Phase 2
@@ -838,6 +945,7 @@ def build_connector_pipeline(
     chunk_writer: Any = None,
     entity_graph_sink: Any = None,
     disk_free_resolver: Any = None,
+    deps: FactoryDeps | None = None,
 ) -> Any:
     """Construct a production-shape ConnectorPipeline against ``db``.
 
@@ -866,12 +974,8 @@ def build_connector_pipeline(
     # don't hit SecretNotFoundError. Worker entry points already call this
     # at startup, but the factory is the universal entry — centralising
     # bootstrap here closes the structural gap surfaced by 3874bf7e.
-    from kairix.secrets.bootstrap import bootstrap_secrets
-
-    try:
-        bootstrap_secrets()
-    except Exception as exc:
-        logger.debug("factory: bootstrap_secrets soft-failed in build_connector_pipeline: %s", exc)
+    deps = deps if deps is not None else FactoryDeps()
+    _run_bootstrap_secrets(deps, caller="build_connector_pipeline")
 
     # Phase 7: streaming bronze writes no files; bronze_root is accepted
     # for backward-compat call-signature but unused. New callers should
@@ -925,6 +1029,7 @@ def build_neo4j_drainer(
     db: Any,
     repo: Any,
     batch_size: int | None = None,
+    deps: FactoryDeps | None = None,
 ) -> Any:
     """Construct a :class:`kairix.core.curator.drain.Neo4jDrainer`.
 
@@ -942,12 +1047,8 @@ def build_neo4j_drainer(
     # Auto-hydrate secrets at the factory boundary so Python-API consumers
     # don't hit SecretNotFoundError when the Neo4j repo lazily resolves its
     # connection credentials. See build_search_pipeline for the same pattern.
-    from kairix.secrets.bootstrap import bootstrap_secrets
-
-    try:
-        bootstrap_secrets()
-    except Exception as exc:
-        logger.debug("factory: bootstrap_secrets soft-failed in build_neo4j_drainer: %s", exc)
+    deps = deps if deps is not None else FactoryDeps()
+    _run_bootstrap_secrets(deps, caller="build_neo4j_drainer")
 
     from kairix.core.curator.drain import DEFAULT_DRAIN_BATCH_SIZE, Neo4jDrainer
 

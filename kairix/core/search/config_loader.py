@@ -423,6 +423,17 @@ def _load_cached_layered(base_path: Path | None, overlay_path: Path | None) -> R
     return cfg
 
 
+def reset_config_cache() -> None:
+    """Clear the layered-config + legacy-single-file caches.
+
+    Public surface so tests can clear the resolver's lru_cache without
+    importing the private ``_load_cached_layered`` (F5). Production code
+    has no reason to call this; cache invalidation is process-lifetime.
+    """
+    load_cached.cache_clear()
+    _load_cached_layered.cache_clear()
+
+
 def parse_config(data: dict) -> RetrievalConfig:
     """Parse YAML dict into RetrievalConfig. Returns defaults for any missing/invalid section.
 
@@ -599,9 +610,16 @@ def parse_collections(data: dict) -> CollectionsConfig | None:
     )
 
 
-def load_collections() -> CollectionsConfig | None:
-    """Load collections config from YAML. Returns None if not configured."""
-    path = resolve_config_path()
+def load_collections(config_path: Path | str | None = None) -> CollectionsConfig | None:
+    """Load collections config from YAML. Returns None if not configured.
+
+    Args:
+        config_path: Optional explicit path to a YAML config file (F2-clean
+            test seam). When ``None``, the env / cwd resolution chain in
+            :func:`resolve_config_path` applies — preserving production
+            behaviour for callers that omit the kwarg.
+    """
+    path = resolve_config_path(config_path)
     if path is None:
         return None
     try:
