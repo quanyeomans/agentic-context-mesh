@@ -36,7 +36,7 @@ def _default_pipeline_runner() -> Callable[..., Any]:
     return run_incremental_embed_pipeline
 
 
-def default_run_recall_gate() -> tuple[bool, dict[str, Any]]:
+def default_run_recall_gate() -> tuple[bool, dict[str, Any]]:  # pragma: no cover  # lazy-import DI-default delegation
     """Public wrapper around :func:`run_recall_gate` for ``EmbedCliDeps``.
 
     Named ``default_*`` (not ``_default_*``) so tests can import it
@@ -45,73 +45,77 @@ def default_run_recall_gate() -> tuple[bool, dict[str, Any]]:
     return run_recall_gate()
 
 
-def default_get_db_path() -> Path:
+def default_get_db_path() -> Path:  # pragma: no cover  # lazy-import DI-default delegation
     """Public wrapper around :func:`kairix.core.db.get_db_path`."""
     return get_db_path()
 
 
-def default_open_db(path: Path) -> Any:
+def default_open_db(path: Path) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
     """Public wrapper around :func:`kairix.core.db.open_db`."""
     return open_db(path)
 
 
-def default_get_pending_chunks(db: Any) -> list[Any]:
+def default_get_pending_chunks(db: Any) -> list[Any]:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.core.embed.schema.get_pending_chunks``."""
     from .schema import get_pending_chunks
 
     return get_pending_chunks(db)
 
 
-def default_check_fts_available(db: Any) -> Any:
+def default_check_fts_available(db: Any) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.core.db.fts.check_fts_available``."""
     from kairix.core.db.fts import check_fts_available
 
     return check_fts_available(db)
 
 
-def default_rebuild_fts(db: Any) -> int:
+def default_rebuild_fts(db: Any) -> int:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.core.db.fts.rebuild_fts``."""
     from kairix.core.db.fts import rebuild_fts
 
     return rebuild_fts(db)
 
 
-def default_document_root() -> Path:
+def default_document_root() -> Path:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around :func:`kairix.paths.document_root`."""
     from kairix.paths import document_root
 
     return document_root()
 
 
-def default_summaries_db_path() -> Path:
+def default_summaries_db_path() -> Path:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around :func:`kairix.paths.summaries_db_path`."""
     from kairix.paths import summaries_db_path
 
     return summaries_db_path()
 
 
-def default_init_summaries_db(db: sqlite3.Connection) -> None:
+def default_init_summaries_db(db: sqlite3.Connection) -> None:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.knowledge.summaries.staleness.init_summaries_db``."""
     from kairix.knowledge.summaries.staleness import init_summaries_db
 
     init_summaries_db(db)
 
 
-def default_get_stale_paths(all_docs: list[str], db: sqlite3.Connection) -> list[str]:
+def default_get_stale_paths(
+    all_docs: list[str], db: sqlite3.Connection
+) -> list[str]:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.knowledge.summaries.staleness.get_stale_paths``."""
     from kairix.knowledge.summaries.staleness import get_stale_paths
 
     return get_stale_paths(all_docs, db)
 
 
-def default_write_summary(result: Any, db: sqlite3.Connection) -> None:
+def default_write_summary(
+    result: Any, db: sqlite3.Connection
+) -> None:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.knowledge.summaries.staleness.write_summary``."""
     from kairix.knowledge.summaries.staleness import write_summary
 
     write_summary(result, db)
 
 
-def default_generate_summaries(**kw: Any) -> list[Any]:
+def default_generate_summaries(**kw: Any) -> list[Any]:  # pragma: no cover  # lazy-import DI-default delegation
     """Lazy-import wrapper around ``kairix.knowledge.summaries.generate.generate_summaries``."""
     from kairix.knowledge.summaries.generate import generate_summaries
 
