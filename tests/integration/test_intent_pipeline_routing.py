@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import EntityBoost, ProceduralBoost, TemporalDateBoost
 from kairix.core.search.config import (
     EntityBoostConfig,
@@ -30,12 +30,13 @@ from kairix.core.search.config import (
 )
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from tests.fakes import (
     CapturingBoost,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
     IntentGatedBoost,
@@ -95,7 +96,7 @@ def _build_pipeline(
     boosts: list,
     graph: FakeGraphRepository | None = None,
     config: RetrievalConfig | None = None,
-) -> tuple[SearchPipeline, RealClassifierAdapter, FakeGraphRepository]:
+):
     """Construct a SearchPipeline with the real classifier and real fusion.
 
     Returns the pipeline, the classifier adapter (so tests can assert it was
@@ -103,15 +104,21 @@ def _build_pipeline(
     """
     classifier = RealClassifierAdapter()
     graph_fake = graph if graph is not None else FakeGraphRepository(available=True)
-    pipeline = SearchPipeline(
-        classifier=classifier,
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository(results=vec_results)),
-        graph=graph_fake,
-        fusion=RRFFusion(k=60),
-        boosts=boosts,
-        logger=FakeSearchLogger(),
+    pipeline = build_search_pipeline(
         config=config or RetrievalConfig.minimal(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=classifier,
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(results=vec_results),
+            graph_override=graph_fake,
+            fusion_override=RRFFusion(k=60),
+            boosts_override=boosts,
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
     return pipeline, classifier, graph_fake
 

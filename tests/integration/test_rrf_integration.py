@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import EntityBoost, ProceduralBoost, TemporalDateBoost
 from kairix.core.search.budget import BudgetedResult
 from kairix.core.search.config import (
@@ -40,13 +40,15 @@ from kairix.core.search.config import (
 )
 from kairix.core.search.fusion import BM25PrimaryFusion, RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline, SearchResult
+from kairix.core.search.pipeline import SearchResult
 from kairix.core.search.rrf import RRF_K, FusedResult, chunk_date_boost
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeVectorRepository,
 )
 
@@ -107,22 +109,41 @@ def _build_pipeline(
     boosts: list[Any] | None = None,
     graph: FakeGraphRepository | None = None,
     config: RetrievalConfig | None = None,
-) -> SearchPipeline:
+):
     """Compose a SearchPipeline with canonical fakes and explicit collaborators."""
     cfg = config if config is not None else RetrievalConfig.minimal()
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=intent),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=bm25_docs)),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(),
-            FakeVectorRepository(results=vec_results),
-        ),
-        graph=graph if graph is not None else FakeGraphRepository(available=False),
-        fusion=fusion if fusion is not None else RRFFusion(k=cfg.rrf_k),
-        boosts=boosts or [],
-        logger=None,
+    return build_search_pipeline(
         config=cfg,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=intent),
+            doc_repo_override=FakeDocumentRepository(documents=bm25_docs),
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(results=vec_results),
+            graph_override=graph if graph is not None else FakeGraphRepository(available=False),
+            fusion_override=fusion if fusion is not None else RRFFusion(k=cfg.rrf_k),
+            boosts_override=boosts or [],
+            logger_override=_NullLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
+
+
+class _NullLogger:
+    """Logger that swallows every event — equivalent of ``logger=None`` on
+    the previous direct ``SearchPipeline(...)`` construction.
+
+    The factory always wires a logger (production has JsonlSearchLogger),
+    so tests that previously passed ``logger=None`` use this no-op
+    stand-in to preserve the "no logging side effects" semantics.
+    """
+
+    def log_search(self, event: dict) -> None:
+        pass
+
+    def log_query(self, event: dict) -> None:
+        pass
 
 
 def _paths_in_order(result: SearchResult) -> list[str]:

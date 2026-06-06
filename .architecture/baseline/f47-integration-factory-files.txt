@@ -22,14 +22,11 @@
 #   * tests/contracts/ — Protocol shape proofs
 #   * tests/integration/test_<x>_contract.py — single-layer boundary
 #     proofs that intentionally bypass composition
-tests/integration/test_backends_integration.py
-tests/integration/test_boosts_integration.py
-tests/integration/test_budget_integration.py
-tests/integration/test_enrich_cache_e2e.py
-tests/integration/test_federation_end_to_end.py
-tests/integration/test_intent_pipeline_routing.py
-tests/integration/test_logger_integration.py
-tests/integration/test_per_query_stage_telemetry_e2e.py
-tests/integration/test_pipeline_integration.py
-tests/integration/test_query_cache_pipeline_e2e.py
-tests/integration/test_rrf_integration.py
+#
+# Cleared 2026-06-06: all 11 grandfathered entries paid down by
+# extending FactoryDeps with per-component overrides (classifier,
+# doc_repo, vec_repo, embed_service, graph, fusion, boosts, logger,
+# resolver, query_cache). Integration tests now thread Fake* through
+# build_search_pipeline(paths=FakePaths(...), deps=FactoryDeps(...))
+# instead of constructing SearchPipeline(...) directly. Net-new
+# violations remain blocked by the F47 gate.

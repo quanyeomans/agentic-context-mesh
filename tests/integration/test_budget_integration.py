@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.budget import (
     DEFAULT_BUDGET,
     L1_BUDGET_MIN,
@@ -30,12 +30,13 @@ from kairix.core.search.budget import (
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeSummaryLoader,
     FakeVectorRepository,
@@ -52,7 +53,7 @@ pytestmark = pytest.mark.integration
 def _build_pipeline(
     docs: list[dict],
     vec_results: list[dict],
-) -> SearchPipeline:
+):
     """Construct a SearchPipeline from fakes plus the real RRF fusion.
 
     Using the real RRFFusion (not FakeFusion) is what makes this an
@@ -60,18 +61,21 @@ def _build_pipeline(
     FusedResult objects with proper paths/snippets/scores, so apply_budget
     sees production-shaped input.
     """
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(),
-            FakeVectorRepository(results=vec_results),
-        ),
-        graph=FakeGraphRepository(available=True),
-        fusion=RRFFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            vec_repo_override=FakeVectorRepository(results=vec_results),
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=RRFFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 

@@ -19,17 +19,18 @@ from __future__ import annotations
 
 import pytest
 
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.facts import SQLiteFactStore, StoredFactRecord
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -44,19 +45,25 @@ def _build_pipeline(
     intent: QueryIntent,
     fact_retriever: SQLiteFactStore | None,
     documents: list[dict] | None = None,
-) -> SearchPipeline:
+):
     """Build a SearchPipeline tailored for federation integration tests."""
     docs = documents or []
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=intent),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=True),
-        fusion=RRFFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
         fact_retriever=fact_retriever,
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=intent),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            vec_repo_override=FakeVectorRepository(),
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=RRFFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 

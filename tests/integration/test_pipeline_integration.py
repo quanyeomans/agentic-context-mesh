@@ -23,8 +23,8 @@ from typing import Any
 
 import pytest
 
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.protocols import GraphRepository
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
 from kairix.core.search.boosts import (
     EntityBoost,
     ProceduralBoost,
@@ -38,13 +38,14 @@ from kairix.core.search.config import (
 )
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from kairix.core.search.scope import Scope
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -180,7 +181,7 @@ def _build_pipeline(
     boosts_enabled: bool = True,
     config: RetrievalConfig | None = None,
     logger: FakeSearchLogger | None = None,
-) -> tuple[SearchPipeline, FakeSearchLogger, FakeGraphRepository]:
+):
     """Compose a SearchPipeline with the boost chain wired end-to-end.
 
     Returns (pipeline, logger, graph) so tests can introspect the logger and
@@ -190,9 +191,6 @@ def _build_pipeline(
     vec = _vec_results() if vec is None else vec
     cfg = config if config is not None else RetrievalConfig.defaults()
 
-    doc_repo = FakeDocumentRepository(documents=docs)
-    vec_repo = FakeVectorRepository(results=vec)
-    embed = FakeEmbeddingService(dim=8)
     graph = FakeGraphRepository(available=graph_available)
     fake_logger = logger if logger is not None else FakeSearchLogger()
 
@@ -206,15 +204,21 @@ def _build_pipeline(
             ),
         ]
 
-    pipeline = SearchPipeline(
-        classifier=FakeClassifier(intent=intent),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(embed, vec_repo),
-        graph=graph,
-        fusion=RRFFusion(k=60),
-        boosts=boost_chain,
-        logger=fake_logger,
+    pipeline = build_search_pipeline(
         config=cfg,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=intent),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(dim=8),
+            vec_repo_override=FakeVectorRepository(results=vec),
+            graph_override=graph,
+            fusion_override=RRFFusion(k=60),
+            boosts_override=boost_chain,
+            logger_override=fake_logger,
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
     return pipeline, fake_logger, graph
 
@@ -539,18 +543,21 @@ def test_pipeline_never_raises_under_combined_component_failures() -> None:
     docs = _corpus()
     vec = _vec_results()
 
-    pipeline = SearchPipeline(
-        classifier=_ExplodingClassifier(),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(dim=8),
-            FakeVectorRepository(results=vec),
-        ),
-        graph=FakeGraphRepository(available=True),
-        fusion=RRFFusion(k=60),
-        boosts=[_ExplodingBoost(), _ExplodingBoost(), _ExplodingBoost()],
-        logger=_ExplodingLogger(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=_ExplodingClassifier(),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(dim=8),
+            vec_repo_override=FakeVectorRepository(results=vec),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[_ExplodingBoost(), _ExplodingBoost(), _ExplodingBoost()],
+            logger_override=_ExplodingLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
     # Must NOT raise
@@ -588,22 +595,25 @@ def test_boost_chain_runs_in_declared_order() -> None:
     """Boosts run in the order passed to SearchPipeline.boosts — earlier
     boosts feed their output into later ones."""
     log: list[str] = []
-    pipeline = SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=_corpus())),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(dim=8),
-            FakeVectorRepository(results=_vec_results()),
-        ),
-        graph=FakeGraphRepository(available=True),
-        fusion=RRFFusion(k=60),
-        boosts=[
-            _OrderRecordingBoost("entity", log),
-            _OrderRecordingBoost("procedural", log),
-            _OrderRecordingBoost("temporal", log),
-        ],
-        logger=FakeSearchLogger(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+            doc_repo_override=FakeDocumentRepository(documents=_corpus()),
+            embed_service_override=FakeEmbeddingService(dim=8),
+            vec_repo_override=FakeVectorRepository(results=_vec_results()),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[
+                _OrderRecordingBoost("entity", log),
+                _OrderRecordingBoost("procedural", log),
+                _OrderRecordingBoost("temporal", log),
+            ],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
     pipeline.search("architecture")
@@ -667,19 +677,21 @@ def test_resolver_misconfiguration_surfaces_as_search_error() -> None:
     """Resolver raising NotImplementedError → SearchResult.error populated,
     pipeline does NOT continue to BM25/vector."""
     docs = _corpus()
-    pipeline = SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(dim=8),
-            FakeVectorRepository(results=_vec_results()),
-        ),
-        graph=FakeGraphRepository(available=True),
-        fusion=RRFFusion(k=60),
-        boosts=[],
-        logger=FakeSearchLogger(),
-        resolver=_MisconfiguredResolver(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(dim=8),
+            vec_repo_override=FakeVectorRepository(results=_vec_results()),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=_MisconfiguredResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
     result = pipeline.search("architecture", scope=Scope.ALL_AGENTS)
@@ -711,18 +723,21 @@ def test_pipeline_passes_intent_query_and_graph_in_boost_context() -> None:
     rely on for intent gating and entity lookup."""
     inspector = _ContextInspectingBoost()
     graph: GraphRepository = FakeGraphRepository(available=True)
-    pipeline = SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.PROCEDURAL),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=_corpus())),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(dim=8),
-            FakeVectorRepository(results=_vec_results()),
-        ),
-        graph=graph,
-        fusion=RRFFusion(k=60),
-        boosts=[inspector],
-        logger=FakeSearchLogger(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.PROCEDURAL),
+            doc_repo_override=FakeDocumentRepository(documents=_corpus()),
+            embed_service_override=FakeEmbeddingService(dim=8),
+            vec_repo_override=FakeVectorRepository(results=_vec_results()),
+            graph_override=graph,
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[inspector],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
     pipeline.search("how to deploy")

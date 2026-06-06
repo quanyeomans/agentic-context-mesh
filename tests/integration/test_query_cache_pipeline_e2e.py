@@ -14,16 +14,17 @@ import time
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
-from kairix.core.search.pipeline import SearchPipeline
 from kairix.core.search.query_cache import QueryResultCache
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeFusion,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -31,21 +32,26 @@ from tests.fakes import (
 pytestmark = pytest.mark.integration
 
 
-def _build(cache: QueryResultCache | None) -> tuple[SearchPipeline, FakeDocumentRepository]:
+def _build(cache: QueryResultCache | None):
     """Standard rig: real pipeline + canonical fakes; cache optional."""
     doc_repo = FakeDocumentRepository(
         documents=[{"path": "p.md", "title": "T", "content": "alpha bravo charlie", "collection": "c"}]
     )
-    pipeline = SearchPipeline(
-        classifier=FakeClassifier(),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=True),
-        fusion=FakeFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
-        query_cache=cache,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(),
+            doc_repo_override=doc_repo,
+            vec_repo_override=FakeVectorRepository(),
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=FakeFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=cache if cache is not None else QUERY_CACHE_DISABLED,
+        ),
     )
     return pipeline, doc_repo
 
@@ -153,22 +159,23 @@ def test_cache_does_not_cache_error_results() -> None:
     """
     from kairix.core.search.intent import QueryIntent
 
-    class _AlwaysEntityClassifier:
-        def classify(self, _q: str) -> QueryIntent:
-            return QueryIntent.ENTITY
-
     cache = QueryResultCache(max_entries=10, max_age_s=60.0)
     doc_repo = FakeDocumentRepository(documents=[{"path": "p.md", "title": "T", "content": "alpha", "collection": "c"}])
-    pipeline = SearchPipeline(
-        classifier=_AlwaysEntityClassifier(),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=False),  # ENTITY + no graph → error envelope
-        fusion=FakeFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
-        query_cache=cache,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.ENTITY),
+            doc_repo_override=doc_repo,
+            vec_repo_override=FakeVectorRepository(),
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=False),  # ENTITY + no graph → error envelope
+            fusion_override=FakeFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=cache,
+        ),
     )
 
     first = pipeline.search("anything")

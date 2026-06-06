@@ -22,16 +22,17 @@ from dataclasses import dataclass
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
-from kairix.core.search.pipeline import SearchPipeline
 from kairix.quality.probe.runner import SampledQuery, run_probe_search
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeFusion,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -58,7 +59,7 @@ def _suite_loader(_suite: str) -> list[_Case]:
     return out
 
 
-def _build_pipeline() -> SearchPipeline:
+def _build_pipeline():
     """Real SearchPipeline with canonical fakes at every I/O boundary."""
     doc_repo = FakeDocumentRepository(
         documents=[
@@ -67,19 +68,25 @@ def _build_pipeline() -> SearchPipeline:
         ]
     )
     vec_repo = FakeVectorRepository(results=[{"path": "v.md", "distance": 0.1, "collection": "c"}])
-    return SearchPipeline(
-        classifier=FakeClassifier(),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(FakeEmbeddingService(), vec_repo),
-        graph=FakeGraphRepository(available=True),
-        fusion=FakeFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(),
+            doc_repo_override=doc_repo,
+            vec_repo_override=vec_repo,
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=FakeFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 
-def _make_searcher(pipeline: SearchPipeline):
+def _make_searcher(pipeline):
     """Adapt SearchPipeline.search to the probe's ``Callable[[SampledQuery], Any]``."""
 
     def _search(q: SampledQuery):

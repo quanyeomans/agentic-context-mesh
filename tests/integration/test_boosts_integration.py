@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import (
     ChunkDateBoost,
     EntityBoost,
@@ -29,13 +29,14 @@ from kairix.core.search.config import (
 )
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from tests.fakes import (
     FakeBoost,
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -77,7 +78,7 @@ def _build_pipeline(
     vec_rows: list,
     graph: FakeGraphRepository | None = None,
     config: RetrievalConfig | None = None,
-) -> SearchPipeline:
+):
     """Wire a SearchPipeline using canonical fakes.
 
     BM25 rows are returned by the fake DocumentRepository.search_fts; they
@@ -85,32 +86,25 @@ def _build_pipeline(
     title+content). The simplest pattern: put the query token in every doc.
     """
     cfg = config or RetrievalConfig.minimal()
-
-    # Canonical fake in scripted mode: bm25_rows is the BM25Result-shaped
-    # list returned verbatim by search_fts. See tests/fakes.py.
-    doc_repo = FakeDocumentRepository(bm25_rows=bm25_rows)
-    bm25 = BM25SearchBackend(doc_repo)
-
-    # Vector backend
-    embedding = FakeEmbeddingService()
-    vector_repo = FakeVectorRepository(results=vec_rows)
-    vector = VectorSearchBackend(embedding, vector_repo)
-
-    # Graph (defaults to unavailable — entity boost is a no-op)
     graph_repo = graph if graph is not None else FakeGraphRepository(available=False)
-
-    # Fusion: RRF (deterministic, simple)
-    fusion = RRFFusion(k=cfg.rrf_k)
-
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=intent),
-        bm25=bm25,
-        vector=vector,
-        graph=graph_repo,
-        fusion=fusion,
-        boosts=boosts,
-        logger=FakeSearchLogger(),
+    return build_search_pipeline(
         config=cfg,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=intent),
+            # Canonical fake in scripted mode: bm25_rows is the BM25Result-shaped
+            # list returned verbatim by search_fts. See tests/fakes.py.
+            doc_repo_override=FakeDocumentRepository(bm25_rows=bm25_rows),
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(results=vec_rows),
+            graph_override=graph_repo,
+            # Fusion: RRF (deterministic, simple)
+            fusion_override=RRFFusion(k=cfg.rrf_k),
+            boosts_override=boosts,
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 
@@ -395,19 +389,21 @@ class TestFullBoostStackSmoke:
         logger = FakeSearchLogger()
 
         cfg = RetrievalConfig.minimal()
-        embedding = FakeEmbeddingService()
-        vector_repo = FakeVectorRepository(results=vec)
-        doc_repo = FakeDocumentRepository(bm25_rows=bm25)
-
-        pipe = SearchPipeline(
-            classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-            bm25=BM25SearchBackend(doc_repo),
-            vector=VectorSearchBackend(embedding, vector_repo),
-            graph=FakeGraphRepository(available=False),
-            fusion=RRFFusion(k=cfg.rrf_k),
-            boosts=[ProceduralBoost()],
-            logger=logger,
+        pipe = build_search_pipeline(
             config=cfg,
+            paths=FakePaths(),
+            deps=FactoryDeps(
+                classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+                doc_repo_override=FakeDocumentRepository(bm25_rows=bm25),
+                embed_service_override=FakeEmbeddingService(),
+                vec_repo_override=FakeVectorRepository(results=vec),
+                graph_override=FakeGraphRepository(available=False),
+                fusion_override=RRFFusion(k=cfg.rrf_k),
+                boosts_override=[ProceduralBoost()],
+                logger_override=logger,
+                resolver_override=FakeCollectionResolver(),
+                query_cache_override=QUERY_CACHE_DISABLED,
+            ),
         )
         pipe.search("anything")
 

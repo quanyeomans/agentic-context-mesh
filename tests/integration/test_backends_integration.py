@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.protocols import (
     DocumentRepository,
     EmbeddingService,
@@ -30,12 +31,14 @@ from kairix.core.search.budget import BudgetedResult
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline, SearchResult
+from kairix.core.search.pipeline import SearchResult
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -98,22 +101,35 @@ def _result_paths(result: SearchResult) -> list[str]:
 
 def _build_pipeline(
     *,
-    bm25: BM25SearchBackend,
-    vector: VectorSearchBackend,
+    doc_repo: FakeDocumentRepository,
+    embed: FakeEmbeddingService,
+    vec_repo: FakeVectorRepository,
     intent: QueryIntent = QueryIntent.SEMANTIC,
     logger: FakeSearchLogger | None = None,
     graph_available: bool = False,
-) -> SearchPipeline:
-    """Compose a SearchPipeline with the given backends + protocol-compliant fakes."""
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=intent),
-        bm25=bm25,
-        vector=vector,
-        graph=FakeGraphRepository(available=graph_available),
-        fusion=RRFFusion(k=60),
-        boosts=[],
-        logger=logger,
+):
+    """Compose a SearchPipeline through the factory with protocol-compliant fakes.
+
+    F47-clean: the factory wraps ``doc_repo`` in ``BM25SearchBackend`` and
+    ``(embed, vec_repo)`` in ``VectorSearchBackend`` exactly as production
+    does — the test wires the fakes at the same boundary the
+    SQLite/Azure/usearch implementations sit on.
+    """
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=intent),
+            doc_repo_override=doc_repo,
+            embed_service_override=embed,
+            vec_repo_override=vec_repo,
+            graph_override=FakeGraphRepository(available=graph_available),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[],
+            logger_override=logger,
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 
@@ -157,10 +173,10 @@ class TestBM25BackendInPipeline:
             ),
         ]
         repo = FakeDocumentRepository(documents=docs)
-        bm25 = BM25SearchBackend(repo)
         pipeline = _build_pipeline(
-            bm25=bm25,
-            vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
+            doc_repo=repo,
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(),
             intent=QueryIntent.KEYWORD,
             logger=FakeSearchLogger(),
         )
@@ -179,10 +195,10 @@ class TestBM25BackendInPipeline:
             _bm25_doc(path="a.md", title="A", content="match", collection="alpha"),
             _bm25_doc(path="b.md", title="B", content="match", collection="beta"),
         ]
-        bm25 = BM25SearchBackend(FakeDocumentRepository(documents=docs))
         pipeline = _build_pipeline(
-            bm25=bm25,
-            vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
+            doc_repo=FakeDocumentRepository(documents=docs),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(),
             intent=QueryIntent.KEYWORD,
         )
 
@@ -219,13 +235,10 @@ class TestVectorBackendInPipeline:
             _vec_hit(path="sem-a.md", distance=0.1, collection="shared"),
             _vec_hit(path="sem-b.md", distance=0.2, collection="shared"),
         ]
-        vector = VectorSearchBackend(
-            FakeEmbeddingService(),
-            FakeVectorRepository(results=vec_results),
-        )
         pipeline = _build_pipeline(
-            bm25=BM25SearchBackend(FakeDocumentRepository()),
-            vector=vector,
+            doc_repo=FakeDocumentRepository(),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(results=vec_results),
             intent=QueryIntent.SEMANTIC,
         )
 
@@ -250,13 +263,10 @@ class TestVectorBackendInPipeline:
         assert isinstance(empty_embedding, EmbeddingService)
         assert empty_embedding.embed("anything") == []
 
-        vector = VectorSearchBackend(
-            empty_embedding,
-            FakeVectorRepository(results=[_vec_hit(path="never.md", distance=0.1, collection="c")]),
-        )
         pipeline = _build_pipeline(
-            bm25=BM25SearchBackend(FakeDocumentRepository()),
-            vector=vector,
+            doc_repo=FakeDocumentRepository(),
+            embed=empty_embedding,
+            vec_repo=FakeVectorRepository(results=[_vec_hit(path="never.md", distance=0.1, collection="c")]),
             intent=QueryIntent.SEMANTIC,
         )
 
@@ -275,13 +285,10 @@ class TestVectorBackendInPipeline:
             _vec_hit(path="a.md", distance=0.1, collection="alpha"),
             _vec_hit(path="b.md", distance=0.2, collection="beta"),
         ]
-        vector = VectorSearchBackend(
-            FakeEmbeddingService(),
-            FakeVectorRepository(results=vec_results),
-        )
         pipeline = _build_pipeline(
-            bm25=BM25SearchBackend(FakeDocumentRepository()),
-            vector=vector,
+            doc_repo=FakeDocumentRepository(),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(results=vec_results),
             intent=QueryIntent.SEMANTIC,
         )
 
@@ -313,11 +320,9 @@ class TestBothBackendsInPipeline:
             _vec_hit(path="vec-only.md", distance=0.1, collection="shared"),
         ]
         pipeline = _build_pipeline(
-            bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-            vector=VectorSearchBackend(
-                FakeEmbeddingService(),
-                FakeVectorRepository(results=vec_results),
-            ),
+            doc_repo=FakeDocumentRepository(documents=docs),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(results=vec_results),
             intent=QueryIntent.SEMANTIC,
             logger=FakeSearchLogger(),
         )
@@ -345,11 +350,9 @@ class TestBothBackendsInPipeline:
         vec_results = [_vec_hit(path="logged-vec.md", distance=0.1, collection="shared")]
         log = FakeSearchLogger()
         pipeline = _build_pipeline(
-            bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-            vector=VectorSearchBackend(
-                FakeEmbeddingService(),
-                FakeVectorRepository(results=vec_results),
-            ),
+            doc_repo=FakeDocumentRepository(documents=docs),
+            embed=FakeEmbeddingService(),
+            vec_repo=FakeVectorRepository(results=vec_results),
             intent=QueryIntent.SEMANTIC,
             logger=log,
         )

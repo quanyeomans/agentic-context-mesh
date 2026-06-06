@@ -19,18 +19,19 @@ from pathlib import Path
 
 import pytest
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
 from kairix.core.search.logger import JsonlSearchLogger
-from kairix.core.search.pipeline import SearchPipeline
 from kairix.core.search.scope import Scope
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeVectorRepository,
 )
 
@@ -45,7 +46,7 @@ def _build_pipeline_with_jsonl_logger(
     *,
     search_log_path: Path,
     query_log_path: Path | None = None,
-) -> SearchPipeline:
+):
     """Compose a SearchPipeline with canonical fakes + a real JsonlSearchLogger."""
     docs = [
         {
@@ -55,18 +56,24 @@ def _build_pipeline_with_jsonl_logger(
             "content": "hello world",
         },
     ]
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=False),
-        fusion=RRFFusion(k=60),
-        boosts=[],
-        logger=JsonlSearchLogger(
-            search_log_path=search_log_path,
-            query_log_path=query_log_path,
-        ),
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            vec_repo_override=FakeVectorRepository(),
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=False),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[],
+            logger_override=JsonlSearchLogger(
+                search_log_path=search_log_path,
+                query_log_path=query_log_path,
+            ),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 

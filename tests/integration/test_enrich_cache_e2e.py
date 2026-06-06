@@ -20,15 +20,16 @@ import pytest
 from kairix.core.db import open_db
 from kairix.core.db.repository import SQLiteDocumentRepository
 from kairix.core.db.schema import create_schema
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -88,19 +89,22 @@ def _vec_hit(path: str, distance: float = 0.1) -> dict:
 def _build_pipeline(
     doc_repo: SQLiteDocumentRepository,
     vec_results: list[dict],
-) -> SearchPipeline:
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(),
-            FakeVectorRepository(results=vec_results),
-        ),
-        graph=FakeGraphRepository(available=False),
-        fusion=RRFFusion(k=60),
-        boosts=[],
-        logger=FakeSearchLogger(),
+):
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+            doc_repo_override=doc_repo,
+            vec_repo_override=FakeVectorRepository(results=vec_results),
+            embed_service_override=FakeEmbeddingService(),
+            graph_override=FakeGraphRepository(available=False),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 

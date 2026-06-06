@@ -335,11 +335,82 @@ class FactoryDeps:
     - ``bootstrap_secrets_fn`` runs the secrets-bundle hydration once
       before any credential resolution; raising is logged and swallowed
       so a missing bundle in local dev doesn't crash the factory.
+
+    F47 paydown — pipeline-component overrides:
+    Integration tests that previously constructed ``SearchPipeline(...)``
+    directly with canonical fakes now thread their fakes via the
+    ``*_override`` fields below. ``None`` means "build the production
+    default"; any non-``None`` value short-circuits the corresponding
+    production wiring and uses the override instead. Setting any
+    override flips :func:`_is_default_deps` to False, which bypasses the
+    process-shared pipeline cache so tests get a fresh wiring per call.
+
+    - ``classifier_override``: replace the rule-based intent classifier
+      (typically with ``FakeClassifier(intent=...)`` or
+      ``RealClassifierAdapter()``).
+    - ``doc_repo_override``: replace the SQLite-backed
+      ``DocumentRepository`` (typically with ``FakeDocumentRepository``).
+      Wraps in :class:`BM25SearchBackend` automatically.
+    - ``vec_repo_override``: replace the usearch-backed
+      ``VectorRepository`` (typically with ``FakeVectorRepository``).
+      Wraps in :class:`VectorSearchBackend` with the embed service.
+    - ``embed_service_override``: replace the
+      :class:`ProviderEmbeddingService` (typically with
+      ``FakeEmbeddingService``). When set, ``cfg.provider`` is not
+      consulted and ``registry`` is ignored — the override is used
+      verbatim.
+    - ``graph_override``: replace the ``GraphRepository`` (typically
+      with ``FakeGraphRepository(available=...)``). When set, the
+      ``graph_client_factory`` is not called.
+    - ``fusion_override``: replace the fusion strategy (typically with
+      ``RRFFusion(k=60)`` or ``FakeFusion()``); when set, ``cfg.fusion_strategy``
+      is ignored.
+    - ``boosts_override``: replace the boost chain. ``None`` builds the
+      production chain from ``cfg``; any list (including ``[]``) is
+      used verbatim.
+    - ``logger_override``: replace the JSONL search logger (typically
+      with ``FakeSearchLogger`` or a tmp-path :class:`JsonlSearchLogger`).
+    - ``resolver_override``: replace the topology-v2 collection
+      resolver. When set, no SQLite Connection is opened for resolution.
+    - ``query_cache_override``: replace (or disable) the
+      process-shared :class:`QueryResultCache`. Use the sentinel
+      :data:`QUERY_CACHE_DISABLED` to wire ``query_cache=None`` on the
+      pipeline; pass an explicit ``QueryResultCache`` instance to wire
+      a specific cache.
     """
 
     vec_index_factory: Callable[[], Any] = field(default_factory=lambda: _default_vec_index_factory)
     graph_client_factory: Callable[[], Any] = field(default_factory=lambda: _default_graph_client_factory)
     bootstrap_secrets_fn: Callable[..., Any] = field(default_factory=lambda: _default_bootstrap_secrets)
+
+    # F47 paydown — pipeline-component overrides. ``None`` means "use the
+    # production default". Production callers never set these; tests
+    # thread Fake* implementations from ``tests/fakes.py`` through them.
+    classifier_override: Any = None
+    doc_repo_override: Any = None
+    vec_repo_override: Any = None
+    embed_service_override: Any = None
+    graph_override: Any = None
+    fusion_override: Any = None
+    boosts_override: Any = None  # list[BoostStrategy] | None
+    logger_override: Any = None
+    resolver_override: Any = None
+    query_cache_override: Any = None  # QueryResultCache | QUERY_CACHE_DISABLED | None
+
+
+class _QueryCacheDisabledSentinel:
+    """Sentinel for ``FactoryDeps.query_cache_override`` meaning ``query_cache=None``.
+
+    A bare ``None`` would be indistinguishable from "use the production
+    default cache" — this sentinel disambiguates "wire no cache at all"
+    (e.g. tests asserting backend-call counts without dedup).
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - cosmetic
+        return "QUERY_CACHE_DISABLED"
+
+
+QUERY_CACHE_DISABLED = _QueryCacheDisabledSentinel()
 
 
 def _build_vector_repo(vec_index_factory: Callable[[], Any]) -> Any:
@@ -802,11 +873,30 @@ def _is_default_deps(deps: FactoryDeps) -> bool:
     point constructs ``FactoryDeps()`` — :func:`build_search_pipeline`
     then treats it as "default" and honours the process-shared pipeline
     cache.
+
+    Any non-``None`` pipeline-component override (classifier, doc_repo,
+    vec_repo, embed_service, graph, fusion, boosts, logger, resolver,
+    query_cache) also flips this to ``False`` so tests get a fresh
+    pipeline per call — the cache key is the resolved RetrievalConfig
+    alone, so caching a fake-wired pipeline would leak across cases.
     """
+    overrides_clean = (
+        deps.classifier_override is None
+        and deps.doc_repo_override is None
+        and deps.vec_repo_override is None
+        and deps.embed_service_override is None
+        and deps.graph_override is None
+        and deps.fusion_override is None
+        and deps.boosts_override is None
+        and deps.logger_override is None
+        and deps.resolver_override is None
+        and deps.query_cache_override is None
+    )
     return (
         deps.vec_index_factory is _default_vec_index_factory
         and deps.graph_client_factory is _default_graph_client_factory
         and deps.bootstrap_secrets_fn is _default_bootstrap_secrets
+        and overrides_clean
     )
 
 
@@ -825,6 +915,14 @@ def _build_search_pipeline_uncached(
     duplicating the wiring. Callers that have already verified the cache
     is cold (e.g. inside the double-checked-locking critical section)
     invoke this directly.
+
+    F47 paydown — each pipeline component (classifier, doc_repo,
+    vec_repo, embed_service, graph, fusion, boosts, logger, resolver,
+    query_cache) honours the corresponding ``*_override`` on ``deps``
+    when set. Production callers leave them ``None`` and the production
+    defaults below fire; integration tests pass Fake* instances so they
+    can construct the pipeline through this factory rather than via
+    direct ``SearchPipeline(...)`` construction.
     """
     from kairix.core.search.intent import classify as _classify_fn
 
@@ -832,8 +930,6 @@ def _build_search_pipeline_uncached(
         def classify(self, query: str) -> Any:
             return _classify_fn(query)
 
-    from kairix.core.db import get_db_path
-    from kairix.core.db.repository import SQLiteDocumentRepository
     from kairix.core.search.backends import (
         BM25SearchBackend,
         VectorSearchBackend,
@@ -842,12 +938,39 @@ def _build_search_pipeline_uncached(
     # Explicit ``paths`` (test DI seam) wins over the env-driven default
     # (F2: keeps tmp_path injection out of monkeypatch.setenv). Production
     # passes ``paths=None`` and the existing resolution chain runs.
-    resolved_db_path = paths.db_path if paths is not None else get_db_path()
-    doc_repo = SQLiteDocumentRepository(db_path=resolved_db_path)
+    resolved_db_path = _resolve_db_path(paths)
+
+    # Components: each starts at the override (when set) and falls back
+    # to the production wiring otherwise. Production callers leave every
+    # override ``None``.
+    classifier = deps.classifier_override if deps.classifier_override is not None else _RuleClassifier()
+
+    doc_repo = deps.doc_repo_override if deps.doc_repo_override is not None else _default_doc_repo(resolved_db_path)
     bm25 = BM25SearchBackend(doc_repo)
-    embed_service = _build_embedding_service(cfg, registry=registry)
-    vector = VectorSearchBackend(embed_service, _build_vector_repo(deps.vec_index_factory))
-    graph = _build_graph(deps.graph_client_factory)
+
+    embed_service = (
+        deps.embed_service_override
+        if deps.embed_service_override is not None
+        else _build_embedding_service(cfg, registry=registry)
+    )
+    vec_repo = (
+        deps.vec_repo_override if deps.vec_repo_override is not None else _build_vector_repo(deps.vec_index_factory)
+    )
+    vector = VectorSearchBackend(embed_service, vec_repo)
+
+    graph = deps.graph_override if deps.graph_override is not None else _build_graph(deps.graph_client_factory)
+
+    fusion = deps.fusion_override if deps.fusion_override is not None else _build_fusion(cfg)
+
+    boosts = deps.boosts_override if deps.boosts_override is not None else select_boosts(cfg, graph)
+
+    pipeline_logger = deps.logger_override if deps.logger_override is not None else _build_search_logger(env)
+
+    resolver = (
+        deps.resolver_override
+        if deps.resolver_override is not None
+        else build_collection_resolver(db_path=resolved_db_path, env=env)
+    )
 
     # Auto-wire the fact retriever when the operator's data dir contains a
     # facts table. The SQLiteFactStore uses the same SQLite database file as
@@ -860,34 +983,75 @@ def _build_search_pipeline_uncached(
         fact_retriever if fact_retriever is not None else _auto_wire_fact_retriever(resolved_db_path)
     )
 
+    # Query cache: ``QUERY_CACHE_DISABLED`` sentinel wires ``None``;
+    # an explicit ``QueryResultCache`` is used verbatim; default wires
+    # the process-shared LRU.
+    query_cache = _resolve_query_cache(deps.query_cache_override, cfg)
+
     # #411 Phase 2 — record the pipeline-build marker BEFORE constructing
     # the query cache, so the marker's cfg_hash is the one scoping the
     # persistent cache rows. Marker writes are best-effort (defensive
-    # against disk failures inside the marker module itself).
-    _record_pipeline_build_marker(cfg)
+    # against disk failures inside the marker module itself). Skip the
+    # marker write when query_cache_override is set so test-wired caches
+    # don't contaminate the production marker file.
+    if deps.query_cache_override is None:
+        _record_pipeline_build_marker(cfg)
 
     # Cache writes are owned by the caller (build_search_pipeline) under
     # ``_PIPELINE_CACHE_LOCK``; this helper just builds + returns.
     return SearchPipeline(
-        classifier=_RuleClassifier(),
+        classifier=classifier,
         bm25=bm25,
         vector=vector,
         graph=graph,
-        fusion=_build_fusion(cfg),
-        boosts=select_boosts(cfg, graph),
-        logger=_build_search_logger(env),
-        resolver=build_collection_resolver(db_path=resolved_db_path, env=env),
+        fusion=fusion,
+        boosts=boosts,
+        logger=pipeline_logger,
+        resolver=resolver,
         config=cfg,
         # #281 — wire the process-shared LRU so repeat queries from
         # teaming agents skip the Azure embed roundtrip. #411 Phase 2
         # — pass the resolved cfg_hash so persistent rows are scoped
         # to the current pipeline configuration.
-        query_cache=_get_or_create_query_cache(cfg_hash=_compute_cfg_hash(cfg)),
+        query_cache=query_cache,
         # Plan B-parity Capability #5 — opt-in fact federation. ``None``
         # preserves today's chunk-only behaviour for vault-only deployments.
         # Auto-wired above when the operator's data dir contains a facts table.
         fact_retriever=resolved_fact_retriever,
     )
+
+
+def _resolve_db_path(paths: KairixPaths | None) -> Any:
+    """Pick ``paths.db_path`` (test seam) over the env-driven default."""
+    if paths is not None:
+        return paths.db_path
+    from kairix.core.db import get_db_path
+
+    return get_db_path()
+
+
+def _default_doc_repo(db_path: Any) -> Any:
+    """Construct the production ``SQLiteDocumentRepository`` for ``db_path``."""
+    from kairix.core.db.repository import SQLiteDocumentRepository
+
+    return SQLiteDocumentRepository(db_path=db_path)
+
+
+def _resolve_query_cache(override: Any, cfg: RetrievalConfig) -> Any:
+    """Return the wired ``query_cache`` for the pipeline.
+
+    Three resolution branches:
+      * ``override is QUERY_CACHE_DISABLED`` → ``None`` (no caching).
+      * ``override`` is any other non-``None`` value (e.g. a
+        ``QueryResultCache``) → use it verbatim.
+      * ``override is None`` → the process-shared LRU keyed on the
+        resolved cfg_hash (production default).
+    """
+    if override is QUERY_CACHE_DISABLED:
+        return None
+    if override is not None:
+        return override
+    return _get_or_create_query_cache(cfg_hash=_compute_cfg_hash(cfg))
 
 
 def _compute_cfg_hash(cfg: RetrievalConfig) -> str:
