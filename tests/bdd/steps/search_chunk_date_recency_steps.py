@@ -3,14 +3,20 @@
 Two scenarios:
 
 1. End-to-end: a TEMPORAL query with a date in the query lifts the doc whose
-   chunk_date metadata matches that date. Drives the SearchPipeline directly
-   with the same boost-chain composition factory.build_search_pipeline()
-   produces in production. Requires (a) factory wires the temporal boosts AND
-   (b) pipeline extracts query_date into the boost context.
+   chunk_date metadata matches that date. Drives the SearchPipeline via the
+   production factory with the same boost-chain composition
+   factory.build_search_pipeline() produces in production. Requires
+   (a) factory wires the temporal boosts AND (b) pipeline extracts
+   query_date into the boost context.
 
 2. Contract: factory.build_search_pipeline() includes TemporalDateBoost +
    ChunkDateBoost in the boost chain when their respective config flags are
    enabled. Documents the wiring contract for #157.
+
+F46-clean: composed via ``kairix.core.factory.build_search_pipeline`` with
+``paths=FakePaths(...)`` and ``deps=FactoryDeps(...)`` overrides — the
+production boost chain is built via ``select_boosts`` and threaded through
+``boosts_override`` so the wiring matches what production runs.
 """
 
 from __future__ import annotations
@@ -21,11 +27,14 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import (
+    QUERY_CACHE_DISABLED,
+    FactoryDeps,
+    build_search_pipeline,
+    select_boosts,
+)
 from kairix.core.search.boosts import (
     ChunkDateBoost,
-    EntityBoost,
-    ProceduralBoost,
     TemporalDateBoost,
 )
 from kairix.core.search.config import (
@@ -37,9 +46,11 @@ from kairix.core.search.config import (
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.pipeline import SearchPipeline, SearchResult
 from tests.fakes import (
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
     RealClassifierAdapter,
@@ -59,24 +70,6 @@ class _RecencyCtx:
 @pytest.fixture
 def recency_ctx() -> _RecencyCtx:
     return _RecencyCtx()
-
-
-def _build_factory_style_boosts(cfg: RetrievalConfig, graph: FakeGraphRepository) -> list[Any]:
-    """Mirror factory.build_search_pipeline()'s boost-registration logic.
-
-    Production wiring: every enabled boost in cfg.entity / cfg.procedural /
-    cfg.temporal contributes a strategy adapter to the chain.
-    """
-    boosts: list[Any] = []
-    if cfg.entity.enabled:
-        boosts.append(EntityBoost(graph=graph, config=cfg.entity))
-    if cfg.procedural.enabled:
-        boosts.append(ProceduralBoost(config=cfg.procedural))
-    if cfg.temporal.date_path_boost_enabled:
-        boosts.append(TemporalDateBoost(config=cfg.temporal))
-    if cfg.temporal.chunk_date_boost_enabled:
-        boosts.append(ChunkDateBoost(config=cfg.temporal))
-    return boosts
 
 
 # ---------------------------------------------------------------------------
@@ -127,16 +120,24 @@ def _populate_recency_index(recency_ctx: _RecencyCtx, datatable: list[list[str]]
     cfg = recency_ctx.config
 
     graph = FakeGraphRepository(available=False)
-    boosts = _build_factory_style_boosts(cfg, graph)
-    recency_ctx.pipeline = SearchPipeline(
-        classifier=recency_ctx.classifier,
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=graph,
-        fusion=RRFFusion(k=60),
-        boosts=boosts,
-        logger=FakeSearchLogger(),
+    # Production wiring: select_boosts is exactly what build_search_pipeline
+    # uses internally to derive the boost chain from cfg + graph.
+    boosts = select_boosts(cfg, graph)
+    recency_ctx.pipeline = build_search_pipeline(
         config=cfg,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=recency_ctx.classifier,
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(),
+            graph_override=graph,
+            fusion_override=RRFFusion(k=60),
+            boosts_override=boosts,
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 
@@ -195,12 +196,11 @@ def _factory_builds_with_temporal(recency_ctx: _RecencyCtx) -> None:
         ),
     )
 
-    # We cannot drive the real factory.build_search_pipeline here — it opens
-    # Azure / Neo4j / SQLite. Instead, exercise its boost-chain
-    # registration logic by dispatching it via a focused helper so
-    # the contract assertion runs against the same wiring rules.
-    from kairix.core.factory import select_boosts
-
+    # The production factory.build_search_pipeline derives its boost
+    # chain via select_boosts(cfg, graph); pin the contract by invoking
+    # the same public helper. (Calling build_search_pipeline itself here
+    # would still satisfy F46, but only this projection is needed to
+    # assert the boost-chain registration contract.)
     graph = FakeGraphRepository(available=False)
     recency_ctx.factory_built_boosts = select_boosts(cfg, graph)
 

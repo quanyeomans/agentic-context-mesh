@@ -24,9 +24,6 @@
 # tests/integration/test_vec_index_lifecycle.py) and removing the line
 # from this file in the same commit.
 #
-tests/bdd/steps/probe_per_query_telemetry_steps.py
-tests/bdd/steps/query_cache_steps.py
-tests/bdd/steps/search_boosts_steps.py
-tests/bdd/steps/search_chunk_date_recency_steps.py
-tests/bdd/steps/search_intent_gated_boosts_steps.py
-tests/bdd/steps/search_logging_steps.py
+# Status (2026-06-06): all 6 grandfathered files paid down via the
+# factory.build_search_pipeline(paths=FakePaths(...), deps=FactoryDeps(...))
+# pattern. Baseline is empty; F46 detector reports clean.

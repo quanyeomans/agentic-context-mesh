@@ -8,6 +8,10 @@ Wires a real SearchPipeline using canonical fakes from tests/fakes.py:
   - FakeSearchLogger
 
 No monkeypatching, no @patch.
+
+F46-clean: composed via ``kairix.core.factory.build_search_pipeline`` with
+``paths=FakePaths(...)`` and ``deps=FactoryDeps(...)`` overrides — the
+boost adapters are threaded via ``boosts_override``.
 """
 
 from __future__ import annotations
@@ -16,17 +20,18 @@ from typing import Any
 
 from pytest_bdd import given, parsers, then, when
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import EntityBoost, ProceduralBoost
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
-from kairix.core.search.pipeline import SearchPipeline
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -96,11 +101,7 @@ def _build_and_run(intent: QueryIntent, query: str) -> None:
     graph = FakeGraphRepository(entities=_state["entities"], available=graph_available)
 
     doc_repo = FakeDocumentRepository(bm25_rows=_state["bm25"])
-    bm25 = BM25SearchBackend(doc_repo)
-
-    embedding = FakeEmbeddingService()
     vector_repo = FakeVectorRepository(results=_state["vec"])
-    vector = VectorSearchBackend(embedding, vector_repo)
 
     boosts: list[Any] = []
     if intent == QueryIntent.PROCEDURAL:
@@ -108,15 +109,21 @@ def _build_and_run(intent: QueryIntent, query: str) -> None:
     if intent == QueryIntent.ENTITY:
         boosts.append(EntityBoost(graph=graph))
 
-    pipe = SearchPipeline(
-        classifier=FakeClassifier(intent=intent),
-        bm25=bm25,
-        vector=vector,
-        graph=graph,
-        fusion=RRFFusion(k=cfg.rrf_k),
-        boosts=boosts,
-        logger=FakeSearchLogger(),
+    pipe = build_search_pipeline(
         config=cfg,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=intent),
+            doc_repo_override=doc_repo,
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=vector_repo,
+            graph_override=graph,
+            fusion_override=RRFFusion(k=cfg.rrf_k),
+            boosts_override=boosts,
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
     _state["result"] = pipe.search(query)
 

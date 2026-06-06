@@ -7,6 +7,10 @@ production EntityBoost / ProceduralBoost / TemporalDateBoost adapters
 exactly as production wires them. No IntentGatedBoost wrappers, no test
 wrappers — if production fires the wrong boost on the wrong intent, the
 scenario fails.
+
+F46-clean: composed via ``kairix.core.factory.build_search_pipeline`` with
+``paths=FakePaths(...)`` and ``deps=FactoryDeps(...)`` overrides — the
+production boost-chain adapters are threaded via ``boosts_override``.
 """
 
 from __future__ import annotations
@@ -17,15 +21,17 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.boosts import EntityBoost, ProceduralBoost, TemporalDateBoost
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.pipeline import SearchPipeline, SearchResult
 from tests.fakes import (
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
     RealClassifierAdapter,
@@ -50,24 +56,43 @@ def intent_boost_ctx() -> _IntentBoostCtx:
 # ---------------------------------------------------------------------------
 
 
+def _build_intent_gated_pipeline(
+    classifier: RealClassifierAdapter,
+    docs: list[dict[str, Any]],
+    graph: FakeGraphRepository,
+) -> SearchPipeline:
+    """Build the intent-gated pipeline through the production factory.
+
+    The boost chain mirrors what kairix.core.factory.build_search_pipeline
+    produces today: each strategy adapter from kairix.core.search.boosts.
+    No intent-gating wrappers — we want to observe whether each adapter's
+    internal "intent guard" actually fires.
+    """
+    return build_search_pipeline(
+        config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=classifier,
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(),
+            graph_override=graph,
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[EntityBoost(graph=graph), ProceduralBoost(), TemporalDateBoost()],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
+    )
+
+
 @given("a search pipeline with the production boost chain wired by factory.build_search_pipeline")
 def _build_pipeline_with_production_boost_chain(intent_boost_ctx: _IntentBoostCtx) -> None:
     intent_boost_ctx.classifier = RealClassifierAdapter()
-    # The boost chain mirrors what kairix.core.factory.build_search_pipeline
-    # produces today: each strategy adapter from kairix.core.search.boosts.
-    # No intent-gating wrappers — we want to observe whether each adapter's
-    # internal "intent guard" actually fires.
-    graph = FakeGraphRepository(available=False)
-    boosts = [EntityBoost(graph=graph), ProceduralBoost(), TemporalDateBoost()]
-    intent_boost_ctx.pipeline = SearchPipeline(
+    intent_boost_ctx.pipeline = _build_intent_gated_pipeline(
         classifier=intent_boost_ctx.classifier,
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=intent_boost_ctx.docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
+        docs=intent_boost_ctx.docs,
         graph=FakeGraphRepository(available=False),
-        fusion=RRFFusion(k=60),
-        boosts=boosts,
-        logger=FakeSearchLogger(),
-        config=RetrievalConfig.defaults(),
     )
 
 
@@ -81,17 +106,12 @@ def _populate_vault_table(intent_boost_ctx: _IntentBoostCtx, datatable: list[lis
         doc["collection"] = "vault"
         docs.append(doc)
     intent_boost_ctx.docs[:] = docs
-    graph = FakeGraphRepository(available=False)
     # Re-construct the pipeline with the populated repo.
-    intent_boost_ctx.pipeline = SearchPipeline(
+    assert intent_boost_ctx.classifier is not None, "Background must run before this step"
+    intent_boost_ctx.pipeline = _build_intent_gated_pipeline(
         classifier=intent_boost_ctx.classifier,
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=graph,
-        fusion=RRFFusion(k=60),
-        boosts=[EntityBoost(graph=graph), ProceduralBoost(), TemporalDateBoost()],
-        logger=FakeSearchLogger(),
-        config=RetrievalConfig.defaults(),
+        docs=docs,
+        graph=FakeGraphRepository(available=False),
     )
 
 

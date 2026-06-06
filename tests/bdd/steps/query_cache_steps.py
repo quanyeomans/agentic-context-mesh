@@ -4,6 +4,10 @@ Drives a real ``SearchPipeline`` wired with a real ``QueryResultCache`` and
 the canonical kairix fakes for the I/O boundaries (FakeDocumentRepository
 etc). No @patch on internals, no monkeypatch on kairix modules — the cache
 seam is exercised through the public SearchPipeline.search() surface.
+
+F46-clean: composed via ``kairix.core.factory.build_search_pipeline`` with
+``paths=FakePaths(...)`` and ``deps=FactoryDeps(...)`` overrides — the
+same wiring the production CLI / MCP entry points use.
 """
 
 from __future__ import annotations
@@ -13,16 +17,18 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.pipeline import SearchPipeline
 from kairix.core.search.query_cache import QueryResultCache
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeFusion,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -51,17 +57,27 @@ def _qc_state() -> dict[str, Any]:
 
 
 def _build_pipeline(doc_repo: FakeDocumentRepository, cache: QueryResultCache) -> SearchPipeline:
-    """Construct a real SearchPipeline wired with canonical fakes + the cache."""
-    return SearchPipeline(
-        classifier=FakeClassifier(),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=True),
-        fusion=FakeFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    """Construct a real SearchPipeline wired with canonical fakes + the cache.
+
+    F46-clean: routes through ``build_search_pipeline`` with FactoryDeps
+    overrides — the cache is wired via ``query_cache_override`` rather than
+    a direct ``SearchPipeline(query_cache=...)`` constructor argument.
+    """
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
-        query_cache=cache,
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(),
+            doc_repo_override=doc_repo,
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=FakeFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=cache,
+        ),
     )
 
 
@@ -97,22 +113,24 @@ def _given_error_pipeline(_qc_state: dict[str, Any]) -> None:
     """
     from kairix.core.search.intent import QueryIntent
 
-    class _EntityClassifier:
-        def classify(self, _q: str) -> QueryIntent:
-            return QueryIntent.ENTITY
-
     doc_repo = FakeDocumentRepository(documents=[])
     _qc_state["doc_repo"] = doc_repo
-    _qc_state["pipeline"] = SearchPipeline(
-        classifier=_EntityClassifier(),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=False),  # ENTITY + no graph → error
-        fusion=FakeFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    # ENTITY classifier + graph_override(available=False) → error envelope.
+    _qc_state["pipeline"] = build_search_pipeline(
         config=RetrievalConfig.defaults(),
-        query_cache=_qc_state["cache"],
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.ENTITY),
+            doc_repo_override=doc_repo,
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(),
+            graph_override=FakeGraphRepository(available=False),
+            fusion_override=FakeFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=_qc_state["cache"],
+        ),
     )
 
 

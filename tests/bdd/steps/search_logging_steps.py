@@ -5,6 +5,11 @@ JsonlSearchLogger writing under tmp_path. No @patch, no monkeypatch.
 
 Per-scenario state is held on a fixture (`logging_ctx`) so scenarios
 remain isolated.
+
+F46-clean: composed via ``kairix.core.factory.build_search_pipeline`` with
+``paths=FakePaths(...)`` and ``deps=FactoryDeps(...)`` overrides — the
+JsonlSearchLogger is wired via ``logger_override`` rather than a direct
+``SearchPipeline(logger=...)`` constructor argument.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from pathlib import Path
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
 from kairix.core.search.fusion import RRFFusion
 from kairix.core.search.intent import QueryIntent
@@ -25,9 +30,11 @@ from kairix.core.search.pipeline import SearchPipeline, SearchResult
 from kairix.core.search.scope import Scope
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeGraphRepository,
+    FakePaths,
     FakeVectorRepository,
 )
 
@@ -57,15 +64,21 @@ def _build_pipeline(log_path: Path) -> SearchPipeline:
             "content": "hello world",
         },
     ]
-    return SearchPipeline(
-        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
-        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
-        vector=VectorSearchBackend(FakeEmbeddingService(), FakeVectorRepository()),
-        graph=FakeGraphRepository(available=False),
-        fusion=RRFFusion(k=60),
-        boosts=[],
-        logger=JsonlSearchLogger(search_log_path=log_path),
+    return build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(intent=QueryIntent.SEMANTIC),
+            doc_repo_override=FakeDocumentRepository(documents=docs),
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(),
+            graph_override=FakeGraphRepository(available=False),
+            fusion_override=RRFFusion(k=60),
+            boosts_override=[],
+            logger_override=JsonlSearchLogger(search_log_path=log_path),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
 

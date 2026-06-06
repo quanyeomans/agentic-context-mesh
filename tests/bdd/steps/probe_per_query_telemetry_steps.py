@@ -12,6 +12,10 @@ follow-up). The BDD layer pins the operator-visible envelope shape:
 
 Pattern: canonical fakes from ``tests/fakes.py`` for I/O boundaries;
 the SearchPipeline and probe runner are real.
+
+F46-clean: composed via ``kairix.core.factory.build_search_pipeline`` with
+``paths=FakePaths(...)`` and ``deps=FactoryDeps(...)`` overrides — the
+fakes are wired through the same factory production callers use.
 """
 
 from __future__ import annotations
@@ -23,16 +27,17 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, then, when
 
-from kairix.core.search.backends import BM25SearchBackend, VectorSearchBackend
+from kairix.core.factory import QUERY_CACHE_DISABLED, FactoryDeps, build_search_pipeline
 from kairix.core.search.config import RetrievalConfig
-from kairix.core.search.pipeline import SearchPipeline
 from kairix.quality.probe.runner import ProbeResult, SampledQuery, run_probe_search
 from tests.fakes import (
     FakeClassifier,
+    FakeCollectionResolver,
     FakeDocumentRepository,
     FakeEmbeddingService,
     FakeFusion,
     FakeGraphRepository,
+    FakePaths,
     FakeSearchLogger,
     FakeVectorRepository,
 )
@@ -125,22 +130,28 @@ class _LatencyInjectingClient:
 
 
 def _build_real_pipeline_searcher() -> Any:
-    """Real SearchPipeline composed from canonical fakes; adapt to runner shape."""
+    """Real SearchPipeline composed from canonical fakes via the production factory.
+
+    Adapts the resulting pipeline to the probe runner's ``searcher`` shape.
+    """
     doc_repo = FakeDocumentRepository(
         documents=[{"path": "p.md", "title": "T", "content": "alpha bravo charlie", "collection": "c"}]
     )
-    pipeline = SearchPipeline(
-        classifier=FakeClassifier(),
-        bm25=BM25SearchBackend(doc_repo),
-        vector=VectorSearchBackend(
-            FakeEmbeddingService(),
-            FakeVectorRepository(results=[{"path": "v.md", "distance": 0.1, "collection": "c"}]),
-        ),
-        graph=FakeGraphRepository(available=True),
-        fusion=FakeFusion(),
-        boosts=[],
-        logger=FakeSearchLogger(),
+    pipeline = build_search_pipeline(
         config=RetrievalConfig.defaults(),
+        paths=FakePaths(),
+        deps=FactoryDeps(
+            classifier_override=FakeClassifier(),
+            doc_repo_override=doc_repo,
+            embed_service_override=FakeEmbeddingService(),
+            vec_repo_override=FakeVectorRepository(results=[{"path": "v.md", "distance": 0.1, "collection": "c"}]),
+            graph_override=FakeGraphRepository(available=True),
+            fusion_override=FakeFusion(),
+            boosts_override=[],
+            logger_override=FakeSearchLogger(),
+            resolver_override=FakeCollectionResolver(),
+            query_cache_override=QUERY_CACHE_DISABLED,
+        ),
     )
 
     def _search(q: SampledQuery) -> Any:
