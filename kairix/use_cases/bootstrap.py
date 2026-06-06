@@ -44,6 +44,14 @@ logger = logging.getLogger(__name__)
 # so ``BootstrapHealth`` is now ``KairixHealth`` under a friendly name.
 BootstrapHealth = KairixHealth
 
+# Envelope key constants — extracted to satisfy F17 (no string literal of
+# >=10 chars duplicated >=3 times in a module). The ``next_action`` key
+# appears in ``to_envelope`` (write), ``from_envelope`` (read), and
+# ``envelope_to_bootstrap_health`` (read) — three sites means a constant
+# makes the coupling explicit and any future rename is one edit.
+_KEY_NEXT_ACTION = "next_action"
+
+
 # Re-export the budget so callers that imported it from here keep working.
 __all__ = [
     "HEALTH_PROBE_BUDGET_S",
@@ -55,6 +63,7 @@ __all__ = [
     "bootstrap_health_to_envelope",
     "bootstrap_output_to_envelope",
     "bootstrap_output_to_markdown",
+    "envelope_to_bootstrap_health",
     "run_bootstrap",
 ]
 
@@ -125,6 +134,35 @@ class BootstrapOutput:
     health: BootstrapHealth = field(default_factory=BootstrapHealth)
     next_action: str = ""
     error: str = ""
+
+    @classmethod
+    def from_envelope(cls, envelope: dict[str, Any]) -> BootstrapOutput:
+        """Rebuild a ``BootstrapOutput`` from the dict ``bootstrap_output_to_envelope`` emits.
+
+        The seam for warm-MCP text-mode routing (#421 PR 2.3). The CLI
+        dispatcher receives a JSON envelope from the MCP worker; this
+        adapter projects it back to the dataclass shape
+        ``bootstrap_output_to_markdown`` already consumes, so the
+        in-process and warm paths render byte-identical markdown.
+
+        Every field on the envelope round-trips, including ``health``
+        (rebuilt via :func:`envelope_to_bootstrap_health`) and
+        ``recent_memory`` (rebuilt as a list of :class:`MemoryEntry`).
+        """
+        return cls(
+            agent=str(envelope.get("agent", "")),
+            role=str(envelope.get("role", "")),
+            board=str(envelope.get("board", "")),
+            recent_memory=[
+                MemoryEntry(date=str(entry.get("date", "")), content=str(entry.get("content", "")))
+                for entry in envelope.get("recent_memory", [])
+                if isinstance(entry, dict)
+            ],
+            active_goals=[str(g) for g in envelope.get("active_goals", [])],
+            health=envelope_to_bootstrap_health(envelope.get("health", {})),
+            next_action=str(envelope.get(_KEY_NEXT_ACTION, "")),
+            error=str(envelope.get("error", "")),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +451,32 @@ def bootstrap_health_to_envelope(health: BootstrapHealth) -> dict[str, Any]:
     return dict(health_to_envelope(health))
 
 
+def envelope_to_bootstrap_health(envelope: Any) -> BootstrapHealth:
+    """Rebuild a ``BootstrapHealth`` from the dict ``bootstrap_health_to_envelope`` emits.
+
+    Inverse of :func:`bootstrap_health_to_envelope` — used by
+    :meth:`BootstrapOutput.from_envelope` to project a JSON envelope's
+    ``health`` sub-dict back to the dataclass shape
+    ``bootstrap_output_to_markdown`` reads. Tolerant of missing keys
+    (each falls back to the dataclass default) so a partial envelope
+    still rebuilds cleanly.
+
+    Accepts ``Any`` because the envelope value may be a non-dict on
+    malformed input — in that case every field defaults and the
+    function returns the same shape ``BootstrapHealth()`` would.
+    """
+    if not isinstance(envelope, dict):
+        return BootstrapHealth()
+    return BootstrapHealth(
+        vector_search=str(envelope.get("vector_search", "ok")),
+        bm25=str(envelope.get("bm25", "ok")),
+        chat=str(envelope.get("chat", "ok")),
+        secrets_loaded=bool(envelope.get("secrets_loaded", True)),
+        degraded_reason=str(envelope.get("degraded_reason", "")),
+        next_action=str(envelope.get(_KEY_NEXT_ACTION, "")),
+    )
+
+
 def bootstrap_output_to_envelope(out: BootstrapOutput) -> dict[str, Any]:
     """Project a ``BootstrapOutput`` to the JSON envelope MCP callers receive."""
     return {
@@ -422,7 +486,7 @@ def bootstrap_output_to_envelope(out: BootstrapOutput) -> dict[str, Any]:
         "recent_memory": [{"date": m.date, "content": m.content} for m in out.recent_memory],
         "active_goals": list(out.active_goals),
         "health": bootstrap_health_to_envelope(out.health),
-        "next_action": out.next_action,
+        _KEY_NEXT_ACTION: out.next_action,
         "error": out.error,
     }
 
