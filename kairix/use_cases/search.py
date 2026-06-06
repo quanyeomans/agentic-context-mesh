@@ -37,6 +37,23 @@ from kairix.text import estimate_tokens
 logger = logging.getLogger(__name__)
 
 
+# Envelope key constants — F17: the keys appear in three sites
+# (``search_output_to_envelope`` writer, ``SearchOutput.from_envelope``
+# / ``SearchHit.from_envelope`` reader, ``_search_output_from_pipeline``
+# pipeline-shape ``getattr``) and a string-literal triplet trips the
+# duplicate-string rule. The constants make the coupling between
+# writer + reader + pipeline-mapper explicit and renaming a single
+# edit site.
+_KEY_BM25_COUNT = "bm25_count"
+_KEY_VEC_COUNT = "vec_count"
+_KEY_FUSED_COUNT = "fused_count"
+_KEY_VEC_FAILED = "vec_failed"
+_KEY_TOTAL_TOKENS = "total_tokens"
+_KEY_LATENCY_MS = "latency_ms"
+_KEY_COLLECTION = "collection"
+_KEY_SOURCE_PAGE = "source_page"
+
+
 def _default_search(
     query: str,
     budget: int,
@@ -101,6 +118,39 @@ class SearchHit:
     entity: dict[str, str] = field(default_factory=dict)
     source_page: int | None = None
 
+    @classmethod
+    def from_envelope(cls, hit: dict[str, Any]) -> SearchHit:
+        """Rebuild a ``SearchHit`` from the per-hit dict ``search_output_to_envelope`` emits.
+
+        Mirrors the projection in ``search_output_to_envelope``: the
+        envelope per-hit dict carries every structural field straight
+        through (``path`` / ``title`` / ``snippet`` / ``score`` / ``tier``
+        / ``tokens`` / ``collection`` / ``source_page``) and includes
+        ``source`` + ``entity`` ONLY when ``source`` was non-empty in the
+        original (entity-card hits). The inverse defaults the omitted
+        keys back to their dataclass-default zero values so flat search
+        rows rebuild identically.
+        """
+        raw_page = hit.get(_KEY_SOURCE_PAGE)
+        entity_raw = hit.get("entity") or {}
+        # Coerce the entity dict's values to str to match the
+        # ``dict[str, str]`` field annotation — the envelope round-trip
+        # through JSON preserves types, but downstream consumers should
+        # not assume the dict was untouched.
+        entity = {str(k): str(v) for k, v in entity_raw.items()}
+        return cls(
+            path=str(hit.get("path", "")),
+            title=str(hit.get("title", "")),
+            snippet=str(hit.get("snippet", "")),
+            score=float(hit.get("score", 0.0)),
+            tier=str(hit.get("tier", "")),
+            tokens=int(hit.get("tokens", 0) or 0),
+            collection=str(hit.get(_KEY_COLLECTION, "")),
+            source=str(hit.get("source", "")),
+            entity=entity,
+            source_page=int(raw_page) if isinstance(raw_page, int) else None,
+        )
+
 
 @dataclass(frozen=True)
 class SearchOutput:
@@ -134,6 +184,41 @@ class SearchOutput:
     latency_ms: float = 0.0
     health: KairixHealth = field(default_factory=KairixHealth)
     error: str = ""
+
+    @classmethod
+    def from_envelope(cls, envelope: dict[str, Any]) -> SearchOutput:
+        """Rebuild a ``SearchOutput`` from the dict ``search_output_to_envelope`` emits.
+
+        The seam for warm-MCP text-mode routing (#421 PR 2.2). The CLI
+        dispatcher receives a JSON envelope from the MCP worker; this
+        adapter projects it back to the dataclass shape ``format_text``
+        already consumes, so the in-process and warm paths render
+        byte-identical text.
+
+        ``health`` is NOT round-tripped from its envelope dict here.
+        ``format_text`` reads only ``query`` / ``intent`` / ``results``
+        / count diagnostics / ``error``; reconstructing a
+        ``KairixHealth`` from its envelope dict would require an
+        inverse of ``health_to_envelope`` that doesn't exist today.
+        The dataclass default ``KairixHealth()`` is acceptable because
+        the CLI's rendering path never reads it. Any future caller
+        that needs the round-tripped health snapshot should add an
+        explicit ``envelope_to_health`` and wire it here.
+        """
+        raw_results = envelope.get("results") or []
+        results = [SearchHit.from_envelope(h) for h in raw_results if isinstance(h, dict)]
+        return cls(
+            query=str(envelope.get("query", "")),
+            intent=str(envelope.get("intent", "")),
+            results=results,
+            bm25_count=int(envelope.get(_KEY_BM25_COUNT, 0) or 0),
+            vec_count=int(envelope.get(_KEY_VEC_COUNT, 0) or 0),
+            fused_count=int(envelope.get(_KEY_FUSED_COUNT, 0) or 0),
+            vec_failed=bool(envelope.get(_KEY_VEC_FAILED, False)),
+            total_tokens=int(envelope.get(_KEY_TOTAL_TOKENS, 0) or 0),
+            latency_ms=float(envelope.get(_KEY_LATENCY_MS, 0.0) or 0.0),
+            error=str(envelope.get("error", "")),
+        )
 
 
 @dataclass(frozen=True)
@@ -236,20 +321,20 @@ def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
                 "score": h.score,
                 "tier": h.tier,
                 "tokens": h.tokens,
-                "collection": h.collection,
+                _KEY_COLLECTION: h.collection,
                 # MM-3 — per-page citation surfaced to MCP / CLI callers.
                 # ``None`` for non-paged documents.
-                "source_page": h.source_page,
+                _KEY_SOURCE_PAGE: h.source_page,
                 **({"source": h.source, "entity": h.entity} if h.source else {}),
             }
             for h in out.results
         ],
-        "bm25_count": out.bm25_count,
-        "vec_count": out.vec_count,
-        "fused_count": out.fused_count,
-        "vec_failed": out.vec_failed,
-        "total_tokens": out.total_tokens,
-        "latency_ms": out.latency_ms,
+        _KEY_BM25_COUNT: out.bm25_count,
+        _KEY_VEC_COUNT: out.vec_count,
+        _KEY_FUSED_COUNT: out.fused_count,
+        _KEY_VEC_FAILED: out.vec_failed,
+        _KEY_TOTAL_TOKENS: out.total_tokens,
+        _KEY_LATENCY_MS: out.latency_ms,
         "health": dict(health_to_envelope(out.health)),
         "error": out.error,
     }
@@ -322,12 +407,12 @@ def _search_output_from_pipeline(
         query=getattr(sr, "query", query),
         intent=_intent_value(sr),
         results=hits,
-        bm25_count=int(getattr(sr, "bm25_count", 0) or 0),
-        vec_count=int(getattr(sr, "vec_count", 0) or 0),
-        fused_count=int(getattr(sr, "fused_count", 0) or 0),
-        vec_failed=bool(getattr(sr, "vec_failed", False)),
-        total_tokens=int(getattr(sr, "total_tokens", 0) or 0),
-        latency_ms=float(getattr(sr, "latency_ms", elapsed_ms) or elapsed_ms),
+        bm25_count=int(getattr(sr, _KEY_BM25_COUNT, 0) or 0),
+        vec_count=int(getattr(sr, _KEY_VEC_COUNT, 0) or 0),
+        fused_count=int(getattr(sr, _KEY_FUSED_COUNT, 0) or 0),
+        vec_failed=bool(getattr(sr, _KEY_VEC_FAILED, False)),
+        total_tokens=int(getattr(sr, _KEY_TOTAL_TOKENS, 0) or 0),
+        latency_ms=float(getattr(sr, _KEY_LATENCY_MS, elapsed_ms) or elapsed_ms),
         health=health,
         error=str(getattr(sr, "error", "") or ""),
     )

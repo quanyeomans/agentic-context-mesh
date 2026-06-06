@@ -33,7 +33,7 @@ import sys
 from typing import Any
 
 from kairix.core.search.scope import Scope
-from kairix.use_cases.search import SearchDeps, SearchOutput, run_search
+from kairix.use_cases.search import SearchDeps, SearchOutput, run_search, search_output_to_envelope
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,32 +140,18 @@ def format_text(out: SearchOutput) -> str:
     return "\n".join(lines)
 
 
-def to_json_envelope(out: SearchOutput) -> dict:
-    """Serialise the ``SearchOutput`` to the JSON envelope the ``--json`` flag emits."""
-    envelope: dict = {
-        "query": out.query,
-        "intent": out.intent,
-        "bm25_count": out.bm25_count,
-        "vec_count": out.vec_count,
-        "fused_count": out.fused_count,
-        "vec_failed": out.vec_failed,
-        "total_tokens": out.total_tokens,
-        "latency_ms": round(out.latency_ms, 1),
-        "results": [
-            {
-                "path": h.path,
-                "title": h.title,
-                "collection": h.collection,
-                "score": h.score,
-                "tier": h.tier,
-                "snippet": h.snippet,
-            }
-            for h in out.results
-        ],
-    }
-    if out.error:
-        envelope["error"] = out.error
-    return envelope
+def to_json_envelope(out: SearchOutput) -> dict[str, Any]:
+    """Serialise the ``SearchOutput`` to the JSON envelope the ``--json`` flag emits.
+
+    PR 2.2 / #421 aligned this with ``search_output_to_envelope`` —
+    the dict shape ``tool_search`` returns over MCP — so the warm-MCP
+    dispatch path can round-trip the envelope through
+    ``SearchOutput.from_envelope`` and render byte-identical text.
+    Operators previously saw a CLI-only subset (no ``health`` snapshot,
+    no per-hit ``tokens`` or ``source_page``); the canonical shape now
+    surfaces every field MCP callers already received.
+    """
+    return search_output_to_envelope(out)
 
 
 def main(argv: list[str] | None = None, *, deps: SearchDeps | None = None) -> None:
