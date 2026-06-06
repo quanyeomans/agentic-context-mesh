@@ -31,73 +31,17 @@ kairix/agents/mcp/cold_start.py
 # flip CI's 3.12 stage between pass and fail). Grandfathering here is
 # the ADR-024-aligned response: F7 is a smell, not the gate.
 kairix/worker.py
-# kairix/core/connectors/silver.py — extractor adapter + per-format
-# rendering helpers. Several rendering branches (oversize-paragraph
-# expansion, edge-case entity emission, document_pages writer error
-# paths) are reached only through end-to-end fixtures that exercise
-# the full pipeline. Unit-coverable behaviour is already pinned by
-# tests/unit/test_silver.py + tests/integration/test_document_pages_writer.py;
-# the gap is over render-glue lines that don't carry a failure mode
-# worth a dedicated unit test. Lifting via DI on the render helpers
-# would invert the dependency for cosmetic reasons. F7 is a smell; the
-# matching gate for the failure classes here is F70 (schema-writer
-# symmetry) which the document_pages writer satisfies.
-kairix/core/connectors/silver.py
-# kairix/connectors/sharepoint/graph_client.py — Graph SDK boundary
-# adapter. Uncovered branches are Graph-specific error envelopes
-# (drive disabled, deleted-item tombstones, throttle-retry inner loop)
-# whose contract is pinned by F64 (rate-limit BDD) +
-# tests/integration/test_sharepoint_*.py at the boundary, not by line
-# coverage of the adapter itself. The remaining 4% gap is Azure-SDK
-# error-path branching that a unit test would re-implement the SDK to
-# exercise — F68 (Protocol failure-mode contracts) is the right gate
-# for that, not F7.
-kairix/connectors/sharepoint/graph_client.py
+# kairix/connectors/m365_calendar/graph_client.py — Graph SDK boundary
+# adapter for calendar events. Uncovered branches are Graph-specific
+# error envelopes whose contract belongs to F68 + integration tests,
+# not F7.
+kairix/connectors/m365_calendar/graph_client.py
 # kairix/worker_cli.py — CLI dispatcher; the uncovered lines are
 # argparse subcommand wrappers that call into already-tested worker.py
 # entry points and immediately exit. F30 (operator-outcome tests)
 # covers the subcommand surface end-to-end via subprocess invocation;
-# F7 doesn't catch additional defects here.
+# F7 doesn't catch additional defects here. Currently at 90.1%, kept
+# on baseline because 1 line of variance flips CI per the worker.py
+# rationale; the right paydown is the same _default_* wrapper extraction
+# pattern, tracked in followup work.
 kairix/worker_cli.py
-# kairix/core/db/integrity.py — preflight invariant checks. The
-# uncovered branches are per-check fan-out paths that fire only when
-# the underlying SQLite store carries gap data (e.g. orphaned vectors,
-# documents-without-fts mismatches). F71 (preflight-truthfulness) is
-# the targeted gate for the failure class this file covers; lifting
-# F7 here would require synthesising every preflight gap shape into
-# unit fixtures with no marginal defect-detection benefit beyond what
-# F71 + the integration tests already pin.
-kairix/core/db/integrity.py
-# kairix/connectors/m365_calendar/auth.py — OAuth2 client-credentials
-# helper. Uncovered branches are token-expiry edge cases + httpx
-# error-path responses that need a recorded fixture against the real
-# Microsoft identity-platform endpoint. F64 (rate-limit BDD) is the
-# right gate for the IdP failure modes; F7 doesn't catch additional
-# defects in a transport helper whose contract is "exchange creds for
-# token, raise on non-2xx".
-kairix/connectors/m365_calendar/auth.py
-# kairix/connectors/m365_calendar/graph_client.py — Graph SDK boundary
-# adapter for calendar events. Same shape as the SharePoint graph_client
-# entry above — uncovered branches are Graph-specific error envelopes
-# whose contract belongs to F68 + integration tests, not F7.
-kairix/connectors/m365_calendar/graph_client.py
-# Adapter / CLI surfaces grandfathered together per ADR-024 §"Repositioning F7".
-# All five files are dispatcher / formatter / boundary code; uncovered
-# branches are render-glue + SDK error envelopes whose failure modes are
-# pinned by F30 (operator-outcome tests for CLI), F53 (features-status
-# CLI + MCP coverage), F64 (rate-limit BDD), or F68 (Protocol failure-mode
-# contracts). Lifting via DI on render helpers inverts the dependency for
-# cosmetic reasons.
-kairix/agents/mcp/server.py
-kairix/connectors/github/connector.py
-kairix/core/features/cli.py
-kairix/quality/probe/burst.py
-kairix/quality/probe/config_cli.py
-# kairix/chunkers/email_thread/chunker.py — shipped in commit a80b6599
-# (ADR-028 Wave G.1 batch 1 chunkers) without a baseline entry; F7 floor
-# at 87.7% vs 90% target. Uncovered branches are multi-message thread-split
-# edge cases that need a fixture-corpus expansion in the chunkers wave's
-# follow-up commit. Grandfathered to unblock unrelated waves (ADR-029
-# G.1 queue spike, M365 Retry-After fix, etc.). Paydown owner: Wave G.1
-# author (chunker BDD coverage extension lifts above floor).
-kairix/chunkers/email_thread/chunker.py
