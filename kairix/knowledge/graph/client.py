@@ -351,18 +351,30 @@ class Neo4jClient:
             logger.warning("find_by_name(%s): %s", name, e)
             return []
 
-    def cypher(self, query: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def cypher(
+        self,
+        query: str,
+        params: dict[str, Any] | None = None,
+        *,
+        write: bool = False,
+    ) -> list[dict[str, Any]]:
         """
-        Execute an arbitrary read Cypher query.
+        Execute an arbitrary Cypher query.
 
-        Intended for MCP kairix.graph_query tool (scoped reads only).
-        Returns [] on any error.
+        Intended for MCP kairix.graph_query tool (default: scoped reads).
+        Set ``write=True`` for callers that need to MERGE/SET/CREATE/DELETE —
+        without this kwarg the session opens with ``default_access_mode="READ"``
+        which Neo4j rejects with ``Neo.ClientError.Statement.AccessMode`` on
+        any write. Returns [] on any error.
+
+        Closes #416 — the enricher's ``SET n.summary = ...`` silently
+        failed because every cypher() call landed on a READ session.
         """
         if not self._driver:
             return []
+        access_mode = "WRITE" if write else "READ"
         try:
-            # Enforce read-only to prevent accidental graph mutation via arbitrary queries
-            with self._driver.session(default_access_mode="READ") as session:
+            with self._driver.session(default_access_mode=access_mode) as session:
                 result = session.run(query, **(params or {}))
                 return [dict(r) for r in result]
         except Exception as e:
