@@ -277,6 +277,38 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
+    "cli_routes_through_warm_mcp": FeatureFlag(
+        name="cli_routes_through_warm_mcp",
+        # Default-ON: every composer-equipped subcommand (PRs 2.1-2.7)
+        # ships with green envelope-parity contracts so the warm-MCP
+        # text rendering matches in-process byte-for-byte. Operators
+        # who want the legacy fall-through set this flag OFF via the
+        # config overlay; the dispatcher then falls through to
+        # in-process for text mode regardless of MCP responsiveness.
+        # JSON mode is never gated by this flag — it kept its
+        # always-on routing semantics from PR 2.0.
+        default=True,
+        description=(
+            "When ON, text-mode CLI subcommands (search / prep / timeline / "
+            "research / brief / contradict / bootstrap) route through warm "
+            "MCP when one is responsive and the subcommand has a registered "
+            "composer in kairix.agents.mcp.text_mode_composers. When OFF, "
+            "text mode falls through to the in-process path even when MCP "
+            "is responsive. Subcommands without a registered composer "
+            "(features / worker / secrets / dead-letter) always fall "
+            "through regardless of this flag. JSON-mode routing was "
+            "always enabled and is NOT gated by this flag."
+        ),
+        stage="cutover",
+        introduced_in="v2026.6.6",
+        # SCM+6mo per F51 retire-deadline rule. The cutover lands ON
+        # by default with green parity tests; retirement is "delete
+        # the gate, keep the composer wiring" once dogfood confirms
+        # no operator has overridden it OFF.
+        target_retire_in="v2026.12.6",
+        owner="cli-warm-mcp",
+        related_spec="docs/architecture/feature-flag-architecture.md",
+    ),
 }
 
 

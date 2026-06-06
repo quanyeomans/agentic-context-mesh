@@ -59,6 +59,47 @@ from urllib.parse import urlparse
 
 from kairix.paths import mcp_endpoint, mcp_routing_enabled
 
+_COMPOSERS_LOADED = False
+
+
+def ensure_composers_loaded() -> None:
+    """Trigger one-shot side-effect import of the canonical composer registry.
+
+    Runs ``kairix.agents.mcp._composer_init`` once so every PR 2.1-2.7
+    composer is registered. Guarded by a module-level flag so callers
+    that re-invoke (tests, multiple dispatch calls) only pay the init
+    cost on the first call. Idempotency by both Python's module cache
+    AND the guard belt-and-braces.
+
+    Tests that need to pre-register a sentinel composer should call
+    this function FIRST, then register the sentinel — that way the
+    canonical wiring runs once, the sentinel overrides afterwards.
+
+    Public surface: invoked from production at dispatcher first-use AND
+    from BDD / integration / unit tests that pre-warm the canonical
+    wiring before overriding individual composers (F5 / F24-clean).
+    """
+    global _COMPOSERS_LOADED
+    if _COMPOSERS_LOADED:
+        return
+    _COMPOSERS_LOADED = True
+    import kairix.agents.mcp._composer_init  # noqa: F401 — side-effect registration
+
+
+def _default_text_mode_flag_reader() -> bool:
+    """Default reader for ``cli_routes_through_warm_mcp`` — defers the import.
+
+    Lazy-imported so that early CLI startup (and ``--json`` invocations
+    which don't need text-mode routing) don't pay the feature-flag
+    resolver import cost. The flag defaults to True at the registry
+    level so this reader returning True is the "no overlay set"
+    behaviour.
+    """
+    from kairix.core.features import flag
+
+    return flag("cli_routes_through_warm_mcp")
+
+
 logger = logging.getLogger(__name__)
 
 # Default detection budget. The CLI must NEVER block startup when MCP
@@ -502,17 +543,22 @@ class DispatcherDeps:
     endpoint_fn: Callable[[], str] = field(default=mcp_endpoint)
     routing_enabled_fn: Callable[[], bool] = field(default=mcp_routing_enabled)
     detection_timeout_s: float = _DETECTION_TIMEOUT_S
+    # ``cli_routes_through_warm_mcp`` flag reader. Production callers
+    # leave the default which resolves through ``kairix.core.features.flag``;
+    # tests pass a lambda that reads ``FakeFeatureFlagResolver``. The flag
+    # gates text-mode routing only — JSON mode is never gated.
+    text_mode_flag_reader: Callable[[], bool] = field(default=_default_text_mode_flag_reader)
 
 
 def _wants_json_output(argv: list[str]) -> bool:
     """Detect whether the user asked for ``--json`` output.
 
-    Phase 1 only routes through MCP when ``--json`` is requested. Text
-    rendering needs per-subcommand format_text() composers we haven't
-    yet wired through the envelope — calling those would require
-    reconstructing the in-process result object, which inflates the
-    diff well beyond the file-scoped budget. See the issue
-    description: "Acceptable Phase 1 shape; document the trade-off."
+    The dispatcher uses this to choose between two rendering modes —
+    JSON-mode emits the envelope verbatim via :func:`_render_envelope_as_json`;
+    text-mode looks up a :class:`TextModeComposer` and renders through
+    its ``from_envelope`` → ``format_text`` pair. Both modes route
+    through warm MCP when the subcommand is mappable and the server is
+    responsive; the choice is purely rendering, not routing.
     """
     return "--json" in argv or any(a.startswith("--json=") for a in argv)
 
@@ -567,12 +613,23 @@ def try_dispatch_via_mcp(
     kwargs = cli_args_to_mcp_kwargs(subcommand, argv)
     if kwargs is None:
         return None
-    if not _wants_json_output(argv):
-        # Phase 1: text mode stays in-process. The CLI has rich
-        # per-subcommand format_text() composers that need the
-        # in-process result object; constructing those from the MCP
-        # envelope is the Phase 2 follow-up.
-        return None
+
+    ensure_composers_loaded()
+    from kairix.agents.mcp.text_mode_composers import get_composer
+
+    wants_json = _wants_json_output(argv)
+    composer = get_composer(subcommand)
+
+    if not wants_json:
+        # Text mode: gate on composer availability + the flag. No
+        # composer registered → fall through (gives subcommands like
+        # ``features``/``worker`` without composers the in-process path
+        # until their composers land). Flag OFF → operator chose the
+        # legacy fall-through; honour it.
+        if composer is None:
+            return None
+        if not effective_deps.text_mode_flag_reader():
+            return None
 
     client = effective_deps.client or HttpMcpDispatchClient()
     endpoint = effective_deps.endpoint_fn()
@@ -591,7 +648,13 @@ def try_dispatch_via_mcp(
         )
         return None
 
-    _render_envelope_as_json(result.payload)
+    if wants_json:
+        _render_envelope_as_json(result.payload)
+    else:
+        # composer is non-None here (we early-returned otherwise above).
+        assert composer is not None
+        result_obj = composer.from_envelope(result.payload)
+        print(composer.format_text(result_obj, argv))
     return _exit_code_for_envelope(result)
 
 

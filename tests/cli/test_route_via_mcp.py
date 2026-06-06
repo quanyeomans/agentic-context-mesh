@@ -185,19 +185,29 @@ def test_unmappable_subcommand_uses_in_process() -> None:
 
 
 @pytest.mark.unit
-def test_text_mode_falls_through_to_in_process() -> None:
-    """Text output stays in-process (Phase 1 trade-off, see module docstring).
+def test_text_mode_falls_through_for_subcommand_without_composer() -> None:
+    """Text output falls through when no composer is registered for the subcommand.
 
-    Phase 1 only routes when the user passes ``--json``. Text rendering
-    needs per-subcommand format_text() composers that consume the
-    in-process result object; constructing those from the MCP envelope
-    is the Phase 2 follow-up. Until then, text mode falls through.
+    PR 2.8 / #421 dropped the ``_wants_json_output`` Phase-1 fence and
+    introduced the composer registry as the text-mode routing gate. A
+    subcommand without a registered composer (e.g. ``worker`` /
+    ``features`` / ``secrets`` / ``dead-letter`` — none have composers
+    yet) falls through to in-process for text mode regardless of MCP
+    responsiveness. JSON mode for the same subcommands still routes
+    because JSON rendering never needed a composer.
 
-    Sabotage-proof: removed the ``_wants_json_output`` check so every
-    routable subcommand dispatched regardless of output mode, then
-    re-ran — the assertion failed with ``calls`` non-empty proving
-    the gate was bypassed. Restoring the check restored green.
+    Sabotage-proof (executed): removed the ``composer is None`` check
+    in ``try_dispatch_via_mcp``; this test failed because the worker
+    text mode dispatched to MCP. Restored the registry-as-gate branch.
     """
+    # Defensively pop any composer that some prior test may have left
+    # registered for "worker" — the property under test is "no composer
+    # registered → fall through". Use the public ``unregister_composer``
+    # surface so F5/F24 stay clean.
+    from kairix.agents.mcp.text_mode_composers import unregister_composer
+
+    unregister_composer("worker")
+
     client = FakeMcpDispatchClient(responsive=True, envelope={"x": 1})
     deps = DispatcherDeps(
         client=client,
@@ -205,11 +215,11 @@ def test_text_mode_falls_through_to_in_process() -> None:
         routing_enabled_fn=lambda: True,
     )
 
-    # No --json — text mode requested
-    exit_code = try_dispatch_via_mcp("search", ["topic-a"], deps=deps)
+    # No --json — text mode requested for a subcommand without composer
+    exit_code = try_dispatch_via_mcp("worker", ["status"], deps=deps)
 
     assert exit_code is None
-    assert client.calls == [], "text mode must NOT route through MCP in Phase 1"
+    assert client.calls == [], "text mode for composer-less subcommand must NOT route through MCP"
 
 
 # ---------------------------------------------------------------------------
