@@ -2,7 +2,7 @@
 kairix.knowledge.contradict.cli — CLI entry point for contradiction detection.
 
 Usage:
-    kairix contradict check "<new content>" [--top-k 5] [--threshold 0.45] [--top-claims 3] [--format text|json] [--agent shared]
+    kairix contradict check "<new content>" [--top-k 5] [--threshold 0.45] [--top-claims 3] [--format text|json] [--agent shared] [--json]
 
 Adapter only — business logic lives in
 ``kairix.use_cases.contradict.run_contradict``.
@@ -15,7 +15,12 @@ import json
 import sys
 
 from kairix.core.search.scope import Scope
-from kairix.use_cases.contradict import ContradictOutput, run_contradict
+from kairix.use_cases.contradict import (
+    ContradictDeps,
+    ContradictOutput,
+    contradict_output_to_envelope,
+    run_contradict,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check_p.add_argument("--format", choices=["text", "json"], default="text", help="Output format")
     check_p.add_argument("--agent", default="shared", help="Agent scope for search (default shared)")
+    check_p.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        default=False,
+        help=(
+            "Emit the contradict envelope dict as JSON to stdout. The same shape "
+            "``tool_contradict`` returns over MCP — use to drive automation or "
+            "to inspect the warm-MCP routing path (#421). Distinct from "
+            "``--format json``, which emits the legacy flat list of hits."
+        ),
+    )
     return parser
 
 
@@ -82,7 +99,12 @@ def to_json_envelope(out: ContradictOutput) -> list[dict]:
     ]
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, deps: ContradictDeps | None = None) -> None:
+    """Entry point for ``kairix contradict``.
+
+    The optional ``deps`` parameter forwards a ``ContradictDeps``
+    directly to the use case — production callers leave it None.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -97,9 +119,16 @@ def main(argv: list[str] | None = None) -> None:
         top_k=args.top_k,
         threshold=args.threshold,
         top_claims=args.top_claims,
+        deps=deps,
     )
 
-    if args.format == "json":
+    if args.as_json:
+        # ``--json`` mode emits the MCP envelope dict shape (the same
+        # ``tool_contradict`` returns). Distinct from ``--format json``
+        # which keeps the legacy flat list. Stays on stdout so shell
+        # pipelines can branch on the dict; non-zero exit on error.
+        print(json.dumps(contradict_output_to_envelope(out), indent=2))
+    elif args.format == "json":
         print(json.dumps(to_json_envelope(out), indent=2))
     else:
         print(format_text(out, top_k=args.top_k, threshold=args.threshold))

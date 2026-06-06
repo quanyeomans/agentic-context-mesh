@@ -69,6 +69,42 @@ class ContradictOutput:
     has_contradictions: bool = False
     error: str = ""
 
+    @classmethod
+    def from_envelope(cls, envelope: dict[str, Any]) -> ContradictOutput:
+        """Rebuild a ``ContradictOutput`` from the dict ``contradict_output_to_envelope`` emits.
+
+        The seam for warm-MCP text-mode routing (#421 PR 2.6). The CLI
+        dispatcher receives a JSON envelope from the MCP worker; this
+        adapter projects it back to the dataclass shape ``format_text``
+        already consumes, so the in-process and warm paths render
+        byte-identical text.
+
+        ``contradictions`` is the only non-trivial field — each hit dict
+        is projected back to a ``ContradictionHit`` with ``str`` /
+        ``float`` coercion to defend against accidental JSON-number
+        widening (e.g. an int score round-tripped from a sparse
+        envelope). Missing keys default to the same values
+        ``ContradictionHit`` uses.
+        """
+        raw_hits = envelope.get("contradictions") or []
+        hits = [
+            ContradictionHit(
+                path=str(h.get("path", "")),
+                score=float(h.get("score", 0.0)),
+                reason=str(h.get("reason", "")),
+                snippet=str(h.get("snippet", "")),
+                category=str(h.get("category", "")),
+                claim=str(h.get("claim", "")),
+            )
+            for h in raw_hits
+        ]
+        return cls(
+            content=str(envelope.get("content", "")),
+            contradictions=hits,
+            has_contradictions=bool(envelope.get("has_contradictions", False)),
+            error=str(envelope.get("error", "")),
+        )
+
 
 @dataclass(frozen=True)
 class ContradictDeps:
