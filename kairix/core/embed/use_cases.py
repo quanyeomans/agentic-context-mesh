@@ -46,65 +46,215 @@ logger = logging.getLogger(__name__)
 # real implementation; lazy ``from kairix.<pkg> import ...`` calls keep
 # import-time cost off any unit test that injects stand-ins.
 #
-# These helpers are tested in aggregate by
-# ``tests/integration/test_recall_gate_pipeline.py`` and the production
-# embed flow on the VM. They are on the F7 per-file-coverage baseline
-# as production-wiring code.
+# Each wrapper accepts an optional ``UseCaseDeps`` so unit tests can
+# pin the wrapped impls (and the scan-composition collaborators) via
+# DI rather than ``monkeypatch.setattr`` on kairix modules (F1).
 # ---------------------------------------------------------------------------
 
 
-def default_db_path() -> str:
+@dataclass(frozen=True)
+class UseCaseDeps:
+    """Injection seam for the lazy-import wrappers in this module.
+
+    Production callers leave every field unset; the ``default_factory``
+    slots wire the canonical kairix implementations on first call.
+    Tests construct ``UseCaseDeps(get_db_path_fn=..., DocumentScanner=...)``
+    and pass ``deps=`` to the ``default_*`` wrappers to drive each
+    branch without monkey-patching ``kairix.core.db`` / ``kairix.core.embed.*``
+    / ``kairix.core.search.*`` / ``kairix.paths``.
+
+    Fields are bundled into one dataclass — not split per-wrapper — so
+    ``default_scan_documents`` can compose all seven collaborators
+    (DocumentScanner, load_collections, resolve_config_path, agent
+    registry, reference-library probe, FTS rebuild, yaml loader)
+    through a single deps argument the test constructs once.
+    """
+
+    # default_db_path / default_open_db
+    get_db_path_fn: Callable[[], Path] = field(default_factory=lambda: _real_get_db_path)
+    open_db_fn: Callable[[Path], Any] = field(default_factory=lambda: _real_open_db)
+    # default_create_schema / default_validate_schema
+    create_schema_fn: Callable[[Any], None] = field(default_factory=lambda: _real_create_schema)
+    validate_schema_fn: Callable[[Any], None] = field(default_factory=lambda: _real_validate_schema)
+    # default_acquire_lock / default_release_lock
+    acquire_lock_fn: Callable[[], Any] = field(default_factory=lambda: _real_acquire_lock)
+    release_lock_fn: Callable[[Any], None] = field(default_factory=lambda: _real_release_lock)
+    # default_save_run_log
+    save_run_log_fn: Callable[[dict[str, Any]], None] = field(default_factory=lambda: _real_save_run_log)
+    # default_run_embed / default_run_recall_gate
+    run_embed_fn: Callable[..., dict[str, Any]] = field(default_factory=lambda: _real_run_embed)
+    run_recall_gate_fn: Callable[..., tuple[bool, dict[str, Any]]] = field(
+        default_factory=lambda: _real_run_recall_gate
+    )
+    # default_scan_documents composes these seven collaborators
+    document_scanner_cls: Callable[..., Any] = field(default_factory=lambda: _real_document_scanner)
+    load_collections_fn: Callable[[], Any] = field(default_factory=lambda: _real_load_collections)
+    resolve_config_path_fn: Callable[[], Any] = field(default_factory=lambda: _real_resolve_config_path)
+    parse_agent_registry_fn: Callable[..., Any] = field(default_factory=lambda: _real_parse_agent_registry)
+    build_agent_owner_resolver_fn: Callable[[Any], Any] = field(
+        default_factory=lambda: _real_build_agent_owner_resolver
+    )
+    document_root_fn: Callable[[], Path] = field(default_factory=lambda: _real_document_root)
+    reference_library_root_fn: Callable[[], Path] = field(default_factory=lambda: _real_reference_library_root)
+    rebuild_fts_fn: Callable[[Any], int] = field(default_factory=lambda: _real_rebuild_fts)
+    yaml_safe_load_fn: Callable[[Any], Any] = field(default_factory=lambda: _real_yaml_safe_load)
+
+
+# Lazy-import accessors — each returns the canonical kairix function on
+# demand so importing ``kairix.core.embed.use_cases`` stays cheap.
+
+
+def _real_get_db_path() -> Path:
     from kairix.core.db import get_db_path
 
-    return str(get_db_path())
+    return get_db_path()
 
 
-def default_open_db(path: Path) -> Any:
+def _real_open_db(path: Path) -> Any:
     from kairix.core.db import open_db
 
     return open_db(path)
 
 
-def default_create_schema(db: Any) -> None:
+def _real_create_schema(db: Any) -> None:
     from kairix.core.db.schema import create_schema
 
     create_schema(db)
 
 
-def default_validate_schema(db: Any) -> None:
+def _real_validate_schema(db: Any) -> None:
     from kairix.core.db.schema import validate_schema
 
     validate_schema(db)
 
 
-def default_acquire_lock() -> Any:
+def _real_acquire_lock() -> Any:
     from kairix.core.embed.cli import acquire_lock
 
     return acquire_lock()
 
 
-def default_release_lock(lock_fh: Any) -> None:
+def _real_release_lock(lock_fh: Any) -> None:
     from kairix.core.embed.cli import release_lock
 
     release_lock(lock_fh)
 
 
-def default_save_run_log(entry: dict[str, Any]) -> None:
+def _real_save_run_log(entry: dict[str, Any]) -> None:
     from kairix.core.embed.schema import save_run_log
 
     save_run_log(entry)
 
 
-def default_run_embed(**kwargs: Any) -> dict[str, Any]:
+def _real_run_embed(**kwargs: Any) -> dict[str, Any]:
     from kairix.core.embed.embed import run_embed
 
     return run_embed(**kwargs)
 
 
-def default_run_recall_gate(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
+def _real_run_recall_gate(**kwargs: Any) -> tuple[bool, dict[str, Any]]:
     from kairix.core.embed.recall_check import run_recall_gate
 
     return run_recall_gate(**kwargs)
+
+
+def _real_document_scanner(*args: Any, **kwargs: Any) -> Any:
+    from kairix.core.db.scanner import DocumentScanner
+
+    return DocumentScanner(*args, **kwargs)
+
+
+def _real_load_collections() -> Any:
+    from kairix.core.search.config_loader import load_collections
+
+    return load_collections()
+
+
+def _real_resolve_config_path() -> Any:
+    from kairix.core.search.config_loader import resolve_config_path
+
+    return resolve_config_path()
+
+
+def _real_parse_agent_registry(raw: Any, **kw: Any) -> Any:
+    from kairix.core.search.registry import parse_agent_registry
+
+    return parse_agent_registry(raw, **kw)
+
+
+def _real_build_agent_owner_resolver(registry: Any) -> Any:
+    from kairix.core.search.registry import build_agent_owner_resolver
+
+    return build_agent_owner_resolver(registry)
+
+
+def _real_document_root() -> Path:
+    from kairix.paths import document_root
+
+    return document_root()
+
+
+def _real_reference_library_root() -> Path:
+    from kairix.paths import reference_library_root
+
+    return reference_library_root()
+
+
+def _real_rebuild_fts(db: Any) -> int:
+    from kairix.core.db.fts import rebuild_fts
+
+    return rebuild_fts(db)
+
+
+def _real_yaml_safe_load(stream: Any) -> Any:
+    import yaml
+
+    return yaml.safe_load(stream)
+
+
+def default_db_path(*, deps: UseCaseDeps | None = None) -> str:
+    d = deps if deps is not None else UseCaseDeps()
+    return str(d.get_db_path_fn())
+
+
+def default_open_db(path: Path, *, deps: UseCaseDeps | None = None) -> Any:
+    d = deps if deps is not None else UseCaseDeps()
+    return d.open_db_fn(path)
+
+
+def default_create_schema(db: Any, *, deps: UseCaseDeps | None = None) -> None:
+    d = deps if deps is not None else UseCaseDeps()
+    d.create_schema_fn(db)
+
+
+def default_validate_schema(db: Any, *, deps: UseCaseDeps | None = None) -> None:
+    d = deps if deps is not None else UseCaseDeps()
+    d.validate_schema_fn(db)
+
+
+def default_acquire_lock(*, deps: UseCaseDeps | None = None) -> Any:
+    d = deps if deps is not None else UseCaseDeps()
+    return d.acquire_lock_fn()
+
+
+def default_release_lock(lock_fh: Any, *, deps: UseCaseDeps | None = None) -> None:
+    d = deps if deps is not None else UseCaseDeps()
+    d.release_lock_fn(lock_fh)
+
+
+def default_save_run_log(entry: dict[str, Any], *, deps: UseCaseDeps | None = None) -> None:
+    d = deps if deps is not None else UseCaseDeps()
+    d.save_run_log_fn(entry)
+
+
+def default_run_embed(*, deps: UseCaseDeps | None = None, **kwargs: Any) -> dict[str, Any]:
+    d = deps if deps is not None else UseCaseDeps()
+    return d.run_embed_fn(**kwargs)
+
+
+def default_run_recall_gate(*, deps: UseCaseDeps | None = None, **kwargs: Any) -> tuple[bool, dict[str, Any]]:
+    d = deps if deps is not None else UseCaseDeps()
+    return d.run_recall_gate_fn(**kwargs)
 
 
 REFERENCE_LIBRARY_NAME = "reference-library"
@@ -180,47 +330,51 @@ def default_reflib_collection(reflib_root: Path) -> Any:
     return CollectionConfig(name=REFERENCE_LIBRARY_NAME, path=str(reflib_root), glob="**/*.md")
 
 
-def default_scan_documents(db: Any, diagnostics: list[str]) -> tuple[int, int, int]:
+def default_scan_documents(
+    db: Any,
+    diagnostics: list[str],
+    *,
+    deps: UseCaseDeps | None = None,
+) -> tuple[int, int, int]:
     """Scan the document root for new/changed files and rebuild FTS.
 
     Lives in the use-case module so ``PipelineDeps``' default factory
-    can wire it directly. Integration-tested via the full embed flow
-    against a real DB; unit testing it would require a fake document
-    corpus and is not load-bearing for the worker fix.
+    can wire it directly. ``deps`` injects every collaborator
+    (DocumentScanner, load_collections, resolve_config_path, agent
+    registry, reference-library probe, FTS rebuild, yaml loader) so
+    unit tests construct one ``UseCaseDeps(...)`` and drive every
+    branch without monkey-patching kairix modules.
     """
-    from kairix.core.db.scanner import CollectionConfig, DocumentScanner
-    from kairix.core.search.config_loader import load_collections, resolve_config_path
-    from kairix.core.search.registry import build_agent_owner_resolver, parse_agent_registry
-    from kairix.paths import document_root, reference_library_root
+    from kairix.core.db.scanner import CollectionConfig
 
-    droot = document_root()
+    d = deps if deps is not None else UseCaseDeps()
+
+    droot = d.document_root_fn()
 
     agent_resolver = None
     try:
-        config_path = resolve_config_path()
+        config_path = d.resolve_config_path_fn()
         if config_path is not None:
-            import yaml as _yaml
-
             with config_path.open(encoding="utf-8") as _f:
-                _raw_yaml = _yaml.safe_load(_f) or {}
-            _registry = parse_agent_registry(_raw_yaml)
+                _raw_yaml = d.yaml_safe_load_fn(_f) or {}
+            _registry = d.parse_agent_registry_fn(_raw_yaml)
             if _registry.list_agents():
-                agent_resolver = build_agent_owner_resolver(_registry)
+                agent_resolver = d.build_agent_owner_resolver_fn(_registry)
     # Agent-resolver construction is best-effort; we'd rather scan with
     # agent_owner=NULL than skip the scan entirely.
     except Exception as exc:
         diagnostics.append(f"agent_resolver_unavailable: {exc}")
 
-    scanner = DocumentScanner(db, document_root=droot, agent_owner_resolver=agent_resolver)
+    scanner = d.document_scanner_cls(db, document_root=droot, agent_owner_resolver=agent_resolver)
 
-    collections_cfg = load_collections()
+    collections_cfg = d.load_collections_fn()
     if collections_cfg and collections_cfg.shared:
         scan_collections = [CollectionConfig(name=c.name, path=c.path, glob=c.glob) for c in collections_cfg.shared]
         logger.info("Using %d configured collections", len(scan_collections))
     else:
         scan_collections = [CollectionConfig(name="default", path=".")]
 
-    reflib_root = reference_library_root()
+    reflib_root = d.reference_library_root_fn()
     scan_collections = harmonise_reference_library(scan_collections, reflib_root, droot)
 
     scan_report = scanner.scan(scan_collections)
@@ -231,9 +385,7 @@ def default_scan_documents(db: Any, diagnostics: list[str]) -> tuple[int, int, i
             scan_report.updated,
             scan_report.unchanged,
         )
-        from kairix.core.db.fts import rebuild_fts
-
-        fts_count = rebuild_fts(db)
+        fts_count = d.rebuild_fts_fn(db)
         logger.info("FTS index rebuilt: %d documents", fts_count)
 
     return scan_report.new, scan_report.updated, scan_report.errors

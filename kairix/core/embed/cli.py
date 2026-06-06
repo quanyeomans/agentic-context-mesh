@@ -11,6 +11,7 @@ import argparse
 import fcntl
 import logging
 import os
+import sqlite3
 import sys
 import time
 from collections.abc import Callable
@@ -35,18 +36,125 @@ def _default_pipeline_runner() -> Callable[..., Any]:
     return run_incremental_embed_pipeline
 
 
-@dataclass
+def default_run_recall_gate() -> tuple[bool, dict[str, Any]]:
+    """Public wrapper around :func:`run_recall_gate` for ``EmbedCliDeps``.
+
+    Named ``default_*`` (not ``_default_*``) so tests can import it
+    through the public surface (F5).
+    """
+    return run_recall_gate()
+
+
+def default_get_db_path() -> Path:
+    """Public wrapper around :func:`kairix.core.db.get_db_path`."""
+    return get_db_path()
+
+
+def default_open_db(path: Path) -> Any:
+    """Public wrapper around :func:`kairix.core.db.open_db`."""
+    return open_db(path)
+
+
+def default_get_pending_chunks(db: Any) -> list[Any]:
+    """Lazy-import wrapper around ``kairix.core.embed.schema.get_pending_chunks``."""
+    from .schema import get_pending_chunks
+
+    return get_pending_chunks(db)
+
+
+def default_check_fts_available(db: Any) -> Any:
+    """Lazy-import wrapper around ``kairix.core.db.fts.check_fts_available``."""
+    from kairix.core.db.fts import check_fts_available
+
+    return check_fts_available(db)
+
+
+def default_rebuild_fts(db: Any) -> int:
+    """Lazy-import wrapper around ``kairix.core.db.fts.rebuild_fts``."""
+    from kairix.core.db.fts import rebuild_fts
+
+    return rebuild_fts(db)
+
+
+def default_document_root() -> Path:
+    """Lazy-import wrapper around :func:`kairix.paths.document_root`."""
+    from kairix.paths import document_root
+
+    return document_root()
+
+
+def default_summaries_db_path() -> Path:
+    """Lazy-import wrapper around :func:`kairix.paths.summaries_db_path`."""
+    from kairix.paths import summaries_db_path
+
+    return summaries_db_path()
+
+
+def default_init_summaries_db(db: sqlite3.Connection) -> None:
+    """Lazy-import wrapper around ``kairix.knowledge.summaries.staleness.init_summaries_db``."""
+    from kairix.knowledge.summaries.staleness import init_summaries_db
+
+    init_summaries_db(db)
+
+
+def default_get_stale_paths(all_docs: list[str], db: sqlite3.Connection) -> list[str]:
+    """Lazy-import wrapper around ``kairix.knowledge.summaries.staleness.get_stale_paths``."""
+    from kairix.knowledge.summaries.staleness import get_stale_paths
+
+    return get_stale_paths(all_docs, db)
+
+
+def default_write_summary(result: Any, db: sqlite3.Connection) -> None:
+    """Lazy-import wrapper around ``kairix.knowledge.summaries.staleness.write_summary``."""
+    from kairix.knowledge.summaries.staleness import write_summary
+
+    write_summary(result, db)
+
+
+def default_generate_summaries(**kw: Any) -> list[Any]:
+    """Lazy-import wrapper around ``kairix.knowledge.summaries.generate.generate_summaries``."""
+    from kairix.knowledge.summaries.generate import generate_summaries
+
+    return generate_summaries(**kw)
+
+
+@dataclass(frozen=True)
 class EmbedCliDeps:
     """Injection seam for the embed CLI.
 
-    Production callers leave this as the default — the use case runner is
-    lazily imported on first call. Tests pass a Deps with a stand-in
-    runner so cmd_embed's exit-code mapping can be exercised without
-    touching the real DB / Azure / lockfile.
+    Production callers leave this as the default — every helper is
+    wired by ``default_factory`` to the canonical production function
+    (lazy-imported on first call). Tests construct
+    ``EmbedCliDeps(get_db_path_fn=lambda: tmp_path, ...)`` and pass
+    ``deps=`` to ``main`` / ``cmd_*`` to drive the CLI without
+    monkey-patching kairix internals.
     """
 
+    # cmd_embed
     pipeline_runner_factory: Callable[[], Callable[..., Any]] = field(default_factory=lambda: _default_pipeline_runner)
     post_embed_summarise: Callable[[], None] = field(default_factory=lambda: run_post_embed_summarise)
+    # cmd_recall
+    run_recall_gate_fn: Callable[[], tuple[bool, dict[str, Any]]] = field(
+        default_factory=lambda: default_run_recall_gate
+    )
+    # cmd_status + cmd_rebuild_fts share DB seams
+    get_db_path_fn: Callable[[], Path] = field(default_factory=lambda: default_get_db_path)
+    open_db_fn: Callable[[Path], Any] = field(default_factory=lambda: default_open_db)
+    get_pending_chunks_fn: Callable[[Any], list[Any]] = field(default_factory=lambda: default_get_pending_chunks)
+    # cmd_rebuild_fts
+    check_fts_available_fn: Callable[[Any], Any] = field(default_factory=lambda: default_check_fts_available)
+    rebuild_fts_fn: Callable[[Any], int] = field(default_factory=lambda: default_rebuild_fts)
+    # run_post_embed_summarise sub-helpers
+    document_root_fn: Callable[[], Path] = field(default_factory=lambda: default_document_root)
+    summaries_db_path_fn: Callable[[], Path] = field(default_factory=lambda: default_summaries_db_path)
+    init_summaries_db_fn: Callable[[sqlite3.Connection], None] = field(
+        default_factory=lambda: default_init_summaries_db
+    )
+    get_stale_paths_fn: Callable[[list[str], sqlite3.Connection], list[str]] = field(
+        default_factory=lambda: default_get_stale_paths
+    )
+    write_summary_fn: Callable[[Any, sqlite3.Connection], None] = field(default_factory=lambda: default_write_summary)
+    generate_summaries_fn: Callable[..., list[Any]] = field(default_factory=lambda: default_generate_summaries)
 
 
 LOG_FILE = Path(
@@ -68,18 +176,25 @@ LOCKFILE = _default_lockfile()
 LOCK_WAIT_SECS = 60
 
 
-def setup_logging(verbose: bool = False) -> None:
+def setup_logging(verbose: bool = False, *, log_file: Path | None = None) -> None:
+    """Configure logging for the embed CLI.
+
+    ``log_file`` is a test seam — when supplied, the file handler writes
+    there instead of the module-level :data:`LOG_FILE`. Production
+    callers leave it ``None``.
+    """
     level = logging.DEBUG if verbose else logging.INFO
     fmt = "%(asctime)s %(levelname)s %(message)s"
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
 
-    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    handlers.append(logging.FileHandler(LOG_FILE))
+    log_path = log_file if log_file is not None else LOG_FILE
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handlers.append(logging.FileHandler(log_path))
 
     logging.basicConfig(level=level, format=fmt, handlers=handlers)
 
 
-def acquire_lock() -> IO[str]:
+def acquire_lock(*, lockfile: Path | None = None, wait_secs: float | None = None) -> IO[str]:
     """
     Acquire exclusive lock using the same lockfile as kairix-maintenance.sh.
 
@@ -90,9 +205,17 @@ def acquire_lock() -> IO[str]:
 
     Exits with code 3 if the wait window expires while the holder is still
     actively running.
+
+    ``lockfile`` and ``wait_secs`` are test seams — when supplied, they
+    override the module-level :data:`LOCKFILE` / :data:`LOCK_WAIT_SECS`
+    so tests can pin a tmp lock path + short wait without reassigning
+    module constants. Production callers leave both ``None``.
     """
-    lock_fh = open(LOCKFILE, "w")
-    deadline = time.time() + LOCK_WAIT_SECS
+    lock_path = lockfile if lockfile is not None else LOCKFILE
+    timeout = wait_secs if wait_secs is not None else LOCK_WAIT_SECS
+
+    lock_fh = open(lock_path, "w")
+    deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -108,18 +231,76 @@ def acquire_lock() -> IO[str]:
     lock_fh.close()
     logging.error(
         "Could not acquire lock after %ds — another embed is still running",
-        LOCK_WAIT_SECS,
+        timeout,
     )
     sys.exit(3)
 
 
-def release_lock(lock_fh: IO[str]) -> None:
+def release_lock(lock_fh: IO[str], *, lockfile: Path | None = None) -> None:
+    """Release a lock acquired by :func:`acquire_lock`.
+
+    ``lockfile`` mirrors the :func:`acquire_lock` seam — tests can pin
+    the same tmp lock path so the unlink targets the test's tmpfile,
+    not the production lockfile.
+    """
+    lock_path = lockfile if lockfile is not None else LOCKFILE
     try:
         fcntl.flock(lock_fh, fcntl.LOCK_UN)
         lock_fh.close()
-        LOCKFILE.unlink(missing_ok=True)
+        lock_path.unlink(missing_ok=True)
     except (OSError, ValueError):
         pass
+
+
+def _run_embed_pipeline(
+    args: argparse.Namespace,
+    deps: EmbedCliDeps,
+) -> Any:
+    """Invoke the use case via deps; return the result or raise."""
+    runner = deps.pipeline_runner_factory()
+    return runner(
+        force=args.force,
+        batch_size=args.batch_size,
+        limit=args.limit,
+        skip_recall_check=args.skip_recall_check,
+        rebuild_canaries=getattr(args, "rebuild_canaries", False),
+        parallel=getattr(args, "parallel", DEFAULT_PARALLEL_BATCHES),
+        force_rebuild_cache=getattr(args, "force_rebuild_cache", False),
+    )
+
+
+def _log_recall_outcome(args: argparse.Namespace, result: Any) -> None:
+    """Emit the recall-gate summary lines.
+
+    Kept out of ``cmd_embed`` to keep the dispatcher's cognitive
+    complexity under F16's ceiling.
+    """
+    if args.skip_recall_check:
+        logging.info("Skipping recall check (--skip-recall-check)")
+        return
+    if result.recall_score is None:
+        return
+    logging.info(
+        "Recall: %.0f%% (gate %s)",
+        result.recall_score * 100,
+        "passed" if result.recall_passed else "FAILED",
+    )
+    if result.recall_passed is False:
+        logging.error("Recall gate FAILED — search quality degraded. Check logs.")
+
+
+def _invoke_post_summarise(deps: EmbedCliDeps) -> None:
+    """Run the post-embed summarise step.
+
+    When ``post_embed_summarise`` is the production helper we re-pass
+    the outer Deps so its sub-helpers inject from the same source.
+    Custom callables (tests pinning a counter, e.g.) are invoked as-is.
+    """
+    post = deps.post_embed_summarise
+    if post is run_post_embed_summarise:
+        run_post_embed_summarise(deps=deps)
+    else:
+        post()
 
 
 def cmd_embed(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> int:
@@ -136,18 +317,9 @@ def cmd_embed(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> 
       2  — pipeline raised (DB unreachable, schema migration, etc.)
     """
     deps = deps or EmbedCliDeps()
-    run_incremental_embed_pipeline = deps.pipeline_runner_factory()
 
     try:
-        result = run_incremental_embed_pipeline(
-            force=args.force,
-            batch_size=args.batch_size,
-            limit=args.limit,
-            skip_recall_check=args.skip_recall_check,
-            rebuild_canaries=getattr(args, "rebuild_canaries", False),
-            parallel=getattr(args, "parallel", DEFAULT_PARALLEL_BATCHES),
-            force_rebuild_cache=getattr(args, "force_rebuild_cache", False),
-        )
+        result = _run_embed_pipeline(args, deps)
     except ValueError as exc:
         # --parallel out of range surfaces here as an F21-shaped affordance
         # from run_embed. Print to stderr so operators see the rationale +
@@ -165,55 +337,41 @@ def cmd_embed(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> 
     if result.failed > 0:
         logging.warning(f"{result.failed} chunks failed. Re-run without --force to retry failed chunks.")
 
-    if args.skip_recall_check:
-        logging.info("Skipping recall check (--skip-recall-check)")
-    elif result.recall_score is not None:
-        logging.info(
-            "Recall: %.0f%% (gate %s)",
-            result.recall_score * 100,
-            "passed" if result.recall_passed else "FAILED",
-        )
-        if result.recall_passed is False:
-            logging.error("Recall gate FAILED — search quality degraded. Check logs.")
+    _log_recall_outcome(args, result)
 
-    # Post-embed summarise — non-critical; failures only logged
+    # Post-embed summarise — non-critical; failures only logged.
     if not args.skip_summarise:
-        deps.post_embed_summarise()
+        _invoke_post_summarise(deps)
 
-    if not result.success:
-        return 1
-    if result.recall_passed is False:
+    if not result.success or result.recall_passed is False:
         return 1
     return 0
 
 
-def run_post_embed_summarise() -> None:
+def run_post_embed_summarise(*, deps: EmbedCliDeps | None = None) -> None:
     """Generate L0 summaries for documents that don't have them yet.
 
     Non-critical: failures are logged but don't block the embed return code.
-    """
-    try:
-        from kairix.paths import document_root
 
-        droot = document_root()
+    ``deps`` is the F1-clean injection seam — every collaborator
+    (document_root, summaries_db_path, staleness helpers, generate_summaries)
+    is reached through ``EmbedCliDeps`` so tests can construct a
+    ``EmbedCliDeps(document_root_fn=..., ...)`` with stand-ins. Production
+    callers leave it ``None`` and the dataclass' ``default_factory`` slots
+    wire the real implementations.
+    """
+    d = deps if deps is not None else EmbedCliDeps()
+    try:
+        droot = d.document_root_fn()
         all_docs = [str(p) for p in droot.rglob("*.md") if p.is_file()]
         if not all_docs:
             return
 
-        # Open summaries DB and find stale/missing docs
-        import sqlite3
-
-        from kairix.knowledge.summaries.staleness import (
-            get_stale_paths,
-            init_summaries_db,
-        )
-        from kairix.paths import summaries_db_path
-
         # F77-allow: summaries DB (separate file from worker DB); CLI-only writer.
-        db = sqlite3.connect(str(summaries_db_path()))
-        init_summaries_db(db)
+        db = sqlite3.connect(str(d.summaries_db_path_fn()))
+        d.init_summaries_db_fn(db)
 
-        stale = get_stale_paths(all_docs, db)
+        stale = d.get_stale_paths_fn(all_docs, db)
         if not stale:
             logging.info("Summarise: all %d docs have current summaries", len(all_docs))
             db.close()
@@ -227,12 +385,9 @@ def run_post_embed_summarise() -> None:
             len(stale),
         )
 
-        from kairix.knowledge.summaries.generate import generate_summaries
-        from kairix.knowledge.summaries.staleness import write_summary
-
-        results = generate_summaries(paths=batch, api_key="", endpoint="", deployment="gpt-4o-mini")
+        results = d.generate_summaries_fn(paths=batch, api_key="", endpoint="", deployment="gpt-4o-mini")
         for r in results:
-            write_summary(r, db)
+            d.write_summary_fn(r, db)
 
         logging.info("Summarise: %d L0 summaries generated", len(results))
         db.close()
@@ -241,17 +396,46 @@ def run_post_embed_summarise() -> None:
         logging.warning("Post-embed summarise failed (non-critical)", exc_info=True)
 
 
-def cmd_recall(_args: argparse.Namespace) -> int:
+def cmd_recall(_args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> int:
     """Run the recall check standalone."""
-    passed, result = run_recall_gate()
+    d = deps if deps is not None else EmbedCliDeps()
+    passed, result = d.run_recall_gate_fn()
     print(f"Recall: {result['passed']}/{result['total']} ({result['score']:.0%})")
-    for d in result["detail"]:
-        status = "✓" if d["hit"] else "✗"
-        print(f"  {status} [{d['id']}] {d['query'][:60]}")
+    for det in result["detail"]:
+        status = "✓" if det["hit"] else "✗"
+        print(f"  {status} [{det['id']}] {det['query'][:60]}")
     return 0 if passed else 1
 
 
-def cmd_status(args: argparse.Namespace) -> int:
+def _print_last_run_line() -> None:
+    """Read ~/.cache/kairix/azure-embed-runs.json and print the last entry.
+
+    Broken-out helper so ``cmd_status`` stays under F16's cognitive
+    complexity ceiling. Best-effort: missing or corrupt log is silently
+    ignored — logging isn't yet initialised when status runs.
+    """
+    log_path = Path.home() / ".cache" / "kairix" / "azure-embed-runs.json"
+    if not log_path.exists():
+        return
+    import json
+
+    try:
+        runs = json.loads(log_path.read_text())
+        if not runs:
+            return
+        last = runs[-1]
+        import datetime
+
+        ts = datetime.datetime.fromtimestamp(last.get("timestamp", 0))
+        print(
+            f"Last run:  {ts.strftime('%Y-%m-%d %H:%M')} — "
+            f"embedded={last.get('embedded')} cost=${last.get('estimated_cost_usd'):.4f}"
+        )
+    except Exception:  # nosec B110 — NOSONAR S110 — status display failure is non-critical, logging not yet initialised
+        pass  # non-critical: status display failed
+
+
+def cmd_status(args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> int:
     """Show current embedding status.
 
     ``--db-path`` is the F30 subprocess seam — when supplied, status
@@ -261,12 +445,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     outcome tests can drive a tmp index without touching the process
     environment (F2-clean).
     """
-    from .schema import get_pending_chunks
-
-    db_path = getattr(args, "db_path", None) or get_db_path()
-    db = open_db(Path(db_path))
+    d = deps if deps is not None else EmbedCliDeps()
+    db_path = getattr(args, "db_path", None) or d.get_db_path_fn()
+    db = d.open_db_fn(Path(db_path))
     try:
-        pending = get_pending_chunks(db)
+        pending = d.get_pending_chunks_fn(db)
         total_vecs = db.execute("SELECT COUNT(*) FROM content_vectors").fetchone()[0]
         total_docs = db.execute("SELECT COUNT(*) FROM documents WHERE active=1").fetchone()[0]
 
@@ -275,30 +458,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"Vectors:   {total_vecs}")
         print(f"Pending:   {len(pending)} documents need embedding")
 
-        # Last run
-        log_path = Path.home() / ".cache" / "kairix" / "azure-embed-runs.json"
-        if log_path.exists():
-            import json
-
-            try:
-                runs = json.loads(log_path.read_text())
-                if runs:
-                    last = runs[-1]
-                    import datetime
-
-                    ts = datetime.datetime.fromtimestamp(last.get("timestamp", 0))
-                    print(
-                        f"Last run:  {ts.strftime('%Y-%m-%d %H:%M')} — "
-                        f"embedded={last.get('embedded')} cost=${last.get('estimated_cost_usd'):.4f}"
-                    )
-            except Exception:  # nosec B110 — NOSONAR S110 — status display failure is non-critical, logging not yet initialised
-                pass  # non-critical: status display failed
+        _print_last_run_line()
     finally:
         db.close()
     return 0
 
 
-def cmd_rebuild_fts(_args: argparse.Namespace) -> int:
+def cmd_rebuild_fts(_args: argparse.Namespace, *, deps: EmbedCliDeps | None = None) -> int:
     """Rebuild the documents_fts BM25 index in isolation. Self-heal for #223.
 
     Reads from the same documents + content tables that the embed pipeline
@@ -309,19 +475,15 @@ def cmd_rebuild_fts(_args: argparse.Namespace) -> int:
     The ``_args`` parameter is required by the CLI dispatch signature but
     carries no rebuild-fts-specific flags (F19: underscore-prefixed).
     """
-    from pathlib import Path
-
-    from kairix.core.db import get_db_path, open_db
-    from kairix.core.db.fts import check_fts_available, rebuild_fts
-
-    db = open_db(Path(get_db_path()))
+    d = deps if deps is not None else EmbedCliDeps()
+    db = d.open_db_fn(Path(d.get_db_path_fn()))
     try:
-        before = check_fts_available(db)
+        before = d.check_fts_available_fn(db)
         print(f"FTS state before rebuild: available={before.available} reason={before.reason} rows={before.row_count}")
 
-        count = rebuild_fts(db)
+        count = d.rebuild_fts_fn(db)
 
-        after = check_fts_available(db)
+        after = d.check_fts_available_fn(db)
         print(f"FTS state after rebuild:  available={after.available} reason={after.reason} rows={after.row_count}")
         print(f"Rebuilt: {count} documents indexed")
     finally:
@@ -425,11 +587,11 @@ def main(argv: list[str] | None = None, *, deps: EmbedCliDeps | None = None) -> 
             args.skip_summarise = False
         sys.exit(cmd_embed(args, deps=deps))
     elif args.command == "recall-check":
-        sys.exit(cmd_recall(args))
+        sys.exit(cmd_recall(args, deps=deps))
     elif args.command == "status":
-        sys.exit(cmd_status(args))
+        sys.exit(cmd_status(args, deps=deps))
     elif args.command == "rebuild-fts":
-        sys.exit(cmd_rebuild_fts(args))
+        sys.exit(cmd_rebuild_fts(args, deps=deps))
 
 
 if __name__ == "__main__":
