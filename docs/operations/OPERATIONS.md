@@ -317,9 +317,19 @@ If kairix container fails to start with `failed to bind host port 127.0.0.1:8080
 If you run kairix as a systemd-managed Docker stack on a long-running VM, copy the example units from `scripts/install/` and tailor them. They pin the correct dependency ordering (kairix.service → kairix-fetch-secrets.service → docker.service) so the deployment self-heals after a reboot rather than crash-looping when `/run/secrets/kairix.env` is empty (resolved in v2026.5.10, see #167).
 
 ```bash
+# Create the data directory the unit declares in ReadWritePaths= before
+# enabling the unit, otherwise systemd's mount namespace setup will fail
+# with "Failed to set up mount namespacing: /var/lib/kairix: No such
+# file or directory" (exit 226/NAMESPACE) — the unit appears failed
+# even though the containers come up cleanly outside systemd. The
+# ReadWritePaths= entries in the shipped unit use the `-` prefix so
+# they don't strictly require this, but creating the canonical path
+# explicitly is cheaper than chasing a phantom-failure unit later.
+sudo install -d -m 0750 -o kairix -g kairix /var/lib/kairix
+
 sudo install -m 0644 scripts/install/kairix.service.example /etc/systemd/system/kairix.service
 sudo install -m 0644 scripts/install/kairix-fetch-secrets.service.example /etc/systemd/system/kairix-fetch-secrets.service
-sudo install -m 0755 scripts/install/permissions-preflight.sh /opt/kairix/bin/permissions-preflight.sh
+sudo install -m 0750 -o kairix -g kairix scripts/install/permissions-preflight.sh /opt/kairix/bin/permissions-preflight.sh
 sudo systemctl daemon-reload
 sudo systemctl enable --now kairix-fetch-secrets.service kairix.service
 ```
