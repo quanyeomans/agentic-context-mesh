@@ -50,7 +50,24 @@ REMEDIATION = """F48: tests/e2e/test_composed_production_path.py is missing or h
 next: write the test per docs/architecture/test-discipline-hardening.md §4.3 (canonical E2E shape).
 fix: restore tests/e2e/test_composed_production_path.py with at least one @pytest.mark.e2e
      test that exercises config -> factory.build_search_pipeline -> ingest -> query -> assertion.
-run: bash scripts/checks/check-f48-e2e-present.sh"""
+run: bash scripts/checks/check-f48-e2e-present.sh
+
+Pass example:
+  # tests/e2e/test_composed_production_path.py
+  @pytest.mark.e2e
+  def test_composed_production_path(tmp_path):
+      paths = FakePaths(root=tmp_path)
+      cfg = load_config(...)
+      pipeline = build_search_pipeline(paths=paths, config=cfg)
+      ingest(paths=paths, source=FakeSourceConnector(docs=[...]))
+      hits = pipeline.run('integration query')
+      assert hits and hits[0].score > 0.5
+
+Forbidden example:
+  # tests/e2e/test_composed_production_path.py is missing entirely,
+  # OR exists but every test function lacks @pytest.mark.e2e — Stage 4.5
+  # selector skips them and the LoCoMo-class drift the rule was created
+  # to prevent goes undetected."""
 
 
 def _has_e2e_marker(tree: ast.AST) -> bool:

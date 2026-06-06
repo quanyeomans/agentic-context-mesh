@@ -51,6 +51,19 @@ next: see docs/architecture/test-discipline-hardening.md §5 (canonical
       paydown patterns) for the same shape applied to F30. Same approach
       works for any per-file baseline.
 run: bash scripts/checks/check-f50-net-new-file-violations.sh
+
+Pass example:
+  # New file kairix/connectors/notion/connector.py lands clean — it has
+  # no @patch / monkeypatch usage, declares per_tick_max_items, passes
+  # source_uri to Chunk(...), and is therefore absent from every
+  # .architecture/baseline/*-files.txt. F50 passes silently.
+
+Forbidden example:
+  # New file kairix/connectors/notion/connector.py lands in the same
+  # commit that appends it to .architecture/baseline/f66-files.txt
+  # because it omits per_tick_max_items. F50 fires:
+  #   baseline f66-files.txt:
+  #     kairix/connectors/notion/connector.py
 """
 
 # ---------------------------------------------------------------------------

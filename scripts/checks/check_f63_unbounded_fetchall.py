@@ -46,7 +46,7 @@ pattern and tests/integration/test_maintenance_scale_bound.py for the
 matching scale-bound test shape.
 run: python3 scripts/checks/check_f63_unbounded_fetchall.py
 
-Pass example (bounded query):
+Pass example: (bounded query)
 
     rows = db.execute(
         "SELECT v.hash FROM content_vectors v "
@@ -55,12 +55,12 @@ Pass example (bounded query):
         (self._per_tick_cap,),
     ).fetchall()
 
-Pass example (rationale comment):
+Pass example: (rationale comment)
 
     # F63-bounded: documents table has < 1000 rows by config schema design.
     rows = db.execute("SELECT * FROM topology_skills").fetchall()
 
-Forbidden example (current state before F63):
+Forbidden example: (current state before F63)
 
     # full-table scan at production scale; no LIMIT, no rationale
     orphans = db.execute(

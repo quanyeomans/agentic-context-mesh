@@ -103,7 +103,7 @@ next: see docs/architecture/test-discipline-hardening.md §2.3
 (new-capability principle) for the canonical shape.
 run: bash scripts/checks/check-f45-new-capability-bdd.sh
 
-Pass example (tests/bdd/features/cli_<name>.feature):
+Pass example: (tests/bdd/features/cli_<name>.feature)
   Feature: <name> subcommand
     Scenario: happy path
       Given a kairix process configured with FakePaths

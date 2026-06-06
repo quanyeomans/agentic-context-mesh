@@ -54,7 +54,8 @@ Pass example:
   pipeline = SearchPipeline(retriever=FakeRetriever(hits=[...]))
   assert pipeline.run(query='x') == ...
 
-Shapes that fire the gate (all six are the same anti-pattern):
+Forbidden example:
+  Shapes that fire the gate (all six are the same anti-pattern):
   @patch('kairix.core.search.bm25.bm25_search')
   with patch('kairix.providers.get_provider'):
   kairix.paths.provider_name = lambda: "fake"

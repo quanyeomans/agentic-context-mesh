@@ -44,7 +44,28 @@ fix: either retire the flag (delete the REGISTRY entry + remove the legacy
      comment adjacent to the entry in kairix/core/features/registry.py.
 next: see docs/architecture/feature-flag-architecture.md §4.1 (lifecycle
       stages) + §6 (F51 mechanics).
-run: bash scripts/checks/check-f51-flag-retirement.sh"""
+run: bash scripts/checks/check-f51-flag-retirement.sh
+
+Pass example:
+  # kairix/core/features/registry.py
+  REGISTRY = {
+      # retire-extension: pending m365_calendar soak — see issue #382
+      "topology_v2_resolver": FeatureFlag(
+          name="topology_v2_resolver",
+          default=True,
+          target_retire_in="v2026.12.31",
+      ),
+  }
+
+Forbidden example:
+  # kairix/core/features/registry.py
+  REGISTRY = {
+      "topology_v2_resolver": FeatureFlag(
+          name="topology_v2_resolver",
+          default=True,
+          target_retire_in="v2026.1.1",  # past deadline, no extension comment
+      ),
+  }"""
 
 _VERSION_RE = re.compile(r"^v?(\d{4})\.(\d{1,2})\.(\d{1,2})(?:[.\-+].*)?$")
 

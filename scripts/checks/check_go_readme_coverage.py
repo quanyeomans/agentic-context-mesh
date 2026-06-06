@@ -46,7 +46,7 @@ next: re-run python3 scripts/checks/check_go_readme_coverage.py to
 confirm the gate goes green.
 run: bash scripts/checks/run-all.sh
 
-Pass example (services/alpha-deploy-webhook/README.md):
+Pass example: (services/alpha-deploy-webhook/README.md)
   # alpha-deploy-webhook
   Receives signed POSTs from release-vm-deploy.yml, pulls the alpha
   Docker image, runs onboard check + reflib benchmark, posts back via

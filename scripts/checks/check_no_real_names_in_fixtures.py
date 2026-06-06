@@ -123,11 +123,11 @@ next: re-run ``python3 scripts/checks/check_no_real_names_in_fixtures.py``
 to confirm the gate goes green.
 run: bash scripts/safe-commit.sh "test(fixtures): drop real names from fixtures"
 
-Pass:
+Pass example:
   record = FakeFactRecord(entity="agent-alpha", attribute="role", value="VP")
   transcript = "agent-beta works at Acme."
 
-Forbidden:
+Forbidden example:
   record = FakeFactRecord(entity="<real-first-name>", attribute="role", value="VP")
   transcript = "<real-full-name> works at <real-org>."
 """

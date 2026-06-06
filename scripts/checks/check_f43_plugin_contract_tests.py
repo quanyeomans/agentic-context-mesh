@@ -76,7 +76,7 @@ next: re-run python3 scripts/checks/check_f43_plugin_contract_tests.py
 to confirm the gate goes green.
 run: bash scripts/safe-commit.sh \"test(contracts): add contract test for <plugin>\"
 
-Pass example (tests/contracts/test_openai_protocol.py):
+Pass example: (tests/contracts/test_openai_protocol.py)
   import pytest
   from kairix.core.protocols import ChatBackend
   from kairix.providers.openai import OpenAIProvider

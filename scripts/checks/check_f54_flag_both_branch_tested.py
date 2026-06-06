@@ -60,7 +60,24 @@ fix: add tests/bdd/features/feature_flag_<name>.feature with OFF + ON
      tests/e2e/test_composed_<name>_path.py per F48.
 next: see docs/architecture/feature-flag-architecture.md §5
       (both-branch test coverage).
-run: bash scripts/checks/check-f54-flag-both-branch-tested.sh"""
+run: bash scripts/checks/check-f54-flag-both-branch-tested.sh
+
+Pass example:
+  # tests/integration/test_feature_flag_hybrid_ranker_v2.py
+  @pytest.mark.integration
+  def test_off_branch_uses_v1():
+      with with_flag("hybrid_ranker_v2", False):
+          assert pipeline.ranker.__class__.__name__ == "HybridRankerV1"
+  @pytest.mark.integration
+  def test_on_branch_uses_v2():
+      with with_flag("hybrid_ranker_v2", True):
+          assert pipeline.ranker.__class__.__name__ == "HybridRankerV2"
+
+Forbidden example:
+  # tests/integration/test_feature_flag_hybrid_ranker_v2.py
+  # has only with_flag("hybrid_ranker_v2", True) — the OFF / rollback
+  # branch is never exercised. When the flag is flipped back during
+  # an incident the legacy code path has rotted silently."""
 
 
 def _count_scenarios(feature_path: Path) -> int:

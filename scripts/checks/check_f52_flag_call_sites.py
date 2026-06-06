@@ -31,7 +31,22 @@ fix: either correct the typo OR add the missing entry to
      be declared in REGISTRY before it can be referenced.
 next: see docs/architecture/feature-flag-architecture.md §3.2 (FeatureFlag
       value object) + §6 (F52 mechanics).
-run: bash scripts/checks/check-f52-flag-call-sites.sh"""
+run: bash scripts/checks/check-f52-flag-call-sites.sh
+
+Pass example:
+  # kairix/core/search/ranker.py
+  from kairix.core.features import flag
+  if flag("hybrid_ranker_v2"):           # name is declared in REGISTRY
+      ranker = HybridRankerV2(...)
+  else:
+      ranker = HybridRankerV1(...)
+
+Forbidden example:
+  # kairix/core/search/ranker.py
+  from kairix.core.features import flag
+  if flag("hybrid_ranker_v3"):           # typo; REGISTRY has v2 not v3
+      ranker = HybridRankerV3(...)        # always returns the OFF branch
+                                          # silently — bug is invisible."""
 
 
 class _FlagAliasResolver(ast.NodeVisitor):

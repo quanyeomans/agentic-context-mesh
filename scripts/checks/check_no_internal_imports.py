@@ -54,7 +54,7 @@ Pass example:
   from kairix.core.search import SearchPipeline  # public class
   result = SearchPipeline(retriever=FakeRetriever(...)).run('q')
 
-Forbidden example (direct private import):
+Forbidden example: (direct private import)
   from kairix.core.search.bm25 import _tokenize  # private helper
   assert _tokenize('a b') == ['a', 'b']
 

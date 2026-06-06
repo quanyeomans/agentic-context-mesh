@@ -100,14 +100,14 @@ next: re-run ``python3 scripts/checks/check_shellcheck_disable_with_reason.py``
 to confirm the gate goes green.
 run: bash scripts/safe-commit.sh "chore(<area>): document shellcheck disable rationale"
 
-Pass:
+Pass example:
   # safe -- sourced path is computed from a controlled config var
   # shellcheck disable=SC1090
   . "$SECRETS_FILE"
 
   # shellcheck disable=SC2034  # exported via process substitution below
 
-Forbidden:
+Forbidden example:
   # shellcheck disable=SC1090
   . "$SECRETS_FILE"
 """

@@ -96,7 +96,7 @@ Pass example:
   # kairix/providers/openai/provider.py
   client = make_openai_client(...)  # type: ignore[arg-type] — openai SDK v1.x still uses Any in this kwarg
 
-Forbidden example (bare directive, plus the plugin has no py.typed):
+Forbidden example: (bare directive, plus the plugin has no py.typed)
   # kairix/providers/openai/provider.py
   # client = make_openai_client(...)  ## (bare) type-ignore[arg-type]
   # (and no py.typed marker exists in the plugin root)

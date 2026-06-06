@@ -64,7 +64,18 @@ run: bash scripts/safe-commit.sh "<message>"
 If a rule has no recipe row in the §Rule map, add the recipe in the same
 commit that fixes the issue. KAIRIX_SKIP_SONAR_PARITY=1 skips this gate
 locally for a focused refactor series; CI's `1 · Quality gate` remains
-authoritative."""
+authoritative.
+
+Pass example:
+  # local run after applying the recipe rows
+  $ python3 scripts/checks/check_sonar_new_code.py
+  ok [sonar-new-code] — 0 issue(s), 0 hotspot(s) on new code.
+
+Forbidden example:
+  # row printed by this script but not addressed in the next commit
+  python:S3776  MAJOR  kairix/core/search/rrf.py:142
+    fix: hoist the inner-most for/if block into a `_helper(...)` function
+  # ... and the developer pushes anyway because "CI is the slow path"."""
 
 DEFAULT_PROJECT_KEY = "three-cubes_kairix"
 DEFAULT_BRANCH = "main"

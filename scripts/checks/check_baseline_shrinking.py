@@ -69,6 +69,22 @@ workflow.
 
 run: bash scripts/checks/check-baseline-shrinking.sh
 
+Pass example:
+  # release tag v2026.5.18 -> v2026.5.19
+  # Before: .architecture/baseline/f30-operator-outcome-tests-files.txt has 14 entries.
+  # After:  .architecture/baseline/f30-operator-outcome-tests-files.txt has 13 entries
+  #         (one entry removed in the same commit that adds the outcome
+  #         test that asserts on stdout/stderr/envelope for that command).
+  $ diff -u v2026.5.18:.../f30-...-files.txt HEAD:.../f30-...-files.txt
+  -kairix/cli/embed.py
+
+Forbidden example:
+  # release tag v2026.5.18 -> v2026.5.19
+  # f30 baseline count unchanged at 14; no outcome test landed in this
+  # cycle. F49 fires — release is blocked until at least one entry is
+  # paid down (or the rule is explicitly granted a skip in the release PR
+  # body with rationale).
+
 See also: docs/architecture/test-discipline-hardening.md §3 (F49)."""
 
 

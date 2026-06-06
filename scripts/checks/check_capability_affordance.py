@@ -142,7 +142,20 @@ and the per-capability binding decision matrix.
 
 If the command legitimately has no agent use case (interactive wizard,
 protocol-level dispatch like `mcp` itself), add it to
-_NO_MCP_AFFORDANCE_REQUIRED in this file with a one-line rationale comment."""
+_NO_MCP_AFFORDANCE_REQUIRED in this file with a one-line rationale comment.
+
+Pass example:
+  # kairix/agents/mcp/server.py — read-only `kairix status` binding
+  @server.tool()
+  def tool_status() -> dict[str, Any]:
+      from kairix.cli.status import run_status
+      return run_status(paths=resolve_paths()).to_envelope()
+
+Forbidden example:
+  # kairix/cli.py adds COMMANDS["reindex"] = (...)
+  # but kairix/agents/mcp/server.py has no tool_reindex AND
+  # _NO_MCP_AFFORDANCE_REQUIRED does not list "reindex" — F-rule fires
+  # because agents have no path to invoke the capability or escalate."""
 
 
 def _read_cli_commands() -> set[str]:

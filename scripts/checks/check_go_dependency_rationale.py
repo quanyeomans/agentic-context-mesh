@@ -115,7 +115,7 @@ next: re-run python3 scripts/checks/check_go_dependency_rationale.py
 to confirm the gate goes green.
 run: bash scripts/checks/run-all.sh
 
-Pass example (services/<name>/DEPENDENCIES.md):
+Pass example: (services/<name>/DEPENDENCIES.md)
   # Dependency rationale (G10)
   - github.com/foo/bar — reason for needing this dep.
 

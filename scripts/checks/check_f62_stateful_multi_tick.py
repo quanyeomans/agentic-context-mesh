@@ -66,7 +66,7 @@ Pass example:
         assert cursor_after_t2 == fake.next_cursor()
         assert fake.fetch_call_count == 3  # zero new fetches in tick 2
 
-Forbidden example (current state before F62):
+Forbidden example: (current state before F62)
 
     # tests/integration/test_connector_pipeline.py
     @pytest.mark.integration

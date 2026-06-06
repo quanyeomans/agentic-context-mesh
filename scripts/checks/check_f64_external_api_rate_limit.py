@@ -41,7 +41,7 @@ next: see docs/architecture/fitness-functions.md §F64 for the full
 specification.
 run: python3 scripts/checks/check_f64_external_api_rate_limit.py
 
-Pass example (test file present):
+Pass example: (test file present)
 
     # tests/integration/test_sharepoint_rate_limit.py
     @pytest.mark.integration
@@ -54,7 +54,7 @@ Pass example (test file present):
         assert fake_sleep.calls == [2]
         assert result.status_code == 200
 
-Forbidden example (current state before F64 for a new plugin):
+Forbidden example: (current state before F64 for a new plugin)
 
     # kairix/connectors/newthing/client.py imports httpx, fires requests,
     # never handles 429. No tests/integration/test_newthing_rate_limit.py

@@ -97,6 +97,19 @@ immediately below the snapshot header with a rationale, e.g.
   Snapshot kept until KFEAT-019 paydown wave lands; refresh together
   with that PR.
 
+Pass example:
+  # docs/architecture/grandfathering-paydown.md (header)
+  ## State (as of 2026-06-06, post-e7d33db8)
+  | baseline | count | next paydown |
+  | --- | --- | --- |
+  | f30-operator-outcome-tests-files.txt | 13 | embed CLI outcome test |
+
+Forbidden example:
+  # docs/architecture/grandfathering-paydown.md (header)
+  ## State (as of 2026-04-01, post-aabbccdd)
+  # Snapshot date is 60+ days older than the most recent release tag;
+  # baseline counts are stale and reviewers can't tell what's paid down.
+
 See docs/features/KFEAT-018-paydown-doc-refresh/BRIEF.md for context."""
 
 

@@ -75,7 +75,7 @@ next: re-run python3 scripts/checks/check_readme_coverage.py to
 confirm the gate goes green.
 run: bash scripts/checks/run-all.sh
 
-Pass example (tests/README.md):
+Pass example: (tests/README.md)
   # tests/
   Pytest test suites organised by category — unit, contract, bdd,
   integration. Fakes in `tests/fakes.py`; fixtures in `tests/fixtures/`.

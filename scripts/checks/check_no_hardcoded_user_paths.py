@@ -83,11 +83,11 @@ fix: replace the hardcoded path with one of:
 next: re-run ``python3 scripts/checks/check_no_hardcoded_user_paths.py`` to confirm green.
 run: bash scripts/safe-commit.sh "fix(<area>): drop hardcoded user path"
 
-Pass:
+Pass example:
   ROOT = Path(__file__).resolve().parents[2]
   data_dir = os.environ.get("KAIRIX_DATA_DIR", "/opt/kairix/data")
 
-Forbidden:
+Forbidden example:
   ROOT = Path("/Users/developer/Development/kairix")
   config = "/home/dan/.config/kairix.yaml"
 """

@@ -35,7 +35,23 @@ fix: ensure kairix/cli.py:COMMANDS includes a 'features' entry (CLI
      baseline as missing an outcome test).
 next: see docs/architecture/feature-flag-architecture.md §3.5 (operator
       surface) + §6 (F53 mechanics).
-run: bash scripts/checks/check-f53-features-status-surface.sh"""
+run: bash scripts/checks/check-f53-features-status-surface.sh
+
+Pass example:
+  # kairix/cli.py
+  COMMANDS: dict[str, tuple[...]] = {
+      "features": (run_features_status, "show feature flag state"),
+      ...
+  }
+  # kairix/agents/mcp/server.py
+  @server.tool()
+  def tool_features_status() -> dict[str, Any]:
+      return features_status().to_envelope()
+
+Forbidden example:
+  # kairix/cli.py COMMANDS has no 'features' entry; operators can only
+  # read flag state by grep-ing the registry source. MCP also missing
+  # tool_features_status — agents have no programmatic surface either."""
 
 
 def _commands_has_features(cli_path: Path) -> bool:

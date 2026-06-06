@@ -55,7 +55,7 @@ Pass example:
   ok [worktree-isolation] — 3 untracked file(s) in primary, none also
     present in 2 active subagent worktree(s).
 
-Forbidden example (untracked file shadows a subagent worktree path):
+Forbidden example: (untracked file shadows a subagent worktree path)
   $ python3 scripts/checks/check_worktree_isolation.py
   FAIL [worktree-isolation] — 1 leak fingerprint(s) detected:
     kairix/foo.py  (also exists in .claude/worktrees/agent-abc123)

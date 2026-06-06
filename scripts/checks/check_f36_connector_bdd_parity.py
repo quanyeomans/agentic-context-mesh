@@ -85,14 +85,14 @@ next: re-run python3 scripts/checks/check_f36_connector_bdd_parity.py
 to confirm the gate goes green.
 run: bash scripts/safe-commit.sh "test(bdd): connector_<name> + e2e Examples row"
 
-Pass example (tests/bdd/features/connector_obsidian.feature):
+Pass example: (tests/bdd/features/connector_obsidian.feature)
   Feature: obsidian connector
     Scenario: list_changes since cursor returns modified notes
       Given an obsidian vault with a .md note modified after the cursor
       When the connector lists changes since the cursor
       Then the modified note path is returned
 
-Pass example (tests/bdd/features/e2e_connector_sync.feature):
+Pass example: (tests/bdd/features/e2e_connector_sync.feature)
   Scenario Outline: sync with connector <connector> + extractor <extractor>
     Given the kairix process is configured with connector <connector>
     And the extractor <extractor> is registered

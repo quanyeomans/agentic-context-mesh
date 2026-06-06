@@ -55,7 +55,7 @@ next: re-run python3 scripts/checks/check_go_version_flag.py to
 confirm the gate goes green.
 run: bash scripts/checks/run-all.sh
 
-Pass example (services/hello/cmd/hello/main.go):
+Pass example: (services/hello/cmd/hello/main.go)
   var version = "dev"
   ...
   showVersion := fs.Bool("version", false, "print version and exit (G1)")

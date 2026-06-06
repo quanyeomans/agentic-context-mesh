@@ -79,14 +79,14 @@ next: re-run python3 scripts/checks/check_provider_bdd_completeness.py
 to confirm the gate goes green.
 run: bash scripts/safe-commit.sh "test(bdd): provider_<name> + e2e Examples row"
 
-Pass example (tests/bdd/features/provider_openai.feature):
+Pass example: (tests/bdd/features/provider_openai.feature)
   Feature: openai provider
     Scenario: embed_batch reaches the configured base_url
       Given an openai plugin configured with base_url=https://api.openai.com
       When the caller invokes embed_batch with two texts
       Then the recorded request URL is https://api.openai.com/v1/embeddings
 
-Pass example (tests/bdd/features/e2e_provider_embed.feature):
+Pass example: (tests/bdd/features/e2e_provider_embed.feature)
   Scenario Outline: embed with provider <provider>
     Given the kairix process is configured with provider <provider>
     ...
