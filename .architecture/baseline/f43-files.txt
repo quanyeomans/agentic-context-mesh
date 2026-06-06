@@ -1,8 +1,0 @@
-kairix/connectors/obsidian
-kairix/providers/anthropic
-kairix/providers/azure_foundry
-kairix/providers/azure_legacy
-kairix/providers/bedrock
-kairix/providers/litellm_proxy
-kairix/providers/ollama
-kairix/providers/openai
