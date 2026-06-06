@@ -126,6 +126,9 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         # PR 1.4 / #420 — agent scope discovery + proposal
         "onboard_scan",
         "onboard_agent",
+        # PR 1.5 / #420 — doctor agent validates configured scopes against disk
+        "doctor_check_all",
+        "doctor_check_agent",
         "worker_status",
         "features_status",
         "secrets_verify",

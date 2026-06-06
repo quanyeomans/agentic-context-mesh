@@ -755,6 +755,57 @@ def tool_onboard_agent(
         return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def tool_doctor_check_all(
+    *,
+    config: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    """Re-validate every configured agent scope against disk state.
+
+    Mirrors ``kairix doctor agent --all --json`` — same Python API
+    (``doctor_check_all`` + ``report_to_envelope``) backs both
+    surfaces, so CLI and MCP return byte-identical envelopes for the
+    same configured + on-disk state.
+
+    Never raises — disk-IO errors collapse into per-surface issues.
+    """
+    from kairix.agents.onboarding.doctor import doctor_check_all
+    from kairix.agents.onboarding.doctor_cli import report_to_envelope
+
+    try:
+        report = doctor_check_all(config=config)
+        return report_to_envelope(report)
+    except Exception as exc:
+        logger.warning("tool_doctor_check_all failed: %s", exc, exc_info=True)
+        return {
+            "agents": [],
+            "overall": "error",
+            "summary_text": "",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def tool_doctor_check_agent(
+    agent_name: str,
+    *,
+    config: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    """Re-validate a single configured agent scope against disk state.
+
+    Mirrors ``kairix doctor agent --name <name> --json``. Never raises
+    — unknown agents collapse into an :class:`AgentHealth` with
+    ``overall="error"`` and the error captured in ``issues``.
+    """
+    from kairix.agents.onboarding.doctor import doctor_check_agent
+    from kairix.agents.onboarding.doctor_cli import agent_health_to_envelope
+
+    try:
+        health = doctor_check_agent(agent_name, config=config)
+        return {"agent": agent_health_to_envelope(health), "error": ""}
+    except Exception as exc:
+        logger.warning("tool_doctor_check_agent failed: %s", exc, exc_info=True)
+        return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def tool_warm() -> dict[str, Any]:
     """Pre-load kairix caches + pay factory-init costs.
 
@@ -1375,6 +1426,19 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix onboard agent",
                 category=CAP_CATEGORY_CONFIGURATION,
             ),
+            # PR 1.5 / #420 — agent scope drift detection
+            _cap(
+                name="doctor_check_all",
+                mcp_tool="doctor_check_all",
+                cli="kairix doctor agent --all",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
+            _cap(
+                name="doctor_check_agent",
+                mcp_tool="doctor_check_agent",
+                cli="kairix doctor agent --name",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
             _cap(
                 name="worker_status",
                 mcp_tool="worker_status",
@@ -1763,6 +1827,38 @@ def _register_synthesis_and_diagnostic_tools(
             workspace_root=workspace_root,
             harness=harness,
         )
+
+    @server.tool(
+        description=(
+            "Re-validate every configured agent scope against disk state. "
+            "Returns drift (missing dirs, stale memory, glob misses, ambiguous "
+            "cross-agent overlap) before agents hit it. Read-only. Identical "
+            "envelope to `kairix doctor agent --all --json`. Call this after "
+            "changing kairix.config.yaml or rotating an agent's memory tree."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/cli_doctor.feature
+    def doctor_check_all(config: dict[str, object] | None = None) -> dict[str, Any]:
+        """Bulk doctor envelope. Read-only. Identical to `kairix doctor agent --all --json`."""
+        return tool_doctor_check_all(config=config)
+
+    @server.tool(
+        description=(
+            "Re-validate one configured agent's scope against disk state — "
+            "single-target counterpart to `doctor_check_all`. Returns "
+            "{agent: {...}, error: ''} with the per-surface health probe. "
+            "Read-only."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/cli_doctor.feature
+    def doctor_check_agent(
+        agent_name: str,
+        config: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """Single-agent doctor envelope. Read-only."""
+        return tool_doctor_check_agent(agent_name=agent_name, config=config)
 
     @server.tool(
         description=(
