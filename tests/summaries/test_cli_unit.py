@@ -334,7 +334,7 @@ def test_main_resolves_defaults_when_neither_kwarg_provided(tmp_path: Path) -> N
 # ---------------------------------------------------------------------------
 
 
-def testdefault_document_root_path_delegates_to_kairix_paths(tmp_path: Path) -> None:
+def test_default_document_root_path_delegates_to_kairix_paths(tmp_path: Path) -> None:
     """``default_document_root_path`` returns whatever ``kairix.paths.document_root``
     returns. Drive it through the real env-var resolution (KAIRIX_DOCUMENT_ROOT
     is the documented operator boundary; F2 blocks ``monkeypatch.setenv``
@@ -356,7 +356,7 @@ def testdefault_document_root_path_delegates_to_kairix_paths(tmp_path: Path) -> 
             _os.environ["KAIRIX_DOCUMENT_ROOT"] = prev
 
 
-def testdefault_summaries_db_path_fn_delegates_to_kairix_paths() -> None:
+def test_default_summaries_db_path_fn_delegates_to_kairix_paths() -> None:
     """``default_summaries_db_path_fn`` returns a Path resolved by kairix.paths."""
     from kairix.knowledge.summaries.cli import default_summaries_db_path_fn
 
@@ -364,7 +364,7 @@ def testdefault_summaries_db_path_fn_delegates_to_kairix_paths() -> None:
     assert isinstance(result, Path)
 
 
-def testdefault_get_stale_paths_delegates_through_real_staleness(tmp_path: Path) -> None:
+def test_default_get_stale_paths_delegates_through_real_staleness(tmp_path: Path) -> None:
     """``default_get_stale_paths`` hits the real staleness module. With
     an empty paths list it returns an empty list."""
     from kairix.knowledge.summaries.cli import default_get_stale_paths
@@ -378,7 +378,7 @@ def testdefault_get_stale_paths_delegates_through_real_staleness(tmp_path: Path)
         conn.close()
 
 
-def testdefault_write_summary_delegates_through_real_staleness(tmp_path: Path) -> None:
+def test_default_write_summary_delegates_through_real_staleness(tmp_path: Path) -> None:
     """``default_write_summary`` calls ``staleness.write_summary``; a
     non-dict input is rejected by the real impl with an AttributeError or
     similar — either way the wrapper's two lines execute."""
@@ -394,7 +394,7 @@ def testdefault_write_summary_delegates_through_real_staleness(tmp_path: Path) -
         conn.close()
 
 
-def testdefault_get_credentials_delegates_through_real_credentials() -> None:
+def test_default_get_credentials_delegates_through_real_credentials() -> None:
     """``default_get_credentials`` calls into real ``credentials.get_credentials``.
     With an unknown kind the real impl raises — proves the wrapper
     delegated, not silently swallowed."""
@@ -404,7 +404,7 @@ def testdefault_get_credentials_delegates_through_real_credentials() -> None:
         default_get_credentials("nonexistent_kind_xyz")
 
 
-def testdefault_generate_summaries_delegates_through_real_generator() -> None:
+def test_default_generate_summaries_delegates_through_real_generator() -> None:
     """``default_generate_summaries`` calls ``generate.generate_summaries``.
     Missing required kwargs surface as TypeError from the real impl —
     confirms the wrapper delegated, not stubbed silently."""
