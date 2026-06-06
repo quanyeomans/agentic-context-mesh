@@ -6,10 +6,16 @@ functions in isolation. This module fills the remaining gaps:
   - The ``cmd_seed`` happy path with candidates + Neo4j seeding.
   - The ``cmd_seed`` default db_path resolution branch.
   - The ``main()`` dispatcher's suggest / validate / get branches.
+
+All tests construct fakes via the *Deps dataclasses in
+``kairix.knowledge.entities.cli`` / ``kairix.use_cases.entity`` /
+``kairix.use_cases.entity_get`` and pass them through ``deps=``. F1
+forbids ``monkeypatch.setattr`` on kairix internals.
 """
 
 from __future__ import annotations
 
+import argparse
 import io
 import sqlite3
 from contextlib import redirect_stderr, redirect_stdout
@@ -19,6 +25,10 @@ from typing import Any
 import pytest
 
 import kairix.knowledge.entities.cli as entities_cli
+from kairix.core.health import HealthDeps
+from kairix.knowledge.entities.cli import EntitySeedDeps
+from kairix.use_cases.entity import EntitySuggestDeps, EntityValidateDeps
+from kairix.use_cases.entity_get import EntityGetDeps
 
 pytestmark = pytest.mark.unit
 
@@ -56,168 +66,234 @@ def _populated_db(path: Path) -> None:
     db.close()
 
 
-def test_seed_with_candidates_lists_and_seeds_neo4j(monkeypatch, tmp_path: Path) -> None:
-    """seed with non-empty candidate list + available Neo4j → seed_graph called."""
-    import kairix.knowledge.entities.seed as seed_mod
+def _fake_candidate(name: str = "Entity") -> Any:
+    """Build a candidate-shaped object without depending on the prod dataclass."""
+    from types import SimpleNamespace
 
+    return SimpleNamespace(
+        entity_type="ORG",
+        name=name,
+        confidence=0.9,
+        source_docs=["a.md"],
+    )
+
+
+def test_seed_with_candidates_lists_and_seeds_neo4j(tmp_path: Path) -> None:
+    """seed with non-empty candidate list + available Neo4j → seed_graph called."""
     db_path = tmp_path / "index.sqlite"
     _populated_db(db_path)
 
-    from types import SimpleNamespace
-
-    fake_candidates = [
-        SimpleNamespace(
-            entity_type="ORG",
-            name=f"Entity{i:02d}",
-            confidence=0.9,
-            source_docs=["a.md"],
-        )
-        for i in range(25)
-    ]
-    monkeypatch.setattr(seed_mod, "scan_for_entities", lambda db, limit: fake_candidates)
+    fake_candidates = [_fake_candidate(f"Entity{i:02d}") for i in range(25)]
     seed_calls: list[int] = []
 
-    def _fake_seed_graph(neo: Any, candidates: list) -> int:
+    def _fake_seed_graph(_neo: Any, candidates: list[Any]) -> int:
         seed_calls.append(len(candidates))
         return len(candidates)
 
-    monkeypatch.setattr(seed_mod, "seed_graph", _fake_seed_graph)
+    deps = EntitySeedDeps(
+        scan_for_entities=lambda _db, _limit: fake_candidates,
+        seed_graph=_fake_seed_graph,
+    )
 
-    rc = entities_cli.main(["seed"], db_path=db_path, neo4j_client=_AvailableNeo())
+    rc = entities_cli.main(
+        ["seed"],
+        db_path=db_path,
+        neo4j_client=_AvailableNeo(),
+        seed_deps=deps,
+    )
     assert rc == 0
     assert seed_calls == [25]
 
 
-def test_seed_with_candidates_dry_run_does_not_call_seed_graph(monkeypatch, tmp_path: Path) -> None:
-    import kairix.knowledge.entities.seed as seed_mod
-
+def test_seed_with_candidates_dry_run_does_not_call_seed_graph(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite"
     _populated_db(db_path)
 
-    from types import SimpleNamespace
+    called: list[str] = []
 
-    monkeypatch.setattr(
-        seed_mod,
-        "scan_for_entities",
-        lambda db, limit: [SimpleNamespace(entity_type="ORG", name="E1", confidence=0.9, source_docs=["a.md"])],
+    def _record(_neo: Any, _cands: list[Any]) -> int:
+        called.append("yes")
+        return 0
+
+    deps = EntitySeedDeps(
+        scan_for_entities=lambda _db, _limit: [_fake_candidate()],
+        seed_graph=_record,
     )
-    called = []
-    monkeypatch.setattr(seed_mod, "seed_graph", lambda neo, candidates: called.append("yes"))
 
-    rc = entities_cli.main(["seed", "--dry-run"], db_path=db_path, neo4j_client=_AvailableNeo())
+    rc = entities_cli.main(
+        ["seed", "--dry-run"],
+        db_path=db_path,
+        neo4j_client=_AvailableNeo(),
+        seed_deps=deps,
+    )
     assert rc == 0
     assert called == [], "seed_graph must not be called in --dry-run mode"
 
 
-def test_seed_exits_1_when_neo4j_unavailable(monkeypatch, tmp_path: Path) -> None:
-    import kairix.knowledge.entities.seed as seed_mod
-
+def test_seed_exits_1_when_neo4j_unavailable(tmp_path: Path) -> None:
     db_path = tmp_path / "index.sqlite"
     _populated_db(db_path)
 
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(
-        seed_mod,
-        "scan_for_entities",
-        lambda db, limit: [SimpleNamespace(entity_type="ORG", name="E1", confidence=0.9, source_docs=["a.md"])],
+    deps = EntitySeedDeps(
+        scan_for_entities=lambda _db, _limit: [_fake_candidate()],
     )
 
-    rc = entities_cli.main(["seed"], db_path=db_path, neo4j_client=_UnavailableNeo())
+    rc = entities_cli.main(
+        ["seed"],
+        db_path=db_path,
+        neo4j_client=_UnavailableNeo(),
+        seed_deps=deps,
+    )
     assert rc == 1
 
 
-def test_seed_default_db_path_resolves_from_core_db(monkeypatch, tmp_path: Path) -> None:
-    """When db_path is None, the CLI calls get_db_path() to resolve it."""
-    import kairix.core.db as core_db
-    import kairix.knowledge.entities.seed as seed_mod
-
+def test_seed_default_db_path_resolves_via_deps(tmp_path: Path) -> None:
+    """When db_path is None, cmd_seed calls deps.get_db_path() to resolve it."""
     real_db = tmp_path / "k.db"
     _populated_db(real_db)
-    monkeypatch.setattr(core_db, "get_db_path", lambda: str(real_db))
-    monkeypatch.setattr(seed_mod, "scan_for_entities", lambda db, limit: [])
+
+    deps = EntitySeedDeps(
+        scan_for_entities=lambda _db, _limit: [],
+        get_db_path=lambda: str(real_db),
+    )
 
     # neo4j_client unused because no candidates.
-    rc = entities_cli.main(["seed"])
+    rc = entities_cli.main(["seed"], seed_deps=deps)
     assert rc == 0
 
 
-def test_seed_default_neo4j_client_resolves_from_graph_client(monkeypatch, tmp_path: Path) -> None:
-    """When neo4j_client is None, the CLI calls get_client() (graph_client.get_client)."""
-    from types import SimpleNamespace
-
-    import kairix.knowledge.entities.seed as seed_mod
-    import kairix.knowledge.graph.client as graph_client
-
+def test_seed_default_neo4j_client_resolves_via_deps(tmp_path: Path) -> None:
+    """When neo4j_client is None, cmd_seed calls deps.get_neo4j_client()."""
     db_path = tmp_path / "index.sqlite"
     _populated_db(db_path)
 
-    monkeypatch.setattr(
-        seed_mod,
-        "scan_for_entities",
-        lambda db, limit: [SimpleNamespace(entity_type="ORG", name="E1", confidence=0.9, source_docs=["a.md"])],
-    )
     seed_calls: list[int] = []
-    monkeypatch.setattr(seed_mod, "seed_graph", lambda neo, cands: seed_calls.append(len(cands)) or 1)
-    monkeypatch.setattr(graph_client, "get_client", lambda: _AvailableNeo())
 
-    rc = entities_cli.main(["seed"], db_path=db_path)
+    def _record(_neo: Any, cands: list[Any]) -> int:
+        seed_calls.append(len(cands))
+        return 1
+
+    deps = EntitySeedDeps(
+        scan_for_entities=lambda _db, _limit: [_fake_candidate()],
+        seed_graph=_record,
+        get_neo4j_client=lambda: _AvailableNeo(),
+    )
+
+    rc = entities_cli.main(["seed"], db_path=db_path, seed_deps=deps)
     assert rc == 0
     assert seed_calls == [1]
 
 
 # ---------------------------------------------------------------------------
-# main() — dispatcher branches not covered by direct cmd_* tests.
+# Dispatcher branches — exercise cmd_suggest / cmd_validate / cmd_get
+# directly with their canonical *Deps so the test does not bypass the
+# production handler, but also avoids the dispatcher's ``deps=None`` shortcut.
 # ---------------------------------------------------------------------------
 
 
-def test_main_dispatches_suggest(monkeypatch) -> None:
-    """main() routes 'suggest' to cmd_suggest."""
-    from types import SimpleNamespace
+def test_cmd_suggest_happy_path_uses_injected_deps() -> None:
+    """cmd_suggest formats the EntitySuggestOutput produced via injected deps."""
+    args = argparse.Namespace(text="acme is a client", file=None, format="table")
 
-    import kairix.use_cases.entity as entity_uc
+    class _FakeNeo:
+        available = True
 
-    fake_out = SimpleNamespace(text="acme", suggestions=[], new_count=0, existing_count=0, error="")
-    monkeypatch.setattr(entity_uc, "run_entity_suggest", lambda text, deps=None: fake_out)
-    rc, stdout, _ = _capture(lambda: entities_cli.main(["suggest", "acme is a client"]))
+    deps = EntitySuggestDeps(
+        suggest_fn=lambda _text, _neo: [],  # zero suggestions
+        neo4j_client_fn=lambda: _FakeNeo(),
+    )
+
+    rc, stdout, _ = _capture(lambda: entities_cli.cmd_suggest(args, deps=deps))
     assert rc == 0
     assert "Total: 0 entities found" in stdout
 
 
-def test_main_dispatches_validate(monkeypatch) -> None:
-    """main() routes 'validate' to cmd_validate."""
-    from types import SimpleNamespace
+def test_cmd_validate_no_matches_returns_1() -> None:
+    """cmd_validate returns 1 when the use case returns zero matches."""
+    args = argparse.Namespace(name="Acme", update=False, format="table")
 
-    import kairix.use_cases.entity as entity_uc
-
-    fake_out = SimpleNamespace(
-        name="Acme",
-        neo4j_id="acme",
-        matches=[],
-        updated=False,
-        error="",
+    deps = EntityValidateDeps(
+        validate_fn=lambda _name, _neo, *, update=False: {
+            "name": "Acme",
+            "neo4j_id": "acme",
+            "matches": [],
+            "updated": False,
+            "error": "",
+        },
+        neo4j_client_fn=lambda: object(),
     )
-    monkeypatch.setattr(entity_uc, "run_entity_validate", lambda name, update=False, deps=None: fake_out)
-    rc, _stdout, _ = _capture(lambda: entities_cli.main(["validate", "Acme"]))
-    # No matches → return 1
+
+    rc, _stdout, _ = _capture(lambda: entities_cli.cmd_validate(args, deps=deps))
     assert rc == 1
 
 
-def test_main_dispatches_get(monkeypatch) -> None:
-    """main() routes 'get' to cmd_get."""
-    from types import SimpleNamespace
+def test_cmd_get_renders_table_when_found() -> None:
+    """cmd_get returns 0 and renders the entity name when the lookup succeeds."""
+    args = argparse.Namespace(name="Acme", format="table")
 
-    import kairix.use_cases.entity_get as entity_get_uc
-
-    fake_out = SimpleNamespace(
-        id="acme",
-        name="Acme",
-        type="Organisation",
-        summary="supplier",
-        vault_path="/Acme.md",
-        error="",
+    health_deps = HealthDeps(
+        secrets_loaded_fn=lambda: True,
+        embed_backend_available_fn=lambda: True,
+        bm25_index_available_fn=lambda: True,
+        neo4j_available_fn=lambda: True,
     )
-    monkeypatch.setattr(entity_get_uc, "run_entity_get", lambda name, deps=None: fake_out)
-    rc, stdout, _ = _capture(lambda: entities_cli.main(["get", "Acme"]))
+    deps = EntityGetDeps(
+        fetch_fn=lambda _name: {
+            "id": "acme",
+            "name": "Acme",
+            "type": "Organisation",
+            "summary": "supplier",
+            "vault_path": "/Acme.md",
+        },
+        health_deps=health_deps,
+    )
+
+    rc, stdout, _ = _capture(lambda: entities_cli.cmd_get(args, deps=deps))
     assert rc == 0
     assert "Acme" in stdout
+
+
+# ---------------------------------------------------------------------------
+# EntitySeedDeps — exercise the production defaults so the dataclass's
+# lazy-import shim functions are covered. Each default just dispatches to
+# the live helper; the test pins that the dispatch returns the expected
+# type / forwards args, not the underlying helper's contract.
+# ---------------------------------------------------------------------------
+
+
+def test_entity_seed_deps_default_scan_for_entities_returns_list(tmp_path: Path) -> None:
+    """The default scan helper accepts (db, limit) and returns a list."""
+    db_path = tmp_path / "k.db"
+    _populated_db(db_path)
+    from kairix.core.db import open_db
+
+    deps = EntitySeedDeps()
+    db = open_db(db_path)
+    try:
+        out = deps.scan_for_entities(db, 1)
+    finally:
+        db.close()
+    assert isinstance(out, list)
+
+
+def test_entity_seed_deps_default_get_db_path_returns_path_or_str() -> None:
+    """The default db-path resolver returns a Path / str (real helper output)."""
+    deps = EntitySeedDeps()
+    out = deps.get_db_path()
+    # get_db_path may return a Path; just confirm str(out) is non-empty
+    assert str(out)
+
+
+def test_entity_seed_deps_default_get_neo4j_client_returns_object() -> None:
+    """The default Neo4j client resolver returns *something* (real client or null)."""
+    deps = EntitySeedDeps()
+    client = deps.get_neo4j_client()
+    # client object exists; .available may be True or False — both are fine.
+    assert client is not None
+    assert hasattr(client, "available")
+
+
+def test_entity_seed_deps_default_seed_graph_is_callable() -> None:
+    """seed_graph default is the production helper (callable, not None)."""
+    deps = EntitySeedDeps()
+    assert callable(deps.seed_graph)

@@ -4,12 +4,69 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 # F17 — argparse 'store_true' action name. Centralised so adding new
 # boolean flags doesn't push the literal over the duplicated-string limit.
 # Every site is "this is a boolean flag with no value"; the coupling is real.
 _STORE_TRUE = "store_true"
+
+
+# ---------------------------------------------------------------------------
+# Deps — DI seam for cmd_seed
+# ---------------------------------------------------------------------------
+
+
+def _default_scan_for_entities(db: Any, limit: int) -> list[Any]:
+    """Production default for ``EntitySeedDeps.scan_for_entities``."""
+    from kairix.knowledge.entities.seed import scan_for_entities
+
+    return scan_for_entities(db, limit)
+
+
+def _default_seed_graph(neo: Any, candidates: list[Any]) -> int:
+    """Production default for ``EntitySeedDeps.seed_graph``."""
+    from kairix.knowledge.entities.seed import seed_graph
+
+    return seed_graph(neo, candidates)
+
+
+def _default_get_neo4j_client() -> Any:
+    """Production default for ``EntitySeedDeps.get_neo4j_client``."""
+    from kairix.knowledge.graph.client import get_client
+
+    return get_client()
+
+
+def _default_get_db_path() -> Any:
+    """Production default for ``EntitySeedDeps.get_db_path``.
+
+    Returns a ``Path`` (``kairix.core.db.get_db_path``'s native type).
+    Typed as ``Any`` so tests can return either a ``str`` or a ``Path``
+    without a cast — ``cmd_seed`` normalises with ``Path(str(...))``.
+    """
+    from kairix.core.db import get_db_path
+
+    return get_db_path()
+
+
+@dataclass(frozen=True)
+class EntitySeedDeps:
+    """Injectable dependencies for ``cmd_seed``.
+
+    Mirrors ``EntityValidateDeps`` — every callable field is non-Optional
+    with a ``default_factory`` wiring the production helper. Tests pass
+    ``EntitySeedDeps(scan_for_entities=fake, ...)`` to avoid touching
+    real SQLite / Neo4j state; production callers leave ``deps=None``
+    and the defaults reproduce the historical lazy-import behaviour.
+    """
+
+    scan_for_entities: Callable[[Any, int], list[Any]] = field(default_factory=lambda: _default_scan_for_entities)
+    seed_graph: Callable[[Any, list[Any]], int] = field(default_factory=lambda: _default_seed_graph)
+    get_neo4j_client: Callable[[], Any] = field(default_factory=lambda: _default_get_neo4j_client)
+    get_db_path: Callable[[], Any] = field(default_factory=lambda: _default_get_db_path)
 
 
 def cmd_suggest(
@@ -226,23 +283,29 @@ def format_enrich_batch_text(batch: Any) -> str:
     return "\n".join(lines)
 
 
-def cmd_seed(args: argparse.Namespace, *, db_path: Any = None, neo4j_client: Any = None) -> int:
+def cmd_seed(
+    args: argparse.Namespace,
+    *,
+    db_path: Any = None,
+    neo4j_client: Any = None,
+    deps: EntitySeedDeps | None = None,
+) -> int:
     """kairix entity seed — discover entities from indexed documents and seed Neo4j.
 
-    ``db_path`` and ``neo4j_client`` are DI seams for tests: passing them
-    avoids touching the global ``KAIRIX_DB_PATH`` env var or constructing
-    a real Neo4j client.
+    ``db_path`` and ``neo4j_client`` remain DI seams (back-compat with
+    existing call sites). ``deps`` is the canonical seam: pass an
+    ``EntitySeedDeps(...)`` to swap any of scan/seed/client/db-path
+    resolution. Production callers leave all kwargs ``None``.
     """
     import sqlite3
     from pathlib import Path
 
     from kairix.core.db import open_db
-    from kairix.knowledge.entities.seed import scan_for_entities, seed_graph
+
+    d = deps or EntitySeedDeps()
 
     if db_path is None:
-        from kairix.core.db import get_db_path
-
-        db_path = Path(get_db_path())
+        db_path = Path(str(d.get_db_path()))
     else:
         db_path = Path(str(db_path))
     if not db_path.exists():
@@ -251,7 +314,7 @@ def cmd_seed(args: argparse.Namespace, *, db_path: Any = None, neo4j_client: Any
 
     db = open_db(db_path)
     try:
-        candidates = scan_for_entities(db, limit=args.limit)
+        candidates = d.scan_for_entities(db, args.limit)
     except sqlite3.OperationalError as exc:
         # Index file exists but isn't populated — same operator remediation.
         print(
@@ -276,17 +339,12 @@ def cmd_seed(args: argparse.Namespace, *, db_path: Any = None, neo4j_client: Any
         print("\nDry run — no changes made. Remove --dry-run to seed Neo4j.")
         return 0
 
-    if neo4j_client is None:
-        from kairix.knowledge.graph.client import get_client
-
-        neo4j: Any = get_client()
-    else:
-        neo4j = neo4j_client
+    neo4j: Any = neo4j_client if neo4j_client is not None else d.get_neo4j_client()
     if not neo4j.available:
         print("ERROR: Neo4j not available. Check connection settings.", file=sys.stderr)
         return 1
 
-    count = seed_graph(neo4j, candidates)
+    count = d.seed_graph(neo4j, candidates)
     print(f"\nSeeded {count}/{len(candidates)} entities into Neo4j.")
     return 0
 
@@ -597,17 +655,23 @@ def _resolve_document_root() -> str:
         return ""
 
 
-def main(argv: list[str] | None = None, *, db_path: Any = None, neo4j_client: Any = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    db_path: Any = None,
+    neo4j_client: Any = None,
+    seed_deps: EntitySeedDeps | None = None,
+) -> int:
     """Entry point for `kairix entity`.
 
-    ``db_path`` and ``neo4j_client`` are DI seams for tests; production
-    callers leave them ``None`` and the CLI resolves them from the
-    environment.
+    ``db_path``, ``neo4j_client`` and ``seed_deps`` are DI seams for
+    tests; production callers leave them ``None`` and the CLI resolves
+    them from the environment.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "seed":
-        return cmd_seed(args, db_path=db_path, neo4j_client=neo4j_client)
+        return cmd_seed(args, db_path=db_path, neo4j_client=neo4j_client, deps=seed_deps)
     if args.command == "suggest":
         return cmd_suggest(args)
     if args.command == "validate":
