@@ -345,15 +345,18 @@ def test_default_document_root_path_delegates_to_kairix_paths(tmp_path: Path) ->
     import os as _os
 
     from kairix.knowledge.summaries.cli import default_document_root_path
+    from kairix.paths import clear_cache
 
     prev = _os.environ.pop("KAIRIX_DOCUMENT_ROOT", None)
     _os.environ["KAIRIX_DOCUMENT_ROOT"] = str(tmp_path)
+    clear_cache()  # KairixPaths.resolve() is LRU-cached; invalidate so the env mutation takes effect
     try:
         assert default_document_root_path() == tmp_path
     finally:
         del _os.environ["KAIRIX_DOCUMENT_ROOT"]
         if prev is not None:
             _os.environ["KAIRIX_DOCUMENT_ROOT"] = prev
+        clear_cache()  # restore so sibling tests see fresh resolution
 
 
 def test_default_summaries_db_path_fn_delegates_to_kairix_paths() -> None:
