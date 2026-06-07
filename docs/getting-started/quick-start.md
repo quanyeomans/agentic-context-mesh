@@ -3,9 +3,11 @@
 Get kairix running and searching your documents in under 30 minutes. Two install paths cover most operators:
 
 - **Docker** — the default for shared hosts, VMs, and anywhere `docker compose up -d` is the operating shape. Three containers (kairix / worker / neo4j) with healthchecks.
-- **Pip install** — the default for laptop dogfooding and single-user deployments. One Python virtualenv; kairix runs as two processes (`kairix worker run` and `kairix mcp serve`).
+- **Pip install** — the default for laptop setups and single-user deployments. One Python virtualenv; kairix runs as two processes (`kairix worker run` and `kairix mcp serve`).
 
 Pick the path that matches your environment and skip the other one.
+
+> **Want a system-managed install with `kairix init --system` (kairix user, systemd unit, FHS paths)?** See [install.md](install.md) — the full three-track guide for system, user, Docker, macOS, and Windows.
 
 ## What you need (either path)
 
