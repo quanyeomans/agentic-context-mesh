@@ -1,0 +1,30 @@
+# kairix.config.yaml
+#
+# Minimal default config written by ``kairix init``. The full
+# operator-facing example with every block annotated lives at
+# ``kairix.config.example.yaml`` in the source tree (and in the
+# packaged wheel at ``kairix/install/templates/``). Copy the relevant
+# sections from there into this file once you know which connectors,
+# collections, and scope profiles you want to declare.
+#
+# Mode this file was rendered for: {{ mode }}
+_schema_version: 1
+
+# Pick the LLM / embed provider this deployment talks to. See
+# ``kairix.config.example.yaml`` for the full list of installed plugins
+# and the secrets each one expects.
+provider: azure_foundry
+
+# Retrieval pipeline defaults — keyword-first fusion with the standard
+# entity / procedural / temporal boosts. Tune against a gold suite via
+# ``kairix benchmark run`` once you have one.
+retrieval:
+  fusion_strategy: "bm25_primary"
+  boosts:
+    entity:
+      enabled: true
+      factor: 0.20
+      cap: 2.0
+    procedural:
+      enabled: true
+      factor: 1.4
