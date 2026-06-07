@@ -73,7 +73,7 @@ jobs:
       # the provider creds at runtime — same code path the VM uses, no
       # long-lived GH secret to rotate.
       - name: Azure login (federated OIDC)
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
