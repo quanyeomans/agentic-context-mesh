@@ -275,7 +275,7 @@ without parsing the JSON.
 Heuristics are deliberately coarse: the goal of probe-config is to
 nudge the operator toward a sensible region, not to find the optimum.
 For tuning at the optimum, the operator runs the PVT suite
-(`kairix probe --suite reflib`) against a representative concurrency.
+(`kairix benchmark run --suite reflib`) against a representative concurrency.
 
 ## Privacy and shareability
 

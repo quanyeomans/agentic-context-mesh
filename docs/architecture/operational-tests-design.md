@@ -42,8 +42,8 @@ Every capability has one Python implementation. Each binding is a thin shell:
 ```
 kairix.quality.soak.run_soak(...)         # Python API — the source of truth
   ↑                ↑                ↑
-  CLI binding      MCP binding      HTTP binding (future)
-  kairix soak run  tool_soak_run    POST /v1/soak/run
+  CLI binding                            MCP binding      HTTP binding (future)
+  kairix benchmark run --mode soak       tool_soak_run    POST /v1/soak/run
 ```
 
 Which bindings get exposed per capability:
@@ -78,17 +78,17 @@ The follow-up issue (filed alongside this design) captures the retroactive MCP e
 
 | capability | CLI | MCP | rationale |
 |---|---|---|---|
-| `soak run` | ✅ `kairix soak run` | ❌ | minutes-long; load-generating; gate behind operator/SRE-worker explicit invocation |
-| `probe search` (low-concurrency) | ✅ `kairix probe search --concurrency N` | ✅ `tool_probe_search` with hard cap concurrency≤3, queries≤20 | hard-capped variant is read-only; full variant is load-generating (CLI flag opens the range) |
-| `probe log-volume` | ✅ `kairix probe log-volume` | ❌ | requires running a benchmark; long; better as CLI/scheduled |
+| `soak run` | ✅ `kairix benchmark run --mode soak` | ❌ | minutes-long; load-generating; gate behind operator/SRE-worker explicit invocation |
+| `probe search` (low-concurrency) | ✅ `kairix benchmark run --mode concurrent --concurrency N` | ✅ `tool_probe_search` with hard cap concurrency≤3, queries≤20 | hard-capped variant is read-only; full variant is load-generating (CLI flag opens the range) |
+| `probe log-volume` | ✅ `kairix benchmark run --mode soak --max-log-volume-mb N` | ❌ | requires running a benchmark; long; better as CLI/scheduled |
 | `probe factory-calls` (future) | ✅ | ❌ | development/debugging tool, not a runtime signal |
 
-### `kairix soak run` — full spec
+### `kairix benchmark run --mode soak` — full spec
 
 Repeats a workload and asserts the system holds together across iterations. Catches the #275 class of bug — work that's individually fine but degrades when repeated.
 
 ```
-kairix soak run --suite reflib --repeat 3 [--max-memory-growth-mb 50] [--max-log-volume-mb 5] [--json]
+kairix benchmark run --suite reflib --repeat 3 [--max-memory-growth-mb 50] [--max-log-volume-mb 5] [--json]
 ```
 
 Assertions:
@@ -113,11 +113,11 @@ JSON envelope:
 
 **MCP posture**: not exposed. Soak runs take minutes and stress the system — agents have no legitimate reason to trigger them ad-hoc. Invoked by the SRE worker via subprocess and by alpha-deploy webhook on its deploy chain.
 
-### `kairix probe search` / `tool_probe_search` — full spec
+### `kairix benchmark run --mode concurrent` / `tool_probe_search` — full spec
 
 CLI surface — full range available:
 ```
-kairix probe search --concurrency 10 --queries 100 [--query-mix builtin|file:path] [--json]
+kairix benchmark run --mode concurrent --concurrency 10 --queries 100 [--query-mix builtin|file:path] [--json]
 ```
 
 MCP surface — hard-capped safe subset:
@@ -133,10 +133,10 @@ Assertions (both surfaces):
 
 **MCP posture**: exposed at hard-capped variant. An agent seeing slow searches can verify whether kairix-side latency is the cause without imposing meaningful load. Operator running the CLI for full diagnostic gets the unrestricted form.
 
-### `kairix probe log-volume` — full spec
+### `kairix benchmark run --mode soak --max-log-volume-mb N` — full spec
 
 ```
-kairix probe log-volume --suite reflib [--max-bytes-per-case 100] [--json]
+kairix benchmark run --mode soak --suite reflib [--max-bytes-per-case 100] [--json]
 ```
 
 **MCP posture**: not exposed. Requires running a full benchmark; multi-minute; better as scheduled/CI invocation.
@@ -152,12 +152,12 @@ For capabilities that are **CLI-only**, register a thin MCP stub that returns a 
 ```python
 @server.tool()
 def tool_soak_run(suite: str = "reflib", repeat: int = 3) -> dict:
-    """Run a kairix soak test. Operator-only — agents must escalate."""
+    """Run a kairix benchmark soak. Operator-only — agents must escalate."""
     return {
         "error": "OperatorOnlyCapability",
         "capability": "soak run",
         "reason": "Soak runs take minutes and stress the system. Agents should escalate to their admin.",
-        "operator_command": f"kairix soak run --suite {suite} --repeat {repeat}",
+        "operator_command": f"kairix benchmark run --suite {suite} --repeat {repeat}",
         "expected_runtime_seconds": 60 * repeat,
         "see_also": ["docs/runbooks/kairix-retrieval-health.md#soak"],
     }
@@ -176,8 +176,8 @@ The existing `tool_usage_guide` (already MCP-exposed) gets a `capabilities` topi
 |---|---|---|
 | `tool_search` | retrieving content | MCP — direct |
 | `tool_probe_search` | "is search slow?" | MCP — direct (hard-capped) |
-| Full latency probe | full diagnostic | escalate: `kairix probe search --concurrency 10 --queries 100` |
-| Soak test | "does this hold under load?" | escalate: `kairix soak run --suite reflib --repeat 3` |
+| Full latency probe | full diagnostic | escalate: `kairix benchmark run --mode concurrent --concurrency 10 --queries 100` |
+| Soak test | "does this hold under load?" | escalate: `kairix benchmark run --suite reflib --repeat 3` |
 | Onboard check | "is kairix healthy?" | MCP — `tool_onboard_check` (when shipped) |
 | Worker state | "is the worker running?" | MCP — `tool_worker_status` (when shipped) |
 ```
@@ -189,8 +189,8 @@ The guide is the index; the stubs are the per-capability handoffs. Both must shi
 CLI help text on each command's first line includes the MCP equivalent (or its absence):
 
 ```
-$ kairix soak run --help
-usage: kairix soak run --suite SUITE [--repeat N] [...]
+$ kairix benchmark run --mode soak --help
+usage: kairix benchmark run --suite SUITE [--repeat N] [...]
 
 Operational soak test — repeat a workload and assert it holds together
 across iterations. Catches "unit-fine, scale-fragile" regressions.
@@ -204,8 +204,8 @@ Bindings: CLI only. See docs/architecture/operational-tests-design.md
 ```
 
 ```
-$ kairix probe search --help
-usage: kairix probe search --concurrency N --queries M [...]
+$ kairix benchmark run --mode concurrent --help
+usage: kairix benchmark run --mode concurrent --concurrency N --queries M [...]
 
 Concurrent-load search probe — measures p50/p95/p99 latency.
 
@@ -226,8 +226,8 @@ def tool_capabilities() -> dict:
     return {
         "capabilities": [
             {"name": "search", "mcp_tool": "tool_search", "cli": "kairix search", "category": "retrieval"},
-            {"name": "soak_run", "mcp_tool": None, "cli": "kairix soak run", "category": "diagnostic-operator-only", "escalate_via": "tool_soak_run"},
-            {"name": "probe_search", "mcp_tool": "tool_probe_search", "cli": "kairix probe search", "category": "diagnostic", "mcp_caps": {"concurrency_max": 3, "queries_max": 20}},
+            {"name": "soak_run", "mcp_tool": None, "cli": "kairix benchmark run --mode soak", "category": "diagnostic-operator-only", "escalate_via": "tool_soak_run"},
+            {"name": "probe_search", "mcp_tool": "tool_probe_search", "cli": "kairix benchmark run --mode concurrent", "category": "diagnostic", "mcp_caps": {"concurrency_max": 3, "queries_max": 20}},
         ]
     }
 ```
@@ -262,11 +262,11 @@ The architectural invariant stands: **the SRE worker is a scheduler over capabil
 
 ### CI workflows — release-vm-deploy + alpha-gate
 
-The alpha-deploy webhook (Go, on the VM) already shells out to `kairix benchmark run`. Phase 1 adds `kairix soak run` to the same chain. Both are CLI subprocess invocations.
+The alpha-deploy webhook (Go, on the VM) already shells out to `kairix benchmark run`. Phase 1 adds `kairix benchmark run --mode soak` to the same chain. Both are CLI subprocess invocations.
 
 ### Ad-hoc operator commands — terminal
 
-`kairix soak run`, `kairix probe search`, etc. invoked directly. Standard CLI experience with `--help`, `--json`, and exit-code semantics.
+`kairix benchmark run --mode soak`, `kairix benchmark run --mode concurrent`, etc. invoked directly. Standard CLI experience with `--help`, `--json`, and exit-code semantics.
 
 ### Agents via MCP
 
@@ -278,7 +278,7 @@ For capabilities exposed via MCP, agents call directly. For CLI-only capabilitie
 
 Ships:
 - `kairix.quality.soak.run_soak()` Python API
-- `kairix soak run` CLI binding
+- `kairix benchmark run --mode soak` CLI binding
 - `tool_soak_run` MCP **stub** with operator-handoff envelope (pattern 1)
 - `tool_usage_guide` updated with the capabilities table (pattern 2)
 - CLI `--help` cross-references MCP / absence (pattern 3)
@@ -287,7 +287,7 @@ Ships:
 - Wired into CI / alpha-deploy webhook
 
 Acceptance:
-- `kairix soak run --suite reflib --repeat 2` against pre-#275-fix state fails with `log_volume_exceeded`, exit 1.
+- `kairix benchmark run --suite reflib --repeat 2` against pre-#275-fix state fails with `log_volume_exceeded`, exit 1.
 - Same command against post-#275-fix state passes.
 - `tool_soak_run` returns the expected operator-handoff envelope.
 - Agent searching `tool_usage_guide("diagnostics")` gets the capabilities table.
@@ -296,17 +296,17 @@ Acceptance:
 ### Phase 2 — probe primitives + read-only MCP retroactives
 
 Ships:
-- `kairix probe search` CLI + `tool_probe_search` MCP (hard-capped)
-- `kairix probe log-volume` CLI + MCP stub
+- `kairix benchmark run --mode concurrent` CLI + `tool_probe_search` MCP (hard-capped)
+- `kairix benchmark run --mode soak --max-log-volume-mb N` CLI + MCP stub
 - **Retroactive MCP exposures** (per follow-up issue): `tool_onboard_check`, `tool_worker_status`
 - Tier-2 integration in CI suite
 
 ### Phase 3 — burst + failure-injection + capability introspection
 
 Ships:
-- `kairix probe burst` (CLI-only) ✅ landed
+- `kairix benchmark run --mode burst` (CLI-only) ✅ landed
 - `tool_capabilities()` programmatic introspection (pattern 4) ✅ landed
-- `kairix probe stability` (long soak, CLI-only) — **deferred** until burst surfaces fault-shape regressions worth catching (see #276 Phase 3 closure)
+- `kairix benchmark run --mode stability` (long soak, CLI-only) — **deferred** until `--mode burst` surfaces fault-shape regressions worth catching (see #276 Phase 3 closure)
 
 ### Phase 4 — PVT layer (production-truth measurement)
 
@@ -321,7 +321,7 @@ Phase 4 redefines the layer that owns "what do agents see":
 
 When #284 ships:
 - The PVT scenarios fire against the live VM (and optionally an in-CI fake-server fixture).
-- `kairix probe search/burst` keep working — they're now explicitly the Python-pipeline regression gate, not the production-latency gate.
+- `kairix benchmark run --mode concurrent` / `--mode burst` keep working — they're now explicitly the Python-pipeline regression gate, not the production-latency gate.
 - The runbook §6 measurement-shape caveat goes away (PVT layer is the production-truth answer).
 
 ## Out of scope (deliberately)

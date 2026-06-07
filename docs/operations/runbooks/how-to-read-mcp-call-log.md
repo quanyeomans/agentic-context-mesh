@@ -2,7 +2,7 @@
 
 **Purpose:** Investigate brief failures, MCP tool latency tails, and per-tool error rates using the per-call observability surface added in issue #398.
 
-**Background:** Before #398, the FastMCP server logged only `Processing request of type ...` without naming the tool, and failures appeared as terse `WARNING run_brief failed: 1 (of 6) futures TimeoutError` lines in container logs — useless for "which tool is slow?" or "which error class dominates?". The `mcp_call_log` SQLite table now records one row per MCP tool call. Operators query it via `kairix probe mcp-calls`.
+**Background:** Before #398, the FastMCP server logged only `Processing request of type ...` without naming the tool, and failures appeared as terse `WARNING run_brief failed: 1 (of 6) futures TimeoutError` lines in container logs — useless for "which tool is slow?" or "which error class dominates?". The `mcp_call_log` SQLite table now records one row per MCP tool call. Operators query it via `kairix mcp-calls`.
 
 ---
 
@@ -22,20 +22,20 @@ The migration is idempotent; re-running on an already-migrated database is a no-
 
 ---
 
-## Step 2 — Run `kairix probe mcp-calls`
+## Step 2 — Run `kairix mcp-calls`
 
 ```bash
 # All-time stats across every tool.
-kairix probe mcp-calls
+kairix mcp-calls
 
 # Last hour only.
-kairix probe mcp-calls --since 1h
+kairix mcp-calls --since 1h
 
 # Just the brief tool.
-kairix probe mcp-calls --tool brief
+kairix mcp-calls --tool brief
 
 # Machine-readable envelope for piping into jq.
-kairix probe mcp-calls --json
+kairix mcp-calls --json
 ```
 
 Text-mode output columns:
@@ -127,7 +127,7 @@ If observability lookback is an audit requirement (regulatory or contractual), s
 
 ## Step 5 — When the report says "no calls recorded"
 
-The `kairix probe mcp-calls` report shows `mcp-calls: no calls recorded` when the filtered window has zero rows. Three causes:
+The `kairix mcp-calls` report shows `mcp-calls: no calls recorded` when the filtered window has zero rows. Three causes:
 
 1. **The MCP server hasn't received traffic since the migration.** Expected on a freshly-deployed instance — call any MCP tool and re-run the probe.
 2. **The table is missing.** The probe surfaces an actionable error pointing at the migration script (Step 1).

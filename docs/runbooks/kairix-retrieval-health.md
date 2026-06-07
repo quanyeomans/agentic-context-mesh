@@ -261,7 +261,7 @@ Use after a major index rebuild — the persisted canary suite gets discarded an
 Symptom branch for "the gate passes but agents report degradation". Run a soak test — repeat the workload N times and assert no degradation across iterations.
 
 ```bash
-kairix soak run --suite reflib --repeat 3 --json
+kairix benchmark run --mode soak --suite reflib --repeat 3 --json
 ```
 
 Assertions (any failure exits 1, with a structured envelope in the JSON output):
@@ -271,26 +271,26 @@ Assertions (any failure exits 1, with a structured envelope in the JSON output):
 - no new file descriptors held at exit
 - byte-identical `BenchmarkResult` signature across iterations (catches non-determinism)
 
-If `kairix benchmark run` passes once but `kairix soak run --repeat 2` fails:
+If `kairix benchmark run` passes once but `kairix benchmark run --mode soak --repeat 2` fails:
 - **log_volume** failure → a per-call code path is spamming stderr. Common cause: deprecation warning fired on every call instead of once per process. Check the warning's surrounding code for missing dedup.
 - **memory_growth** → an O(N) cache is growing without bound, or a closure is holding a reference past its iteration.
 - **signature_mismatch** → the workload isn't deterministic. Look for clock-derived ordering, random sampling, or non-deterministic map iteration.
 - **fd_leak** → a file/socket isn't being closed across iterations. Often a temp-file or HTTP client that's not in a `with` block.
 
-`kairix soak run` is the operational complement to `kairix benchmark run` — same workload, but the assertion target is *system health*, not retrieval quality.
+`kairix benchmark run --mode soak` is the operational complement to `kairix benchmark run` — same workload, but the assertion target is *system health*, not retrieval quality.
 
-**MCP**: `tool_soak_run` returns an `OperatorOnlyCapability` envelope (soak is a multi-minute load test; agents must escalate). The envelope carries the exact `kairix soak run` command for the operator to invoke.
+**MCP**: `tool_soak_run` returns an `OperatorOnlyCapability` envelope (soak is a multi-minute load test; agents must escalate). The envelope carries the exact `kairix benchmark run --mode soak` command for the operator to invoke.
 
 ---
 
 ## 6. Concurrent-load probe — does p95 hold under teaming load?
 
-> ⚠ **Measurement-shape caveat.** `kairix probe search` and `kairix probe burst` measure the **Python-pipeline regression surface** — they run as a CLI subprocess that pays a cold factory-build tax (~4-5 s) and call the pipeline in-process. That's NOT what an agent over MCP experiences (agents talk to a long-running warm server). The probes are still the right tool for "is the Python pipeline regressing under concurrency?" — they correctly surface which Tier 1 lever to pull. They are NOT the right tool for "what latency do agents actually see in production?" — for that, use the **PVT layer** ([`docs/architecture/performance-testing-approach.md`](../architecture/performance-testing-approach.md)). PVT scenarios run against the live MCP server (#284 ships the harness).
+> ⚠ **Measurement-shape caveat.** `kairix benchmark run --mode concurrent` and `kairix benchmark run --mode burst` measure the **Python-pipeline regression surface** — they run as a CLI subprocess that pays a cold factory-build tax (~4-5 s) and call the pipeline in-process. That's NOT what an agent over MCP experiences (agents talk to a long-running warm server). The probes are still the right tool for "is the Python pipeline regressing under concurrency?" — they correctly surface which Tier 1 lever to pull. They are NOT the right tool for "what latency do agents actually see in production?" — for that, use the **PVT layer** ([`docs/architecture/performance-testing-approach.md`](../architecture/performance-testing-approach.md)). PVT scenarios run against the live MCP server (#284 ships the harness).
 
 Symptom branch for "individual queries feel fine but the team session goes flaky around 5+ active agents". The probe is the decision instrument for the Tier 1 tuning levers (Azure embed pool, query-result LRU cache, connection-pool sizes) laid out in [`docs/architecture/teaming-concurrency-strategy.md`](../architecture/teaming-concurrency-strategy.md) — run it *before* you commit to a tuning change so you pull the right lever, not the loudest one.
 
 ```bash
-kairix probe search --suite reflib --queries 100 --concurrency 5 --recommend --json | jq .
+kairix benchmark run --mode concurrent --suite reflib --queries 100 --concurrency 5 --recommend --json | jq .
 ```
 
 Read three fields, in order: `overall.p95_ms` (gate is ≤ 500 ms — matches the ADR's agent-perceived-performance target; above it agents commit "kairix is flaky" to memory), `mean_concurrency` (Little's-Law `sum(durations)/wallclock`; approaches `--concurrency` when work overlaps, far below requested means a hidden lock, not a load problem), and `bottleneck.kind` / `bottleneck.recommended_action` (populated by `--recommend`; names the suspect subsystem and the lever).
@@ -306,7 +306,7 @@ Read three fields, in order: `overall.p95_ms` (gate is ≤ 500 ms — matches th
 On a fresh deployment or after a tuning change, sweep first rather than fixing a single concurrency — this is the recommended first run:
 
 ```bash
-kairix probe search --suite reflib --queries 100 --concurrency-sweep 1,2,5,10,20 --recommend --json | jq .
+kairix benchmark run --mode concurrent --suite reflib --queries 100 --concurrency-sweep 1,2,5,10,20 --recommend --json | jq .
 ```
 
 The inflection where p95 starts to climb is the operating headroom; the level *at* the climb names the lever (≤5 → Azure pool; 10-15 → query cache). Pass/fail thresholds: `p95_ms` ≤ 500 ms (ADR gate), `p99_ms` ≤ 2000 ms, zero errors (any non-zero invalidates the reading). Agents can call `tool_probe_search` MCP for healthcheck-shaped probes up to `queries ≤ 20` / `concurrency ≤ 3`; above-cap calls return an `OperatorOnlyCapability` envelope with the exact CLI pre-filled — full load runs are operator-only by design.
@@ -314,7 +314,7 @@ The inflection where p95 starts to climb is the operating headroom; the level *a
 ```
 fix: identify the bottleneck — re-run with --recommend, then apply the lever named in bottleneck.recommended_action
 next: if recommendation is `worker_contention`, run py-spy against the live MCP process before pulling any tuning lever — the symptom is upstream of the levers
-run: kairix probe search --suite reflib --queries 100 --concurrency 5 --recommend --json | jq .
+run: kairix benchmark run --mode concurrent --suite reflib --queries 100 --concurrency 5 --recommend --json | jq .
 ```
 
 ### 6a. Burst-load probe — does throughput hold after warm-up?
@@ -322,7 +322,7 @@ run: kairix probe search --suite reflib --queries 100 --concurrency 5 --recommen
 Complementary to `probe search`. Search measures p50/p95/p99 latency at sustained concurrency; burst measures queries-per-second over time-bucketed windows after rapid injection. Use search when you suspect a latency-curve inflection; use burst when latency looks fine yet *sustained* throughput drops after warm-up (cache eviction, fd leak, connection-pool churn). The signal burst catches that search misses: a system can hold p95 yet collapse sustained QPS once caches evict — burst surfaces that as `qps_drop_pct` above the 30% gate.
 
 ```bash
-kairix probe burst --suite reflib --total-queries 200 --peak-concurrency 20 --json | jq .
+kairix benchmark run --mode burst --suite reflib --total-queries 200 --peak-concurrency 20 --json | jq .
 ```
 
 Read three fields: `peak_qps` (max QPS across headline-eligible buckets), `sustained_qps` (mean of headline-eligible buckets), and `qps_drop_pct`. Pass = drop within 30% AND zero errors.
@@ -336,8 +336,8 @@ The full timeline stays in `buckets` (for inspection) and `skipped_buckets` list
 
 ```
 fix: investigate sustained QPS degradation — likely cache eviction or resource leak under burst
-next: re-run with --bucket-ms 250 to see finer-grained throughput trend; cross-check with kairix soak run --repeat 3
-run: kairix probe burst --suite reflib --total-queries 200 --peak-concurrency 20 --json | jq .
+next: re-run with --bucket-ms 250 to see finer-grained throughput trend; cross-check with kairix benchmark run --mode soak --repeat 3
+run: kairix benchmark run --mode burst --suite reflib --total-queries 200 --peak-concurrency 20 --json | jq .
 ```
 
 ---
@@ -452,7 +452,7 @@ Tag the issue with whichever dogfood agent reported the symptom — that's the p
 ## See also
 
 - [`teaming-concurrency-strategy.md`](../architecture/teaming-concurrency-strategy.md) — ADR for the concurrency model and the Tier 1 tuning levers the probe (§6) selects between.
-- `kairix probe search --help` — full CLI surface for the concurrent-load probe, including `--concurrency-sweep`, `--p95-threshold-ms`, `--seed`, and `--recommend`.
+- `kairix benchmark run --mode concurrent --help` — full CLI surface for the concurrent-load probe, including `--concurrency-sweep`, `--p95-threshold-ms`, `--seed`, and `--recommend`.
 - [`runbook-vector-search-failure.md`](../operations/runbooks/runbook-vector-search-failure.md) — deep dive on `vec=0, vec_failed=True` (vector leg only).
 - [`runbook-embedding-lag.md`](../operations/runbooks/runbook-embedding-lag.md) — new content not searchable after the expected embed cycle.
 - [`runbook-benchmark-regression.md`](../operations/runbooks/runbook-benchmark-regression.md) — NDCG dropped after a config or index change.

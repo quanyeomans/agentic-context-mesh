@@ -316,7 +316,7 @@ Every kairix capability has one Python implementation with one or more bindings 
 | `tool_bootstrap` / `kairix bootstrap` | session-start orientation envelope | MCP — direct | both |
 | `tool_onboard_check` / `kairix onboard check` | "is kairix healthy?" — read-only 9-probe envelope | MCP — direct | both |
 | `tool_worker_status` / `kairix worker status` | "is the worker running?" — state file envelope | MCP — direct | both |
-| `tool_soak_run` / `kairix soak run` | repeat-and-assert (memory, log volume, fd, determinism) | MCP returns escalation envelope; operator runs CLI | CLI |
+| `tool_soak_run` / `kairix benchmark run --mode soak` | repeat-and-assert (memory, log volume, fd, determinism) | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_benchmark_run` / `kairix benchmark run` | retrieval quality measurement | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_embed` / `kairix embed` | embed documents into the vector index | MCP returns escalation envelope; operator runs CLI | CLI |
 | `tool_store_crawl` / `kairix store crawl` | rebuild the Neo4j entity graph | MCP returns escalation envelope; operator runs CLI | CLI |

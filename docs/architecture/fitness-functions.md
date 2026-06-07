@@ -740,8 +740,8 @@ key. Allow-listed locations are `kairix/paths.py` and
 
 ```python
 # REJECTED — production module other than paths.py/secrets.py
-# kairix/agents/briefing/cli.py
-default_root = os.environ.get("KAIRIX_AGENT_MEMORY_ROOT", "/data/agents")
+# kairix/agents/briefing/sources.py
+docs_root = os.environ.get("KAIRIX_DOCUMENT_ROOT", "/data/documents")
 
 # ACCEPTED — kairix/paths.py is the canonical boundary
 def _resolve_cached() -> KairixPaths:
@@ -764,21 +764,21 @@ as a field. Inner code reads `KairixPaths.resolve().<field>`:
 
 ```python
 # Before
-# kairix/agents/briefing/cli.py
-default_root = os.environ.get("KAIRIX_AGENT_MEMORY_ROOT")
+# kairix/agents/briefing/sources.py
+docs_root = os.environ.get("KAIRIX_DOCUMENT_ROOT")
 
 # After
 # kairix/paths.py — single env-var read, exposed as a field
 @dataclass(frozen=True)
 class KairixPaths:
-    agent_memory_root: Path
+    document_root: Path
     ...
     @classmethod
     def resolve(cls):
-        return _resolve_cached()  # reads KAIRIX_AGENT_MEMORY_ROOT once
+        return _resolve_cached()  # reads KAIRIX_DOCUMENT_ROOT once
 
-# kairix/agents/briefing/cli.py — uses the resolved value
-default_root = KairixPaths.resolve().agent_memory_root
+# kairix/agents/briefing/sources.py — uses the resolved value
+docs_root = KairixPaths.resolve().document_root
 ```
 
 ---

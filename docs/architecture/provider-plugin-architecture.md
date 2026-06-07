@@ -197,7 +197,7 @@ Probe just sums and reports — no per-provider conditionals.
 
 **Two consumer paths, one implementation:**
 
-1. **PVT pre-release** — `kairix probe --suite reflib --concurrency 10`
+1. **PVT pre-release** — `kairix benchmark run --suite reflib --concurrency 10`
    runs against the project's reference provider. Existing PVT Gherkin
    scenarios (`tests/pvt/features/*.feature`) cover this.
 

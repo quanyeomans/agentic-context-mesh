@@ -8,7 +8,7 @@
 
 ## Context
 
-The Phase 2 + Phase 3 work landed `kairix probe search` and `kairix probe
+The Phase 2 + Phase 3 work landed `kairix benchmark run --mode concurrent` and `kairix benchmark run
 burst` (see [`teaming-concurrency-strategy.md`](teaming-concurrency-strategy.md)
 and [`operational-tests-design.md`](operational-tests-design.md)). The live
 VM verification on `v2026.5.16a4` and `v2026.5.16a5` surfaced a methodology
@@ -61,7 +61,7 @@ Three reasons, in priority order:
    block a PR merge. They should produce an actionable runbook hit, not
    bounce a code review.
 
-The existing `kairix probe search` / `kairix probe burst` CLIs are the PVT
+The existing `kairix benchmark run --mode concurrent` / `kairix benchmark run --mode burst` CLIs are the PVT
 toolkit. They were initially framed as "performance gates" but live
 verification showed they measure the Python-pipeline regression surface
 (useful as a regression gate, but not as a production-latency gate). Both
@@ -157,12 +157,12 @@ visible spec but inert.
 
 ## What this displaces
 
-- **`kairix probe search` is NOT the production-latency gate.** Its
+- **`kairix benchmark run --mode concurrent` is NOT the production-latency gate.** Its
   measurement is the Python-pipeline regression surface — useful as a
   regression instrument (catches a change to the fusion logic that
   doubles single-query CPU time), not as a "is production fast enough"
   signal.
-- **`kairix probe burst` is NOT the agent-experienced throughput gate.**
+- **`kairix benchmark run --mode burst` is NOT the agent-experienced throughput gate.**
   Same reason — it runs as a cold CLI subprocess, not a warm MCP client.
   The probe's own first live run produced a 58.7 % qps drop that was
   mostly subprocess cold-start, not real degradation (filed as #283).
@@ -175,7 +175,7 @@ visible spec but inert.
 ## What this preserves
 
 - All existing test layers stay as they are. No deletions.
-- The `kairix probe search/burst` CLIs stay shipped and operator-callable
+- The `kairix benchmark run --mode concurrent`/`--mode burst` CLIs stay shipped and operator-callable
   — they're the Python-pipeline regression gate, plus the PVT toolkit
   the future `MCPHttpSearchClient` plugs into.
 - Existing BDD scenarios are not rewritten. They measure semantic

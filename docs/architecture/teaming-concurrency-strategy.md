@@ -2,7 +2,7 @@
 
 > **Status**: decided. This document records the architectural decision and
 > the reasoning that backs it. Re-open if the measurement instrument
-> (`kairix probe search`) surfaces evidence that contradicts the load-shape
+> (`kairix benchmark run --mode concurrent`) surfaces evidence that contradicts the load-shape
 > assumptions below.
 
 ## Context
@@ -145,7 +145,7 @@ threads in one process is simpler and adequate.
 6. **Rewrite search pipeline in Go**. Wrong tool; saves ms not seconds;
    breaks the Go-only-for-ops scope rule. Don't.
 
-## Decision-making instrument: `kairix probe search`
+## Decision-making instrument: `kairix benchmark run --mode concurrent`
 
 The probe is the architectural decision-making instrument. Before pulling
 ANY Tier 1 lever, the probe must tell us which one matters. Specifically:
@@ -181,7 +181,7 @@ measurement that would tell us.
 
 ## What ships next
 
-1. `kairix probe search` (sequential + concurrent + sweep) — implementation
+1. `kairix benchmark run --mode concurrent` (sequential + concurrent + sweep) — implementation
    tracked by #276 Phase 2. Includes Azure HTTP diagnostics and the
    `--recommend` lever-suggestion output.
 2. After first probe-driven measurement on the live VM: file specific
@@ -195,7 +195,7 @@ measurement that would tell us.
 - [`go-integration-plan.md`](go-integration-plan.md) — the existing Go scope
   rule that this decision is consistent with.
 - [`sre-worker-design.md`](sre-worker-design.md) — the SRE worker that will
-  consume `kairix probe search` on its rotation.
+  consume `kairix benchmark run --mode concurrent` on its rotation.
 - [`operational-tests-design.md`](operational-tests-design.md) — Phase 2 of
   the operational-tests design (where this probe ships).
 - [#276](https://github.com/three-cubes/kairix/issues/276) — operational
