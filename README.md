@@ -3,7 +3,7 @@
 **Give your agents the same knowledge as your team — without giving it away.**
 
 [![Apache 2.0](https://img.shields.io/badge/licence-Apache%202.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-3966_passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-9200%2B_passing-brightgreen)]()
 [![Hit@5](https://img.shields.io/badge/Hit%405-98.5%25-orange)]()
 
 ---

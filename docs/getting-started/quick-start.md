@@ -94,6 +94,26 @@ docker compose exec kairix kairix onboard check --json   # structured — exits 
 
 The output reports one row per check. Every failed check carries a one-line `remediation` string so you can fix forward without grepping logs. The `--json` shape `{passed, total, fully_passed, failures: [{check, detail, remediation}]}` is the canonical signal for any machine consumer.
 
+### A7. Discover your agents (recommended)
+
+If your knowledge store has per-agent subdirectories — for example `04-Agent-Knowledge/<agent>/` per agent — let kairix discover them rather than hand-authoring the config:
+
+```bash
+docker compose exec kairix kairix onboard scan \
+    --memory-root /data/documents/04-Agent-Knowledge \
+    --yaml > agents-block.yaml
+```
+
+Review `agents-block.yaml` — it lists each agent kairix found, the file count, and the most-recent file's date so you can see the proposal is real. Paste the `agents:` block from it into your `kairix.config.yaml`, then validate:
+
+```bash
+docker compose exec kairix kairix doctor agent --all
+```
+
+Doctor reports `ok` per agent when its configured paths exist and contain recent files, `warn` for staleness or fallback synthesis, `error` for missing paths.
+
+Skip this step if you don't have per-agent subdirectories yet — kairix synthesises sensible defaults and you can add the `agents:` block later.
+
 ---
 
 ## Path B — Pip install
