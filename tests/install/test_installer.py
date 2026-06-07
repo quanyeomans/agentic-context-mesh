@@ -26,8 +26,10 @@ from kairix.install.dirs import DirActionReport, DirSpec, specs_for
 from kairix.install.installer import (
     InstallerDeps,
     InstallReport,
+    UninstallReport,
     VerifyReport,
     install,
+    uninstall,
     verify,
 )
 from kairix.install.system_user import SystemUserResult
@@ -291,3 +293,129 @@ def test_verify_returns_not_ok_when_systemd_missing(tmp_path: Path, monkeypatch:
     for d in report.dirs_ok:
         assert d.present is True
     assert report.ok is False, "overall ok must be False when any layer is missing"
+
+
+# ---------------------------------------------------------------------------
+# uninstall() coverage — Plan 1 task 8 surface
+# ---------------------------------------------------------------------------
+
+
+def _seed_user_install_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, Path, Path]:
+    """Pre-create the user-mode install layout under tmp_path via XDG env vars.
+
+    Returns ``(config_dir, data_dir, cache_dir, systemd_target_dir)``
+    so the test body can probe each layer's post-uninstall state.
+    Mirrors what ``install(mode=Mode.user)`` would lay down without
+    invoking systemctl — uninstall is read-only against the install
+    layer, so the seed is enough.
+    """
+    xdg_config = tmp_path / "xdg-config"
+    xdg_data = tmp_path / "xdg-data"
+    xdg_cache = tmp_path / "xdg-cache"
+    xdg_runtime = tmp_path / "xdg-runtime"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_cache))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg_runtime))
+
+    config_dir = xdg_config / "kairix"
+    data_dir = xdg_data / "kairix"
+    cache_dir = xdg_cache / "kairix"
+    systemd_target_dir = tmp_path / "systemd-user"
+
+    for d in (config_dir, data_dir, cache_dir, systemd_target_dir):
+        d.mkdir(parents=True, exist_ok=True)
+
+    (config_dir / "kairix.config.yaml").write_text("# placeholder\n")
+    (systemd_target_dir / "kairix.service").write_text("[Unit]\nDescription=placeholder\n")
+    (data_dir / "marker.txt").write_text("operator data\n")
+
+    return config_dir, data_dir, cache_dir, systemd_target_dir
+
+
+@pytest.mark.unit
+def test_uninstall_user_mode_keep_data_removes_layout_keeps_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default uninstall removes systemd / config / cache; data dir survives.
+
+    Sabotage-proof: change production's ``if keep_data:`` branch to
+    unconditionally ``shutil.rmtree(data)`` and the assertion on
+    ``data_dir.exists()`` flips red. Restored.
+    """
+    config_dir, data_dir, cache_dir, systemd_target_dir = _seed_user_install_layout(tmp_path, monkeypatch)
+    deps = InstallerDeps(systemd_target_dir=systemd_target_dir)
+
+    report = uninstall(mode=Mode.user, keep_data=True, deps=deps)
+
+    assert isinstance(report, UninstallReport)
+    assert report.mode == Mode.user.value
+    assert report.keep_data is True
+
+    removed = set(report.removed)
+    assert str(systemd_target_dir / "kairix.service") in removed
+    assert str(config_dir / "kairix.config.yaml") in removed
+    assert str(cache_dir) in removed
+    assert str(data_dir) in set(report.kept)
+
+    assert not (systemd_target_dir / "kairix.service").exists()
+    assert not (config_dir / "kairix.config.yaml").exists()
+    assert not cache_dir.exists()
+    assert data_dir.exists(), "data dir wrongly removed despite keep_data=True"
+    assert (data_dir / "marker.txt").exists(), "operator data file inside data dir was wrongly removed"
+
+
+@pytest.mark.unit
+def test_uninstall_user_mode_no_keep_data_removes_data_too(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``keep_data=False`` also deletes the data dir and records it in ``removed``.
+
+    Sabotage-proof: change production's ``elif data.exists(): rmtree(data)``
+    branch to a pass-through and the assertion on ``not data_dir.exists()``
+    flips red. Restored.
+    """
+    _config_dir, data_dir, _cache_dir, systemd_target_dir = _seed_user_install_layout(tmp_path, monkeypatch)
+    deps = InstallerDeps(systemd_target_dir=systemd_target_dir)
+
+    report = uninstall(mode=Mode.user, keep_data=False, deps=deps)
+
+    assert report.keep_data is False
+    assert str(data_dir) in set(report.removed)
+    assert report.kept == [], f"kept list should be empty with keep_data=False; got {report.kept}"
+    assert not data_dir.exists()
+
+
+@pytest.mark.unit
+def test_uninstall_idempotent_on_clean_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uninstall against an absent layout exits cleanly with empty removed/kept lists.
+
+    Sabotage-proof: change production's ``if unit_path.exists():`` guard
+    to an unconditional ``unit_path.unlink()`` and this test flips red
+    on the now-raised FileNotFoundError. Restored.
+    """
+    xdg_config = tmp_path / "xdg-config"
+    xdg_data = tmp_path / "xdg-data"
+    xdg_cache = tmp_path / "xdg-cache"
+    xdg_runtime = tmp_path / "xdg-runtime"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(xdg_cache))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg_runtime))
+    systemd_target_dir = tmp_path / "systemd-user"
+    # Intentionally no mkdir on systemd_target_dir — proves the empty path branch.
+
+    deps = InstallerDeps(systemd_target_dir=systemd_target_dir)
+    report = uninstall(mode=Mode.user, keep_data=True, deps=deps)
+
+    assert report.removed == []
+    assert report.kept == []
+    assert report.keep_data is True

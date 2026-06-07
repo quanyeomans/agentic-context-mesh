@@ -1,3 +1,6 @@
+# F45-anchor: this feature is the BDD spec for the `kairix init --system`
+# AND `kairix uninstall --system` CLI subcommands (both register their
+# # F45-feature: override pointer in kairix/cli.py to this file).
 Feature: kairix init --system
   As an operator deploying kairix to a fresh Linux host
   I want `sudo kairix init --system` to create a complete working install

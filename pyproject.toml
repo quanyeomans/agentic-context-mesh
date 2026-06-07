@@ -304,6 +304,15 @@ omit = [
     # CLIs without BDD or integration coverage yet — flagged for backfill.
     # Each will move out of this list when tests land.
     "kairix/knowledge/reflib/cli.py",
+    # Plan 1 task 8 — kairix init / uninstall thin argparse wrappers over
+    # kairix.install.installer. Behaviour proof is in
+    # tests/integration/test_cli_init.py + tests/integration/test_cli_uninstall.py
+    # (subprocess F30 outcome tests). Unit coverage is intentionally
+    # deferred — the wrappers are 100% delegation; the durable behaviour
+    # surface is tests/install/test_installer.py. Same pattern as
+    # kairix/knowledge/reflib/cli.py above.
+    "kairix/install/init_cli.py",
+    "kairix/install/uninstall_cli.py",
     # NOTE: benchmark/cli.py and wikilinks/audit.py removed from omit
     # after PR #247 — tests now exist (tests/benchmark/test_cli_helpers.py
     # and tests/wikilinks/test_audit_unit.py — 63 sabotage-proven tests).

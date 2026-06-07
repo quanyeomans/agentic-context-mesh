@@ -399,3 +399,92 @@ def _verify_user(mode: Mode) -> bool:
     except KeyError:
         return False
     return True
+
+
+@dataclass(frozen=True)
+class UninstallReport:
+    """Outcome of :func:`uninstall`.
+
+    Fields:
+      * ``mode`` — the resolved mode value the uninstall ran in.
+      * ``removed`` — list of absolute paths the uninstaller deleted on
+        this run. Pre-existing absent paths are NOT recorded (idempotent
+        — a re-run reports an empty list, not an error).
+      * ``kept`` — list of absolute paths the uninstaller deliberately
+        left in place (e.g. data dir when ``keep_data=True``).
+      * ``keep_data`` — pass-through of the operator's
+        ``--keep-data`` choice, so the JSON envelope records intent.
+    """
+
+    mode: str
+    removed: list[str]
+    kept: list[str]
+    keep_data: bool
+
+
+def uninstall(
+    *,
+    mode: Mode,
+    keep_data: bool = True,
+    deps: InstallerDeps | None = None,
+) -> UninstallReport:
+    """Remove the kairix install layout. Idempotent; non-destructive by default.
+
+    Removes (in order):
+
+    1. The systemd unit file at the per-mode location.
+    2. The default ``kairix.config.yaml`` file (config dir itself stays
+       in case the operator stored other files there).
+    3. The cache dir (always — caches are regen-able).
+    4. The data dir — only when ``keep_data=False``. Default is to KEEP
+       data so operator state survives the uninstall.
+
+    Never removes the system user / group: that's a destructive op an
+    operator does deliberately via ``userdel kairix`` once they're sure
+    no other state depends on it.
+
+    Args:
+      mode: the install mode whose layout to remove.
+      keep_data: when True (default), leave ``data_dir(mode)`` intact;
+        when False, remove it as well. Cache dir is always removed.
+      deps: same shape as :func:`install` so test paths can override
+        ``systemd_target_dir`` and ``config_target_dir``.
+
+    Returns an :class:`UninstallReport` describing what was removed +
+    what was kept on this run.
+    """
+    deps = deps or InstallerDeps()
+    removed: list[str] = []
+    kept: list[str] = []
+
+    unit_path = _systemd_target_dir(mode, deps) / _UNIT_FILENAME
+    if unit_path.exists():
+        unit_path.unlink()
+        removed.append(str(unit_path))
+
+    config_path = _config_target_dir(mode, deps) / _CONFIG_FILENAME
+    if config_path.exists():
+        config_path.unlink()
+        removed.append(str(config_path))
+
+    from kairix.paths import cache_dir, data_dir
+
+    cache = cache_dir(mode)
+    if cache.exists():
+        shutil.rmtree(cache)
+        removed.append(str(cache))
+
+    data = data_dir(mode)
+    if keep_data:
+        if data.exists():
+            kept.append(str(data))
+    elif data.exists():
+        shutil.rmtree(data)
+        removed.append(str(data))
+
+    return UninstallReport(
+        mode=mode.value,
+        removed=removed,
+        kept=kept,
+        keep_data=keep_data,
+    )

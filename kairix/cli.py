@@ -37,6 +37,8 @@ Subcommands:
   secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
   connect     Operator-only: capture OAuth2 tokens for connectors (Google + GitHub App)
   maintenance Operator surface for ad-hoc maintenance tasks (analyze: refresh planner stats)
+  init        Self-installer: lay down FHS/XDG dir tree, config template, and systemd unit (--system / --user / verify)
+  uninstall   Remove the kairix install layout (--system / --user; --no-keep-data also deletes data dir)
 
 See KAIRIX-ARCHITECTURE.md for architecture, ADRs, and roadmap.
 """
@@ -116,6 +118,10 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "secrets": ("kairix.secrets.cli", "main", True),
     "connect": ("kairix.connect.cli", "main", True),
     "maintenance": ("kairix.core.maintenance.cli", "main", True),
+    # F45-feature: tests/bdd/features/install_user_mode.feature
+    "init": ("kairix.install.init_cli", "main", True),
+    # F45-feature: tests/bdd/features/install_system_mode.feature
+    "uninstall": ("kairix.install.uninstall_cli", "main", True),
 }
 
 

@@ -1,3 +1,5 @@
+# F45-anchor: this feature is the BDD spec for the `kairix init` CLI subcommand
+# (registered in kairix/cli.py with a matching # F45-feature: override pointer).
 Feature: kairix init --user
   As a developer or solo user installing kairix to their own home
   I want `kairix init --user` to install without sudo
