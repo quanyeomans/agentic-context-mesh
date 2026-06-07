@@ -7,8 +7,22 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### New for agents
+
+- **`kairix brief <agent>` returns ~10x faster.** Previously every brief invocation cold-started the embedding model, vector index, and neo4j connection in the CLI process — ~6 seconds per call even when an MCP server was running warm. The CLI now routes text-mode subcommands through the warm MCP server when one is responsive, with byte-identical output. Brief drops to sub-second when the MCP server is warm; cold-fallback to in-process is automatic when MCP is unreachable. Same change benefits search, bootstrap, prep, research, contradict, and timeline.
+- **Agent memory and workspace are now first-class configured surfaces.** Each agent declares its operating directories under `agents:` in `kairix.config.yaml`: memory location, workspace location, file pattern. Search, brief, and memory capture all read every configured surface for the agent — no more hardcoded `/memory` subdir convention. New deployments don't need to author this by hand; `kairix onboard scan` discovers agents on disk and emits a paste-ready config block.
+
+### New for operators
+
+- **`kairix onboard scan` discovers agents on disk and proposes config.** Walks your `agent-knowledge` root, identifies per-agent directories, runs harness detectors (claude-code, codex, generic), cross-references workspace directories, and emits a `kairix.config.yaml` `agents:` block ready to paste. Includes per-agent file counts and most-recent-mtime so you can sanity-check the discovery before committing the config.
+- **`kairix onboard agent --name <agent>` for one-agent setup.** Same discovery, scoped to a single agent. Auto-detects the harness when not specified; accepts explicit `--harness claude-code|codex|generic` and `--memory-path`/`--workspace-path` overrides.
+- **`kairix doctor agent --all` validates configured scopes against disk.** Reports per-agent and per-surface health: missing paths, empty surfaces, staleness (most-recent file older than 30 days), ambiguous globs that match the same file across agents. Exit code 0 when overall=ok, 1 when overall=error; warnings don't break CI.
+- **`kairix caches` reflects the warm MCP server's cache state, not the CLI process.** Previously running `kairix caches` from a shell showed brand-new (size=0, hits=0) singletons because the CLI started a fresh Python process. The CLI now routes through a new `caches_status` MCP tool when MCP is responsive; the envelope includes the MCP process pid and uptime so you can confirm it's the real server. Cold-fallback to in-process collectors stays available with an explicit `NOTE: MCP server not responsive` banner on stderr.
+- **Cold-start envelope is now operator-documented and regression-tested.** When the MCP server is still warming on first boot, requests get HTTP 503 with `Retry-After` and a structured `KAIRIX_COLD_START` envelope. The exact bytes from a production drill are captured in `docs/operations/runbooks/cold-start-envelope-reference.md`; a soak test in `tests/soak/test_cold_start_envelope_visible_on_restart.py` runs nightly to prevent envelope-shape regressions.
+
 ### Retired
 
+- **`agent_memory_path()` and `KAIRIX_AGENT_MEMORY_ROOT` env var.** Both encoded the `<agent>/memory` subdir convention into kairix code in four places. Agent surfaces are now config-driven via the `agents:` block. The `--memory-root` flag on `kairix brief` is also gone — operators declare the memory location once in config and every CLI command reads it consistently.
 - **`kairix probe` and `kairix soak` CLIs.** Both shipped with a deprecation
   notice in v2026.5.18. The CLIs are gone; the underlying Python APIs
   (`kairix.quality.probe.run_probe_search`, `kairix.quality.probe.run_probe_burst`,
@@ -31,6 +45,12 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
   envelopes name the Python API.** The `operator_command` field is now a
   pasteable `python -c '...'` one-liner instead of the retired
   `kairix soak run` / `kairix probe search` / `kairix probe burst` CLIs.
+
+### Configuration migration
+
+1. **Add the `agents:` block to `kairix.config.yaml`.** Easiest path: run `kairix onboard scan --yaml > agents-block.yaml` against your agent-knowledge root, review the generated config, append it to your kairix.config.yaml. The block lists each agent's memory + workspace surfaces explicitly, replacing the implicit `<agent>/memory` subdir convention. Without this block, kairix synthesises a scope from `agent_defaults` and logs one warning per agent at startup.
+2. **Drop `KAIRIX_AGENT_MEMORY_ROOT` from your environment.** No replacement — config is the source of truth.
+3. **Update any scripts using `kairix brief --memory-root PATH`.** The flag is gone; use the `agents.<name>.surfaces` config instead.
 
 ## [2026.6.2a2] - 2026-06-02 — Search reads more sources by default, three connector fixes
 
