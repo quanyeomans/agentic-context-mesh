@@ -111,12 +111,15 @@ def test_missing_entry_synthesises_memory_only_when_workspace_absent(
     assert scope.surfaces[0].label == "memory"
 
 
-# Sabotage-proof: removed the "no defaults" ValueError so the fall-through
-# returned an empty AgentScope → pytest.raises saw nothing; test failed;
-# restored.
-def test_missing_entry_and_missing_defaults_raises_value_error(tmp_path: Path) -> None:
-    """No explicit entry AND no ``agent_defaults`` block → ValueError with
-    an actionable message so the operator can recover (the message names
-    the agent and points at the missing config sections)."""
-    with pytest.raises(ValueError, match="ghost"):
-        get_agent_scope("ghost", config={}, document_root=tmp_path)
+# Sabotage-proof (executed): broke the document_root fallback path → the
+# returned scope's surface pointed at the wrong path; assertion failed; restored.
+def test_missing_entry_and_missing_defaults_falls_back_to_document_root(
+    tmp_path: Path,
+) -> None:
+    """No explicit entry AND no ``agent_defaults`` block → built-in fallback
+    to ``{document_root}/04-Agent-Knowledge/<name>`` so kairix works
+    out-of-the-box without explicit config. The operator still sees a
+    warning naming the agent + onboard command for committing explicit config."""
+    scope = get_agent_scope("ghost", config={}, document_root=tmp_path)
+    assert len(scope.surfaces) == 1
+    assert scope.surfaces[0].path == tmp_path / "04-Agent-Knowledge" / "ghost"

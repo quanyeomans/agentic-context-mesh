@@ -42,7 +42,7 @@ def _format_mtime(mtime: float | None) -> str:
     no .md files were found in the scope."""
     if mtime is None:
         return "never"
-    return _dt.datetime.fromtimestamp(mtime, tz=_dt.UTC).date().isoformat()
+    return _dt.datetime.fromtimestamp(mtime, tz=_dt.timezone.utc).date().isoformat()
 
 
 def render_scopes_as_yaml(scopes: tuple[ProposedScope, ...]) -> str:

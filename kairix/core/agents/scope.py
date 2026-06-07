@@ -182,29 +182,48 @@ def get_agent_scope(
       2. ``agent_defaults`` block present → synthesise a scope and emit a
          one-line ``logger.warning`` so operators see the drift and can
          commit explicit config via ``kairix onboard agent --name <name>``.
-      3. Neither present → ``ValueError`` with an actionable message.
+      3. Neither present → fall back to ``{document_root}/04-Agent-Knowledge/<name>``
+         (the conventional layout) so kairix works out-of-the-box on
+         fresh deployments without explicit config.
 
-    ``config`` and ``document_root`` are test seams; production callers will
-    leave them ``None`` once PR 1.2 wires this resolver into the boundary
-    helpers (PR 1.1 ships the abstraction only — there are no production
-    callsites yet).
+    ``config`` and ``document_root`` are test seams; production callers
+    leave them ``None`` and the resolver reads ``kairix.config.yaml``
+    and ``kairix.paths.document_root()`` respectively.
     """
-    _ = document_root  # reserved for PR 1.2 (relative-path resolution)
     scopes = load_agent_scopes(config) if config is not None else {}
     if name in scopes:
         return scopes[name]
 
     defaults = (config or {}).get("agent_defaults") if config is not None else None
-    if not isinstance(defaults, dict) or not defaults:
-        raise ValueError(
-            f"No agents.{name} entry and no agent_defaults block — "
-            f"add agents.{name} or agent_defaults.memory_root in kairix.config.yaml"
+    if isinstance(defaults, dict) and defaults:
+        logger.warning(
+            "No explicit agents.%s entry — synthesising scope from agent_defaults; "
+            "run `kairix onboard agent --name %s` to commit explicit config",
+            name,
+            name,
         )
+        return _synthesise_from_defaults(name, defaults)
 
+    if document_root is None:
+        from kairix.paths import document_root as _doc_root
+
+        document_root = _doc_root()
     logger.warning(
-        "No explicit agents.%s entry — synthesising scope from agent_defaults; "
-        "run `kairix onboard agent --name %s` to commit explicit config",
+        "No explicit agents.%s entry and no agent_defaults block — using built-in "
+        "default at %s/04-Agent-Knowledge/%s. Run `kairix onboard agent --name %s` "
+        "to commit explicit config.",
+        name,
+        document_root,
         name,
         name,
     )
-    return _synthesise_from_defaults(name, defaults)
+    return AgentScope(
+        name=name,
+        surfaces=(
+            AgentSurface(
+                path=Path(document_root) / "04-Agent-Knowledge" / name,
+                glob="**/*.md",
+                label="memory",
+            ),
+        ),
+    )

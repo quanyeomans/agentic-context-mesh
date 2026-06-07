@@ -301,25 +301,36 @@ def test_missing_entry_synthesises_memory_only_when_workspace_absent(
     assert scope.surfaces[0].label == "memory"
 
 
-# Sabotage-proof (executed): removed the "no defaults" ValueError so the
-# fall-through returned an empty AgentScope → pytest.raises saw nothing;
-# test failed; restored.
-def test_missing_entry_and_missing_defaults_raises_value_error(tmp_path: Path) -> None:
-    """No explicit entry AND no ``agent_defaults`` block → ValueError with
-    an actionable message so the operator can recover (the message names
-    the agent and points at the missing config sections)."""
-    with pytest.raises(ValueError, match="ghost"):
-        get_agent_scope("ghost", config={}, document_root=tmp_path)
+# Sabotage-proof (executed): broke the built-in-default fallback to
+# return an empty scope → assertion on surface path failed; restored.
+def test_missing_entry_and_missing_defaults_falls_back_to_document_root(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No explicit entry AND no ``agent_defaults`` block → built-in fallback
+    to ``{document_root}/04-Agent-Knowledge/<name>`` so kairix works
+    out-of-the-box without explicit config. A warning names the agent and
+    points at the onboard command for committing explicit config."""
+    with caplog.at_level(logging.WARNING, logger="kairix.core.agents.scope"):
+        scope = get_agent_scope("ghost", config={}, document_root=tmp_path)
+    assert len(scope.surfaces) == 1
+    assert scope.surfaces[0].path == tmp_path / "04-Agent-Knowledge" / "ghost"
+    assert scope.surfaces[0].label == "memory"
+    assert any("ghost" in rec.message for rec in caplog.records)
 
 
-# Sabotage-proof (executed): changed the `if config is None` guard to
-# `if config is not None` (inverted) → the test passed because the
-# fallback raised but with wrong message; restored.
-def test_get_agent_scope_with_none_config_raises_value_error(tmp_path: Path) -> None:
+# Sabotage-proof (executed): swapped the document_root parameter to None so
+# the fallback would crash → built-in-default path differed; restored.
+def test_get_agent_scope_with_none_config_falls_back_to_document_root(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """``config=None`` is the no-config-file signal. With no agents entry +
-    no defaults, the resolver must raise ValueError with the agent name."""
-    with pytest.raises(ValueError, match="phantom"):
-        get_agent_scope("phantom", config=None, document_root=tmp_path)
+    no defaults, the resolver falls back to the document_root-based default
+    so deployments without an explicit ``kairix.config.yaml`` still work."""
+    with caplog.at_level(logging.WARNING, logger="kairix.core.agents.scope"):
+        scope = get_agent_scope("phantom", config=None, document_root=tmp_path)
+    assert len(scope.surfaces) == 1
+    assert scope.surfaces[0].path == tmp_path / "04-Agent-Knowledge" / "phantom"
+    assert any("phantom" in rec.message for rec in caplog.records)
 
 
 # Sabotage-proof (executed): changed the `_synthesise_from_defaults` body to

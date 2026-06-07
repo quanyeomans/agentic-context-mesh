@@ -21,6 +21,7 @@ from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
+from kairix.core.agents.scope import AgentScope
 from kairix.core.search.bm25 import FTS_STOP_WORDS as _STOP_WORDS
 from kairix.core.temporal.chunker import TemporalChunk, chunk_board, chunk_memory_log
 from kairix.paths import boards_dir_override as _boards_dir_override
@@ -71,6 +72,29 @@ def _date_in_range(log_date: date, start: date | None, end: date | None) -> bool
     return True
 
 
+def _iter_configured_scope_memory_dirs(scopes: dict[str, AgentScope]) -> Iterator[Path]:
+    """Yield every existing memory path across the configured scopes."""
+    for scope in scopes.values():
+        for path in scope.memory_paths():
+            if path.is_dir():
+                yield path
+
+
+def _iter_fallback_agent_memory_dirs() -> Iterator[Path]:
+    """Yield every agent subdirectory under ``{document_root}/04-Agent-Knowledge/``.
+
+    The built-in fallback when no ``agents:`` block is configured.
+    """
+    from kairix.paths import document_root
+
+    agent_knowledge = document_root() / "04-Agent-Knowledge"
+    if not agent_knowledge.is_dir():
+        return
+    for agent_dir in agent_knowledge.iterdir():
+        if agent_dir.is_dir():
+            yield agent_dir
+
+
 def _iter_scope_memory_dirs(config: dict[str, object] | None) -> Iterator[Path]:
     """Yield every memory surface declared in the parsed ``agents:`` config.
 
@@ -80,14 +104,19 @@ def _iter_scope_memory_dirs(config: dict[str, object] | None) -> Iterator[Path]:
     vault layouts and multi-surface scopes (memory + workspace) are
     both honoured. Surfaces that don't exist on disk are skipped so
     a partially-onboarded scope doesn't break the temporal index.
+
+    Fallback: when no ``agents:`` block is configured, scan every
+    subdirectory under ``{document_root}/04-Agent-Knowledge/`` — this
+    matches the built-in default ``get_agent_scope`` synthesises and
+    keeps the temporal index working out-of-the-box on fresh deployments.
     """
     from kairix.core.agents.scope import load_agent_scopes
 
     scopes = load_agent_scopes(config)
-    for scope in scopes.values():
-        for path in scope.memory_paths():
-            if path.is_dir():
-                yield path
+    if scopes:
+        yield from _iter_configured_scope_memory_dirs(scopes)
+        return
+    yield from _iter_fallback_agent_memory_dirs()
 
 
 def _load_top_level_config() -> dict[str, object] | None:
