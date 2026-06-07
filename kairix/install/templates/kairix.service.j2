@@ -1,0 +1,23 @@
+[Unit]
+Description=Kairix - private knowledge retrieval for AI agents (mode={{ mode }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+{{ user_directive }}
+ExecStart={{ kairix_bin }} mcp serve --transport http
+Environment=KAIRIX_CONFIG_PATH={{ config_path }}
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/kairix /var/cache/kairix /var/log/kairix
+PrivateTmp=true
+
+[Install]
+WantedBy={% if mode == 'system' %}multi-user.target{% else %}default.target{% endif %}

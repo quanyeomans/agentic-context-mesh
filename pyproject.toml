@@ -444,6 +444,12 @@ include = ["kairix*"]
 "kairix.core.facts.prompts" = [
     "*.txt",
 ]
+# Plan 1 task 6 ships the systemd unit template as package data so
+# ``kairix.install.systemd.render_unit`` can load it via jinja2's
+# ``PackageLoader`` from both source checkouts and installed wheels.
+"kairix.install" = [
+    "templates/*.j2",
+]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.
 # E2E test gate: set KAIRIX_E2E=1 to enable live Azure API tests.
