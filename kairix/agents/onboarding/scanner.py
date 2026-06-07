@@ -183,6 +183,38 @@ def _augment_with_workspace(
     return _dedupe_surfaces((*surfaces, addition))
 
 
+def _run_detectors(
+    agent_name: str,
+    candidate_root: Path,
+    detectors: tuple[HarnessDetector, ...],
+) -> tuple[str | None, list[AgentSurface]]:
+    """Iterate every detector, return (chosen_harness, aggregated surfaces).
+
+    Harness attribution prefers the first non-generic detector that matched.
+    """
+    chosen_harness: str | None = None
+    aggregated: list[AgentSurface] = []
+    for detector in detectors:
+        proposed = detector.propose_surfaces(agent_name, candidate_root)
+        if not proposed:
+            continue
+        if chosen_harness is None or (chosen_harness == _GENERIC_HARNESS and detector.name != _GENERIC_HARNESS):
+            chosen_harness = detector.name
+        aggregated.extend(proposed)
+    return chosen_harness, aggregated
+
+
+def _build_md_fallback(candidate_root: Path) -> list[AgentSurface] | None:
+    """Return a single low-confidence ``memory`` surface when no detector
+    matched but the directory carries ``.md`` content; ``None`` otherwise.
+    """
+    if not candidate_root.is_dir():
+        return None
+    if not any(candidate_root.rglob("*.md")):
+        return None
+    return [AgentSurface(path=candidate_root, glob="**/*.md", label="memory")]
+
+
 def _propose_for_candidate(
     *,
     agent_name: str,
@@ -199,28 +231,14 @@ def _propose_for_candidate(
     proposals fall through to the .md-file fallback so directories
     containing markdown still surface as a "low confidence" entry.
     """
-    chosen_harness: str | None = None
-    aggregated: list[AgentSurface] = []
-    for detector in detectors:
-        proposed = detector.propose_surfaces(agent_name, candidate_root)
-        if not proposed:
-            continue
-        if chosen_harness is None or (chosen_harness == _GENERIC_HARNESS and detector.name != _GENERIC_HARNESS):
-            chosen_harness = detector.name
-        aggregated.extend(proposed)
+    chosen_harness, aggregated = _run_detectors(agent_name, candidate_root, detectors)
 
     fallback_used = False
     if not aggregated:
-        # No detector matched. If the directory carries .md content the
-        # operator probably wants a baseline proposal anyway — emit
-        # one with the generic harness label + low confidence.
-        if not candidate_root.is_dir():
+        fallback = _build_md_fallback(candidate_root)
+        if fallback is None:
             return None
-        if not any(candidate_root.rglob("*.md")):
-            return None
-        aggregated.append(
-            AgentSurface(path=candidate_root, glob="**/*.md", label="memory"),
-        )
+        aggregated = fallback
         chosen_harness = _GENERIC_HARNESS
         fallback_used = True
 

@@ -370,3 +370,83 @@ def test_discover_single_agent_detectors_kwarg_seam(tmp_path: Path) -> None:
         detectors=(GenericDetector(),),
     )
     assert scope.harness == "generic"
+
+
+# ---------------------------------------------------------------------------
+# Coverage for the detector-aggregation + md-fallback branches inside
+# _propose_for_candidate (the helpers extracted to satisfy F16).
+# Tests drive through the public scan_for_agents / discover_single_agent
+# surface — F24-clean (no internal-name imports).
+# ---------------------------------------------------------------------------
+
+
+# Sabotage-proof (executed): collapsed the harness-upgrade conditional in
+# _run_detectors to `if chosen_harness is None:` → discover_single_agent
+# returned harness="generic" instead of "claude-code"; test failed; restored.
+def test_discover_upgrades_harness_from_generic_to_specific(tmp_path: Path) -> None:
+    """When generic matches FIRST and a specific detector matches SECOND,
+    harness attribution upgrades to the specific one. Driven through the
+    public detectors-kwarg seam on discover_single_agent."""
+    candidate = tmp_path / "agent-alpha"
+    candidate.mkdir()
+    (candidate / "Board.md").write_text("# b")
+    (candidate / "CLAUDE.md").write_text("# c")
+
+    # Generic FIRST, claude-code SECOND — exercises the upgrade branch.
+    scope = discover_single_agent(
+        "agent-alpha",
+        memory_root=tmp_path,
+        detectors=(GenericDetector(), ClaudeCodeDetector()),
+    )
+    assert scope.harness == "claude-code"
+
+
+# Sabotage-proof (executed): forced _build_md_fallback to always return None
+# → discover_single_agent raised ValueError instead of returning a
+# low-confidence proposal; test failed; restored.
+def test_discover_md_fallback_proposes_when_no_detector_matches(tmp_path: Path) -> None:
+    """With ONLY a non-matching detector and .md content present, the
+    md-fallback path produces a low-confidence generic memory surface."""
+    candidate = tmp_path / "agent-alpha"
+    candidate.mkdir()
+    (candidate / "random-notes.md").write_text("hi")  # no harness markers
+
+    # Empty detector tuple — nothing matches → fallback path exercised.
+    scope = discover_single_agent(
+        "agent-alpha",
+        memory_root=tmp_path,
+        detectors=(),
+    )
+    assert scope.harness == "generic"
+    assert any(s.label == "memory" and s.path == candidate for s in scope.surfaces)
+
+
+# Sabotage-proof (executed): made _build_md_fallback return [surface] for
+# missing dirs → discover_single_agent returned a phantom scope instead of
+# raising; test failed; restored.
+def test_discover_md_fallback_raises_for_missing_dir(tmp_path: Path) -> None:
+    """Non-existent agent directory with no detectors → ValueError (no
+    fallback proposal because there's nothing to propose against)."""
+    with pytest.raises(ValueError):
+        discover_single_agent(
+            "agent-doesnotexist",
+            memory_root=tmp_path,
+            detectors=(),
+        )
+
+
+# Sabotage-proof (executed): made _build_md_fallback skip the no-md check
+# → discover_single_agent returned a low-confidence scope for an empty dir
+# instead of raising; test failed; restored.
+def test_discover_md_fallback_raises_for_dir_without_md(tmp_path: Path) -> None:
+    """Empty dir (no .md files) with no detectors → ValueError."""
+    empty = tmp_path / "empty-agent"
+    empty.mkdir()
+    (empty / "notes.txt").write_text("not markdown")
+
+    with pytest.raises(ValueError):
+        discover_single_agent(
+            "empty-agent",
+            memory_root=tmp_path,
+            detectors=(),
+        )

@@ -123,7 +123,9 @@ def scope_to_envelope(scope: ProposedScope) -> dict[str, object]:
     }
 
 
-def cmd_scan(args: argparse.Namespace) -> int:
+def cmd_scan(
+    args: argparse.Namespace,
+) -> int:  # NOSONAR S3516 — int return matches the CLI exit-code convention used by every other kairix subcommand; scan_for_agents never raises so every branch returns 0, but the dispatcher contract is "return an exit code", not "return None".
     """Execute ``kairix onboard scan``."""
     memory_root = Path(args.memory_root)
     workspace_root = Path(args.workspace_root) if args.workspace_root else None

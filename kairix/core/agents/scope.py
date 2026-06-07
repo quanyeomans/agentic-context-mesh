@@ -40,6 +40,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Default glob applied to every AgentSurface when the config (or default
+# synthesis) doesn't override it. Centralised here so the four call sites
+# (dataclass default, loader fallback, defaults synthesis, document-root
+# fallback) stay in lockstep.
+_DEFAULT_GLOB = "**/*.md"
+
 
 @dataclass(frozen=True)
 class AgentSurface:
@@ -54,7 +60,7 @@ class AgentSurface:
     """
 
     path: Path
-    glob: str = "**/*.md"
+    glob: str = _DEFAULT_GLOB
     label: str = ""
 
 
@@ -104,7 +110,7 @@ def _build_surface(entry: object, agent_name: str) -> AgentSurface:
         raise ValueError(f"agents.{agent_name}.surfaces[*] is missing required 'path' field")
     return AgentSurface(
         path=Path(str(raw_path)),
-        glob=str(entry.get("glob") or "**/*.md"),
+        glob=str(entry.get("glob") or _DEFAULT_GLOB),
         label=str(entry.get("label") or ""),
     )
 
@@ -154,7 +160,7 @@ def _synthesise_from_defaults(name: str, defaults: dict[str, object]) -> AgentSc
     when the directory exists on disk — operators with no workspace tree
     shouldn't see a phantom surface).
     """
-    glob = str(defaults.get("glob") or "**/*.md")
+    glob = str(defaults.get("glob") or _DEFAULT_GLOB)
     memory_root = defaults.get("memory_root")
     workspace_root = defaults.get("workspace_root")
 
@@ -222,7 +228,7 @@ def get_agent_scope(
         surfaces=(
             AgentSurface(
                 path=Path(document_root) / "04-Agent-Knowledge" / name,
-                glob="**/*.md",
+                glob=_DEFAULT_GLOB,
                 label="memory",
             ),
         ),
