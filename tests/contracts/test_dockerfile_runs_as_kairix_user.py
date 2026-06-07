@@ -5,16 +5,14 @@ Plan reference: ``2026-06-07-2-unified-container-supervisor.md`` (Plan 2 C1).
 Two regression guards on the Dockerfile shape:
 
 * :func:`test_dockerfile_declares_user_kairix` — the runtime stage must end
-  with a ``USER kairix`` directive. Today the Dockerfile runs as root (KF-4);
-  Task 3 of Plan 2 lands the directive.
+  with a ``USER kairix`` directive (KF-4 regression guard).
 * :func:`test_dockerfile_creates_kairix_user_with_uid_995` — the kairix user
   must be created with ``--uid 995`` and ``--gid 985`` so bind-mounted files
   land on the host with the correct ownership (matches the host convention
   used across the deployed fleet).
 
-Both are decorated ``@pytest.mark.xfail(strict=False)`` until Plan 2 Task 3
-lands the Dockerfile refactor — the impl agent removes the decorator inline
-as the production change flips each path from RED to GREEN.
+Both flipped GREEN after Plan 2 Task 3 landed the Dockerfile refactor; the
+xfail decorators were removed in Plan 2 Task 7 (close-out).
 """
 
 from __future__ import annotations
@@ -38,14 +36,10 @@ def _dockerfile_text() -> str:
 
 
 @pytest.mark.contract
-@pytest.mark.xfail(
-    reason="RED today; will GREEN after Plan 2 Task 3 (Dockerfile refactor)",
-    strict=False,
-)
 def test_dockerfile_declares_user_kairix() -> None:
-    """RED today (Dockerfile has no USER directive — runs as root).
+    """The Dockerfile MUST end with ``USER kairix`` (KF-4 regression guard).
 
-    GREEN after Task 3 lands ``USER kairix``.
+    Plan 2 Task 3 landed the directive; this test pins it.
     """
     content = _dockerfile_text()
     assert re.search(r"^USER\s+kairix\s*$", content, re.MULTILINE), (
@@ -54,10 +48,6 @@ def test_dockerfile_declares_user_kairix() -> None:
 
 
 @pytest.mark.contract
-@pytest.mark.xfail(
-    reason="RED today; will GREEN after Plan 2 Task 3 (Dockerfile refactor)",
-    strict=False,
-)
 def test_dockerfile_creates_kairix_user_with_uid_995() -> None:
     """The UID must be 995 and GID 985 to match host convention.
 

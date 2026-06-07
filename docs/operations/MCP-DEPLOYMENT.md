@@ -14,6 +14,14 @@ Kairix supports three transports. Pick one per deployment:
 
 Streamable HTTP (the `/mcp` endpoint) is the recommended transport going forward. It's stateless per request, requires no session keep-alive, and survives gateway timeouts that historically broke `/sse` deployments. SSE remains mounted on the same port for any client that hasn't switched yet.
 
+## Container model
+
+The Docker image is a single unified container that runs both the MCP api process and the background worker as supervised siblings under [s6-overlay](https://github.com/just-containers/s6-overlay) v3. The container's pid 1 is the s6 supervisor; the two child processes are `kairix mcp serve --transport http` (the api) and `kairix worker run` (the worker). s6 forwards signals, restarts a crashed child on the spot, and routes each child's stdout/stderr to `docker logs` with a per-service prefix.
+
+Operationally this means `docker compose ps` lists two services — `kairix` (api + worker together) and `neo4j` — instead of three. Memory limits are folded into the unified service: the compose default is `memory: 4g` for the kairix container (was 3g for api + 1g for worker).
+
+The container runs as the `kairix` system user (uid `995`, gid `985`) — **not root**. Files written to bind-mounted host volumes (`/var/lib/kairix`, `/var/cache/kairix`) land owned by `kairix:kairix` on the host, matching the convention used by the systemd / pip-install path. Pre-existing host volumes that were written by an older root-owned image need a one-time `chown -R 995:985 <path>` after upgrade so the new container can read/write them.
+
 ## Run
 
 ```bash

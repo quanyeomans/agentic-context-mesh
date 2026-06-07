@@ -1,14 +1,26 @@
 """pytest-bdd loader for ``unified_container.feature``.
 
-Plan 2 Task 1 — wires the unified-container BDD feature into the
-pytest-bdd collector. Each scenario is tagged ``@future`` in the
-.feature file and bound here with ``@pytest.mark.skip`` so the
-collection succeeds and safe-commit stays green; the skip reasons
-follow the F21 affordance template (fix / next / run markers) and
-point at the subsequent Plan 2 tasks that land each implementation.
+Plan 2 (unified container) is fully landed: the Dockerfile declares
+``USER kairix`` uid 995, the s6 service definitions exist, and the
+``docker-compose.yml`` ships two services (was three). The scenarios in
+``unified_container.feature`` describe *current* deployment behaviour
+(tag flipped from ``@future`` to ``@current``).
 
-Step bodies will land alongside Tasks 2-6; this module only enrols
-the scenarios for collection today.
+Why the scenarios stay decorated with ``@pytest.mark.skip``: each
+scenario asserts a runtime fact about a live container (`docker compose
+up -d`, `docker exec ... ps -ef`, `docker exec ... id`, SIGTERM
+behaviour). Those facts need a real Docker daemon and a built image to
+verify — the assertions belong in the integration tier, not the BDD
+collector. The equivalent assertion battery runs in
+``tests/integration/test_container_supervisor.py`` (Plan 2 Task 5),
+which builds the image, runs ``docker compose up -d --wait``, and
+checks the supervisor + uid + process-list invariants against the live
+container.
+
+This file keeps the BDD scenarios discoverable so the feature reads as
+the canonical user-facing description of the unified-container
+contract, while delegating the actual mechanical proof to the
+integration tier where ``docker`` is available.
 """
 
 from pathlib import Path
@@ -18,78 +30,103 @@ from pytest_bdd import scenario
 
 FEATURE = str(Path(__file__).parent / "features" / "unified_container.feature")
 
-# F11 rationale lives inline on each @pytest.mark.skip(reason=...) decorator
-# below — the check_test_skip_rationale.py gate requires a literal string
-# at the call site. Each reason follows the F21 template (fix / next / run
-# markers) so a developer running the test sees the affordance without
-# leaving the file.
+# F11 rationale: each @pytest.mark.skip(reason=...) below points at the
+# integration test that asserts the same invariant against a live
+# container. Skips follow the F21 affordance template (fix / next / run
+# markers) so a developer reading the test sees the path to verifying
+# the invariant without leaving the file.
 
 
 @pytest.mark.bdd
 @pytest.mark.skip(
     reason=(
-        "future — Plan 2 Task 4; docker-compose refactor drops kairix-worker. "
-        "fix: refactor docker-compose.yml so `docker compose ps` reports 2 services per Plan 2 Task 4. "
-        "next: drop the @pytest.mark.skip once the compose refactor lands. "
-        "run: bash scripts/safe-commit.sh after the body lands."
+        "requires docker daemon to verify `docker compose up -d` + `docker compose ps` output. "
+        "fix: assertion runs in tests/integration/test_container_supervisor.py (Plan 2 Task 5) "
+        "which builds the image and checks the live 2-service compose shape. "
+        "next: drop the skip once the BDD tier wires a docker fixture (Plan 2 follow-up). "
+        "run: pytest tests/integration/test_container_supervisor.py -v (requires docker)."
     )
 )
 @scenario(FEATURE, "docker compose up brings up 2 services (was 3)")
 def test_docker_compose_up_brings_up_two_services():
-    """Body populated by @scenario from the .feature file (skipped — Plan 2 Task 4)."""
+    """Body populated by @scenario from the .feature file.
+
+    Skipped at the BDD tier because the assertion needs a live Docker
+    daemon — the equivalent integration test runs the proof.
+    """
 
 
 @pytest.mark.bdd
 @pytest.mark.skip(
     reason=(
-        "future — Plan 2 Tasks 2 + 3; s6 service definitions + Dockerfile refactor. "
-        "fix: land s6 services per Plan 2 Task 2 and the multi-stage Dockerfile per Plan 2 Task 3. "
-        "next: drop the @pytest.mark.skip once the unified image builds. "
-        "run: bash scripts/safe-commit.sh after the body lands."
+        "requires docker daemon to inspect process list inside the running container. "
+        "fix: assertion runs in tests/integration/test_container_supervisor.py (Plan 2 Task 5) "
+        "which builds the image and asserts s6-supervisor + kairix-api + kairix-worker visible in ps -ef. "
+        "next: drop the skip once the BDD tier wires a docker fixture (Plan 2 follow-up). "
+        "run: pytest tests/integration/test_container_supervisor.py -v (requires docker)."
     )
 )
 @scenario(FEATURE, "kairix container runs both api + worker via s6")
 def test_kairix_container_runs_both_api_and_worker_via_s6():
-    """Body populated by @scenario from the .feature file (skipped — Plan 2 Tasks 2 + 3)."""
+    """Body populated by @scenario from the .feature file.
+
+    Skipped at the BDD tier because the assertion needs a live Docker
+    daemon — the equivalent integration test runs the proof.
+    """
 
 
 @pytest.mark.bdd
 @pytest.mark.skip(
     reason=(
-        "future — Plan 2 Task 3; Dockerfile declares USER kairix uid 995. "
-        "fix: land the Dockerfile refactor per Plan 2 Task 3 (groupadd 985 + useradd 995 + USER kairix). "
-        "next: drop the @pytest.mark.skip once the unified image runs as uid 995. "
-        "run: bash scripts/safe-commit.sh after the body lands."
+        "requires docker daemon to run `docker exec <container> id`. "
+        "fix: assertion runs in tests/integration/test_container_supervisor.py (Plan 2 Task 5) "
+        "which builds the image and asserts uid=995 inside the running container. "
+        "next: drop the skip once the BDD tier wires a docker fixture (Plan 2 follow-up). "
+        "run: pytest tests/integration/test_container_supervisor.py -v (requires docker)."
     )
 )
 @scenario(FEATURE, "Container runs as the kairix user (uid 995)")
 def test_container_runs_as_kairix_user_uid_995():
-    """Body populated by @scenario from the .feature file (skipped — Plan 2 Task 3)."""
+    """Body populated by @scenario from the .feature file.
+
+    Skipped at the BDD tier because the assertion needs a live Docker
+    daemon — the equivalent integration test runs the proof.
+    """
 
 
 @pytest.mark.bdd
 @pytest.mark.skip(
     reason=(
-        "future — Plan 2 Tasks 3 + 5; ownership of bind-mounted volumes. "
-        "fix: land Dockerfile USER kairix per Plan 2 Task 3 and integration test per Plan 2 Task 5. "
-        "next: drop the @pytest.mark.skip once the unified image writes files as 995:985. "
-        "run: bash scripts/safe-commit.sh after the body lands."
+        "requires docker daemon and a host bind mount to check file ownership on the host volume. "
+        "fix: assertion runs in tests/integration/test_container_supervisor.py (Plan 2 Task 5) "
+        "which writes to a bind-mounted volume and stats the resulting file's uid/gid. "
+        "next: drop the skip once the BDD tier wires a docker fixture with a bind mount (Plan 2 follow-up). "
+        "run: pytest tests/integration/test_container_supervisor.py -v (requires docker)."
     )
 )
 @scenario(FEATURE, "Files written to the volume land as kairix:kairix on host")
 def test_files_written_to_volume_land_as_kairix_on_host():
-    """Body populated by @scenario from the .feature file (skipped — Plan 2 Tasks 3 + 5)."""
+    """Body populated by @scenario from the .feature file.
+
+    Skipped at the BDD tier because the assertion needs a live Docker
+    daemon — the equivalent integration test runs the proof.
+    """
 
 
 @pytest.mark.bdd
 @pytest.mark.skip(
     reason=(
-        "future — Plan 2 Tasks 2 + 5; s6 signal forwarding + graceful shutdown integration test. "
-        "fix: land s6 finish scripts per Plan 2 Task 2 and the SIGTERM integration test per Plan 2 Task 5. "
-        "next: drop the @pytest.mark.skip once docker stop drains both processes within 30s. "
-        "run: bash scripts/safe-commit.sh after the body lands."
+        "requires docker daemon to deliver SIGTERM via `docker stop` and observe exit codes. "
+        "fix: assertion runs in tests/integration/test_container_supervisor.py (Plan 2 Task 5) "
+        "which runs `docker stop` and asserts both processes exit within 30s. "
+        "next: drop the skip once the BDD tier wires a docker fixture (Plan 2 follow-up). "
+        "run: pytest tests/integration/test_container_supervisor.py -v (requires docker)."
     )
 )
 @scenario(FEATURE, "SIGTERM to the container shuts both processes gracefully")
 def test_sigterm_to_container_shuts_both_processes_gracefully():
-    """Body populated by @scenario from the .feature file (skipped — Plan 2 Tasks 2 + 5)."""
+    """Body populated by @scenario from the .feature file.
+
+    Skipped at the BDD tier because the assertion needs a live Docker
+    daemon — the equivalent integration test runs the proof.
+    """
