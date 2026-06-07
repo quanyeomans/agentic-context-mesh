@@ -274,3 +274,19 @@ def test_module_main_guard_imports_cleanly(tmp_path: Path) -> None:
         importlib.reload(sys.modules["kairix.agents.onboarding.cli"])
     assert out.getvalue() == ""
     assert err.getvalue() == ""
+
+
+# Sabotage-proof (executed): swapped the empty-scope return to `return 0` →
+# the rc == 1 assertion failed because empty scan silently returned 0; restored.
+def test_cmd_scan_returns_one_on_empty_discovery(tmp_path: Path) -> None:
+    """cmd_scan returns exit 1 when no agents are discovered — the
+    actionable signal that the memory_root is misconfigured (otherwise
+    pipelines could silently produce empty config blocks).
+    """
+    empty = tmp_path / "empty-memory"
+    empty.mkdir()
+    args = _ns(memory_root=str(empty))
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = cmd_scan(args)
+    assert rc == 1

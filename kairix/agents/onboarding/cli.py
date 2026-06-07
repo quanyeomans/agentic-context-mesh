@@ -123,10 +123,16 @@ def scope_to_envelope(scope: ProposedScope) -> dict[str, object]:
     }
 
 
-def cmd_scan(
-    args: argparse.Namespace,
-) -> int:  # NOSONAR S3516 — int return matches the CLI exit-code convention used by every other kairix subcommand; scan_for_agents never raises so every branch returns 0, but the dispatcher contract is "return an exit code", not "return None".
-    """Execute ``kairix onboard scan``."""
+def cmd_scan(args: argparse.Namespace) -> int:
+    """Execute ``kairix onboard scan``.
+
+    Returns 0 when scopes were discovered, 1 when the scan returned an
+    empty result (operator-actionable signal: the memory_root contains no
+    agent-shaped subdirectories, so the proposed config block would be
+    empty). The non-trivial return value lets pipelines fail-fast on
+    misconfigured discovery roots instead of silently producing empty
+    config blocks.
+    """
     memory_root = Path(args.memory_root)
     workspace_root = Path(args.workspace_root) if args.workspace_root else None
     scopes = scan_for_agents(memory_root=memory_root, workspace_root=workspace_root)
@@ -137,14 +143,12 @@ def cmd_scan(
             "error": "",
         }
         print(json.dumps(envelope, indent=2))
-        return 0
-
-    if args.as_yaml:
+    elif args.as_yaml:
         print(render_scopes_as_yaml(scopes), end="")
-        return 0
+    else:
+        print(render_validation_report(scopes), end="")
 
-    print(render_validation_report(scopes), end="")
-    return 0
+    return 0 if scopes else 1
 
 
 def cmd_agent(args: argparse.Namespace) -> int:
