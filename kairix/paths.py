@@ -17,11 +17,85 @@ import os
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+class Mode(str, Enum):
+    """Path-resolution mode for the kairix self-installer (Plan 1).
+
+    Three modes carve the FHS/XDG path table into distinct prefixes so a
+    single ``pip install`` + ``kairix init`` flow can lay down a working
+    install with the right ownership + locations for each deployment
+    shape:
+
+    - ``system`` — root-owned ``/etc/kairix/``, ``/var/lib/kairix/``,
+      ``/var/cache/kairix/``, systemd unit at
+      ``/etc/systemd/system/kairix.service``. Selected when ``kairix init``
+      runs as root with no ``KAIRIX_CONTAINER`` signal.
+    - ``user`` — XDG-rooted user install under ``$XDG_CONFIG_HOME/kairix``,
+      ``$XDG_DATA_HOME/kairix``, ``$XDG_CACHE_HOME/kairix``, systemd unit
+      at ``~/.config/systemd/user/kairix.service``. No root required.
+    - ``container`` — same path layout as system mode (``/etc/kairix``,
+      ``/var/lib/kairix``) because the container image owns the root tree.
+      Selected when ``KAIRIX_CONTAINER=1`` is set by the Dockerfile.
+
+    See ``docs/architecture/`` (forthcoming installer doc) for the full
+    path-resolution table and ``Plan 1`` for the cutover rationale.
+    """
+
+    system = "system"
+    user = "user"
+    container = "container"
+
+    @classmethod
+    def detect(cls, env: Mapping[str, str] | None = None) -> Mode:
+        """Auto-detect the install mode from the live process environment.
+
+        Resolution order:
+
+        1. ``KAIRIX_CONTAINER`` env var (any non-empty value) → container.
+           This is the Dockerfile-controlled signal; never set by tests
+           accidentally.
+        2. ``os.geteuid() == 0`` → system. Root invocation outside a
+           container.
+        3. Otherwise → user. Non-root or a platform that lacks
+           ``os.geteuid`` (Windows) — falls through to the XDG-rooted
+           user layout.
+
+        Args:
+            env: Optional env mapping for unit + contract tests to drive
+                the parser without mutating ``os.environ`` (mirrors the
+                F2-clean test seam used by :func:`is_docker_env`,
+                :func:`mcp_endpoint`, :func:`log_queries_enabled`).
+                Production callers leave this ``None`` and the live
+                ``os.environ`` is read at the F4 boundary.
+        """
+        e = env if env is not None else os.environ
+        if e.get("KAIRIX_CONTAINER"):
+            return cls.container
+        # Windows lacks ``os.geteuid``; treat as user-mode unconditionally
+        # so module import doesn't AttributeError on non-POSIX hosts.
+        if not hasattr(os, "geteuid"):
+            return cls.user
+        return cls.system if os.geteuid() == 0 else cls.user
+
+
+def _xdg(env_name: str, fallback: str) -> Path:
+    """XDG base-dir helper.
+
+    Returns ``$<env_name>`` when set + non-empty, else ``<fallback>`` —
+    both expanded through ``Path.expanduser`` so ``~/...`` fallbacks
+    resolve. The kairix project subdir is appended by the caller, not
+    here, so callers can compose deeper paths off the XDG root.
+    """
+    raw = os.environ.get(env_name)
+    return Path(raw if raw else fallback).expanduser()
+
 
 # XDG-style user cache directory name (Path.home() / _USER_CACHE_DIR / "kairix").
 # Centralised so the path is the same wherever a non-Docker, non-service install
@@ -227,8 +301,31 @@ def clear_cache() -> None:
 # Convenience functions — import these directly instead of calling KairixPaths.resolve()
 
 
-def document_root() -> Path:
-    """Return the document store root path."""
+def document_root(mode: Mode | None = None) -> Path:
+    """Return the document store root path.
+
+    When ``mode`` is supplied (the installer + contract-test surface),
+    return the per-mode default location:
+
+    - ``Mode.system`` → ``/var/lib/kairix/documents``
+    - ``Mode.user``   → ``<data_dir(Mode.user)>/documents``
+      (``$XDG_DATA_HOME/kairix/documents`` fallback
+      ``~/.local/share/kairix/documents``)
+    - ``Mode.container`` → ``/data/documents`` (Docker bind-mount target)
+
+    When ``mode`` is ``None`` (existing callers — backwards-compat):
+    flow through :meth:`KairixPaths.resolve` so ``KAIRIX_DOCUMENT_ROOT``,
+    ``kairix.config.yaml``'s ``paths.document_root``, and the legacy
+    platform-aware defaults all keep working unchanged.
+    """
+    if mode is not None:
+        if mode == Mode.system:
+            return Path("/var/lib/kairix/documents")
+        if mode == Mode.container:
+            return Path("/data/documents")
+        # Mode.user — sit under the user-mode data dir so the document
+        # tree co-locates with the SQLite index + vector index.
+        return data_dir(Mode.user) / "documents"
     return KairixPaths.resolve().document_root
 
 
@@ -461,18 +558,27 @@ def workspace_root() -> Path:
     return KairixPaths.resolve().workspace_root
 
 
-def embedding_cache_path() -> Path:
+def embedding_cache_path(mode: Mode | None = None) -> Path:
     """Resolve the SQLite-backed persistent embedding cache path.
 
-    Lives under ``<document_root>/.kairix/cache/embedding_cache.sqlite``
-    so it travels with the document store across deployments and is
-    never mixed with the canonical ``index.sqlite``. Reuses the cached
-    ``document_root()`` resolution so per-process overrides flow through.
+    When ``mode`` is supplied (the installer + contract-test surface),
+    return ``<data_dir(mode)>/cache/embedding_cache.sqlite``. This is
+    the per-mode FHS/XDG-aligned location the kairix installer creates;
+    the runtime-patch shape (in-image ``/opt/kairix/...``) the previous
+    cutover relied on is retired in favour of this resolver.
+
+    When ``mode`` is ``None`` (existing callers — backwards-compat):
+    keep returning ``<document_root>/.kairix/cache/embedding_cache.sqlite``
+    so today's call sites (which co-locate the cache with the document
+    tree on operator volumes) keep working unchanged. The migration to
+    the data-dir-rooted layout happens through explicit-mode call sites
+    in the installer + worker cutover commits.
 
     See :mod:`kairix.core.embed.embedding_cache` for cache shape +
-    invariants. F4-clean — the env read for ``KAIRIX_DOCUMENT_ROOT``
-    happens inside ``document_root`` at the paths boundary.
+    invariants. F4-clean — env reads stay at the paths boundary.
     """
+    if mode is not None:
+        return data_dir(mode) / "cache" / "embedding_cache.sqlite"
     return document_root() / ".kairix" / "cache" / "embedding_cache.sqlite"
 
 
@@ -984,19 +1090,111 @@ def document_root_override() -> str | None:
     return value if value else None
 
 
-def data_dir() -> Path:
-    """Public accessor for the platform-aware data dir.
+def data_dir(mode: Mode | None = None) -> Path:
+    """Public accessor for the kairix data dir, per-mode aware.
 
-    Wraps ``default_data_dir`` so other modules can centralise their
-    "log / cache under the kairix data dir" path resolution without
-    re-reading ``KAIRIX_DATA_DIR`` (or its legacy fallback) themselves.
-    Honours ``KAIRIX_DATA_DIR`` when set — operators occasionally pin the
-    data dir directly rather than via Docker / service detection.
+    When ``mode`` is supplied explicitly (the installer + contract-test
+    surface), dispatch on the Mode enum:
+
+    - ``Mode.system`` → ``/var/lib/kairix``
+    - ``Mode.user``   → ``$XDG_DATA_HOME/kairix`` (fallback ``~/.local/share/kairix``)
+    - ``Mode.container`` → ``/var/lib/kairix``
+
+    When ``mode`` is ``None`` (existing callers — backwards-compat):
+
+    1. ``KAIRIX_DATA_DIR`` env override wins (legacy pin operators rely on).
+    2. Otherwise dispatch on ``Mode.detect()`` via this same function.
+
+    Mode-explicit calls intentionally do NOT consult the env override so
+    the contract test in ``tests/contracts/test_path_resolvers_dispatch_per_mode.py``
+    can assert per-mode distinctness without any test-env pollution.
     """
+    if mode is not None:
+        if mode == Mode.user:
+            return _xdg("XDG_DATA_HOME", "~/.local/share") / "kairix"
+        # system + container share /var/lib/kairix
+        return Path("/var/lib/kairix")
     raw = os.environ.get("KAIRIX_DATA_DIR")
     if raw:
         return Path(raw)
-    return default_data_dir()
+    return data_dir(Mode.detect())
+
+
+def config_dir(mode: Mode | None = None) -> Path:
+    """Per-mode config-directory resolver (Plan 1).
+
+    - ``Mode.system`` → ``/etc/kairix``
+    - ``Mode.user``   → ``$XDG_CONFIG_HOME/kairix`` (fallback ``~/.config/kairix``)
+    - ``Mode.container`` → ``/etc/kairix``
+
+    ``mode=None`` → auto-detect via :meth:`Mode.detect`. Forthcoming
+    installer code uses the per-mode form; existing callers that read
+    ``KAIRIX_CONFIG_PATH`` continue to do so via :func:`config_path_override`.
+    """
+    m = mode or Mode.detect()
+    if m == Mode.user:
+        return _xdg("XDG_CONFIG_HOME", "~/.config") / "kairix"
+    return Path("/etc/kairix")
+
+
+def cache_dir(mode: Mode | None = None) -> Path:
+    """Per-mode cache-directory resolver (Plan 1).
+
+    - ``Mode.system`` → ``/var/cache/kairix``
+    - ``Mode.user``   → ``$XDG_CACHE_HOME/kairix`` (fallback ``~/.cache/kairix``)
+    - ``Mode.container`` → ``/var/cache/kairix``
+
+    ``mode=None`` → auto-detect via :meth:`Mode.detect`. Existing callers
+    that want the legacy platform-aware (incl. Windows ``%LOCALAPPDATA%``)
+    layout keep using :func:`default_cache_dir`.
+    """
+    m = mode or Mode.detect()
+    if m == Mode.user:
+        return _xdg("XDG_CACHE_HOME", "~/.cache") / "kairix"
+    return Path("/var/cache/kairix")
+
+
+def runtime_secrets_dir(mode: Mode | None = None) -> Path:
+    """Per-mode runtime-secrets directory resolver (Plan 1).
+
+    - ``Mode.system`` → ``/run/secrets/kairix``
+    - ``Mode.user``   → ``$XDG_RUNTIME_DIR/kairix/secrets`` (fallback ``/tmp/kairix/secrets``)
+    - ``Mode.container`` → ``/run/secrets/kairix``
+
+    ``mode=None`` → auto-detect via :meth:`Mode.detect`. Used by the
+    installer to lay down the tmpfs-backed secrets dir under systemd.
+    """
+    m = mode or Mode.detect()
+    if m == Mode.user:
+        # XDG_RUNTIME_DIR is mandated by the XDG base-dir spec; the
+        # ``/tmp`` fallback is the conventional last-resort when the env
+        # var is unset (matches ``man pam_systemd``). S108 fires on the
+        # ``/tmp`` literal; suppressed because we're emitting a kairix-
+        # owned subdir (``/tmp/kairix/secrets``) per the XDG fallback
+        # contract, not creating an unscoped tempfile.
+        return _xdg("XDG_RUNTIME_DIR", "/tmp") / "kairix" / "secrets"  # noqa: S108 — XDG-spec fallback path
+    return Path("/run/secrets/kairix")
+
+
+def index_path(mode: Mode | None = None) -> Path:
+    """Per-mode SQLite index path (Plan 1).
+
+    Returns ``<data_dir(mode)>/index.sqlite``. New resolver; existing
+    callers in ``kairix.worker`` and ``kairix.core.embed.embed`` still
+    compute this locally from ``db_path.parent`` — those migrate to this
+    resolver in subsequent installer-cutover commits.
+    """
+    return data_dir(mode) / "index.sqlite"
+
+
+def vec_index_path(mode: Mode | None = None) -> Path:
+    """Per-mode usearch vector-index path (Plan 1).
+
+    Returns ``<data_dir(mode)>/vectors.usearch``. Mirrors
+    :func:`index_path` — derives per-mode distinctness from
+    :func:`data_dir`.
+    """
+    return data_dir(mode) / "vectors.usearch"
 
 
 def monitor_log_path() -> Path:
@@ -1044,7 +1242,7 @@ def env_file_override() -> str | None:
     return value if value else None
 
 
-def warm_flag_path() -> Path:
+def warm_flag_path(mode: Mode | None = None) -> Path:
     """Path to the cross-process warm-state flag — single env-read boundary
     for ``KAIRIX_WARM_FLAG_PATH``.
 
@@ -1069,7 +1267,15 @@ def warm_flag_path() -> Path:
     Operators with a layout where ``data_dir`` is read-only can set
     ``KAIRIX_WARM_FLAG_PATH`` to relocate the flag — but it must point
     at a writable, non-world-writable location.
+
+    Per-mode form: when ``mode`` is supplied (installer + contract-test
+    surface), bypass the env override and return
+    ``<data_dir(mode)>/warm.flag`` directly. The env override only
+    affects the no-arg form, preserving F2 (no env coupling) for the
+    explicit-mode call sites.
     """
+    if mode is not None:
+        return data_dir(mode) / "warm.flag"
     override = os.environ.get("KAIRIX_WARM_FLAG_PATH", "").strip()
     return Path(override) if override else data_dir() / "warm.flag"
 
