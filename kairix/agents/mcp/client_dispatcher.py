@@ -258,10 +258,14 @@ def _translate_research(argv: list[str]) -> dict[str, Any] | None:
 
 
 def _translate_brief(argv: list[str]) -> dict[str, Any] | None:
-    _positionals, flags = _parse_kv_flags(argv)
-    if "agent" not in flags:
+    positionals, flags = _parse_kv_flags(argv)
+    # The brief CLI accepts ``agent`` as the first positional
+    # (``kairix brief shape``); accept that shape and the alternative
+    # ``--agent NAME`` flag form. Without either, fall through.
+    agent = flags.get("agent") or (positionals[0] if positionals else None)
+    if not agent:
         return None
-    return {"agent": flags["agent"]}
+    return {"agent": agent}
 
 
 def _translate_contradict(argv: list[str]) -> dict[str, Any] | None:
@@ -283,10 +287,14 @@ def _translate_contradict(argv: list[str]) -> dict[str, Any] | None:
 
 
 def _translate_bootstrap(argv: list[str]) -> dict[str, Any] | None:
-    _positionals, flags = _parse_kv_flags(argv)
-    if "agent" not in flags:
+    positionals, flags = _parse_kv_flags(argv)
+    # The bootstrap CLI accepts ``agent`` as the first positional
+    # (``kairix bootstrap shape``); accept that shape and the alternative
+    # ``--agent NAME`` flag form. Without either, fall through.
+    agent = flags.get("agent") or (positionals[0] if positionals else None)
+    if not agent:
         return None
-    kwargs: dict[str, Any] = {"agent": flags["agent"]}
+    kwargs: dict[str, Any] = {"agent": agent}
     if "max-memory-days" in flags:
         kwargs["max_memory_days"] = _int_or(flags.get("max-memory-days"), 3)
     return kwargs

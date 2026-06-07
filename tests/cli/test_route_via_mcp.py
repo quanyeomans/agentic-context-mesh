@@ -341,6 +341,19 @@ def test_is_error_envelope_exits_non_zero(capsys: pytest.CaptureFixture[str]) ->
             {"query": "when did agent-alpha join", "anchor_date": "2026-01-01"},
         ),
         ("brief", ["--agent", "agent-alpha", "--json"], {"agent": "agent-alpha"}),
+        # The brief CLI takes ``agent`` as a positional arg
+        # (``kairix brief shape``); the translator must accept that form
+        # too, not just the ``--agent NAME`` flag form. Production VM
+        # invocations use the positional form and were silently falling
+        # through to in-process before this row was added.
+        ("brief", ["agent-alpha", "--json"], {"agent": "agent-alpha"}),
+        # bootstrap mirrors brief — positional first arg is the agent.
+        ("bootstrap", ["agent-alpha", "--json"], {"agent": "agent-alpha"}),
+        (
+            "bootstrap",
+            ["agent-alpha", "--max-memory-days", "5", "--json"],
+            {"agent": "agent-alpha", "max_memory_days": 5},
+        ),
         ("features", ["status", "--json"], {}),
         ("worker", ["status", "--json"], {}),
         ("secrets", ["verify", "--json"], {}),
