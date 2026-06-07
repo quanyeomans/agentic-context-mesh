@@ -9,122 +9,53 @@
 #   6. docker compose exec kairix kairix setup
 #   7. docker compose exec kairix kairix search "your question"
 #
-# Services:
-#   kairix        — MCP server (port 8080) for agent integration + CLI
-#   kairix-worker — background tasks (hourly embed, nightly entity seed)
-#   neo4j         — knowledge graph for people/company/relationship queries
+# Services (Plan 2 — unified container):
+#   kairix — one container runs both the MCP api process AND the worker process
+#            as supervised siblings via s6-overlay. `docker compose ps` now
+#            shows 2 services (was 3) — `kairix-worker` is gone; its workload
+#            and memory budget folded into the unified `kairix` service.
+#   neo4j  — knowledge graph for people / company / relationship queries.
 
 services:
   kairix:
-    image: ghcr.io/three-cubes/kairix:latest
-    # To build from source instead: comment out 'image' above and uncomment:
-    # build: .
+    image: ghcr.io/three-cubes/kairix:${KAIRIX_IMAGE_TAG:-main}
+    container_name: app-kairix-1
+    restart: unless-stopped
     ports:
       # Bound to localhost only by default — kairix has no auth. Operators
       # who already run a reverse proxy on host port 8080 (e.g. caddy)
-      # override KAIRIX_HOST_PORT to a different host port; the proxy
-      # routes from its public port to ${KAIRIX_HOST_PORT}. Drop the
-      # 127.0.0.1 prefix only if you intend to expose externally.
-      - "127.0.0.1:${KAIRIX_HOST_PORT:-8080}:8080"
+      # route from their public port to host 8090 → container 8080.
+      # Drop the 127.0.0.1 prefix only if you intend to expose externally.
+      - "127.0.0.1:8090:8080"
     volumes:
-      - ./documents:/data/documents  # Your documents folder → container's document store
-      - kairix-data:/data/kairix
-      # Optional: mount a custom config file (created by kairix setup)
-      # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
+      - kairix-data:/var/lib/kairix
+      - kairix-cache:/var/cache/kairix
+      - ./documents:/data/documents:ro  # Your documents folder → container's document store (read-only)
+      - /run/secrets/kairix.env:/run/secrets/kairix.env:ro
     env_file:
-      - .env
-    environment:
-      - KAIRIX_NEO4J_URI=bolt://neo4j:7687
-      - KAIRIX_NEO4J_USER=neo4j
-      - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
+      - /run/secrets/kairix.env
     depends_on:
       neo4j:
         condition: service_healthy
-    restart: unless-stopped
-    # Healthcheck uses `kairix onboard ready` — the narrow flag-file readiness
-    # probe (sub-millisecond, no neo4j touch). Distinct from `kairix onboard
-    # check` (heavy configuration diagnostic — secrets, paths, neo4j probe,
-    # embed pipeline) which previously ran here every 60s and made the
-    # container flip unhealthy on transient neo4j slowness, blowing in-process
-    # warm state and surfacing as `fetch_failed` to MCP clients (KFEAT-020).
-    # start_period generous so the initial warm (~7-10s on a hot node, ~30s+
-    # on a fresh container) is treated as "starting", matching the
-    # docker-compose.example.yml operator-facing shape.
+    # Healthcheck hits the readiness endpoint that the supervised api
+    # process serves on port 8080. start_period generous so the initial
+    # warm (s6 cont-init scripts, first-boot kairix init --user if the
+    # data volume is empty, then the api + worker services starting) is
+    # treated as "starting" rather than "unhealthy".
     healthcheck:
-      test: ["CMD", "kairix", "onboard", "ready"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 120s
+      start_period: 60s
     # Resource limits — sized for a 4-vCPU / 8-GiB host (smallest deployment
-    # we test against). Sum of all service ceilings must stay below host
-    # so OS + Azure agent + cloudflared tunnel always have headroom; without
-    # this any one container can saturate the host and make the VM
-    # unreachable (#330 — two production incidents 2026-05-27).
-    # MCP-serving path keeps the largest slice so agent calls stay responsive.
-    # Operators on bigger hosts override via .env (KAIRIX_*_CPUS / *_MEM vars).
-    mem_limit: ${KAIRIX_MCP_MEM_LIMIT:-3g}
-    mem_reservation: ${KAIRIX_MCP_MEM_RESERVATION:-1500m}
-    cpus: ${KAIRIX_MCP_CPUS:-1.5}
-    # IO priority — agent-facing path gets default cgroup weight (500) so
-    # the worker (set to 100 below) can never starve MCP responses for disk.
-    blkio_config:
-      weight: 500
-    # Bound /tmp on tmpfs so connector fetches (e.g. SharePoint binary
-    # downloads, markitdown PDF conversions) cannot spill onto the host
-    # root filesystem and fill the OS disk.
-    tmpfs:
-      - /tmp:size=2G,mode=1777
-
-  kairix-worker:
-    image: ghcr.io/three-cubes/kairix:latest
-    # To build from source instead: comment out 'image' above and uncomment:
-    # build: .
-    command: ["worker"]
-    volumes:
-      - ./documents:/data/documents  # Your documents folder → container's document store
-      - kairix-data:/data/kairix
-      # Optional: mount a custom config file
-      # - ./kairix.config.yaml:/opt/kairix/kairix.config.yaml:ro
-    env_file:
-      - .env
-    environment:
-      - KAIRIX_NEO4J_URI=bolt://neo4j:7687
-      - KAIRIX_NEO4J_USER=neo4j
-      - KAIRIX_NEO4J_PASSWORD=${KAIRIX_NEO4J_PASSWORD}
-    depends_on:
-      neo4j:
-        condition: service_healthy
-    restart: unless-stopped
-    # Worker steady-state RSS observed at ~150 MB. 1 GB cap is plenty.
-    # CPU + IO ceilings sized so the worker can NEVER take down the host
-    # regardless of any code bug or unbounded workload — two production
-    # incidents on 2026-05-27 both surfaced this gap (#330).
-    # Operators on bigger hosts override via .env.
-    mem_limit: ${KAIRIX_WORKER_MEM_LIMIT:-1g}
-    # memswap_limit gates how much HOST SWAP the worker's cgroup may
-    # consume. Docker default (unset) implies memswap_limit == mem_limit
-    # → ZERO swap allowed → any allocation past mem_limit is an OOM kill.
-    # Set memswap_limit > mem_limit to permit the worker to spill into
-    # host swap (e.g. during the usearch HNSW mutable-add path at
-    # 1M+ corpus scale; see #335 and ADR-023). The DIFFERENCE
-    # (memswap_limit - mem_limit) bounds swap usage. Operators on hosts
-    # with SSD swap and a 1M+ vector corpus override to e.g. 8g; the
-    # default keeps the conservative "no swap" behaviour.
-    memswap_limit: ${KAIRIX_WORKER_MEMSWAP_LIMIT:-1g}
-    mem_reservation: ${KAIRIX_WORKER_MEM_RESERVATION:-256m}
-    cpus: ${KAIRIX_WORKER_CPUS:-1.5}
-    # blkio weight 100 (default 500) puts the worker LAST for disk
-    # contention — neo4j (the worker's dependency) + kairix-1 (the
-    # agent-facing path) always win disk bandwidth when the worker is
-    # mid-ingest / mid-recovery.
-    blkio_config:
-      weight: 100
-    # Same /tmp tmpfs rationale as kairix above — connector binary
-    # fetches and extractor temp files stay bounded by RAM, never the OS
-    # disk. 2 GB sized for SharePoint single-file extraction headroom.
-    tmpfs:
-      - /tmp:size=2G,mode=1777
+    # we test against). 4g folds in what was previously kairix (3g) +
+    # kairix-worker (1g) = 4g combined. Both processes now share this cap
+    # under s6 supervision inside the same container.
+    deploy:
+      resources:
+        limits:
+          memory: 4g
 
   neo4j:
     image: neo4j:5-community
@@ -148,9 +79,6 @@ services:
     # Neo4j heap is configured via NEO4J_server_memory_heap_max_size (set
     # via env var if you tune it). Container hard cap below provides a
     # backstop so a runaway neo4j can't OOM the host.
-    # Sum across kairix (1.5) + worker (1.5) + neo4j (0.75) = 3.75 cpus
-    # on a 4-vCPU host — leaves 0.25 for OS + Azure agent + cloudflared
-    # so the host stays reachable for diagnostics under any workload.
     mem_limit: ${KAIRIX_NEO4J_MEM_LIMIT:-2g}
     mem_reservation: ${KAIRIX_NEO4J_MEM_RESERVATION:-512m}
     cpus: ${KAIRIX_NEO4J_CPUS:-0.75}
@@ -159,4 +87,5 @@ services:
 
 volumes:
   kairix-data:
+  kairix-cache:
   neo4j-data:
