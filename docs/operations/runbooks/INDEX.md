@@ -20,6 +20,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | `agent_knowledge_populated` onboard check fails after upgrade | [how-to-upgrade-kairix §"Troubleshooting"](how-to-upgrade-kairix.md#troubleshooting-agent_knowledge_populated-fails-after-upgrade) — pin `paths.agent_knowledge_dir` + `paths.agent_memory_glob` in `kairix.config.yaml` |
 | Ghost search hits pointing at deleted documents, orphan vector counts climbing | Enable `maintenance_loop` in `kairix.config.yaml` — see [how-to-upgrade-kairix](how-to-upgrade-kairix.md#migration-from-v2026518-to-the-current-release) for the operator recipe |
 | Setting up MCP server for the first time | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) |
+| MCP client returned a `KAIRIX_COLD_START` 503 envelope and you need to confirm the shape or reproduce the drill | [cold-start-envelope-reference](cold-start-envelope-reference.md) — byte-exact envelope from the 2026-06-06 drill + local reproduce recipe |
 | Migrating an existing MCP client off SSE | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) |
 | Worker container restart-loops with `vec_index: converting immutable index to mutable (...)`; vector index drifting behind `content_vectors` | [worker-memory-and-swap](worker-memory-and-swap.md) — raise mem ceiling + allow host swap; #335 |
 | `app-kairix-1` container fails to start with `failed to bind host port 127.0.0.1:8080/tcp: address already in use` (reverse proxy already owns 8080) | Set `KAIRIX_HOST_PORT=8090` (or any unused port) in `.env` and `docker compose up -d --force-recreate kairix`; see [OPERATIONS §"Deploying behind a reverse proxy"](../OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared); #331 |
@@ -53,6 +54,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | [kairix-entity-audit](kairix-entity-audit.md) | Audit the entity graph — junk detection, path repair, enrichment, safe purge |
 | [how-to-configure-pypi-trusted-publisher](how-to-configure-pypi-trusted-publisher.md) | One-time PyPI Trusted Publisher setup so GitHub Releases auto-publish without long-lived tokens |
 | [MCP-DEPLOYMENT](../MCP-DEPLOYMENT.md) | Choose a transport (stdio/http/sse), wire `/mcp` and `/sse` mounts, configure agent registry, verify with `/healthz` |
+| [cold-start-envelope-reference](cold-start-envelope-reference.md) | Byte-exact reference of the `KAIRIX_COLD_START` 503 envelope captured from the 2026-06-06 production drill; what each field means, what to do when a client surfaces it, how to reproduce the drill locally, and the nightly soak that pins the contract |
 | [MCP-CLIENT-MIGRATION](../MCP-CLIENT-MIGRATION.md) | Migrate Claude Desktop / Claude Code / OpenClaw / custom Python or Node clients from `/sse` to `/mcp` |
 | [plan-b-parity-runbook](../plan-b-parity-runbook.md) | Consolidated single-page operator workflow — pre-flight → hydrate → ingest → query → validate → cost model → teardown, with cross-links into the deep docs below |
 | [consultancy-in-a-box](../consultancy-in-a-box.md) | Per-engagement workflow — spin up container, ingest knowledge store + transcripts, query, validate, teardown |

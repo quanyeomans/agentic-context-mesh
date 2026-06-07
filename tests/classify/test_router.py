@@ -2,6 +2,12 @@
 Tests for the write router (kairix/classify/router.py).
 
 Tests path resolution for all classification types and agent scoping.
+
+PR 1.2 / #420 — episodic routing follows
+:meth:`kairix.core.agents.scope.AgentScope.writable_path` (the surface
+labelled "memory"), not the legacy ``<workspace_root>/<agent>/memory``
+formula. Tests pass an inline ``config=`` dict to drive scope
+resolution without touching the operator's on-disk config.
 """
 
 from __future__ import annotations
@@ -13,37 +19,51 @@ import pytest
 from kairix.core.classify.router import VALID_AGENTS, resolve_target_path
 
 
+def _episodic_config(agent: str, memory_dir: str) -> dict[str, object]:
+    """Build an inline ``agents:`` config for the agent's memory surface."""
+    return {
+        "agents": {
+            agent: {"surfaces": [{"path": memory_dir, "label": "memory"}]},
+        },
+    }
+
+
 @pytest.mark.unit
 class TestEpisodicRouting:
     @pytest.mark.unit
     def test_episodic_builder_default_date(self):
         today = date.today().isoformat()
-        path = resolve_target_path("builder", "episodic")
-        assert path.endswith(f"/builder/memory/{today}.md")
+        config = _episodic_config("builder", "/data/agents/builder/memory")
+        path = resolve_target_path("builder", "episodic", config=config)
+        assert path == f"/data/agents/builder/memory/{today}.md"
 
     @pytest.mark.unit
     def test_episodic_shape_default_date(self):
         today = date.today().isoformat()
-        path = resolve_target_path("shape", "episodic")
-        assert path.endswith(f"/shape/memory/{today}.md")
+        config = _episodic_config("shape", "/data/agents/shape/memory")
+        path = resolve_target_path("shape", "episodic", config=config)
+        assert path == f"/data/agents/shape/memory/{today}.md"
 
     @pytest.mark.unit
     def test_episodic_custom_date(self):
-        path = resolve_target_path("builder", "episodic", date="2026-03-23")
-        assert path.endswith("/builder/memory/2026-03-23.md")
+        config = _episodic_config("builder", "/data/agents/builder/memory")
+        path = resolve_target_path("builder", "episodic", date="2026-03-23", config=config)
+        assert path == "/data/agents/builder/memory/2026-03-23.md"
 
     @pytest.mark.unit
     def test_episodic_growth(self):
         today = date.today().isoformat()
-        path = resolve_target_path("growth", "episodic")
-        assert path.endswith(f"/memory/{today}.md")
+        config = _episodic_config("growth", "/data/agents/growth/journal")
+        path = resolve_target_path("growth", "episodic", config=config)
+        assert path == f"/data/agents/growth/journal/{today}.md"
         assert "growth" in path
 
     @pytest.mark.unit
     def test_episodic_consultant(self):
         today = date.today().isoformat()
-        path = resolve_target_path("consultant", "episodic")
-        assert path.endswith(f"/memory/{today}.md")
+        config = _episodic_config("consultant", "/data/agents/consultant/journal")
+        path = resolve_target_path("consultant", "episodic", config=config)
+        assert path == f"/data/agents/consultant/journal/{today}.md"
         assert "consultant" in path
 
 

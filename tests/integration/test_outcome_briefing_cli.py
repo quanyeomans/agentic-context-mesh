@@ -8,17 +8,18 @@ half of the paydown — the existing unit tests in
 seam (in-process ``deps=BriefDeps(...)`` injection); this test adds
 the F30-required subprocess outcome assertion.
 
-The ``--memory-root`` flag is the F2-clean subprocess seam — it was
-already on the CLI before this paydown (the CLI threads the operator-
-supplied root through ``set_agent_memory_root_override``). This commit
-adds the outcome test and removes the baseline entry; no production
-change.
+PR 1.2 / #420 — the legacy ``--memory-root`` flag has been removed.
+The F2-clean subprocess seam is now a ``kairix.config.yaml`` written
+to ``tmp_path`` with the subprocess ``cwd`` set there — the
+``load_paths_from_config`` loader picks up the cwd-relative config and
+the ``agents:`` block drives every brief callsite via AgentScope.
+This is NOT ``monkeypatch.setenv`` (F2 targets pytest monkeypatch);
+seeding a config file in a tmp dir is the F2-clean subprocess seam.
 
 Boundary chain exercised (degraded happy-path):
 
-  subprocess([kairix, brief, <agent>, --memory-root <tmp>])
+  subprocess([kairix, brief, <agent>], cwd=tmp_path with config)
     → kairix/agents/briefing/cli.py:main
-    → set_agent_memory_root_override(<tmp>)
     → kairix.use_cases.brief.run_brief
     → probe_health() → chat=offline (no KAIRIX_LLM_API_KEY in subprocess env)
     → returns BriefOutput(content="", path="", error="") + degraded health
@@ -57,6 +58,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
@@ -65,16 +67,27 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def _seed_minimal_memory_root(root: Path, agent: str) -> None:
-    """Seed the minimum vault layout the brief use case + sources read.
+def _seed_minimal_brief_workspace(tmp_path: Path, agent: str) -> None:
+    """Seed a ``kairix.config.yaml`` + minimum agent memory dir.
 
     The brief pipeline's source fetchers tolerate missing files (they
-    return empty content for the source), so a bare agent subdir is
+    return empty content for the source), so a bare agent surface is
     enough to drive the CLI's "Generating briefing for agent: ..."
     stderr line without crashing the sources step.
     """
-    agent_dir = root / agent
-    (agent_dir / "memory").mkdir(parents=True, exist_ok=True)
+    agent_dir = tmp_path / agent
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    config_yaml = tmp_path / "kairix.config.yaml"
+    config_yaml.write_text(
+        textwrap.dedent(f"""\
+            agents:
+              {agent}:
+                surfaces:
+                  - path: {agent_dir}
+                    label: memory
+            """),
+        encoding="utf-8",
+    )
 
 
 def _subprocess_env_without_llm_keys() -> dict[str, str]:
@@ -98,7 +111,7 @@ def _subprocess_env_without_llm_keys() -> dict[str, str]:
 
 
 def test_brief_cli_subprocess_degraded_happy_path_outcome(tmp_path: Path) -> None:
-    """Drive the real ``kairix brief`` binary against a tmp memory root.
+    """Drive the real ``kairix brief`` binary against a tmp config + memory dir.
 
     Without an LLM credential the use case takes the degraded path
     (``chat=offline``) and returns an empty-content envelope — exit 0,
@@ -106,7 +119,7 @@ def test_brief_cli_subprocess_degraded_happy_path_outcome(tmp_path: Path) -> Non
     ..." line. Asserts on the stderr trace + clean exit, NOT on
     returncode alone, NOT on internal fake call-counts.
     """
-    _seed_minimal_memory_root(tmp_path, "builder")
+    _seed_minimal_brief_workspace(tmp_path, "builder")
 
     t0 = time.monotonic()
     proc = subprocess.run(
@@ -116,13 +129,12 @@ def test_brief_cli_subprocess_degraded_happy_path_outcome(tmp_path: Path) -> Non
             "kairix.cli",
             "brief",
             "builder",
-            "--memory-root",
-            str(tmp_path),
         ],
         capture_output=True,
         text=True,
         timeout=30,
         env=_subprocess_env_without_llm_keys(),
+        cwd=str(tmp_path),
     )
     elapsed_ms = (time.monotonic() - t0) * 1000.0
 
@@ -142,6 +154,7 @@ def test_brief_cli_subprocess_invalid_agent_exits_non_zero(tmp_path: Path) -> No
     LLM availability — the use case's agent-validation step runs before
     any LLM call, so this test is the F30 stable anchor.
     """
+    _seed_minimal_brief_workspace(tmp_path, "builder")
     proc = subprocess.run(
         [
             sys.executable,
@@ -149,13 +162,12 @@ def test_brief_cli_subprocess_invalid_agent_exits_non_zero(tmp_path: Path) -> No
             "kairix.cli",
             "brief",
             "rogue-agent",
-            "--memory-root",
-            str(tmp_path),
         ],
         capture_output=True,
         text=True,
         timeout=30,
         env=_subprocess_env_without_llm_keys(),
+        cwd=str(tmp_path),
     )
 
     assert proc.returncode == 1, f"expected exit 1 for invalid agent, got {proc.returncode}. stderr={proc.stderr!r}"

@@ -65,6 +65,13 @@ _EXPECTED_TOOLS = {
     "cc_pair",
     # #376 — operator-triggered ANALYZE for SQLite query-planner stats refresh
     "maintenance_analyze",
+    # #420 — agent-scope onboarding + doctor diagnostics
+    "onboard_scan",
+    "onboard_agent",
+    "doctor_check_all",
+    "doctor_check_agent",
+    # #422 — caches_status (warm MCP cache observability)
+    "caches_status",
 }
 
 

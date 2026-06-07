@@ -88,6 +88,8 @@ Clients and agent runtimes should treat `error_code=KAIRIX_COLD_START` as a wait
 
 KFEAT-020 hardens the cold-start path against the failure mode where agents see `fetch_failed` during the container-restart window and dismiss kairix as broken instead of retrying. The contract has three layers — operators and MCP client authors only need to know the surface visible at their layer, but they all carry the same retry hint so a client can implement a single retry loop.
 
+> **See also:** [`runbooks/cold-start-envelope-reference.md`](runbooks/cold-start-envelope-reference.md) — operator reference with the byte-exact envelope captured from the 2026-06-06 production drill, field-by-field meaning, the local reproduce-the-drill recipe, and the link to the nightly soak test that pins the contract in place.
+
 **Layer 1 — HTTP 503 + `Retry-After` (transport).** When the readiness gate is closed (uvicorn is bound but warm-up hasn't finished), every non-health request returns:
 
 ```

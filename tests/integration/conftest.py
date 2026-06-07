@@ -61,7 +61,11 @@ def _roll_memory_dates_to_today(tmp_root: Path) -> None:
     filenames are left alone.
     """
     today = date.today()
-    for memory_dir in tmp_root.rglob("memory"):
+    # Walk every directory under tmp_root; pick up date-named .md files at the
+    # top level of each agent-knowledge dir (the v2 flat layout) as well as any
+    # legacy ``memory/`` subdirs for fixtures still using the v1 layout.
+    candidate_dirs = [tmp_root, *(p for p in tmp_root.rglob("*") if p.is_dir())]
+    for memory_dir in candidate_dirs:
         if not memory_dir.is_dir():
             continue
         dated: list[tuple[date, Path]] = []

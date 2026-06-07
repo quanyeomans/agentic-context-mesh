@@ -43,11 +43,26 @@ def test_use_case_returns_research_output() -> None:
 
 @pytest.mark.contract
 def test_envelope_keys_match_research_output() -> None:
-    from kairix.use_cases import research as uc
+    """Pin the envelope key set returned by ``research_output_to_envelope``.
 
-    src = inspect.getsource(uc.research_output_to_envelope)
-    for key in ("query", "synthesis", "retrieved_chunks", "gaps", "confidence", "turns", "error"):
-        assert f'"{key}"' in src
+    Asserts on the dict the function produces — not on the source text —
+    so the contract survives F17 refactors that extract key literals to
+    module-level constants (the keys themselves must stay stable; how
+    they're spelled in source is a code-shape question, not a contract
+    question).
+    """
+    from kairix.use_cases.research import ResearchOutput, research_output_to_envelope
+
+    envelope = research_output_to_envelope(ResearchOutput(query="q"))
+    assert set(envelope.keys()) == {
+        "query",
+        "synthesis",
+        "retrieved_chunks",
+        "gaps",
+        "confidence",
+        "turns",
+        "error",
+    }
 
 
 @pytest.mark.contract

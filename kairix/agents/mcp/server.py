@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +39,12 @@ from kairix.agents.mcp.errors import async_tool_handler
 from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
+
+# Module-import time — the MCP process's effective birth moment for the
+# operator-facing ``process_uptime_s`` field on ``tool_caches_status``.
+# Captured once at module import so every subsequent call reports
+# wall-clock seconds since the long-running process started.
+_PROCESS_STARTED_AT_MONOTONIC: float = time.monotonic()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -690,6 +698,122 @@ def tool_onboard_check() -> dict[str, Any]:
         }
 
 
+def tool_onboard_scan(
+    memory_root: str,
+    workspace_root: str = "",
+) -> dict[str, Any]:
+    """Discover agent scopes on disk and return them as an envelope.
+
+    Mirrors ``kairix onboard scan --json``. Wraps
+    :func:`kairix.agents.onboarding.scanner.scan_for_agents` so the
+    CLI + MCP return byte-identical envelopes for the same disk state.
+
+    Never raises — disk IO failures collapse into an empty ``agents``
+    list with the exception string preserved on ``error``.
+    """
+    from kairix.agents.onboarding.cli import scope_to_envelope
+    from kairix.agents.onboarding.scanner import scan_for_agents
+
+    try:
+        scopes = scan_for_agents(
+            memory_root=Path(memory_root),
+            workspace_root=Path(workspace_root) if workspace_root else None,
+        )
+        return {
+            "agents": [scope_to_envelope(s) for s in scopes],
+            "error": "",
+        }
+    except Exception as exc:
+        logger.warning("tool_onboard_scan failed: %s", exc, exc_info=True)
+        return {
+            "agents": [],
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def tool_onboard_agent(
+    agent_name: str,
+    memory_root: str,
+    workspace_root: str = "",
+    harness: str = "",
+) -> dict[str, Any]:
+    """Discover surfaces for one named agent and return as an envelope.
+
+    Mirrors ``kairix onboard agent --name <name> --json``. Returns
+    ``{"agent": None, "error": "..."}`` when the agent has no detector
+    matches AND no .md files at ``memory_root/<name>`` — never raises.
+    """
+    from kairix.agents.onboarding.cli import scope_to_envelope
+    from kairix.agents.onboarding.scanner import discover_single_agent
+
+    try:
+        scope = discover_single_agent(
+            agent_name,
+            memory_root=Path(memory_root),
+            workspace_root=Path(workspace_root) if workspace_root else None,
+            harness=harness or None,
+        )
+        return {"agent": scope_to_envelope(scope), "error": ""}
+    except ValueError as exc:
+        # ValueError is the documented "no proposal" signal; surface
+        # the agent name so callers can branch on it.
+        return {"agent": None, "error": str(exc)}
+    except Exception as exc:
+        logger.warning("tool_onboard_agent failed: %s", exc, exc_info=True)
+        return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def tool_doctor_check_all(
+    *,
+    config: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    """Re-validate every configured agent scope against disk state.
+
+    Mirrors ``kairix doctor agent --all --json`` — same Python API
+    (``doctor_check_all`` + ``report_to_envelope``) backs both
+    surfaces, so CLI and MCP return byte-identical envelopes for the
+    same configured + on-disk state.
+
+    Never raises — disk-IO errors collapse into per-surface issues.
+    """
+    from kairix.agents.onboarding.doctor import doctor_check_all
+    from kairix.agents.onboarding.doctor_cli import report_to_envelope
+
+    try:
+        report = doctor_check_all(config=config)
+        return report_to_envelope(report)
+    except Exception as exc:
+        logger.warning("tool_doctor_check_all failed: %s", exc, exc_info=True)
+        return {
+            "agents": [],
+            "overall": "error",
+            "summary_text": "",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def tool_doctor_check_agent(
+    agent_name: str,
+    *,
+    config: dict[str, object] | None = None,
+) -> dict[str, Any]:
+    """Re-validate a single configured agent scope against disk state.
+
+    Mirrors ``kairix doctor agent --name <name> --json``. Never raises
+    — unknown agents collapse into an :class:`AgentHealth` with
+    ``overall="error"`` and the error captured in ``issues``.
+    """
+    from kairix.agents.onboarding.doctor import doctor_check_agent
+    from kairix.agents.onboarding.doctor_cli import agent_health_to_envelope
+
+    try:
+        health = doctor_check_agent(agent_name, config=config)
+        return {"agent": agent_health_to_envelope(health), "error": ""}
+    except Exception as exc:
+        logger.warning("tool_doctor_check_agent failed: %s", exc, exc_info=True)
+        return {"agent": None, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def tool_warm() -> dict[str, Any]:
     """Pre-load kairix caches + pay factory-init costs.
 
@@ -874,6 +998,42 @@ def tool_dead_letter_status(
             "per_source": [],
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+def tool_caches_status() -> dict[str, Any]:
+    """Return per-cache stats for every TTL LRU in this MCP process.
+
+    Wraps the same ``_collect_*`` collectors used by ``kairix caches``
+    CLI in-process mode, but executed inside the MCP server's address
+    space so the returned stats reflect the warm long-lived process
+    (the CLI's freshly-spawned process always sees zeros — this tool
+    is how operators see real cache effectiveness).
+
+    PR 3.1 / #422 — paired with the CLI dispatcher routing so
+    ``kairix caches`` shows MCP-side cache state by default.
+
+    Envelope shape::
+
+        {
+            "caches": [
+                {"name": str, "size": int, "hits": int, "misses": int,
+                 "evictions": int, "hit_rate_pct": float},
+                ...
+            ],
+            "process_pid": int,        # operator sanity-check that this is the MCP process
+            "process_uptime_s": float, # how long this MCP process has been up
+        }
+    """
+    from kairix.quality.probe.caches_cli import (
+        _collect_all_rows,
+        caches_rows_to_envelope,
+    )
+
+    rows = _collect_all_rows()
+    envelope = caches_rows_to_envelope(rows)
+    envelope["process_pid"] = os.getpid()
+    envelope["process_uptime_s"] = round(time.monotonic() - _PROCESS_STARTED_AT_MONOTONIC, 3)
+    return envelope
 
 
 # ---------------------------------------------------------------------------
@@ -1202,6 +1362,10 @@ CAP_CATEGORY_DIAGNOSTIC = "diagnostic"
 CAP_CATEGORY_DIAGNOSTIC_OPERATOR_ONLY = "diagnostic-operator-only"
 CAP_CATEGORY_KNOWLEDGE_WRITE = "knowledge-write"
 CAP_CATEGORY_AGENT = "agent"
+# PR 1.4 / #420 — agent scope discovery + proposal tools live under
+# their own category so agents grouping by category can find them
+# without scanning the diagnostic bucket.
+CAP_CATEGORY_CONFIGURATION = "configuration"
 
 
 def _cap(
@@ -1293,6 +1457,32 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix onboard check",
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
+            # PR 1.4 / #420 — agent scope discovery + proposal
+            _cap(
+                name="onboard_scan",
+                mcp_tool="onboard_scan",
+                cli="kairix onboard scan",
+                category=CAP_CATEGORY_CONFIGURATION,
+            ),
+            _cap(
+                name="onboard_agent",
+                mcp_tool="onboard_agent",
+                cli="kairix onboard agent",
+                category=CAP_CATEGORY_CONFIGURATION,
+            ),
+            # PR 1.5 / #420 — agent scope drift detection
+            _cap(
+                name="doctor_check_all",
+                mcp_tool="doctor_check_all",
+                cli="kairix doctor agent --all",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
+            _cap(
+                name="doctor_check_agent",
+                mcp_tool="doctor_check_agent",
+                cli="kairix doctor agent --name",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
             _cap(
                 name="worker_status",
                 mcp_tool="worker_status",
@@ -1315,6 +1505,12 @@ def tool_capabilities() -> dict[str, Any]:
                 name="dead_letter_status",
                 mcp_tool="dead_letter_status",
                 cli="kairix dead-letter status",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
+            _cap(
+                name="caches_status",
+                mcp_tool="caches_status",
+                cli="kairix caches",
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
             _cap(name="warm", mcp_tool="warm", cli="kairix warm", category=CAP_CATEGORY_DIAGNOSTIC),
@@ -1646,6 +1842,76 @@ def _register_synthesis_and_diagnostic_tools(
 
     @server.tool(
         description=(
+            "Discover agent scopes on disk under memory_root and propose "
+            "`agents:` config blocks for kairix.config.yaml. Read-only. "
+            "Identical envelope to `kairix onboard scan --json`. Call this "
+            "during first-time onboarding or when adding a new agent to "
+            "an existing kairix install."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/onboard_scan_discovers_agents.feature
+    def onboard_scan(memory_root: str, workspace_root: str = "") -> dict[str, Any]:
+        """Discovery envelope. Read-only. Identical to `kairix onboard scan --json`."""
+        return tool_onboard_scan(memory_root=memory_root, workspace_root=workspace_root)
+
+    @server.tool(
+        description=(
+            "Discover surfaces for one named agent — single-target counterpart "
+            "to `onboard_scan`. Returns {agent: {...}, error: ''} or "
+            "{agent: None, error: '<why>'} when nothing matches. Read-only."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/onboard_scan_discovers_agents.feature
+    def onboard_agent(
+        agent_name: str,
+        memory_root: str,
+        workspace_root: str = "",
+        harness: str = "",
+    ) -> dict[str, Any]:
+        """Single-agent discovery envelope. Read-only."""
+        return tool_onboard_agent(
+            agent_name=agent_name,
+            memory_root=memory_root,
+            workspace_root=workspace_root,
+            harness=harness,
+        )
+
+    @server.tool(
+        description=(
+            "Re-validate every configured agent scope against disk state. "
+            "Returns drift (missing dirs, stale memory, glob misses, ambiguous "
+            "cross-agent overlap) before agents hit it. Read-only. Identical "
+            "envelope to `kairix doctor agent --all --json`. Call this after "
+            "changing kairix.config.yaml or rotating an agent's memory tree."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/cli_doctor.feature
+    def doctor_check_all(config: dict[str, object] | None = None) -> dict[str, Any]:
+        """Bulk doctor envelope. Read-only. Identical to `kairix doctor agent --all --json`."""
+        return tool_doctor_check_all(config=config)
+
+    @server.tool(
+        description=(
+            "Re-validate one configured agent's scope against disk state — "
+            "single-target counterpart to `doctor_check_all`. Returns "
+            "{agent: {...}, error: ''} with the per-surface health probe. "
+            "Read-only."
+        )
+    )
+    @async_tool_handler
+    # F45-feature: tests/bdd/features/cli_doctor.feature
+    def doctor_check_agent(
+        agent_name: str,
+        config: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
+        """Single-agent doctor envelope. Read-only."""
+        return tool_doctor_check_agent(agent_name=agent_name, config=config)
+
+    @server.tool(
+        description=(
             "Read the kairix-worker state file. Call to verify the embed/maintenance loop is running. "
             "Returns the worker's phase, counters, last-run timestamp, and last-error string."
         )
@@ -1697,6 +1963,21 @@ def _register_synthesis_and_diagnostic_tools(
     def dead_letter_status(source_name: str | None = None) -> dict[str, Any]:
         """Dead-letter status envelope. Read-only. Identical to `kairix dead-letter status --json`."""
         return tool_dead_letter_status(source_name=source_name)
+
+    @server.tool(
+        description=(
+            "Per-cache stats for every TTL LRU in this MCP process. Use to see "
+            "how effective the warm caches are after a session of agent work. "
+            "Includes process_pid + process_uptime_s so operators confirm the "
+            "envelope reflects the warm MCP process, not a freshly-spawned CLI. "
+            "Read-only. Identical envelope to `kairix caches --json` when routed "
+            "through warm MCP."
+        )
+    )
+    @async_tool_handler
+    def caches_status() -> dict[str, Any]:
+        """Cache stats envelope. Read-only. Reflects the warm MCP process's state."""
+        return tool_caches_status()
 
     @server.tool(
         description=(

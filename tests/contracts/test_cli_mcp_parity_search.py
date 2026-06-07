@@ -66,10 +66,30 @@ def test_mcp_envelope_keys_match_search_output_fields() -> None:
     The keys live in ``search_output_to_envelope`` (the shared projection
     helper); the MCP adapter ``tool_search`` calls it. Both surfaces (CLI
     --json and MCP) reach it from different directions.
-    """
-    import kairix.use_cases.search as search_uc
 
-    src = inspect.getsource(search_uc.search_output_to_envelope)
+    PR 2.2 / #421 moved the envelope keys behind module-level
+    constants (F17), so source-grep would now miss them. Build a
+    representative ``SearchOutput`` instead and assert against the
+    emitted envelope dict — a stronger contract than text-matching.
+    """
+    from kairix.use_cases.search import SearchHit, SearchOutput, search_output_to_envelope
+
+    out = SearchOutput(
+        query="q",
+        intent="semantic",
+        results=[
+            SearchHit(
+                path="p",
+                title="t",
+                snippet="s",
+                score=0.5,
+                tier="vector",
+                tokens=3,
+                collection="agent-alpha",
+            ),
+        ],
+    )
+    env = search_output_to_envelope(out)
     for key in (
         "query",
         "intent",
@@ -82,9 +102,11 @@ def test_mcp_envelope_keys_match_search_output_fields() -> None:
         "latency_ms",
         "error",
     ):
-        assert f'"{key}"' in src, f"envelope projector missing key {key!r}"
+        assert key in env, f"envelope missing key {key!r}: {sorted(env.keys())}"
+    assert len(env["results"]) == 1
+    rendered_hit = env["results"][0]
     for hit_key in ("path", "title", "snippet", "score", "tier", "tokens", "collection"):
-        assert f'"{hit_key}"' in src, f"envelope projector hit missing key {hit_key!r}"
+        assert hit_key in rendered_hit, f"envelope hit missing key {hit_key!r}: {sorted(rendered_hit.keys())}"
 
 
 @pytest.mark.contract

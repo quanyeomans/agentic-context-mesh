@@ -303,11 +303,14 @@ omit = [
     "kairix/knowledge/graph/client.py",
     # CLIs without BDD or integration coverage yet — flagged for backfill.
     # Each will move out of this list when tests land.
-    "kairix/knowledge/contradict/cli.py",
     "kairix/knowledge/reflib/cli.py",
     # NOTE: benchmark/cli.py and wikilinks/audit.py removed from omit
     # after PR #247 — tests now exist (tests/benchmark/test_cli_helpers.py
     # and tests/wikilinks/test_audit_unit.py — 63 sabotage-proven tests).
+    # NOTE: contradict/cli.py removed from omit after PR 2.6 / #421 —
+    # tests now exist (tests/contracts/test_contradict_envelope_parity.py,
+    # tests/bdd/features/contradict_through_warm_mcp.feature,
+    # tests/integration/test_contradict_cli_json_mode.py).
 ]
 
 [tool.coverage.report]

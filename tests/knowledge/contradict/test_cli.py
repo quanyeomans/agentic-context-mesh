@@ -9,11 +9,12 @@ formatting only. The use case logic lives in
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
 from kairix.knowledge.contradict.cli import build_parser, format_text, to_json_envelope
-from kairix.use_cases.contradict import ContradictionHit, ContradictOutput
+from kairix.use_cases.contradict import ContradictDeps, ContradictionHit, ContradictOutput
 
 pytestmark = pytest.mark.unit
 
@@ -144,3 +145,98 @@ def test_to_json_envelope_returns_array_of_hit_dicts() -> None:
 def test_to_json_envelope_empty_returns_empty_array() -> None:
     out = ContradictOutput(content="c")
     assert to_json_envelope(out) == []
+
+
+# ---------------------------------------------------------------------------
+# main — drives the use case via ContradictDeps injection
+# ---------------------------------------------------------------------------
+
+
+# Sabotage-proof (executed): replaced ``sys.exit(1)`` with ``return``
+# in the no-subcommand branch; ``pytest.raises(SystemExit)`` no longer
+# fired and the test failed. Restored.
+def test_main_with_no_subcommand_prints_help_and_exits_one(capsys: pytest.CaptureFixture[str]) -> None:
+    """``main([])`` falls through the subcommand guard → exit(1)."""
+    from kairix.knowledge.contradict.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main([])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    # argparse prints help to stdout.
+    assert "kairix contradict" in captured.out or "kairix contradict" in captured.err
+
+
+def _check_deps_returning_empty() -> ContradictDeps:
+    """A ContradictDeps that returns no hits and a no-op LLM (no real I/O)."""
+
+    class _NoopLLM:
+        def chat(self, _messages: list[dict[str, Any]]) -> str:
+            return "{}"
+
+    def _check_fn(**_kwargs: Any) -> list[Any]:
+        return []
+
+    return ContradictDeps(check_fn=_check_fn, llm_backend=_NoopLLM())
+
+
+# Sabotage-proof (executed): removed ``args.as_json`` branch entirely so
+# ``main`` always entered ``--format text``; the
+# ``parsed["has_contradictions"]`` assertion fired with KeyError because
+# stdout was the text "No contradictions found" line, not the envelope
+# dict. Restored.
+def test_main_with_json_flag_prints_envelope_dict_to_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``main([..., "--json"])`` emits the MCP envelope dict on stdout."""
+    from kairix.knowledge.contradict.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(["check", "agent-alpha claim", "--json"], deps=_check_deps_returning_empty())
+    assert exc.value.code == 0
+    parsed = json.loads(capsys.readouterr().out)
+    assert isinstance(parsed, dict)
+    assert parsed["content"] == "agent-alpha claim"
+    assert parsed["contradictions"] == []
+    assert parsed["has_contradictions"] is False
+    assert parsed["error"] == ""
+
+
+# Sabotage-proof (executed): made the ``--format json`` branch print a
+# dict instead of the legacy list; the ``isinstance(parsed, list)``
+# assertion fired. Restored.
+def test_main_with_format_json_prints_legacy_list_to_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``main([..., "--format", "json"])`` keeps the legacy flat-list shape."""
+    from kairix.knowledge.contradict.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            ["check", "agent-beta claim", "--format", "json"],
+            deps=_check_deps_returning_empty(),
+        )
+    assert exc.value.code == 0
+    parsed = json.loads(capsys.readouterr().out)
+    assert isinstance(parsed, list)
+    assert parsed == []
+
+
+# Sabotage-proof (executed): mutated the text-mode default branch to
+# print "" instead of ``format_text(out, ...)``; the
+# ``"No contradictions found" in captured.out`` assertion fired.
+# Restored.
+def test_main_default_text_mode_renders_human_readable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default (no ``--json``, no ``--format``) emits the operator text line."""
+    from kairix.knowledge.contradict.cli import main
+
+    with pytest.raises(SystemExit) as exc:
+        main(["check", "agent-gamma claim"], deps=_check_deps_returning_empty())
+    assert exc.value.code == 0
+    captured = capsys.readouterr()
+    assert "No contradictions found" in captured.out
+    # Text mode must not produce a JSON dict.
+    assert not captured.out.lstrip().startswith("{")
+    assert not captured.out.lstrip().startswith("[")

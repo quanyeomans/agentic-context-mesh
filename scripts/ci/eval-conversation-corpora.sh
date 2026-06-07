@@ -76,23 +76,39 @@ for suite in "${suites[@]}"; do
     sentinel_rc=0
     is_sentinel "$expected_file" || sentinel_rc=$?
 
+    # Capture stderr so missing-credentials errors can be distinguished from
+    # real code regressions. CI runs that don't bear the kairix-provider-llm-
+    # api-key secret (PR builds from forks, dev branches without OIDC) cannot
+    # measure recall regression — treat that as "skipped" rather than failed.
+    eval_err_log="$OUT_DIR/$suite_name-eval-err.log"
+
     if [ "$sentinel_rc" -eq 0 ]; then
         # Sentinel — record the run, do not regression-gate.
         echo "Baseline for $suite_name is a sentinel — establishing baseline mode (no regression gate)."
-        if ! python3 -m kairix.cli eval "$suite" --json > "$out_file"; then
-            echo "::error::kairix eval failed on $suite_name (sentinel mode)"
-            echo "fix: re-run locally — \`kairix eval $suite --json\` — and resolve the traceback"
-            echo "next: commit the fix, push, and the gate will re-run"
-            overall_status=1
+        if ! python3 -m kairix.cli eval "$suite" --json > "$out_file" 2> "$eval_err_log"; then
+            cat "$eval_err_log" >&2
+            if grep -q "SecretNotFoundError\|kairix-provider-llm-api-key" "$eval_err_log"; then
+                echo "::warning::kairix eval skipped on $suite_name — LLM API key not available in this CI environment (expected on PR builds without KV access)"
+            else
+                echo "::error::kairix eval failed on $suite_name (sentinel mode)"
+                echo "fix: re-run locally — \`kairix eval $suite --json\` — and resolve the traceback"
+                echo "next: commit the fix, push, and the gate will re-run"
+                overall_status=1
+            fi
         fi
     elif [ "$sentinel_rc" -eq 1 ]; then
         # Real SuiteResult baseline — enforce regression gate.
         echo "Baseline for $suite_name is pinned — regression gate enforced (>2pp = fail)."
-        if ! python3 -m kairix.cli eval "$suite" --json --regression-against "$EXPECTED_DIR" > "$out_file"; then
-            echo "::error::$suite_name regressed against pinned baseline"
-            echo "fix: investigate the recall/extractor delta surfaced above"
-            echo "next: re-run after the fix, then update $expected_file if the score improved"
-            overall_status=1
+        if ! python3 -m kairix.cli eval "$suite" --json --regression-against "$EXPECTED_DIR" > "$out_file" 2> "$eval_err_log"; then
+            cat "$eval_err_log" >&2
+            if grep -q "SecretNotFoundError\|kairix-provider-llm-api-key" "$eval_err_log"; then
+                echo "::warning::$suite_name regression gate skipped — LLM API key not available in this CI environment (expected on PR builds without KV access)"
+            else
+                echo "::error::$suite_name regressed against pinned baseline"
+                echo "fix: investigate the recall/extractor delta surfaced above"
+                echo "next: re-run after the fix, then update $expected_file if the score improved"
+                overall_status=1
+            fi
         fi
     else
         echo "::error::baseline file $expected_file is malformed (json decode or read failed)"

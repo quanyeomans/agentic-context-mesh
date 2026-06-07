@@ -14,7 +14,10 @@ YAML schema (sits alongside collections in kairix.config.yaml):
     agents:
       - name: alpha
         collection: alpha-memory          # optional, derived via agent_pattern
-        write_path: 04-Agent-Knowledge/alpha/memory
+        write_path: 04-Agent-Knowledge/alpha   # PR 1.2 / #420 — no more /memory subdir;
+                                               # the canonical write zone comes from the
+                                               # AgentScope surface labelled "memory"
+                                               # (kairix.core.agents.scope)
         read_only: false                  # optional; true skips write validation
       - name: beta
         ...

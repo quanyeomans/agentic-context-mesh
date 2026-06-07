@@ -2,21 +2,29 @@
 kairix brief — session briefing synthesis.
 
 Usage:
-  kairix brief <agent> [--print] [--memory-root PATH]
+  kairix brief <agent> [--print] [--json]
 
 Generates a session briefing at the configured briefing dir and prints
 the path and first 30 lines to stdout.
 
 Adapter only — business logic lives in
 ``kairix.use_cases.brief.run_brief``.
+
+PR 1.2 / #420 — the legacy ``--memory-root`` flag has been removed.
+The agent's memory + workspace surfaces now come from the ``agents:``
+block in ``kairix.config.yaml`` (or the ``agent_defaults:`` synthesis
+fallback). Operators that previously passed ``--memory-root`` should
+declare the directory under ``agents.<name>.surfaces`` instead — run
+``kairix onboard agent --name <agent>`` to scaffold the entry.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
-from kairix.use_cases.brief import BriefDeps, BriefOutput, run_brief
+from kairix.use_cases.brief import BriefDeps, BriefOutput, brief_output_to_envelope, run_brief
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,10 +44,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the full briefing to stdout.",
     )
     parser.add_argument(
-        "--memory-root",
-        dest="memory_root",
-        default=None,
-        help="Root directory containing agent subdirectories (e.g. /path/to/04-Agent-Knowledge).",
+        "--json",
+        dest="as_json",
+        action="store_true",
+        default=False,
+        help=(
+            "Emit the brief envelope dict as JSON to stdout. The same shape "
+            "``tool_brief`` returns over MCP — use to drive automation or "
+            "to inspect the warm-MCP routing path (#421)."
+        ),
     )
     return parser
 
@@ -67,13 +80,20 @@ def main(args: list[str] | None = None, *, deps: BriefDeps | None = None) -> Non
         args = sys.argv[2:]  # strip 'kairix brief'
     parsed = build_parser().parse_args(args)
 
-    if parsed.memory_root:
-        from kairix.paths import set_agent_memory_root_override
-
-        set_agent_memory_root_override(parsed.memory_root)
-
     print(f"Generating briefing for agent: {parsed.agent} ...", file=sys.stderr)
     out = run_brief(parsed.agent, deps=deps)
+
+    if parsed.as_json:
+        # JSON mode short-circuits the human-facing branches: the
+        # envelope carries the error / path / content fields the caller
+        # needs to parse. Operator-facing stderr trace ("Generating
+        # briefing...") stays so the subprocess narration still appears
+        # in interactive use, but nothing else writes to stderr/stdout.
+        # Exit non-zero on error so shell pipelines can branch on it.
+        print(json.dumps(brief_output_to_envelope(out), indent=2))
+        if out.error:
+            sys.exit(1)
+        return
 
     if out.error:
         print(f"Error generating briefing: {out.error}", file=sys.stderr)

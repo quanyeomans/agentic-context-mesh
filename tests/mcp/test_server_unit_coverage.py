@@ -123,10 +123,18 @@ def test_build_server_constructs_fastmcp_with_all_tools_registered_under_unit() 
         "bootstrap",
         # Diagnostic capabilities (read-only)
         "onboard_check",
+        # PR 1.4 / #420 — agent scope discovery + proposal
+        "onboard_scan",
+        "onboard_agent",
+        # PR 1.5 / #420 — doctor agent validates configured scopes against disk
+        "doctor_check_all",
+        "doctor_check_agent",
         "worker_status",
         "features_status",
         "secrets_verify",
         "dead_letter_status",
+        # PR 3.1 / #422 — per-cache stats reflecting the warm MCP process
+        "caches_status",
         "warm",
         # Agent-safe capped surface (escalates above queries<=20 / concurrency<=3)
         "probe_search",
@@ -190,6 +198,7 @@ def test_build_server_each_wrapper_dispatches_to_tool_function_under_unit() -> N
         ("worker_status", {}),
         ("features_status", {}),
         ("dead_letter_status", {}),
+        ("caches_status", {}),
         ("warm", {}),
         # Capped agent-safe probe — over-cap so the closure returns the escalation
         # envelope without spinning up a real probe in unit context.

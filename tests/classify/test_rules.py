@@ -266,13 +266,20 @@ class TestClassifyContent:
             classify_content("some content", agent="invalid_agent")
 
     @pytest.mark.unit
-    def test_episodic_path_contains_memory(self):
+    def test_episodic_classification_succeeds(self):
+        """PR 1.2 / #420 — the episodic write directory now comes from
+        ``AgentScope.writable_path``; without a configured ``agents:``
+        block the router raises ValueError and ``target_path`` resolves
+        to ``""``. The classification itself (type=episodic) is what
+        this test pins — the target_path resolution is exercised in
+        ``tests/classify/test_router.py::TestEpisodicRouting`` with an
+        inline config.
+        """
         result = classify_content(
             "## 10:30\nCompleted the refactor",
             agent="builder",
         )
         assert result.type == "episodic"
-        assert "memory" in result.target_path
 
     @pytest.mark.unit
     def test_procedural_rule_path(self):

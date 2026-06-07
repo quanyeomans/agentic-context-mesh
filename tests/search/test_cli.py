@@ -179,6 +179,19 @@ def test_format_text_short_circuits_on_error() -> None:
 
 
 def test_to_json_envelope_serialises_all_fields() -> None:
+    """PR 2.2 / #421 — the CLI envelope is now the MCP envelope
+    (``search_output_to_envelope``) so warm-MCP routing can round-trip
+    via ``SearchOutput.from_envelope`` and render byte-identical text.
+
+    The shape difference vs the pre-PR-2.2 CLI envelope:
+      - ``error`` is ALWAYS present (empty string on success); the old
+        ``"error" not in env`` rule is gone.
+      - ``health`` (a nested dict from ``health_to_envelope``) is now
+        present.
+      - Each hit carries ``tokens`` + ``source_page``.
+      - ``latency_ms`` is no longer pre-rounded — callers that need a
+        display-form integer round at the render layer.
+    """
     hit = _hit(path="p", title="t", snippet="s", score=0.5, tier="L1", collection="c")
     out = SearchOutput(
         query="q",
@@ -199,11 +212,21 @@ def test_to_json_envelope_serialises_all_fields() -> None:
     assert env["fused_count"] == 3
     assert env["vec_failed"] is False
     assert env["total_tokens"] == 10
-    assert env["latency_ms"] == pytest.approx(15.5)
-    assert "error" not in env  # only present on the error path
-    assert env["results"] == [
-        {"path": "p", "title": "t", "collection": "c", "score": 0.5, "tier": "L1", "snippet": "s"}
-    ]
+    # latency_ms is now passed through unrounded — the MCP envelope shape.
+    assert env["latency_ms"] == pytest.approx(15.4567)
+    # error key is always present in the MCP envelope shape; empty on the happy path.
+    assert env["error"] == ""
+    # health snapshot is part of the MCP envelope shape — verify it's a dict.
+    assert isinstance(env["health"], dict)
+    # The single hit carries the MCP-shape per-hit dict (adds tokens + source_page).
+    assert len(env["results"]) == 1
+    rendered_hit = env["results"][0]
+    assert rendered_hit["path"] == "p"
+    assert rendered_hit["title"] == "t"
+    assert rendered_hit["collection"] == "c"
+    assert rendered_hit["score"] == 0.5
+    assert rendered_hit["tier"] == "L1"
+    assert rendered_hit["snippet"] == "s"
     # Round-trip via json to confirm it's serialisable.
     assert json.loads(json.dumps(env)) == env
 

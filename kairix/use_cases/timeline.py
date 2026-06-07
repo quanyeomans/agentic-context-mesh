@@ -30,6 +30,14 @@ from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
 
+# Envelope key shared by every TimelineHit emitted to / consumed from
+# the canonical JSON envelope (CLI ``--json`` + MCP ``tool_timeline``,
+# #412 + #421). Extracted to a module-level constant per F17 — the
+# literal appears on the writer side (``timeline_output_to_envelope``),
+# the reader side (``TimelineResult.from_envelope``), and the
+# ``_chunk_to_hit`` projector.
+_HIT_KEY_CHUNK_TYPE = "chunk_type"
+
 
 # ---------------------------------------------------------------------------
 # Production defaults — lazy-import wrappers so the use case stays
@@ -125,6 +133,51 @@ class TimelineResult:
     results: list[TimelineHit] = field(default_factory=list)
     error: str = ""
 
+    @classmethod
+    def from_envelope(cls, envelope: dict[str, Any]) -> TimelineResult:
+        """Rebuild a ``TimelineResult`` from the dict ``timeline_output_to_envelope`` emits.
+
+        The seam for warm-MCP text-mode routing (#421 PR 2.7). The CLI
+        dispatcher receives a JSON envelope from the MCP worker; this
+        adapter projects it back to the dataclass shape that
+        ``format_header`` / ``format_results`` already consume, so the
+        in-process and warm paths render byte-identical text.
+
+        Field defaults mirror the dataclass defaults so an envelope
+        missing optional keys (e.g. produced by an older worker) still
+        rebuilds into a renderable result.
+        """
+        raw_results = envelope.get("results", []) or []
+        rebuilt_hits: list[TimelineHit] = []
+        for hit in raw_results:
+            if not isinstance(hit, dict):
+                continue
+            rebuilt_hits.append(
+                TimelineHit(
+                    path=str(hit.get("path", "")),
+                    title=str(hit.get("title", "")),
+                    snippet=str(hit.get("snippet", "")),
+                    score=float(hit.get("score", 0.0)),
+                    date=str(hit.get("date", "")),
+                    chunk_type=str(hit.get(_HIT_KEY_CHUNK_TYPE, "")),
+                )
+            )
+        raw_window = envelope.get("time_window", {}) or {}
+        # The envelope round-trip is dict[str,str] keyed; coerce defensively
+        # so a None or non-str value doesn't poison the renderer.
+        time_window: dict[str, str] = (
+            {str(k): str(v) for k, v in raw_window.items()} if isinstance(raw_window, dict) else {}
+        )
+        return cls(
+            original_query=str(envelope.get("original_query", "")),
+            rewritten_query=str(envelope.get("rewritten_query", "")),
+            is_temporal=bool(envelope.get("is_temporal", False)),
+            fell_back=bool(envelope.get("fell_back", False)),
+            time_window=time_window,
+            results=rebuilt_hits,
+            error=str(envelope.get("error", "")),
+        )
+
 
 def timeline_output_to_envelope(result: TimelineResult) -> dict[str, Any]:
     """Project ``TimelineResult`` onto the canonical JSON envelope.
@@ -147,7 +200,7 @@ def timeline_output_to_envelope(result: TimelineResult) -> dict[str, Any]:
                 "snippet": h.snippet,
                 "score": h.score,
                 "date": h.date,
-                "chunk_type": h.chunk_type,
+                _HIT_KEY_CHUNK_TYPE: h.chunk_type,
             }
             for h in result.results
         ],
@@ -201,7 +254,7 @@ def _chunk_to_hit(chunk: Any) -> TimelineHit:
         snippet=text[:300],
         score=float(metadata.get("score", 0.0)),
         date=chunk_date.isoformat() if chunk_date else "",
-        chunk_type=str(getattr(chunk, "chunk_type", "")),
+        chunk_type=str(getattr(chunk, _HIT_KEY_CHUNK_TYPE, "")),
     )
 
 
