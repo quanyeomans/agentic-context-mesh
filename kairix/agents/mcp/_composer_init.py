@@ -26,6 +26,8 @@ F46-clean: this is a composition module, not pipeline construction.
 
 from __future__ import annotations
 
+from typing import Any
+
 from kairix.agents.briefing.cli import format_output as _brief_format_output
 from kairix.agents.mcp.client_dispatcher import (
     _float_or,
@@ -42,6 +44,12 @@ from kairix.core.search.cli import format_text as _search_format_text
 from kairix.core.temporal.cli import format_header as _timeline_format_header
 from kairix.core.temporal.cli import format_results as _timeline_format_results
 from kairix.knowledge.contradict.cli import format_text as _contradict_format_text
+from kairix.quality.probe.caches_cli import (
+    CacheRow,
+)
+from kairix.quality.probe.caches_cli import (
+    format_text as _caches_format_text,
+)
 from kairix.use_cases.bootstrap import (
     BootstrapOutput,
 )
@@ -191,6 +199,42 @@ register_composer(
         from_envelope=TimelineResult.from_envelope,
         format_text=_timeline_render,
         name="timeline",
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# caches — uses _format_text(rows: list[CacheRow]) over the envelope's
+# ``caches`` list. PR 3.1 / #422 — operators run ``kairix caches`` and
+# the dispatcher routes through the warm MCP server's ``caches_status``
+# tool so the rendered table reflects the long-running process's cache
+# effectiveness instead of a freshly-spawned CLI's empty caches.
+# ---------------------------------------------------------------------------
+
+
+def _caches_from_envelope(envelope: dict[str, Any]) -> list[CacheRow]:
+    """Project the ``tool_caches_status`` envelope back to a list of rows.
+
+    Only the ``caches`` key matters for text rendering; ``process_pid``
+    + ``process_uptime_s`` are JSON-mode operator affordances that
+    ``_format_text`` doesn't surface (and the in-process path never
+    has, so byte-parity is preserved).
+    """
+    raw_rows = envelope.get("caches") or []
+    return [CacheRow.from_envelope(row) for row in raw_rows if isinstance(row, dict)]
+
+
+def _caches_render(rows: list[CacheRow], _argv: list[str]) -> str:
+    """Render the warm-MCP envelope's rows through the existing text formatter."""
+    return _caches_format_text(rows)
+
+
+register_composer(
+    "caches",
+    TextModeComposer(
+        from_envelope=_caches_from_envelope,
+        format_text=_caches_render,
+        name="caches",
     ),
 )
 

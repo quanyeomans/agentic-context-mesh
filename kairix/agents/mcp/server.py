@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +39,12 @@ from kairix.agents.mcp.errors import async_tool_handler
 from kairix.core.search.scope import Scope
 
 logger = logging.getLogger(__name__)
+
+# Module-import time — the MCP process's effective birth moment for the
+# operator-facing ``process_uptime_s`` field on ``tool_caches_status``.
+# Captured once at module import so every subsequent call reports
+# wall-clock seconds since the long-running process started.
+_PROCESS_STARTED_AT_MONOTONIC: float = time.monotonic()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -992,6 +1000,42 @@ def tool_dead_letter_status(
         }
 
 
+def tool_caches_status() -> dict[str, Any]:
+    """Return per-cache stats for every TTL LRU in this MCP process.
+
+    Wraps the same ``_collect_*`` collectors used by ``kairix caches``
+    CLI in-process mode, but executed inside the MCP server's address
+    space so the returned stats reflect the warm long-lived process
+    (the CLI's freshly-spawned process always sees zeros — this tool
+    is how operators see real cache effectiveness).
+
+    PR 3.1 / #422 — paired with the CLI dispatcher routing so
+    ``kairix caches`` shows MCP-side cache state by default.
+
+    Envelope shape::
+
+        {
+            "caches": [
+                {"name": str, "size": int, "hits": int, "misses": int,
+                 "evictions": int, "hit_rate_pct": float},
+                ...
+            ],
+            "process_pid": int,        # operator sanity-check that this is the MCP process
+            "process_uptime_s": float, # how long this MCP process has been up
+        }
+    """
+    from kairix.quality.probe.caches_cli import (
+        _collect_all_rows,
+        caches_rows_to_envelope,
+    )
+
+    rows = _collect_all_rows()
+    envelope = caches_rows_to_envelope(rows)
+    envelope["process_pid"] = os.getpid()
+    envelope["process_uptime_s"] = round(time.monotonic() - _PROCESS_STARTED_AT_MONOTONIC, 3)
+    return envelope
+
+
 # ---------------------------------------------------------------------------
 # Operator-only capability stubs — agents that call these get a structured
 # escalation envelope naming the exact CLI command to ask their admin to run.
@@ -1463,6 +1507,12 @@ def tool_capabilities() -> dict[str, Any]:
                 cli="kairix dead-letter status",
                 category=CAP_CATEGORY_DIAGNOSTIC,
             ),
+            _cap(
+                name="caches_status",
+                mcp_tool="caches_status",
+                cli="kairix caches",
+                category=CAP_CATEGORY_DIAGNOSTIC,
+            ),
             _cap(name="warm", mcp_tool="warm", cli="kairix warm", category=CAP_CATEGORY_DIAGNOSTIC),
             # Probe search — capped MCP variant. The legacy ``kairix probe
             # search`` CLI was retired in v2026.6; the diagnostic registry
@@ -1913,6 +1963,21 @@ def _register_synthesis_and_diagnostic_tools(
     def dead_letter_status(source_name: str | None = None) -> dict[str, Any]:
         """Dead-letter status envelope. Read-only. Identical to `kairix dead-letter status --json`."""
         return tool_dead_letter_status(source_name=source_name)
+
+    @server.tool(
+        description=(
+            "Per-cache stats for every TTL LRU in this MCP process. Use to see "
+            "how effective the warm caches are after a session of agent work. "
+            "Includes process_pid + process_uptime_s so operators confirm the "
+            "envelope reflects the warm MCP process, not a freshly-spawned CLI. "
+            "Read-only. Identical envelope to `kairix caches --json` when routed "
+            "through warm MCP."
+        )
+    )
+    @async_tool_handler
+    def caches_status() -> dict[str, Any]:
+        """Cache stats envelope. Read-only. Reflects the warm MCP process's state."""
+        return tool_caches_status()
 
     @server.tool(
         description=(

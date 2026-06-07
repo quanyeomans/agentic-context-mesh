@@ -138,6 +138,7 @@ MCP_TOOL_MAP: dict[str, str] = {
     "worker": "worker_status",
     "secrets": "secrets_verify",  # pragma: allowlist secret — MCP tool name, not a credential
     "dead-letter": "dead_letter_status",
+    "caches": "caches_status",
 }
 
 
@@ -329,6 +330,22 @@ def _translate_dead_letter(argv: list[str]) -> dict[str, Any] | None:
     return kwargs
 
 
+def _translate_caches(argv: list[str]) -> dict[str, Any] | None:
+    """Translator for ``kairix caches [--json] [--since X]`` → ``{}``.
+
+    The MCP ``caches_status`` tool takes no kwargs; ``--json`` is purely
+    a rendering switch (handled by the dispatcher / composer) and
+    ``--since`` is an operator affordance for parity with
+    ``kairix mcp-calls`` (the caches CLI accepts but ignores it). Any
+    unexpected positional → fall through to in-process so the
+    in-process argparse surfaces the actual error.
+    """
+    positionals, _flags = _parse_kv_flags(argv)
+    if positionals:
+        return None
+    return {}
+
+
 # Per-subcommand translators. None entries are intentional — they
 # document subcommands present in :data:`MCP_TOOL_MAP` that don't yet
 # have a translator, so the dispatcher falls through to in-process.
@@ -344,6 +361,7 @@ _TRANSLATORS: dict[str, Callable[[list[str]], dict[str, Any] | None]] = {
     "worker": _translate_worker,
     "secrets": _translate_secrets,
     "dead-letter": _translate_dead_letter,
+    "caches": _translate_caches,
 }
 
 
