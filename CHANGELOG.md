@@ -7,6 +7,11 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### New for operators
+
+- **One container instead of two.** `kairix` and `kairix-worker` were the same image with different entrypoints; they're now one container with an internal supervisor (s6) running both processes. `docker compose ps` shows 2 services (kairix + neo4j) instead of 3. No behavioural change.
+- **Container runs as the `kairix` user (uid 995), not root.** Files written to bind-mounted volumes land with the correct ownership on the host. Fixes a class of permission issues operators previously hit. If you have pre-existing host volumes written by the old root-owned image, run `sudo chown -R 995:985 <path>` once after upgrade.
+
 ## [2026.6.7] - 2026-06-07 — Faster CLI through warm MCP, agent-setup discovery, caches show real state
 
 > **Upgrading?** No required config changes — out-of-the-box defaults still synthesise a sensible scope per agent. Recommended action: run `kairix onboard scan` to discover your agents on disk and paste the generated block into `kairix.config.yaml`. After that, `kairix doctor agent --all` reports clean. Full notes in [`docs/upgrades/v2026.6.7.md`](docs/upgrades/v2026.6.7.md).
