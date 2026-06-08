@@ -367,12 +367,17 @@ def _systemd_target_dir(mode: Mode, deps: InstallerDeps) -> Path:
 
     Mirrors :func:`kairix.install.systemd._default_target_dir`'s
     behaviour so verify checks against the same path install writes to.
+    User mode honours ``XDG_CONFIG_HOME`` per the XDG base-dir spec —
+    must match the install-side resolver or verify can't find units
+    that install just wrote.
     """
     if deps.systemd_target_dir is not None:
         return deps.systemd_target_dir
     if mode == Mode.system:
         return Path("/etc/systemd/system")
-    return Path.home() / ".config" / "systemd" / "user"
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg_config) if xdg_config else Path.home() / ".config"
+    return base / "systemd" / "user"
 
 
 def _verify_user(mode: Mode) -> bool:
