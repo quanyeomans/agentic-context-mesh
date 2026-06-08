@@ -5,9 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
-## [Unreleased]
+## [2026.6.8] - 2026-06-08 — One-command install, one container, one-command OAuth
 
-> **Upgrading?** Two operator actions: (a) the kairix container now runs as a dedicated `kairix` user (uid 995) instead of root — if your host volumes were written by the old image, run `sudo chown -R 995:985 <path>` once after pulling the new image; (b) on bare hosts (no Docker), the new `sudo kairix init --system` lays down everything in one command. Existing Docker compose deploys upgrade in place. Full notes in [`docs/upgrades/v2026.7.md`](docs/upgrades/v2026.7.md).
+> **Upgrading?** Two operator actions: (a) the kairix container now runs as a dedicated `kairix` user (uid 995) instead of root — if your host volumes were written by the old image, run `sudo chown -R 995:985 <path>` once after pulling the new image; (b) on bare hosts (no Docker), the new `sudo kairix init --system` lays down everything in one command. Existing Docker compose deploys upgrade in place. Full notes in [`docs/upgrades/v2026.6.8.md`](docs/upgrades/v2026.6.8.md).
 
 ### New for agents
 

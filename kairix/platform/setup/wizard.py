@@ -156,7 +156,7 @@ _PROVIDER_KEYS = ["azure", "openai", "custom"]
 _STORAGE_OPTIONS = [
     "Default location (~/.cache/kairix/) — good for personal use",
     "Custom path — for shared or production deployments",
-    "FHS layout (/var/lib/kairix) — for system installs and v2026.7+ containers",
+    "FHS layout (/var/lib/kairix) — for system installs and v2026.6.8+ containers",
 ]
 
 _COLLECTION_OPTIONS = [
@@ -251,7 +251,7 @@ def _resolve_storage_dir(ctx: SetupContext) -> str:
         return str(Path.home() / ".cache" / "kairix")
     if idx == 1:
         return os.path.expanduser(prompt(ctx, "Data directory path"))
-    # Docker / FHS — the v2026.7+ unified container + system install both
+    # Docker / FHS — the v2026.6.8+ unified container + system install both
     # land here per Plan 1's kairix init.
     return "/var/lib/kairix"
 

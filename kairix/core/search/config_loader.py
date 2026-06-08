@@ -42,13 +42,13 @@ _KEY_RERANK_INTENTS = "rerank_intents"
 _KEY_DATE_PATH_BOOST = "date_path_boost"
 _KEY_CHUNK_DATE_BOOST = "chunk_date_boost"
 
-# The path the Docker image bundles its canonical config at. v2026.7+
+# The path the Docker image bundles its canonical config at. v2026.6.8+
 # unified container places this at /etc/kairix/kairix.config.yaml per
 # the FHS layout (the Dockerfile's COPY target + KAIRIX_CONFIG_PATH env).
 # Operators overlay sparse host-side overrides via
 # ``KAIRIX_CONFIG_OVERLAY_PATH``; the layered loader reads BASE from
 # this location unless ``KAIRIX_CONFIG_BASE_PATH`` is set to point
-# elsewhere. Pre-v2026.7 images placed it at /opt/kairix/kairix.config.yaml
+# elsewhere. Pre-v2026.6.8 images placed it at /opt/kairix/kairix.config.yaml
 # — operators on legacy images set KAIRIX_CONFIG_BASE_PATH explicitly.
 _DEFAULT_IMAGE_BASE_PATH = Path("/etc/kairix/kairix.config.yaml")
 

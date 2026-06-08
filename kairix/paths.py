@@ -151,7 +151,7 @@ def default_data_dir(platform: str = sys.platform) -> Path:
     Resolution order:
       1. ``KAIRIX_DATA_DIR`` env if set — operator override, always wins
       2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/data/kairix`` (legacy
-         default; operators on the v2026.7+ FHS layout set
+         default; operators on the v2026.6.8+ FHS layout set
          ``KAIRIX_DATA_DIR=/var/lib/kairix`` to override — see #447)
       3. Service install (system-mode kairix init): ``/var/lib/kairix``
       4. Windows user: ``%LOCALAPPDATA%/kairix``
@@ -167,7 +167,7 @@ def default_data_dir(platform: str = sys.platform) -> Path:
         return Path(env).expanduser()
     if is_docker_runtime_check():
         # Legacy default — see #447 + docs/architecture/deployment-architecture.md.
-        # Operators on FHS layouts (v2026.7+ kairix init --system) set
+        # Operators on FHS layouts (v2026.6.8+ kairix init --system) set
         # KAIRIX_DATA_DIR=/var/lib/kairix explicitly to override.
         return Path("/data/kairix")
     if is_service_install():
@@ -617,7 +617,7 @@ def embed_cache_path() -> Path:
         normalised query text — the transport-layer cache that sits
         in front of every search-time embed call.
 
-    Lives under :func:`data_dir` (``/var/lib/kairix`` on v2026.7+ FHS
+    Lives under :func:`data_dir` (``/var/lib/kairix`` on v2026.6.8+ FHS
     containers + service installs, ``/data/kairix`` on legacy
     container layouts, XDG data dir for user installs) so it travels
     with the kairix data volume across

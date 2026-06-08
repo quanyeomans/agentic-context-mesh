@@ -9,7 +9,7 @@ construction time (G4: config at boundary — no env-var reads here).
 Production wiring resolves the path in factory.py via
 :func:`kairix.paths.log_dir`, which honours ``KAIRIX_LOG_DIR`` env
 first, then config-file ``log_dir``, then per-mode defaults
-(``/var/lib/kairix/logs`` on v2026.7+ FHS containers,
+(``/var/lib/kairix/logs`` on v2026.6.8+ FHS containers,
 ``/data/kairix/logs`` on legacy container layouts,
 ``/var/log/kairix`` on system installs, ``~/.cache/kairix/logs`` on
 user installs).
@@ -118,7 +118,7 @@ def default_search_log_paths(*, base: Path | None = None) -> tuple[Path, Path]:
     config files. The decision of which base directory to use lives in
     ``factory.py``, which calls :func:`kairix.paths.log_dir` (honours
     ``KAIRIX_LOG_DIR`` env, config-file ``log_dir`` setting, then per-mode
-    defaults: docker → ``/var/lib/kairix/logs`` after the v2026.7+ FHS
+    defaults: docker → ``/var/lib/kairix/logs`` after the v2026.6.8+ FHS
     cutover or ``/data/kairix/logs`` on legacy hosts, server →
     ``/var/log/kairix``, user → ``~/.cache/kairix/logs``).
 

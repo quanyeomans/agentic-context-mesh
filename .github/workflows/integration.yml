@@ -6,7 +6,7 @@ name: "2 · Pre-merge PR gates (PR → main)"
 #
 # The previous "Full integration suite" job in this workflow was a
 # duplicate of ci.yml's Stage 3 Integration (same `pytest -m
-# "integration or contract"` invocation). Removed in v2026.7 to halve
+# "integration or contract"` invocation). Removed in v2026.6.8 to halve
 # per-PR CI minutes — Stage 3 in ci.yml remains the integration gate.
 # (The "Verify public API imports" smoke that lived alongside it is
 # redundant with Stage 2 pytest collection.)

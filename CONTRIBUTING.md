@@ -112,7 +112,7 @@ tests/
 
 ## Branching model
 
-Trunk-based on `main`. The historical `develop` branch was retired in v2026.7.
+Trunk-based on `main`. The historical `develop` branch was retired in v2026.6.8.
 
 | Branch | Purpose |
 |---|---|
