@@ -45,6 +45,7 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
       docs: ${{ steps.filter.outputs.docs }}
       reflib: ${{ steps.filter.outputs.reflib }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -513,8 +514,11 @@ jobs:
     # composed production path through subprocess CLI invocations, disjoint
     # from integration's in-process factory.build_* calls. Decoupling lets
     # E2E run in parallel with Stage 2 + Stage 3 instead of after both.
+    # Gated on the narrower `e2e` paths filter (excludes test-only edits
+    # to tests/unit, tests/contract, tests/bdd, tests/soak + probe scripts
+    # — none of these can affect a composed-production-path E2E).
     needs: [changes, contracts]
-    if: needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.e2e == 'true'
     permissions:
       contents: read
 
