@@ -387,9 +387,21 @@ jobs:
         # session bus the subprocess fails. Mirrors the same step on the
         # Stage 2 unit job + Stage 4.5 e2e job.
         run: |
+          # Enable lingering so the user manager persists outside login sessions
           sudo loginctl enable-linger "$USER"
-          timeout 30 bash -c 'until systemctl --user is-system-running --quiet 2>/dev/null || systemctl --user is-system-running 2>/dev/null | grep -qE "running|degraded|starting"; do sleep 1; done'
-          systemctl --user is-system-running || true
+          # Explicitly start the user manager — enable-linger alone doesn't
+          # create the bus retroactively in non-interactive runner sessions.
+          UID_N=$(id -u "$USER")
+          sudo systemctl start "user@${UID_N}.service"
+          # Wait for the user manager to come up
+          timeout 30 bash -c "until systemctl --user --no-pager status >/dev/null 2>&1; do sleep 1; done"
+          # Propagate XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS to all
+          # downstream steps via \$GITHUB_ENV so pytest subprocesses inherit them.
+          echo "XDG_RUNTIME_DIR=/run/user/${UID_N}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus" >> "$GITHUB_ENV"
+          # Verify
+          XDG_RUNTIME_DIR=/run/user/${UID_N} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus \
+            systemctl --user is-system-running || true
 
       - name: Integration tests
         # Coverage collected and uploaded so production-wiring code
