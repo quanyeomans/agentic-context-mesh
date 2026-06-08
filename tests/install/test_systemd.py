@@ -138,7 +138,7 @@ def test_install_unit_system_writes_to_injected_target_dir(tmp_path: Path) -> No
     assert target.read_text() == content
     # Mode bits — 0o644 — F50/security baseline.
     assert target.stat().st_mode & 0o777 == 0o644
-    assert result == {"path": str(target), "mode": "system"}
+    assert result == {"path": str(target), "mode": "system", "systemctl_enabled": "true"}
 
 
 @pytest.mark.unit
@@ -161,7 +161,7 @@ def test_install_unit_user_writes_to_injected_target_dir(tmp_path: Path) -> None
     target = tmp_path / "kairix.service"
     assert target.exists()
     assert target.read_text() == content
-    assert result == {"path": str(target), "mode": "user"}
+    assert result == {"path": str(target), "mode": "user", "systemctl_enabled": "true"}
 
 
 @pytest.mark.unit

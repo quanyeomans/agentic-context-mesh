@@ -648,7 +648,12 @@ def _then_user_data_exists(install_ctx: _InstallCtx) -> None:
 
 @then("~/.config/systemd/user/kairix.service exists")
 def _then_user_systemd_unit_exists(install_ctx: _InstallCtx) -> None:
-    unit = install_ctx.test_root / ".config" / "systemd" / "user" / "kairix.service"
+    # install_unit honours XDG_CONFIG_HOME per the XDG base-dir spec (which
+    # is what the systemd user manager itself reads). The test env sets
+    # XDG_CONFIG_HOME=<test_root>/config, so the unit lands there — NOT
+    # under <test_root>/.config (the HOME fallback used only when
+    # XDG_CONFIG_HOME is unset).
+    unit = install_ctx.test_root / "config" / "systemd" / "user" / "kairix.service"
     assert unit.exists(), f"user-mode systemd unit not present: {unit}"
 
 
@@ -659,7 +664,7 @@ def _then_user_unit_no_user_directive(install_ctx: _InstallCtx) -> None:
     check; the template ships an empty ``user_directive`` placeholder
     for user mode, which jinja2 renders as an empty line.
     """
-    unit = install_ctx.test_root / ".config" / "systemd" / "user" / "kairix.service"
+    unit = install_ctx.test_root / "config" / "systemd" / "user" / "kairix.service"
     content = unit.read_text()
     # The template emits literal "User=" when ``user_directive`` is set;
     # the empty-string render under user mode emits no User= line at all.

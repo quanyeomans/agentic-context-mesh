@@ -21,6 +21,7 @@ real FHS / XDG locations; tests pass
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from collections.abc import Callable, Sequence
@@ -30,6 +31,8 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from kairix.paths import Mode
+
+_logger = logging.getLogger("kairix.install.systemd")
 
 # Autoescape is intentionally empty: systemd unit files are plain text
 # (ini-style key=value), not HTML / XML, so escaping ``&``/``<``/``>``
@@ -109,10 +112,35 @@ def install_unit(
     target.chmod(0o644)
 
     systemctl_argv = _systemctl_argv_for(mode)
-    _run(deps.subprocess_runner, [*systemctl_argv, "daemon-reload"])
-    _run(deps.subprocess_runner, [*systemctl_argv, "enable", _UNIT_FILENAME])
+    # systemctl daemon-reload + enable are best-effort: the durable
+    # artefact is the unit file at `target`. When the systemd user
+    # manager can't reach the unit (no logind session, XDG override
+    # mismatch, container runtime, etc.) we log + continue rather than
+    # raise — operators can run `systemctl --user enable kairix.service`
+    # manually once the bus is reachable.
+    systemctl_ok = True
+    try:
+        _run(deps.subprocess_runner, [*systemctl_argv, "daemon-reload"])
+        _run(deps.subprocess_runner, [*systemctl_argv, "enable", _UNIT_FILENAME])
+    except subprocess.CalledProcessError as exc:
+        systemctl_ok = False
+        _logger.warning(
+            "systemctl enable kairix.service failed (rc=%d). Unit file is written "
+            "at %s — run `%s enable %s` manually once the systemd %s manager "
+            "is reachable. stderr: %s",
+            exc.returncode,
+            target,
+            " ".join(systemctl_argv),
+            _UNIT_FILENAME,
+            "system" if mode == Mode.system else "--user",
+            (exc.stderr or b"").decode("utf-8", errors="replace")[:200],
+        )
 
-    return {"path": str(target), "mode": mode.value}
+    return {
+        "path": str(target),
+        "mode": mode.value,
+        "systemctl_enabled": "true" if systemctl_ok else "false",
+    }
 
 
 def _default_target_dir(mode: Mode) -> Path:
