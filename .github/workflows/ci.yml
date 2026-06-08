@@ -72,6 +72,23 @@ jobs:
             reflib:
               - 'kairix/knowledge/reflib/**'
               - 'reference-library/**'
+            # Stage 4.5 (composed-production-path E2E) covers install, container,
+            # connectors, search/factory/embed surfaces. Most kairix/** edits DO
+            # affect at least one composed path. Excluding only the test scopes
+            # that DON'T trigger E2E (unit/contract/bdd are their own scopes) plus
+            # benchmark-probe scripts (perf measurement, not behaviour).
+            e2e:
+              - 'kairix/**'
+              - '!kairix/quality/probe/**'
+              - 'tests/e2e/**'
+              - '!tests/unit/**'
+              - '!tests/contract/**'
+              - '!tests/bdd/**'
+              - '!tests/soak/**'
+              - 'Dockerfile'
+              - 'docker-compose*.yml'
+              - 'docker/**'
+              - 'pyproject.toml'
 
   # ── Pre-commit (linting, formatting, secrets, file hygiene) ────────────────
   pre-commit:
@@ -191,7 +208,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # PR-time: only 3.12 (the project's pinned runtime). Push-to-main:
+        # full 3.10/3.11/3.12 matrix as the regression net. 3.10 + 3.11
+        # specific bugs are caught on the main push before any release tag.
+        # Saves ~1.3 min critical path on every PR (3.10 was the slowest
+        # at 7.3 min; dropping it leaves 3.12 at 6.5 min as the matrix max).
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.10", "3.11", "3.12"]') }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
