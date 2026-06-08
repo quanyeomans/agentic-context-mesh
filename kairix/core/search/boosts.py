@@ -8,6 +8,8 @@ functions.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from kairix.core.protocols import GraphRepository
 from kairix.core.search.config import (
     EntityBoostConfig,
@@ -15,6 +17,57 @@ from kairix.core.search.config import (
     TemporalBoostConfig,
 )
 from kairix.core.search.intent import QueryIntent
+
+
+def default_intent_confidence_flag_reader() -> bool:
+    """Production flag-reader — delegates to :func:`kairix.core.features.resolver.flag`.
+
+    Pulled into a thin wrapper so tests can inject a fake reader via the
+    ``flag_reader`` kwarg on :func:`intent_confidence_passes` without
+    monkey-patching the resolver module (F1/F2-clean).
+    """
+    from kairix.core.features.resolver import flag
+
+    return flag("intent_confidence_gated_boosts")
+
+
+# Callable signature for the flag_reader DI seam — a zero-arg returning bool.
+IntentConfidenceFlagReader = Callable[[], bool]
+
+
+def intent_confidence_passes(
+    context: dict,
+    expected: QueryIntent,
+    min_confidence: float,
+    *,
+    flag_reader: IntentConfidenceFlagReader = default_intent_confidence_flag_reader,
+) -> bool:
+    """Return True iff the boost should fire based on intent + confidence.
+
+    Three-way decision (Issue #456):
+
+      1. ``context["intent"]`` must equal ``expected`` (legacy gate).
+      2. If the ``intent_confidence_gated_boosts`` feature flag is OFF,
+         step 1 alone decides — confidence is ignored (byte-for-byte
+         parity with pre-#456 behaviour).
+      3. If the flag is ON, ``context["intent_confidence"]`` (defaulting
+         to ``1.0`` when absent so legacy callers that haven't been
+         updated to populate it still see boosts fire) must be ≥
+         ``min_confidence``.
+
+    Public surface (no underscore prefix) so tests can drive it directly
+    (F5-clean). ``flag_reader`` is a DI seam — production callers leave
+    it at the default; tests pass a fake to drive both flag states
+    without touching the resolver cache.
+    """
+    if context.get("intent") != expected:
+        return False
+
+    if not flag_reader():
+        return True
+
+    confidence = float(context.get("intent_confidence", 1.0))
+    return confidence >= min_confidence
 
 
 class EntityBoost:
@@ -40,7 +93,12 @@ class EntityBoost:
         unused by this strategy — the boost is purely structural (Neo4j
         graph in-degree), not query-text dependent.
         """
-        if context.get("intent") != QueryIntent.ENTITY:
+        min_confidence = (
+            self._config.min_intent_confidence
+            if self._config is not None
+            else EntityBoostConfig().min_intent_confidence
+        )
+        if not intent_confidence_passes(context, QueryIntent.ENTITY, min_confidence):
             return results
         from kairix.core.search.rrf import entity_boost_neo4j
 
@@ -65,7 +123,12 @@ class ProceduralBoost:
         unused — the procedural boost is path-pattern based, not query-text
         dependent.
         """
-        if context.get("intent") != QueryIntent.PROCEDURAL:
+        min_confidence = (
+            self._config.min_intent_confidence
+            if self._config is not None
+            else ProceduralBoostConfig().min_intent_confidence
+        )
+        if not intent_confidence_passes(context, QueryIntent.PROCEDURAL, min_confidence):
             return results
         from kairix.core.search.rrf import procedural_boost
 
@@ -84,7 +147,12 @@ class TemporalDateBoost:
         self._config = config
 
     def boost(self, results: list, query: str, context: dict) -> list:
-        if context.get("intent") != QueryIntent.TEMPORAL:
+        min_confidence = (
+            self._config.min_intent_confidence
+            if self._config is not None
+            else TemporalBoostConfig().min_intent_confidence
+        )
+        if not intent_confidence_passes(context, QueryIntent.TEMPORAL, min_confidence):
             return results
         from kairix.core.search.rrf import temporal_date_boost
 
@@ -109,7 +177,12 @@ class ChunkDateBoost:
         actual proximity input is ``context["query_date"]``, not the raw
         query string.
         """
-        if context.get("intent") != QueryIntent.TEMPORAL:
+        min_confidence = (
+            self._config.min_intent_confidence
+            if self._config is not None
+            else TemporalBoostConfig().min_intent_confidence
+        )
+        if not intent_confidence_passes(context, QueryIntent.TEMPORAL, min_confidence):
             return results
         from kairix.core.search.rrf import chunk_date_boost
 

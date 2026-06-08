@@ -277,6 +277,35 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
+    "intent_confidence_gated_boosts": FeatureFlag(
+        name="intent_confidence_gated_boosts",
+        # Default-OFF: today's binary-enum behaviour is preserved byte-for-byte.
+        # Operators flip ON to enable confidence-gated boosts; ambiguous
+        # queries (confidence < min_intent_confidence in the boost configs)
+        # then fall back to plain RRF fusion instead of triggering
+        # potentially-wrong boosts like ChunkDateBoost on a query whose
+        # TEMPORAL match was a false positive.
+        default=False,
+        description=(
+            "When ON, boost strategies (ProceduralBoost, TemporalDateBoost, "
+            "ChunkDateBoost, EntityBoost) gate on intent confidence in addition "
+            "to intent matching. The classifier emits IntentDecision(primary, "
+            "confidence, alternatives) via classify_with_confidence(); the "
+            "pipeline puts both intent + confidence in the boost context dict; "
+            "each boost compares confidence against its min_intent_confidence "
+            "config (default 0.5). When OFF, boosts use the legacy binary "
+            "intent==X check, ignoring confidence. Closes #456: ambiguous "
+            "queries like 'what changed in v1.2.3' currently match a TEMPORAL "
+            "pattern via 'what changed' and trigger ChunkDateBoost — wrong "
+            "answer. Confidence-gating makes the boost skip when the "
+            "TEMPORAL classification is contested by another signal."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_FLAG_TARGET_RETIRE_IN,
+        owner="search-pipeline",
+        related_spec="docs/architecture/feature-flag-architecture.md",
+    ),
     "cli_routes_through_warm_mcp": FeatureFlag(
         name="cli_routes_through_warm_mcp",
         # Default-ON: every composer-equipped subcommand (PRs 2.1-2.7)

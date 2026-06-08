@@ -798,3 +798,172 @@ def test_pipeline_rerank_exception_returns_pre_rerank_order_unchanged():
     # Must not raise
     result = pipeline.search("anything")
     assert isinstance(result, SearchResult)
+
+
+# ---------------------------------------------------------------------------
+# Intent-confidence-gated boosts (Issue #456)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingBoost:
+    """Boost strategy that records whether it was invoked + reads the
+    confidence value from the context dict for assertion."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[QueryIntent, float | None]] = []
+
+    def boost(self, results: list, query: str, context: dict) -> list:
+        self.calls.append((context.get("intent"), context.get("intent_confidence")))
+        return results
+
+
+@pytest.mark.unit
+def test_pipeline_threads_intent_confidence_into_boost_context():
+    """Sabotage-proof: removing 'intent_confidence' from _apply_boosts'
+    context dict makes this test fail with KeyError on the recording
+    boost's read."""
+    recorder = _RecordingBoost()
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC, confidence=0.7),
+        boosts=[recorder],
+    )
+    pipeline.search("test query")
+    assert len(recorder.calls) == 1
+    intent, confidence = recorder.calls[0]
+    assert intent == QueryIntent.SEMANTIC
+    assert confidence == 0.7
+
+
+@pytest.mark.unit
+def test_pipeline_legacy_fake_without_classify_with_confidence_defaults_to_1():
+    """A classifier surface that only implements classify() (pre-#456
+    fake) still works — pipeline defaults its confidence to 1.0 so
+    legacy callers get unconditional boost firing."""
+
+    class _LegacyClassifier:
+        def classify(self, query: str) -> QueryIntent:
+            return QueryIntent.SEMANTIC
+
+    recorder = _RecordingBoost()
+    pipeline = _test_pipeline(
+        classifier=_LegacyClassifier(),
+        boosts=[recorder],
+    )
+    pipeline.search("test query")
+    assert len(recorder.calls) == 1
+    _, confidence = recorder.calls[0]
+    assert confidence == 1.0, (
+        f"legacy classifier without classify_with_confidence should yield "
+        f"confidence=1.0 (legacy unconditional fire); got {confidence}"
+    )
+
+
+@pytest.mark.unit
+def test_intent_confidence_passes_skips_when_flag_on_and_confidence_low():
+    """When the flag is ON and intent_confidence < min_confidence, the
+    helper returns False — the boost will be skipped.
+
+    Drives the gate via the flag_reader DI seam (F1/F2-clean — no
+    monkey-patching of the resolver module).
+
+    Sabotage-proof: removing `if not flag_reader(): return True` from
+    intent_confidence_passes makes this test FAIL (function returns True
+    on the legacy fall-through path) — confirming the flag-gate is
+    load-bearing.
+    """
+    from kairix.core.search.boosts import intent_confidence_passes
+
+    flag_on = lambda: True  # noqa: E731 — concise test fake
+    context = {"intent": QueryIntent.TEMPORAL, "intent_confidence": 0.3}
+    assert (
+        intent_confidence_passes(
+            context,
+            QueryIntent.TEMPORAL,
+            min_confidence=0.5,
+            flag_reader=flag_on,
+        )
+        is False
+    )
+
+
+@pytest.mark.unit
+def test_intent_confidence_passes_fires_when_flag_off_regardless_of_confidence():
+    """Backwards-compat: with the flag OFF, intent_confidence is ignored
+    entirely — the helper returns True on intent match alone (pre-#456
+    binary behaviour preserved)."""
+    from kairix.core.search.boosts import intent_confidence_passes
+
+    flag_off = lambda: False  # noqa: E731
+    # Confidence is impossibly low; min is impossibly high; flag OFF
+    # → boost still fires because confidence is ignored.
+    context = {"intent": QueryIntent.TEMPORAL, "intent_confidence": 0.0}
+    assert (
+        intent_confidence_passes(
+            context,
+            QueryIntent.TEMPORAL,
+            min_confidence=0.99,
+            flag_reader=flag_off,
+        )
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_intent_confidence_passes_fires_when_flag_on_and_confidence_high():
+    """The user-facing happy path from #456: flag ON, confident
+    classification, intent matches → boost fires."""
+    from kairix.core.search.boosts import intent_confidence_passes
+
+    flag_on = lambda: True  # noqa: E731
+    context = {"intent": QueryIntent.TEMPORAL, "intent_confidence": 0.85}
+    assert (
+        intent_confidence_passes(
+            context,
+            QueryIntent.TEMPORAL,
+            min_confidence=0.5,
+            flag_reader=flag_on,
+        )
+        is True
+    )
+
+
+@pytest.mark.unit
+def test_intent_confidence_passes_skips_when_intent_mismatch_regardless_of_flag():
+    """Intent mismatch always short-circuits to False before the flag
+    check — pre-#456 semantics for the legacy gate are preserved
+    byte-for-byte."""
+    from kairix.core.search.boosts import intent_confidence_passes
+
+    for flag in (True, False):
+        context = {"intent": QueryIntent.SEMANTIC, "intent_confidence": 1.0}
+        # Expected TEMPORAL but context says SEMANTIC → False
+        assert (
+            intent_confidence_passes(
+                context,
+                QueryIntent.TEMPORAL,
+                min_confidence=0.5,
+                flag_reader=lambda f=flag: f,
+            )
+            is False
+        )
+
+
+@pytest.mark.unit
+def test_intent_confidence_passes_legacy_default_confidence_is_one():
+    """When the context doesn't carry intent_confidence (legacy callers
+    that haven't been updated post-#456), the helper defaults to 1.0 so
+    boosts fire normally (unconditional-fire backwards-compat)."""
+    from kairix.core.search.boosts import intent_confidence_passes
+
+    flag_on = lambda: True  # noqa: E731
+    # No intent_confidence key in context; default should kick in
+    context = {"intent": QueryIntent.TEMPORAL}
+    assert (
+        intent_confidence_passes(
+            context,
+            QueryIntent.TEMPORAL,
+            min_confidence=0.5,
+            flag_reader=flag_on,
+        )
+        is True
+    )

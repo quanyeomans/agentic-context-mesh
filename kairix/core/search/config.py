@@ -51,6 +51,12 @@ class EntityBoostConfig:
     enabled: bool = True
     factor: float = 0.20  # log-scale weight on Neo4j MENTIONS in-degree
     cap: float = 2.0  # max boosted_score / rrf_score ratio
+    # Issue #456 — when intent_confidence_gated_boosts flag is ON, this
+    # boost only fires when (intent == ENTITY) AND
+    # (intent_confidence >= min_intent_confidence). 0.5 is the
+    # recommended default: a clear margin between the primary's match
+    # count and the runner-up. When the flag is OFF, this field is unused.
+    min_intent_confidence: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,8 @@ class ProceduralBoostConfig:
         r"(?:^|/)guide-",
         r"(?:^|/)playbook-",
     )
+    # Issue #456 — confidence-gated minimum. See EntityBoostConfig.
+    min_intent_confidence: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -89,6 +97,8 @@ class TemporalBoostConfig:
     # marker (ISO date or relative term like "last week"). Prevents generic TEMPORAL
     # intent queries ("what changed and why") from receiving unintended recency bias.
     chunk_date_boost_guard_explicit_only: bool = True
+    # Issue #456 — confidence-gated minimum. See EntityBoostConfig.
+    min_intent_confidence: float = 0.5
 
 
 @dataclass(frozen=True)

@@ -176,7 +176,7 @@ class SearchPipeline:
 
         # 1. Classify intent
         t = time.monotonic()
-        intent = self._classify(query)
+        intent, intent_confidence = self._classify_with_confidence(query)
         _stage("classify", t)
 
         # 2. Entity intent requires graph
@@ -217,7 +217,7 @@ class SearchPipeline:
 
         # 6. Boost chain
         t = time.monotonic()
-        fused = self._apply_boosts(fused, query, intent)
+        fused = self._apply_boosts(fused, query, intent, intent_confidence)
         _stage("boost", t)
 
         # 6b. Cross-encoder rerank (Issue 2). No-op when reranker is None
@@ -268,12 +268,41 @@ class SearchPipeline:
         return result
 
     def _classify(self, query: str) -> QueryIntent:
-        """Classify intent; fall back to SEMANTIC on any classifier failure."""
+        """Classify intent; fall back to SEMANTIC on any classifier failure.
+
+        Backwards-compat shim: delegates to :meth:`_classify_with_confidence`
+        and returns the primary intent only. Existing tests + call sites
+        that don't need confidence keep working byte-for-byte.
+        """
+        return self._classify_with_confidence(query)[0]
+
+    def _classify_with_confidence(self, query: str) -> tuple[QueryIntent, float]:
+        """Classify intent + emit confidence (Issue #456).
+
+        Prefers ``classifier.classify_with_confidence(query)`` when the
+        classifier exposes it (production + post-#456 fakes); falls back to
+        ``classifier.classify(query)`` with confidence=1.0 when the
+        classifier is a legacy fake/adapter that hasn't been updated.
+
+        Confidence is consumed by the boost layer when the
+        ``intent_confidence_gated_boosts`` feature flag is ON — see
+        :func:`kairix.core.search.boosts._intent_confidence_passes`. When
+        the flag is OFF, the confidence value is irrelevant.
+
+        Failure-isolated: any classifier exception returns
+        ``(SEMANTIC, 0.0)``. The 0.0 confidence makes downstream gated
+        boosts skip, which is the safe-default behaviour.
+        """
         try:
-            return self.classifier.classify(query)  # type: ignore[union-attr] — classifier may be None when graph backend unavailable; guarded by try
+            classifier_with_confidence = getattr(self.classifier, "classify_with_confidence", None)
+            if classifier_with_confidence is not None:
+                decision = classifier_with_confidence(query)
+                return decision.primary, float(decision.confidence)
+            # Legacy classifier surface — no confidence available.
+            return self.classifier.classify(query), 1.0  # type: ignore[union-attr] — classifier may be None when graph backend unavailable; guarded by try/except.
         except Exception as e:
             _logger.warning("pipeline: classify failed — %s", e)
-            return QueryIntent.SEMANTIC
+            return QueryIntent.SEMANTIC, 0.0
 
     def _resolve_collections(
         self,
@@ -489,10 +518,19 @@ class SearchPipeline:
         except Exception as e:
             _logger.warning("pipeline: chunk_date enrichment failed — %s", e)
 
-    def _apply_boosts(self, fused: list, query: str, intent: QueryIntent) -> list:
-        """Apply each boost in order; per-boost failures are logged and skipped."""
+    def _apply_boosts(self, fused: list, query: str, intent: QueryIntent, intent_confidence: float = 1.0) -> list:
+        """Apply each boost in order; per-boost failures are logged and skipped.
+
+        ``intent_confidence`` is passed into the boost context so the
+        confidence-gated boost strategies (Issue #456) can decide whether
+        to fire based on classifier confidence in addition to intent match.
+        Defaults to 1.0 so any legacy caller invoking this method directly
+        (without going through ``search()``) gets the legacy
+        unconditional-fire behaviour.
+        """
         context = {
             "intent": intent,
+            "intent_confidence": intent_confidence,
             "query": query,
             "graph": self.graph,
             "query_date": _extract_query_date(query),

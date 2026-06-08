@@ -25,6 +25,7 @@ Failure mode: never raises; returns SEMANTIC on any unexpected input.
 """
 
 import re
+from dataclasses import dataclass, field
 from enum import Enum
 
 # ---------------------------------------------------------------------------
@@ -315,11 +316,158 @@ def classify(query: str) -> QueryIntent:
     Priority order: TEMPORAL > MULTI_HOP > ATTRIBUTE_FACT > ENTITY > PROCEDURAL > KEYWORD > SEMANTIC.
     Returns SEMANTIC on empty or unclassifiable input.
     Never raises.
+
+    This is a thin shim over :func:`classify_with_confidence` that drops the
+    confidence + alternatives. New callers wanting the full decision shape
+    should use :func:`classify_with_confidence` directly.
+    """
+    try:
+        return classify_with_confidence(query).primary
+    except Exception:
+        return QueryIntent.SEMANTIC
+
+
+# ---------------------------------------------------------------------------
+# IntentDecision + classify_with_confidence (Issue #456)
+# ---------------------------------------------------------------------------
+#
+# Pre-#456: classify() returned a bare QueryIntent enum value with no
+# confidence signal. Downstream boost strategies gated on
+# context["intent"] == QueryIntent.X — a binary check that fired even when
+# a query matched a high-priority pattern by accident (e.g. "what changed
+# in the v1.2.3 release" routes TEMPORAL because of "what changed", which
+# then triggers ChunkDateBoost — wrong answer).
+#
+# Post-#456: classify_with_confidence() returns IntentDecision(primary,
+# confidence, alternatives). Boost strategies gate on (intent == X AND
+# confidence >= min_intent_confidence). When confidence is below the
+# threshold, the boost is skipped and the pipeline falls back to plain
+# RRF fusion — equivalent to SEMANTIC routing.
+#
+# The confidence formula is pure regex math (no learned weights, no I/O):
+# confidence = (matches_primary - matches_runner_up) / max(matches_primary, 1).
+# A query that matches one TEMPORAL pattern and zero of any other intent's
+# patterns gets confidence = (1-0)/1 = 1.0. A query that matches one
+# TEMPORAL pattern AND one KEYWORD pattern (e.g. "what changed in v1.2.3")
+# gets confidence = (1-1)/1 = 0.0 → boost skipped.
+
+
+@dataclass(frozen=True)
+class IntentDecision:
+    """The full output of :func:`classify_with_confidence`.
+
+    Attributes:
+        primary: The winning :class:`QueryIntent` per the existing
+            priority-ordered dispatch chain.
+        confidence: ``[0.0, 1.0]`` scalar — margin between the primary
+            intent's match count and the runner-up's. 1.0 = unambiguous;
+            0.0 = tied with the runner-up.
+        alternatives: Other intents whose patterns also matched, in
+            priority order, primary excluded. Empty for unambiguous
+            queries.
+    """
+
+    primary: QueryIntent
+    confidence: float
+    alternatives: tuple[QueryIntent, ...] = field(default_factory=tuple)
+
+
+# F17 — the same pattern-list lookup is read in two places (the priority
+# walk + the confidence count); centralise so a rename of a pattern var
+# hits a single edit site.
+_INTENT_PATTERN_REGISTRY: tuple[tuple[QueryIntent, list[re.Pattern[str]]], ...] = (
+    (QueryIntent.TEMPORAL, _TEMPORAL_PATTERNS),
+    (QueryIntent.MULTI_HOP, _MULTI_HOP_PATTERNS),
+    # ATTRIBUTE_FACT uses a guarded predicate, not a flat regex list; we
+    # represent it as a fake pattern-list with one boolean entry computed
+    # in _count_matches_for_intent.
+    (QueryIntent.ENTITY, _ENTITY_PATTERNS),
+    (QueryIntent.PROCEDURAL, _PROCEDURAL_PATTERNS),
+    # KEYWORD also uses a predicate (_is_keyword_query); same shape as
+    # ATTRIBUTE_FACT. Counted explicitly below.
+)
+
+
+def _count_matches_for_intent(q: str, intent: QueryIntent) -> int:
+    """Count the number of distinct pattern families that match ``q`` for ``intent``.
+
+    Used by :func:`classify_with_confidence` to compute the confidence
+    margin. Returns an integer in ``[0, len(patterns)]`` for regex-based
+    intents and ``{0, 1}`` for predicate-based ones (ATTRIBUTE_FACT,
+    KEYWORD). SEMANTIC has no patterns and always returns 0 — it's the
+    default-fallback intent, never the runner-up signal.
+    """
+    if intent == QueryIntent.TEMPORAL:
+        return sum(1 for p in _TEMPORAL_PATTERNS if p.search(q))
+    if intent == QueryIntent.MULTI_HOP:
+        return sum(1 for p in _MULTI_HOP_PATTERNS if p.search(q))
+    if intent == QueryIntent.ATTRIBUTE_FACT:
+        return 1 if _is_attribute_fact_query(q) else 0
+    if intent == QueryIntent.ENTITY:
+        return sum(1 for p in _ENTITY_PATTERNS if p.search(q))
+    if intent == QueryIntent.PROCEDURAL:
+        return sum(1 for p in _PROCEDURAL_PATTERNS if p.search(q))
+    if intent == QueryIntent.KEYWORD:
+        return 1 if _is_keyword_query(q) else 0
+    return 0  # SEMANTIC
+
+
+def classify_with_confidence(query: str) -> IntentDecision:
+    """Classify ``query`` and return primary intent + confidence + alternatives.
+
+    The primary intent is selected by the same priority-ordered dispatch
+    chain as :func:`classify` — for behavioural parity with existing
+    callers. The confidence is computed by counting pattern-family
+    matches per non-SEMANTIC intent and comparing the primary's count to
+    the runner-up's:
+
+        confidence = (matches_primary - matches_runner_up) / max(matches_primary, 1)
+
+    Edge cases:
+      - Empty / whitespace-only query → ``IntentDecision(SEMANTIC, 1.0, ())``.
+      - SEMANTIC fallback (no intent's patterns matched) → confidence 1.0,
+        no alternatives (no signal contested it).
+      - Any exception → ``IntentDecision(SEMANTIC, 0.0, ())``. The 0.0
+        confidence makes downstream gated boosts skip, which is the
+        safe-default behaviour.
+
+    Never raises. Pure function — no I/O, no module-level state mutation.
     """
     try:
         q = query.strip()
         if not q:
-            return QueryIntent.SEMANTIC
-        return _classify_nonempty(q)
+            return IntentDecision(primary=QueryIntent.SEMANTIC, confidence=1.0, alternatives=())
+
+        primary = _classify_nonempty(q)
+        if primary == QueryIntent.SEMANTIC:
+            # Default-fallback: no intent's patterns matched. There's no
+            # competing signal, so confidence is full.
+            return IntentDecision(primary=QueryIntent.SEMANTIC, confidence=1.0, alternatives=())
+
+        # Score every non-SEMANTIC intent's match count; the priority
+        # winner is `primary`, runner-up is the next-highest count among
+        # the remaining intents (priority-tie-breaker preserves the
+        # existing dispatch order).
+        intent_scores: list[tuple[QueryIntent, int]] = [
+            (it, _count_matches_for_intent(q, it))
+            for it in (
+                QueryIntent.TEMPORAL,
+                QueryIntent.MULTI_HOP,
+                QueryIntent.ATTRIBUTE_FACT,
+                QueryIntent.ENTITY,
+                QueryIntent.PROCEDURAL,
+                QueryIntent.KEYWORD,
+            )
+        ]
+        primary_score = next(score for it, score in intent_scores if it == primary)
+        # Runner-up = highest score among intents != primary. Priority
+        # order is the tie-breaker (the list is already in priority order).
+        alternatives = tuple(it for it, score in intent_scores if it != primary and score > 0)
+        runner_up_score = max((score for it, score in intent_scores if it != primary), default=0)
+
+        denom = max(primary_score, 1)
+        confidence = max(0.0, min(1.0, (primary_score - runner_up_score) / denom))
+
+        return IntentDecision(primary=primary, confidence=confidence, alternatives=alternatives)
     except Exception:
-        return QueryIntent.SEMANTIC
+        return IntentDecision(primary=QueryIntent.SEMANTIC, confidence=0.0, alternatives=())

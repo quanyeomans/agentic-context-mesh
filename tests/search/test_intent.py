@@ -311,3 +311,112 @@ def test_attribute_fact_what_did_x_multi_clause_falls_through() -> None:
     # TEMPORAL/MULTI_HOP/ENTITY/PROCEDURAL signal → SEMANTIC.
     result = classify("what did agent-alpha research about ancient civilisations")
     assert result == QueryIntent.SEMANTIC
+
+
+# ---------------------------------------------------------------------------
+# IntentDecision + classify_with_confidence (Issue #456)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_returns_intent_decision():
+    """The new function returns an IntentDecision dataclass with primary,
+    confidence, alternatives."""
+    from kairix.core.search.intent import IntentDecision, classify_with_confidence
+
+    decision = classify_with_confidence("what changed last week")
+    assert isinstance(decision, IntentDecision)
+    assert hasattr(decision, "primary")
+    assert hasattr(decision, "confidence")
+    assert hasattr(decision, "alternatives")
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_unambiguous_temporal_is_high_confidence():
+    """A pure temporal query (matches only TEMPORAL patterns) gets
+    confidence = 1.0."""
+    from kairix.core.search.intent import classify_with_confidence
+
+    decision = classify_with_confidence("yesterday")
+    assert decision.primary == QueryIntent.TEMPORAL
+    assert decision.confidence == 1.0
+    assert decision.alternatives == ()
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_ambiguous_temporal_versus_keyword_is_low():
+    """An ambiguous query that matches both TEMPORAL ('what changed') AND
+    KEYWORD (version string 'v1.2.3') signals low confidence — primary
+    is TEMPORAL per priority, runner-up KEYWORD competes."""
+    from kairix.core.search.intent import classify_with_confidence
+
+    decision = classify_with_confidence("what changed in the v1.2.3 release")
+    # TEMPORAL wins by priority; KEYWORD matched too so margin is tight.
+    assert decision.primary == QueryIntent.TEMPORAL
+    # The exact value depends on _count_matches_for_intent semantics.
+    # The contract is: with a competing runner-up, confidence < 1.0.
+    assert decision.confidence < 1.0
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_empty_query_is_semantic_full_confidence():
+    """Empty / whitespace query → SEMANTIC with confidence 1.0
+    (definitely no contesting signals)."""
+    from kairix.core.search.intent import classify_with_confidence
+
+    for q in ("", "   ", "\t\n"):
+        decision = classify_with_confidence(q)
+        assert decision.primary == QueryIntent.SEMANTIC
+        assert decision.confidence == 1.0
+        assert decision.alternatives == ()
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_semantic_fallback_is_full_confidence():
+    """A non-empty query that matches no intent's patterns falls through
+    to SEMANTIC; confidence = 1.0 because no competing signal exists."""
+    from kairix.core.search.intent import classify_with_confidence
+
+    decision = classify_with_confidence("xyzabc some plain prose")
+    assert decision.primary == QueryIntent.SEMANTIC
+    assert decision.confidence == 1.0
+
+
+@pytest.mark.unit
+def test_classify_legacy_function_returns_only_primary():
+    """The legacy classify() function still returns a bare QueryIntent —
+    backwards-compat shim over classify_with_confidence()."""
+    from kairix.core.search.intent import classify
+
+    result = classify("yesterday")
+    assert result == QueryIntent.TEMPORAL
+    assert isinstance(result, QueryIntent)
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_never_raises_on_weird_input():
+    """Contract: classify_with_confidence must never raise. Pin against
+    a few weird inputs that would have surfaced bugs."""
+    from kairix.core.search.intent import IntentDecision, classify_with_confidence
+
+    weird_inputs = [
+        "",
+        " " * 1000,
+        "x" * 10_000,
+        "\x00 null byte",
+        "🦄 emoji query",
+    ]
+    for q in weird_inputs:
+        # Must never raise; must always return IntentDecision
+        decision = classify_with_confidence(q)
+        assert isinstance(decision, IntentDecision)
+        assert 0.0 <= decision.confidence <= 1.0
+
+
+@pytest.mark.unit
+def test_classify_with_confidence_alternatives_excludes_primary():
+    """The alternatives tuple never contains the primary intent."""
+    from kairix.core.search.intent import classify_with_confidence
+
+    decision = classify_with_confidence("what changed in v1.2.3 release")
+    assert decision.primary not in decision.alternatives

@@ -63,6 +63,10 @@ class FakeClassifier:
 
     Pass ``raises=`` to make ``classify()`` raise — covers never-raises
     contracts in callers that wrap the classifier.
+
+    Issue #456 — pass ``confidence=`` to drive the confidence value that
+    ``classify_with_confidence()`` returns. Default 1.0 preserves the
+    pre-#456 contract where ambient confidence wasn't surfaced.
     """
 
     def __init__(
@@ -70,14 +74,26 @@ class FakeClassifier:
         intent: QueryIntent = QueryIntent.SEMANTIC,
         *,
         raises: BaseException | None = None,
+        confidence: float = 1.0,
     ) -> None:
         self.intent = intent
         self._raises = raises
+        self._confidence = confidence
 
     def classify(self, query: str) -> QueryIntent:
         if self._raises is not None:
             raise self._raises
         return self.intent
+
+    def classify_with_confidence(self, query: str):
+        """Return an IntentDecision matching this fake's configured (intent,
+        confidence). Used by SearchPipeline._classify_with_confidence when
+        the classifier supports the post-#456 surface."""
+        from kairix.core.search.intent import IntentDecision
+
+        if self._raises is not None:
+            raise self._raises
+        return IntentDecision(primary=self.intent, confidence=self._confidence, alternatives=())
 
 
 class RealClassifierAdapter:
