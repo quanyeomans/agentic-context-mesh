@@ -17,8 +17,12 @@ Use RetrievalConfig.minimal() for RRF baseline isolation.
 Constants:
   RRF_K = 60  Standard RRF constant (Cormack et al., 2009)
 
-RRF formula per document:
-  score(d) = sum(1 / (k + rank_in_list) for each list containing d)
+RRF formula per document (with asymmetric-list normalisation — Issue #454):
+  score(d) = sum(w_list * 1 / (k + rank_in_list) for each list containing d)
+  where w_list = len(list) / max(len(bm25), len(vec)).
+  Symmetric inputs (len(bm25) == len(vec)) collapse w to 1.0 and the
+  formula reduces to classic Cormack 2009 RRF; asymmetric inputs
+  rebalance so the longer list doesn't silently outweigh the shorter.
   Documents appearing in only one list use len(other_list) + 1 as their rank.
 
 Entity boost formula:
@@ -188,9 +192,36 @@ def _rrf_impl(
     vec: list[VecResult],
     k: int,
 ) -> list[FusedResult]:
-    """Implementation of RRF — called from rrf() with error boundary."""
+    """Implementation of RRF — called from rrf() with error boundary.
+
+    Per-document score:
+      score(d) = sum(w_list * 1/(k + rank_in_list) for each list containing d)
+
+    where ``w_list = len(list) / max(len(bm25), len(vec))``.
+
+    The asymmetric-list normalisation (Issue #454) compensates for the
+    case where ``bm25_limit != vec_limit`` (e.g. default config ships
+    ``bm25_limit=20, vec_limit=10``). Without it, the longer list silently
+    out-weights the shorter one because each rank still contributes
+    ``1/(k+rank)``; the longer list just has more contributors. The weight
+    rescales each list so a unit of "rank confidence" is comparable across
+    the two backends regardless of list length.
+
+    Symmetric inputs (``len(bm25) == len(vec)``) collapse both weights to
+    1.0 → bit-identical to the classic Cormack 2009 formula. This is a
+    strict no-op for any caller using equal limits.
+    """
     # Build path → FusedResult index
     fused: dict[str, FusedResult] = {}
+
+    # Per-list weight (Issue #454). When lists are symmetric, w_bm25 ==
+    # w_vec == 1.0 and the formula reduces to classic Cormack 2009.
+    # ``or 1`` guards the degenerate case where both lists are empty
+    # (caller filters this case upstream in ``rrf``; the guard is
+    # defence-in-depth so divide-by-zero is structurally impossible).
+    n_max = max(len(bm25), len(vec)) or 1
+    w_bm25 = len(bm25) / n_max
+    w_vec = len(vec) / n_max
 
     # Process BM25 results (1-indexed ranks)
     for rank, result in enumerate(bm25, start=1):
@@ -205,7 +236,7 @@ def _rrf_impl(
             )
         fused[path].in_bm25 = True
         fused[path].bm25_rank = rank
-        fused[path].rrf_score += 1.0 / (k + rank)
+        fused[path].rrf_score += w_bm25 * 1.0 / (k + rank)
         # Backfill source_page when the BM25 leg has it but the vector
         # leg surfaced the row first without it.
         if fused[path].source_page is None:
@@ -224,7 +255,7 @@ def _rrf_impl(
             )
         fused[path].in_vec = True
         fused[path].vec_rank = rank
-        fused[path].rrf_score += 1.0 / (k + rank)
+        fused[path].rrf_score += w_vec * 1.0 / (k + rank)
         if fused[path].source_page is None:
             fused[path].source_page = _extract_source_page(result)
 

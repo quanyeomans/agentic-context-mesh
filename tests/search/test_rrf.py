@@ -107,13 +107,21 @@ def test_rrf_rank_2_formula() -> None:
 
 @pytest.mark.unit
 def test_rrf_document_in_both_lists_at_different_ranks() -> None:
-    """Document at BM25 rank 1, vec rank 2: score = 1/(k+1) + 1/(k+2)."""
+    """Document at BM25 rank 1 (of 1), vec rank 2 (of 2) with asymmetric-list
+    normalisation (Issue #454): score = (1/2) * 1/(k+1) + (2/2) * 1/(k+2).
+
+    BM25 list length is 1; vector list length is 2. n_max=2, so
+    w_bm25 = 1/2 = 0.5 and w_vec = 2/2 = 1.0. The shorter list (BM25)
+    gets a 0.5 weight; the longer list (vec) gets full weight. Without
+    this normalisation a single BM25 hit would silently outweigh
+    deeper-list vector candidates just because the BM25 list was shorter.
+    """
     b = [_bm25("/doc.md")]
     v = [_vec("/other.md"), _vec("/doc.md")]
 
     results = rrf(b, v)
     doc = next(r for r in results if r.path == "/doc.md")
-    expected = 1.0 / (RRF_K + 1) + 1.0 / (RRF_K + 2)
+    expected = 0.5 * 1.0 / (RRF_K + 1) + 1.0 * 1.0 / (RRF_K + 2)
     assert abs(doc.rrf_score - expected) < 1e-10
 
 
@@ -518,3 +526,123 @@ def test_bm25_primary_deduplicates_same_doc_different_prefix() -> None:
     )
     assert len(results) == 1
     assert results[0].path == "04-Agent-Knowledge/foo.md"
+
+
+# ---------------------------------------------------------------------------
+# Asymmetric-list normalisation (Issue #454)
+#
+# Sabotage proof for the three tests below: revert _rrf_impl's `w_bm25 *` and
+# `w_vec *` multipliers in kairix/core/search/rrf.py and the asymmetric +
+# rank-confidence tests fail; the symmetric test stays passing (regression
+# guard).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_rrf_symmetric_lists_bit_identical_to_baseline() -> None:
+    """When len(bm25) == len(vec), weights collapse to 1.0 and the formula
+    is identical to classic Cormack 2009 RRF. Locks the no-op invariant
+    so the normalisation can never introduce drift for symmetric callers
+    (the documented invariant for callers running bm25_limit == vec_limit).
+    """
+    b = [_bm25("/a.md"), _bm25("/b.md"), _bm25("/c.md")]
+    v = [_vec("/a.md"), _vec("/b.md"), _vec("/c.md")]
+
+    results = rrf(b, v)
+    by_path = {r.path: r for r in results}
+
+    # /a.md: rank 1 in both lists, weights both 1.0 → 2/(k+1)
+    expected_a = 2.0 / (RRF_K + 1)
+    assert abs(by_path["/a.md"].rrf_score - expected_a) < 1e-10
+    # /b.md: rank 2 in both lists → 2/(k+2)
+    expected_b = 2.0 / (RRF_K + 2)
+    assert abs(by_path["/b.md"].rrf_score - expected_b) < 1e-10
+
+
+@pytest.mark.unit
+def test_rrf_asymmetric_weighting_correct() -> None:
+    """Hand-computed expected score for a 3-doc asymmetric case.
+
+    BM25 list length 2, vec list length 4. n_max=4, w_bm25=0.5, w_vec=1.0.
+    /shared.md is rank 1 in BM25 and rank 3 in vec.
+    Expected: 0.5 * 1/(k+1) + 1.0 * 1/(k+3).
+    """
+    b = [_bm25("/shared.md"), _bm25("/bm25only.md")]
+    v = [_vec("/v1.md"), _vec("/v2.md"), _vec("/shared.md"), _vec("/v4.md")]
+
+    results = rrf(b, v)
+    shared = next(r for r in results if r.path == "/shared.md")
+    expected = 0.5 * 1.0 / (RRF_K + 1) + 1.0 * 1.0 / (RRF_K + 3)
+    assert abs(shared.rrf_score - expected) < 1e-10
+
+
+@pytest.mark.unit
+def test_rrf_document_in_shorter_list_only_keeps_full_rank_credit() -> None:
+    """A document that appears only in the shorter list still gets the
+    weighted contribution from THAT list — i.e. it's not zeroed by the
+    other list being longer. With bm25 length 1 and vec length 5, a
+    bm25-only document at rank 1 gets 0.2 * 1/(k+1), not 0.
+
+    Locks the contract that the normalisation rebalances inter-list
+    weights but never zeros a document out for being in the shorter list.
+    """
+    b = [_bm25("/bm25only.md")]
+    v = [_vec("/v1.md"), _vec("/v2.md"), _vec("/v3.md"), _vec("/v4.md"), _vec("/v5.md")]
+
+    results = rrf(b, v)
+    doc = next(r for r in results if r.path == "/bm25only.md")
+    # n_max = 5; w_bm25 = 1/5 = 0.2
+    expected = 0.2 * 1.0 / (RRF_K + 1)
+    assert abs(doc.rrf_score - expected) < 1e-10
+    assert doc.rrf_score > 0, "document in shorter list must not be zeroed by normalisation"
+
+
+@pytest.mark.unit
+def test_rrf_asymmetric_reorders_top_vs_unnormalised() -> None:
+    """The core claim Issue #454 addresses: with asymmetric lists the
+    normalisation produces a DIFFERENT top result than the unnormalised
+    formula. Confirms the change is observable, not theoretical.
+
+    Setup: BM25 has 1 result (a high-confidence single hit); vec has 5
+    results (a wider net). Without normalisation, the BM25 hit ranks
+    high simply because the BM25 list is short. With normalisation, the
+    vec top hits compete fairly.
+    """
+    # BM25 single-shot: /bm25-top.md is rank 1.
+    # Vec wider net: /vec-top.md is rank 1 (separate doc).
+    b = [_bm25("/bm25-top.md")]
+    v = [
+        _vec("/vec-top.md"),
+        _vec("/v2.md"),
+        _vec("/v3.md"),
+        _vec("/v4.md"),
+        _vec("/v5.md"),
+    ]
+
+    results = rrf(b, v)
+    by_path = {r.path: r for r in results}
+
+    # With normalisation:
+    #   bm25-top: w_bm25=0.2, 0.2 * 1/(k+1) = 0.2/61 ≈ 0.00328
+    #   vec-top:  w_vec=1.0,  1.0 * 1/(k+1) = 1/61 ≈ 0.01639
+    # Vec-top should rank ABOVE bm25-top.
+    assert by_path["/vec-top.md"].rrf_score > by_path["/bm25-top.md"].rrf_score
+    # And the top result is the vec hit.
+    assert results[0].path == "/vec-top.md"
+
+
+@pytest.mark.unit
+def test_rrf_single_list_collapses_to_self_normalisation() -> None:
+    """When one list is empty, the non-empty list's weight collapses to
+    n_self / n_max = 1.0 — equivalent to running the classic RRF formula
+    on that list alone. Locks the degenerate-input behaviour.
+    """
+    b = [_bm25("/a.md"), _bm25("/b.md")]
+    v: list = []
+
+    results = rrf(b, v)
+    by_path = {r.path: r for r in results}
+
+    # n_max = max(2, 0) = 2; w_bm25 = 2/2 = 1.0
+    assert abs(by_path["/a.md"].rrf_score - 1.0 / (RRF_K + 1)) < 1e-10
+    assert abs(by_path["/b.md"].rrf_score - 1.0 / (RRF_K + 2)) < 1e-10

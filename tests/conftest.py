@@ -60,6 +60,7 @@ pytest_plugins = [
     "tests.bdd.steps.search_config_validation_steps",
     "tests.bdd.steps.search_planner_steps",
     "tests.bdd.steps.search_rerank_steps",
+    "tests.bdd.steps.rrf_asymmetric_fusion_steps",
     "tests.bdd.steps.search_intent_gated_boosts_steps",
     "tests.bdd.steps.search_chunk_date_recency_steps",
     "tests.bdd.steps.search_collection_retrieval_overrides_steps",
