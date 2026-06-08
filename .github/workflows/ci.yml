@@ -357,10 +357,18 @@ jobs:
 
   # ── Stage 3: Integration tests ─────────────────────────────────────────────
   # Engineering hub: "Stop on >3 failures. Only mock external systems."
+  # Depends on `contracts` only (not unit-and-type) — integration tests use a
+  # disjoint test surface from unit tests, and `contracts` is the import-graph
+  # gate that catches any broken collection. Decoupling from unit-and-type
+  # saves ~6 min wall-clock on the critical path (Stage 3 starts immediately
+  # after contracts instead of waiting for the slowest 3.x matrix entry).
+  # Trade-off: a PR that breaks both unit + integration burns Stage 3 runner
+  # minutes that the serial dependency would have skipped. Most PRs are
+  # clean, so net positive.
   integration:
     name: "Stage 3 -- Integration"
     runs-on: ubuntu-latest
-    needs: [changes, unit-and-type]
+    needs: [changes, contracts]
     if: needs.changes.outputs.python == 'true'
     permissions:
       contents: read
@@ -479,7 +487,11 @@ jobs:
   e2e-composed-path:
     name: "Stage 4.5 -- F48 composed production path e2e"
     runs-on: ubuntu-latest
-    needs: [changes, integration]
+    # Depends on `contracts` only (not integration) — E2E tests exercise the
+    # composed production path through subprocess CLI invocations, disjoint
+    # from integration's in-process factory.build_* calls. Decoupling lets
+    # E2E run in parallel with Stage 2 + Stage 3 instead of after both.
+    needs: [changes, contracts]
     if: needs.changes.outputs.python == 'true'
     permissions:
       contents: read
