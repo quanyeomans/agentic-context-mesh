@@ -1037,3 +1037,67 @@ class TestBronzeTtlDays:
         with caplog.at_level("WARNING"):
             assert bronze_ttl_days() == 7
         assert any("negative" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# embedding_cache_path() — closes #426
+# ---------------------------------------------------------------------------
+#
+# Pre-fix: embedding_cache_path() resolved to <document_root>/.kairix/cache/
+# which on production = the operator's synced Obsidian vault. The cache file
+# grew to 8.7 GB and was dragged into vault sync. The fix routes the default
+# through cache_dir() so the cache lands in a kairix-controlled writable dir
+# (/var/cache/kairix on FHS, $XDG_CACHE_HOME/kairix on user installs).
+#
+# Sabotage proof: reverting embedding_cache_path's default branch to
+# `document_root() / ".kairix" / "cache" / "embedding_cache.sqlite"` makes
+# test_default_does_not_land_under_document_root fail with the path
+# containing the document_root prefix.
+
+
+@pytest.mark.unit
+class TestEmbeddingCachePath:
+    @pytest.mark.unit
+    def test_default_resolves_through_cache_dir(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The mode=None default uses default_cache_dir() — not document_root.
+
+        default_cache_dir honours KAIRIX_CACHE_DIR env first, so an operator
+        override (e.g. /var/cache/kairix on FHS) wins over platform defaults.
+        """
+        from kairix.paths import clear_cache, default_cache_dir, embedding_cache_path
+
+        monkeypatch.setenv("KAIRIX_CACHE_DIR", "/tmp/test-cache")
+        monkeypatch.delenv("KAIRIX_DOCUMENT_ROOT", raising=False)
+        clear_cache()
+
+        result = embedding_cache_path()
+        assert result == default_cache_dir() / "embedding_cache.sqlite"
+        assert result == Path("/tmp/test-cache/embedding_cache.sqlite")
+
+    @pytest.mark.unit
+    def test_default_does_not_land_under_document_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression for #426 — cache must NOT land under the operator's
+        document_root (which is typically a synced knowledge store)."""
+        from kairix.paths import clear_cache, embedding_cache_path
+
+        monkeypatch.setenv("KAIRIX_DOCUMENT_ROOT", "/data/obsidian-vault")
+        monkeypatch.setenv("KAIRIX_CACHE_DIR", "/var/cache/kairix")
+        clear_cache()
+
+        result = embedding_cache_path()
+        assert "/data/obsidian-vault" not in str(result)
+        assert "/var/cache/kairix" in str(result)
+
+    @pytest.mark.unit
+    def test_explicit_mode_uses_data_dir_per_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The explicit-mode branch (installer + contract test surface)
+        resolves to data_dir(mode)/cache/embedding_cache.sqlite. Pinning
+        this so the fix to the mode=None branch doesn't accidentally
+        change the mode-explicit behaviour."""
+        from kairix.paths import Mode, clear_cache, data_dir, embedding_cache_path
+
+        monkeypatch.delenv("KAIRIX_DATA_DIR", raising=False)
+        clear_cache()
+
+        result_system = embedding_cache_path(Mode.system)
+        assert result_system == data_dir(Mode.system) / "cache" / "embedding_cache.sqlite"

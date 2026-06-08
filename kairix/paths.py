@@ -584,23 +584,33 @@ def embedding_cache_path(mode: Mode | None = None) -> Path:
 
     When ``mode`` is supplied (the installer + contract-test surface),
     return ``<data_dir(mode)>/cache/embedding_cache.sqlite``. This is
-    the per-mode FHS/XDG-aligned location the kairix installer creates;
-    the runtime-patch shape (in-image ``/opt/kairix/...``) the previous
-    cutover relied on is retired in favour of this resolver.
+    the per-mode FHS/XDG-aligned location the kairix installer creates.
 
-    When ``mode`` is ``None`` (existing callers — backwards-compat):
-    keep returning ``<document_root>/.kairix/cache/embedding_cache.sqlite``
-    so today's call sites (which co-locate the cache with the document
-    tree on operator volumes) keep working unchanged. The migration to
-    the data-dir-rooted layout happens through explicit-mode call sites
-    in the installer + worker cutover commits.
+    When ``mode`` is ``None`` (the runtime default), return
+    ``<cache_dir()>/embedding_cache.sqlite`` — honours
+    ``KAIRIX_CACHE_DIR`` env and the per-mode FHS/XDG defaults via
+    :func:`cache_dir`. **Closes #426**: the previous default put the
+    cache under ``<document_root>/.kairix/cache/`` which on production
+    deployments IS the operator's synced knowledge store (Obsidian
+    vault, Notion export, etc.). 8.7 GB of cache writes were dragged
+    into the user's vault sync surface on every embed run.
+
+    The cache is regenerable: relocating to a kairix-controlled
+    writable directory means a deployment move no longer needs the
+    cache to travel. The embed worker rebuilds from scratch when the
+    cache is absent.
 
     See :mod:`kairix.core.embed.embedding_cache` for cache shape +
     invariants. F4-clean — env reads stay at the paths boundary.
     """
     if mode is not None:
         return data_dir(mode) / "cache" / "embedding_cache.sqlite"
-    return document_root() / ".kairix" / "cache" / "embedding_cache.sqlite"
+    # default_cache_dir honours KAIRIX_CACHE_DIR env first, then per-mode
+    # FHS/XDG defaults (/var/cache/kairix on system + docker installs,
+    # ~/.cache/kairix on user installs). cache_dir(mode) is the Plan 1
+    # FHS-only resolver that ignores the env override, so we use
+    # default_cache_dir here to keep operator overrides functional.
+    return default_cache_dir() / "embedding_cache.sqlite"
 
 
 def embed_cache_path() -> Path:
