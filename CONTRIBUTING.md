@@ -7,19 +7,32 @@ Read [CLAUDE.md](CLAUDE.md) for engineering standards and [CONSTRAINTS.md](CONST
 ```bash
 git clone https://github.com/three-cubes/kairix
 cd kairix
-pip install -e ".[dev,neo4j,agents,rerank]"
+make setup-dev
+```
+
+`make setup-dev` runs `scripts/dev/setup.sh` — it checks prerequisites (Python 3.12+, pip, git), installs kairix with the canonical CI extras set, and wires the pre-commit hooks. Idempotent; safe to re-run after pulling new deps.
+
+To dry-run (report what would change without installing): `make setup-check`.
+
+For granular control:
+
+```bash
+pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+make setup           # pre-commit hooks only
 ```
 
 ## Making changes
 
-1. Branch from `develop` (the default branch — also where PRs target)
+Kairix is trunk-based on `main`. Routine work commits direct to `main` when `safe-commit.sh` is green.
+
+1. Pull latest `main`
 2. Make your changes
 3. Commit via the gated script: `bash scripts/safe-commit.sh "your message"`
-4. The script runs lint, format, mypy, tests, and security checks. If any fail, fix and re-run.
-5. Run `pre-commit run --all-files` once before pushing — `safe-commit.sh` historically diverges from CI's pre-commit; the explicit run catches it locally.
-6. Open a PR targeting `develop` — the repo only allows **merge commits** (no squash, no rebase) to preserve per-commit history.
+4. The script runs lint, format, mypy, tests, security checks, and Sonar new-code parity. If any fail, fix and re-run.
+5. For docs/CHANGELOG-only edits, use `--fast` to skip the heavy test suite: `bash scripts/safe-commit.sh --fast "docs: …"`.
+6. Push to `main` once green.
 
-For routine work where you're confident in `safe-commit` + `pre-commit`, direct push to develop is also fine — the same CI gate runs on push and PR.
+Open a PR (`feat/*` or `fix/*` branch) when you want grouped review, a release-stabilisation cycle, or cross-team sign-off. PRs gate on the same CI checks as direct push, plus mandatory branch-protection checks. Merge with `gh pr merge --merge` — never squash; per-commit history is the audit trail.
 
 ## Running tests
 
@@ -30,8 +43,11 @@ pytest tests/ -m "unit or bdd or contract" -x --timeout=30
 # Integration (requires real SQLite index)
 pytest tests/ -m integration -v
 
-# E2E (requires running kairix instance + credentials)
-KAIRIX_E2E=1 pytest tests/e2e/ -v -s
+# E2E composed production path (CI Stage 4.5)
+pytest tests/e2e/ -m e2e -v
+
+# Soak tier (nightly on main; not part of the PR gate)
+pytest tests/ -m soak -v
 ```
 
 ## Testing approach
@@ -40,18 +56,17 @@ Tests use protocol fakes, not monkey-patches. See `tests/fakes.py` for fake impl
 
 ```python
 from tests.fakes import FakeClassifier, FakeDocumentRepository
-from kairix.core.search.pipeline import SearchPipeline
-from kairix.core.search.backends import BM25SearchBackend
+from kairix.core.factory import build_search_pipeline
 
-pipeline = SearchPipeline(
+pipeline = build_search_pipeline(
+    paths=FakePaths(...),
     classifier=FakeClassifier(),
-    bm25=BM25SearchBackend(FakeDocumentRepository(documents=[...])),
-    ...
+    document_repository=FakeDocumentRepository(documents=[...]),
 )
 result = pipeline.search("test query")
 ```
 
-See [CONSTRAINTS.md](CONSTRAINTS.md) for what's not allowed in tests.
+Construct pipelines through `kairix.core.factory.build_*`, not by direct `SearchPipeline(...)` / `EmbedPipeline(...)` construction. F46/F47/F48 enforce this. See [CONSTRAINTS.md](CONSTRAINTS.md) and [`docs/architecture/test-discipline-hardening.md`](docs/architecture/test-discipline-hardening.md) for the full specification.
 
 ## Architecture
 
@@ -92,28 +107,30 @@ tests/
   fakes.py               # All fake implementations
   contracts/             # Protocol compliance tests
   integration/           # Real DB, real paths
+  e2e/                   # Composed production-path E2E (CI Stage 4.5)
 ```
 
 ## Branching model
 
+Trunk-based on `main`. The historical `develop` branch was retired in v2026.7.
+
 | Branch | Purpose |
 |---|---|
-| `develop` | **Default branch.** All work lands here — direct push or PR. |
-| `main` | Release-only: each commit is the SHA of a tagged release. Promoted from `develop` via the `5 · Release` workflow at release time. |
-| `feat/*`, `fix/*` | Optional feature branches when grouping multiple commits — PR targets `develop`. |
+| `main` | **Default branch.** All work lands here — direct push or PR. Release tags point at `main` SHAs. |
+| `feat/*`, `fix/*` | Optional feature branches for grouped commits, release stabilisation, or external review — PR targets `main`. |
 
-The `raw.githubusercontent.com/.../main/...` URLs in [README.md](README.md) and [docker-compose.yml](docker-compose.yml) deliberately point at `main` so users following the quick-start get the last-released compose, not in-progress work.
+The `raw.githubusercontent.com/.../main/...` URLs in [README.md](README.md) and [docker-compose.yml](docker-compose.yml) point at `main`, which serves both as default and as the last-released compose source.
 
 ## Versioning
 
-CalVer: `YYYY.MM.DD`. Pre-release: `YYYY.MM.DDaN`.
+CalVer: `YYYY.M.D`. Pre-release: `YYYY.M.DaN`.
 
 ## Cutting a release
 
-1. Validate on deployment target
-2. Confirm `CHANGELOG.md` `[Unreleased]` section is fully populated (no empty sub-sections) and the version label matches CalVer (`vYYYY.M.D[.N]`)
-3. Open a PR `develop → main` — gates on the same CI checks as any other PR
-4. Once green, merge with the standard merge commit
-5. Trigger the **`5 · Release`** workflow (Actions tab → workflow_dispatch) with `version=vYYYY.M.D[.N]`. It tags `main` HEAD, extracts the `[Unreleased]` CHANGELOG section as release notes, and creates the GitHub Release. The release-created event then fires Docker + PyPI publish workflows automatically.
+Releases are HITL — they ship to shared infra. Don't run release workflows without explicit per-action authorisation.
 
-See [scripts/release-checklist.md](scripts/release-checklist.md) for the full end-to-end checklist including post-deploy UAT.
+1. Validate on the deployment target.
+2. Confirm `CHANGELOG.md` `[Unreleased]` section is fully populated (no empty sub-sections) and the version label matches CalVer (`vYYYY.M.D[aN]`).
+3. Trigger the **`5 · Release`** workflow (Actions tab → workflow_dispatch) with `version=vYYYY.M.D[aN]`. It tags `main` HEAD, extracts the `[Unreleased]` CHANGELOG section as release notes, and creates the GitHub Release. The release-created event then fires Docker + PyPI publish workflows automatically.
+
+See [scripts/release-checklist.md](scripts/release-checklist.md) for the full end-to-end checklist including post-deploy validation.
