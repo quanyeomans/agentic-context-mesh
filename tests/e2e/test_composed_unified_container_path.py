@@ -67,12 +67,23 @@ def _docker_available() -> bool:
     return result.returncode == 0
 
 
+_IMAGE_REGISTRY = "ghcr.io/three-cubes/kairix"
+_IMAGE_TAG_SUFFIX = "test-local"
+_LOCAL_IMAGE = f"{_IMAGE_REGISTRY}:{_IMAGE_TAG_SUFFIX}"
+
+
 def _compose(*args: str, check: bool = True, timeout: int = 180) -> subprocess.CompletedProcess[str]:
     """Run ``docker compose -f <repo>/docker-compose.yml <args...>``.
 
     Surfaces stdout + stderr in the CalledProcessError so a failing compose
     step produces a diagnosable failure message rather than a bare returncode.
+    Sets ``KAIRIX_IMAGE_TAG`` so compose picks the locally-built image instead
+    of pulling from ghcr (the unified-container image isn't published until
+    this PR merges).
     """
+    import os as _os
+
+    env = {**_os.environ, "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX}
     cmd = ["docker", "compose", "-f", str(_COMPOSE_FILE), *args]
     return subprocess.run(
         cmd,
@@ -80,6 +91,7 @@ def _compose(*args: str, check: bool = True, timeout: int = 180) -> subprocess.C
         text=True,
         timeout=timeout,
         check=check,
+        env=env,
     )
 
 
@@ -105,6 +117,23 @@ def test_compose_up_yields_two_services_both_healthy() -> None:
             "4.5 (`pytest -m e2e`) or locally with `colima start` / Docker "
             "Desktop running.",
         )
+
+    # Build the kairix image locally and tag it under the registry prefix
+    # compose expects, then KAIRIX_IMAGE_TAG (set inside _compose) picks it up
+    # — no public-registry round-trip.
+    subprocess.run(
+        ["docker", "build", "-t", _LOCAL_IMAGE, "."],
+        cwd=str(_REPO_ROOT),
+        check=True,
+    )
+
+    # Compose mounts /run/secrets/kairix.env; on a bare runner this doesn't
+    # exist. Create an empty stub — the E2E test asserts on process IDs +
+    # healthcheck, not on any configured secrets.
+    secrets_stub = Path("/run/secrets/kairix.env")
+    if not secrets_stub.exists():
+        secrets_stub.parent.mkdir(parents=True, exist_ok=True)
+        secrets_stub.write_text("# test stub — empty\n")
 
     # docker compose up -d --wait: starts containers and blocks until each
     # service's healthcheck passes (or fails). Timeout generous enough to

@@ -28,7 +28,14 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CONTAINER_NAME = "app-kairix-1"
-_IMAGE_TAG = "kairix:test"
+# Compose file references ``ghcr.io/three-cubes/kairix:${KAIRIX_IMAGE_TAG:-main}``.
+# The test builds the image locally and tags it under that exact registry path
+# with a sentinel tag, then sets KAIRIX_IMAGE_TAG so compose picks it up
+# without trying to pull from ghcr (the unified-container image isn't published
+# to ghcr until the PR merges).
+_IMAGE_REGISTRY = "ghcr.io/three-cubes/kairix"
+_IMAGE_TAG_SUFFIX = "test-local"
+_IMAGE_TAG = f"{_IMAGE_REGISTRY}:{_IMAGE_TAG_SUFFIX}"
 
 
 def _docker_available() -> bool:
@@ -78,12 +85,29 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
         cwd=str(_REPO_ROOT),
         check=True,
     )
+
+    # Compose mounts /run/secrets/kairix.env into both kairix + neo4j; on a
+    # bare runner this path doesn't exist. Create an empty stub so compose
+    # can mount it; the empty env file is fine for the supervisor probe (the
+    # test asserts on process IDs + uid, not on any configured secrets).
+    secrets_stub = Path("/run/secrets/kairix.env")
+    if not secrets_stub.exists():
+        secrets_stub.parent.mkdir(parents=True, exist_ok=True)
+        secrets_stub.write_text("# test stub — empty\n")
+
     # Spin up via compose so neo4j comes along for the ride and the
     # healthcheck gating matches what operators see in production.
+    # Pass KAIRIX_IMAGE_TAG so compose picks the locally-built image we just
+    # tagged (under the ghcr.io/three-cubes/kairix prefix) instead of pulling
+    # from the public registry.
+    import os as _os
+
+    env = {**_os.environ, "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX}
     subprocess.run(
         ["docker", "compose", "up", "-d", "--wait"],
         cwd=str(_REPO_ROOT),
         check=True,
+        env=env,
     )
     try:
         ps_proc = subprocess.run(
@@ -109,8 +133,12 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
         assert id_out == "995", f"container must run as kairix uid 995, got uid={id_out!r}"
     finally:
         # Teardown shouldn't break the test if it succeeds — best-effort.
+        import os as _os
+
+        env = {**_os.environ, "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX}
         subprocess.run(
             ["docker", "compose", "down", "-v"],
             cwd=str(_REPO_ROOT),
             check=False,
+            env=env,
         )
