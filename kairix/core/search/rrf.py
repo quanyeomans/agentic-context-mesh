@@ -797,34 +797,91 @@ def chunk_date_boost(
         return results
 
 
+def _parse_chunk_date(chunk_date_str: object) -> object:
+    """Return a ``datetime.date`` for a chunk's chunk_date attribute, or
+    ``None`` when the value is missing / unparseable. Extracted from
+    :func:`_chunk_date_boost_impl` to keep its cognitive complexity
+    under the F16 ceiling."""
+    import datetime
+
+    if not chunk_date_str:
+        return None
+    try:
+        if isinstance(chunk_date_str, str):
+            return datetime.date.fromisoformat(chunk_date_str[:10])
+        return chunk_date_str
+    except (ValueError, TypeError):
+        return None
+
+
+def _apply_chunk_date_proximity(
+    results: list[FusedResult],
+    query_date: object,
+    sigma: float,
+) -> tuple[bool, list[bool]]:
+    """First pass — apply Gaussian-decay proximity boost to dated chunks.
+
+    Returns ``(boosted_any, has_parseable_date_per_row)``. The second
+    pass uses ``has_parseable_date_per_row`` to decide which rows are
+    eligible for the undated-chunk penalty (Issue #430).
+    """
+    import math
+
+    boosted_any = False
+    has_parseable_date: list[bool] = []
+    for r in results:
+        chunk_date = _parse_chunk_date(getattr(r, "chunk_date", None))
+        if chunk_date is None:
+            has_parseable_date.append(False)
+            continue
+        delta_days = abs((chunk_date - query_date).days)
+        boost = 1.0 + math.exp(-(delta_days**2) / (2 * sigma**2))
+        r.boosted_score *= boost
+        boosted_any = True
+        has_parseable_date.append(True)
+    return boosted_any, has_parseable_date
+
+
+def _apply_undated_penalty(
+    results: list[FusedResult],
+    has_parseable_date: list[bool],
+    penalty: float,
+) -> bool:
+    """Second pass — Issue #430 — penalise undated chunks. Returns
+    ``True`` when any row was penalised so the caller knows whether to
+    re-sort the result list."""
+    penalised_any = False
+    for r, was_dated in zip(results, has_parseable_date, strict=False):
+        if not was_dated:
+            r.boosted_score *= penalty
+            penalised_any = True
+    return penalised_any
+
+
 def _chunk_date_boost_impl(
     results: list[FusedResult],
     query_date: object,
     config: TemporalBoostConfig,
 ) -> list[FusedResult]:
-    """Implementation of chunk_date proximity boosting."""
-    import datetime
-    import math
+    """Implementation of chunk_date proximity boosting.
 
+    Two-pass design (Issue #430 adds the second pass):
+      1. ``_apply_chunk_date_proximity`` — Gaussian-decay boost on dated
+         chunks; tracks which rows had a parseable chunk_date so pass 2
+         knows which rows to penalise.
+      2. ``_apply_undated_penalty`` — when ``undated_chunk_penalty_enabled``
+         is True AND at least one row in pass 1 was dated, multiply every
+         undated row's ``boosted_score`` by ``undated_chunk_penalty``.
+
+    Safety: when EVERY candidate is undated, the penalty does not fire
+    (would penalise every result equally and return nothing useful).
+    """
     sigma = config.chunk_date_decay_halflife_days / 1.177
-    boosted_any = False
+    boosted_any, has_parseable_date = _apply_chunk_date_proximity(results, query_date, sigma)
 
-    for r in results:
-        chunk_date_str = getattr(r, "chunk_date", None)
-        if not chunk_date_str:
-            continue
-        try:
-            if isinstance(chunk_date_str, str):
-                chunk_date = datetime.date.fromisoformat(chunk_date_str[:10])
-            else:
-                chunk_date = chunk_date_str
-        except (ValueError, TypeError):
-            continue
-
-        delta_days = abs((chunk_date - query_date).days)
-        boost = 1.0 + math.exp(-(delta_days**2) / (2 * sigma**2))
-        r.boosted_score *= boost
-        boosted_any = True
+    if config.undated_chunk_penalty_enabled and any(has_parseable_date):
+        penalised = _apply_undated_penalty(results, has_parseable_date, config.undated_chunk_penalty)
+        boosted_any = boosted_any or penalised
 
     if boosted_any:
         return sorted(results, key=lambda r: r.boosted_score, reverse=True)

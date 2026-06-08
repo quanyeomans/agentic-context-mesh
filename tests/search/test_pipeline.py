@@ -1100,3 +1100,101 @@ def test_source_tier_boost_unknown_tier_name_falls_back_safely():
     out = boost.boost(results, "q", {})
     # Falls back to default_tier=vault_active (x1.0)
     assert out[0].boosted_score == 0.5
+
+
+# ---------------------------------------------------------------------------
+# Undated-chunk penalty for temporal queries (Issue #430)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_chunk_date_boost_no_undated_penalty_when_disabled():
+    """Default (undated_chunk_penalty_enabled=False) preserves pre-#430
+    behaviour — undated chunks pass through unchanged."""
+    import datetime
+
+    from kairix.core.search.config import TemporalBoostConfig
+    from kairix.core.search.rrf import chunk_date_boost
+
+    cfg = TemporalBoostConfig(
+        chunk_date_boost_enabled=True,
+        undated_chunk_penalty_enabled=False,
+    )
+    dated = _fused("/d.md", "c", rrf_score=0.5)
+    dated.chunk_date = "2026-06-01"
+    undated = _fused("/u.md", "c", rrf_score=0.5)
+    out = chunk_date_boost([dated, undated], datetime.date(2026, 6, 1), config=cfg)
+    # Find undated in output — it should still have boosted_score=0.5
+    out_by_path = {r.path: r for r in out}
+    assert out_by_path["/u.md"].boosted_score == 0.5
+
+
+@pytest.mark.unit
+def test_chunk_date_boost_undated_penalty_demotes_undated_chunks():
+    """When undated_chunk_penalty_enabled=True and the query has a date,
+    undated chunks get multiplied by the penalty (default 0.1).
+
+    Sabotage-prove: removing the penalty loop in _chunk_date_boost_impl
+    fails this test — undated.boosted_score stays at 0.5 rather than 0.05."""
+    import datetime
+
+    from kairix.core.search.config import TemporalBoostConfig
+    from kairix.core.search.rrf import chunk_date_boost
+
+    cfg = TemporalBoostConfig(
+        chunk_date_boost_enabled=True,
+        undated_chunk_penalty_enabled=True,
+        undated_chunk_penalty=0.1,
+    )
+    dated = _fused("/d.md", "c", rrf_score=0.5)
+    dated.chunk_date = "2026-06-01"
+    undated = _fused("/u.md", "c", rrf_score=0.5)
+    out = chunk_date_boost([dated, undated], datetime.date(2026, 6, 1), config=cfg)
+    out_by_path = {r.path: r for r in out}
+    # undated should be ~0.05 (0.5 * 0.1)
+    assert out_by_path["/u.md"].boosted_score == pytest.approx(0.05)
+
+
+@pytest.mark.unit
+def test_chunk_date_boost_dated_outranks_undated_after_penalty():
+    """The user-facing claim of #430: a dated chunk ranks above an
+    undated chunk after the penalty applies — closes the reproduction
+    where SharePoint reference fragments topped May/June agent-memory."""
+    import datetime
+
+    from kairix.core.search.config import TemporalBoostConfig
+    from kairix.core.search.rrf import chunk_date_boost
+
+    cfg = TemporalBoostConfig(
+        chunk_date_boost_enabled=True,
+        undated_chunk_penalty_enabled=True,
+    )
+    dated = _fused("/agent-memory.md", "vault-canon", rrf_score=0.5)
+    dated.chunk_date = "2026-06-01"
+    undated = _fused("/sharepoint-svg.md", "sharepoint", rrf_score=0.5)
+    out = chunk_date_boost([dated, undated], datetime.date(2026, 6, 1), config=cfg)
+    assert out[0].path == "/agent-memory.md"
+    assert out[1].path == "/sharepoint-svg.md"
+
+
+@pytest.mark.unit
+def test_chunk_date_boost_no_penalty_when_every_chunk_is_undated():
+    """Defensive: when EVERY candidate is undated, the penalty must not
+    fire (it would penalise every result equally, producing nothing
+    useful). The boost is a no-op in this degenerate case."""
+    import datetime
+
+    from kairix.core.search.config import TemporalBoostConfig
+    from kairix.core.search.rrf import chunk_date_boost
+
+    cfg = TemporalBoostConfig(
+        chunk_date_boost_enabled=True,
+        undated_chunk_penalty_enabled=True,
+    )
+    r1 = _fused("/a.md", "c", rrf_score=0.5)
+    r2 = _fused("/b.md", "c", rrf_score=0.7)
+    out = chunk_date_boost([r1, r2], datetime.date(2026, 6, 1), config=cfg)
+    # Scores unchanged; original order by rrf_score preserved
+    by_path = {r.path: r.boosted_score for r in out}
+    assert by_path["/a.md"] == 0.5
+    assert by_path["/b.md"] == 0.7

@@ -98,6 +98,25 @@ class TemporalBoostConfig:
     # marker (ISO date or relative term like "last week"). Prevents generic TEMPORAL
     # intent queries ("what changed and why") from receiving unintended recency bias.
     chunk_date_boost_guard_explicit_only: bool = True
+
+    # Issue #430 — date-aware boost for temporal queries.
+    #
+    # When a TEMPORAL query has a parseable date (query_date is set) and
+    # chunk_date_boost is enabled, undated chunks (no chunk_date metadata)
+    # are penalised by ``undated_chunk_penalty``. Default 0.1 = x10
+    # demotion. The reproduction in #430 was 'recent memory issue fixes
+    # Kairix OpenClaw Gateway Shape June 2026' returning SharePoint
+    # SVG/XML reference fragments above dated agent-memory notes —
+    # exactly the undated-vs-dated drag the penalty is designed to fix.
+    #
+    # Disabled by default (``undated_chunk_penalty_enabled=False``) so
+    # pre-#430 behaviour is preserved byte-for-byte. Operators enable in
+    # ``kairix.config.yaml`` after confirming the corpus has chunk_date
+    # populated on the canonical sources (otherwise everything gets
+    # penalised and search returns nothing useful).
+    undated_chunk_penalty_enabled: bool = False
+    undated_chunk_penalty: float = 0.1
+
     # Issue #456 — confidence-gated minimum. See EntityBoostConfig.
     min_intent_confidence: float = 0.5
 
