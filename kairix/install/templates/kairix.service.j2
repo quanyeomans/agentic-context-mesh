@@ -2,6 +2,11 @@
 Description=Kairix - private knowledge retrieval for AI agents (mode={{ mode }})
 After=network-online.target
 Wants=network-online.target
+# StartLimit* MUST live in [Unit] per systemd.service(5); systemd silently
+# ignores them under [Service] (lesson from fix(install) #422 — a deployed
+# host crash-looped for 3 days because the rate limit never engaged).
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=notify
@@ -10,7 +15,6 @@ ExecStart={{ kairix_bin }} mcp serve --transport http
 Environment=KAIRIX_CONFIG_PATH={{ config_path }}
 Restart=on-failure
 RestartSec=5
-StartLimitBurst=5
 
 # Hardening
 NoNewPrivileges=true
