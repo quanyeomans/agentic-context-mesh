@@ -127,14 +127,19 @@ Kairix is the memory + context layer your agent uses to stay oriented across ses
 ### 1. Install
 
 ```bash
-# pip
-pip install "kairix-agentic-knowledge-mgt[agents,neo4j]" && kairix setup
+# pip — user-mode install (no root)
+pip install --user kairix-agentic-knowledge-mgt && kairix init --user
+
+# pip — system-mode install (production servers)
+sudo pip install kairix-agentic-knowledge-mgt && sudo kairix init --system
 
 # Docker
 curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/docker-compose.yml \
   && curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/.env.example \
   && cp .env.example .env && docker compose up -d
 ```
+
+Full track-by-track install guide (system / user / Docker / macOS / Windows) lives in [`docs/getting-started/install.md`](docs/getting-started/install.md).
 
 ### 2. Configure secrets
 

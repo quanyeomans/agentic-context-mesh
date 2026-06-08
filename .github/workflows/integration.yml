@@ -1,8 +1,15 @@
-name: "2 · Pre-merge integration suite (PR → main)"
+name: "2 · Pre-merge PR gates (PR → main)"
 
-# Runs full integration suite on PRs targeting main.
-# Separated from ci.yml so it can use larger runners when needed.
-# Engineering hub: "Integration tests: medium (30s–2min). Stop on >3 failures."
+# PR-quality gates that don't fit cleanly in ci.yml:
+#  - PR description must mention benchmark results when retrieval logic changes
+#  - PR title + body scanned for obvious leaked secrets
+#
+# The previous "Full integration suite" job in this workflow was a
+# duplicate of ci.yml's Stage 3 Integration (same `pytest -m
+# "integration or contract"` invocation). Removed in v2026.7 to halve
+# per-PR CI minutes — Stage 3 in ci.yml remains the integration gate.
+# (The "Verify public API imports" smoke that lived alongside it is
+# redundant with Stage 2 pytest collection.)
 
 on:
   pull_request:
@@ -78,50 +85,3 @@ jobs:
 
             console.log(`Retrieval logic touched: ${touches_retrieval}`);
             console.log('PR gates passed.');
-
-  # Full integration test suite
-  full-integration:
-    name: Full integration suite
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    needs: pr-gates
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install package + dev deps
-        # The agents extras (mcp>=1.20) are required for
-        # tests/integration/test_mcp_build_server.py — those probes exercise
-        # the production build_server() wiring and need the real FastMCP
-        # package, not a stub. xlsx + docx are required because the matching
-        # BDD step files (extractor_xlsx_steps.py / extractor_docx_steps.py)
-        # import openpyxl / python-docx at module-top level, so pytest can't
-        # collect the integration suite without them.
-        run: pip install -e ".[dev,agents,xlsx,docx]" pytest-timeout
-
-      - name: Run integration tests
-        run: |
-          pytest tests/ \
-            -m "integration or contract" \
-            -v --tb=short \
-            --maxfail=3 \
-            --timeout=60
-
-      - name: Verify public API imports
-        run: |
-          python -c "
-          from kairix.core.embed.embed import build_hash_seq, run_embed
-          from kairix.core.embed.schema import validate_schema
-          from kairix.core.embed.recall_check import run_recall_gate
-          from kairix.platform.setup.prompts import SetupContext
-          from kairix.knowledge.entities.seed import scan_for_entities
-          from kairix.quality.eval.auto_gold import analyse_corpus
-          from kairix.quality.eval.tune import recommend
-          print('All public API imports passed.')
-          "

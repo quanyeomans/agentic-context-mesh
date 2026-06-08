@@ -45,6 +45,7 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
       docs: ${{ steps.filter.outputs.docs }}
       reflib: ${{ steps.filter.outputs.reflib }}
+      e2e: ${{ steps.filter.outputs.e2e }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -72,6 +73,23 @@ jobs:
             reflib:
               - 'kairix/knowledge/reflib/**'
               - 'reference-library/**'
+            # Stage 4.5 (composed-production-path E2E) covers install, container,
+            # connectors, search/factory/embed surfaces. Most kairix/** edits DO
+            # affect at least one composed path. Excluding only the test scopes
+            # that DON'T trigger E2E (unit/contract/bdd are their own scopes) plus
+            # benchmark-probe scripts (perf measurement, not behaviour).
+            e2e:
+              - 'kairix/**'
+              - '!kairix/quality/probe/**'
+              - 'tests/e2e/**'
+              - '!tests/unit/**'
+              - '!tests/contract/**'
+              - '!tests/bdd/**'
+              - '!tests/soak/**'
+              - 'Dockerfile'
+              - 'docker-compose*.yml'
+              - 'docker/**'
+              - 'pyproject.toml'
 
   # ── Pre-commit (linting, formatting, secrets, file hygiene) ────────────────
   pre-commit:
@@ -191,7 +209,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # PR-time: only 3.12 (the project's pinned runtime). Push-to-main:
+        # full 3.10/3.11/3.12 matrix as the regression net. 3.10 + 3.11
+        # specific bugs are caught on the main push before any release tag.
+        # Saves ~1.3 min critical path on every PR (3.10 was the slowest
+        # at 7.3 min; dropping it leaves 3.12 at 6.5 min as the matrix max).
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.10", "3.11", "3.12"]') }}
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -236,6 +259,28 @@ jobs:
         run: |
           ruff check kairix/ tests/ --output-format github
           ruff format --check kairix/ tests/
+
+      - name: Enable systemd --user bus for install-mode tests
+        # Plan 1 install BDD + E2E need a logind session bus to run
+        # `systemctl --user daemon-reload + enable` against tmp-rooted XDG dirs.
+        # Without this, kairix.install.systemd.install_unit() fails and the
+        # 5 user-mode BDD scenarios + 2 E2E install tests skip.
+        run: |
+          # Enable lingering so the user manager persists outside login sessions
+          sudo loginctl enable-linger "$USER"
+          # Explicitly start the user manager — enable-linger alone doesn't
+          # create the bus retroactively in non-interactive runner sessions.
+          UID_N=$(id -u "$USER")
+          sudo systemctl start "user@${UID_N}.service"
+          # Wait for the user manager to come up
+          timeout 30 bash -c "until systemctl --user --no-pager status >/dev/null 2>&1; do sleep 1; done"
+          # Propagate XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS to all
+          # downstream steps via \$GITHUB_ENV so pytest subprocesses inherit them.
+          echo "XDG_RUNTIME_DIR=/run/user/${UID_N}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus" >> "$GITHUB_ENV"
+          # Verify
+          XDG_RUNTIME_DIR=/run/user/${UID_N} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus \
+            systemctl --user is-system-running || true
 
       - name: Unit + BDD + Contract tests with coverage
         run: |
@@ -335,10 +380,18 @@ jobs:
 
   # ── Stage 3: Integration tests ─────────────────────────────────────────────
   # Engineering hub: "Stop on >3 failures. Only mock external systems."
+  # Depends on `contracts` only (not unit-and-type) — integration tests use a
+  # disjoint test surface from unit tests, and `contracts` is the import-graph
+  # gate that catches any broken collection. Decoupling from unit-and-type
+  # saves ~6 min wall-clock on the critical path (Stage 3 starts immediately
+  # after contracts instead of waiting for the slowest 3.x matrix entry).
+  # Trade-off: a PR that breaks both unit + integration burns Stage 3 runner
+  # minutes that the serial dependency would have skipped. Most PRs are
+  # clean, so net positive.
   integration:
     name: "Stage 3 -- Integration"
     runs-on: ubuntu-latest
-    needs: [changes, unit-and-type]
+    needs: [changes, contracts]
     if: needs.changes.outputs.python == 'true'
     permissions:
       contents: read
@@ -357,6 +410,29 @@ jobs:
         # the production build_server() wiring and need the real FastMCP
         # package, not a stub.
         run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+
+      - name: Enable systemd --user bus for install-mode tests
+        # Plan 1 integration tests (tests/integration/test_cli_init.py +
+        # test_cli_uninstall.py) exercise `kairix init --user` which runs
+        # `systemctl --user daemon-reload + enable`. Without an active logind
+        # session bus the subprocess fails. Mirrors the same step on the
+        # Stage 2 unit job + Stage 4.5 e2e job.
+        run: |
+          # Enable lingering so the user manager persists outside login sessions
+          sudo loginctl enable-linger "$USER"
+          # Explicitly start the user manager — enable-linger alone doesn't
+          # create the bus retroactively in non-interactive runner sessions.
+          UID_N=$(id -u "$USER")
+          sudo systemctl start "user@${UID_N}.service"
+          # Wait for the user manager to come up
+          timeout 30 bash -c "until systemctl --user --no-pager status >/dev/null 2>&1; do sleep 1; done"
+          # Propagate XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS to all
+          # downstream steps via \$GITHUB_ENV so pytest subprocesses inherit them.
+          echo "XDG_RUNTIME_DIR=/run/user/${UID_N}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus" >> "$GITHUB_ENV"
+          # Verify
+          XDG_RUNTIME_DIR=/run/user/${UID_N} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus \
+            systemctl --user is-system-running || true
 
       - name: Integration tests
         # Coverage collected and uploaded so production-wiring code
@@ -434,8 +510,15 @@ jobs:
   e2e-composed-path:
     name: "Stage 4.5 -- F48 composed production path e2e"
     runs-on: ubuntu-latest
-    needs: [changes, integration]
-    if: needs.changes.outputs.python == 'true'
+    # Depends on `contracts` only (not integration) — E2E tests exercise the
+    # composed production path through subprocess CLI invocations, disjoint
+    # from integration's in-process factory.build_* calls. Decoupling lets
+    # E2E run in parallel with Stage 2 + Stage 3 instead of after both.
+    # Gated on the narrower `e2e` paths filter (excludes test-only edits
+    # to tests/unit, tests/contract, tests/bdd, tests/soak + probe scripts
+    # — none of these can affect a composed-production-path E2E).
+    needs: [changes, contracts]
+    if: needs.changes.outputs.e2e == 'true'
     permissions:
       contents: read
 
@@ -449,6 +532,28 @@ jobs:
 
       - name: Install dependencies
         run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+
+      - name: Enable systemd --user bus for install-mode tests
+        # Plan 1 install BDD + E2E need a logind session bus to run
+        # `systemctl --user daemon-reload + enable` against tmp-rooted XDG dirs.
+        # Without this, kairix.install.systemd.install_unit() fails and the
+        # 5 user-mode BDD scenarios + 2 E2E install tests skip.
+        run: |
+          # Enable lingering so the user manager persists outside login sessions
+          sudo loginctl enable-linger "$USER"
+          # Explicitly start the user manager — enable-linger alone doesn't
+          # create the bus retroactively in non-interactive runner sessions.
+          UID_N=$(id -u "$USER")
+          sudo systemctl start "user@${UID_N}.service"
+          # Wait for the user manager to come up
+          timeout 30 bash -c "until systemctl --user --no-pager status >/dev/null 2>&1; do sleep 1; done"
+          # Propagate XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS to all
+          # downstream steps via \$GITHUB_ENV so pytest subprocesses inherit them.
+          echo "XDG_RUNTIME_DIR=/run/user/${UID_N}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus" >> "$GITHUB_ENV"
+          # Verify
+          XDG_RUNTIME_DIR=/run/user/${UID_N} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus \
+            systemctl --user is-system-running || true
 
       - name: F48 — composed production path e2e
         run: |

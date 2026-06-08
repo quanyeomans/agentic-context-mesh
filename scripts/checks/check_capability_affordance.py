@@ -103,6 +103,17 @@ _NO_MCP_AFFORDANCE_REQUIRED: frozenset[str] = frozenset(
         # observability table over MCP would be circular).
         "mcp-calls",
         "caches",
+        # init + uninstall are operator-only self-installer entry points
+        # (Plan 1 task 8). They mutate the FHS / XDG filesystem layout,
+        # create the kairix system user (system mode), and write the
+        # systemd unit — all on the host where the kairix CLI runs.
+        # Categorically not safe for agents: an agent issuing
+        # `kairix uninstall --no-keep-data` over MCP would erase the
+        # operator's data dir, and a system-mode init requires real root
+        # (no MCP escalation path is meaningful). Operators run these
+        # interactively from a shell.
+        "init",
+        "uninstall",
     }
 )
 

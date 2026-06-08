@@ -21,8 +21,24 @@
 
 set -euo pipefail
 
+# --fast mode (opt-in): skip the full test suite + coverage + arch fitness +
+# Sonar checks, run only lint + format + mypy + tests touching the staged
+# diff. For commits that genuinely can't affect the product test surface —
+# workflow YAML, doc-only edits, sonar-project.properties tweaks, Dockerfile
+# build-only changes. The full gate stays the merge bar; --fast is the
+# iteration loop. See CLAUDE.md "Local-first feedback loops" for guidance.
+FAST_MODE=0
+ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --fast) FAST_MODE=1 ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+set -- "${ARGS[@]}"
+
 if [[ $# -lt 1 ]]; then
-    echo "Usage: bash scripts/safe-commit.sh \"commit message\""
+    echo "Usage: bash scripts/safe-commit.sh [--fast] \"commit message\""
     exit 1
 fi
 
@@ -42,7 +58,11 @@ if git diff --cached --quiet; then
     exit 1
 fi
 
-echo "=== Quality gates ==="
+if [[ "$FAST_MODE" == "1" ]]; then
+    echo "=== Fast gates (--fast — lint + format + mypy + staged-impact tests) ==="
+else
+    echo "=== Quality gates ==="
+fi
 
 # 1. Lint (includes isort via ruff I rules)
 # Scope kairix/ + tests/ + scripts/ to match what pre-commit's ruff hook
@@ -104,7 +124,39 @@ echo -e "${GREEN}OK${NC}"
 # This is an escape hatch — do NOT push commits whose F7 only passes because
 # coverage was skipped; CI will still enforce it.
 echo -n "  tests + coverage... "
-if [[ "${KAIRIX_SKIP_COVERAGE:-0}" == "1" ]]; then
+if [[ "$FAST_MODE" == "1" ]]; then
+    # --fast: run only tests that import any file in the staged diff.
+    # Discovery is import-graph-based: grep imports of the staged source
+    # modules across tests/ and run those test files.
+    STAGED_KAIRIX=$(git diff --cached --name-only --diff-filter=AM | grep -E "^kairix/.*\.py$" || true)
+    if [[ -z "$STAGED_KAIRIX" ]]; then
+        echo -e "${GREEN}OK${NC} (no staged kairix/*.py — skipping product tests)"
+        TEST_OUT="--fast: no kairix source touched, no tests to run"
+        COVERAGE_SKIPPED=1
+    else
+        # Map kairix/foo/bar.py → kairix.foo.bar for import-grep
+        IMPORT_PATHS=$(echo "$STAGED_KAIRIX" | sed 's|/|.|g; s|\.py$||' | sort -u)
+        TEST_FILES=()
+        for imp in $IMPORT_PATHS; do
+            while IFS= read -r tf; do
+                [[ -n "$tf" ]] && TEST_FILES+=("$tf")
+            done < <(grep -rl "$imp" tests/ --include='*.py' 2>/dev/null | sort -u)
+        done
+        # Dedup
+        UNIQ_TESTS=$(printf '%s\n' "${TEST_FILES[@]}" | sort -u | head -50)
+        if [[ -z "$UNIQ_TESTS" ]]; then
+            echo -e "${GREEN}OK${NC} (no tests import the staged modules)"
+            TEST_OUT="--fast: no tests import the staged modules"
+            COVERAGE_SKIPPED=1
+        else
+            COUNT=$(echo "$UNIQ_TESTS" | wc -l | tr -d ' ')
+            # shellcheck disable=SC2086 # word-split intentional for pytest argv
+            TEST_OUT=$(uv run python -m pytest $UNIQ_TESTS -x --timeout=30 \
+                -m "unit or bdd or contract" --no-cov 2>&1)
+            COVERAGE_SKIPPED=1
+        fi
+    fi
+elif [[ "${KAIRIX_SKIP_COVERAGE:-0}" == "1" ]]; then
     TEST_OUT=$(uv run python -m pytest tests/ -x --timeout=30 -m "unit or bdd or contract" 2>&1)
     COVERAGE_SKIPPED=1
 else
@@ -119,16 +171,31 @@ if echo "$TEST_OUT" | grep -qE "[0-9]+ failed"; then
     echo "$TEST_OUT" | grep -E "FAILED|passed|failed" | tail -10
     exit 1
 fi
-if ! echo "$TEST_OUT" | grep -qE "[0-9]+ passed"; then
+# --fast may legitimately collect 0 tests (no kairix/*.py touched, or no
+# tests import the staged modules); skip the no-tests-collected check then.
+if [[ "$FAST_MODE" != "1" ]] && ! echo "$TEST_OUT" | grep -qE "[0-9]+ passed"; then
     echo -e "${RED}FAIL${NC} (no tests collected)"
     exit 1
 fi
-PASSED=$(echo "$TEST_OUT" | grep -oE '[0-9]+ passed')
-if [[ "$COVERAGE_SKIPPED" == "1" ]]; then
+PASSED=$(echo "$TEST_OUT" | grep -oE '[0-9]+ passed' | head -1 || echo "0 passed")
+[[ -z "$PASSED" ]] && PASSED="0 passed"
+if [[ "$FAST_MODE" == "1" ]]; then
+    echo -e "${GREEN}OK${NC} ($PASSED, --fast: impacted-only, no coverage)"
+elif [[ "$COVERAGE_SKIPPED" == "1" ]]; then
     echo -e "${GREEN}OK${NC} ($PASSED, coverage skipped via KAIRIX_SKIP_COVERAGE=1)"
 else
     TOTAL_COV=$(echo "$TEST_OUT" | grep -oE 'Total coverage: [0-9.]+%' | head -1)
     echo -e "${GREEN}OK${NC} ($PASSED, $TOTAL_COV)"
+fi
+
+# --fast mode: skip arch fitness + secrets + confidential + sonar. The full
+# gate runs all of these; --fast trades safety for iteration speed on
+# commits that genuinely can't affect their domain (workflow YAML, docs,
+# sonar-project.properties). CI is still the merge bar.
+if [[ "$FAST_MODE" == "1" ]]; then
+    echo -e "${GREEN}--fast complete. Committing.${NC}"
+    git commit -m "$MESSAGE"
+    exit $?
 fi
 
 # 5. Architecture fitness functions (F1-F30)

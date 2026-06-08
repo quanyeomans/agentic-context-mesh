@@ -4,9 +4,11 @@
 #
 # Source-of-truth notes:
 #   - The pytest-cov omit list lives in pyproject.toml ([tool.coverage.run]).
-#     Coverage XML uploaded here is already filtered, so no `ignore:` block
-#     is needed at the Codecov layer (and adding one would create a second
-#     omit list that drifts).
+#     Coverage XML uploaded here is already filtered for project + flag
+#     totals. The `ignore:` block below mirrors the omit list so PATCH
+#     coverage (which Codecov computes from the diff itself, not the
+#     uploaded XML) doesn't count omitted files as 0%. Keep the two lists
+#     aligned when adding/removing omits.
 #   - The merge bar matches F7 (architecture fitness function): every new
 #     line must belong to a file at >=85% coverage. `patch.target = 85%`
 #     applies the same bar to the PR diff itself.
@@ -16,6 +18,16 @@
 
 codecov:
   require_ci_to_pass: true
+
+# Patch coverage uses the diff, not the XML — files omitted from
+# pyproject's [tool.coverage.run] omit list would otherwise show as 0%
+# covered. Mirror the omit list here so patch coverage agrees.
+ignore:
+  - "tests/**/*"
+  - "kairix/knowledge/graph/client.py"
+  - "kairix/knowledge/reflib/cli.py"
+  - "kairix/install/init_cli.py"
+  - "kairix/install/uninstall_cli.py"
 
 # Two flags are uploaded by .github/workflows/ci.yml:
 #   - `unit`        from Stage 2 (pytest -m "unit or bdd or contract" with --cov)

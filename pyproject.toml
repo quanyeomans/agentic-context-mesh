@@ -45,6 +45,10 @@ dependencies = [
     # full connector framework on H1 (raw binary blobs); tenacity is
     # the sole library adoption that came out of that evaluation.
     "tenacity>=8,<10",
+    # jinja2 (BSD) — template rendering for systemd unit + kairix.config.yaml
+    # in kairix.install.systemd / installer. Base dependency because
+    # kairix init runs on a freshly pip-installed host with no extras.
+    "jinja2>=3.1,<4",
 ]
 
 [project.optional-dependencies]
@@ -289,6 +293,8 @@ markers = [
     "invariant: cross-layer integrity invariant tests under tests/integrity_invariants/ — ADR-024 §F72, asserts state agreement across bronze/content/vector/dead-letter tables after composed pipeline runs",
     "docker: tests that shell out to the docker CLI against a pre-built kairix image (requires KAIRIX_DOCKER_TEST_IMAGE or a local `docker build`; skips when docker is unavailable)",
     "load: load tests under tests/load/ that fire many concurrent MCP-style calls (issue #398 W-D). Excluded from default discovery; operators run via `pytest -m load tests/load/`. Wall-clock target ~30-90s; not a branch-protection check.",
+    "current: BDD scenario passes on :main (post-this-PR)",
+    "future: BDD scenario describes target state; gated runtime-only",
 ]
 timeout = 60  # Per-test timeout default (seconds)
 
@@ -304,6 +310,15 @@ omit = [
     # CLIs without BDD or integration coverage yet — flagged for backfill.
     # Each will move out of this list when tests land.
     "kairix/knowledge/reflib/cli.py",
+    # Plan 1 task 8 — kairix init / uninstall thin argparse wrappers over
+    # kairix.install.installer. Behaviour proof is in
+    # tests/integration/test_cli_init.py + tests/integration/test_cli_uninstall.py
+    # (subprocess F30 outcome tests). Unit coverage is intentionally
+    # deferred — the wrappers are 100% delegation; the durable behaviour
+    # surface is tests/install/test_installer.py. Same pattern as
+    # kairix/knowledge/reflib/cli.py above.
+    "kairix/install/init_cli.py",
+    "kairix/install/uninstall_cli.py",
     # NOTE: benchmark/cli.py and wikilinks/audit.py removed from omit
     # after PR #247 — tests now exist (tests/benchmark/test_cli_helpers.py
     # and tests/wikilinks/test_audit_unit.py — 63 sabotage-proven tests).
@@ -443,6 +458,12 @@ include = ["kairix*"]
 # and installed wheels.
 "kairix.core.facts.prompts" = [
     "*.txt",
+]
+# Plan 1 task 6 ships the systemd unit template as package data so
+# ``kairix.install.systemd.render_unit`` can load it via jinja2's
+# ``PackageLoader`` from both source checkouts and installed wheels.
+"kairix.install" = [
+    "templates/*.j2",
 ]
 
 # Benchmark gates — kairix benchmark run exits non-zero if any gate fails.

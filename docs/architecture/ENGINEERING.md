@@ -95,7 +95,7 @@ push/PR
 |---|---|---|
 | `.github/workflows/ci.yml` | Every push + PR | Four-stage pipeline (all Python gates) |
 | `.github/workflows/go-quality.yml` | Push/PR touching `services/**`, `tools/**`, `.golangci.yml` | Per-service Go gate: `gofmt -s` / `go vet` / `golangci-lint` / `go test -race -cover` (floor 80%) / cross-compile (linux+darwin × amd64+arm64) |
-| `.github/workflows/integration.yml` | PR to main | Full integration suite + PR compliance checks |
+| `.github/workflows/integration.yml` | PR to main | PR compliance checks (benchmark mention + secret scan). Integration tests themselves run as Stage 3 in `ci.yml`. |
 | `.github/workflows/benchmark-gate.yml` | Manual dispatch | Benchmark comparison (required for retrieval PRs) |
 | `.github/workflows/reflib-benchmark-gate.yml` | Manual dispatch | Reference library benchmark comparison |
 | `.github/workflows/dependency-review.yml` | PR | Dependency change review |

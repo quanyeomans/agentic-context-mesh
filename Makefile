@@ -1,4 +1,4 @@
-.PHONY: setup lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
+.PHONY: setup setup-dev setup-check lint format check test test-unit test-bdd test-contract test-integration type-check security commit clean \
         go-modules go-fmt go-vet go-lint go-test go-build go-check
 
 # Developer-environment setup — wires the pre-commit hooks so first-commit
@@ -21,6 +21,17 @@ setup:
 	pre-commit install --install-hooks
 	pre-commit install --hook-type commit-msg --install-hooks 2>/dev/null || true
 	@echo "setup: pre-commit hooks installed. Run 'make check' to verify the gate locally."
+
+# Full developer setup on a fresh clone: prerequisites check + editable
+# install with CI's canonical extras set + pre-commit wiring. Idempotent —
+# safe to re-run after pulling new deps.
+setup-dev:
+	bash scripts/dev/setup.sh
+
+# Dry-run developer setup — reports what would happen without installing.
+# Useful for "did I miss a prereq" troubleshooting.
+setup-check:
+	bash scripts/dev/setup.sh --check
 
 # Combined quality check — run all linting, formatting, and type checks
 lint: lint-check format-check type-check

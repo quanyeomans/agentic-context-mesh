@@ -19,6 +19,12 @@ After=network-online.target docker.service kairix-fetch-secrets.service
 # Strict: kairix MUST NOT start until /run/secrets/kairix.env has been
 # written. Without this, vector search comes up degraded (BM25 only).
 Requires=docker.service kairix-fetch-secrets.service
+# Bounded retry — 5 attempts in 5 min then give up so a broken host
+# doesn't loop forever. These keys belong in [Unit], not [Service] —
+# placing them under [Service] makes systemd log "Unknown key name"
+# and silently skip them, leaving the unit with no startup-rate limit.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 # ---------------------------------------------------------------------------
@@ -84,17 +90,23 @@ RemainAfterExit=true
 # if .env / secrets / required env vars are missing — surfacing the
 # failure here is far more diagnostic than docker compose's
 # "permission denied" cycle.
-ExecStartPre=/opt/kairix/bin/permissions-preflight.sh
+#
+# The `+` prefix runs the command as root regardless of User= above.
+# The preflight script's own self-heal section (chown/chmod of .env)
+# requires root, and reading /run/secrets/kairix.env (root:root mode
+# 0640 from kairix-fetch-secrets) requires root or group membership
+# the kairix user does not have on every host. Without `+`, this
+# ExecStartPre runs as User=kairix and fails its sudo-based read
+# check on hosts where /run/secrets/kairix.env is root-only.
+ExecStartPre=+/opt/kairix/bin/permissions-preflight.sh
 
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose stop
 
-# Restart only on actual failure (not clean shutdown). Bounded retry —
-# 5 attempts in 5 min then give up so a broken host doesn't loop forever.
+# Restart only on actual failure (not clean shutdown). The
+# StartLimit* keys that bound the retry budget live in [Unit] above.
 Restart=on-failure
 RestartSec=10
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # ---------------------------------------------------------------------------
 # Hardening (override per host as needed)
@@ -102,7 +114,12 @@ StartLimitBurst=5
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/kairix /var/lib/kairix /run/secrets
+# `-` prefix marks each path optional so namespace setup does not fail
+# with `Failed to set up mount namespacing: <path>: No such file or
+# directory` (exit 226/NAMESPACE) on a host where one of these paths
+# has not been created yet. /var/lib/kairix in particular is created
+# lazily by some install paths.
+ReadWritePaths=-/opt/kairix -/var/lib/kairix -/run/secrets
 
 [Install]
 WantedBy=multi-user.target
