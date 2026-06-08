@@ -1,2 +1,2 @@
-#!/usr/bin/execlineb -S0
+#!/command/execlineb -S0
 foreground { redirfd -w 1 /dev/stderr echo "kairix-api exited with code ${1}" }
