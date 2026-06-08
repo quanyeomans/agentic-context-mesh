@@ -7,12 +7,42 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+> **Upgrading?** Two operator actions: (a) the kairix container now runs as a dedicated `kairix` user (uid 995) instead of root — if your host volumes were written by the old image, run `sudo chown -R 995:985 <path>` once after pulling the new image; (b) on bare hosts (no Docker), the new `sudo kairix init --system` lays down everything in one command. Existing Docker compose deploys upgrade in place. Full notes in [`docs/upgrades/v2026.7.md`](docs/upgrades/v2026.7.md).
+
+### New for agents
+
+- **An agent can install its own knowledge store on a fresh laptop.** `pip install kairix-agentic-knowledge-mgt && kairix init --user` lays down config, data, and a per-user service unit under the agent's own home directory — no root, no manual dir-tree creation, no "where does my knowledge store live" question. The same install path applies to humans installing kairix locally.
+
 ### New for operators
 
-- **New: `kairix init` and `kairix uninstall` CLI subcommands.** One command to lay down kairix on a fresh Linux host: `sudo kairix init --system` creates the kairix system user, FHS-compliant dirs (/etc/kairix, /var/lib/kairix, /var/cache/kairix, /run/secrets/kairix), and a systemd unit. `kairix init --user` does the same for per-user installs under XDG dirs. Idempotent — re-running is a no-op. `kairix init verify` reports install health.
-- **Path resolution is now mode-aware.** `kairix.paths` resolvers (config_dir, data_dir, cache_dir, runtime_secrets_dir, embedding_cache_path, etc.) detect whether kairix is running in system, user, or container mode and return the right FHS or XDG path. Existing callers that pass no `mode` arg keep working unchanged via `Mode.detect()`.
-- **One container instead of two.** `kairix` and `kairix-worker` were the same image with different entrypoints; they're now one container with an internal supervisor (s6) running both processes. `docker compose ps` shows 2 services (kairix + neo4j) instead of 3. No behavioural change.
-- **Container runs as the `kairix` user (uid 995), not root.** Files written to bind-mounted volumes land with the correct ownership on the host. Fixes a class of permission issues operators previously hit. If you have pre-existing host volumes written by the old root-owned image, run `sudo chown -R 995:985 <path>` once after upgrade.
+- **`kairix init` — one command, fresh host to working install.** `sudo kairix init --system` creates the kairix system user, lays down config at `/etc/kairix/`, data at `/var/lib/kairix/`, cache at `/var/cache/kairix/`, and a systemd service — all the steps that used to be a copy-paste runbook. `kairix init --user` does the same under your XDG dirs (no root needed). Re-running is safe: nothing gets clobbered. `kairix init verify` reports install health.
+- **One container instead of two.** `kairix` and `kairix-worker` were the same image with different entrypoints. They're now a single container with an internal supervisor running both processes. `docker compose ps` shows 2 services (kairix + neo4j) where it used to show 3. Behaviour is unchanged for agents and operators; the background worker still runs.
+- **Container runs as the kairix user, not root.** Files written from the container land with `kairix:kairix` ownership on the host. Fixes the class of permission errors operators previously hit when host-side scripts (running under their own user) tried to read or move kairix-written files.
+- **`kairix connect google-gmail | google-drive | google-calendar` — one-command OAuth setup.** Run the command, your browser opens to Google's consent screen, you approve, and the captured tokens land in your secrets store. No more manual GCP-console-then-key-vault-copy-paste per service. See [`kairix/connect/README.md`](kairix/connect/README.md) for the one-time GCP setup walkthrough.
+- **`kairix connect slack --workspace <name>` — one-command Slack workspace setup.** Run with your Slack app's client_id + client_secret, browser opens to the workspace-install screen, captured bot token lands in your secrets store under a per-workspace canonical name. Run again for a second workspace — both co-exist.
+- **`kairix connect github-app` — one-command GitHub App install + token capture.** Browser opens to the App install URL, you pick the org + repos, the installation id + initial access token land in your secrets store. The GitHub connector rotates installation tokens at the 50-minute mark transparently — no manual JWT signing.
+- **`kairix uninstall` — clean reversal.** `sudo kairix uninstall --system` removes config, the systemd unit, and the kairix user. `--keep-data` (the default) preserves your data + cache directories so a re-install picks up where you left off; pass `--no-keep-data` to wipe everything.
+
+### Things that work better
+
+- **Google Drive and Calendar auto-refresh OAuth tokens.** Previously these expected a static `access_token` and silently broke at Google's 1-hour TTL — the symptom was "Drive sync stopped working a week after I set it up". The auto-refresh path now uses the `refresh_token` captured by `kairix connect` to mint fresh access tokens transparently. Gmail already worked this way; Drive and Calendar now match.
+- **Kairix knows how it's running and where to put things.** The path resolver now detects whether kairix is a system install (`/etc/kairix/`, `/var/lib/kairix/`), a per-user install (XDG dirs under your home), or a container (FHS paths owned by the image). Plugin authors and operators no longer override per-environment env vars by hand.
+- **systemctl-enable is now best-effort.** If the systemd user manager can't reach the unit file at install time (which happens in some test and container setups), `kairix init` writes the unit and logs a clear warning telling you the exact `systemctl enable` command to run when the bus is reachable — instead of failing the whole install.
+- **Container image dropped from 6 GB to under 700 MB.** The build was pulling NVIDIA CUDA libraries alongside the CPU-only PyTorch wheel because of a two-step pip install pattern. A single resolve with the CPU extra-index keeps the runtime image lean.
+
+### Important when upgrading
+
+- **Production-mode OAuth consent screen is unavoidable for Google.** If you set up Google connectors with the consent screen in Testing mode, refresh tokens silently expire after 7 days. The `kairix connect` README walks you through publishing the consent screen to Production state — do that before running `kairix connect google-*`.
+- **Per-workspace Slack tokens.** Slack tokens are now read by workspace (`KAIRIX_CONNECTOR_SLACK_<NAME>_BOT_TOKEN`); singleton deployments using `CONNECTOR_SLACK_BOT_TOKEN` continue to work via the legacy alias. To switch, run `kairix connect slack --workspace <name>` and add `workspace: <name>` to your connector config.
+- **Host-volume ownership on Docker upgrades.** If you've been running the previous image and have bind-mounted host volumes, one chown step picks up the new kairix-user shape:
+  ```
+  sudo chown -R 995:985 /path/to/your/kairix-data /path/to/your/kairix-cache
+  ```
+
+### Retired
+
+- **The three-container compose shape.** The `kairix-worker` service has been removed from `docker-compose.yml`. Existing `docker compose up` commands still work — they just bring up one fewer container. No state migration needed; the worker continues to run inside the kairix container under an internal supervisor.
+- **Root-owned container.** The previous image ran processes as root. The new image runs as `kairix` (uid 995). Bind-mounted host volumes need a one-time chown if they were written by the old image; everything else is transparent.
 
 ## [2026.6.7] - 2026-06-07 — Faster CLI through warm MCP, agent-setup discovery, caches show real state
 
@@ -65,20 +95,6 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 1. **Reduce any custom M365 calendar windows over 390 days total.** If your `kairix.config.yaml` overrides `window_days_back` / `window_days_forward` and the sum is above 390, `kairix config validate` will tell you with the legal range. Default deploys need no action.
 2. **Run the SharePoint backfill once per deploy.** `python3 scripts/migrations/2026-06-01-sharepoint-collection-backfill.py --dry-run` shows you how many rows are affected; re-run without `--dry-run` to apply. Idempotent — a second run is a no-op. Vectors and content are unaffected; the migration only updates the `collection` metadata column.
 3. **Optional: turn on the broader default-scope search.** Set `features.topology_v2_collection_resolver: true` in `kairix.config.yaml` and restart. Validate the change has the effect you want by running a few representative queries before and after.
-
-## [Unreleased]
-
-### New for operators
-
-- **`kairix connect google-gmail | google-drive | google-calendar` — one-command OAuth setup.** Run the command, your browser opens to Google's consent screen, you approve, and the captured tokens land in your secrets store (file by default; Azure Key Vault and stdout-pipe also supported). No more manual GCP-console-then-KV-copy-paste for the four canonical secrets per Google service. See [`kairix/connect/README.md`](kairix/connect/README.md) for the one-time GCP setup walkthrough.
-- **`kairix connect slack --workspace <name>` — one-command Slack workspace setup.** Run the command with your Slack app's client_id + client_secret, the browser opens to Slack's workspace-install screen, you approve, and the captured bot token lands in your secrets store under a per-workspace canonical name (`KAIRIX_CONNECTOR_SLACK_<NAME>_BOT_TOKEN`). Run again for a second workspace — both co-exist in the same KV. The README walks you through the one-time Slack app setup at api.slack.com.
-- **`kairix connect github-app` — one-command GitHub App install + token capture.** Run the command, your browser opens to your GitHub App's install URL, you pick the org / account + repos to grant, and the captured installation id lands in your secrets store alongside an initial installation access token. The GitHub connector picks both up automatically and rotates installation tokens at the 50-minute mark transparently — no manual JWT signing, no installation-id-by-hand copy-paste from the GitHub redirect URL. See [`kairix/connect/README.md`](kairix/connect/README.md) for the one-time GitHub App setup walkthrough.
-- **Google Drive and Calendar now auto-refresh tokens.** Previously these connectors expected a static `access_token` and surfaced `CredentialExpiredError` to the operator the moment Google's hour-long access-token TTL ran out — the failure was silent on the connector side and looked like "Drive sync just stopped working a week after I set it up". The new auto-refresh path uses the `refresh_token` captured by `kairix connect` (or pre-provisioned in KV under the canonical names) to mint fresh access tokens transparently. Gmail already worked this way; Drive and Calendar now match.
-
-### Important when upgrading
-
-- **Production-mode OAuth consent screen is unavoidable for Google.** If you set up Google connectors with the consent screen in Testing mode, refresh tokens silently expire after 7 days. The `kairix connect` README walks you through publishing the consent screen to Production state — do that step before running `kairix connect google-*`, otherwise you'll hit the seven-day-cliff failure again.
-- **Per-workspace Slack tokens.** The Slack connector now reads tokens by workspace (`KAIRIX_CONNECTOR_SLACK_<NAME>_BOT_TOKEN`); existing singleton deployments using `CONNECTOR_SLACK_BOT_TOKEN` continue to work through the legacy-alias layer. To switch to per-workspace tokens, run `kairix connect slack --workspace <name>` and update your connector config to include `workspace: <name>` — the connector then reads from the per-workspace canonical name.
 
 ## [2026.5.31a2] - 2026-05-31 — Restart-resilient embed, one credential naming rule, silent-config-bug class closed
 

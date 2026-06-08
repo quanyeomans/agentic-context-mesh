@@ -1,21 +1,21 @@
 # Installing kairix
 
-Pick the install track that matches where you're running. All three end with a working `kairix` service you can point your agent at.
+kairix is the knowledge store an AI agent (or a team of agents and humans) reads from + writes to. Pick the install track that matches where the agent runs.
 
-| Track | Best for | Needs root? |
+| Track | Who it's for | Needs root? |
 |---|---|---|
-| Linux — system install | Production servers, shared hosts | Yes |
-| Linux — user install | Laptops, dev boxes, single-user setups | No |
-| Linux — Docker | Ephemeral, VM-managed, or multi-tenant hosts | No (Docker handles it) |
-| macOS / Windows | Local dev on a personal machine | No |
+| Linux — system install | Production servers; teams sharing one knowledge store | Yes |
+| Linux — user install | A single agent on a laptop or dev box with its own knowledge store | No |
+| Linux — Docker | Ephemeral hosts, VM-managed deploys, multi-tenant | No (Docker handles it) |
+| macOS / Windows | A single agent on a personal machine | No |
 
-If you already know the Docker path and just want it running, jump to [quick-start.md](quick-start.md). This page covers the longer pip-based install in three flavours.
+All four end with a `kairix mcp serve` endpoint the agent can connect to. If Docker is the one you want and you just need it running, jump to [quick-start.md](quick-start.md). The rest of this page covers the pip-based install paths.
 
 ---
 
 ## On Linux — system install
 
-For production servers where you want kairix running as a managed service under its own account.
+For production servers + shared-knowledge-store deployments where kairix needs to run as a managed service under its own account.
 
 ```bash
 pip install kairix-agentic-knowledge-mgt
@@ -51,7 +51,7 @@ sudo kairix uninstall --system --keep-data
 
 ## On Linux — user install
 
-For development boxes or single-user setups where you don't want to use sudo.
+For an agent (or a single human) running kairix as its own private knowledge store under its own user account. No sudo, nothing system-wide.
 
 ```bash
 pip install --user kairix-agentic-knowledge-mgt
@@ -123,4 +123,6 @@ kairix embed
 kairix onboard check
 ```
 
-Then point your agent at the MCP server — see [connecting-agents.md](connecting-agents.md) for Claude Desktop, OpenAI agents, LangGraph, and other clients.
+`kairix embed` walks your configured document root and embeds every file the agent should be able to retrieve from. `kairix onboard check` validates 18 things the agent's first request needs (search, secrets, vector index, neo4j, sample query) — exits 0 when the knowledge store is ready to serve.
+
+Then connect the agent. See [connecting-agents.md](connecting-agents.md) for Claude Desktop, OpenAI agents, LangGraph, and other clients — kairix exposes one MCP server with the same tool set for all of them.
