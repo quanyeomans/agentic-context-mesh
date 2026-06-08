@@ -1172,7 +1172,11 @@ def runtime_secrets_dir(mode: Mode | None = None) -> Path:
         # ``/tmp`` literal; suppressed because we're emitting a kairix-
         # owned subdir (``/tmp/kairix/secrets``) per the XDG fallback
         # contract, not creating an unscoped tempfile.
-        return _xdg("XDG_RUNTIME_DIR", "/tmp") / "kairix" / "secrets"  # noqa: S108 NOSONAR python:S5443 — XDG-spec fallback; kairix.install.dirs creates the kairix-owned 0700 subdir
+        # Sonar python:S5443 suppressed via sonar-project.properties
+        # (xdg-runtime-tmp-fallback entry) — the XDG fallback contract +
+        # 0700 subdir creation by kairix.install.dirs means the path is
+        # not world-writable in operator use.
+        return _xdg("XDG_RUNTIME_DIR", "/tmp") / "kairix" / "secrets"  # noqa: S108 — XDG-spec fallback path
     return Path("/run/secrets/kairix")
 
 
