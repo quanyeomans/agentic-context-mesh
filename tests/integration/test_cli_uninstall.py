@@ -76,7 +76,10 @@ def _seed_user_layout(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     data_dir = tmp_path / "data" / "kairix"
     cache_dir = tmp_path / "cache" / "kairix"
     runtime_dir = tmp_path / "runtime" / "kairix" / "secrets"
-    systemd_dir = tmp_path / ".config" / "systemd" / "user"
+    # XDG_CONFIG_HOME=<tmp_path>/config; production install puts the unit
+    # under <XDG_CONFIG_HOME>/systemd/user/, so the seed mirrors that path
+    # (not the ~/.config home fallback).
+    systemd_dir = tmp_path / "config" / "systemd" / "user"
 
     for d in (config_dir, data_dir, cache_dir, runtime_dir, systemd_dir):
         d.mkdir(parents=True, exist_ok=True)

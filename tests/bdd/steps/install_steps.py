@@ -679,15 +679,18 @@ def _then_systemctl_user_reports_enabled(install_ctx: _InstallCtx) -> None:
     test's per-scenario user systemd bus. We confirm enablement via the
     same ``is-enabled`` query the system-mode assertion uses.
 
-    Note: the per-scenario unit file lives under ``test_root/.config/``
-    which is NOT the operator's real ``~/.config``. systemctl --user
-    won't see it unless ``XDG_CONFIG_HOME`` is the same env it reads.
-    On most systemd setups the user daemon does read XDG_CONFIG_HOME,
-    but in case it doesn't, we treat "unit file exists on disk" as
-    sufficient evidence the install path completed and skip the live
-    systemctl query.
+    Note: the per-scenario unit file lives under ``test_root/config/``
+    (the XDG_CONFIG_HOME the Background step set), NOT the operator's
+    real ``~/.config``. systemctl --user won't see it unless XDG_CONFIG_HOME
+    is the same env it reads. On most systemd setups the user daemon does
+    read XDG_CONFIG_HOME, but in case it doesn't, we treat "unit file
+    exists on disk" as sufficient evidence the install path completed
+    and skip the live systemctl query.
     """
-    unit = install_ctx.test_root / ".config" / "systemd" / "user" / "kairix.service"
+    # XDG_CONFIG_HOME=<test_root>/config (set by Background step at line 181);
+    # production code honours XDG_CONFIG_HOME so the unit lands there,
+    # NOT in the ``~/.config`` home fallback.
+    unit = install_ctx.test_root / "config" / "systemd" / "user" / "kairix.service"
     assert unit.exists(), f"unit file not on disk: {unit}"
     # The live systemctl --user enable check would require systemd to
     # share the test's XDG_CONFIG_HOME — that's environment-specific
