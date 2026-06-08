@@ -8,6 +8,13 @@ Use `bash scripts/safe-commit.sh "message"` for every commit. It runs lint, form
 
 **Local-first feedback loops.** Every blocking signal (lint, type, Sonar, coverage) must be reproducible locally in <60s. CI is the *confirmation* gate, not the *discovery* loop. When you hit a CI-flagged issue, query the full failing set ONCE (`python3 scripts/checks/check_sonar_new_code.py`), batch-fix locally, push once. See [`docs/architecture/local-first-feedback-loops.md`](docs/architecture/local-first-feedback-loops.md) for the Sonar-rule → local-fix recipe map.
 
+**`safe-commit.sh --fast` for CI-fix commits.** Default `safe-commit.sh` runs the full test suite + coverage (~5-10 min). For commits that genuinely can't affect the product test surface — workflow files (`.github/workflows/*.yml`), doc-only edits, `sonar-project.properties` tweaks, `Dockerfile` build-only changes — use `--fast` to run only lint + format + mypy + tests touching the staged paths. Full gate is still the merge bar; `--fast` is just the iteration loop. Don't use `--fast` for kairix/ source edits.
+
+**Three classes of failure that only surface in Linux CI (test locally OR repro in an LXC container before iterating in CI):**
+- `systemctl --user` integration — Linux runners need `loginctl enable-linger + systemctl start user@$(id -u)` AND `XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS` exported via `$GITHUB_ENV` for pytest subprocess inheritance. macOS lacks systemd entirely; tests must skip gracefully.
+- `/run/secrets` mount — exists on Linux, doesn't on macOS. Tests creating stubs must handle `OSError [Errno 30]` (read-only fs) and skip rather than fail.
+- Docker `linux/amd64` torch wheel — pip's two-step install pattern (`pip install torch --index-url cpu` then `pip install ".[extras]"`) re-resolves torch from default PyPI in the second pass, pulling 3.6 GB of NVIDIA CUDA libs. Always single-resolve with `--extra-index-url https://download.pytorch.org/whl/cpu`.
+
 ## How to test
 
 Test with fakes from `tests/fakes.py`, not monkey-patches. Construct pipelines through `kairix.core.factory.build_*`, not by direct `SearchPipeline(...)` / `EmbedPipeline(...)` construction.
@@ -53,6 +60,14 @@ Ralph pattern: fine-grained file-scoped work, parallel agents with embedded back
 **Default for single tasks: sequential on the main checkout, no isolation.** One agent at a time, commits and pushes direct to main.
 
 Every agent runs `safe-commit.sh` in its loop and only commits (and pushes, in non-worktree mode) when green.
+
+**Subagent worktree venv setup (lesson from v2026.7 session — burned ~30 min of agent time before being learned).** A fresh worktree starts with NO `.venv/`. `pip install -e ".[dev]"` is not enough — kairix has optional extras (`xlsx`, `docx`, `markitdown`, `pdf_fallback`, `ocr`, `agents`, `nlp`, `rerank`, `pptx`) that BDD step modules import at the top level. Without them, pytest can't even collect the test suite. Every subagent MUST run as its first command:
+
+```bash
+uv sync --all-extras --all-groups
+```
+
+before any `pytest` or `safe-commit.sh` invocation. Dispatch briefs should include this verbatim.
 
 **Worktree isolation hygiene (#208, upstream anthropics/claude-code#59019).** Subagents dispatched with `isolation="worktree"` MUST stay inside their assigned worktree for all file writes. Do NOT `cd` to the primary checkout or to another worktree. Symptom of failed isolation: untracked files appear in the primary checkout that mirror paths the subagent claims to have written in its own worktree. Orchestrator-side defense: before each `git cherry-pick <subagent-sha>`, run `python3 scripts/checks/check_worktree_isolation.py` (use `--clean` to delete shadow copies in the primary). The subagent's commit is the canonical source; the primary's untracked copy is the stale shadow.
 
