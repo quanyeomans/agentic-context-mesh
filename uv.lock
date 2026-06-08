@@ -1396,6 +1396,7 @@ name = "kairix-agentic-knowledge-mgt"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "jinja2" },
     { name = "langgraph" },
     { name = "lxml" },
     { name = "openai" },
@@ -1480,6 +1481,7 @@ requires-dist = [
     { name = "google-auth", marker = "extra == 'connect'", specifier = ">=2.40,<3" },
     { name = "google-auth-oauthlib", marker = "extra == 'connect'", specifier = ">=1.2,<2" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "jinja2", specifier = ">=3.1,<4" },
     { name = "langgraph", specifier = ">=1.0.10,<2" },
     { name = "lxml", specifier = ">=6.1.0" },
     { name = "markitdown", extras = ["docx", "outlook", "pdf", "pptx", "xls", "xlsx"], marker = "extra == 'markitdown'", specifier = ">=0.1.5,<1" },

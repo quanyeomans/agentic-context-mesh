@@ -45,6 +45,10 @@ dependencies = [
     # full connector framework on H1 (raw binary blobs); tenacity is
     # the sole library adoption that came out of that evaluation.
     "tenacity>=8,<10",
+    # jinja2 (BSD) — template rendering for systemd unit + kairix.config.yaml
+    # in kairix.install.systemd / installer. Base dependency because
+    # kairix init runs on a freshly pip-installed host with no extras.
+    "jinja2>=3.1,<4",
 ]
 
 [project.optional-dependencies]
