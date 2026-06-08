@@ -237,6 +237,17 @@ jobs:
           ruff check kairix/ tests/ --output-format github
           ruff format --check kairix/ tests/
 
+      - name: Enable systemd --user bus for install-mode tests
+        # Plan 1 install BDD + E2E need a logind session bus to run
+        # `systemctl --user daemon-reload + enable` against tmp-rooted XDG dirs.
+        # Without this, kairix.install.systemd.install_unit() fails and the
+        # 5 user-mode BDD scenarios + 2 E2E install tests skip.
+        run: |
+          sudo loginctl enable-linger "$USER"
+          # Wait for the user manager to be available
+          timeout 30 bash -c 'until systemctl --user is-system-running --quiet 2>/dev/null || systemctl --user is-system-running 2>/dev/null | grep -qE "running|degraded|starting"; do sleep 1; done'
+          systemctl --user is-system-running || true
+
       - name: Unit + BDD + Contract tests with coverage
         run: |
           pytest tests/ \
@@ -449,6 +460,17 @@ jobs:
 
       - name: Install dependencies
         run: pip install -e ".[dev,agents,markitdown,pdf_fallback,ocr,pptx,docx,xlsx]"
+
+      - name: Enable systemd --user bus for install-mode tests
+        # Plan 1 install BDD + E2E need a logind session bus to run
+        # `systemctl --user daemon-reload + enable` against tmp-rooted XDG dirs.
+        # Without this, kairix.install.systemd.install_unit() fails and the
+        # 5 user-mode BDD scenarios + 2 E2E install tests skip.
+        run: |
+          sudo loginctl enable-linger "$USER"
+          # Wait for the user manager to be available
+          timeout 30 bash -c 'until systemctl --user is-system-running --quiet 2>/dev/null || systemctl --user is-system-running 2>/dev/null | grep -qE "running|degraded|starting"; do sleep 1; done'
+          systemctl --user is-system-running || true
 
       - name: F48 — composed production path e2e
         run: |

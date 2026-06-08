@@ -289,6 +289,8 @@ markers = [
     "invariant: cross-layer integrity invariant tests under tests/integrity_invariants/ — ADR-024 §F72, asserts state agreement across bronze/content/vector/dead-letter tables after composed pipeline runs",
     "docker: tests that shell out to the docker CLI against a pre-built kairix image (requires KAIRIX_DOCKER_TEST_IMAGE or a local `docker build`; skips when docker is unavailable)",
     "load: load tests under tests/load/ that fire many concurrent MCP-style calls (issue #398 W-D). Excluded from default discovery; operators run via `pytest -m load tests/load/`. Wall-clock target ~30-90s; not a branch-protection check.",
+    "current: BDD scenario passes on :main (post-this-PR)",
+    "future: BDD scenario describes target state; gated runtime-only",
 ]
 timeout = 60  # Per-test timeout default (seconds)
 
