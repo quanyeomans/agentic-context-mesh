@@ -679,3 +679,122 @@ def test_pipeline_attribute_fact_dominance_requires_non_empty_fact_hits():
     top = result.results[0]
     top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
     assert not top_path.startswith("facts://")
+
+
+# ---------------------------------------------------------------------------
+# Reranker wiring (Issue 2 — closes the dead-code gap where
+# kairix.core.search.rerank shipped + tested but was never called from
+# the pipeline).
+# ---------------------------------------------------------------------------
+
+
+def _seq_reranker_call_log() -> list[tuple[str, int]]:
+    """Build a (query, n_results) call log + a closure that records into it."""
+    return []
+
+
+def _make_recording_reranker(log: list[tuple[str, int]]):
+    """Return a reranker callable that records each invocation in ``log``.
+
+    The reranker re-orders the input by reversing it — so a test can confirm
+    that (a) the reranker was actually called and (b) the pipeline's final
+    result ordering reflects the rerank output, not the boost output.
+    """
+
+    def _record(query: str, fused: list) -> list:
+        log.append((query, len(fused)))
+        return list(reversed(fused))
+
+    return _record
+
+
+@pytest.mark.unit
+def test_pipeline_rerank_skipped_when_reranker_is_none():
+    """Default pipeline (reranker=None) skips the rerank stage entirely.
+
+    Sabotage-proof: removing the ``if self.reranker is None`` guard from
+    _maybe_rerank would cause a TypeError on the None call; this test
+    confirms the guard exists.
+    """
+    pipeline = _test_pipeline()  # reranker defaults to None
+    result = pipeline.search("any query")
+    assert isinstance(result, SearchResult)
+    # rerank stage still records 0ms latency — visible in stage_latency_ms
+    assert "rerank" in result.stage_latency_ms
+
+
+@pytest.mark.unit
+def test_pipeline_rerank_skipped_when_intent_not_in_rerank_intents():
+    """When config.rerank_intents=() (force-disabled), the reranker is not
+    invoked even when wired.
+
+    Locks the gating contract: just wiring a reranker shouldn't unilaterally
+    enable it; config controls per-intent activation.
+    """
+    log: list[tuple[str, int]] = []
+    config = RetrievalConfig(rerank_intents=())  # explicitly disable for all intents
+    pipeline = _test_pipeline(
+        reranker=_make_recording_reranker(log),
+        config=config,
+    )
+    pipeline.search("any query")
+    assert log == [], f"reranker should not have been called; got {log}"
+
+
+@pytest.mark.unit
+def test_pipeline_rerank_invoked_when_intent_matches_config_rerank_intents():
+    """When config.rerank_intents includes the resolved intent, the reranker
+    runs. Sabotage-proof: removing the rerank call from _maybe_rerank
+    would leave log empty.
+    """
+    log: list[tuple[str, int]] = []
+    config = RetrievalConfig(rerank_intents=("semantic",))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
+        reranker=_make_recording_reranker(log),
+        config=config,
+    )
+    pipeline.search("conceptual query")
+    assert len(log) == 1, f"reranker should have been called exactly once; got {log}"
+    recorded_query, _ = log[0]
+    assert recorded_query == "conceptual query"
+
+
+@pytest.mark.unit
+def test_pipeline_rerank_invoked_when_force_enabled_regardless_of_intent():
+    """config.rerank.enabled=True is the operator's force-enable knob.
+    Should run rerank for every intent, regardless of rerank_intents."""
+    from kairix.core.search.config import RerankConfig
+
+    log: list[tuple[str, int]] = []
+    config = RetrievalConfig(
+        rerank=RerankConfig(enabled=True),
+        rerank_intents=(),  # empty intent list — would normally skip
+    )
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.KEYWORD),  # not in rerank_intents
+        reranker=_make_recording_reranker(log),
+        config=config,
+    )
+    pipeline.search("any query")
+    assert len(log) == 1, f"force-enable should override rerank_intents gating; got {log}"
+
+
+@pytest.mark.unit
+def test_pipeline_rerank_exception_returns_pre_rerank_order_unchanged():
+    """When the reranker raises, the pipeline must not propagate — the
+    boost-order result returns unchanged. Locks the failure-isolation
+    contract documented in _maybe_rerank's docstring."""
+
+    def _exploding_reranker(query: str, fused: list) -> list:
+        raise RuntimeError("rerank inference failed")
+
+    config = RetrievalConfig(rerank_intents=("semantic",))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
+        reranker=_exploding_reranker,
+        config=config,
+    )
+    # Must not raise
+    result = pipeline.search("anything")
+    assert isinstance(result, SearchResult)

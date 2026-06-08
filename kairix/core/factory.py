@@ -30,6 +30,7 @@ from kairix.core.search.query_cache import (
     DEFAULT_MAX_ENTRIES,
     QueryResultCache,
 )
+from kairix.core.search.rrf import FusedResult
 
 if TYPE_CHECKING:
     from kairix.paths import KairixPaths
@@ -1000,6 +1001,28 @@ def _build_search_pipeline_uncached(
 
     # Cache writes are owned by the caller (build_search_pipeline) under
     # ``_PIPELINE_CACHE_LOCK``; this helper just builds + returns.
+    # Issue 2 — wire cross-encoder rerank into production. The reranker
+    # is a closure that calls kairix.core.search.rerank.rerank with the
+    # config-derived model + candidate_limit. Gating (intent + enabled
+    # flag) lives in pipeline._maybe_rerank — the closure is unconditional.
+    # When sentence-transformers isn't installed (kairix[rerank] extra
+    # not pulled), the rerank function returns the input unchanged and
+    # logs WARNING once. None-out the reranker only when the operator
+    # has explicitly disabled rerank AND no intents are registered for
+    # it — saves a closure allocation per build for the disabled path.
+    rerank_disabled = not cfg.rerank.enabled and not cfg.rerank_intents
+    pipeline_reranker = None
+    if not rerank_disabled:
+        from kairix.core.search.rerank import rerank as _rerank_impl
+
+        def pipeline_reranker(query: str, fused: list[FusedResult]) -> list[FusedResult]:
+            return _rerank_impl(
+                query,
+                fused,
+                model=cfg.rerank.model,
+                candidate_limit=cfg.rerank.candidate_limit,
+            )
+
     return SearchPipeline(
         classifier=classifier,
         bm25=bm25,
@@ -1019,6 +1042,9 @@ def _build_search_pipeline_uncached(
         # preserves today's chunk-only behaviour for vault-only deployments.
         # Auto-wired above when the operator's data dir contains a facts table.
         fact_retriever=resolved_fact_retriever,
+        # Issue 2 — production cross-encoder rerank closure. The pipeline
+        # decides per-call whether to invoke it based on config + intent.
+        reranker=pipeline_reranker,
     )
 
 

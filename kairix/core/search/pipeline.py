@@ -18,6 +18,7 @@ import datetime
 import hashlib
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -124,6 +125,20 @@ class SearchPipeline:
     # default is roomy enough to give the intent-weighted fusion stage
     # genuine candidates to surface.
     top_k_facts: int = 15
+    # Optional cross-encoder reranker (Issue 2 — closes the dead-code gap
+    # where kairix.core.search.rerank.rerank() shipped + tested but was
+    # never called from the pipeline). When wired AND
+    # (config.rerank.enabled OR intent.value in config.rerank_intents),
+    # the reranker is called after the boost chain and before budget so
+    # the cross-encoder pass operates on the boosted candidates and the
+    # budget enforces token caps on the reranked order.
+    #
+    # Signature: ``reranker(query, fused_results) -> list[FusedResult]``.
+    # When None (the test-pipeline default), the rerank stage is a no-op
+    # and the pipeline degrades to today's BM25-primary + boost ordering
+    # — preserves every existing test that constructs SearchPipeline
+    # directly with fakes.
+    reranker: Callable[[str, list[FusedResult]], list[FusedResult]] | None = None
 
     def search(
         self,
@@ -204,6 +219,15 @@ class SearchPipeline:
         t = time.monotonic()
         fused = self._apply_boosts(fused, query, intent)
         _stage("boost", t)
+
+        # 6b. Cross-encoder rerank (Issue 2). No-op when reranker is None
+        # OR when the intent isn't in config.rerank_intents (and rerank
+        # isn't force-enabled). The reranker re-orders the top-N boosted
+        # candidates by semantic similarity to the query so the budget
+        # stage gets a higher-quality ordering to truncate from.
+        t = time.monotonic()
+        fused = self._maybe_rerank(query, fused, intent)
+        _stage("rerank", t)
 
         # 7. Budget
         t = time.monotonic()
@@ -479,6 +503,42 @@ class SearchPipeline:
             except Exception as e:
                 _logger.warning("pipeline: boost %s failed — %s", type(boost).__name__, e)
         return fused
+
+    def _maybe_rerank(
+        self,
+        query: str,
+        fused: list[FusedResult],
+        intent: QueryIntent,
+    ) -> list[FusedResult]:
+        """Run the cross-encoder reranker when wired AND applicable for intent.
+
+        Gating rules (must ALL hold):
+          - ``self.reranker`` is not None (a reranker has been injected)
+          - one of:
+            - ``self.config.rerank.enabled`` is True (operator force-enable), OR
+            - ``intent.value`` appears in ``self.config.rerank_intents``
+              (per-intent default, e.g. ``("multi_hop", "semantic")``)
+
+        Failure-isolated: any rerank exception logs at WARNING and returns
+        ``fused`` unchanged. The pipeline never raises because of rerank.
+
+        Closes Issue 2 (Phase A) — dead-code-shaped lift. The rerank module
+        + config + tests have all shipped; only the wiring into the pipeline
+        was missing. The expected lift on the 2026-06-08 reflib eval is
+        +0.010 to +0.020 weighted_total, concentrated on MULTI_HOP and
+        SEMANTIC intents.
+        """
+        if self.reranker is None:
+            return fused
+        force_enabled = bool(self.config.rerank.enabled)
+        intent_matches = intent.value in self.config.rerank_intents
+        if not force_enabled and not intent_matches:
+            return fused
+        try:
+            return self.reranker(query, fused)
+        except Exception as e:
+            _logger.warning("pipeline: rerank failed — %s — returning boosted order unchanged", e)
+            return fused
 
     def _log_search(
         self,
