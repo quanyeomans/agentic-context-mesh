@@ -27,6 +27,15 @@ type Config struct {
 	Repo string
 	// ComposeDir is the docker-compose directory on the host.
 	ComposeDir string
+	// ComposeFiles is the list of compose -f file args (space-separated).
+	// Defaults to "docker-compose.yml docker-compose.override.yml" for the
+	// legacy 2-container layout; v2026.6.8+ FHS deploys set this to
+	// "docker-compose.yml" (no override — the new compose is self-contained).
+	ComposeFiles string
+	// ComposeServices is the list of service names to pull + up
+	// (space-separated). Defaults to "kairix kairix-worker" for the legacy
+	// 2-container layout; v2026.6.8+ unified deploys set this to "kairix".
+	ComposeServices string
 	// BenchmarkSuite is the suite name passed to `kairix benchmark run`.
 	BenchmarkSuite string
 	// RegressionTolerance is the maximum allowed delta below baseline
@@ -45,6 +54,8 @@ func LoadFromEnv() (*Config, error) {
 		Listen:              envOr("WEBHOOK_LISTEN", ":9443"),
 		Repo:                envOr("KAIRIX_REPO", "three-cubes/kairix"),
 		ComposeDir:          envOr("KAIRIX_COMPOSE_DIR", "/opt/kairix/app"),
+		ComposeFiles:        envOr("KAIRIX_COMPOSE_FILES", "docker-compose.yml docker-compose.override.yml"),
+		ComposeServices:     envOr("KAIRIX_COMPOSE_SERVICES", "kairix kairix-worker"),
 		BenchmarkSuite:      envOr("KAIRIX_BENCHMARK_SUITE", "reflib"),
 		RegressionTolerance: 0.05,
 	}

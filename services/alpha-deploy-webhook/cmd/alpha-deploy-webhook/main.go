@@ -70,6 +70,8 @@ func run(argv []string, stdout, stderr io.Writer) int {
 		slog.String("listen", cfg.Listen),
 		slog.String("repo", cfg.Repo),
 		slog.String("compose_dir", cfg.ComposeDir),
+		slog.String("compose_files", cfg.ComposeFiles),
+		slog.String("compose_services", cfg.ComposeServices),
 		slog.String("benchmark_suite", cfg.BenchmarkSuite),
 		slog.Float64("regression_tolerance", cfg.RegressionTolerance),
 		slog.String("version", version),
@@ -78,6 +80,8 @@ func run(argv []string, stdout, stderr io.Writer) int {
 	deployer := &deploy.Service{
 		Runner:              deploy.ExecRunner{},
 		ComposeDir:          cfg.ComposeDir,
+		ComposeFiles:        cfg.ComposeFiles,
+		ComposeServices:     cfg.ComposeServices,
 		BenchmarkSuite:      cfg.BenchmarkSuite,
 		RegressionTolerance: cfg.RegressionTolerance,
 		Logger:              logger.With(slog.String("component", "deploy")),

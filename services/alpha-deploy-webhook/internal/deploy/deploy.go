@@ -68,12 +68,51 @@ type Result struct {
 
 // Service composes the deploy steps. Inject a fake Runner for tests.
 type Service struct {
-	Runner                Runner
-	ComposeDir            string
+	Runner     Runner
+	ComposeDir string
+	// ComposeFiles is the space-separated list of compose -f file args.
+	// Empty value defaults to the legacy "docker-compose.yml
+	// docker-compose.override.yml" pair. v2026.6.8+ unified-container
+	// deploys pass "docker-compose.yml" alone (no override).
+	ComposeFiles string
+	// ComposeServices is the space-separated list of service names to
+	// pull + up. Empty value defaults to the legacy "kairix kairix-worker"
+	// pair. v2026.6.8+ unified-container deploys pass "kairix" alone.
+	ComposeServices       string
 	BenchmarkSuite        string
 	RegressionTolerance   float64
 	BaselineWeightedTotal float64
 	Logger                *slog.Logger
+}
+
+// composeFileArgs renders the -f argument string for the configured
+// compose files. Returns the legacy "-f docker-compose.yml -f
+// docker-compose.override.yml" when ComposeFiles is empty.
+func (s *Service) composeFileArgs() string {
+	files := s.ComposeFiles
+	if files == "" {
+		files = "docker-compose.yml docker-compose.override.yml"
+	}
+	parts := strings.Fields(files)
+	if len(parts) == 0 {
+		return ""
+	}
+	args := make([]string, 0, len(parts)*2)
+	for _, f := range parts {
+		args = append(args, "-f", f)
+	}
+	return strings.Join(args, " ")
+}
+
+// composeServiceArgs renders the trailing service-name argument string
+// for compose pull/up commands. Defaults to the legacy "kairix
+// kairix-worker" pair when ComposeServices is empty.
+func (s *Service) composeServiceArgs() string {
+	services := s.ComposeServices
+	if services == "" {
+		services = "kairix kairix-worker"
+	}
+	return services
 }
 
 // Run executes the full deploy sequence. Never panics; every failure
@@ -207,8 +246,8 @@ func (s *Service) pullAndUp(ctx context.Context, version string) error {
 	// env. So we pass both: the base file for parametrization, the override
 	// for the secrets wiring.
 	pullCmd := fmt.Sprintf(
-		"KAIRIX_IMAGE_TAG=%s docker compose -f docker-compose.yml -f docker-compose.override.yml pull kairix kairix-worker",
-		quoted,
+		"KAIRIX_IMAGE_TAG=%s docker compose %s pull %s",
+		quoted, s.composeFileArgs(), s.composeServiceArgs(),
 	)
 	out, err := s.Runner.Run(ctx, s.ComposeDir, "sh", "-c", pullCmd)
 	if err != nil {
@@ -231,8 +270,8 @@ func (s *Service) pullAndUp(ctx context.Context, version string) error {
 	// the running-process side, costing one ~10s container restart per
 	// deploy in exchange for eliminating the stale-container trap.
 	upCmd := fmt.Sprintf(
-		"KAIRIX_IMAGE_TAG=%s docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --force-recreate --wait --wait-timeout 90 kairix kairix-worker",
-		quoted,
+		"KAIRIX_IMAGE_TAG=%s docker compose %s up -d --force-recreate --wait --wait-timeout 90 %s",
+		quoted, s.composeFileArgs(), s.composeServiceArgs(),
 	)
 	out, err = s.Runner.Run(ctx, s.ComposeDir, "sh", "-c", upCmd)
 	if err != nil {
