@@ -2,7 +2,7 @@
 
 Get kairix running and searching your documents in under 30 minutes. Two install paths cover most operators:
 
-- **Docker** — the default for shared hosts, VMs, and anywhere `docker compose up -d` is the operating shape. Three containers (kairix / worker / neo4j) with healthchecks.
+- **Docker** — the default for shared hosts, VMs, and anywhere `docker compose up -d` is the operating shape. Two containers (kairix + neo4j) with healthchecks; the kairix container runs both the api and the background worker under an internal supervisor (s6) as the `kairix` system user (uid 995).
 - **Pip install** — the default for laptop setups and single-user deployments. One Python virtualenv; kairix runs as two processes (`kairix worker run` and `kairix mcp serve`).
 
 Pick the path that matches your environment and skip the other one.
@@ -72,10 +72,11 @@ The container includes 5,800+ curated reference library documents, so you can st
 docker compose up -d
 ```
 
-This starts three services:
-- **kairix** — search engine and MCP server (port 8080)
-- **kairix-worker** — indexes your documents automatically every hour
+This starts two services:
+- **kairix** — search engine, MCP server (port 8080), and background worker. Both processes run inside the same container under an internal supervisor (s6); the container runs as the `kairix` user (uid 995, gid 985), so files written to bind-mounted volumes are owned by `kairix:kairix` on the host.
 - **neo4j** — knowledge graph for people/company queries
+
+> **Upgrading from an earlier release where the worker ran in its own container?** No action needed — `docker compose up -d` swaps both old containers for the unified one. If your host volume directories were written by the old root-owned image, run `sudo chown -R 995:985 /path/to/host/volume` once so the new uid-995 container can read and write them.
 
 > **Port 8080 already in use?** If you're already running caddy, nginx, or another reverse proxy on host 8080, set `KAIRIX_HOST_PORT=8090` (or any unused port) in your `.env` before `docker compose up -d`. See [OPERATIONS §"Deploying behind a reverse proxy"](../operations/OPERATIONS.md#deploying-behind-a-reverse-proxy-caddy--nginx--cloudflared).
 

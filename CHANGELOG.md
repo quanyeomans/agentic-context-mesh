@@ -11,6 +11,8 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 - **New: `kairix init` and `kairix uninstall` CLI subcommands.** One command to lay down kairix on a fresh Linux host: `sudo kairix init --system` creates the kairix system user, FHS-compliant dirs (/etc/kairix, /var/lib/kairix, /var/cache/kairix, /run/secrets/kairix), and a systemd unit. `kairix init --user` does the same for per-user installs under XDG dirs. Idempotent — re-running is a no-op. `kairix init verify` reports install health.
 - **Path resolution is now mode-aware.** `kairix.paths` resolvers (config_dir, data_dir, cache_dir, runtime_secrets_dir, embedding_cache_path, etc.) detect whether kairix is running in system, user, or container mode and return the right FHS or XDG path. Existing callers that pass no `mode` arg keep working unchanged via `Mode.detect()`.
+- **One container instead of two.** `kairix` and `kairix-worker` were the same image with different entrypoints; they're now one container with an internal supervisor (s6) running both processes. `docker compose ps` shows 2 services (kairix + neo4j) instead of 3. No behavioural change.
+- **Container runs as the `kairix` user (uid 995), not root.** Files written to bind-mounted volumes land with the correct ownership on the host. Fixes a class of permission issues operators previously hit. If you have pre-existing host volumes written by the old root-owned image, run `sudo chown -R 995:985 <path>` once after upgrade.
 
 ## [2026.6.7] - 2026-06-07 — Faster CLI through warm MCP, agent-setup discovery, caches show real state
 

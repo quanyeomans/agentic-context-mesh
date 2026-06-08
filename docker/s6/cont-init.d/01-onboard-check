@@ -1,0 +1,8 @@
+#!/usr/bin/with-contenv sh
+# First-boot init: if /var/lib/kairix/index.sqlite doesn't exist,
+# run kairix init --user (creating dirs + default config) BEFORE
+# the api or worker start.
+if [ ! -f /var/lib/kairix/index.sqlite ]; then
+  kairix init --user || exit 1
+fi
+exit 0
