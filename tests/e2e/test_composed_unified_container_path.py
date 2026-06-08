@@ -129,11 +129,19 @@ def test_compose_up_yields_two_services_both_healthy() -> None:
 
     # Compose mounts /run/secrets/kairix.env; on a bare runner this doesn't
     # exist. Create an empty stub — the E2E test asserts on process IDs +
-    # healthcheck, not on any configured secrets.
+    # healthcheck, not on any configured secrets. Skip on platforms where
+    # /run is read-only (macOS); Linux CI Stage 4.5 carries the check.
     secrets_stub = Path("/run/secrets/kairix.env")
     if not secrets_stub.exists():
-        secrets_stub.parent.mkdir(parents=True, exist_ok=True)
-        secrets_stub.write_text("# test stub — empty\n")
+        try:
+            secrets_stub.parent.mkdir(parents=True, exist_ok=True)
+            secrets_stub.write_text("# test stub — empty\n")
+        except OSError as exc:
+            pytest.skip(
+                reason=f"cannot create /run/secrets stub ({exc}); "
+                "this E2E runs on Linux CI where /run is writable. "
+                "fix: re-run under Linux (CI Stage 4.5) or skip-locally as designed.",
+            )
 
     # docker compose up -d --wait: starts containers and blocks until each
     # service's healthcheck passes (or fails). Timeout generous enough to

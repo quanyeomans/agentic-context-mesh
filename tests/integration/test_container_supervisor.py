@@ -90,10 +90,19 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
     # bare runner this path doesn't exist. Create an empty stub so compose
     # can mount it; the empty env file is fine for the supervisor probe (the
     # test asserts on process IDs + uid, not on any configured secrets).
+    # Skip on platforms where /run is read-only (macOS), letting Linux CI
+    # carry the end-to-end check.
     secrets_stub = Path("/run/secrets/kairix.env")
     if not secrets_stub.exists():
-        secrets_stub.parent.mkdir(parents=True, exist_ok=True)
-        secrets_stub.write_text("# test stub — empty\n")
+        try:
+            secrets_stub.parent.mkdir(parents=True, exist_ok=True)
+            secrets_stub.write_text("# test stub — empty\n")
+        except OSError as exc:
+            pytest.skip(
+                reason=f"cannot create /run/secrets stub ({exc}); "
+                "this integration test runs on Linux CI where /run is writable. "
+                "fix: re-run under Linux (CI Stage 3) or skip-locally as designed.",
+            )
 
     # Spin up via compose so neo4j comes along for the ride and the
     # healthcheck gating matches what operators see in production.
