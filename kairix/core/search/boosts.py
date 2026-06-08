@@ -14,6 +14,8 @@ from kairix.core.protocols import GraphRepository
 from kairix.core.search.config import (
     EntityBoostConfig,
     ProceduralBoostConfig,
+    SourceTier,
+    SourceTierBoostConfig,
     TemporalBoostConfig,
 )
 from kairix.core.search.intent import QueryIntent
@@ -188,3 +190,82 @@ class ChunkDateBoost:
 
         query_date = context.get("query_date")
         return chunk_date_boost(results, query_date, config=self._config)
+
+
+class SourceTierBoost:
+    """Multiply boosted_score by a per-tier multiplier (Issue #432).
+
+    Reads each result's collection name, looks up the configured tier
+    (via ``tier_map``), then applies ``config.multipliers[tier]``. Results
+    whose collection has no tier mapping fall back to
+    ``config.default_tier`` (``vault_active``, x1.0 — preserves
+    pre-#432 ranking).
+
+    Intent-agnostic: fires for every query when ``config.enabled`` is
+    True. Per-query-class overrides (per EPIC #438 §4) layer on later.
+
+    Construction:
+      - ``tier_map``: ``dict[collection_name, tier_name]`` — derived
+        from the operator's ``collections.shared[].tier`` declarations
+        in ``kairix.config.yaml``. The factory builds this once at
+        pipeline-construction time.
+      - ``config``: SourceTierBoostConfig with the multiplier table.
+
+    When ``config.enabled`` is False (the default), the strategy
+    short-circuits and returns ``results`` unchanged — preserves the
+    pre-#432 ranking even when the strategy is wired into the chain.
+    """
+
+    def __init__(
+        self,
+        tier_map: dict[str, str] | None = None,
+        config: SourceTierBoostConfig | None = None,
+    ) -> None:
+        self._tier_map = tier_map or {}
+        self._config = config or SourceTierBoostConfig()
+
+    def boost(self, results: list, _query: str, _context: dict) -> list:
+        """Apply tier multipliers; returns the input list with mutated
+        ``boosted_score`` values per result. Order is NOT re-sorted here
+        — the budget stage that follows sorts by ``boosted_score`` so
+        the multipliers take effect there.
+
+        Failure-isolated: any per-result exception logs at WARNING and
+        leaves that result's score unchanged; the strategy itself never
+        raises.
+        """
+        if not self._config.enabled:
+            return results
+
+        default_tier_value = self._config.default_tier.value
+        for r in results:
+            try:
+                collection = getattr(r, "collection", "") or ""
+                tier_name = self._tier_map.get(collection, default_tier_value)
+                # Normalise tier-name string into SourceTier for the
+                # multiplier lookup. Unknown tier values fall back to
+                # default_tier so a config typo doesn't drop the result
+                # to multiplier=0.
+                try:
+                    tier_enum = SourceTier(tier_name)
+                except ValueError:
+                    tier_enum = self._config.default_tier
+                multiplier = self._config.multipliers_map().get(tier_enum, 1.0)
+                # ``boosted_score`` was initialised from rrf_score by
+                # _rrf_impl; subsequent boosts mutate it. We multiply
+                # in-place so any prior boost (entity / procedural /
+                # temporal) is preserved.
+                r.boosted_score = float(r.boosted_score) * multiplier
+            except Exception as exc:
+                # Don't break the result list on a single odd row; log so
+                # an operator can triage why a particular row's tier
+                # lookup blew up.
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "SourceTierBoost: per-result tier lookup failed for %s — %s",
+                    getattr(r, "path", "?"),
+                    exc,
+                )
+                continue
+        return results

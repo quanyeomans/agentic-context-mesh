@@ -35,6 +35,7 @@ YAML (``retrieval.fusion_strategy`` in kairix config).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 
 # F17 — fusion strategy enum value repeated across the FUSION_STRATEGIES tuple
 # and three factory defaults; extract so renames hit a single edit site.
@@ -99,6 +100,77 @@ class TemporalBoostConfig:
     chunk_date_boost_guard_explicit_only: bool = True
     # Issue #456 — confidence-gated minimum. See EntityBoostConfig.
     min_intent_confidence: float = 0.5
+
+
+class SourceTier(str, Enum):
+    """Source-tier classification for chunks (Issue #432).
+
+    The chunk-store + collection config carries a tier; the
+    :class:`SourceTierBoost` strategy multiplies each result's
+    ``boosted_score`` by the tier's configured multiplier. Operators
+    declare per-collection tier in ``kairix.config.yaml`` (defaults to
+    ``vault_active`` when absent — preserves pre-#432 behaviour).
+    """
+
+    CANONICAL = "canonical"
+    ACTIVE_STANDARD = "active_standard"
+    VAULT_ACTIVE = "vault_active"
+    REFERENCE = "reference"
+    ARCHIVED = "archived"
+
+
+@dataclass(frozen=True)
+class SourceTierBoostConfig:
+    """Configuration for source-tier-aware ranking (Issue #432).
+
+    The multipliers reweight per-result ``boosted_score`` based on the
+    chunk's source tier (resolved via the result's collection name +
+    the operator's per-collection tier map). Defaults match the EPIC
+    #438 design:
+
+      - canonical: x3.0 (the team's declared canon — ETHOS/AGENTS/SOUL,
+        agent-knowledge decisions/rules/facts/patterns, platform standards)
+      - active_standard: x2.0 (operational delivery docs + active ADRs)
+      - vault_active: x1.0 (baseline — non-archived vault content)
+      - reference: x0.6 (external reference-library content)
+      - archived: x0.2 (vault archive + superseded ADRs — present but
+        outranked by every other tier)
+
+    Disabled by default (``enabled=False``) so existing deployments see
+    byte-for-byte pre-#432 ranking. Operators flip ``enabled=True`` in
+    ``kairix.config.yaml`` after declaring tier assignments per
+    collection. F47-clean — the boost reads collection→tier from the
+    pipeline context; no chunk-store schema change required for MVP.
+    """
+
+    enabled: bool = False
+    # Stored as a tuple-of-pairs (not a dict) because RetrievalConfig is a
+    # frozen dataclass + used as a process-lifetime cache key in
+    # kairix.core.factory.build_search_pipeline — must be hashable. The
+    # :meth:`multipliers_map` helper materialises the dict view that
+    # :class:`SourceTierBoost` reads.
+    multipliers: tuple[tuple[SourceTier, float], ...] = (
+        (SourceTier.CANONICAL, 3.0),
+        (SourceTier.ACTIVE_STANDARD, 2.0),
+        (SourceTier.VAULT_ACTIVE, 1.0),
+        (SourceTier.REFERENCE, 0.6),
+        (SourceTier.ARCHIVED, 0.2),
+    )
+    # Default tier when a result's collection has no configured tier.
+    # vault_active = x1.0 → preserves the pre-tier ranking for
+    # collections the operator hasn't yet classified.
+    default_tier: SourceTier = SourceTier.VAULT_ACTIVE
+    # Issue #456 — confidence-gated minimum. See EntityBoostConfig.
+    # SourceTierBoost is currently intent-agnostic (fires for every
+    # query) so this field is a placeholder; future per-query-class
+    # overrides (per the EPIC's section 4) will consume it.
+    min_intent_confidence: float = 0.0
+
+    def multipliers_map(self) -> dict[SourceTier, float]:
+        """Materialise the tuple-of-pairs ``multipliers`` field into a
+        dict for per-result lookup. Called once at boost construction
+        time (or per-call — the cost is microscopic for a 5-entry tuple)."""
+        return dict(self.multipliers)
 
 
 @dataclass(frozen=True)
@@ -171,6 +243,11 @@ class RetrievalConfig:
     procedural: ProceduralBoostConfig = field(default_factory=ProceduralBoostConfig)
     temporal: TemporalBoostConfig = field(default_factory=TemporalBoostConfig)
     rerank: RerankConfig = field(default_factory=RerankConfig)
+
+    # Issue #432 — source-tier ranking. Disabled by default; enable via
+    # ``source_tier_boost: enabled: true`` in kairix.config.yaml after
+    # declaring per-collection ``tier:`` assignments.
+    source_tier_boost: SourceTierBoostConfig = field(default_factory=SourceTierBoostConfig)
 
     # Intent types that always receive cross-encoder re-ranking, even when
     # rerank.enabled is False.  Users can force rerank for *all* intents by

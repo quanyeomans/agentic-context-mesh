@@ -967,3 +967,136 @@ def test_intent_confidence_passes_legacy_default_confidence_is_one():
         )
         is True
     )
+
+
+# ---------------------------------------------------------------------------
+# SourceTierBoost (Issue #432) — source-tier-aware ranking
+# ---------------------------------------------------------------------------
+
+
+def _fused(path: str, collection: str, rrf_score: float = 0.5):
+    """Build a minimal FusedResult-shaped object for boost tests."""
+    from kairix.core.search.rrf import FusedResult
+
+    return FusedResult(
+        path=path,
+        collection=collection,
+        title=f"T-{path}",
+        snippet="s",
+        rrf_score=rrf_score,
+        boosted_score=rrf_score,
+    )
+
+
+@pytest.mark.unit
+def test_source_tier_boost_disabled_is_noop():
+    """When SourceTierBoostConfig.enabled is False (the default), the
+    boost returns results with boosted_score unchanged — preserves
+    pre-#432 ranking byte-for-byte.
+
+    Sabotage-prove by removing the `if not self._config.enabled:` guard
+    in SourceTierBoost.boost(): this test would then mutate scores
+    even when the boost is disabled."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-canon": "canonical"},
+        config=SourceTierBoostConfig(enabled=False),
+    )
+    results = [_fused("/a.md", "vault-canon", rrf_score=0.5)]
+    out = boost.boost(results, "q", {})
+    assert out[0].boosted_score == 0.5
+
+
+@pytest.mark.unit
+def test_source_tier_boost_applies_canonical_multiplier():
+    """A result whose collection maps to 'canonical' gets x3.0 boost."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-canon": "canonical"},
+        config=SourceTierBoostConfig(enabled=True),
+    )
+    results = [_fused("/ethos.md", "vault-canon", rrf_score=0.5)]
+    out = boost.boost(results, "q", {})
+    # canonical multiplier = 3.0
+    assert out[0].boosted_score == 1.5
+
+
+@pytest.mark.unit
+def test_source_tier_boost_applies_reference_multiplier():
+    """A result whose collection maps to 'reference' gets x0.6 boost."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"sharepoint": "reference"},
+        config=SourceTierBoostConfig(enabled=True),
+    )
+    results = [_fused("/random.md", "sharepoint", rrf_score=1.0)]
+    out = boost.boost(results, "q", {})
+    # reference multiplier = 0.6
+    assert out[0].boosted_score == pytest.approx(0.6)
+
+
+@pytest.mark.unit
+def test_source_tier_boost_archived_outranked_by_canonical():
+    """The core user-facing claim of #432: a 'canonical' result outranks
+    an 'archived' result with the same RRF score after the boost.
+
+    Sabotage-prove: removing the `r.boosted_score *= multiplier` line
+    leaves scores untouched and the boost is a no-op.
+    """
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-canon": "canonical", "vault-archive": "archived"},
+        config=SourceTierBoostConfig(enabled=True),
+    )
+    canon = _fused("/ethos.md", "vault-canon", rrf_score=0.5)
+    archive = _fused("/old.md", "vault-archive", rrf_score=0.5)
+    results = [canon, archive]
+    out = boost.boost(results, "q", {})
+    # canonical x3.0 = 1.5; archived x0.2 = 0.1
+    canon_out = next(r for r in out if r.path == "/ethos.md")
+    archive_out = next(r for r in out if r.path == "/old.md")
+    assert canon_out.boosted_score > archive_out.boosted_score
+
+
+@pytest.mark.unit
+def test_source_tier_boost_unconfigured_collection_falls_back_to_default_tier():
+    """A result whose collection has no tier mapping falls back to the
+    default tier (vault_active, x1.0) — preserves pre-#432 ranking
+    byte-for-byte for any collection the operator hasn't classified."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-canon": "canonical"},  # no mapping for 'other'
+        config=SourceTierBoostConfig(enabled=True),
+    )
+    results = [_fused("/x.md", "other", rrf_score=0.5)]
+    out = boost.boost(results, "q", {})
+    # default_tier=vault_active multiplier = 1.0 → score unchanged
+    assert out[0].boosted_score == 0.5
+
+
+@pytest.mark.unit
+def test_source_tier_boost_unknown_tier_name_falls_back_safely():
+    """A tier_map entry with an unknown tier name (typo / future tier
+    value) falls back to default_tier — does not crash + does not
+    silently zero the score."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"weird": "blueprint"},  # not a SourceTier value
+        config=SourceTierBoostConfig(enabled=True),
+    )
+    results = [_fused("/x.md", "weird", rrf_score=0.5)]
+    out = boost.boost(results, "q", {})
+    # Falls back to default_tier=vault_active (x1.0)
+    assert out[0].boosted_score == 0.5

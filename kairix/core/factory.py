@@ -189,7 +189,12 @@ def get_query_cache() -> QueryResultCache:
     return _get_or_create_query_cache()
 
 
-def select_boosts(cfg: RetrievalConfig, graph: Any) -> list[Any]:
+def select_boosts(
+    cfg: RetrievalConfig,
+    graph: Any,
+    *,
+    tier_map: dict[str, str] | None = None,
+) -> list[Any]:
     """Build the production boost chain from a RetrievalConfig.
 
     Public helper so tests can pin which boosts the production pipeline
@@ -199,18 +204,28 @@ def select_boosts(cfg: RetrievalConfig, graph: Any) -> list[Any]:
     fire.
 
     Args:
-        cfg:   ``RetrievalConfig``. Each ``*_enabled`` flag opts the matching
-               adapter into the chain.
-        graph: ``GraphRepository`` for ``EntityBoost``. Other boosts ignore it.
+        cfg:      ``RetrievalConfig``. Each ``*_enabled`` flag opts the matching
+                  adapter into the chain.
+        graph:    ``GraphRepository`` for ``EntityBoost``. Other boosts ignore it.
+        tier_map: ``dict[collection_name, tier_name]`` for
+                  :class:`SourceTierBoost` (Issue #432). When ``None``
+                  (the default) the boost has no per-collection tier
+                  mapping — every result falls back to
+                  ``cfg.source_tier_boost.default_tier`` (x1.0). The factory
+                  derives this map from the operator's collections config
+                  before calling this helper.
 
     Returns:
         List of boost-strategy instances in registration order:
-        EntityBoost → ProceduralBoost → TemporalDateBoost → ChunkDateBoost.
+        EntityBoost → ProceduralBoost → TemporalDateBoost → ChunkDateBoost
+        → SourceTierBoost (Issue #432 — runs last so tier multipliers
+        apply on top of any intent-gated boost output).
     """
     from kairix.core.search.boosts import (
         ChunkDateBoost,
         EntityBoost,
         ProceduralBoost,
+        SourceTierBoost,
         TemporalDateBoost,
     )
 
@@ -223,7 +238,39 @@ def select_boosts(cfg: RetrievalConfig, graph: Any) -> list[Any]:
         boosts.append(TemporalDateBoost(config=cfg.temporal))
     if cfg.temporal.chunk_date_boost_enabled:
         boosts.append(ChunkDateBoost(config=cfg.temporal))
+    # Issue #432 — source-tier-aware ranking. Registered last so tier
+    # multipliers apply on the boosted_score AFTER any intent-gated
+    # boost has had its effect. No-op when cfg.source_tier_boost.enabled
+    # is False (the default), preserving pre-#432 ranking byte-for-byte.
+    if cfg.source_tier_boost.enabled:
+        boosts.append(SourceTierBoost(tier_map=tier_map, config=cfg.source_tier_boost))
     return boosts
+
+
+def derive_tier_map() -> dict[str, str]:
+    """Derive ``{collection_name: tier_name}`` from the operator's
+    collections config (Issue #432).
+
+    Reads via :func:`kairix.core.search.config_loader.load_collections`
+    so the env / cwd resolution chain applies — same surface the rest
+    of the kairix-config-aware code uses. Returns an empty dict when
+    no collections config is present, when no collection declares a
+    ``tier:`` field, or when the load fails — in all cases the
+    :class:`SourceTierBoost` falls back to its default tier (x1.0)
+    and preserves pre-#432 ranking byte-for-byte.
+
+    Pure read; no I/O beyond the YAML load. Safe to call at
+    pipeline-construction time.
+    """
+    try:
+        from kairix.core.search.config_loader import load_collections
+
+        collections = load_collections()
+    except Exception:
+        return {}
+    if collections is None:
+        return {}
+    return {c.name: c.tier for c in collections.shared if c.tier}
 
 
 def _resolve_retrieval_config(config: RetrievalConfig | None) -> RetrievalConfig:
@@ -964,7 +1011,12 @@ def _build_search_pipeline_uncached(
 
     fusion = deps.fusion_override if deps.fusion_override is not None else _build_fusion(cfg)
 
-    boosts = deps.boosts_override if deps.boosts_override is not None else select_boosts(cfg, graph)
+    # Issue #432 — derive {collection_name: tier_name} from the
+    # operator's kairix.config.yaml so SourceTierBoost knows which tier
+    # to apply per result. Empty dict (no tier declarations) means the
+    # boost falls back to the default tier (x1.0) for every result.
+    tier_map = derive_tier_map() if cfg.source_tier_boost.enabled else None
+    boosts = deps.boosts_override if deps.boosts_override is not None else select_boosts(cfg, graph, tier_map=tier_map)
 
     pipeline_logger = deps.logger_override if deps.logger_override is not None else _build_search_logger(env)
 

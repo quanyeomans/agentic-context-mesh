@@ -505,6 +505,13 @@ class CollectionDef:
     reachable via an explicit ``--collection <name>`` lookup — they simply
     don't auto-join the default mix. The intended use is large or noisy
     corpora (reference libraries, archives) that should be opt-in.
+
+    ``tier`` (Issue #432) classifies the collection for source-tier-aware
+    ranking. Allowed values: ``"canonical"``, ``"active_standard"``,
+    ``"vault_active"``, ``"reference"``, ``"archived"``. When absent (the
+    default), :class:`SourceTierBoost` falls back to
+    :attr:`SourceTierBoostConfig.default_tier` (``vault_active``,
+    multiplier x1.0) — preserves pre-#432 ranking byte-for-byte.
     """
 
     name: str
@@ -512,6 +519,7 @@ class CollectionDef:
     glob: str = "**/*.md"
     in_default: bool = True
     retrieval_overrides: dict | None = None  # per-collection retrieval config (raw YAML dict)
+    tier: str | None = None  # Issue #432 — source-tier classification
 
 
 @dataclass(frozen=True)
@@ -604,6 +612,7 @@ def parse_collections(data: dict) -> CollectionsConfig | None:
                 glob=item.get("glob", "**/*.md"),
                 in_default=in_default,
                 retrieval_overrides=item.get("retrieval"),
+                tier=item.get("tier"),  # Issue #432 — source-tier metadata
             )
         )
 
