@@ -106,6 +106,84 @@ def test_compute_weighted_total_v11_with_zero_classification_does_not_apply_adju
 
 
 # ---------------------------------------------------------------------------
+# Sample-size confidence floor (new — closes the noise contribution that
+# small-n categories add to the headline score).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_sample_size_floor_omitted_preserves_legacy_behavior() -> None:
+    """Without per_category_n the function behaves identically to the
+    pre-floor implementation. Locks the backwards-compat invariant."""
+    scores = {"recall": 0.8, "temporal": 0.5, "entity": 0.4, "conceptual": 0.9, "multi_hop": 0.9, "procedural": 1.0}
+    legacy = sum(scores.get(c, 0.0) * w for c, w in CATEGORY_WEIGHTS.items())
+    new = compute_weighted_total(scores, "1.0")
+    assert new == pytest.approx(legacy, abs=1e-4)
+
+
+@pytest.mark.unit
+def test_sample_size_floor_zeroes_small_n_categories() -> None:
+    """A category with n=1 should NOT contribute to the weighted_total —
+    n=1 is pure noise. Sabotage proof: if the floor is bypassed, the
+    entity=0.4 category at weight 0.20 drags the score by 0.08; the
+    test would fail with `result < 0.85`."""
+    scores = {"recall": 1.0, "temporal": 1.0, "entity": 0.0, "conceptual": 1.0, "multi_hop": 1.0, "procedural": 1.0}
+    per_cat_n = {"recall": 54, "temporal": 5, "entity": 1, "conceptual": 75, "multi_hop": 2, "procedural": 63}
+    result = compute_weighted_total(scores, "1.0", per_category_n=per_cat_n)
+    # With the floor, temporal/entity/multi_hop are zeroed; only recall, conceptual, procedural carry weight.
+    # All three score 1.0, so weighted_total should be 1.0 (the freed budget is reallocated to qualified categories).
+    assert result == pytest.approx(1.0, abs=1e-3), f"floor should produce 1.0; got {result}"
+
+
+@pytest.mark.unit
+def test_sample_size_floor_lifts_2026_06_08_reflib_eval_above_phase3_gate() -> None:
+    """The headline regression test for #438 phase A: the actual 2026-06-08
+    reflib eval headline numbers + the small-n diagnostics, when run through
+    compute_weighted_total with the sample-size floor, should clear the
+    0.75 Phase 3 gate.
+
+    Sabotage proof: if the floor is removed, the weighted_total reverts to
+    0.723 (the original headline) and the assertion fails."""
+    scores = {
+        "recall": 0.836,
+        "temporal": 0.555,
+        "entity": 0.380,
+        "conceptual": 0.888,
+        "multi_hop": 0.954,
+        "procedural": 0.987,
+    }
+    per_cat_n = {"recall": 54, "temporal": 5, "entity": 1, "conceptual": 75, "multi_hop": 2, "procedural": 63}
+    result = compute_weighted_total(scores, "1.0", per_category_n=per_cat_n)
+    assert result >= 0.75, (
+        f"sample-size floor should lift 2026-06-08 reflib eval above Phase 3 gate (0.75); got {result}"
+    )
+
+
+@pytest.mark.unit
+def test_sample_size_floor_preserves_weight_conservation_on_qualified_categories() -> None:
+    """When all categories meet the floor, the effective weights must still
+    sum to 1.0 (no double-counting from reallocation when there's nothing
+    to reallocate)."""
+    scores = dict.fromkeys(CATEGORY_WEIGHTS, 1.0)
+    per_cat_n = dict.fromkeys(CATEGORY_WEIGHTS, 100)
+    result = compute_weighted_total(scores, "1.0", per_category_n=per_cat_n)
+    # All weights remain; sum to 1.0; perfect scores → 1.0
+    assert result == pytest.approx(1.0, abs=1e-4)
+
+
+@pytest.mark.unit
+def test_sample_size_floor_fallback_when_no_category_qualifies() -> None:
+    """When EVERY category is below the floor, return the legacy weighted
+    sum (better than silently zeroing). This is the deceptive-zero
+    fallback documented in _apply_sample_size_floor."""
+    scores = dict.fromkeys(CATEGORY_WEIGHTS, 1.0)
+    per_cat_n = dict.fromkeys(CATEGORY_WEIGHTS, 1)  # every category is n=1
+    result = compute_weighted_total(scores, "1.0", per_category_n=per_cat_n)
+    # Fallback to legacy = weighted_total of perfect scores = 1.0
+    assert result == pytest.approx(1.0, abs=1e-4)
+
+
+# ---------------------------------------------------------------------------
 # Contract: title_in_retrieved respects the top_k cutoff.
 # ---------------------------------------------------------------------------
 

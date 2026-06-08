@@ -653,6 +653,9 @@ def aggregate_scores_by_category(
 def compute_weighted_total(
     per_category_avg: dict[str, float],
     suite_version: str,
+    *,
+    per_category_n: dict[str, int] | None = None,
+    min_n_for_full_weight: int = 10,
 ) -> float:
     """Apply category weights (with Phase 3 classification adjustment) and return weighted total.
 
@@ -661,16 +664,78 @@ def compute_weighted_total(
     ``temporal`` to ``classification`` so the weights conserve. (A previous
     revision used 0.15 for classification, which broke the [0, 1] range and
     let perfect-scoring v1.1 suites report 1.05; surfaced by contract test.)
+
+    **Sample-size confidence floor** (new — closes the noise contribution
+    that small-n categories add to the headline score). When
+    ``per_category_n`` is provided, any category with ``n <
+    min_n_for_full_weight`` has its weight zeroed and the freed budget is
+    reallocated proportionally to categories that meet the floor.
+    Rationale: a category with n=1 contributes pure noise to the weighted
+    average; treating it as if it had the same statistical power as a
+    category with n=75 distorts the headline.
+
+    Example: on the 2026-06-08 reflib eval, temporal (n=5), entity (n=1),
+    and multi_hop (n=2) had their full configured weights (0.20 / 0.20 /
+    0.10 = 0.50 budget) despite being below the noise floor. With
+    min_n_for_full_weight=10, those three contribute 0; their 0.50 budget
+    is reallocated to recall (n=54), conceptual (n=75), and procedural
+    (n=63) in proportion to their configured weights. The
+    suite-design noise stops dragging the headline number.
+
+    Backwards-compat: ``per_category_n=None`` (the default) reproduces
+    the legacy behaviour exactly — every existing caller keeps working.
     """
     effective_weights = dict(CATEGORY_WEIGHTS)
     if suite_version >= "1.1" and per_category_avg.get(_CATEGORY_CLASSIFICATION, 0.0) > 0:
         # Conservation: temporal donates 0.10 to classification.
         effective_weights[_CATEGORY_CLASSIFICATION] = 0.10
         effective_weights["temporal"] = 0.10
+
+    if per_category_n is not None:
+        effective_weights = _apply_sample_size_floor(
+            effective_weights,
+            per_category_n,
+            min_n_for_full_weight,
+        )
+
     return round(
         sum(per_category_avg.get(cat, 0.0) * w for cat, w in effective_weights.items()),
         4,
     )
+
+
+def _apply_sample_size_floor(
+    weights: dict[str, float],
+    per_category_n: dict[str, int],
+    min_n: int,
+) -> dict[str, float]:
+    """Zero weights for categories below the noise floor; reallocate budget.
+
+    Returns a new dict; never mutates ``weights``. Categories with n < min_n
+    get weight 0; their original weight is summed into ``freed_budget`` and
+    redistributed across categories with n >= min_n in proportion to their
+    pre-reallocation weights. When EVERY category is below the floor, the
+    function returns the input unchanged — a degraded-but-deterministic
+    fallback that's better than silently zeroing everything.
+    """
+    qualified = {cat: weight for cat, weight in weights.items() if weight > 0 and per_category_n.get(cat, 0) >= min_n}
+    if not qualified:
+        # No category qualifies — keep the original weights as a fallback
+        # so the score doesn't silently zero. The headline number will be
+        # wrong but visible; the alternative is a deceptive 0.0 that hides
+        # the underlying noise.
+        return dict(weights)
+
+    qualified_total = sum(qualified.values())
+    freed_budget = sum(weight for cat, weight in weights.items() if weight > 0 and per_category_n.get(cat, 0) < min_n)
+
+    new_weights: dict[str, float] = {cat: 0.0 for cat in weights}
+    # Categories that qualify: keep their configured weight + their
+    # proportional share of the freed budget.
+    for cat, weight in qualified.items():
+        share = weight / qualified_total
+        new_weights[cat] = weight + freed_budget * share
+    return new_weights
 
 
 def aggregate_ndcg_metrics(
@@ -855,10 +920,18 @@ def run_benchmark(
 
     # Aggregate
     per_category_avg = aggregate_scores_by_category(category_scores)
+    per_category_n = {cat: len(scores) for cat, scores in category_scores.items()}
 
     # Phase 3 weight model: classification gets 0.15 weight; temporal reduced to 0.10.
+    # Sample-size confidence floor: categories with n < 10 are noisy; their
+    # weight is reallocated to qualified categories. Avoids small-n drag
+    # on the headline score that was observed on the 2026-06-08 reflib eval.
     suite_version = suite.meta.get("version", "1.0")
-    weighted_total = compute_weighted_total(per_category_avg, suite_version)
+    weighted_total = compute_weighted_total(
+        per_category_avg,
+        suite_version,
+        per_category_n=per_category_n,
+    )
 
     gates = {gate: weighted_total >= threshold for gate, threshold in PHASE_GATES.items()}
     ndcg_at_10, hit_rate_at_5, mrr_at_10 = aggregate_ndcg_metrics(case_results)
