@@ -7,6 +7,11 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ## [Unreleased]
 
+### New for operators
+
+- **New: `kairix init` and `kairix uninstall` CLI subcommands.** One command to lay down kairix on a fresh Linux host: `sudo kairix init --system` creates the kairix system user, FHS-compliant dirs (/etc/kairix, /var/lib/kairix, /var/cache/kairix, /run/secrets/kairix), and a systemd unit. `kairix init --user` does the same for per-user installs under XDG dirs. Idempotent — re-running is a no-op. `kairix init verify` reports install health.
+- **Path resolution is now mode-aware.** `kairix.paths` resolvers (config_dir, data_dir, cache_dir, runtime_secrets_dir, embedding_cache_path, etc.) detect whether kairix is running in system, user, or container mode and return the right FHS or XDG path. Existing callers that pass no `mode` arg keep working unchanged via `Mode.detect()`.
+
 ## [2026.6.7] - 2026-06-07 — Faster CLI through warm MCP, agent-setup discovery, caches show real state
 
 > **Upgrading?** No required config changes — out-of-the-box defaults still synthesise a sensible scope per agent. Recommended action: run `kairix onboard scan` to discover your agents on disk and paste the generated block into `kairix.config.yaml`. After that, `kairix doctor agent --all` reports clean. Full notes in [`docs/upgrades/v2026.6.7.md`](docs/upgrades/v2026.6.7.md).

@@ -9,7 +9,7 @@ Feature: kairix init --system
   Background:
     Given a clean test root simulating a fresh host
 
-  @future
+  @current
   Scenario: First run creates user, dirs, config, systemd unit
     When the operator runs `kairix init --system --prefix <test_root>` as simulated root
     Then a kairix system user exists with uid >= 990
@@ -20,7 +20,7 @@ Feature: kairix init --system
     And the systemd unit declares User=kairix
     And `systemctl status kairix` reports the unit as enabled
 
-  @future
+  @current
   Scenario: Re-running is a no-op
     Given `kairix init --system` has already run successfully
     When the operator runs `kairix init --system` again
@@ -28,20 +28,20 @@ Feature: kairix init --system
     And no warnings about existing-file conflicts
     And the install report shows action=unchanged for every step
 
-  @future
+  @current
   Scenario: Refusing to run as non-root with --system
     When a non-root user runs `kairix init --system`
     Then exit code is 1
     And stderr says "system-mode install requires root; re-run with sudo OR pass --user"
 
-  @future
+  @current
   Scenario: `kairix init verify` reports install health
     Given `kairix init --system` has run successfully
     When the operator runs `kairix init verify`
     Then exit code is 0
     And stdout lists every install element marked OK
 
-  @future
+  @current
   Scenario: `kairix uninstall --system` removes everything except data
     Given `kairix init --system` has run successfully
     And /var/lib/kairix/index.sqlite exists with operator data

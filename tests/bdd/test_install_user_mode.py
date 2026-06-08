@@ -1,15 +1,10 @@
 """pytest-bdd loader for ``install_user_mode.feature``.
 
-Task 3 of Plan 1 (kairix self-installer) — wires the user-mode install
-feature file into the pytest-bdd collector. Each Scenario gets one
-``@scenario`` declaration here; the step bodies will live in
-``tests/bdd/steps/install_steps.py`` (Task 10 of the same plan).
-
-All 3 scenarios are tagged ``@future`` in the .feature file and skipped
-here via ``@pytest.mark.skip`` because the implementation slices
-(Tasks 4-8: system_user, dirs, systemd, installer, CLI) have not yet
-landed. The skip rationale points back at Plan 1 so a developer
-running the suite sees why each test is dormant.
+Plan 1 task 10 — all 3 scenarios are @current, driven by the step
+impls in :mod:`tests.bdd.steps.install_steps`. Runtime gates inside
+the step impls skip scenarios that need a live ``systemctl --user``
+bus (macOS dev boxes, CI runners without logind) with fix-style
+affordances; the binding file itself carries no static skips.
 
 This module follows the ``tests/bdd/test_benchmark_unified_contract.py``
 pattern — one test function per scenario, body populated by ``@scenario``
@@ -21,6 +16,13 @@ from pathlib import Path
 import pytest
 from pytest_bdd import scenario
 
+# Belt-and-braces import so the @scenario decorator can resolve the step
+# phrases even when the binding file is collected before the conftest
+# pytest_plugins entry registers the steps. The pytest_plugins entry in
+# tests/conftest.py is the suite-wide source of truth; this import
+# documents the coupling at the binding-file level too.
+import tests.bdd.steps.install_steps  # noqa: F401 — registers @given/@when/@then via import side effect
+
 FEATURE = str(Path(__file__).parent / "features" / "install_user_mode.feature")
 
 
@@ -30,10 +32,9 @@ FEATURE = str(Path(__file__).parent / "features" / "install_user_mode.feature")
 
 
 @pytest.mark.bdd
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @scenario(FEATURE, "First run lays down user-mode install")
 def test_first_run_lays_down_user_mode_install():
-    """Body populated by @scenario from the .feature file (skipped — Plan 1 future)."""
+    """User-mode install lays down config / data / systemd unit under tmp XDG root."""
 
 
 # ---------------------------------------------------------------------------
@@ -42,10 +43,9 @@ def test_first_run_lays_down_user_mode_install():
 
 
 @pytest.mark.bdd
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @scenario(FEATURE, "User-mode refuses to install global systemd unit")
 def test_user_mode_refuses_to_install_global_systemd_unit():
-    """Body populated by @scenario from the .feature file (skipped — Plan 1 future)."""
+    """User-mode install never writes /etc/systemd/system/kairix.service."""
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,6 @@ def test_user_mode_refuses_to_install_global_systemd_unit():
 
 
 @pytest.mark.bdd
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @scenario(FEATURE, "System and user installs can coexist on the same host")
 def test_system_and_user_installs_can_coexist_on_the_same_host():
-    """Body populated by @scenario from the .feature file (skipped — Plan 1 future)."""
+    """System-mode install + user-mode install land in distinct trees, both intact."""

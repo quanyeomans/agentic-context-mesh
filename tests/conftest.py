@@ -277,6 +277,13 @@ pytest_plugins = [
     # tool_search-only spike behind the agent_query_queue flag (default OFF).
     "tests.bdd.steps.agent_query_queue_steps",
     "tests.bdd.steps.feature_flag_agent_query_queue_steps",
+    # Plan 1 task 10 — kairix self-installer BDD step impls.
+    # Drives kairix init + uninstall via the real CLI subprocess surface
+    # (F46-compliant) against an XDG-redirected tmp root. Runtime-gated:
+    # scenarios needing root / a live user systemd bus skip with fix-style
+    # affordances; the user-mode sibling scenarios cover the equivalent
+    # code paths on every dev box.
+    "tests.bdd.steps.install_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

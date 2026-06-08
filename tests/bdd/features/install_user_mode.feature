@@ -9,7 +9,7 @@ Feature: kairix init --user
     Given XDG_CONFIG_HOME=/tmp/test-config
     And XDG_DATA_HOME=/tmp/test-data
 
-  @future
+  @current
   Scenario: First run lays down user-mode install
     When the operator runs `kairix init --user`
     Then /tmp/test-config/kairix/kairix.config.yaml exists
@@ -18,12 +18,12 @@ Feature: kairix init --user
     And the systemd unit does NOT declare User=
     And `systemctl --user status kairix` reports enabled
 
-  @future
+  @current
   Scenario: User-mode refuses to install global systemd unit
     When the operator runs `kairix init --user`
     Then /etc/systemd/system/kairix.service does NOT exist
 
-  @future
+  @current
   Scenario: System and user installs can coexist on the same host
     Given `sudo kairix init --system` has run
     When a non-root user runs `kairix init --user`

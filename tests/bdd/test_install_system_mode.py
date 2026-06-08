@@ -1,8 +1,11 @@
 """Bindings for tests/bdd/features/install_system_mode.feature.
 
-All 5 scenarios @future — skipped until the installer impl lands in Plan 1
-Tasks 4-8. Pinning the contract early so the feature file is operator-readable
-without breaking CI.
+Plan 1 task 10 — all 5 scenarios are @current, driven by the step
+impls in :mod:`tests.bdd.steps.install_steps`. Each scenario carries
+runtime gates (NOT static ``@pytest.mark.skip``) so dev boxes without
+root + a live systemd user bus skip with fix-style affordances while
+root-capable CI / Linux hosts run the full path. See the install_steps
+module docstring for the gate-by-gate rationale.
 """
 
 from __future__ import annotations
@@ -10,8 +13,15 @@ from __future__ import annotations
 import pytest
 from pytest_bdd import scenario
 
+# Importing the step module here is belt-and-braces over the
+# pytest_plugins registration in ``tests/conftest.py``: pytest-bdd's
+# scenario decorator only resolves step phrases that have been imported
+# into the live process. The conftest-level pytest_plugins entry handles
+# this for the suite-wide run; the explicit import documents the
+# coupling at the binding file too.
+import tests.bdd.steps.install_steps  # noqa: F401 — registers @given/@when/@then via import side effect
 
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
+
 @pytest.mark.bdd
 @scenario(
     "features/install_system_mode.feature",
@@ -21,7 +31,6 @@ def test_first_run_creates_install() -> None:
     """First-run install creates user, dirs, config, systemd unit."""
 
 
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @pytest.mark.bdd
 @scenario(
     "features/install_system_mode.feature",
@@ -31,7 +40,6 @@ def test_rerun_is_noop() -> None:
     """Re-running kairix init --system is idempotent."""
 
 
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @pytest.mark.bdd
 @scenario(
     "features/install_system_mode.feature",
@@ -41,7 +49,6 @@ def test_refuses_non_root_system_mode() -> None:
     """--system as non-root fails with actionable error."""
 
 
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @pytest.mark.bdd
 @scenario(
     "features/install_system_mode.feature",
@@ -51,7 +58,6 @@ def test_verify_reports_install_health() -> None:
     """verify subcommand reports every install element OK."""
 
 
-@pytest.mark.skip(reason="future — Plan 1; impl lands in subsequent tasks")
 @pytest.mark.bdd
 @scenario(
     "features/install_system_mode.feature",
