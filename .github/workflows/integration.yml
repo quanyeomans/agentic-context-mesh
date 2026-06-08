@@ -105,6 +105,29 @@ jobs:
         # collect the integration suite without them.
         run: pip install -e ".[dev,agents,xlsx,docx]" pytest-timeout
 
+      - name: Enable systemd --user bus for install-mode tests
+        # Plan 1 integration tests (tests/integration/test_cli_init.py +
+        # test_cli_uninstall.py) exercise `kairix init --user` which runs
+        # `systemctl --user daemon-reload + enable`. Without an active logind
+        # session bus the subprocess fails. Mirrors the same step on ci.yml's
+        # Stage 2 unit / Stage 3 integration / Stage 4.5 e2e jobs.
+        run: |
+          # Enable lingering so the user manager persists outside login sessions
+          sudo loginctl enable-linger "$USER"
+          # Explicitly start the user manager — enable-linger alone doesn't
+          # create the bus retroactively in non-interactive runner sessions.
+          UID_N=$(id -u "$USER")
+          sudo systemctl start "user@${UID_N}.service"
+          # Wait for the user manager to come up
+          timeout 30 bash -c "until systemctl --user --no-pager status >/dev/null 2>&1; do sleep 1; done"
+          # Propagate XDG_RUNTIME_DIR + DBUS_SESSION_BUS_ADDRESS to all
+          # downstream steps via \$GITHUB_ENV so pytest subprocesses inherit them.
+          echo "XDG_RUNTIME_DIR=/run/user/${UID_N}" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus" >> "$GITHUB_ENV"
+          # Verify
+          XDG_RUNTIME_DIR=/run/user/${UID_N} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${UID_N}/bus \
+            systemctl --user is-system-running || true
+
       - name: Run integration tests
         run: |
           pytest tests/ \
