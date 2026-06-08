@@ -148,16 +148,27 @@ def default_document_root() -> Path:
 def default_data_dir(platform: str = sys.platform) -> Path:
     """Platform-appropriate data directory for DB, vectors, and state.
 
-    Docker: /data/kairix
-    Server: /var/lib/kairix
-    Linux/macOS user: ~/.local/share/kairix (XDG_DATA_HOME)
-    Windows user: %LOCALAPPDATA%/kairix
+    Resolution order:
+      1. ``KAIRIX_DATA_DIR`` env if set — operator override, always wins
+      2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/data/kairix`` (legacy
+         default; operators on the v2026.7+ FHS layout set
+         ``KAIRIX_DATA_DIR=/var/lib/kairix`` to override — see #447)
+      3. Service install (system-mode kairix init): ``/var/lib/kairix``
+      4. Windows user: ``%LOCALAPPDATA%/kairix``
+      5. ``XDG_DATA_HOME``/kairix when set
+      6. ``~/.local/share/kairix`` (XDG default)
 
     ``platform`` defaults to ``sys.platform`` and is exposed as a
     parameter so unit tests can drive the Windows branch on any host
     without patching ``kairix.paths.sys``.
     """
+    env = os.environ.get("KAIRIX_DATA_DIR")
+    if env:
+        return Path(env).expanduser()
     if is_docker_runtime_check():
+        # Legacy default — see #447 + docs/architecture/deployment-architecture.md.
+        # Operators on FHS layouts (v2026.7+ kairix init --system) set
+        # KAIRIX_DATA_DIR=/var/lib/kairix explicitly to override.
         return Path("/data/kairix")
     if is_service_install():
         return Path("/var/lib/kairix")
@@ -174,15 +185,25 @@ def default_data_dir(platform: str = sys.platform) -> Path:
 def default_cache_dir(platform: str = sys.platform) -> Path:
     """Platform-appropriate cache directory for temporary data.
 
-    Docker: /data/kairix (same as data dir)
-    Server: /var/cache/kairix
-    Linux/macOS user: ~/.cache/kairix (XDG_CACHE_HOME)
-    Windows user: %LOCALAPPDATA%/kairix/cache
+    Resolution order:
+      1. ``KAIRIX_CACHE_DIR`` env if set — operator override, always wins
+      2. Docker runtime (``KAIRIX_CONTAINER=1``): ``/data/kairix`` (legacy
+         default; operators on FHS layouts set
+         ``KAIRIX_CACHE_DIR=/var/cache/kairix`` to override — see #447)
+      3. Service install (system-mode kairix init): ``/var/cache/kairix``
+      4. Windows user: ``%LOCALAPPDATA%/kairix/cache``
+      5. ``XDG_CACHE_HOME``/kairix when set
+      6. ``~/.cache/kairix`` (XDG default)
 
     ``platform`` defaults to ``sys.platform``; injectable for the same
     reason as ``default_data_dir``.
     """
+    env = os.environ.get("KAIRIX_CACHE_DIR")
+    if env:
+        return Path(env).expanduser()
     if is_docker_runtime_check():
+        # Legacy default — see #447. Operators on FHS layouts set
+        # KAIRIX_CACHE_DIR=/var/cache/kairix explicitly to override.
         return Path("/data/kairix")
     if is_service_install():
         return Path("/var/cache/kairix")
