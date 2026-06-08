@@ -1,8 +1,18 @@
 #!/command/with-contenv sh
 # First-boot init: if /var/lib/kairix/index.sqlite doesn't exist,
-# run kairix init --user (creating dirs + default config) BEFORE
-# the api or worker start.
+# run `kairix init` (no flag → Mode.detect() reads KAIRIX_CONTAINER=1
+# and resolves to Mode.container). Container mode treats the image
+# tree as already-laid-down — init becomes a verifier rather than a
+# write step, which is correct: the Dockerfile already created
+# /etc/kairix, /var/lib/kairix, /var/cache/kairix with the right
+# ownership during the image build.
+#
+# DO NOT use `kairix init --user` here. The container's USER kairix
+# has --home-dir /var/lib/kairix; --user resolves to XDG paths under
+# HOME (/var/lib/kairix/.config/kairix/kairix.config.yaml etc.). But
+# the runtime reads KAIRIX_CONFIG_PATH=/etc/kairix/kairix.config.yaml.
+# The init step would write a config the runtime ignores. See #448.
 if [ ! -f /var/lib/kairix/index.sqlite ]; then
-  kairix init --user || exit 1
+  kairix init || exit 1
 fi
 exit 0
