@@ -227,3 +227,55 @@ def test_install_unit_creates_parent_dirs(tmp_path: Path) -> None:
     install_unit(Mode.user, content="x", deps=deps)
 
     assert (nested / "kairix.service").exists()
+
+
+@pytest.mark.unit
+def test_install_unit_user_mode_default_target_honours_xdg_config_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """install_unit's default target (no deps.target_dir) honours XDG_CONFIG_HOME.
+
+    Load-bearing: kairix systemd unit lands where systemd's user
+    manager looks for it. systemd reads ``$XDG_CONFIG_HOME/systemd/user/``
+    per spec; install_unit must write to the same path or
+    ``systemctl --user enable`` fails to find the unit (caught in CI on
+    PR #445 before this fix).
+
+    Sabotage-proof: drop the XDG_CONFIG_HOME read in the default-target
+    resolver — the unit lands under HOME instead and this test fails.
+    """
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    _, fake_runner = _fake_runner_factory()
+    deps = SystemdDeps(subprocess_runner=fake_runner)
+
+    install_unit(Mode.user, content="[Unit]\n", deps=deps)
+
+    expected = tmp_path / "xdg-config" / "systemd" / "user" / "kairix.service"
+    assert expected.exists(), f"unit not written to XDG path; expected {expected}"
+
+
+@pytest.mark.unit
+def test_install_unit_user_mode_falls_back_to_home_when_xdg_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When XDG_CONFIG_HOME is unset, install_unit writes under HOME/.config.
+
+    Per XDG base-dir spec, ``~/.config`` is the documented fallback. Set
+    HOME=tmp_path so the test verifies the fallback without touching the
+    developer's real home.
+
+    Sabotage-proof: drop the ``if xdg_config else Path.home() / ".config"``
+    fallback — XDG_CONFIG_HOME being unset would produce a broken base
+    and this test fails.
+    """
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _, fake_runner = _fake_runner_factory()
+    deps = SystemdDeps(subprocess_runner=fake_runner)
+
+    install_unit(Mode.user, content="[Unit]\n", deps=deps)
+
+    expected = tmp_path / ".config" / "systemd" / "user" / "kairix.service"
+    assert expected.exists(), f"unit not written to HOME fallback; expected {expected}"

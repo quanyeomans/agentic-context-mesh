@@ -21,6 +21,7 @@ real FHS / XDG locations; tests pass
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -115,13 +116,23 @@ def install_unit(
 
 
 def _default_target_dir(mode: Mode) -> Path:
-    """Resolve the canonical systemd unit directory for the mode."""
+    """Resolve the canonical systemd unit directory for the mode.
+
+    User mode honours ``XDG_CONFIG_HOME`` per the XDG base-dir spec —
+    that's where the systemd user manager itself looks for unit files
+    (``$XDG_CONFIG_HOME/systemd/user/``, falling back to
+    ``~/.config/systemd/user/`` when XDG is unset). Reading XDG_CONFIG_HOME
+    here keeps the install target + systemd's lookup path aligned, so
+    ``systemctl --user enable`` finds the unit we just wrote.
+    """
     if mode == Mode.system:
         return Path("/etc/systemd/system")
-    # user + container fall through to the per-user systemd location.
-    # Container mode doesn't run systemd, but install_unit isn't called
-    # there in practice; the resolver still has to return *something*.
-    return Path.home() / ".config" / "systemd" / "user"
+    # user + container — honour XDG_CONFIG_HOME; fall back to ~/.config
+    # per the XDG base-dir spec. The systemd user manager applies the
+    # same precedence, so the unit lands where systemctl --user looks.
+    xdg_config = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg_config) if xdg_config else Path.home() / ".config"
+    return base / "systemd" / "user"
 
 
 def _systemctl_argv_for(mode: Mode) -> list[str]:
