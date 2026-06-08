@@ -89,9 +89,10 @@ def default_db_path() -> Path:
 
     Sibling to the main index DB. Must match the path
     ``kairix.agents.mcp.errors.default_db_path`` writes to —
-    ``/data/kairix/mcp_observability.sqlite`` by default. The dedicated
-    file avoids write-lock contention against the worker's writes on
-    the main index DB.
+    ``<data_dir>/mcp_observability.sqlite`` where ``data_dir`` resolves
+    through :mod:`kairix.paths` (``/var/lib/kairix/`` on FHS containers,
+    ``/data/kairix/`` on legacy layouts). The dedicated file avoids
+    write-lock contention against the worker's writes on the main index.
     """
     from kairix.paths import db_path as _db_path
 

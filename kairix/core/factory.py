@@ -460,13 +460,14 @@ def _build_search_logger(env: Mapping[str, str] | None = None) -> Any:
             :func:`kairix.paths.log_queries_enabled`. Production callers
             leave this ``None``.
     """
-    from pathlib import Path
-
     from kairix.core.search.logger import JsonlSearchLogger, default_search_log_paths
-    from kairix.paths import is_docker_env, log_queries_enabled
+    from kairix.paths import log_dir, log_queries_enabled
 
-    log_base = Path("/data/kairix/logs") if is_docker_env(env) else Path.home() / ".cache" / "kairix" / "logs"
-    search_log_path, query_log_path = default_search_log_paths(base=log_base)
+    # log_dir() honours the full resolution chain: KAIRIX_LOG_DIR env, then
+    # config file, then docker/server/XDG defaults. Replaces the previous
+    # docker-only Path("/data/kairix/logs") hardcode that ignored
+    # operator overrides — see #447.
+    search_log_path, query_log_path = default_search_log_paths(base=log_dir())
     enable_query_log = log_queries_enabled(env)
     return JsonlSearchLogger(
         search_log_path=search_log_path,

@@ -295,8 +295,10 @@ def _record_mcp_call(
     commit, closed in one function call.
 
     Production observability runs against a DEDICATED SQLite file
-    (``db_path`` is now ``/data/kairix/mcp_observability.sqlite`` by
-    default, not the main index DB). This decouples per-call INSERT
+    (``db_path`` resolves via :func:`kairix.paths.data_dir` to
+    ``mcp_observability.sqlite`` next to the main index — typically
+    ``/var/lib/kairix/`` on FHS containers, ``/data/kairix/`` on legacy
+    layouts — not the main index DB itself). This decouples per-call INSERT
     writes from the main DB's write-lock contention (embed pipeline,
     neo4j drain, FTS rebuild) — production traces showed ~95% of
     INSERTs lost the lock race against worker writes and were silently

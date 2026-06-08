@@ -266,17 +266,21 @@ def test_default_search_log_paths_is_pure(tmp_path: Path) -> None:
 
 
 @pytest.mark.contract
-def test_default_search_log_paths_defaults_to_docker_base() -> None:
-    """When base is None, the helper returns /data/kairix/logs paths.
+def test_default_search_log_paths_defaults_to_resolved_log_dir() -> None:
+    """When base is None, the helper resolves through ``kairix.paths.log_dir``.
 
-    This is the documented Docker-production default. Callers wanting the
-    non-Docker default (~/.cache/kairix/logs) must pass it explicitly —
-    confirming that the boundary decision lives in factory.py, not here.
+    Replaces the legacy hardcoded ``/data/kairix/logs`` default — that
+    path was a docker-only assumption that broke FHS deployments. Now
+    the helper defers to the central resolver, which honours
+    ``KAIRIX_LOG_DIR`` env / config / per-mode defaults. See #447.
     """
+    from kairix.paths import log_dir
+
+    expected_base = log_dir()
     search_p, query_p = default_search_log_paths(base=None)
 
-    assert search_p == Path("/data/kairix/logs/search.jsonl")
-    assert query_p == Path("/data/kairix/logs/query.jsonl")
+    assert search_p == expected_base / "search.jsonl"
+    assert query_p == expected_base / "query.jsonl"
 
 
 # ---------------------------------------------------------------------------

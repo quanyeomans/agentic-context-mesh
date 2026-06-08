@@ -333,13 +333,19 @@ def test_build_search_pipeline_uses_docker_log_path_when_dockerenv_marker_presen
         env={"KAIRIX_DOCKER": "1"},
     )
 
-    # The search logger's path is rooted at /data/kairix/logs when the
-    # docker marker is detected. We don't write to it; we only check
-    # the path the logger holds.
+    # The search logger's path now resolves through paths.log_dir() —
+    # honours KAIRIX_LOG_DIR env, config-file setting, then per-mode
+    # defaults (docker → /data/kairix/logs legacy or /var/lib/kairix/logs
+    # FHS, server → /var/log/kairix, user → ~/.cache/kairix/logs).
+    # The assertion just confirms the logger holds the same path the
+    # resolver produces (replaces the previous hardcoded /data/kairix/logs
+    # check — see #447).
+    from kairix.paths import log_dir
+
     logger_obj = pipeline.logger
     assert logger_obj is not None
     logger_path = str(getattr(logger_obj, "_search_log_path", ""))
-    assert "/data/kairix/logs" in logger_path
+    assert str(log_dir()) in logger_path
 
 
 @pytest.mark.unit

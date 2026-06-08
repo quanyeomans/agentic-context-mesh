@@ -1,9 +1,11 @@
 """
 Briefing file writer.
 
-Writes the generated briefing to /data/kairix/briefing/<agent>-latest.md.
-Creates directory if needed.
-Overwrites on each run (ephemeral working memory).
+Writes the generated briefing to ``<cache_dir>/briefing/<agent>-latest.md``,
+where ``cache_dir`` resolves through :mod:`kairix.paths` (defaults to
+``/var/cache/kairix`` on v2026.7+ FHS containers, ``~/.cache/kairix`` for
+user installs). Creates the directory if needed. Overwrites on each run
+(ephemeral working memory).
 """
 
 from __future__ import annotations

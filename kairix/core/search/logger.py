@@ -6,9 +6,13 @@ The logger appends one JSON object per event to a configurable path,
 creating parent directories on demand. The path is provided at
 construction time (G4: config at boundary — no env-var reads here).
 
-Production wiring resolves the path in factory.py:
-  - Docker: /data/kairix/logs/search.jsonl
-  - Non-Docker: ~/.cache/kairix/logs/search.jsonl
+Production wiring resolves the path in factory.py via
+:func:`kairix.paths.log_dir`, which honours ``KAIRIX_LOG_DIR`` env
+first, then config-file ``log_dir``, then per-mode defaults
+(``/var/lib/kairix/logs`` on v2026.7+ FHS containers,
+``/data/kairix/logs`` on legacy container layouts,
+``/var/log/kairix`` on system installs, ``~/.cache/kairix/logs`` on
+user installs).
 
 Event schema (additions vs. the existing ad-hoc log):
   - "agent": str | None — calling agent name, if known
@@ -112,12 +116,20 @@ def default_search_log_paths(*, base: Path | None = None) -> tuple[Path, Path]:
 
     Pure path-computation utility — does not read environment variables or
     config files. The decision of which base directory to use lives in
-    ``factory.py`` (production: ``/data/kairix/logs`` under Docker, or
-    ``~/.cache/kairix/logs`` otherwise).
+    ``factory.py``, which calls :func:`kairix.paths.log_dir` (honours
+    ``KAIRIX_LOG_DIR`` env, config-file ``log_dir`` setting, then per-mode
+    defaults: docker → ``/var/lib/kairix/logs`` after the v2026.7+ FHS
+    cutover or ``/data/kairix/logs`` on legacy hosts, server →
+    ``/var/log/kairix``, user → ``~/.cache/kairix/logs``).
 
-    When ``base`` is ``None``, defaults to ``/data/kairix/logs`` — the
-    Docker production path. Callers who want the non-Docker default
-    must pass it explicitly.
+    When ``base`` is ``None``, falls back to :func:`kairix.paths.log_dir`
+    so callers who don't have an explicit override still get the
+    resolved path rather than a hardcoded legacy default.
     """
-    resolved_base = base if base is not None else Path("/data/kairix/logs")
+    if base is None:
+        from kairix.paths import log_dir as _log_dir
+
+        resolved_base = _log_dir()
+    else:
+        resolved_base = base
     return (resolved_base / "search.jsonl", resolved_base / "query.jsonl")

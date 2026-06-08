@@ -617,9 +617,10 @@ def embed_cache_path() -> Path:
         normalised query text — the transport-layer cache that sits
         in front of every search-time embed call.
 
-    Lives under :func:`data_dir` (``/data/kairix`` in Docker;
-    ``/var/lib/kairix`` for service installs; XDG data dir for user
-    installs) so it travels with the kairix data volume across
+    Lives under :func:`data_dir` (``/var/lib/kairix`` on v2026.7+ FHS
+    containers + service installs, ``/data/kairix`` on legacy
+    container layouts, XDG data dir for user installs) so it travels
+    with the kairix data volume across
     ``docker compose down/up`` cycles. Closes #391: the previous
     in-process LRU implementation lost its entries on every container
     restart, so every release fan-out re-paid the ~250-500 ms Azure
