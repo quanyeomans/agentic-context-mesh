@@ -22,13 +22,14 @@ WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY kairix/ ./kairix/
 
-# Install PyTorch CPU-only first (prevents pulling ~5GB CUDA libs on GPU-less
-# servers), then the kairix package with all the extras the runtime image
-# actually needs, all targeted at --prefix=/install so the runtime stage
-# can COPY a single directory tree.
+# Install kairix + all runtime extras in a single pip resolve so the CPU
+# torch wheel from the PyTorch CPU index wins over the default PyPI torch
+# (which on linux/amd64 pulls nvidia + triton libs ~3.6GB — see #444 build).
+# Using --extra-index-url lets pip see the CPU wheel during resolution
+# alongside default PyPI for everything else; --prefix=/install puts it all
+# under /install so the runtime stage can COPY one tree.
 RUN pip install --no-cache-dir --prefix=/install \
-        torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir --prefix=/install \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
         ".[neo4j,agents,nlp,rerank,markitdown,pdf_fallback,docx,pptx,xlsx,ocr]" \
     && PYTHONPATH=/install/lib/python3.12/site-packages \
        /install/bin/python -m spacy download en_core_web_sm || true
