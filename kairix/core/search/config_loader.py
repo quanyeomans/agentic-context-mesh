@@ -23,10 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from kairix.core.search.config import (
+    ContentQualityBoostConfig,
     EntityBoostConfig,
     ProceduralBoostConfig,
     RerankConfig,
     RetrievalConfig,
+    SourceTierBoostConfig,
     TemporalBoostConfig,
 )
 from kairix.paths import config_path_override
@@ -438,6 +440,63 @@ def reset_config_cache() -> None:
     _load_cached_layered.cache_clear()
 
 
+@dataclass(frozen=True)
+class _BoostOverlay:
+    """Parsed boost configs extracted from a retrieval YAML block.
+
+    Internal-only — holds the per-boost configs ``parse_config``
+    threads into :class:`RetrievalConfig`. Pulled out so
+    ``parse_config`` stays under the F16 cognitive-complexity ceiling.
+    """
+
+    entity: EntityBoostConfig
+    procedural: ProceduralBoostConfig
+    temporal: TemporalBoostConfig
+    rerank: RerankConfig
+    content_quality: ContentQualityBoostConfig
+    source_tier: SourceTierBoostConfig
+
+
+def _parse_boost_overlay(retrieval: dict, defaults: RetrievalConfig) -> _BoostOverlay:
+    """Parse the ``retrieval.boosts`` and ``retrieval.rerank`` blocks.
+
+    Every parser falls back to its default config when the block is
+    absent so operators see byte-for-byte pre-feature behaviour
+    without an explicit opt-in.
+    """
+    boosts = retrieval.get("boosts", {}) or {}
+    return _BoostOverlay(
+        entity=_parse_entity(boosts.get("entity", {}) or {}) if boosts.get("entity") else defaults.entity,
+        procedural=_parse_procedural(boosts.get(_KEY_PROCEDURAL, {}) or {})
+        if boosts.get(_KEY_PROCEDURAL)
+        else defaults.procedural,
+        temporal=_parse_temporal(boosts.get("temporal", {}) or {}) if boosts.get("temporal") else defaults.temporal,
+        rerank=_parse_rerank(retrieval.get("rerank", {}) or {}) if retrieval.get("rerank") else defaults.rerank,
+        content_quality=_parse_content_quality_boost(boosts.get("content_quality", {}) or {})
+        if boosts.get("content_quality")
+        else defaults.content_quality_boost,
+        source_tier=_parse_source_tier_boost(boosts.get("source_tier", {}) or {})
+        if boosts.get("source_tier")
+        else defaults.source_tier_boost,
+    )
+
+
+def _resolve_fusion_strategy(retrieval: dict, defaults: RetrievalConfig) -> str:
+    """Resolve + validate the ``fusion_strategy`` value with fallback to default."""
+    fusion = str(retrieval.get("fusion_strategy", defaults.fusion_strategy))
+    if fusion not in ("bm25_primary", "rrf"):
+        logger.warning("config_loader: unknown fusion_strategy %r — using default", fusion)
+        return defaults.fusion_strategy
+    return fusion
+
+
+def _resolve_provider_name(data: dict) -> str | None:
+    """Pull + sanitise the top-level ``provider:`` field."""
+    raw_provider = data.get("provider")
+    provider_name = str(raw_provider).strip() if raw_provider else None
+    return provider_name or None
+
+
 def parse_config(data: dict) -> RetrievalConfig:
     """Parse YAML dict into RetrievalConfig. Returns defaults for any missing/invalid section.
 
@@ -448,45 +507,24 @@ def parse_config(data: dict) -> RetrievalConfig:
     surface a typed ValueError listing the installed plugins.
     """
     retrieval = data.get("retrieval", {}) or {}
-    boosts = retrieval.get("boosts", {}) or {}
-
     defaults = RetrievalConfig.defaults()
-
-    entity_cfg = _parse_entity(boosts.get("entity", {}) or {}) if boosts.get("entity") else defaults.entity
-    procedural_cfg = (
-        _parse_procedural(boosts.get(_KEY_PROCEDURAL, {}) or {}) if boosts.get(_KEY_PROCEDURAL) else defaults.procedural
-    )
-    temporal_cfg = _parse_temporal(boosts.get("temporal", {}) or {}) if boosts.get("temporal") else defaults.temporal
-    rerank_cfg = _parse_rerank(retrieval.get("rerank", {}) or {}) if retrieval.get("rerank") else defaults.rerank
-
-    # Fusion strategy + RRF k
-    fusion = str(retrieval.get("fusion_strategy", defaults.fusion_strategy))
-    if fusion not in ("bm25_primary", "rrf"):
-        logger.warning("config_loader: unknown fusion_strategy %r — using default", fusion)
-        fusion = defaults.fusion_strategy
-    rrf_k = int(retrieval.get("rrf_k", defaults.rrf_k))
-    vec_limit = int(retrieval.get("vec_limit", defaults.vec_limit))
-    bm25_limit = int(retrieval.get("bm25_limit", defaults.bm25_limit))
-
-    # Top-level ``provider:`` — names the plugin loaded by
-    # ``kairix.providers.get_provider``. ``None`` propagates when the
-    # field is absent or blank so the factory's typed error surfaces
-    # with the installed-plugins list.
-    raw_provider = data.get("provider")
-    provider_name = str(raw_provider).strip() if raw_provider else None
-    if provider_name == "":
-        provider_name = None
+    overlay = _parse_boost_overlay(retrieval, defaults)
 
     return RetrievalConfig(
-        provider=provider_name,
-        fusion_strategy=fusion,
-        rrf_k=rrf_k,
-        bm25_limit=bm25_limit,
-        vec_limit=vec_limit,
-        entity=entity_cfg,
-        procedural=procedural_cfg,
-        temporal=temporal_cfg,
-        rerank=rerank_cfg,
+        provider=_resolve_provider_name(data),
+        fusion_strategy=_resolve_fusion_strategy(retrieval, defaults),
+        rrf_k=int(retrieval.get("rrf_k", defaults.rrf_k)),
+        bm25_limit=int(retrieval.get("bm25_limit", defaults.bm25_limit)),
+        vec_limit=int(retrieval.get("vec_limit", defaults.vec_limit)),
+        entity=overlay.entity,
+        procedural=overlay.procedural,
+        temporal=overlay.temporal,
+        rerank=overlay.rerank,
+        content_quality_boost=overlay.content_quality,
+        source_tier_boost=overlay.source_tier,
+        fact_layer_min_floor=float(retrieval.get("fact_layer_min_floor", defaults.fact_layer_min_floor)),
+        chunk_layer_min_floor=float(retrieval.get("chunk_layer_min_floor", defaults.chunk_layer_min_floor)),
+        cross_layer_dedup_enabled=bool(retrieval.get("cross_layer_dedup_enabled", defaults.cross_layer_dedup_enabled)),
     )
 
 
@@ -688,6 +726,48 @@ def _parse_rerank(d: dict) -> RerankConfig:
         enabled=bool(d.get("enabled", defaults.enabled)),
         model=str(d.get("model", defaults.model)),
         candidate_limit=int(d.get("candidate_limit", defaults.candidate_limit)),
+    )
+
+
+def _parse_content_quality_boost(d: dict) -> ContentQualityBoostConfig:
+    """Parse ``retrieval.boosts.content_quality:`` YAML block (#458).
+
+    Operators flip ``enabled: true`` and optionally tune the three
+    signal shapes. All bounded ranges are honoured at the config-level
+    default so an out-of-range YAML override falls back to the
+    canonical bounds.
+    """
+    defaults = ContentQualityBoostConfig()
+    return ContentQualityBoostConfig(
+        enabled=bool(d.get("enabled", defaults.enabled)),
+        length_sigmoid_midpoint_chars=int(
+            d.get("length_sigmoid_midpoint_chars", defaults.length_sigmoid_midpoint_chars)
+        ),
+        length_sigmoid_scale_chars=int(d.get("length_sigmoid_scale_chars", defaults.length_sigmoid_scale_chars)),
+        length_stub_floor=float(d.get("length_stub_floor", defaults.length_stub_floor)),
+        length_substantive_ceiling=float(d.get("length_substantive_ceiling", defaults.length_substantive_ceiling)),
+        structure_log_scale=float(d.get("structure_log_scale", defaults.structure_log_scale)),
+        structure_ceiling=float(d.get("structure_ceiling", defaults.structure_ceiling)),
+        recency_decay_halflife_days=int(d.get("recency_decay_halflife_days", defaults.recency_decay_halflife_days)),
+        recency_floor=float(d.get("recency_floor", defaults.recency_floor)),
+        recency_neutral=float(d.get("recency_neutral", defaults.recency_neutral)),
+    )
+
+
+def _parse_source_tier_boost(d: dict) -> SourceTierBoostConfig:
+    """Parse ``retrieval.boosts.source_tier:`` YAML block (#432).
+
+    Only the ``enabled`` flag is config-driven; the multiplier table
+    stays at the canonical defaults (canonical x3.0 / active_standard
+    x2.0 / vault_active x1.0 / reference x0.6 / archived x0.2). Tuning
+    multipliers per deployment is a future-slice concern — for now an
+    operator's choice is binary on/off.
+    """
+    defaults = SourceTierBoostConfig()
+    return SourceTierBoostConfig(
+        enabled=bool(d.get("enabled", defaults.enabled)),
+        multipliers=defaults.multipliers,
+        default_tier=defaults.default_tier,
     )
 
 

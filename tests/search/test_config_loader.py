@@ -392,3 +392,136 @@ class TestLoadCachedEdgeCases:
 
         cfg = load_cached(config_file)
         assert isinstance(cfg, RetrievalConfig)
+
+
+# ---------------------------------------------------------------------------
+# #458 + #455 + #432 YAML loader wiring — operator overlay parsers
+# ---------------------------------------------------------------------------
+
+
+class TestContentQualityBoostYaml:
+    @pytest.mark.unit
+    def test_content_quality_boost_parsed_from_yaml(self, tmp_path):
+        """``retrieval.boosts.content_quality.enabled: true`` flows through
+        to ``RetrievalConfig.content_quality_boost.enabled`` so the
+        factory wires the boost into the chain.
+
+        Sabotage-proof: drop the ``_parse_content_quality_boost`` call
+        in ``load_config`` and the assertion below fails — config defaults
+        to disabled.
+        """
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text(
+            textwrap.dedent(
+                """
+                provider: fake
+                retrieval:
+                  boosts:
+                    content_quality:
+                      enabled: true
+                      length_substantive_ceiling: 1.3
+                      structure_ceiling: 1.25
+                """
+            ).lstrip()
+        )
+        cfg = load_config(cfg_file)
+        assert cfg.content_quality_boost.enabled is True
+        assert cfg.content_quality_boost.length_substantive_ceiling == 1.3
+        assert cfg.content_quality_boost.structure_ceiling == 1.25
+
+    @pytest.mark.unit
+    def test_content_quality_boost_absent_block_keeps_defaults(self, tmp_path):
+        """When the operator omits the ``content_quality`` block, the
+        loader keeps the default-disabled config so existing deployments
+        see byte-for-byte pre-#458 behaviour."""
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text("provider: fake\nretrieval: {}\n")
+        cfg = load_config(cfg_file)
+        assert cfg.content_quality_boost.enabled is False
+
+
+class TestFusionFloorYaml:
+    @pytest.mark.unit
+    def test_fact_and_chunk_floors_parsed_from_yaml(self, tmp_path):
+        """#455 — operator-supplied fact / chunk floors flow through to
+        the constructed :class:`RetrievalConfig`. Both default to 0.0
+        if absent.
+
+        Sabotage-proof: drop the ``fact_layer_min_floor`` line from
+        ``load_config`` and the floor stays at 0.0 even when the YAML
+        sets 0.4.
+        """
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text(
+            textwrap.dedent(
+                """
+                provider: fake
+                retrieval:
+                  fact_layer_min_floor: 0.4
+                  chunk_layer_min_floor: 0.3
+                """
+            ).lstrip()
+        )
+        cfg = load_config(cfg_file)
+        assert cfg.fact_layer_min_floor == 0.4
+        assert cfg.chunk_layer_min_floor == 0.3
+
+    @pytest.mark.unit
+    def test_cross_layer_dedup_flag_parsed_from_yaml(self, tmp_path):
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text("provider: fake\nretrieval:\n  cross_layer_dedup_enabled: true\n")
+        cfg = load_config(cfg_file)
+        assert cfg.cross_layer_dedup_enabled is True
+
+    @pytest.mark.unit
+    def test_floors_default_to_zero_when_absent(self, tmp_path):
+        """All three #455 knobs default to no-op when the YAML omits them."""
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text("provider: fake\nretrieval: {}\n")
+        cfg = load_config(cfg_file)
+        assert cfg.fact_layer_min_floor == 0.0
+        assert cfg.chunk_layer_min_floor == 0.0
+        assert cfg.cross_layer_dedup_enabled is False
+
+
+class TestSourceTierBoostYaml:
+    @pytest.mark.unit
+    def test_source_tier_boost_parsed_from_yaml(self, tmp_path):
+        """#432 — ``retrieval.boosts.source_tier.enabled: true`` flows
+        through so the factory wires :class:`SourceTierBoost` into the
+        chain."""
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text(
+            textwrap.dedent(
+                """
+                provider: fake
+                retrieval:
+                  boosts:
+                    source_tier:
+                      enabled: true
+                """
+            ).lstrip()
+        )
+        cfg = load_config(cfg_file)
+        assert cfg.source_tier_boost.enabled is True
+
+    @pytest.mark.unit
+    def test_source_tier_boost_absent_block_keeps_defaults(self, tmp_path):
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text("provider: fake\nretrieval: {}\n")
+        cfg = load_config(cfg_file)
+        assert cfg.source_tier_boost.enabled is False
