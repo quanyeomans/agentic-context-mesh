@@ -270,6 +270,41 @@ class _SqliteChunkWriter:
             written += 1
         return written
 
+    def delete_by_source_uri(self, source_uri: str) -> int:
+        """Delete every chunk whose ``source_uri`` matches.
+
+        Required by the entity-summary projector (ADR-036 §Mechanics):
+        before re-projecting an entity whose Wikidata description
+        changed, the projector clears the prior chunk row(s) for
+        ``entity://<QID>`` so the new ``content_hash`` doesn't leave a
+        stale row behind.
+
+        FTS5 cleanup runs in lockstep — for each matched ``documents``
+        row we delete the paired ``documents_fts`` row by the same
+        rowid so BM25 retrieval doesn't keep finding the old text.
+
+        Returns the row count deleted (matches the parameterised
+        ``DELETE`` row count, not the FTS5 cleanup count). Returns 0
+        when no rows match — operators / callers can treat 0 as 'no
+        prior chunk for this URI'. Does NOT commit.
+        """
+        # F63-bounded: every entity-summary write under #457 produces ≤1
+        # row per source_uri, so this scan returns ≤1 row in practice.
+        # Connector pipelines that adopt delete_by_source_uri for other
+        # patterns must keep that one-URI-per-source invariant or accept
+        # a tighter LIMIT.
+        rows = self._db.execute(
+            "SELECT id FROM documents WHERE collection = ? AND source_uri = ?",  # F63-bounded: one URI per source
+            (self._collection, source_uri),
+        ).fetchall()
+        for (doc_id,) in rows:
+            self._db.execute("DELETE FROM documents_fts WHERE rowid = ?", (doc_id,))
+        cursor = self._db.execute(
+            "DELETE FROM documents WHERE collection = ? AND source_uri = ?",
+            (self._collection, source_uri),
+        )
+        return int(cursor.rowcount or 0)
+
 
 class _SqliteEntityGraphSink:
     """Minimal in-process :class:`~kairix.core.protocols.EntityGraphSink`.
@@ -451,6 +486,14 @@ class _CollectionRouterChunkWriter:
         item_id = chunks[0].source_uri
         result = self._router.write_chunks(item_id, chunks)
         return int(result.n_written)
+
+    def delete_by_source_uri(self, source_uri: str) -> int:
+        """Delete every chunk for ``source_uri`` across routed collections.
+
+        Delegates to :meth:`CollectionRouter.delete_chunks_by_source_uri`
+        so the adapter stays a thin shim around the router's lifecycle.
+        """
+        return int(self._router.delete_chunks_by_source_uri(source_uri))
 
 
 def _resolve_config_path_default() -> Path | None:

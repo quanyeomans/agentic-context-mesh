@@ -277,6 +277,32 @@ REGISTRY: dict[str, FeatureFlag] = {
         owner=_CONNECTOR_FRAMEWORK_OWNER,
         related_spec=_CONNECTOR_INGESTION_SPEC,
     ),
+    "entity_summary_indexing_enabled": FeatureFlag(
+        name="entity_summary_indexing_enabled",
+        # Default-OFF: pre-#457 behaviour preserved byte-for-byte. Operators
+        # flip ON after declaring the synthetic 'entity-summaries' collection
+        # tier in kairix.config.yaml. The worker tick then projects Neo4j
+        # n.summary content into the chunk store so Wikidata descriptions
+        # participate in first-pass BM25 + vector retrieval.
+        default=False,
+        description=(
+            "When ON, the worker tick runs EntitySummaryProjectorStage to "
+            "project Neo4j n.summary text into the synthetic "
+            "'entity-summaries' collection. Closes #429: pre-flag, Wikidata "
+            "descriptions written by enrich_entity were unreachable from "
+            "search (entity-category NDCG 0.380 in the 2026-06-08 reflib "
+            "eval). When OFF, the projector stage is a no-op — zero Neo4j "
+            "queries, zero chunk-writer calls — and pre-#457 ranking is "
+            "preserved. ADR-036 locks the full architecture + cutover "
+            "protocol; #459/#460/#461/#462 are the four implementation "
+            "slices."
+        ),
+        stage="introduce",
+        introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
+        target_retire_in=_FLAG_TARGET_RETIRE_IN,
+        owner="search-pipeline",
+        related_spec="docs/architecture/ADR-036-entity-summary-indexing-surface.md",
+    ),
     "intent_confidence_gated_boosts": FeatureFlag(
         name="intent_confidence_gated_boosts",
         # Default-OFF: today's binary-enum behaviour is preserved byte-for-byte.

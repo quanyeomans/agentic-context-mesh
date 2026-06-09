@@ -181,6 +181,24 @@ class CollectionRouter:
         """Number of collection mappings for this cc_pair — for tests + diagnostics."""
         return len(self._mappings)
 
+    def delete_chunks_by_source_uri(self, source_uri: str) -> int:
+        """Delete every chunk for ``source_uri`` across the routed collections.
+
+        Walks every collection writer the router has previously
+        instantiated and delegates the delete. Returns the sum of
+        deletion counts. Used by callers (entity-summary projector,
+        ADR-036) that re-project a fixed ``source_uri`` and need to
+        clear any prior row across whatever collection(s) the router's
+        mappings sent it to.
+        """
+        deleted = 0
+        for writer in self._writers.values():
+            method = getattr(writer, "delete_by_source_uri", None)
+            if method is None:
+                continue
+            deleted += int(method(source_uri))
+        return deleted
+
 
 def _load_mappings_for_cc_pair(db: sqlite3.Connection, cc_pair_id: int) -> tuple[_CollectionMapping, ...]:
     """Read + sort all mappings for ``cc_pair_id``.

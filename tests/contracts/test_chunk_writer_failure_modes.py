@@ -115,3 +115,60 @@ def test_upsert_raises_propagates_and_rolls_back_bronze(tmp_path: Path) -> None:
     )
     assert bronze_count == 0, f"bronze_records must roll back on writer raise; got {bronze_count} row(s)"
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# F68 failure-mode coverage — delete_by_source_uri (ADR-036, #459 Slice A)
+#
+# The new Protocol method needs its own failure-class proofs. The
+# delete path is structurally simpler than upsert (no per-batch
+# transaction here — the caller's transaction owns commit), so the
+# contract pinned is "exception propagates" + "empty-state safe".
+# ---------------------------------------------------------------------------
+
+
+class _DeleteRaisingChunkWriter:
+    """ChunkWriter that raises on ``delete_by_source_uri``.
+
+    Mirrors :class:`_RaisingChunkWriter` but targets the new Protocol
+    method. The contract is "any raise propagates to the caller" so
+    the caller's transaction can roll back deliberately, not silently.
+    """
+
+    def upsert(self, _chunks: object) -> int:
+        return 0
+
+    def delete_by_source_uri(self, _source_uri: str) -> int:
+        raise RuntimeError("F68-delete-raises")
+
+
+def test_delete_by_source_uri_raises_propagates_to_caller() -> None:
+    """F68 — when the underlying writer raises on delete, the exception
+    propagates so the caller's per-batch transaction can roll back.
+
+    Sabotage-proof: wrap the production ``_SqliteChunkWriter.delete_by_source_uri``
+    in a bare ``try/except: return 0`` and the assertion below fails (no
+    exception reaches the caller, the rollback discipline silently
+    breaks).
+    """
+    writer = _DeleteRaisingChunkWriter()
+    with pytest.raises(RuntimeError, match="F68-delete-raises"):
+        writer.delete_by_source_uri("entity://Q1")
+
+
+def test_delete_by_source_uri_returns_empty_for_unknown_collection(tmp_path: Path) -> None:
+    """F68 ``returns_empty`` — a delete targeted at a fresh collection
+    (URI never written) returns 0 and writes nothing, no exception.
+
+    Locks the safe-on-empty-state contract: callers building a fresh
+    projector mid-startup can't crash by delete-then-upsert on the
+    first run."""
+    from kairix.core.connectors.collection_router import legacy_chunk_writer
+    from kairix.core.db.schema import create_schema
+
+    db = sqlite3.connect(str(tmp_path / "kairix.db"))
+    create_schema(db)
+    db.commit()
+    writer = legacy_chunk_writer(db, collection="brand-new-collection")
+    assert writer.delete_by_source_uri("entity://Q-never-written") == 0
+    db.close()

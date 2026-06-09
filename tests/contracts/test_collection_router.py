@@ -218,3 +218,62 @@ def test_router_exposes_cc_pair_id() -> None:
     cc_pair_id = _seed_cc_pair(db, name="cc-id-check")
     router = CollectionRouter(db, cc_pair_id)
     assert router.cc_pair_id == cc_pair_id
+
+
+def test_delete_chunks_by_source_uri_iterates_routed_writers() -> None:
+    """ADR-036 §Q6 — :meth:`CollectionRouter.delete_chunks_by_source_uri`
+    sums deletions across every previously-instantiated writer.
+
+    Sabotage-proof: drop the ``for writer in self._writers.values()`` loop
+    and the returned count is always 0 — the assertion below catches.
+    """
+    db = _fresh_db()
+    cc_pair_id = _seed_cc_pair(db, name="cc-delete")
+    coll_id = _seed_collection(db, name="entity-summaries")
+    _seed_mapping(db, collection_id=coll_id, cc_pair_id=cc_pair_id, filter_glob="entity://*")
+
+    router = CollectionRouter(db, cc_pair_id)
+    router.write_chunks("entity://Q1", [_make_chunk(source_uri="entity://Q1")])
+    db.commit()
+    deleted = router.delete_chunks_by_source_uri("entity://Q1")
+    db.commit()
+    assert deleted == 1
+    # Idempotent — repeating the call returns zero.
+    assert router.delete_chunks_by_source_uri("entity://Q1") == 0
+
+
+def test_delete_chunks_by_source_uri_zero_when_no_writers_instantiated() -> None:
+    """Router that has never routed a chunk has no writers cached and
+    returns 0 deletions — locks the empty-state contract so callers can
+    safely invoke delete on a freshly-constructed router."""
+    db = _fresh_db()
+    cc_pair_id = _seed_cc_pair(db, name="cc-empty-delete")
+    router = CollectionRouter(db, cc_pair_id)
+    assert router.delete_chunks_by_source_uri("entity://Q-nonexistent") == 0
+
+
+def test_router_chunk_writer_adapter_delete_delegates_to_router() -> None:
+    """The router-adapter resolved through the public
+    :func:`resolve_chunk_writer_for_entry` (when a cc_pair has at
+    least one mapping) exposes ``delete_by_source_uri`` that
+    delegates to :meth:`CollectionRouter.delete_chunks_by_source_uri`.
+
+    Sabotage-proof: return a hard-coded 0 from the adapter and the
+    propagated count below mismatches.
+
+    F5-clean: composes via the public ``resolve_chunk_writer_for_entry``
+    entry point (no underscored-private import in the test surface).
+    """
+    from kairix.worker import resolve_chunk_writer_for_entry
+
+    db = _fresh_db()
+    cc_pair_id = _seed_cc_pair(db, name="cc-adapter-delete")
+    coll_id = _seed_collection(db, name="entity-summaries")
+    _seed_mapping(db, collection_id=coll_id, cc_pair_id=cc_pair_id, filter_glob="entity://*")
+    adapter = resolve_chunk_writer_for_entry(db, "cc-adapter-delete")
+    # Seed one chunk to make the deletion count > 0
+    adapter.upsert([_make_chunk(source_uri="entity://Q7")])
+    db.commit()
+    assert adapter.delete_by_source_uri("entity://Q7") == 1
+    db.commit()
+    assert adapter.delete_by_source_uri("entity://Q7") == 0

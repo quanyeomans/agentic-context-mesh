@@ -282,6 +282,10 @@ pytest_plugins = [
     # intent_confidence_gated_boosts feature flag (driven via the
     # intent_confidence_passes flag_reader DI seam).
     "tests.bdd.steps.feature_flag_intent_confidence_gated_boosts_steps",
+    # ADR-036 #459 Slice A — F54 both-branch coverage for the
+    # entity_summary_indexing_enabled feature flag (worker-tick gate
+    # for projecting Neo4j n.summary into the chunk store).
+    "tests.bdd.steps.feature_flag_entity_summary_indexing_enabled_steps",
     # Plan 1 task 10 — kairix self-installer BDD step impls.
     # Drives kairix init + uninstall via the real CLI subprocess surface
     # (F46-compliant) against an XDG-redirected tmp root. Runtime-gated:

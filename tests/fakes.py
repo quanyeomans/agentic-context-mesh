@@ -3851,18 +3851,72 @@ class FakeDrainGraphRepository:
 class FakeChunkWriter:
     """Capture-only :class:`kairix.core.protocols.ChunkWriter`.
 
-    Records every upsert call's chunks in ``writes`` (a list of tuples).
-    Returns the count of chunks written. Tests assert against ``writes``
-    to verify chunk content + that the rollback path skipped the write.
+    Records every upsert call's chunks in ``writes`` (a list of tuples)
+    and every delete call's source_uri in ``deletes``. Returns counts
+    matching the production writer's contract. Tests assert against
+    ``writes`` / ``deletes`` to verify chunk content + that the rollback
+    or re-projection path issued the expected calls.
+
+    The internal ``_by_uri`` dict mirrors the SQLite ``documents`` view
+    keyed by ``source_uri`` so ``delete_by_source_uri`` can return the
+    real row count + the next ``upsert`` for the same URI behaves like
+    production (replace-on-key). Tests that care about idempotency
+    drive the fake through both methods rather than asserting raw call
+    counts.
     """
 
     def __init__(self) -> None:
         self.writes: list[tuple[Any, ...]] = []
+        self.deletes: list[str] = []
+        self._by_uri: dict[str, int] = {}
 
     def upsert(self, chunks: Any) -> int:
         batch = tuple(chunks)
         self.writes.append(batch)
+        for c in batch:
+            uri = getattr(c, "source_uri", "")
+            if uri:
+                self._by_uri[uri] = self._by_uri.get(uri, 0) + 1
         return len(batch)
+
+    def delete_by_source_uri(self, source_uri: str) -> int:
+        """Drop every chunk for ``source_uri``; record the call.
+
+        Returns the count of rows that were tracked under this URI
+        before the delete (matches the production writer's
+        ``cursor.rowcount`` contract). Idempotent: calling twice
+        returns N then 0.
+        """
+        self.deletes.append(source_uri)
+        return int(self._by_uri.pop(source_uri, 0))
+
+
+class FakeEntitySummaryProjector:
+    """Scriptable :class:`kairix.core.protocols.EntitySummaryProjector` (ADR-036).
+
+    Records every :meth:`tick` call's ``per_tick_max_items`` in
+    ``ticks`` so tests can assert the cap was honoured. The result is
+    pre-scripted via the constructor's ``result`` kwarg so a test can
+    pin "tick returns projected=5, failed=0" without wiring real
+    Neo4j + ChunkWriter.
+
+    F1/F2-clean by construction — this stands in via the normal
+    constructor seam, not a monkey-patch.
+    """
+
+    def __init__(
+        self,
+        *,
+        result: Any = None,
+    ) -> None:
+        from kairix.core.protocols import EntitySummaryProjectionResult
+
+        self.ticks: list[int] = []
+        self._result: Any = result if result is not None else EntitySummaryProjectionResult()
+
+    def tick(self, *, per_tick_max_items: int = 200) -> Any:
+        self.ticks.append(per_tick_max_items)
+        return self._result
 
 
 class FakeFeatureFlagResolver:

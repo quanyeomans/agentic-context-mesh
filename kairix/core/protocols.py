@@ -1255,6 +1255,25 @@ class ChunkWriter(Protocol):
         """
         ...
 
+    def delete_by_source_uri(self, source_uri: str) -> int:
+        """Delete every chunk whose ``source_uri`` matches.
+
+        Returns the row count deleted. The deletion is non-cascading at
+        this Protocol surface — callers needing the matching FTS5 row
+        cleared rely on the SQLite trigger that mirrors chunk-row
+        lifecycle.
+
+        Required by the entity-summary projector (ADR-036 §Mechanics) so
+        a changed Wikidata description can replace its prior chunk
+        atomically: ``delete_by_source_uri(\"entity://<QID>\")`` then
+        ``upsert([new_chunk])``. Connector pipelines that don't need
+        deletion may no-op + return 0 to satisfy the Protocol.
+
+        Must NOT commit — same per-batch transaction discipline as
+        :meth:`upsert`.
+        """
+        ...
+
 
 @runtime_checkable
 class EntityGraphSink(Protocol):
@@ -1901,5 +1920,71 @@ class Chunker(Protocol):
         ``section_kind`` is the typed-section discriminator
         (``"text"`` / ``"tabular"`` / ``"image"``). ``source_uri`` is
         propagated through to each emitted :class:`Chunk` per F39.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Entity-summary projector (ADR-036, Issue #457)
+#
+# Projects Neo4j ``n.summary`` content into a synthetic
+# ``entity-summaries`` collection so Wikidata descriptions participate
+# in first-pass BM25 + vector retrieval. The worker tick stage that
+# composes a projector implementation is gated behind the
+# ``entity_summary_indexing_enabled`` feature flag (default OFF).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EntitySummaryProjectionResult:
+    """Outcome of one :meth:`EntitySummaryProjector.tick` call.
+
+    Surfaced so worker telemetry + operator-facing diagnostics
+    (``kairix doctor``, ``kairix features status``) can show backlog
+    clearing without re-querying Neo4j.
+
+      * ``projected`` — net-new chunks written this tick
+      * ``updated`` — existing chunks deleted-and-rewritten this tick
+        (summary content hash changed)
+      * ``skipped`` — entities polled but no work (already indexed and
+        the content hash matches)
+      * ``failed`` — per-entity write failures (logged at WARN,
+        swallowed; the rest of the tick continues per ADR-036
+        failure-isolation contract)
+    """
+
+    projected: int = 0
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+
+@runtime_checkable
+class EntitySummaryProjector(Protocol):
+    """Projects Neo4j entity summaries into the chunk store.
+
+    Reads a :class:`Neo4jClient`-shaped client (any object exposing
+    ``cypher(query, params) -> list[dict]`` plus the write surface);
+    writes through a :class:`ChunkWriter` so the routing flows via the
+    canonical ``CollectionRouter`` → ``_SqliteChunkWriter`` path and
+    F61 stays clean.
+
+    Implementations must:
+
+      * be idempotent — calling :meth:`tick` twice with no Neo4j changes
+        between calls projects zero net-new chunks the second time
+      * isolate per-entity failures — one bad write logs at WARN and
+        increments :attr:`EntitySummaryProjectionResult.failed`; the
+        tick continues
+      * declare ``per_tick_max_items`` + ``disk_watermark_min_free_bytes``
+        on their construction site per F66
+    """
+
+    def tick(self, *, per_tick_max_items: int = 200) -> EntitySummaryProjectionResult:
+        """Project up to ``per_tick_max_items`` pending entities; return outcome.
+
+        Bounded per-tick work so the worker loop stays responsive — a
+        large backlog clears over multiple ticks rather than blocking
+        the loop on a single huge transaction.
         """
         ...

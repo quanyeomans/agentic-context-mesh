@@ -59,10 +59,19 @@ def test_batch_result_is_frozen_dataclass() -> None:
 
 
 def test_chunk_writer_protocol_is_runtime_checkable() -> None:
-    """A class implementing ``upsert(chunks) -> int`` satisfies the Protocol."""
+    """A class implementing the full Protocol surface satisfies the
+    ``runtime_checkable`` ``isinstance`` check.
+
+    ADR-036 (#459 Slice A) extended :class:`ChunkWriter` with
+    :meth:`delete_by_source_uri`; the minimal stub here mirrors both
+    methods so the Protocol-shape contract stays mechanically enforced.
+    """
 
     class _Writer:
         def upsert(self, _chunks: object) -> int:
+            return 0
+
+        def delete_by_source_uri(self, _source_uri: str) -> int:
             return 0
 
     assert isinstance(_Writer(), ChunkWriter)
