@@ -5,6 +5,24 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
+## [Unreleased] — Retrieval quality v2 + entity-summary indexing
+
+> **Upgrading?** Two operator actions: (a) the new `entity_summary_indexing_enabled` feature flag is OFF by default — flip it ON via your overlay after running the [entity-summary cutover runbook](docs/operations/runbooks/entity-summary-cutover.md) to surface Wikidata-style descriptions in search results; (b) the docker-compose host-port bind is now parameterised — set `KAIRIX_MCP_BIND_HOST=0.0.0.0` in your operator-side `.env` if your VM needs external reachability (kairix has no built-in auth, so leave the default for laptop / Docker Desktop installs).
+
+### New for agents
+
+- **Wikidata-style entity descriptions reach first-pass search.** When `entity_summary_indexing_enabled` is ON, descriptions written to Neo4j `n.summary` by `kairix entity enrich` are projected into a synthetic `entity-summaries` collection on every worker tick. An agent asking "which AI ethics organisations did we engage with?" now finds entities tagged with that role even when no document name-matches. Closes #429 / ADR-036 / #457 / #459 / #460 / #461 / #462.
+- **Entity-summary rows carry a discoverable badge.** Agents see `entity_summary: true` on the per-hit dict in the MCP envelope; CLI users see a `[Wikidata]` suffix on the title line. Operators and agents can tell external-context rows apart from vault content at a glance.
+
+### Things that work better
+
+- **Fusion ranking handles single-row fact layers correctly.** The pre-#455 max-relative normalisation auto-promoted a single weak fact hit to the top of `ATTRIBUTE_FACT` queries. The new `fact_layer_min_floor` + `cross_layer_dedup_enabled` knobs (both default-off for byte-for-byte parity) let operators floor the denominator and dedup fact rows against chunk rows describing the same entity. Closes #455.
+- **MCP host-port bind survives image refresh.** `docker-compose.yml` + `docker-compose.example.yml` now use `${KAIRIX_MCP_BIND_HOST:-127.0.0.1}` substitution so an operator running on a private-network VM (e.g. with the MCP behind a reverse proxy) can set `KAIRIX_MCP_BIND_HOST=0.0.0.0` once in their `.env` and the override survives every `git pull` / image refresh. Defaults stay loopback for laptop deploys.
+
+### Important when upgrading
+
+- **`entity_summary_indexing_enabled` cutover is gated.** ADR-036 §Cutover specifies a 24h soak + post-flip gate (entity-category NDCG ≥ 0.55, sample-journey ≥ 80%, state delta ±2%). The [cutover runbook](docs/operations/runbooks/entity-summary-cutover.md) walks through pre-flip baseline capture, tier-mapping YAML overlay, and rollback. Don't flip the flag without running the cutover.
+
 ## [2026.6.8] - 2026-06-08 — One-command install, one container, one-command OAuth
 
 > **Upgrading?** Two operator actions: (a) the kairix container now runs as a dedicated `kairix` user (uid 995) instead of root — if your host volumes were written by the old image, run `sudo chown -R 995:985 <path>` once after pulling the new image; (b) on bare hosts (no Docker), the new `sudo kairix init --system` lays down everything in one command. Existing Docker compose deploys upgrade in place. Full notes in [`docs/upgrades/v2026.6.8.md`](docs/upgrades/v2026.6.8.md).
