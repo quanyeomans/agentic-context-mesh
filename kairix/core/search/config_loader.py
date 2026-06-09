@@ -784,17 +784,63 @@ def _parse_content_quality_boost(d: dict) -> ContentQualityBoostConfig:
 def _parse_source_tier_boost(d: dict) -> SourceTierBoostConfig:
     """Parse ``retrieval.boosts.source_tier:`` YAML block (#432).
 
-    Only the ``enabled`` flag is config-driven; the multiplier table
-    stays at the canonical defaults (canonical x3.0 / active_standard
-    x2.0 / vault_active x1.0 / reference x0.6 / archived x0.2). Tuning
-    multipliers per deployment is a future-slice concern — for now an
-    operator's choice is binary on/off.
+    Knobs honoured:
+      * ``enabled`` (bool) — flip the boost on/off.
+      * ``canonical_filename_allowlist`` (list[str]) — file-suffix
+        overrides that force the chunk to the ``canonical`` tier
+        regardless of its collection.
+      * ``per_intent_overrides`` (list[dict]) — per-intent multiplier
+        table. Each entry: ``{intent: str, tier: str, multiplier: float}``.
+
+    The base multiplier table + default tier stay at canonical
+    defaults — tuning every multiplier per deployment is a future
+    slice; operators today get the binary on/off + the two
+    discriminating overrides.
     """
+    from kairix.core.search.config import SourceTier as _SourceTier
+
     defaults = SourceTierBoostConfig()
+    allowlist_raw = d.get("canonical_filename_allowlist") or ()
+    allowlist = tuple(str(x) for x in allowlist_raw if x)
+
+    overrides_raw = d.get("per_intent_overrides") or []
+    overrides: list[tuple[str, _SourceTier, float]] = []
+    for entry in overrides_raw:
+        if not isinstance(entry, dict):
+            continue
+        intent_value = str(entry.get("intent", "")).strip()
+        tier_value = str(entry.get("tier", "")).strip()
+        multiplier_value = entry.get("multiplier")
+        if not intent_value or not tier_value or multiplier_value is None:
+            logger.warning(
+                "config_loader: source_tier per_intent_overrides entry missing required field — skipping: %r",
+                entry,
+            )
+            continue
+        try:
+            tier_enum = _SourceTier(tier_value)
+        except ValueError:
+            logger.warning(
+                "config_loader: source_tier per_intent_overrides unknown tier %r — skipping",
+                tier_value,
+            )
+            continue
+        try:
+            multiplier_float = float(multiplier_value)
+        except (TypeError, ValueError):
+            logger.warning(
+                "config_loader: source_tier per_intent_overrides bad multiplier %r — skipping",
+                multiplier_value,
+            )
+            continue
+        overrides.append((intent_value, tier_enum, multiplier_float))
+
     return SourceTierBoostConfig(
         enabled=bool(d.get("enabled", defaults.enabled)),
         multipliers=defaults.multipliers,
         default_tier=defaults.default_tier,
+        canonical_filename_allowlist=allowlist,
+        per_intent_overrides=tuple(overrides),
     )
 
 

@@ -225,10 +225,58 @@ class SourceTierBoost:
         self._tier_map = tier_map or {}
         self._config = config or SourceTierBoostConfig()
 
+    def _resolve_tier_for_path(self, path: str, collection: str) -> SourceTier:
+        """Resolve the effective :class:`SourceTier` for one result row.
+
+        Order of precedence (#432 follow-up):
+
+          1. **Canonical-filename allowlist** — if ``path`` matches any
+             entry in ``config.canonical_filename_allowlist`` (via
+             ``str.endswith``), the row is treated as
+             :attr:`SourceTier.CANONICAL` regardless of its collection.
+          2. **Collection tier mapping** — ``tier_map[collection]``
+             from the operator's ``kairix.config.yaml``.
+          3. **Default tier** — ``config.default_tier`` (vault_active)
+             when no mapping exists.
+
+        Unknown tier-name strings (config typo, schema drift) fall
+        back to ``default_tier`` so no result is silently zeroed.
+        """
+        if any(path.endswith(suffix) for suffix in self._config.canonical_filename_allowlist):
+            return SourceTier.CANONICAL
+        tier_name = self._tier_map.get(collection, self._config.default_tier.value)
+        try:
+            return SourceTier(tier_name)
+        except ValueError:
+            return self._config.default_tier
+
+    def _multiplier_for(
+        self,
+        tier: SourceTier,
+        *,
+        intent_name: str,
+        base_multipliers: dict[SourceTier, float],
+        per_intent_overrides: dict[str, dict[SourceTier, float]],
+    ) -> float:
+        """Resolve the multiplier for ``tier`` honouring per-intent overrides.
+
+        Per-intent override wins when both:
+          * the current query's intent matches one of the operator's
+            declared override keys, AND
+          * the tier appears in that intent's override table.
+
+        Otherwise falls back to the base multipliers table. Missing
+        tiers everywhere → multiplier ``1.0`` (no boost, no penalty).
+        """
+        intent_overrides = per_intent_overrides.get(intent_name, {})
+        if tier in intent_overrides:
+            return intent_overrides[tier]
+        return base_multipliers.get(tier, 1.0)
+
     # NOSONAR S3516 — BoostStrategy contract: mutate ``results[i].boosted_score``
     # in place and return the same list; same-reference return is the protocol
     # contract every other boost strategy honours, not a bug.
-    def boost(self, results: list, _query: str, _context: dict) -> list:  # NOSONAR S3516
+    def boost(self, results: list, _query: str, context: dict) -> list:  # NOSONAR S3516
         """Apply tier multipliers; returns the input list with mutated
         ``boosted_score`` values per result. Order is NOT re-sorted here
         — the budget stage that follows sorts by ``boosted_score`` so
@@ -237,24 +285,30 @@ class SourceTierBoost:
         Failure-isolated: any per-result exception logs at WARNING and
         leaves that result's score unchanged; the strategy itself never
         raises.
+
+        ``context`` carries the query's intent so per-intent multiplier
+        overrides can fire — ``context.get("intent")`` returns a
+        :class:`QueryIntent` whose ``.value`` is matched against the
+        operator-declared override keys.
         """
         if not self._config.enabled:
             return results
 
-        default_tier_value = self._config.default_tier.value
+        intent = context.get("intent")
+        intent_name = getattr(intent, "value", "") if intent is not None else ""
+        base_multipliers = self._config.multipliers_map()
+        per_intent_overrides = self._config.per_intent_overrides_map()
         for r in results:
             try:
+                path = getattr(r, "path", "") or ""
                 collection = getattr(r, "collection", "") or ""
-                tier_name = self._tier_map.get(collection, default_tier_value)
-                # Normalise tier-name string into SourceTier for the
-                # multiplier lookup. Unknown tier values fall back to
-                # default_tier so a config typo doesn't drop the result
-                # to multiplier=0.
-                try:
-                    tier_enum = SourceTier(tier_name)
-                except ValueError:
-                    tier_enum = self._config.default_tier
-                multiplier = self._config.multipliers_map().get(tier_enum, 1.0)
+                tier = self._resolve_tier_for_path(path, collection)
+                multiplier = self._multiplier_for(
+                    tier,
+                    intent_name=intent_name,
+                    base_multipliers=base_multipliers,
+                    per_intent_overrides=per_intent_overrides,
+                )
                 # ``boosted_score`` was initialised from rrf_score by
                 # _rrf_impl; subsequent boosts mutate it. We multiply
                 # in-place so any prior boost (entity / procedural /

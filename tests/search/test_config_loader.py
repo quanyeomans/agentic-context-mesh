@@ -525,3 +525,78 @@ class TestSourceTierBoostYaml:
         cfg_file.write_text("provider: fake\nretrieval: {}\n")
         cfg = load_config(cfg_file)
         assert cfg.source_tier_boost.enabled is False
+
+    @pytest.mark.unit
+    def test_source_tier_yaml_loader_parses_allowlist_and_overrides(self, tmp_path):
+        """End-to-end YAML → SourceTierBoostConfig: the loader honours
+        ``canonical_filename_allowlist`` + ``per_intent_overrides`` (#432)."""
+        from kairix.core.search.config import SourceTier
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text(
+            textwrap.dedent(
+                """
+                provider: fake
+                retrieval:
+                  boosts:
+                    source_tier:
+                      enabled: true
+                      canonical_filename_allowlist:
+                        - ETHOS.md
+                        - AGENTS.md
+                      per_intent_overrides:
+                        - intent: entity
+                          tier: canonical
+                          multiplier: 5.0
+                        - intent: procedural
+                          tier: active_standard
+                          multiplier: 3.0
+                """
+            ).lstrip()
+        )
+        cfg = load_config(cfg_file)
+        stb = cfg.source_tier_boost
+        assert stb.enabled is True
+        assert stb.canonical_filename_allowlist == ("ETHOS.md", "AGENTS.md")
+        assert ("entity", SourceTier.CANONICAL, 5.0) in stb.per_intent_overrides
+        assert ("procedural", SourceTier.ACTIVE_STANDARD, 3.0) in stb.per_intent_overrides
+
+    @pytest.mark.unit
+    def test_source_tier_yaml_loader_skips_malformed_override_entries(self, tmp_path, caplog):
+        """A malformed override entry (missing field / unknown tier /
+        bad multiplier) is skipped with a warning — one typo doesn't
+        break the whole config."""
+        import logging
+
+        from kairix.core.search.config_loader import load_config
+
+        cfg_file = tmp_path / "kairix.config.yaml"
+        cfg_file.write_text(
+            textwrap.dedent(
+                """
+                provider: fake
+                retrieval:
+                  boosts:
+                    source_tier:
+                      enabled: true
+                      per_intent_overrides:
+                        - intent: entity
+                          tier: not-a-real-tier
+                          multiplier: 5.0
+                        - intent: procedural
+                          tier: canonical
+                          multiplier: notanumber
+                        - tier: canonical
+                          multiplier: 4.0
+                        - intent: temporal
+                          tier: canonical
+                          multiplier: 4.0
+                """
+            ).lstrip()
+        )
+        with caplog.at_level(logging.WARNING):
+            cfg = load_config(cfg_file)
+        # Only the well-formed entry survived.
+        assert len(cfg.source_tier_boost.per_intent_overrides) == 1
+        assert cfg.source_tier_boost.per_intent_overrides[0][0] == "temporal"

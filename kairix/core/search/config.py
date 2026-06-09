@@ -185,11 +185,53 @@ class SourceTierBoostConfig:
     # overrides (per the EPIC's section 4) will consume it.
     min_intent_confidence: float = 0.0
 
+    # Issue #432 follow-up — canonical-filename allowlist. Operators
+    # declare specific filenames or path-suffixes that should be
+    # treated as ``canonical`` tier regardless of the chunk's
+    # collection. Useful when a single critical doc (e.g. ``ETHOS.md``,
+    # ``SOUL.md``, ``AGENTS.md``) sits in a collection that's
+    # operationally mapped to a non-canonical tier — the file-level
+    # override lifts it back to the team's declared canon.
+    #
+    # Match: ``hit.path`` is checked with ``str.endswith()`` against
+    # each entry, so operators can pass either bare filenames
+    # (``"ETHOS.md"``) or path-suffixes
+    # (``"00-Canon/ETHOS.md"``). Case-sensitive — matches the
+    # filesystem's casing convention.
+    canonical_filename_allowlist: tuple[str, ...] = ()
+
+    # Issue #432 follow-up — per-query-class tier multiplier overrides.
+    # Operators declare an intent-name → (tier, multiplier) entries.
+    # When the query's intent matches, the override multiplier replaces
+    # the base ``multipliers`` value for that tier. Use cases:
+    #   - ENTITY intent → canonical x5.0 (push the team's declared
+    #     entities higher when the operator is explicitly looking up
+    #     one of them)
+    #   - PROCEDURAL intent → active_standard x3.0 (operational
+    #     runbooks should beat canonical strategy docs when the
+    #     operator is hunting for the *current* way to do X)
+    # When an intent has no override declared, the base ``multipliers``
+    # table applies. Tuple-of-tuples shape so the dataclass stays
+    # hashable.
+    per_intent_overrides: tuple[tuple[str, SourceTier, float], ...] = ()
+
     def multipliers_map(self) -> dict[SourceTier, float]:
         """Materialise the tuple-of-pairs ``multipliers`` field into a
         dict for per-result lookup. Called once at boost construction
         time (or per-call — the cost is microscopic for a 5-entry tuple)."""
         return dict(self.multipliers)
+
+    def per_intent_overrides_map(self) -> dict[str, dict[SourceTier, float]]:
+        """Materialise the per-intent override tuple into a nested dict.
+
+        Shape: ``{intent_name: {tier: multiplier}}``. Empty when no
+        overrides are declared. Cost is microscopic for a typical N
+        entries; tier-boost calls this once per ``boost()`` invocation.
+        """
+        out: dict[str, dict[SourceTier, float]] = {}
+        for intent_name, tier, multiplier in self.per_intent_overrides:
+            out.setdefault(intent_name, {})[tier] = multiplier
+        return out
 
 
 @dataclass(frozen=True)

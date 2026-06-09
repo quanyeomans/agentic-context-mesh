@@ -1708,3 +1708,128 @@ def test_cross_layer_dedup_drops_lower_scored_fact_when_chunk_wins():
     # Chunk wins under MULTI_HOP; overlapping fact dropped.
     assert chunk_rows, "expected the chunk row to survive dedup"
     assert not fact_rows, "expected overlapping fact to be dropped"
+
+
+# ---------------------------------------------------------------------------
+# #432 follow-ups — canonical-filename allowlist + per-intent overrides
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_source_tier_canonical_filename_allowlist_lifts_to_canonical() -> None:
+    """A path matching ``canonical_filename_allowlist`` is treated as
+    CANONICAL tier even when its collection maps to a lower tier.
+
+    Sabotage-proof: drop the ``if any(path.endswith(...))`` branch in
+    ``_resolve_tier_for_path`` → the chunk gets its collection's
+    tier (vault_active, x1.0) instead of canonical (x3.0) and the
+    score comparison below catches.
+    """
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-default": "vault_active"},
+        config=SourceTierBoostConfig(
+            enabled=True,
+            canonical_filename_allowlist=("ETHOS.md", "AGENTS.md"),
+        ),
+    )
+    canon_via_filename = _fused("/00-Canon/ETHOS.md", "vault-default", rrf_score=0.5)
+    regular = _fused("/notes/topic.md", "vault-default", rrf_score=0.5)
+    out = boost.boost([canon_via_filename, regular], "q", {})
+    by_path = {r.path: r.boosted_score for r in out}
+    # ETHOS.md gets x3.0 (canonical via allowlist); topic.md gets x1.0
+    # (vault_active via collection tier).
+    assert by_path["/00-Canon/ETHOS.md"] == pytest.approx(1.5)
+    assert by_path["/notes/topic.md"] == pytest.approx(0.5)
+
+
+@pytest.mark.unit
+def test_source_tier_per_intent_overrides_replace_base_multiplier() -> None:
+    """When the query intent matches a declared override, the override
+    multiplier replaces the base multipliers for the affected tier.
+
+    Sabotage-proof: drop the ``intent_overrides.get(...)`` lookup in
+    ``_multiplier_for`` → the base multiplier fires instead of the
+    override and the score comparison below catches.
+    """
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTier, SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-canon": "canonical"},
+        config=SourceTierBoostConfig(
+            enabled=True,
+            per_intent_overrides=(
+                # ENTITY intent → push canonical from x3.0 → x5.0
+                ("entity", SourceTier.CANONICAL, 5.0),
+            ),
+        ),
+    )
+    row = _fused("/ethos.md", "vault-canon", rrf_score=0.5)
+    # ENTITY intent fires the override.
+    out_entity = boost.boost([row], "q", {"intent": QueryIntent.ENTITY})
+    assert out_entity[0].boosted_score == pytest.approx(2.5)  # 0.5 * 5.0
+
+
+@pytest.mark.unit
+def test_source_tier_per_intent_overrides_dont_apply_to_other_intents() -> None:
+    """An intent without a declared override falls through to the base
+    multiplier table — locks the contract that overrides are
+    intent-scoped, not global."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTier, SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-canon": "canonical"},
+        config=SourceTierBoostConfig(
+            enabled=True,
+            per_intent_overrides=(("entity", SourceTier.CANONICAL, 5.0),),
+        ),
+    )
+    row = _fused("/ethos.md", "vault-canon", rrf_score=0.5)
+    out_semantic = boost.boost([row], "q", {"intent": QueryIntent.SEMANTIC})
+    # SEMANTIC has no override; falls through to base canonical x3.0.
+    assert out_semantic[0].boosted_score == pytest.approx(1.5)
+
+
+@pytest.mark.unit
+def test_source_tier_allowlist_then_per_intent_compose() -> None:
+    """Composition: allowlist promotes a chunk to canonical, then the
+    per-intent override for the canonical tier applies. Locks the
+    layered precedence: filename > collection-tier, then per-intent >
+    base."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTier, SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"reflib": "reference"},
+        config=SourceTierBoostConfig(
+            enabled=True,
+            canonical_filename_allowlist=("ETHOS.md",),
+            per_intent_overrides=(("entity", SourceTier.CANONICAL, 5.0),),
+        ),
+    )
+    # /reflib/ETHOS.md is in a reference-tier collection but matches
+    # the canonical allowlist → canonical → per-intent ENTITY x 5.0.
+    row = _fused("/reflib/ETHOS.md", "reflib", rrf_score=0.5)
+    out = boost.boost([row], "q", {"intent": QueryIntent.ENTITY})
+    assert out[0].boosted_score == pytest.approx(2.5)
+
+
+@pytest.mark.unit
+def test_source_tier_allowlist_empty_default_preserves_legacy_behaviour() -> None:
+    """The default ``canonical_filename_allowlist=()`` keeps the
+    pre-allowlist behaviour byte-for-byte. Locks the regression
+    contract."""
+    from kairix.core.search.boosts import SourceTierBoost
+    from kairix.core.search.config import SourceTierBoostConfig
+
+    boost = SourceTierBoost(
+        tier_map={"vault-default": "vault_active"},
+        config=SourceTierBoostConfig(enabled=True),
+    )
+    row = _fused("/ETHOS.md", "vault-default", rrf_score=0.5)
+    out = boost.boost([row], "q", {})
+    assert out[0].boosted_score == pytest.approx(0.5)
