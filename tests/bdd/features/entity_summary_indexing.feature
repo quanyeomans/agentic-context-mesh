@@ -24,3 +24,12 @@ Feature: Operator searches find content via entity descriptions
     And the worker has run a projector tick
     When the operator searches for 'AI policy research institute'
     Then no result has a source uri prefix 'entity://'
+
+  @badge
+  Scenario: Operator sees a Wikidata badge on entity rows in CLI output
+    Given an entity 'Ada Lovelace Institute' enriched with description 'AI policy research institute'
+    And the entity-summary-indexing flag is true
+    And the worker has run a projector tick
+    When the operator searches for 'AI policy research institute'
+    Then the rendered text output contains the badge '[Wikidata]'
+    And the result envelope marks the entity row with 'entity_summary' equal to true

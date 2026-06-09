@@ -326,6 +326,11 @@ def search_output_to_envelope(out: SearchOutput) -> dict[str, Any]:
                 # ``None`` for non-paged documents.
                 _KEY_SOURCE_PAGE: h.source_page,
                 **({"source": h.source, "entity": h.entity} if h.source else {}),
+                # ADR-036 §Q7 — entity-summary chunks from the projector
+                # carry source_uri='entity://<QID>'; the MCP renderer + any
+                # downstream agent can gate on this flag to render a
+                # Wikidata badge or treat the row as external context.
+                **({"entity_summary": True} if h.path.startswith("entity://") else {}),
             }
             for h in out.results
         ],

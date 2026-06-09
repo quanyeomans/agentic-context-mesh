@@ -188,3 +188,56 @@ def _then_includes_prefix(entity_summary_ctx: _Ctx, prefix: str) -> None:
 def _then_excludes_prefix(entity_summary_ctx: _Ctx, prefix: str) -> None:
     paths = _hit_paths(entity_summary_ctx)
     assert all(not p.startswith(prefix) for p in paths), f"expected no hit with prefix {prefix!r}; got {paths!r}"
+
+
+def _result_to_search_output(ctx: _Ctx) -> Any:
+    """Adapt the raw SearchResult into a SearchOutput so the renderer +
+    envelope projection have the canonical input shape ADR-036 Slice D
+    pinned for the badge contract."""
+    from kairix.use_cases.search import SearchHit, SearchOutput
+
+    raw_results = ctx.search_result.results
+    hits = []
+    for row in raw_results:
+        inner = getattr(row, "result", None)
+        hits.append(
+            SearchHit(
+                path=str(getattr(inner, "path", "") or ""),
+                title=str(getattr(inner, "title", "") or ""),
+                snippet=str(getattr(inner, "snippet", "") or ""),
+                score=float(getattr(inner, "boosted_score", 0.0) or 0.0),
+                tier="search",
+                tokens=0,
+                collection=str(getattr(inner, "collection", "") or ""),
+            )
+        )
+    return SearchOutput(
+        query=str(getattr(ctx.search_result, "query", "") or ""),
+        intent="semantic",
+        results=hits,
+        bm25_count=int(getattr(ctx.search_result, "bm25_count", 0) or 0),
+        vec_count=int(getattr(ctx.search_result, "vec_count", 0) or 0),
+        fused_count=len(hits),
+        vec_failed=bool(getattr(ctx.search_result, "vec_failed", False) or False),
+        total_tokens=0,
+        latency_ms=float(getattr(ctx.search_result, "latency_ms", 0.0) or 0.0),
+    )
+
+
+@then(parsers.parse("the rendered text output contains the badge '{badge}'"))
+def _then_rendered_contains_badge(entity_summary_ctx: _Ctx, badge: str) -> None:
+    from kairix.core.search.cli import format_text
+
+    rendered = format_text(_result_to_search_output(entity_summary_ctx))
+    assert badge in rendered, f"expected badge {badge!r} in CLI output; got:\n{rendered}"
+
+
+@then(parsers.parse("the result envelope marks the entity row with 'entity_summary' equal to {value}"))
+def _then_envelope_marks_entity_row(entity_summary_ctx: _Ctx, value: str) -> None:
+    from kairix.use_cases.search import search_output_to_envelope
+
+    envelope = search_output_to_envelope(_result_to_search_output(entity_summary_ctx))
+    entity_rows = [row for row in envelope["results"] if str(row.get("path") or "").startswith("entity://")]
+    assert entity_rows, f"expected at least one entity row in envelope; got {envelope['results']!r}"
+    expected = value.strip().lower() == "true"
+    assert entity_rows[0].get("entity_summary") is expected

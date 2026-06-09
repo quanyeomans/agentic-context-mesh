@@ -118,6 +118,12 @@ def format_text(out: SearchOutput) -> str:
 
     for i, hit in enumerate(out.results, start=1):
         title = hit.title or hit.path.split("/")[-1]
+        # ADR-036 §Q7 — surface Wikidata-sourced entity summaries with a
+        # ``[Wikidata]`` badge so the operator can tell them apart from
+        # vault chunks at a glance. Gated on the well-known ``entity://``
+        # source-URI prefix the projector writes.
+        if hit.path.startswith("entity://"):
+            title = f"{title} [Wikidata]"
         tier = hit.tier or "search"
         # Lead with snippet — the content is what the operator's eye should
         # land on first. Title + path follow, then score/collection. URLs

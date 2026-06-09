@@ -24,3 +24,11 @@ def test_description_keyword_query_surfaces_entity() -> None:
 )
 def test_description_keyword_query_returns_no_entity_when_flag_off() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@scenario(
+    FEATURE,
+    "Operator sees a Wikidata badge on entity rows in CLI output",
+)
+def test_operator_sees_wikidata_badge_on_entity_rows() -> None:
+    """Body populated by @scenario from the .feature file."""

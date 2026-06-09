@@ -62,6 +62,7 @@ Operational procedures and incident runbooks for kairix deployments.
 | [eval-suite](../eval-suite.md) | Running `kairix eval`, picking metrics + backends, the regression-gate CI pattern |
 | [MCP-ingest-tools](../MCP-ingest-tools.md) | Agent-callable `ingest_chat` and `facts_about` — namespace fence, safety boundaries, calling patterns |
 | [worker-memory-and-swap](worker-memory-and-swap.md) | Tune worker `mem_limit` + `memswap_limit` on 1M+ vector corpora so the embed cycle's mutable-index step doesn't OOM (#335) |
+| [entity-summary-cutover](entity-summary-cutover.md) | Cutover protocol for ADR-036 `entity_summary_indexing_enabled` — pre-flip baseline capture, tier-mapping YAML, 24h soak, gate criteria, rollback |
 | [agent-query-queue](agent-query-queue.md) | ADR-029 G.1 spike — flip `agent_query_queue` ON for tool_search, watch pending_queries via SQL until the G.3 CLI/MCP surface + 24h GC ship |
 | Run the production-scale soak suite on demand | `gh workflow run soak-suite.yml` — nightly cadence on `main`; see [ADR-024 §"Soak tier"](../../architecture/ADR-024-test-pyramid-redesign.md) for what each test asserts |
 
