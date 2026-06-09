@@ -54,6 +54,47 @@ def _hit_to_dict(hit: Any) -> dict[str, Any]:
     }
 
 
+def _resolve_canonical_match(entity: str, canonicals: list[Any]) -> dict[str, Any] | None:
+    """Return ``{name, type, summary, aliases}`` if ``entity`` matches a
+    declared canonical (by name OR alias); otherwise ``None``.
+
+    Match is case-insensitive on name + aliases. The first match wins
+    so operators with overlapping aliases see deterministic results.
+
+    Internal helper for #431's canonical-first ordering on
+    ``facts_about``. Kept module-local because the only caller is
+    ``tool_facts_about``.
+    """
+    if not entity:
+        return None
+    needle = entity.strip().lower()
+    for c in canonicals:
+        name = str(getattr(c, "name", "")).strip()
+        aliases = tuple(getattr(c, "aliases", ()) or ())
+        if name.lower() == needle:
+            return {
+                "name": name,
+                "type": str(getattr(c, "entity_type", "")),
+                "summary": str(getattr(c, "summary", "")),
+                "aliases": list(aliases),
+            }
+        if any(a.lower() == needle for a in aliases if isinstance(a, str)):
+            return {
+                "name": name,
+                "type": str(getattr(c, "entity_type", "")),
+                "summary": str(getattr(c, "summary", "")),
+                "aliases": list(aliases),
+            }
+    return None
+
+
+def _default_canonical_loader() -> list[Any]:
+    """Production default — reads the operator's YAML via config_loader."""
+    from kairix.core.search.config_loader import load_canonical_entities
+
+    return load_canonical_entities()
+
+
 def tool_facts_about(
     entity: str,
     namespace: str | None = None,
@@ -61,6 +102,7 @@ def tool_facts_about(
     *,
     paths: KairixPaths | None = None,
     fact_store: FactStore | None = None,
+    canonicals: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Return facts about an entity from the configured fact store.
 
@@ -100,6 +142,7 @@ def tool_facts_about(
             "entity": entity,
             "namespace": namespace,
             "top_k": top_k,
+            "canonical": None,
             "hits": [],
         }
 
@@ -122,13 +165,29 @@ def tool_facts_about(
             "entity": entity,
             "namespace": namespace,
             "top_k": top_k,
+            "canonical": None,
             "hits": [],
         }
 
-    return {
+    # #431 — canonical-first ordering. When the looked-up entity matches
+    # an operator-declared canonical (by name or alias), surface the
+    # canonical's summary in the response so agents can render
+    # 'this is a canonical entity: <summary>' above the fact-store
+    # hits. Lookup is failure-isolated; a degraded load yields
+    # ``canonical: None`` and the response carries facts only.
+    canonical_match = None
+    try:
+        resolved_canonicals = canonicals if canonicals is not None else _default_canonical_loader()
+        canonical_match = _resolve_canonical_match(entity, resolved_canonicals)
+    except Exception as exc:
+        logger.warning("tool_facts_about: canonical lookup failed: %s", exc)
+
+    response: dict[str, Any] = {
         "entity": entity,
         "namespace": namespace,
         "top_k": top_k,
+        "canonical": canonical_match,
         "hits": [_hit_to_dict(h) for h in hits],
         "error": "",
     }
+    return response

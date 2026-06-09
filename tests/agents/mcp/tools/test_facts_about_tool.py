@@ -256,3 +256,103 @@ def test_lookup_failure_is_wrapped_in_lookupfailed_envelope() -> None:
     assert "db is missing" in out["detail"]
     assert out["hits"] == []
     assert out["entity"] == "Alice"
+
+
+# ---------------------------------------------------------------------------
+# #431 — canonical-first ordering on facts_about
+# ---------------------------------------------------------------------------
+
+
+class _FakeStoreWithHits:
+    """FactStore stand-in returning pre-canned hits + entity for sourcing."""
+
+    def __init__(self, *, hits: list[Any] | None = None) -> None:
+        self._hits = list(hits or [])
+
+    def search(self, query: str, *, top_k: int = 10, namespace: str | None = None) -> list[Any]:
+        del query, top_k, namespace
+        return list(self._hits)
+
+
+def test_facts_about_carries_canonical_payload_when_entity_matches_declaration() -> None:
+    """When the looked-up entity matches a declared canonical, the
+    response includes ``canonical: {name, type, summary, aliases}``.
+
+    Sabotage-proof: drop the ``canonical_match`` block in
+    ``tool_facts_about`` → the field stays ``None`` even on a match.
+    """
+    from kairix.knowledge.entities.canonical import CanonicalEntity
+
+    canonicals = [
+        CanonicalEntity(
+            name="Acme Corp",
+            entity_type="organisation",
+            summary="Software vendor.",
+            aliases=("Acme", "Acme Inc."),
+        ),
+    ]
+    out = tool_facts_about(
+        entity="Acme Corp",
+        fact_store=_FakeStoreWithHits(),
+        canonicals=canonicals,
+    )
+    assert out["canonical"] is not None
+    assert out["canonical"]["name"] == "Acme Corp"
+    assert out["canonical"]["type"] == "organisation"
+    assert out["canonical"]["summary"] == "Software vendor."
+    assert out["canonical"]["aliases"] == ["Acme", "Acme Inc."]
+
+
+def test_facts_about_canonical_match_is_alias_aware_and_case_insensitive() -> None:
+    """A lookup using an alias or different casing still resolves the
+    canonical match."""
+    from kairix.knowledge.entities.canonical import CanonicalEntity
+
+    canonicals = [
+        CanonicalEntity(
+            name="Acme Corp",
+            entity_type="organisation",
+            summary="Vendor.",
+            aliases=("Acme",),
+        ),
+    ]
+    via_alias = tool_facts_about(entity="acme", fact_store=_FakeStoreWithHits(), canonicals=canonicals)
+    via_name_case = tool_facts_about(entity="ACME CORP", fact_store=_FakeStoreWithHits(), canonicals=canonicals)
+    assert via_alias["canonical"]["name"] == "Acme Corp"
+    assert via_name_case["canonical"]["name"] == "Acme Corp"
+
+
+def test_facts_about_canonical_field_is_none_for_unknown_entity() -> None:
+    """An entity that doesn't match any declared canonical yields
+    ``canonical: None`` — locks the no-false-positive contract."""
+    from kairix.knowledge.entities.canonical import CanonicalEntity
+
+    canonicals = [CanonicalEntity(name="Acme Corp", entity_type="organisation", summary="x")]
+    out = tool_facts_about(
+        entity="Some other company",
+        fact_store=_FakeStoreWithHits(),
+        canonicals=canonicals,
+    )
+    assert out["canonical"] is None
+
+
+def test_facts_about_empty_canonicals_yields_canonical_none() -> None:
+    """An empty canonicals list (no operator declarations) → response
+    carries ``canonical: None`` for any entity — the no-canonicals
+    deployment sees baseline behaviour."""
+    out = tool_facts_about(entity="Anything", fact_store=_FakeStoreWithHits(), canonicals=[])
+    assert out["canonical"] is None
+    assert out["error"] == ""
+
+
+def test_facts_about_error_branches_carry_canonical_none() -> None:
+    """The InvalidInput + LookupFailed envelopes both carry
+    ``canonical: None`` so agents reading the field always find it
+    present (not KeyError-prone)."""
+    invalid_out = tool_facts_about(entity="", fact_store=_FakeStoreWithHits())
+    assert invalid_out["error"] == ERROR_INVALID_INPUT
+    assert invalid_out["canonical"] is None
+
+    failed_out = tool_facts_about(entity="X", fact_store=_RaisingFactStore(message="oops"))
+    assert failed_out["error"] == ERROR_LOOKUP_FAILED
+    assert failed_out["canonical"] is None

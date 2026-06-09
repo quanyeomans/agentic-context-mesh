@@ -2198,6 +2198,82 @@ class TopologyV2ApplyDeps:
     db_factory: Callable[[], sqlite3.Connection] = field(default_factory=lambda: _open_db_default)
 
 
+@dataclass
+class CanonicalEntitySeedDeps:
+    """F6-clean injection seam for :func:`seed_canonical_entities_at_boot` (#431).
+
+    Fields:
+      * ``load_canonical_entities_fn`` — returns the parsed list of
+        :class:`CanonicalEntity` from the operator's
+        ``kairix.config.yaml`` ``canonical_entities:`` block. Default
+        :func:`kairix.core.search.config_loader.load_canonical_entities`.
+      * ``neo4j_client_fn`` — returns the Neo4jClient the seeder upserts
+        through. Default :func:`kairix.knowledge.graph.client.get_client`.
+    """
+
+    load_canonical_entities_fn: Callable[[], list[Any]] = field(
+        default_factory=lambda: _default_load_canonical_entities
+    )
+    neo4j_client_fn: Callable[[], Any] = field(default_factory=lambda: _default_neo4j_client_for_seed)
+
+
+def _default_load_canonical_entities() -> list[Any]:
+    """Production default — read the operator's YAML via config_loader."""
+    from kairix.core.search.config_loader import load_canonical_entities
+
+    return load_canonical_entities()
+
+
+def _default_neo4j_client_for_seed() -> Any:
+    """Production default — build the live Neo4jClient via get_client."""
+    from kairix.knowledge.graph.client import get_client
+
+    return get_client()
+
+
+def seed_canonical_entities_at_boot(deps: CanonicalEntitySeedDeps | None = None) -> int:
+    """Seed operator-declared canonical entities into Neo4j (#431).
+
+    Reads the ``canonical_entities:`` YAML block, upserts each entry
+    via :func:`seed_canonical_entities`. Returns the count seeded so
+    boot logs can record a number.
+
+    Failure-isolated: never raises. A missing config block, an
+    unavailable Neo4j, a per-entity write failure, or a parser
+    malformation all degrade to a logged warning + a returned count
+    (zero on full degradation). The worker continues so the operator
+    can fix the issue without crashlooping.
+
+    Canonical seeding underpins ``entity_suggest`` exclusion: with the
+    canonicals materialised in Neo4j, the suggester's
+    ``find_by_name`` lookup returns ``is_new=False`` for them
+    automatically. No additional filter wiring needed.
+    """
+    deps = deps if deps is not None else CanonicalEntitySeedDeps()
+
+    try:
+        canonicals = deps.load_canonical_entities_fn()
+    except Exception as exc:
+        logger.warning("worker: canonical-entity seed skipped — could not load config: %s", exc)
+        return 0
+
+    if not canonicals:
+        logger.info("worker: canonical-entity seed skipped — no canonical_entities block in config")
+        return 0
+
+    try:
+        from kairix.knowledge.entities.canonical import seed_canonical_entities
+
+        client = deps.neo4j_client_fn()
+        seeded = seed_canonical_entities(client, canonicals)
+    except Exception as exc:
+        logger.warning("worker: canonical-entity seed failed — %s", exc)
+        return 0
+
+    logger.info("worker: seeded %d canonical entities into Neo4j", seeded)
+    return seeded
+
+
 def apply_topology_v2_at_boot(deps: TopologyV2ApplyDeps | None = None) -> None:
     """Materialise the operator's ``topology_v2:`` YAML into runtime rows.
 
@@ -2493,6 +2569,12 @@ def main(
     # degrade gracefully — the legacy single-collection writer remains
     # the fallback in resolve_chunk_writer_for_entry.
     apply_topology_v2_at_boot()
+
+    # #431 — seed operator-declared canonical entities into Neo4j so
+    # entity_suggest's find_by_name lookup returns is_new=False for
+    # them. Failure-isolated; worker continues even when Neo4j /
+    # config is degraded.
+    seed_canonical_entities_at_boot()
 
     state = _boot_state(deps)
     # Persist initial state (STARTING) so ``kairix worker status`` is

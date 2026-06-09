@@ -683,6 +683,33 @@ def load_collections(config_path: Path | str | None = None) -> CollectionsConfig
         return None
 
 
+def load_canonical_entities(config_path: Path | str | None = None) -> list:
+    """Load the operator's ``canonical_entities:`` YAML block (#431).
+
+    Returns a list of :class:`CanonicalEntity` — empty when the block
+    is absent, malformed, or the config file isn't resolvable.
+    Never raises — the worker boot stage feeds the result straight to
+    :func:`seed_canonical_entities` which is itself failure-isolated.
+
+    The ``config_path`` kwarg is the F2-clean test seam mirroring
+    :func:`load_collections`.
+    """
+    from kairix.knowledge.entities.canonical import parse_canonical_entities
+
+    path = resolve_config_path(config_path)
+    if path is None:
+        return []
+    try:
+        import yaml
+
+        with path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception as exc:
+        logger.warning("load_canonical_entities: failed to read %s — %s", path, exc)
+        return []
+    return parse_canonical_entities(data.get("canonical_entities"))
+
+
 def _parse_entity(d: dict) -> EntityBoostConfig:
     defaults = EntityBoostConfig()
     return EntityBoostConfig(
