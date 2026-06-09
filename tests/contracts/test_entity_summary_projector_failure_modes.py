@@ -74,3 +74,103 @@ def test_tick_returns_empty_for_no_pending_entities() -> None:
     out = projector.tick(per_tick_max_items=100)
     assert isinstance(out, EntitySummaryProjectionResult)
     assert (out.projected, out.updated, out.skipped, out.failed) == (0, 0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Slice B (#460) — real projector failure injection
+# ---------------------------------------------------------------------------
+
+
+_FIXED_TICK = "2026-06-09T00:00:00Z"
+
+
+def _row(*, name: str, qid: str, summary: str, prior_hash: str = "") -> dict:
+    return {
+        "name": name,
+        "qid": qid,
+        "summary": summary,
+        "prior_hash": prior_hash,
+        "summary_source": "wikidata",
+    }
+
+
+def test_tick_returns_empty_when_neo4j_unavailable() -> None:
+    """F68 ``unavailable`` — Neo4j cypher raises on the poll → projector
+    returns an all-zero result, never propagates. Locks the worker
+    boundary's absorb-at-poll contract.
+
+    Sabotage-proof: drop the ``try/except`` around the cypher call in
+    ``_fetch_pending`` and the assertion below fires
+    ``RuntimeError`` instead of catching the empty result.
+    """
+    from kairix.knowledge.entities.summary_projector import EntitySummaryProjectorImpl
+    from tests.fakes import FakeChunkWriter, FakeGraphRepository
+
+    neo4j = FakeGraphRepository(raises=RuntimeError("neo4j-unavailable"))
+    projector = EntitySummaryProjectorImpl(
+        neo4j=neo4j,
+        chunk_writer=FakeChunkWriter(),
+        clock=lambda: _FIXED_TICK,
+    )
+    out = projector.tick(per_tick_max_items=10)
+    assert (out.projected, out.updated, out.skipped, out.failed) == (0, 0, 0, 0)
+
+
+def test_tick_returns_partial_when_chunk_writer_raises_on_some_entities() -> None:
+    """F68 ``returns_partial`` — per-entity ChunkWriter failure is
+    counted in ``failed``; the remaining entities still project.
+
+    Locks ADR-036 §Expected behaviours #6 failure-isolation contract.
+    """
+    from kairix.knowledge.entities.summary_projector import EntitySummaryProjectorImpl
+    from tests.fakes import FakeGraphRepository
+
+    class _FlakyWriter:
+        def __init__(self) -> None:
+            self.upsert_calls = 0
+
+        def upsert(self, chunks):
+            self.upsert_calls += 1
+            if self.upsert_calls == 1:
+                raise RuntimeError("flake on first write")
+            return len(list(chunks))
+
+        def delete_by_source_uri(self, _uri: str) -> int:
+            return 0
+
+    neo4j = FakeGraphRepository(
+        cypher_rows=[
+            _row(name="Ada", qid="Q1", summary="first"),
+            _row(name="Bob", qid="Q2", summary="second"),
+        ],
+    )
+    projector = EntitySummaryProjectorImpl(
+        neo4j=neo4j,
+        chunk_writer=_FlakyWriter(),
+        clock=lambda: _FIXED_TICK,
+    )
+    out = projector.tick(per_tick_max_items=10)
+    assert out.projected == 1
+    assert out.failed == 1
+
+
+def test_tick_returns_partial_respects_per_tick_max_items_cap() -> None:
+    """F68 ``returns_partial`` (cap variant) — per_tick_max_items is
+    forwarded into the Cypher LIMIT param.
+
+    Sabotage-proof: hard-code ``per_tick_max_items`` to 200 in
+    ``_fetch_pending`` and the assertion below catches the wrong
+    LIMIT bind value reaching Cypher."""
+    from kairix.knowledge.entities.summary_projector import EntitySummaryProjectorImpl
+    from tests.fakes import FakeChunkWriter, FakeGraphRepository
+
+    neo4j = FakeGraphRepository(cypher_rows=[])
+    projector = EntitySummaryProjectorImpl(
+        neo4j=neo4j,
+        chunk_writer=FakeChunkWriter(),
+        clock=lambda: _FIXED_TICK,
+    )
+    projector.tick(per_tick_max_items=42)
+    assert neo4j.cypher_calls
+    _query, params = neo4j.cypher_calls[0]
+    assert params == {"per_tick_max_items": 42}
