@@ -25,8 +25,14 @@ services:
       # Bound to localhost only by default — kairix has no auth. Operators
       # who already run a reverse proxy on host port 8080 (e.g. caddy)
       # route from their public port to host 8090 → container 8080.
-      # Drop the 127.0.0.1 prefix only if you intend to expose externally.
-      - "127.0.0.1:8090:8080"
+      #
+      # KAIRIX_MCP_BIND_HOST overrides the bind host. Set to ``0.0.0.0`` in
+      # your operator-side ``.env`` ONLY if you've put the MCP behind an
+      # auth-enforcing reverse proxy (caddy / nginx / Authentik) or sit on
+      # a private VM network. The env-var indirection means the override
+      # survives every ``git pull`` / image refresh — no need to re-patch
+      # docker-compose.yml after upgrades.
+      - "${KAIRIX_MCP_BIND_HOST:-127.0.0.1}:8090:8080"
     volumes:
       - kairix-data:/var/lib/kairix
       - kairix-cache:/var/cache/kairix

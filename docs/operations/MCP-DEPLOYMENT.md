@@ -35,7 +35,7 @@ kairix mcp serve --transport stdio
 Flags:
 
 - `--transport {stdio,http,sse}` — see table above.
-- `--host` (default `127.0.0.1`) — bind address. **Do not bind to `0.0.0.0` without an authenticating gateway in front; the MCP server has no built-in authentication.**
+- `--host` (default `127.0.0.1`) — bind address. **Do not bind to `0.0.0.0` without an authenticating gateway in front; the MCP server has no built-in authentication.** For Docker / docker-compose deploys, override the host-side port mapping via `KAIRIX_MCP_BIND_HOST` in your operator-side `.env` (`KAIRIX_MCP_BIND_HOST=0.0.0.0`) — the env-var indirection means the override survives every `git pull` / image refresh, so VM-side patches don't regress on upgrade.
 - `--port` (default `8080`) — listening port. Auto-detected to a free port if the default is in use; set `KAIRIX_MCP_PORT` to make a substitution permanent.
 - `--no-sse` — when `--transport=http`, omit the legacy `/sse` mount and serve only `/mcp`.
 

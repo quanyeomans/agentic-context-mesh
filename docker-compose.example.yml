@@ -44,7 +44,12 @@ services:
   kairix:
     image: ghcr.io/three-cubes/kairix:latest
     ports:
-      - "127.0.0.1:8080:8080"  # localhost-only; kairix has no built-in auth.
+      # localhost-only by default — kairix has no built-in auth. Set
+      # KAIRIX_MCP_BIND_HOST=0.0.0.0 in your operator-side .env when the
+      # MCP sits behind an auth-enforcing reverse proxy or a private VM
+      # network and needs external reachability. The override survives
+      # every ``git pull`` so VM-side patches don't regress on upgrade.
+      - "${KAIRIX_MCP_BIND_HOST:-127.0.0.1}:8080:8080"
     volumes:
       - ./documents:/data/documents
       - kairix-data:/data/kairix
