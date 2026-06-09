@@ -137,6 +137,36 @@ def clean_title_fallback(path: str) -> str:
     return _CHUNK_SEQ_SUFFIX_RE.sub("", last_segment)
 
 
+def _render_hit_block(i: int, hit: Any, *, snippet_width: int) -> list[str]:
+    """Render one hit's text block — extracted from ``format_text`` to
+    keep its cognitive complexity under the F16 ceiling.
+
+    Returns the list of output lines (header, optional snippet, title,
+    path, blank-separator). ``snippet_width`` is the pre-clamped
+    per-call cap from the caller.
+    """
+    title = hit.title or clean_title_fallback(hit.path)
+    # ADR-036 §Q7 — surface Wikidata-sourced entity summaries with a
+    # ``[Wikidata]`` badge so the operator can tell them apart from
+    # vault chunks at a glance. Gated on the well-known ``entity://``
+    # source-URI prefix the projector writes.
+    if hit.path.startswith("entity://"):
+        title = f"{title} [Wikidata]"
+    tier = hit.tier or "search"
+    snippet = ""
+    if hit.snippet and snippet_width > 0:
+        snippet = hit.snippet[:snippet_width].replace("\n", " ")
+        if len(hit.snippet) > snippet_width:
+            snippet += "…"
+    lines: list[str] = [f"{i}. [{tier}] {hit.collection} · score {hit.score:.4f}"]
+    if snippet:
+        lines.append(f"   {snippet}")
+    lines.append(f"   {title}")
+    lines.append(f"   {hit.path}")
+    lines.append("")
+    return lines
+
+
 def format_text(out: SearchOutput, *, snippet_width: int = 600) -> str:
     """Render a ``SearchOutput`` as the human-readable text the CLI prints.
 
@@ -162,28 +192,7 @@ def format_text(out: SearchOutput, *, snippet_width: int = 600) -> str:
     lines.append("")
 
     for i, hit in enumerate(out.results, start=1):
-        title = hit.title or clean_title_fallback(hit.path)
-        # ADR-036 §Q7 — surface Wikidata-sourced entity summaries with a
-        # ``[Wikidata]`` badge so the operator can tell them apart from
-        # vault chunks at a glance. Gated on the well-known ``entity://``
-        # source-URI prefix the projector writes.
-        if hit.path.startswith("entity://"):
-            title = f"{title} [Wikidata]"
-        tier = hit.tier or "search"
-        # Lead with snippet — the content is what the operator's eye should
-        # land on first. Title + path follow, then score/collection. URLs
-        # are typically long + uninformative without context.
-        snippet = ""
-        if hit.snippet and snippet_width > 0:
-            snippet = hit.snippet[:snippet_width].replace("\n", " ")
-            if len(hit.snippet) > snippet_width:
-                snippet += "…"
-        lines.append(f"{i}. [{tier}] {hit.collection} · score {hit.score:.4f}")
-        if snippet:
-            lines.append(f"   {snippet}")
-        lines.append(f"   {title}")
-        lines.append(f"   {hit.path}")
-        lines.append("")
+        lines.extend(_render_hit_block(i, hit, snippet_width=snippet_width))
 
     if not out.results:
         lines.append("No results found.")

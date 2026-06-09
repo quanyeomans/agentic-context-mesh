@@ -289,6 +289,10 @@ pytest_plugins = [
     # ADR-036 #461 Slice C — operator-facing BDD for entity-summary
     # indexing (composed-path scenarios via the production factory).
     "tests.bdd.steps.entity_summary_indexing_steps",
+    # #432 deferred BDD — source-tier ranking via SourceTierBoost.
+    "tests.bdd.steps.source_tier_ranking_steps",
+    # #431 deferred BDD — canonical-entity seeding into Neo4j.
+    "tests.bdd.steps.canonical_entity_seeding_steps",
     # Plan 1 task 10 — kairix self-installer BDD step impls.
     # Drives kairix init + uninstall via the real CLI subprocess surface
     # (F46-compliant) against an XDG-redirected tmp root. Runtime-gated:
