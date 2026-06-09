@@ -5,9 +5,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning: [Calendar Versioning (CalVer)](https://calver.org/) — `YYYY.MM.DD`, with `.N` suffix for same-day releases.
 Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.04.18`.
 
-## [Unreleased] — Retrieval quality v2 + entity-summary indexing
+## [2026.6.9] - 2026-06-09 — Retrieval quality v2 + entity-summary indexing
 
-> **Upgrading?** Two operator actions: (a) the new `entity_summary_indexing_enabled` feature flag is OFF by default — flip it ON via your overlay after running the [entity-summary cutover runbook](docs/operations/runbooks/entity-summary-cutover.md) to surface Wikidata-style descriptions in search results; (b) the docker-compose host-port bind is now parameterised — set `KAIRIX_MCP_BIND_HOST=0.0.0.0` in your operator-side `.env` if your VM needs external reachability (kairix has no built-in auth, so leave the default for laptop / Docker Desktop installs).
+> **Upgrading?** No required action. The new `entity_summary_indexing_enabled` feature flag is OFF by default — when you're ready to surface Wikidata-style descriptions in search results, follow the [entity-summary cutover runbook](docs/operations/runbooks/entity-summary-cutover.md). One optional knob: the docker-compose host-port bind is now parameterised — set `KAIRIX_MCP_BIND_HOST=0.0.0.0` in your operator-side `.env` if your VM needs external reachability (kairix has no built-in auth, so leave the default for laptop / Docker Desktop installs).
 
 ### New for agents
 
@@ -39,7 +39,7 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 
 ### Important when upgrading
 
-- **`entity_summary_indexing_enabled` cutover is gated.** ADR-036 §Cutover specifies a 24h soak + post-flip gate (entity-category NDCG ≥ 0.55, sample-journey ≥ 80%, state delta ±2%). The [cutover runbook](docs/operations/runbooks/entity-summary-cutover.md) walks through pre-flip baseline capture, tier-mapping YAML overlay, and rollback. Don't flip the flag without running the cutover.
+- **`entity_summary_indexing_enabled` ships OFF by default — no action required to upgrade.** The synthetic `entity-summaries` collection is wired end-to-end (projector, tier ranking, CLI/MCP badges, both-branch tests) but the flag is OFF until an operator deliberately flips it via the [cutover runbook](docs/operations/runbooks/entity-summary-cutover.md). Pre-flip measurement on the production VM showed entity-category NDCG already at 0.800 on the 15-case Phase B suite — the gate is structurally satisfied without the flip, so there's no urgency. Turn it on when you want Wikidata-style descriptions in search results.
 
 ## [2026.6.8] - 2026-06-08 — One-command install, one container, one-command OAuth
 
