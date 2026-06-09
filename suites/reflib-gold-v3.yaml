@@ -1,9 +1,12 @@
 meta:
-  version: '1.0'
+  version: '1.1'
   generated_by: kairix eval generate
-  n_cases: 200
+  # v1.1: +42 operator-curated Phase B entries (#453) — entity 1→15,
+  # temporal 5→20, multi_hop 2→15. All Phase B gold titles resolve to
+  # real basenames in the shipped reference-library/ corpus.
+  n_cases: 242
   name: reflib
-  description: Reference library retrieval gold suite (200 cases across 6 categories)
+  description: Reference library retrieval gold suite (242 cases across 6 categories — 200 generated + 42 Phase B curated)
   default_collection: reference-library  # in_default: false in stock config; CLI auto-scopes
   categories:
   - recall
@@ -2092,4 +2095,399 @@ cases:
   score_method: ndcg
   gold_titles:
   - title: sl-course
+    relevance: 2
+
+# ---------------------------------------------------------------------------
+# #453 Phase B expansion — entity category lift (1 → 15), temporal lift
+# (5 → 20), multi_hop lift (2 → 15). Queries grounded in the
+# reference-library/ corpus shipped in this repo; each gold title is the
+# basename (without .md) of a real file. The ID prefix ``PB-`` separates
+# Phase B entries from the GEN- generated set so dropouts can be diffed
+# without merging in the generator output.
+# ---------------------------------------------------------------------------
+
+# ----- entity (PB-E001 .. PB-E014) ----------------------------------------
+
+- id: PB-E001
+  category: entity
+  query: Who wrote the Meditations and what are its core teachings?
+  score_method: ndcg
+  gold_titles:
+  - title: meditations
+    relevance: 2
+
+- id: PB-E002
+  category: entity
+  query: What is the Discourses by Epictetus about?
+  score_method: ndcg
+  gold_titles:
+  - title: discourses-epictetus
+    relevance: 2
+  - title: enchiridion
+    relevance: 1
+
+- id: PB-E003
+  category: entity
+  query: What is the Enchiridion?
+  score_method: ndcg
+  gold_titles:
+  - title: enchiridion
+    relevance: 2
+
+- id: PB-E004
+  category: entity
+  query: What is the Tao Te Ching and who is it attributed to?
+  score_method: ndcg
+  gold_titles:
+  - title: tao-te-ching
+    relevance: 2
+
+- id: PB-E005
+  category: entity
+  query: What does the Bhagavad Gita teach about action and detachment?
+  score_method: ndcg
+  gold_titles:
+  - title: bhagavad-gita
+    relevance: 2
+
+- id: PB-E006
+  category: entity
+  query: What are the Confucian Analects?
+  score_method: ndcg
+  gold_titles:
+  - title: confucian-analects
+    relevance: 2
+
+- id: PB-E007
+  category: entity
+  query: What are the Yoga Sutras of Patanjali about?
+  score_method: ndcg
+  gold_titles:
+  - title: yoga-sutras
+    relevance: 2
+
+- id: PB-E008
+  category: entity
+  query: What is the Bushido code of the samurai?
+  score_method: ndcg
+  gold_titles:
+  - title: bushido
+    relevance: 2
+
+- id: PB-E009
+  category: entity
+  query: What is the Dhammapada?
+  score_method: ndcg
+  gold_titles:
+  - title: dhammapada
+    relevance: 2
+
+- id: PB-E010
+  category: entity
+  query: What is the Chuang Tzu and what philosophical school does it belong to?
+  score_method: ndcg
+  gold_titles:
+  - title: chuang-tzu
+    relevance: 2
+
+- id: PB-E011
+  category: entity
+  query: What is MADR — the Markdown ADR template?
+  score_method: ndcg
+  gold_titles:
+  - title: adr-template
+    relevance: 2
+  - title: adr-template-minimal
+    relevance: 2
+
+- id: PB-E012
+  category: entity
+  query: What is the Turing Way release workflow?
+  score_method: ndcg
+  gold_titles:
+  - title: release-workflow
+    relevance: 2
+
+- id: PB-E013
+  category: entity
+  query: What is the landing page for Causal Inference for the Brave and True?
+  score_method: ndcg
+  gold_titles:
+  - title: landing-page
+    relevance: 2
+
+- id: PB-E014
+  category: entity
+  query: What does the PostHog incident-comms playbook cover?
+  score_method: ndcg
+  gold_titles:
+  - title: incident-comms
+    relevance: 2
+
+# ----- temporal (PB-T001 .. PB-T015) --------------------------------------
+
+- id: PB-T001
+  category: temporal
+  query: What changes were introduced when upgrading dbt Core to v1.8?
+  score_method: ndcg
+  gold_titles:
+  - title: 07-upgrading-to-v1-8
+    relevance: 2
+
+- id: PB-T002
+  category: temporal
+  query: What changed when dbt Core moved to v1.9?
+  score_method: ndcg
+  gold_titles:
+  - title: 06-upgrading-to-v1-9
+    relevance: 2
+
+- id: PB-T003
+  category: temporal
+  query: What's the upgrade path to dbt Core v1.7?
+  score_method: ndcg
+  gold_titles:
+  - title: 08-upgrading-to-v1-7
+    relevance: 2
+
+- id: PB-T004
+  category: temporal
+  query: What changes are required to upgrade dbt Core to v1.12?
+  score_method: ndcg
+  gold_titles:
+  - title: 03-upgrading-to-v1-12
+    relevance: 2
+
+- id: PB-T005
+  category: temporal
+  query: What does the migration to dbt Fusion involve?
+  score_method: ndcg
+  gold_titles:
+  - title: 02-upgrading-to-fusion
+    relevance: 2
+
+- id: PB-T006
+  category: temporal
+  query: What changed in dbt Core when upgrading to v1.10?
+  score_method: ndcg
+  gold_titles:
+  - title: 05-upgrading-to-v1-10
+    relevance: 2
+
+- id: PB-T007
+  category: temporal
+  query: What changed in dbt Core v1.11?
+  score_method: ndcg
+  gold_titles:
+  - title: 04-upgrading-to-v1-11
+    relevance: 2
+
+- id: PB-T008
+  category: temporal
+  query: What's the upgrade path from the dbt v1.5 release line?
+  score_method: ndcg
+  gold_titles:
+  - title: 10-upgrading-to-v1-5
+    relevance: 2
+
+- id: PB-T009
+  category: temporal
+  query: What are the FY26 Q4 incident-response runbook tasks for Project Condor?
+  score_method: ndcg
+  gold_titles:
+  - title: project-condor-incident-response-runbook-fy26-q4
+    relevance: 2
+
+- id: PB-T010
+  category: temporal
+  query: What's the FY27 Q1 release-stabilisation gate for Project Orca?
+  score_method: ndcg
+  gold_titles:
+  - title: project-orca-release-stabilisation-gate-fy27-q1
+    relevance: 2
+
+- id: PB-T011
+  category: temporal
+  query: What were the FY25 Q4 release-stabilisation outcomes for Project Orca?
+  score_method: ndcg
+  gold_titles:
+  - title: project-orca-release-stabilisation-gate-fy25-q4
+    relevance: 2
+
+- id: PB-T012
+  category: temporal
+  query: What's the Project Otter FY27 Q2 release-stabilisation plan?
+  score_method: ndcg
+  gold_titles:
+  - title: project-otter-release-stabilisation-gate-fy27-q2
+    relevance: 2
+
+- id: PB-T013
+  category: temporal
+  query: How should engineering teams decouple deployment from release?
+  score_method: ndcg
+  gold_titles:
+  - title: decouple-deployment-from-release
+    relevance: 2
+
+- id: PB-T014
+  category: temporal
+  query: What's the release-workflow used by The Turing Way contributors?
+  score_method: ndcg
+  gold_titles:
+  - title: release-workflow
+    relevance: 2
+
+- id: PB-T015
+  category: temporal
+  query: What were the FY25 Q1 release-stabilisation gate findings for Project Orca?
+  score_method: ndcg
+  gold_titles:
+  - title: project-orca-release-stabilisation-gate-fy25-q1
+    relevance: 2
+
+# ----- multi_hop (PB-M001 .. PB-M013) -------------------------------------
+
+- id: PB-M001
+  category: multi_hop
+  query: How do the Meditations of Marcus Aurelius and the Discourses of Epictetus
+    both treat acceptance of what cannot be controlled?
+  score_method: ndcg
+  gold_titles:
+  - title: meditations
+    relevance: 2
+  - title: discourses-epictetus
+    relevance: 2
+  - title: enchiridion
+    relevance: 1
+
+- id: PB-M002
+  category: multi_hop
+  query: How do the Bhagavad Gita and the Tao Te Ching both address detachment
+    from outcomes?
+  score_method: ndcg
+  gold_titles:
+  - title: bhagavad-gita
+    relevance: 2
+  - title: tao-te-ching
+    relevance: 2
+
+- id: PB-M003
+  category: multi_hop
+  query: How do the Confucian Analects and the Meditations both treat virtue and
+    self-governance?
+  score_method: ndcg
+  gold_titles:
+  - title: confucian-analects
+    relevance: 2
+  - title: meditations
+    relevance: 2
+
+- id: PB-M004
+  category: multi_hop
+  query: How do the Yoga Sutras and the Dhammapada both describe the path to
+    liberation from suffering?
+  score_method: ndcg
+  gold_titles:
+  - title: yoga-sutras
+    relevance: 2
+  - title: dhammapada
+    relevance: 2
+
+- id: PB-M005
+  category: multi_hop
+  query: How does the dbt Core v1.7 upgrade relate to the v1.8 upgrade — what
+    continuity exists between the two releases?
+  score_method: ndcg
+  gold_titles:
+  - title: 08-upgrading-to-v1-7
+    relevance: 2
+  - title: 07-upgrading-to-v1-8
+    relevance: 2
+
+- id: PB-M006
+  category: multi_hop
+  query: How do the dbt v1.10 and v1.11 upgrade guides treat breaking changes
+    differently?
+  score_method: ndcg
+  gold_titles:
+  - title: 05-upgrading-to-v1-10
+    relevance: 2
+  - title: 04-upgrading-to-v1-11
+    relevance: 2
+
+- id: PB-M007
+  category: multi_hop
+  query: How does the minimal MADR ADR template compare to the full MADR ADR
+    template — when would an operator pick each?
+  score_method: ndcg
+  gold_titles:
+  - title: adr-template
+    relevance: 2
+  - title: adr-template-minimal
+    relevance: 2
+
+- id: PB-M008
+  category: multi_hop
+  query: How do Project Orca's FY25 Q4 and FY27 Q1 release-stabilisation gates
+    differ in their criteria?
+  score_method: ndcg
+  gold_titles:
+  - title: project-orca-release-stabilisation-gate-fy25-q4
+    relevance: 2
+  - title: project-orca-release-stabilisation-gate-fy27-q1
+    relevance: 2
+
+- id: PB-M009
+  category: multi_hop
+  query: How does the FY26 Q4 Project Condor incident-response runbook relate to
+    the FY27 Q2 Project Otter release-stabilisation plan?
+  score_method: ndcg
+  gold_titles:
+  - title: project-condor-incident-response-runbook-fy26-q4
+    relevance: 2
+  - title: project-otter-release-stabilisation-gate-fy27-q2
+    relevance: 2
+
+- id: PB-M010
+  category: multi_hop
+  query: How does decoupling deployment from release relate to the Turing Way
+    release-workflow?
+  score_method: ndcg
+  gold_titles:
+  - title: decouple-deployment-from-release
+    relevance: 2
+  - title: release-workflow
+    relevance: 2
+
+- id: PB-M011
+  category: multi_hop
+  query: How do open and traditional peer review compare on collaboration?
+  score_method: ndcg
+  gold_titles:
+  - title: peer-review-open
+    relevance: 2
+  - title: peer-review
+    relevance: 2
+
+- id: PB-M012
+  category: multi_hop
+  query: How do the Bushido code and the Meditations of Marcus Aurelius both
+    treat duty and discipline?
+  score_method: ndcg
+  gold_titles:
+  - title: bushido
+    relevance: 2
+  - title: meditations
+    relevance: 2
+
+- id: PB-M013
+  category: multi_hop
+  query: How do the Enchiridion and the Tao Te Ching both treat letting go of
+    attachment?
+  score_method: ndcg
+  gold_titles:
+  - title: enchiridion
+    relevance: 2
+  - title: tao-te-ching
     relevance: 2
