@@ -462,16 +462,19 @@ def test_main_run_accepts_new_flags(bundled_suites: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Deprecation warning on legacy `kairix eval` CLI.
-# (`kairix probe` + `kairix soak` were removed in v2026.6 — see CHANGELOG.)
+# Surface-disambiguation hint on `kairix eval` CLI.
+# Conversation-eval (the legacy surface, still canonical for its shape)
+# and gold-suite benchmark (`kairix benchmark run`) are complementary,
+# not interchangeable — the hint helps operators reaching for the wrong
+# one find the right one.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_kairix_eval_emits_deprecation_warning() -> None:
-    """``kairix eval`` writes a migration warning to stderr at entry.
+def test_kairix_eval_emits_surface_hint() -> None:
+    """``kairix eval`` writes a one-line surface hint to stderr at entry.
 
-    sabotage: drop the ``_emit_deprecation_warning(err_sink)`` call in
+    sabotage: drop the ``_emit_surface_hint(err_sink)`` call in
     kairix.use_cases.eval_suite.main — the assertion below trips because
     stderr is empty.
     """
@@ -479,12 +482,12 @@ def test_kairix_eval_emits_deprecation_warning() -> None:
 
     err = io.StringIO()
     # An invalid argv triggers argparse → SystemExit; we don't care about
-    # the dispatch outcome, only that the warning fires BEFORE the exit.
+    # the dispatch outcome, only that the hint fires BEFORE the exit.
     with pytest.raises(SystemExit), redirect_stderr(io.StringIO()):
         eval_main([], err=err)
 
     text = err.getvalue()
-    assert "DEPRECATION:" in text, f"expected deprecation warning on stderr; got: {text!r}"
+    assert "hint:" in text, f"expected surface hint on stderr; got: {text!r}"
     assert "kairix benchmark run" in text
-    assert "v2026.6.x" in text
-    assert "fix:" in text and "next:" in text and "run:" in text
+    assert "conversation-eval" in text
+    assert "gold-suite" in text

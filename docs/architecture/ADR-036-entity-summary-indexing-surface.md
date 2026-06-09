@@ -446,16 +446,18 @@ query + N chunk-writer calls equal to entity count.
 
 Capture-flip-soak-gate is the standard. For this flag:
 
-1. **Pre-flip baseline.** Reflib eval entity-category NDCG. Sample-journey
-   queries: `kairix benchmark run --mode eval` x 3 runs. Expect ~0.380.
+1. **Pre-flip baseline.** Reflib entity-category NDCG via
+   `kairix benchmark run --suite reflib`. Onboard acceptance run x3 via
+   `kairix onboard check --json`. Capture per the cutover runbook.
 2. **Flip flag ON** in operator config. Wait one worker tick window
    (~30s default) for the backlog to start clearing.
 3. **Soak 24h** so the full backlog clears and entity chunks reach the
    `vec_index`. Monitor `failed:` counter from
    `EntitySummaryProjectionResult` via worker telemetry.
-4. **Post-flip baseline.** Same reflib eval + sample-journey set.
-5. **Gate:** entity-category NDCG ≥ 0.55 (a +0.17 absolute lift over
-   0.380). Sample-journey parity ≥ 80%. No state-digest delta > ±2%.
+4. **Post-flip baseline.** Same reflib + onboard set.
+5. **Gate:** entity-category NDCG ≥ 0.55. Onboard parity ≥ 80%. Row
+   counts on the key tables (chunks / vec_index / fts_chunks) within ±2%
+   of pre-flip outside of the entity-summaries collection.
 6. **Rollback path:** flip flag OFF. Chunks stay in `entity-summaries`
    collection but the projector stops re-projecting. If a full unwind
    is needed: `DELETE FROM chunks WHERE collection='entity-summaries'`
