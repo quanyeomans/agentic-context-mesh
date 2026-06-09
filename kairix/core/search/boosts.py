@@ -225,7 +225,10 @@ class SourceTierBoost:
         self._tier_map = tier_map or {}
         self._config = config or SourceTierBoostConfig()
 
-    def boost(self, results: list, _query: str, _context: dict) -> list:
+    # NOSONAR S3516 — BoostStrategy contract: mutate ``results[i].boosted_score``
+    # in place and return the same list; same-reference return is the protocol
+    # contract every other boost strategy honours, not a bug.
+    def boost(self, results: list, _query: str, _context: dict) -> list:  # NOSONAR S3516
         """Apply tier multipliers; returns the input list with mutated
         ``boosted_score`` values per result. Order is NOT re-sorted here
         — the budget stage that follows sorts by ``boosted_score`` so
@@ -379,7 +382,10 @@ class ContentQualityBoost:
     def __init__(self, config: ContentQualityBoostConfig | None = None) -> None:
         self._config = config or ContentQualityBoostConfig()
 
-    def boost(self, results: list, _query: str, _context: dict) -> list:
+    # NOSONAR S3516 — BoostStrategy contract: mutate ``results[i].boosted_score``
+    # in place and return the same list; same-reference return is the protocol
+    # contract every other boost strategy honours, not a bug.
+    def boost(self, results: list, _query: str, _context: dict) -> list:  # NOSONAR S3516
         if not self._config.enabled:
             return results
 

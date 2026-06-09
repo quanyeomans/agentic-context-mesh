@@ -489,19 +489,35 @@ class SearchPipeline:
         # per-intent weights. Without this, fact-store overlap scores
         # (raw range 0..1) overwhelm RRF scores (raw range 0..~0.033)
         # regardless of weighting — the weighting contract only holds
-        # when both layers are on the same scale. Normalisation is
-        # max-relative so a single-row layer still scores 1.0 x weight.
-        max_chunk = max((_read_rrf_score(r) for r in chunk_fused), default=0.0) or 1.0
+        # when both layers are on the same scale.
+        #
+        # Issue #455 — pure max-relative normalisation auto-promotes a
+        # single-row layer's lone weak hit to 1.0 regardless of absolute
+        # confidence. ``fact_layer_min_floor`` / ``chunk_layer_min_floor``
+        # set an absolute floor on the denominator so a weak hit stays
+        # weak even when it's the only one in its layer. Default 0.0 =
+        # no-op (pre-#455 behaviour); operators flip to ~0.4 to opt in.
+        chunk_floor = float(self.config.chunk_layer_min_floor)
+        max_chunk_raw = max((_read_rrf_score(r) for r in chunk_fused), default=0.0)
+        max_chunk = max(max_chunk_raw, chunk_floor) or 1.0
         for fused_result in chunk_fused:
             current = _read_rrf_score(fused_result)
             _write_rrf_score(fused_result, (current / max_chunk) * chunk_w)
 
-        max_fact = max((float(h.score) for h in fact_hits), default=0.0) or 1.0
+        fact_floor = float(self.config.fact_layer_min_floor)
+        max_fact_raw = max((float(h.score) for h in fact_hits), default=0.0)
+        max_fact = max(max_fact_raw, fact_floor) or 1.0
         fact_fused = [_fused_from_fact_hit(hit, fact_w, denom=max_fact) for hit in fact_hits]
 
         # Merge by weighted-and-normalised score.
         combined: list[Any] = list(chunk_fused) + list(fact_fused)
         combined.sort(key=_read_rrf_score, reverse=True)
+
+        # Issue #455 — cross-layer dedup. When a fact row and a chunk
+        # row describe the same entity, keep the higher-scored row.
+        # Stops the same signal occupying two top-K slots.
+        if self.config.cross_layer_dedup_enabled:
+            combined = _cross_layer_dedup(combined)
         return combined
 
     def _enrich_chunk_dates(self, fused: list) -> None:
@@ -680,6 +696,106 @@ def _read_rrf_score(row: Any) -> float:
     if isinstance(row, dict):
         return float(row.get("rrf_score", row.get("score", 0.0)) or 0.0)
     return float(getattr(row, "rrf_score", 0.0) or 0.0)
+
+
+def _is_fact_row(row: Any) -> bool:
+    """A fused row is a fact iff its synthesised path is namespaced under
+    ``facts://`` (see :func:`_fused_from_fact_hit`)."""
+    return str(getattr(row, "path", "") or "").startswith("facts://")
+
+
+def _fact_entity_name(row: Any) -> str:
+    """Return the entity name from a fact row's title.
+
+    Title shape is ``"{entity} — {attribute}"`` (em-dash separator).
+    Returns an empty string when the row isn't a fact or the title
+    can't be parsed.
+    """
+    title = str(getattr(row, "title", "") or "")
+    if not title:
+        return ""
+    parts = title.split(" — ", 1)
+    return parts[0].strip()
+
+
+def _chunk_overlaps_entity(row: Any, entity_lower: str) -> bool:
+    """True iff a chunk row's title or path contains the entity name."""
+    if not entity_lower:
+        return False
+    title = str(getattr(row, "title", "") or "").lower()
+    path = str(getattr(row, "path", "") or "").lower()
+    return entity_lower in title or entity_lower in path
+
+
+def _collect_fact_indices(combined: list) -> list[tuple[int, str]]:
+    """Return ``[(index, entity_name_lower), ...]`` for every fact row.
+
+    Skips fact rows whose title can't be parsed into an entity — they
+    have no dedup target so they pass through dedup unchanged.
+    """
+    out: list[tuple[int, str]] = []
+    for idx, row in enumerate(combined):
+        if not _is_fact_row(row):
+            continue
+        entity = _fact_entity_name(row).lower()
+        if entity:
+            out.append((idx, entity))
+    return out
+
+
+def _dedup_one_fact(
+    combined: list,
+    fact_idx: int,
+    entity_lower: str,
+    drop: set[int],
+) -> None:
+    """Decide which side of each overlap to drop for one fact row.
+
+    Mutates ``drop`` in place. Returns once the fact is itself
+    dropped (no point checking it against further chunks).
+    """
+    fact_score = _read_rrf_score(combined[fact_idx])
+    for chunk_idx, chunk_row in enumerate(combined):
+        if chunk_idx == fact_idx or chunk_idx in drop:
+            continue
+        if _is_fact_row(chunk_row):
+            continue  # don't dedup fact vs fact
+        if not _chunk_overlaps_entity(chunk_row, entity_lower):
+            continue
+        chunk_score = _read_rrf_score(chunk_row)
+        if fact_score >= chunk_score:
+            drop.add(chunk_idx)
+        else:
+            drop.add(fact_idx)
+            return
+
+
+def _cross_layer_dedup(combined: list) -> list:
+    """Drop the lower-scored row when a fact and chunk describe the same entity.
+
+    Walks every fact row, looks for chunk rows whose title or path
+    contains the fact's entity name (case-insensitive), and removes
+    the lower-scored side of each overlap. Both sides are evaluated
+    against ``rrf_score`` (which by this point is the normalised +
+    weighted fused score).
+
+    Idempotent — running twice produces the same list. Stable for the
+    surviving rows (their relative order is preserved). Handles fact
+    rows whose title can't be parsed by treating them as having no
+    entity name (no dedup target).
+    """
+    if not combined:
+        return combined
+    fact_indices = _collect_fact_indices(combined)
+    if not fact_indices:
+        return combined
+
+    drop: set[int] = set()
+    for fact_idx, entity_lower in fact_indices:
+        if fact_idx in drop:
+            continue
+        _dedup_one_fact(combined, fact_idx, entity_lower, drop)
+    return [row for idx, row in enumerate(combined) if idx not in drop]
 
 
 def _write_rrf_score(row: Any, value: float) -> None:

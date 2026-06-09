@@ -46,6 +46,7 @@ Temporal date boost:
 All functions return [] on empty inputs. Never raise.
 """
 
+import datetime
 import logging
 import math
 import re
@@ -697,8 +698,6 @@ def _boost_by_recency_window(
 
     Returns True if any result was boosted.
     """
-    import datetime
-
     rel_match = _RELATIVE_TEMPORAL_RE.search(query)
     if not rel_match:
         return False
@@ -791,32 +790,34 @@ def chunk_date_boost(
         return results
 
     try:
+        if not isinstance(query_date, datetime.date):
+            return results
         return _chunk_date_boost_impl(results, query_date, cfg)
     except Exception as e:
         logger.warning("chunk_date_boost: error — %s — returning unmodified results", e)
         return results
 
 
-def _parse_chunk_date(chunk_date_str: object) -> object:
+def _parse_chunk_date(chunk_date_str: object) -> datetime.date | None:
     """Return a ``datetime.date`` for a chunk's chunk_date attribute, or
     ``None`` when the value is missing / unparseable. Extracted from
     :func:`_chunk_date_boost_impl` to keep its cognitive complexity
     under the F16 ceiling."""
-    import datetime
-
     if not chunk_date_str:
         return None
     try:
         if isinstance(chunk_date_str, str):
             return datetime.date.fromisoformat(chunk_date_str[:10])
-        return chunk_date_str
+        if isinstance(chunk_date_str, datetime.date):
+            return chunk_date_str
+        return None
     except (ValueError, TypeError):
         return None
 
 
 def _apply_chunk_date_proximity(
     results: list[FusedResult],
-    query_date: object,
+    query_date: datetime.date,
     sigma: float,
 ) -> tuple[bool, list[bool]]:
     """First pass — apply Gaussian-decay proximity boost to dated chunks.
@@ -860,7 +861,7 @@ def _apply_undated_penalty(
 
 def _chunk_date_boost_impl(
     results: list[FusedResult],
-    query_date: object,
+    query_date: datetime.date,
     config: TemporalBoostConfig,
 ) -> list[FusedResult]:
     """Implementation of chunk_date proximity boosting.

@@ -337,6 +337,33 @@ class RetrievalConfig:
     # boost-chain tail.
     content_quality_boost: ContentQualityBoostConfig = field(default_factory=ContentQualityBoostConfig)
 
+    # Issue #455 — three-way fusion floor + cross-layer dedup.
+    #
+    # ``fact_layer_min_floor`` and ``chunk_layer_min_floor`` are absolute
+    # confidence floors used as the denominator when normalising each
+    # layer's scores to ``[0, 1]``. The pre-#455 behaviour was pure
+    # max-relative normalisation — when a layer returned a single weak
+    # hit (raw score 0.12), it auto-promoted to 1.0 and the per-intent
+    # fact-weight (0.6 for ATTRIBUTE_FACT) made the lone weak fact
+    # dominate strong chunks. With a floor of 0.4, the same lone hit
+    # normalises to 0.12/0.4 = 0.3 and the chunk-layer's top result wins.
+    #
+    # Default 0.0 = no-op (pre-#455 behaviour preserved byte-for-byte).
+    # Operators flip to ~0.4 in ``kairix.config.yaml`` after validating
+    # against their eval suite. Recommended range: 0.3-0.5.
+    fact_layer_min_floor: float = 0.0
+    chunk_layer_min_floor: float = 0.0
+
+    # When True, after the three-way fusion the pipeline dedups fact
+    # rows against chunk rows that describe the same entity (e.g. fact
+    # ``"Alice Worked-At Acme"`` vs chunk titled ``"Alice — Acme
+    # onboarding.md"``). The higher-scored row is kept; the lower-scored
+    # row is dropped. Stops the same signal occupying two top-K slots.
+    #
+    # Disabled by default. Operators flip ON after validating the fact
+    # vs chunk overlap matches expectations on their corpus.
+    cross_layer_dedup_enabled: bool = False
+
     # Intent types that always receive cross-encoder re-ranking, even when
     # rerank.enabled is False.  Users can force rerank for *all* intents by
     # setting rerank.enabled = true in their config.

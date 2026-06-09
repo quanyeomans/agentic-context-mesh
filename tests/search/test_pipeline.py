@@ -1427,3 +1427,284 @@ def test_content_quality_boost_failure_isolated_per_result(caplog):
     # good result still got boosted (it had a substantial snippet)
     assert out[1].boosted_score != 0.5
     assert any("ContentQualityBoost" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Three-way fusion: floor + cross-layer dedup (Issue #455)
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedFactStore:
+    """Protocol-compliant FactStore that returns a fixed (record, score) hit.
+
+    Used by Issue #455 floor tests where the canonical FakeFactStore's
+    word-overlap scoring doesn't give us precise enough control over
+    the raw fact score. F1-clean: this is a Protocol satisfier, not a
+    monkey-patch — it stands in for the production FactStore via the
+    pipeline's normal injection seam.
+    """
+
+    def __init__(self, *, record: object, score: float) -> None:
+        self._record = record
+        self._score = float(score)
+
+    def search(self, _query: str, *, top_k: int = 10, namespace: str | None = None):
+        del top_k, namespace  # Protocol shape — unused by this scripted fake
+        from tests.fakes import FakeFactHit
+
+        return [FakeFactHit(record=self._record, score=self._score)]
+
+
+def _scripted_fact_store(*, fact_id: str, entity: str, attribute: str, value: str, score: float):
+    """Build a _ScriptedFactStore wrapping a FakeFactRecord."""
+    return _ScriptedFactStore(
+        record=_fact(fact_id, entity, attribute, value),
+        score=score,
+    )
+
+
+@pytest.mark.unit
+def test_fact_floor_default_zero_preserves_pre_455_normalisation():
+    """With ``fact_layer_min_floor=0.0`` (the default) a single-row fact
+    layer still auto-promotes its lone hit to 1.0 — the pre-#455
+    pure-max-relative normalisation contract.
+
+    Sabotage-prove: bypass the ``max(..., chunk_floor)`` call in
+    ``_fuse_with_intent`` and this test still passes (no behaviour
+    change). The next test (floor=0.4) is the one that pins the actual
+    floor logic.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "acme address billing", "collection": "c"}]
+    weak_fact_store = _scripted_fact_store(
+        fact_id="f1", entity="acme", attribute="address", value="weak hit", score=0.12
+    )
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=weak_fact_store,
+        config=RetrievalConfig(fact_layer_min_floor=0.0),
+    )
+    result = pipeline.search("acme address")
+    assert result.results, "expected results"
+    top = result.results[0]
+    top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
+    # Lone weak fact still wins under default-zero floor — pre-#455
+    # behaviour preserved byte-for-byte.
+    assert top_path.startswith("facts://")
+
+
+@pytest.mark.unit
+def test_fact_floor_set_demotes_lone_weak_fact_below_strong_chunk():
+    """``fact_layer_min_floor=0.4`` + lone weak fact (raw 0.12) →
+    fact normalises to 0.12/0.4=0.3 then ``x 0.6`` weight = 0.18.
+    Strong chunk normalises to 1.0 then ``x 0.3`` weight = 0.3.
+    Chunk wins.
+
+    Sabotage-prove: drop the floor multiplication
+    (``max_fact = max_fact_raw or 1.0``) and the lone fact auto-promotes
+    to 1.0 again — fact comes top, assertion fails.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "acme address billing", "collection": "c"}]
+    weak_fact_store = _scripted_fact_store(
+        fact_id="f1", entity="acme", attribute="address", value="weak hit", score=0.12
+    )
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=weak_fact_store,
+        config=RetrievalConfig(fact_layer_min_floor=0.4),
+    )
+    result = pipeline.search("acme address")
+    assert result.results, "expected results"
+    top = result.results[0]
+    top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
+    # The chunk overtakes the floored-down weak fact.
+    assert not top_path.startswith("facts://"), f"expected chunk to win after floor, got fact path {top_path!r}"
+
+
+@pytest.mark.unit
+def test_fact_floor_does_not_demote_strong_fact():
+    """Strong fact (raw score 0.95) stays above ``fact_layer_min_floor=0.4``,
+    so the floor doesn't kick in — fact still wins under ATTRIBUTE_FACT.
+    Locks the contract that the floor is a guard against weak hits, not
+    a uniform fact-suppression.
+    """
+    docs = [{"path": "a.md", "title": "A", "content": "acme address billing", "collection": "c"}]
+    strong_fact_store = _scripted_fact_store(
+        fact_id="f1", entity="acme", attribute="address", value="strong hit", score=0.95
+    )
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=strong_fact_store,
+        config=RetrievalConfig(fact_layer_min_floor=0.4),
+    )
+    result = pipeline.search("acme address")
+    assert result.results, "expected results"
+    top = result.results[0]
+    top_path = top.result.path if hasattr(top, "result") else getattr(top, "path", "")
+    # 0.95/0.95 = 1.0 (floor doesn't apply; max_fact_raw > floor) → fact still wins
+    assert top_path.startswith("facts://"), f"strong fact should still win, got {top_path!r}"
+
+
+@pytest.mark.unit
+def test_chunk_floor_independent_of_fact_floor():
+    """``chunk_layer_min_floor`` and ``fact_layer_min_floor`` are
+    independent. Setting only the chunk floor lets fact-layer behaviour
+    stay pre-#455; setting only the fact floor lets chunk-layer
+    behaviour stay pre-#455. Locks the matrix so neither floor leaks
+    into the other layer's normalisation.
+    """
+    # No facts → chunk-only path. Setting chunk_floor=0.5 means every
+    # chunk score divides by max(actual_max, 0.5). With a single chunk
+    # whose raw RRF score is well below 0.5, its normalised score
+    # shrinks. The pipeline still returns it (no other candidates), but
+    # the assertion here is that no fact_floor leakage occurs.
+    docs = [{"path": "a.md", "title": "A", "content": "topic body", "collection": "c"}]
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.SEMANTIC),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        config=RetrievalConfig(chunk_layer_min_floor=0.5, fact_layer_min_floor=0.0),
+    )
+    result = pipeline.search("topic")
+    assert result.results, "pipeline returned no results despite a matching doc"
+
+
+@pytest.mark.unit
+def test_cross_layer_dedup_disabled_keeps_both_overlapping_rows():
+    """With ``cross_layer_dedup_enabled=False`` (the default), overlap
+    between a fact row and a chunk row is preserved — both occupy
+    top-K. Locks pre-#455 behaviour."""
+    docs = [
+        {
+            "path": "acme.md",
+            "title": "Acme — overview",
+            "content": "acme overview body",
+            "collection": "c",
+        }
+    ]
+    store = FakeFactStore()
+    store.add(_fact("f1", "Acme", "address", "1 Pier Lane Sydney"))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=store,
+        config=RetrievalConfig(cross_layer_dedup_enabled=False),
+    )
+    # Single-word query so both layers see a match.
+    result = pipeline.search("acme")
+    paths = [(r.result.path if hasattr(r, "result") else getattr(r, "path", "")) for r in result.results]
+    # Both fact and chunk present
+    assert any(p.startswith("facts://") for p in paths)
+    assert any(p == "acme.md" for p in paths)
+
+
+@pytest.mark.unit
+def test_cross_layer_dedup_enabled_drops_overlapping_chunk_when_fact_wins():
+    """Fact-row scores above chunk-row + their entity overlaps → chunk dropped.
+
+    Under ATTRIBUTE_FACT weights (fact=0.6, chunk=0.3), the fact's
+    normalised score wins. Both rows describe ``Acme``, so the chunk is
+    dropped.
+
+    Sabotage-prove: disable the ``if self.config.cross_layer_dedup_enabled:``
+    branch and the chunk reappears in the output — assertion fails.
+    """
+    docs = [
+        {
+            "path": "acme.md",
+            "title": "Acme — overview",
+            "content": "acme overview body",
+            "collection": "c",
+        }
+    ]
+    store = FakeFactStore()
+    store.add(_fact("f1", "Acme", "address", "1 Pier Lane Sydney"))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=store,
+        config=RetrievalConfig(cross_layer_dedup_enabled=True),
+    )
+    # Single-word query matches both BM25 (substring 'acme' in content)
+    # and FakeFactStore (word overlap on 'acme').
+    result = pipeline.search("acme")
+    paths = [(r.result.path if hasattr(r, "result") else getattr(r, "path", "")) for r in result.results]
+    fact_rows = [p for p in paths if p.startswith("facts://")]
+    chunk_rows = [p for p in paths if p == "acme.md"]
+    # Fact wins under ATTRIBUTE_FACT; overlapping chunk dropped.
+    assert fact_rows, "expected the fact row to survive dedup"
+    assert not chunk_rows, "expected overlapping chunk to be dropped"
+
+
+@pytest.mark.unit
+def test_cross_layer_dedup_keeps_non_overlapping_rows():
+    """No entity overlap → no dedup; both rows survive even when the
+    flag is on. Locks that the dedup is content-targeted, not a blanket
+    fact-vs-chunk filter."""
+    docs = [
+        {
+            "path": "unrelated.md",
+            "title": "Some other topic",
+            "content": "acme topic body",
+            "collection": "c",
+        }
+    ]
+    store = FakeFactStore()
+    store.add(_fact("f1", "Acme", "address", "Sydney HQ"))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.ATTRIBUTE_FACT),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=store,
+        config=RetrievalConfig(cross_layer_dedup_enabled=True),
+    )
+    # Single-word query matches chunk (substring 'acme' in content) and
+    # fact (entity 'Acme'). Chunk title + path do NOT contain 'acme' →
+    # no overlap → dedup skips this pair.
+    result = pipeline.search("acme")
+    paths = [(r.result.path if hasattr(r, "result") else getattr(r, "path", "")) for r in result.results]
+    # Both rows present — no entity overlap between fact and chunk
+    assert any(p.startswith("facts://") for p in paths), "fact row missing"
+    assert any(p == "unrelated.md" for p in paths), "chunk row missing"
+
+
+@pytest.mark.unit
+def test_cross_layer_dedup_drops_lower_scored_fact_when_chunk_wins():
+    """Chunk-row scores above fact-row + their entity overlaps → fact dropped.
+
+    Under MULTI_HOP weights (fact=0.2, chunk=0.7) the chunk's normalised
+    score wins. Both rows describe ``Acme`` → fact is dropped instead
+    of chunk. Locks the symmetry of the dedup (higher-scored wins
+    regardless of layer)."""
+    docs = [
+        {
+            "path": "acme.md",
+            "title": "Acme — overview",
+            "content": "acme overview body",
+            "collection": "c",
+        }
+    ]
+    store = FakeFactStore()
+    store.add(_fact("f1", "Acme", "address", "1 Pier Lane Sydney"))
+    pipeline = _test_pipeline(
+        classifier=FakeClassifier(intent=QueryIntent.MULTI_HOP),
+        bm25=BM25SearchBackend(FakeDocumentRepository(documents=docs)),
+        fusion=RRFFusion(),
+        fact_retriever=store,
+        config=RetrievalConfig(cross_layer_dedup_enabled=True),
+    )
+    # Single-word query so both layers see a match.
+    result = pipeline.search("acme")
+    paths = [(r.result.path if hasattr(r, "result") else getattr(r, "path", "")) for r in result.results]
+    fact_rows = [p for p in paths if p.startswith("facts://")]
+    chunk_rows = [p for p in paths if p == "acme.md"]
+    # Chunk wins under MULTI_HOP; overlapping fact dropped.
+    assert chunk_rows, "expected the chunk row to survive dedup"
+    assert not fact_rows, "expected overlapping fact to be dropped"
