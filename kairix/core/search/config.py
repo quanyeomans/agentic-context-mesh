@@ -193,6 +193,68 @@ class SourceTierBoostConfig:
 
 
 @dataclass(frozen=True)
+class ContentQualityBoostConfig:
+    """Configuration for enrichment-derived content-quality ranking (Issue #458).
+
+    Orthogonal to source-tier (#432): source-tier captures operator-declared
+    authority; this boost captures content-derived authority (does the
+    content itself signal quality?). They compose multiplicatively in the
+    boost chain — operator-declared tier x enrichment-derived quality.
+
+    Three independent signals combine into a single multiplier:
+
+      length_signal: ``[0.7, 1.2]``
+        Sigmoid on chunk snippet length. Stubs (< 100 chars) get x0.7;
+        substantive content (>= ``length_substantive_chars``) gets x1.2.
+        Closes the case where a 3-line placeholder ranks equally with a
+        500-line standards doc at the same tier.
+
+      structure_signal: ``[1.0, 1.3]``
+        Log-scaled boost per markdown heading (`#` / `##` / `###`) in the
+        snippet. No headings = neutral (x1.0); heavily structured = x1.3.
+        Authoring effort signal — operators who write structured docs
+        deserve the boost.
+
+      recency_signal: ``[0.8, 1.0]``
+        Mild decay based on ``chunk_date`` metadata. Recent content stays
+        at x1.0; very old content (older than ``recency_decay_halflife_days``)
+        gets x0.8. Differs from #430's chunk_date_boost — that one
+        Gaussian-boosts proximity to query date; this one is a constant
+        mild penalty for stale-feeling content regardless of query.
+        Missing chunk_date = neutral (x1.0); we don't penalise just for
+        missing the date.
+
+    Combined range: ``[0.7 * 1.0 * 0.8, 1.2 * 1.3 * 1.0]`` = ``[0.56, 1.56]``.
+    Bounded so no single signal can dominate; the combination is what
+    gives ranking richness.
+
+    Disabled by default — operators flip ``enabled=True`` in
+    ``kairix.config.yaml`` after validating their corpus has enough
+    structure for the signals to differentiate (a corpus of uniformly
+    short notes would see every chunk get the same multiplier).
+    """
+
+    enabled: bool = False
+
+    # Length signal — sigmoid midpoint. At chunk_length=midpoint the signal
+    # is halfway between length_stub_floor and length_substantive_ceiling.
+    length_sigmoid_midpoint_chars: int = 300
+    length_sigmoid_scale_chars: int = 100  # smaller = sharper transition
+    length_stub_floor: float = 0.7  # signal value as length → 0
+    length_substantive_ceiling: float = 1.2  # signal value as length → infinity
+
+    # Structure signal — log-scaled. headings=0 → 1.0; headings=8 → ceiling.
+    structure_log_scale: float = 1.0  # log(1 + n_headings) / log(1 + structure_log_scale*5)
+    structure_ceiling: float = 1.3  # signal value when heavily structured
+
+    # Recency signal — decay from a halflife. chunk_date older than halflife
+    # gets bias toward floor; recent stays at 1.0.
+    recency_decay_halflife_days: int = 180  # ~6 months
+    recency_floor: float = 0.8  # signal value as age → infinity
+    recency_neutral: float = 1.0  # signal value when chunk_date is missing
+
+
+@dataclass(frozen=True)
 class RerankConfig:
     """Configuration for cross-encoder re-ranking (post-fusion semantic pass)."""
 
@@ -267,6 +329,13 @@ class RetrievalConfig:
     # ``source_tier_boost: enabled: true`` in kairix.config.yaml after
     # declaring per-collection ``tier:`` assignments.
     source_tier_boost: SourceTierBoostConfig = field(default_factory=SourceTierBoostConfig)
+
+    # Issue #458 — enrichment-derived content-quality ranking. Disabled by
+    # default; enable via ``content_quality_boost: enabled: true`` in
+    # kairix.config.yaml. Orthogonal to source_tier_boost (which captures
+    # operator-declared authority); composes multiplicatively at the
+    # boost-chain tail.
+    content_quality_boost: ContentQualityBoostConfig = field(default_factory=ContentQualityBoostConfig)
 
     # Intent types that always receive cross-encoder re-ranking, even when
     # rerank.enabled is False.  Users can force rerank for *all* intents by

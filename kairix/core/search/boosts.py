@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from kairix.core.protocols import GraphRepository
 from kairix.core.search.config import (
+    ContentQualityBoostConfig,
     EntityBoostConfig,
     ProceduralBoostConfig,
     SourceTier,
@@ -264,6 +265,140 @@ class SourceTierBoost:
 
                 logging.getLogger(__name__).warning(
                     "SourceTierBoost: per-result tier lookup failed for %s — %s",
+                    getattr(r, "path", "?"),
+                    exc,
+                )
+                continue
+        return results
+
+
+# ---------------------------------------------------------------------------
+# ContentQualityBoost (Issue #458) — enrichment-derived content authority
+# ---------------------------------------------------------------------------
+
+
+def length_signal(content_length: int, config: ContentQualityBoostConfig) -> float:
+    """Sigmoid signal in ``[length_stub_floor, length_substantive_ceiling]``.
+
+    Stubs (very short snippets) get the floor, substantive content gets the
+    ceiling, midpoint is the sigmoid centre. Bounded so the signal can
+    never zero-out or runaway-multiply a result.
+    """
+    import math
+
+    midpoint = config.length_sigmoid_midpoint_chars
+    scale = max(config.length_sigmoid_scale_chars, 1)
+    z = (content_length - midpoint) / scale
+    s = 1.0 / (1.0 + math.exp(-z))
+    span = config.length_substantive_ceiling - config.length_stub_floor
+    return config.length_stub_floor + span * s
+
+
+def _count_headings(snippet: str) -> int:
+    """Count markdown headings (lines starting with ``#``) in a snippet.
+
+    Cheap proxy for authoring effort — a heavily structured doc has more
+    headings than a stream-of-consciousness note. Robust to leading
+    whitespace; bounded by snippet length so worst-case is linear in
+    snippet size.
+    """
+    if not snippet:
+        return 0
+    count = 0
+    for line in snippet.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            count += 1
+    return count
+
+
+def structure_signal(heading_count: int, config: ContentQualityBoostConfig) -> float:
+    """Log-scaled signal in ``[1.0, structure_ceiling]``.
+
+    0 headings → 1.0 (neutral). ~5+ headings → ``structure_ceiling``.
+    Log scale so the gap between 0 and 1 heading is bigger than between
+    8 and 9 (avoids runaway boost for over-structured docs).
+    """
+    import math
+
+    if heading_count <= 0:
+        return 1.0
+    saturation = max(config.structure_log_scale * 5.0, 1.0)
+    s = math.log(1.0 + heading_count) / math.log(1.0 + saturation)
+    s = min(s, 1.0)
+    return 1.0 + (config.structure_ceiling - 1.0) * s
+
+
+def recency_signal(chunk_date: str, config: ContentQualityBoostConfig) -> float:
+    """Decay signal in ``[recency_floor, recency_neutral]``.
+
+    Empty/unparseable chunk_date → ``recency_neutral`` (we don't penalise
+    just for missing metadata — that's intent-gated #430's job).
+    Recent (< 1 halflife old) → ``recency_neutral``. Very old → ``recency_floor``.
+
+    Halflife semantics: at ``recency_decay_halflife_days`` past today the
+    signal is exactly halfway between neutral and floor.
+    """
+    import math
+    from datetime import date
+
+    if not chunk_date:
+        return config.recency_neutral
+
+    try:
+        parsed = date.fromisoformat(chunk_date[:10])
+    except (ValueError, TypeError):
+        return config.recency_neutral
+
+    today = date.today()
+    age_days = max((today - parsed).days, 0)
+    halflife = max(config.recency_decay_halflife_days, 1)
+    decay = math.exp(-math.log(2) * (age_days / halflife))
+    span = config.recency_neutral - config.recency_floor
+    return config.recency_floor + span * decay
+
+
+class ContentQualityBoost:
+    """Enrichment-derived content-authority boost (Issue #458).
+
+    Multiplies ``boosted_score`` by three orthogonal signals derived from
+    content alone (no Neo4j / no external state):
+
+    * ``length_signal`` — content length sigmoid
+    * ``structure_signal`` — markdown heading count
+    * ``recency_signal`` — chunk_date age decay
+
+    Combined multiplier range: ``[~0.56, ~1.56]``. Composes with
+    :class:`SourceTierBoost` (operator-declared authority) multiplicatively.
+
+    Intent-agnostic — fires for every query when ``config.enabled`` is
+    True. Failure-isolated per result so a single odd row never breaks the
+    list.
+    """
+
+    def __init__(self, config: ContentQualityBoostConfig | None = None) -> None:
+        self._config = config or ContentQualityBoostConfig()
+
+    def boost(self, results: list, _query: str, _context: dict) -> list:
+        if not self._config.enabled:
+            return results
+
+        for r in results:
+            try:
+                snippet = getattr(r, "snippet", "") or ""
+                chunk_date = getattr(r, "chunk_date", "") or ""
+
+                length_m = length_signal(len(snippet), self._config)
+                structure_m = structure_signal(_count_headings(snippet), self._config)
+                recency_m = recency_signal(chunk_date, self._config)
+
+                multiplier = length_m * structure_m * recency_m
+                r.boosted_score = float(r.boosted_score) * multiplier
+            except Exception as exc:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "ContentQualityBoost: per-result signal computation failed for %s — %s",
                     getattr(r, "path", "?"),
                     exc,
                 )

@@ -16,6 +16,7 @@ boost adapters are threaded via ``boosts_override``.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from pytest_bdd import given, parsers, then, when
@@ -96,7 +97,13 @@ def given_entity_canonical(path: str, in_degree: str) -> None:
 
 
 def _build_and_run(intent: QueryIntent, query: str) -> None:
-    cfg = RetrievalConfig.minimal()
+    # Disable auto-rerank for these boost-chain scenarios. The default
+    # rerank_intents = ("multi_hop", "semantic") would otherwise have
+    # the cross-encoder rewrite boosted_score for the SEMANTIC no-op
+    # scenario — a separate concern from whether the boost CHAIN ran.
+    # Issue 2 wired rerank into the pipeline; this step file predates
+    # that wiring and asserts the boost-chain contract in isolation.
+    cfg = dataclasses.replace(RetrievalConfig.minimal(), rerank_intents=())
     graph_available = bool(_state["entities"])
     graph = FakeGraphRepository(entities=_state["entities"], available=graph_available)
 

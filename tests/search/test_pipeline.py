@@ -1198,3 +1198,232 @@ def test_chunk_date_boost_no_penalty_when_every_chunk_is_undated():
     by_path = {r.path: r.boosted_score for r in out}
     assert by_path["/a.md"] == 0.5
     assert by_path["/b.md"] == 0.7
+
+
+# ---------------------------------------------------------------------------
+# ContentQualityBoost (Issue #458) — enrichment-derived content authority
+# ---------------------------------------------------------------------------
+
+
+def _fused_with_body(
+    path: str,
+    snippet: str,
+    chunk_date: str = "",
+    rrf_score: float = 0.5,
+):
+    """Build a FusedResult with a real snippet body for content-quality
+    signal tests."""
+    from kairix.core.search.rrf import FusedResult
+
+    return FusedResult(
+        path=path,
+        collection="c",
+        title=f"T-{path}",
+        snippet=snippet,
+        rrf_score=rrf_score,
+        boosted_score=rrf_score,
+        chunk_date=chunk_date,
+    )
+
+
+@pytest.mark.unit
+def test_content_quality_boost_disabled_is_noop():
+    """When ``ContentQualityBoostConfig.enabled`` is False (default),
+    boost returns results with ``boosted_score`` unchanged — preserves
+    pre-#458 ranking byte-for-byte.
+
+    Sabotage-prove by removing the ``if not self._config.enabled:``
+    guard: this test would then mutate scores even when disabled.
+    """
+    from kairix.core.search.boosts import ContentQualityBoost
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    boost = ContentQualityBoost(config=ContentQualityBoostConfig(enabled=False))
+    results = [_fused_with_body("/a.md", "x" * 800, rrf_score=0.5)]
+    out = boost.boost(results, "q", {})
+    assert out[0].boosted_score == 0.5
+
+
+@pytest.mark.unit
+def test_content_quality_length_signal_substantive_beats_stub():
+    """The core claim: a long substantive snippet outranks a stub when
+    both have the same RRF score.
+
+    Sabotage-prove: replacing ``length_signal(len(snippet), ...)`` with
+    a constant ``1.0`` in ``ContentQualityBoost.boost`` collapses the
+    distinction and the assertion would fail.
+    """
+    from kairix.core.search.boosts import ContentQualityBoost
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    boost = ContentQualityBoost(config=ContentQualityBoostConfig(enabled=True))
+    stub = _fused_with_body("/stub.md", "tiny", rrf_score=0.5)
+    body = _fused_with_body("/body.md", "x" * 1500, rrf_score=0.5)
+    out = boost.boost([stub, body], "q", {})
+    by_path = {r.path: r.boosted_score for r in out}
+    assert by_path["/body.md"] > by_path["/stub.md"]
+
+
+@pytest.mark.unit
+def test_content_quality_length_signal_bounded():
+    """``length_signal`` stays in
+    ``[length_stub_floor, length_substantive_ceiling]`` for all inputs —
+    no signal can zero a score or unbounded-multiply it.
+    """
+    from kairix.core.search.boosts import length_signal
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig()
+    for n in (0, 1, 50, 200, 300, 600, 1500, 100_000):
+        s = length_signal(n, cfg)
+        assert cfg.length_stub_floor <= s <= cfg.length_substantive_ceiling
+
+
+@pytest.mark.unit
+def test_content_quality_structure_signal_counts_headings():
+    """Markdown headings drive the structure signal upward; a snippet
+    with several ``##`` lines outranks an equivalent-length stream of
+    prose.
+
+    Sabotage-prove: hard-coding ``structure_m = 1.0`` in
+    ``ContentQualityBoost.boost`` removes the gap and the assertion fails.
+    """
+    from kairix.core.search.boosts import ContentQualityBoost
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig(enabled=True)
+    boost = ContentQualityBoost(config=cfg)
+    prose = "word " * 200
+    structured = (
+        "# Title\n\n## Section 1\n\nbody\n\n## Section 2\n\nbody\n\n## Section 3\n\nbody\n\n### Subsection\n\nbody\n"
+    )
+    # Pad structured to similar length so we isolate the heading signal
+    structured_padded = structured + ("word " * 200)
+    a = _fused_with_body("/prose.md", prose, rrf_score=0.5)
+    b = _fused_with_body("/structured.md", structured_padded, rrf_score=0.5)
+    out = boost.boost([a, b], "q", {})
+    by_path = {r.path: r.boosted_score for r in out}
+    assert by_path["/structured.md"] > by_path["/prose.md"]
+
+
+@pytest.mark.unit
+def test_content_quality_structure_signal_zero_headings_is_neutral():
+    """A snippet with no headings produces ``structure_signal == 1.0``
+    (neutral). Locks the contract that operators who write prose-only
+    notes aren't penalised — they just don't get the boost."""
+    from kairix.core.search.boosts import structure_signal
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    assert structure_signal(0, ContentQualityBoostConfig()) == 1.0
+
+
+@pytest.mark.unit
+def test_content_quality_structure_signal_bounded():
+    """``structure_signal`` stays in ``[1.0, structure_ceiling]`` for all
+    inputs — heavily structured docs cap out instead of runaway-boosting."""
+    from kairix.core.search.boosts import structure_signal
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig()
+    for n in (0, 1, 3, 5, 8, 100, 10_000):
+        s = structure_signal(n, cfg)
+        assert 1.0 <= s <= cfg.structure_ceiling
+
+
+@pytest.mark.unit
+def test_content_quality_recency_signal_neutral_when_chunk_date_missing():
+    """Empty ``chunk_date`` → ``recency_neutral`` (1.0) — we don't
+    penalise just for missing the metadata. That's intent-gated
+    #430's job."""
+    from kairix.core.search.boosts import recency_signal
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig()
+    assert recency_signal("", cfg) == cfg.recency_neutral
+    assert recency_signal("not-a-date", cfg) == cfg.recency_neutral
+
+
+@pytest.mark.unit
+def test_content_quality_recency_signal_bounded():
+    """``recency_signal`` stays in ``[recency_floor, recency_neutral]``
+    for all inputs — no negative scores and no over-boosting."""
+    from kairix.core.search.boosts import recency_signal
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig()
+    for d in ("2026-06-01", "2024-01-01", "2020-01-01", "1900-01-01"):
+        s = recency_signal(d, cfg)
+        assert cfg.recency_floor <= s <= cfg.recency_neutral
+
+
+@pytest.mark.unit
+def test_content_quality_recency_signal_recent_beats_old():
+    """A recent ``chunk_date`` produces a higher signal than a very old
+    one — drives stale content down the ranking even when length and
+    structure are equal."""
+    from kairix.core.search.boosts import recency_signal
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig()
+    recent = recency_signal("2026-06-01", cfg)
+    old = recency_signal("2010-01-01", cfg)
+    assert recent > old
+
+
+@pytest.mark.unit
+def test_content_quality_signals_compose_multiplicatively():
+    """The combined multiplier is the product of the three signals —
+    locks the contract that no single signal dominates (a great length
+    score can't bury a terrible recency score)."""
+    from kairix.core.search.boosts import (
+        ContentQualityBoost,
+        length_signal,
+        recency_signal,
+        structure_signal,
+    )
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    cfg = ContentQualityBoostConfig(enabled=True)
+    boost = ContentQualityBoost(config=cfg)
+
+    snippet = "# H1\n\n" + ("word " * 200)
+    expected_heading_count = 1  # exactly one ``#``-starting line
+    r = _fused_with_body("/a.md", snippet, chunk_date="2026-06-01", rrf_score=0.5)
+    out = boost.boost([r], "q", {})
+
+    expected = (
+        0.5
+        * length_signal(len(snippet), cfg)
+        * structure_signal(expected_heading_count, cfg)
+        * recency_signal("2026-06-01", cfg)
+    )
+    assert out[0].boosted_score == pytest.approx(expected)
+
+
+@pytest.mark.unit
+def test_content_quality_boost_failure_isolated_per_result(caplog):
+    """A single broken result (e.g. missing ``boosted_score``) doesn't
+    abort the whole list; the rest still get boosted. Locks the contract
+    that an odd row never crashes the search path."""
+    import logging
+
+    from kairix.core.search.boosts import ContentQualityBoost
+    from kairix.core.search.config import ContentQualityBoostConfig
+
+    class _BrokenResult:
+        path = "/broken.md"
+        snippet = "x" * 600
+        chunk_date = "2026-06-01"
+
+        # boosted_score raises on access
+        @property
+        def boosted_score(self):
+            raise RuntimeError("simulated broken result")
+
+    boost = ContentQualityBoost(config=ContentQualityBoostConfig(enabled=True))
+    good = _fused_with_body("/good.md", "x" * 600, rrf_score=0.5)
+    with caplog.at_level(logging.WARNING):
+        out = boost.boost([_BrokenResult(), good], "q", {})
+    # good result still got boosted (it had a substantial snippet)
+    assert out[1].boosted_score != 0.5
+    assert any("ContentQualityBoost" in r.getMessage() for r in caplog.records)

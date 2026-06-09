@@ -223,6 +223,7 @@ def select_boosts(
     """
     from kairix.core.search.boosts import (
         ChunkDateBoost,
+        ContentQualityBoost,
         EntityBoost,
         ProceduralBoost,
         SourceTierBoost,
@@ -238,12 +239,19 @@ def select_boosts(
         boosts.append(TemporalDateBoost(config=cfg.temporal))
     if cfg.temporal.chunk_date_boost_enabled:
         boosts.append(ChunkDateBoost(config=cfg.temporal))
-    # Issue #432 — source-tier-aware ranking. Registered last so tier
-    # multipliers apply on the boosted_score AFTER any intent-gated
-    # boost has had its effect. No-op when cfg.source_tier_boost.enabled
-    # is False (the default), preserving pre-#432 ranking byte-for-byte.
+    # Issue #432 — source-tier-aware ranking. Registered before
+    # ContentQualityBoost so the final ranking is
+    # ``tier_multiplier x content_quality_multiplier`` (orthogonal
+    # composition). No-op when cfg.source_tier_boost.enabled is False
+    # (the default), preserving pre-#432 ranking byte-for-byte.
     if cfg.source_tier_boost.enabled:
         boosts.append(SourceTierBoost(tier_map=tier_map, config=cfg.source_tier_boost))
+    # Issue #458 — content-quality (enrichment-derived) authority.
+    # Composes multiplicatively with #432's operator-declared tier
+    # so canonical-tier content with a stub body doesn't beat
+    # reference-tier content with a substantive body.
+    if cfg.content_quality_boost.enabled:
+        boosts.append(ContentQualityBoost(config=cfg.content_quality_boost))
     return boosts
 
 

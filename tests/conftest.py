@@ -278,6 +278,10 @@ pytest_plugins = [
     # tool_search-only spike behind the agent_query_queue flag (default OFF).
     "tests.bdd.steps.agent_query_queue_steps",
     "tests.bdd.steps.feature_flag_agent_query_queue_steps",
+    # Issue #456 — F54 both-branch coverage for the
+    # intent_confidence_gated_boosts feature flag (driven via the
+    # intent_confidence_passes flag_reader DI seam).
+    "tests.bdd.steps.feature_flag_intent_confidence_gated_boosts_steps",
     # Plan 1 task 10 — kairix self-installer BDD step impls.
     # Drives kairix init + uninstall via the real CLI subprocess surface
     # (F46-compliant) against an XDG-redirected tmp root. Runtime-gated:
