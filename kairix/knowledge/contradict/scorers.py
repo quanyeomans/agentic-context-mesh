@@ -28,19 +28,33 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-_DIRECT_PROMPT = (
+# #434 — the dogfood-reported failure mode (2026-06-08) was the
+# contradict tool flagging "unsupported specifics" as contradictions.
+# Example: claim "Kairix appears operational for Shape retrieval, but
+# SharePoint connector credentials are missing and timeline/entity
+# surfaces have quality gaps" was flagged because older snippets didn't
+# fully *support* every specific in the claim — but they didn't actively
+# disagree either. The prompts below explicitly require the snippet to
+# ASSERT the opposite (not merely fail to assert the same thing). The
+# clarifying phrase "Score 0.0 if..." gives the LLM a clear default for
+# the unsupported-specific case rather than relying on it inferring
+# from "incidental differences do NOT count" (too easy to ignore).
+
+DIRECT_PROMPT = (
     "You are a knowledge consistency analyst.\n\n"
     "Existing document snippet:\n{candidate}\n\n"
     "New content claim:\n{claim}\n\n"
     "Does the existing snippet *directly* contradict the claim? A direct "
     "contradiction exists when the two statements describe the same entity "
     "or event and cannot both be true (e.g. different facts, conflicting "
-    "decisions, mutually exclusive states). Incidental differences or "
-    "missing context do NOT count.\n\n"
+    "decisions, mutually exclusive states). Score 0.0 if the snippet "
+    "simply does not address the claim, omits a specific the claim asserts, "
+    "or is silent on the question — that is missing support, NOT "
+    "contradiction. Incidental differences or missing context do NOT count.\n\n"
     'Reply with ONLY a JSON object: {{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
 )
 
-_OVERSTATEMENT_PROMPT = (
+OVERSTATEMENT_PROMPT = (
     "You are a knowledge consistency analyst checking for overstatements.\n\n"
     "Existing document snippet:\n{candidate}\n\n"
     "New content claim:\n{claim}\n\n"
@@ -48,19 +62,23 @@ _OVERSTATEMENT_PROMPT = (
     "exists when the claim asserts a stronger position than the snippet "
     "warrants — e.g. 'X is the only one who can Y' when the snippet shows "
     "others also do Y, or 'always' / 'never' / 'monopoly' / 'exclusive' "
-    "claims that the evidence undermines.\n\n"
+    "claims that the evidence undermines. Score 0.0 if the snippet "
+    "neither supports nor refutes the claim's strength — silence is not "
+    "overstatement.\n\n"
     'Reply with ONLY a JSON object: {{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
 )
 
-_STATUS_MISMATCH_PROMPT = (
+STATUS_MISMATCH_PROMPT = (
     "You are a knowledge consistency analyst checking for status mismatches.\n\n"
     "Existing document snippet:\n{candidate}\n\n"
     "New content claim:\n{claim}\n\n"
     "Do the claim and snippet assert *different states* for the same entity "
     "at the same time? Examples: 'published on LinkedIn' vs evidence the "
     "article is unpublished; 'engagement is active' vs evidence it has "
-    "closed; 'shipped' vs evidence it is still in design. Focus on "
-    "factual status claims, not opinions.\n\n"
+    "closed; 'shipped' vs evidence it is still in design. Score 0.0 if "
+    "the snippet does not assert any status for the entity in question — "
+    "an absent claim is not a mismatched claim. Focus on factual status "
+    "assertions, not opinions.\n\n"
     'Reply with ONLY a JSON object: {{"score": <0.0-1.0>, "reason": "<one sentence>"}}'
 )
 
@@ -125,17 +143,17 @@ class _PromptedScorer:
 
 class DirectContradictionScorer(_PromptedScorer):
     category = "direct"
-    _prompt = _DIRECT_PROMPT
+    _prompt = DIRECT_PROMPT
 
 
 class OverstatementScorer(_PromptedScorer):
     category = "overstatement"
-    _prompt = _OVERSTATEMENT_PROMPT
+    _prompt = OVERSTATEMENT_PROMPT
 
 
 class StatusMismatchScorer(_PromptedScorer):
     category = "status_mismatch"
-    _prompt = _STATUS_MISMATCH_PROMPT
+    _prompt = STATUS_MISMATCH_PROMPT
 
 
 class CompositeContradictionScorer:

@@ -72,11 +72,15 @@ def _is_warm_or_cold_envelope(tool_name: str) -> dict[str, Any] | None:
     """
     from kairix.platform.warm.state import (
         cold_start_envelope,
-        is_warm,
+        is_warm_with_self_heal,
         trigger_background_warm,
     )
 
-    if is_warm():
+    # #425 — use the self-heal variant so a divergence between
+    # in-process state (which can drift) and the persisted flag (which
+    # the on-disk healthcheck reads) is detected at the request
+    # boundary instead of presenting as a 13-hour cold-state regression.
+    if is_warm_with_self_heal():
         return None
     trigger_background_warm()
     return cold_start_envelope(tool_name)

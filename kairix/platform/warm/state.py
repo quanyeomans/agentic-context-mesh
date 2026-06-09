@@ -231,6 +231,50 @@ def is_warm_persisted() -> bool:
     return warm_flag_path().exists()
 
 
+def is_warm_with_self_heal(*, flag_path: Any = None) -> bool:
+    """In-process warm check with self-heal against the persisted flag.
+
+    The 2026-06-07 dogfood-reported regression (#425) was a 13-hour
+    period of ``app-kairix-1`` returning ColdStart envelopes long
+    after a successful initial warm-up. Root-cause analysis pointed
+    at in-process state diverging from the persisted flag — the flag
+    file said warm, but the in-process ``_state[_K_WARM]`` had been
+    cleared.
+
+    This helper bridges the divergence:
+
+      1. If in-process state says warm → return True (fast path).
+      2. If in-process state says cold BUT the persisted flag exists,
+         the process is in the regression state. Log a WARN with a
+         full :func:`warm_status` snapshot (so the next occurrence
+         lands a timestamped diagnostic), re-mark in-process warm via
+         :func:`mark_warm`, then return True.
+      3. If neither is warm → return False (genuine cold).
+
+    The MCP ``warm_gate`` calls this on every request so the
+    divergence is caught and healed at the request boundary.
+    Operators see the WARN in container logs the moment the
+    regression fires, instead of discovering it hours later via
+    dogfood reports.
+    """
+    if is_warm():
+        return True
+    flag = flag_path if flag_path is not None else warm_flag_path()
+    if not flag.exists():
+        return False
+    snapshot = warm_status()
+    logger.warning(
+        "warm-state divergence detected: persisted flag exists at %s but in-process "
+        "state was cold. Re-marking warm and proceeding. snapshot=%s. "
+        "This recovers from the #425 regression class without restarting the process; "
+        "the next non-divergent tick will see a clean snapshot.",
+        flag,
+        snapshot,
+    )
+    mark_warm(flag_path=flag_path)
+    return True
+
+
 def warm_status() -> dict[str, Any]:
     """Diagnostic envelope for the current warm state.
 

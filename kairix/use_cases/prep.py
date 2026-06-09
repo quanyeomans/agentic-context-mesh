@@ -274,6 +274,25 @@ _GROUND_RULES = (
     "Do NOT add information that is not in the documents."
 )
 
+# #433 — when the LLM emits the canned no-relevance phrase the rest of
+# the envelope must agree. Previously sources stayed populated even when
+# the summary said "No relevant content found", producing the
+# operator-visible contradiction "retrieval surfaced sources but
+# synthesis says nothing matches". Detected via substring match against
+# the canonical phrase (the prompt asks for it verbatim); the
+# normalisation drops the sources list so the envelope is internally
+# consistent.
+_NO_RELEVANT_CANONICAL_PHRASE = "No relevant content found in the knowledge store"
+
+
+def is_no_relevant_response(summary: str) -> bool:
+    """Detect the canned no-relevance phrase in an LLM summary.
+
+    Public so MCP / CLI callers can mirror the detection on their side
+    without rewriting the substring check.
+    """
+    return _NO_RELEVANT_CANONICAL_PHRASE.lower() in (summary or "").lower()
+
 
 def _build_messages(query: str, tier: str, context: str) -> list[dict[str, str]]:
     if tier == "l0":
@@ -441,12 +460,19 @@ def run_prep(
             summary = chat(messages=messages, max_tokens=max_tokens)
             cache.put(cache_key, summary)
 
+        # #433 — when the LLM emitted the canned no-relevance phrase,
+        # drop the sources list so the envelope is internally consistent.
+        # Pre-fix shape: summary="No relevant content found..." +
+        # sources=[doc1, doc2, ...] — confusing for the operator.
+        # Post-fix shape: summary="No relevant content found..." +
+        # sources=[] — the two halves of the envelope agree.
+        final_sources = [] if is_no_relevant_response(summary) else sources
         return PrepOutput(
             query=query,
             tier=tier,
             summary=summary,
             tokens=estimate_tokens(summary),
-            sources=sources,
+            sources=final_sources,
         )
     except Exception as exc:
         logger.warning("run_prep failed: %s", exc, exc_info=True)

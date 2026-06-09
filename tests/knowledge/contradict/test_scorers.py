@@ -205,3 +205,58 @@ def test_default_factory_constructs_three_category_composite() -> None:
     composite = default_contradiction_scorer(llm)
     breakdown = composite.score_all("a", "b")
     assert set(breakdown.keys()) == {"direct", "overstatement", "status_mismatch"}
+
+
+# ---------------------------------------------------------------------------
+# #434 — prompt tightening against "unsupported specifics" false positives
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_direct_prompt_distinguishes_missing_support_from_contradiction() -> None:
+    """The DIRECT prompt explicitly tells the LLM that a snippet which
+    is silent on the claim is NOT a contradiction (it's missing
+    support).
+
+    Locks the #434 prompt-tightening contract: the canned 2026-06-08
+    false-positive class (claim asserts a specific the snippet doesn't
+    address) gets a clear score-0.0 instruction rather than being
+    inferred from 'incidental differences do NOT count'.
+
+    Sabotage-proof: revert the 'Score 0.0 if the snippet simply does
+    not address the claim' sentence and the assertion below catches.
+    """
+    from kairix.knowledge.contradict.scorers import DIRECT_PROMPT
+
+    assert "Score 0.0" in DIRECT_PROMPT
+    assert "missing support" in DIRECT_PROMPT
+    # The original 'incidental differences' guard stays as a secondary fence.
+    assert "Incidental differences" in DIRECT_PROMPT
+
+
+@pytest.mark.unit
+def test_overstatement_prompt_distinguishes_silence_from_overstatement() -> None:
+    """The OVERSTATEMENT prompt now scores 0.0 when the snippet is
+    silent on the claim's strength — silence is not overstatement.
+
+    Sabotage-proof: revert the new 'Score 0.0 if the snippet neither
+    supports nor refutes' sentence and the assertion catches.
+    """
+    from kairix.knowledge.contradict.scorers import OVERSTATEMENT_PROMPT
+
+    assert "Score 0.0" in OVERSTATEMENT_PROMPT
+    assert "silence is not overstatement" in OVERSTATEMENT_PROMPT
+
+
+@pytest.mark.unit
+def test_status_mismatch_prompt_distinguishes_absent_claim_from_mismatch() -> None:
+    """The STATUS_MISMATCH prompt now scores 0.0 when the snippet does
+    not assert any status — an absent claim is not a mismatched claim.
+
+    Sabotage-proof: revert the 'absent claim is not a mismatched claim'
+    line and the assertion catches.
+    """
+    from kairix.knowledge.contradict.scorers import STATUS_MISMATCH_PROMPT
+
+    assert "Score 0.0" in STATUS_MISMATCH_PROMPT
+    assert "absent claim is not a mismatched claim" in STATUS_MISMATCH_PROMPT

@@ -3,7 +3,7 @@ CLI entry point for `kairix search`.
 
 Usage:
   kairix search "query" [--agent AGENT] [--scope SCOPE] [--collection COLLECTION]
-                        [--budget N] [--limit N] [--json]
+                        [--budget N] [--limit N] [--snippet-width N] [--json]
 
 Options:
   --agent AGENT             Agent name for collection scoping (shape, builder, etc.)
@@ -13,6 +13,8 @@ Options:
                             scope-based collection resolution.
   --budget N                Token budget cap (default: 3000)
   --limit N                 Max results to display (default: 10)
+  --snippet-width N         Max snippet length per result (default: 600). Useful for
+                            triage (--snippet-width 200) vs deep-dive (--snippet-width 1200).
   --json                    Output raw JSON instead of formatted text
   --no-entity-card          Skip the entity-graph augmentation when the query is an
                             entity lookup
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from typing import Any
 
@@ -61,6 +64,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--budget", type=int, default=3000, help="Token budget (default: 3000)")
     parser.add_argument("--limit", type=int, default=10, help="Max results to display")
+    parser.add_argument(
+        "--snippet-width",
+        dest="snippet_width",
+        type=int,
+        default=600,
+        help=(
+            "Max snippet length per result (default: 600 chars). Use "
+            "``--snippet-width 200`` for tighter triage output or "
+            "``--snippet-width 1200`` for deep-dive readability."
+        ),
+    )
     parser.add_argument("--json", dest="as_json", action="store_true", help="Output raw JSON")
     parser.add_argument(
         "--no-entity-card",
@@ -100,8 +114,39 @@ def _bind_collection_to_deps(deps: SearchDeps | None, collection: str | None) ->
     )
 
 
-def format_text(out: SearchOutput) -> str:
-    """Render a ``SearchOutput`` as the human-readable text the CLI prints."""
+# #385 follow-up — strip the internal ``#<int>`` chunk-sequence suffix that
+# ``_SqliteChunkWriter`` appends to ``documents.path`` so the operator's
+# fallback title (``hit.path.split("/")[-1]``) reads ``alpha.md`` instead of
+# ``alpha.md#0``. Archive-extracted chunks read ``something.zip#1536``;
+# stripping the suffix turns useless chunk numbering into a recognisable
+# source name. The underlying ``hit.path`` line below still shows the full
+# path so debug context is preserved.
+_CHUNK_SEQ_SUFFIX_RE = re.compile(r"#\d+$")
+
+
+def clean_title_fallback(path: str) -> str:
+    """Last-segment-of-path fallback title with chunk-sequence suffix stripped.
+
+    Mirrors ``hit.path.split("/")[-1]`` plus a regex strip of any trailing
+    ``#<int>``. Returns an empty string when ``path`` is empty so the
+    caller can fall back further (e.g. to the path itself).
+    """
+    if not path:
+        return ""
+    last_segment = path.rsplit("/", 1)[-1]
+    return _CHUNK_SEQ_SUFFIX_RE.sub("", last_segment)
+
+
+def format_text(out: SearchOutput, *, snippet_width: int = 600) -> str:
+    """Render a ``SearchOutput`` as the human-readable text the CLI prints.
+
+    ``snippet_width`` caps each result's snippet length (default 600
+    chars). Operators tune for triage (``snippet_width=200``) or
+    deep-dive (``snippet_width=1200``). Width applies to the rendered
+    text only — the underlying ``hit.snippet`` is unchanged in case a
+    caller wants to format differently downstream.
+    """
+    snippet_width = max(int(snippet_width), 0)
     lines: list[str] = [f"Query: {out.query}", f"Intent: {out.intent}"]
     if out.error:
         lines.append(f"Error: {out.error}")
@@ -117,7 +162,7 @@ def format_text(out: SearchOutput) -> str:
     lines.append("")
 
     for i, hit in enumerate(out.results, start=1):
-        title = hit.title or hit.path.split("/")[-1]
+        title = hit.title or clean_title_fallback(hit.path)
         # ADR-036 §Q7 — surface Wikidata-sourced entity summaries with a
         # ``[Wikidata]`` badge so the operator can tell them apart from
         # vault chunks at a glance. Gated on the well-known ``entity://``
@@ -129,9 +174,9 @@ def format_text(out: SearchOutput) -> str:
         # land on first. Title + path follow, then score/collection. URLs
         # are typically long + uninformative without context.
         snippet = ""
-        if hit.snippet:
-            snippet = hit.snippet[:600].replace("\n", " ")
-            if len(hit.snippet) > 600:
+        if hit.snippet and snippet_width > 0:
+            snippet = hit.snippet[:snippet_width].replace("\n", " ")
+            if len(hit.snippet) > snippet_width:
                 snippet += "…"
         lines.append(f"{i}. [{tier}] {hit.collection} · score {hit.score:.4f}")
         if snippet:
@@ -177,7 +222,7 @@ def main(argv: list[str] | None = None, *, deps: SearchDeps | None = None) -> No
     if args.as_json:
         print(json.dumps(to_json_envelope(out), indent=2))
     else:
-        print(format_text(out))
+        print(format_text(out, snippet_width=args.snippet_width))
 
     if out.error:
         sys.exit(1)

@@ -477,3 +477,74 @@ def test_prep_deps_default_factories_resolve_to_public_callables() -> None:
     deps = PrepDeps()
     assert deps.search_fn is default_search_callable
     assert deps.chat_fn is default_chat_callable
+
+
+# ---------------------------------------------------------------------------
+# #433 — synthesis-vs-sources consistency
+# ---------------------------------------------------------------------------
+
+
+def test_no_relevant_canned_response_clears_sources_to_keep_envelope_consistent() -> None:
+    """#433 — when the LLM emits the canonical 'No relevant content
+    found' phrase, the sources list is cleared so the envelope is
+    internally consistent.
+
+    Pre-fix shape: summary='No relevant content...' + sources=[doc1, ...].
+    Operator reads: 'synthesis says nothing matches yet retrieval
+    listed N sources' — contradiction.
+
+    Post-fix shape: summary='No relevant content...' + sources=[].
+    Operator reads: 'nothing matched, no sources to look at' — coherent.
+
+    Sabotage-proof: drop the ``is_no_relevant_response`` check in
+    ``run_prep`` and the assertion ``out.sources == []`` catches —
+    the original sources list reappears in the envelope.
+    """
+    sr = _FakeSearchResult(
+        results=[
+            _FakeBudgeted(
+                result=_FakeInner(title="doc-a", path="/a.md"),
+                content=_LONG_SNIPPET,
+            )
+        ]
+    )
+    deps, _ = _build_deps(
+        sr=sr,
+        summary="No relevant content found in the knowledge store.",
+    )
+    out = run_prep("topic", deps=deps)
+    assert out.summary == "No relevant content found in the knowledge store."
+    assert out.sources == []
+
+
+def test_substantive_response_keeps_sources() -> None:
+    """A substantive LLM response keeps the sources list intact —
+    locks the regression contract so the #433 fix doesn't accidentally
+    strip sources from real summaries."""
+    sr = _FakeSearchResult(
+        results=[
+            _FakeBudgeted(result=_FakeInner(title="doc-a", path="/a.md"), content=_LONG_SNIPPET),
+            _FakeBudgeted(result=_FakeInner(title="doc-b", path="/b.md"), content=_LONG_SNIPPET),
+        ]
+    )
+    deps, _ = _build_deps(sr=sr, summary="Alpha and Beta are two documents about the topic.")
+    out = run_prep("topic", deps=deps)
+    assert out.sources == ["doc-a", "doc-b"]
+
+
+def test_is_no_relevant_response_handles_casing_and_extra_text() -> None:
+    """The detector is forgiving of casing + trailing whitespace, since
+    LLM responses occasionally vary even when asked for the exact
+    phrase. Locks the contract so a small LLM drift doesn't break
+    detection."""
+    from kairix.use_cases.prep import is_no_relevant_response
+
+    assert is_no_relevant_response("No relevant content found in the knowledge store.")
+    assert is_no_relevant_response("no relevant content found in the knowledge store")
+    assert is_no_relevant_response("  No Relevant Content Found In The Knowledge Store  ")
+    assert is_no_relevant_response("Per the documents: No relevant content found in the knowledge store")
+    # Substantive summaries don't match.
+    assert not is_no_relevant_response("Alpha is a sample document discussing the topic.")
+    # Empty / whitespace summaries don't match either.
+    assert not is_no_relevant_response("")
+    assert not is_no_relevant_response("   ")
