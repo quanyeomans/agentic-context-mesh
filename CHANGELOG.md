@@ -33,6 +33,10 @@ Git tags: `v2026.04.18`. Deploy by pinning to a tag: `pip install git+...@v2026.
 - **Canonical entities get seeded at worker boot.** Declaring `canonical_entities:` in your YAML now propagates straight to Neo4j on the next worker restart (`kairix_canonical=true` marker so `entity_suggest` won't flag them as "new"). `facts_about` returns a `canonical: {name, type, summary, aliases}` field on matches so agents render the canonical context above the fact-store hits.
 - **Entity-summary projector ticks on the worker cadence.** ADR-036 Slice B's `EntitySummaryProjectorImpl` now runs every 60s by default (tunable via `KAIRIX_ENTITY_SUMMARY_PROJECTOR_INTERVAL_S`). A 7,461-entity backlog clears in ~38 min — well inside the 24-hour soak window the cutover runbook specifies.
 
+### Operator surface — reflib eval coverage
+
+- **Reflib gold-suite covers entity / temporal / multi-hop properly.** The three under-served categories grew from {entity: 1, temporal: 5, multi_hop: 2} to {15, 20, 15} via 42 operator-curated queries grounded in the shipped `reference-library/` corpus (Stoic + Eastern philosophical texts, dbt version-upgrade docs, project-stabilisation gates, MADR templates). The ADR-036 cutover gate (entity-NDCG ≥ 0.55) is now measurable on a 15-case sample rather than the prior 1-case. Closes #453.
+
 ### Important when upgrading
 
 - **`entity_summary_indexing_enabled` cutover is gated.** ADR-036 §Cutover specifies a 24h soak + post-flip gate (entity-category NDCG ≥ 0.55, sample-journey ≥ 80%, state delta ±2%). The [cutover runbook](docs/operations/runbooks/entity-summary-cutover.md) walks through pre-flip baseline capture, tier-mapping YAML overlay, and rollback. Don't flip the flag without running the cutover.
