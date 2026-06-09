@@ -7,8 +7,35 @@ to `true` on a kairix deployment that has already run
 vector retrieval.
 
 **Background:** ADR-036 locks the architecture. Issues #459 / #460 /
-#461 land the implementation. This runbook is what an operator
+#461 / #462 land the implementation. This runbook is what an operator
 actually runs to turn the feature on safely.
+
+## Status — Customer Zero cutover 2026-06-09
+
+The Customer Zero (kairix-on-kairix) deployment ran this cutover
+against the v2026.6.9a1 alpha image. Operator overlay at
+`/etc/kairix/kairix.config.yaml` now carries
+`entity_summary_indexing_enabled: true` + the `entity-summaries`
+synthetic collection declaration. Worker restarted to pick up the
+config. Soak-validation in progress; issue
+[kairix#429](https://github.com/three-cubes/kairix/issues/429) stays
+open until the 24h soak completes and a post-flip baseline is captured.
+
+Pre-flip headline numbers (from `/var/lib/kairix/cutover/<DATE>-pre-flip/`):
+
+| Metric | Value | Gate |
+|---|---|---|
+| entity NDCG@10 | 0.800 (n=15) | ≥ 0.55 ✅ |
+| temporal NDCG@10 | 0.558 (n=20) | — |
+| multi_hop NDCG@10 | 0.724 (n=15) | — |
+| weighted total | 0.808 | — |
+| onboard | 18/18 | fully_passed |
+
+The ADR-036 §Cutover gate (entity-NDCG ≥ 0.55) was already
+structurally satisfied pre-flip, so the cutover validates the
+projector mechanics in production rather than chasing a measurable
+quality lift. Post-flip baseline + diff lands at
+`/var/lib/kairix/cutover/2026-06-09-post-flip/` after the soak.
 
 ## When to run this
 
