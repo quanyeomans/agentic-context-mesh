@@ -71,6 +71,14 @@ class WorkerState:
     last_maintenance_orphans_pruned: int = 0
     last_maintenance_pruned_table_size: int = 0
     last_maintenance_elapsed_ms: int = 0
+    # ADR-036 — entity-summary projector tick observability fields.
+    # Persisted so ``kairix features status`` + ``kairix doctor`` can
+    # read the last projection counts across worker restarts.
+    last_entity_summary_tick_at: float = 0.0
+    last_entity_summary_projected: int = 0
+    last_entity_summary_updated: int = 0
+    last_entity_summary_skipped: int = 0
+    last_entity_summary_failed: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-safe dict. Enum values export as strings via the ``str`` mixin."""

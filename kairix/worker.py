@@ -1584,6 +1584,59 @@ def run_maintenance_loop_tick(deps: MaintenanceLoopDeps | None = None) -> Any:
     return result
 
 
+def maybe_run_entity_summary_projector_tick(
+    *,
+    deps: Any | None,
+    transition: Callable[[WorkerPhase], None],
+    state: WorkerState,
+    state_path: Path,
+    write_state_fn: Callable[[WorkerState, Path], None],
+    now: float,
+    last_tick_at: float,
+    interval_seconds: int,
+) -> float:
+    """Run an entity-summary projector tick when due; return the new ``last_tick_at``.
+
+    ADR-036 §Worker. Mirrors :func:`maybe_run_maintenance_loop_tick`:
+
+      * OUTER gate — the ``entity_summary_indexing_enabled`` feature
+        flag check happens inside
+        :func:`run_entity_summary_projector_tick`. When OFF, the
+        dispatcher returns ``None`` and this helper leaves
+        ``last_tick_at`` unchanged so the OFF→ON flip fires
+        immediately rather than waiting an interval.
+      * INNER gate — cadence ``is_tick_due(now, last_tick_at,
+        interval_seconds)``.
+
+    On a productive tick, records the ``EntitySummaryProjectionResult``
+    counters onto :class:`WorkerState` so ``kairix doctor`` /
+    ``kairix features status`` can surface them.
+    """
+    from kairix.core.maintenance import is_tick_due
+    from kairix.knowledge.entities.summary_projector import (
+        run_entity_summary_projector_tick,
+    )
+
+    if not is_tick_due(now, last_tick_at, interval_seconds):
+        return last_tick_at
+
+    transition(WorkerPhase.MAINTENANCE)
+    result = run_entity_summary_projector_tick(deps)
+    transition(WorkerPhase.IDLE)
+    if result is None:
+        # Flag OFF → no tick. Don't advance the timestamp so the next
+        # loop iter re-checks (OFF→ON should fire immediately).
+        return last_tick_at
+
+    state.last_entity_summary_tick_at = now
+    state.last_entity_summary_projected = int(getattr(result, "projected", 0))
+    state.last_entity_summary_updated = int(getattr(result, "updated", 0))
+    state.last_entity_summary_skipped = int(getattr(result, "skipped", 0))
+    state.last_entity_summary_failed = int(getattr(result, "failed", 0))
+    write_state_fn(state, state_path)
+    return now
+
+
 def maybe_run_maintenance_loop_tick(
     *,
     deps: MaintenanceLoopDeps | None,
@@ -1691,6 +1744,36 @@ class WorkerDeps:
     # pinned via FakeFeatureFlagResolver so the flag-OFF / flag-ON
     # branches are exercised against the real scheduler.
     maintenance_loop_deps: MaintenanceLoopDeps = field(default_factory=MaintenanceLoopDeps)
+    # ADR-036 — entity-summary projector tick deps. F6-clean: a real
+    # EntitySummaryProjectorDeps default; tests pass a substitute with
+    # the entity_summary_indexing_enabled flag pinned via
+    # FakeFeatureFlagResolver so OFF / ON branches are exercised
+    # against a real projector + scripted Neo4j fake.
+    entity_summary_projector_deps: Any = field(default_factory=lambda: _default_entity_summary_projector_deps())
+
+
+def _default_entity_summary_projector_deps() -> Any:
+    """Production default — lazy-imports to keep worker.py's top-level
+    import graph thin. The dispatcher itself reads the live feature
+    flag + builds the real projector via the canonical placeholder
+    until Slice C+ adds a live-Neo4j builder.
+    """
+    from kairix.knowledge.entities.summary_projector import EntitySummaryProjectorDeps
+
+    return EntitySummaryProjectorDeps()
+
+
+def entity_summary_projector_interval_seconds() -> int:
+    """Resolve the entity-summary projector tick cadence in seconds.
+
+    Reads ``KAIRIX_ENTITY_SUMMARY_PROJECTOR_INTERVAL_S`` from the
+    paths boundary (F4-clean); defaults to 60s — at the canonical
+    per_tick_max_items=200, a 7,461-entity backlog clears in ~38
+    cycles (~38 min on the default cadence).
+    """
+    from kairix.paths import read_int_env
+
+    return read_int_env("KAIRIX_ENTITY_SUMMARY_PROJECTOR_INTERVAL_S", default=60)
 
 
 @dataclass(frozen=True)
@@ -2612,6 +2695,12 @@ def main(
     # into a local for the in-loop is_tick_due comparison.
     last_maintenance_tick = state.last_maintenance_tick_at
     maintenance_interval = maintenance_interval_seconds()
+    # ADR-036 — entity-summary projector tick cadence. Carried in
+    # WorkerState so cadence survives a container bounce. Default 60s
+    # — a 7,461-entity backlog clears in ~38 cycles (~38 min), well
+    # within ADR-036's 24h soak window.
+    last_entity_summary_tick = state.last_entity_summary_tick_at
+    entity_summary_interval = entity_summary_projector_interval_seconds()
 
     # #224 idle backoff: extend the embed interval after consecutive
     # no-op runs to avoid steady CPU/I/O pressure on idle vaults.
@@ -2704,6 +2793,21 @@ def main(
             now=time.time(),
             last_tick_at=last_maintenance_tick,
             interval_seconds=maintenance_interval,
+        )
+
+        # ADR-036 — entity-summary projector tick. Same OUTER (flag) +
+        # INNER (cadence) gate pattern as the maintenance loop above.
+        # Bit-for-bit pre-ADR-036 behaviour when
+        # entity_summary_indexing_enabled is OFF (the default).
+        last_entity_summary_tick = maybe_run_entity_summary_projector_tick(
+            deps=deps.entity_summary_projector_deps,
+            transition=_transition,
+            state=state,
+            state_path=deps.state_path,
+            write_state_fn=deps.write_state_fn,
+            now=time.time(),
+            last_tick_at=last_entity_summary_tick,
+            interval_seconds=entity_summary_interval,
         )
 
         # Sleep 60 seconds between checks
