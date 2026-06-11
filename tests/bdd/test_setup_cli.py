@@ -25,3 +25,15 @@ def test_setup_invalid_preset() -> None:
 )
 def test_setup_non_interactive_json() -> None:
     """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario("features/setup_cli.feature", "The terminal setup survives indexing")
+def test_setup_survives_indexing() -> None:
+    """Body populated by @scenario from the .feature file."""
+
+
+@pytest.mark.bdd
+@scenario("features/setup_cli.feature", "Re-running setup keeps existing connector config")
+def test_setup_rerun_keeps_connector_config() -> None:
+    """Body populated by @scenario from the .feature file."""

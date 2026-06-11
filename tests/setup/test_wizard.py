@@ -1,10 +1,34 @@
-"""Tests for setup wizard — config generation and template loading."""
+"""Tests for the terminal setup wizard — the second frontend over SetupService.
+
+The wizard rides the SAME :class:`SetupService` backend the web setup
+wizard drives (#review-H3/#review-M6); the primary injection seam is
+``WizardDeps(setup_service=lambda: FakeSetupService(...))`` — the
+canonical Protocol-compliant fake from ``tests/fakes.py``.
+"""
 
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+
+from tests.fakes import FakeSetupService
+
+# Deterministic provider menu for scripted interactive runs — index "1"
+# is always azure_foundry, "2" openai, "3" litellm_proxy.
+_MENU = ("azure_foundry", "openai", "litellm_proxy")
+
+
+def _deps(tmp_path: Path, service: Any = None, persist: Any = None) -> Any:
+    """WizardDeps wired to the canonical fake service + a tmp persistence sink."""
+    from kairix.platform.setup.wizard import WizardDeps
+
+    return WizardDeps(
+        setup_service=lambda: service if service is not None else FakeSetupService(),
+        persist_credentials=persist or (lambda *_a: tmp_path / "unwritten-kairix.env"),
+        provider_names=lambda: _MENU,
+        index_poll_seconds=0.0,
+    )
 
 
 @pytest.mark.unit
@@ -25,40 +49,6 @@ def test_load_template_missing_returns_empty() -> None:
 
 
 @pytest.mark.unit
-def test_count_documents(tmp_path: Path) -> None:
-    from kairix.platform.setup.wizard import count_documents
-
-    # Create some test files
-    (tmp_path / "doc1.md").write_text("hello")
-    (tmp_path / "doc2.md").write_text("world " * 100)
-    (tmp_path / "subdir").mkdir()
-    (tmp_path / "subdir" / "doc3.md").write_text("nested")
-    (tmp_path / "not-markdown.txt").write_text("ignored")
-
-    count, size = count_documents(str(tmp_path))
-    assert count == 3  # .md files only
-    assert size > 0
-
-
-@pytest.mark.unit
-def test_count_documents_empty_dir(tmp_path: Path) -> None:
-    from kairix.platform.setup.wizard import count_documents
-
-    count, size = count_documents(str(tmp_path))
-    assert count == 0
-    assert size == pytest.approx(0.0)
-
-
-@pytest.mark.unit
-def test_count_documents_nonexistent_path() -> None:
-    from kairix.platform.setup.wizard import count_documents
-
-    count, size = count_documents("/nonexistent/path")
-    assert count == 0
-    assert size == pytest.approx(0.0)
-
-
-@pytest.mark.unit
 def test_docker_compose_valid_yaml() -> None:
     """Verify docker-compose.yml is valid YAML."""
     compose_path = Path(__file__).parent.parent.parent / "docker-compose.yml"
@@ -72,13 +62,19 @@ def test_docker_compose_valid_yaml() -> None:
 
 @pytest.mark.unit
 def test_wizard_rejects_nonexistent_document_root(tmp_path: Path) -> None:
-    """Setup wizard fails cleanly when document root doesn't exist."""
+    """Setup wizard fails cleanly when the document root doesn't exist.
+
+    Uses the REAL backend scan (through ``build_setup_service``) so the
+    rejection words match what the web wizard shows for the same path.
+    The run stops before any network-touching step (the scan is step 2;
+    validation runs only after a successful scan + config write).
+    """
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.service import build_setup_service
     from kairix.platform.setup.wizard import WizardDeps, run_setup
 
     output = tmp_path / "test-config.yaml"
     nonexistent = str(tmp_path / "does-not-exist")
-
-    from kairix.platform.setup.prompts import SetupContext
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
     result = run_setup(
@@ -86,7 +82,7 @@ def test_wizard_rejects_nonexistent_document_root(tmp_path: Path) -> None:
         ctx=ctx,
         document_path=nonexistent,
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=WizardDeps(setup_service=lambda: build_setup_service()),
     )
 
     assert result is False, "Wizard should reject a non-existent document root"
@@ -94,29 +90,23 @@ def test_wizard_rejects_nonexistent_document_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_wizard_rejects_nonexistent_document_root_no_continue_option(
-    tmp_path: Path,
-) -> None:
-    """Wizard must hard-reject a non-existent document root (no 'continue anyway?' escape)."""
+def test_wizard_rejects_relative_document_root(tmp_path: Path) -> None:
+    """A relative ``--path`` is rejected with the backend's guidance —
+    the old wizard silently resolved it against the server's working
+    directory (M6 degraded behaviour)."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.service import build_setup_service
     from kairix.platform.setup.wizard import WizardDeps, run_setup
 
     output = tmp_path / "test-config.yaml"
-    nonexistent = str(tmp_path / "does-not-exist")
-
-    # Use non-interactive context with document_path flag.
-    # Before the fix, non-interactive mode returned False due to prompt_yn default.
-    # After the fix, the wizard hard-rejects without even asking.
-    from kairix.platform.setup.prompts import SetupContext
-
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
     result = run_setup(
         output_path=str(output),
         ctx=ctx,
-        document_path=nonexistent,
+        document_path="relative/docs",
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=WizardDeps(setup_service=lambda: build_setup_service()),
     )
-
     assert result is False
     assert not output.exists()
 
@@ -124,13 +114,12 @@ def test_wizard_rejects_nonexistent_document_root_no_continue_option(
 @pytest.mark.unit
 def test_wizard_accepts_valid_document_root(tmp_path: Path) -> None:
     """Setup wizard accepts a valid existing document root."""
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "test-config.yaml"
     doc_dir = tmp_path / "docs"
     doc_dir.mkdir()
-
-    from kairix.platform.setup.prompts import SetupContext
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
     result = run_setup(
@@ -138,7 +127,7 @@ def test_wizard_accepts_valid_document_root(tmp_path: Path) -> None:
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
 
     assert result is True
@@ -147,93 +136,78 @@ def test_wizard_accepts_valid_document_root(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_run_setup_generates_config(tmp_path: Path, monkeypatch) -> None:
-    """run_setup writes a valid YAML config file."""
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    """run_setup writes a valid YAML config file through the full
+    interactive flow (builtins.input scripted — prompts.py is not a
+    kairix-internal seam)."""
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "test-config.yaml"
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
 
-    # Mock all interactive prompts — builtins.input is acceptable here because
-    # prompts.py already uses ctx.interactive guard; we're testing the full
-    # interactive flow end-to-end.
     inputs = iter(
         [
-            "1",  # Step 1: Azure OpenAI
-            "https://test.openai.azure.com",  # endpoint
+            "1",  # Step 0: use case
+            "1",  # Step 1: azure_foundry
+            "https://test.services.ai.azure.com",  # endpoint
             "test-key",  # API key
             "",  # embed model (default)
             "",  # chat model (default)
-            "y",  # continue despite connection failure
-            str(tmp_path),  # Step 2: document path
+            str(doc_dir),  # Step 2: document path
             "1",  # Step 3: default storage
-            "2",  # Step 4: skip knowledge graph
-            "4",  # Step 5: general content
+            "n",  # Step 4: skip knowledge graph
             "1",  # Step 6: search everything
-            "5",  # Step 7: skip agent integration
-            "n",  # Step 8: don't index now
+            "n",  # don't index now
         ]
     )
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs, ""))
 
-    run_setup(
-        output_path=str(output),
-        deps=WizardDeps(connection_test=lambda *_a, **_k: False),
-    )
-    # Setup may return False due to connection failure + "continue anyway"
-    # but the config file should still be written
+    from kairix.platform.setup.prompts import SetupContext
 
-    if output.exists():
-        import yaml
+    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(output_path=str(output), ctx=ctx, deps=_deps(tmp_path))
 
-        with open(output) as f:
-            config = yaml.safe_load(f)
-        assert "retrieval" in config
-        assert isinstance(config["retrieval"], dict)
+    assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert "retrieval" in config
+    assert isinstance(config["retrieval"], dict)
 
 
 @pytest.mark.unit
 def test_wizard_deps_default_factory_binds_callable() -> None:
-    """``WizardDeps()`` with no overrides constructs a deps bag whose
-    ``connection_test`` field is a callable, not ``None``.
+    """``WizardDeps()`` with no overrides binds a real callable for the
+    service factory, not ``None``.
 
-    Sabotage proof: this is the corner the F6 issue specifically calls
-    out — ``Optional[Callable] = None`` self-resolving in ``__post_init__``
-    has landed mypy bugs. ``default_factory`` must bind a real callable
-    or this assertion fires. The test reads only the public field; it
-    does not import the private default function (that would violate F5).
+    Sabotage proof: regressing to ``Optional[Callable] = None`` without
+    a ``__post_init__`` wire-up would leave this None at runtime and
+    break ``run_setup`` on its first line.
     """
     from kairix.platform.setup.wizard import WizardDeps
 
     deps = WizardDeps()
-    # The type system narrows this away, but we want a runtime sabotage:
-    # if the implementation regressed to ``Optional[Callable] = None``
-    # without a __post_init__, ``deps.connection_test`` would be None at
-    # runtime even if mypy were satisfied. The cast through callable() is
-    # what catches that.
-    assert callable(deps.connection_test), (
-        f"default_factory must bind a callable; got {deps.connection_test!r}. "
-        "Regressing to ``connection_test: Callable | None = None`` without a "
+    assert callable(deps.setup_service), (
+        f"default_factory must bind a callable; got {deps.setup_service!r}. "
+        "Regressing to ``setup_service: Callable | None = None`` without a "
         "post-init wire-up would leave this None and break run_setup."
     )
+    assert callable(deps.persist_credentials)
+    assert callable(deps.provider_names)
+    assert callable(deps.write_config)
 
 
 @pytest.mark.unit
-def test_wizard_deps_override_used_by_run_setup(tmp_path: Path) -> None:
-    """``run_setup(deps=WizardDeps(connection_test=fake))`` routes the wizard's
-    connection probe through the injected fake.
+def test_wizard_routes_validation_through_injected_service(tmp_path: Path) -> None:
+    """``run_setup(deps=WizardDeps(setup_service=...))`` drives the
+    injected service's provider validation exactly once.
 
     Sabotage proof: the fake records every call. If the wizard ignored
-    ``deps`` and fell through to the production probe, no calls would be
+    ``deps`` and built its own production service, no calls would be
     recorded and this test would fail.
     """
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
-    calls: list[tuple[str, str, str, str]] = []
-
-    def _spy(provider: str, endpoint: str, api_key: str, embed_model: str) -> bool:
-        calls.append((provider, endpoint, api_key, embed_model))
-        return True
-
+    service = FakeSetupService()
     output = tmp_path / "test-config.yaml"
     doc_dir = tmp_path / "docs"
     doc_dir.mkdir()
@@ -244,36 +218,31 @@ def test_wizard_deps_override_used_by_run_setup(tmp_path: Path) -> None:
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=_spy),
+        deps=_deps(tmp_path, service=service),
     )
 
-    assert len(calls) == 1, f"injected probe should run exactly once; got {len(calls)} calls"
-    # Provider plugin name resolved from the prompt default (Azure, no
-    # legacy-shaped endpoint → the forward-recommended Foundry plugin).
-    assert calls[0][0] == "azure_foundry"
+    assert len(service.validate_calls) == 1, f"expected exactly one validation; got {service.validate_calls}"
+    # Non-interactive default pick is the azure_foundry plugin.
+    assert service.validate_calls[0][0] == "azure_foundry"
 
 
 @pytest.mark.unit
 def test_wizard_preset_consulting_produces_consulting_collections(tmp_path: Path) -> None:
-    """preset='consulting' wires the consulting collection template (lines 281+)."""
-    import yaml
-
+    """preset='consulting' wires the consulting collection template."""
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
     doc_dir.mkdir()
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
-    # With interactive=False, prompt_choice returns default (0).
-    # We still exercise the consulting preset_key in the template loader path.
     result = run_setup(
         output_path=str(output),
         ctx=ctx,
         document_path=str(doc_dir),
         preset="consulting",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
     assert result is True
     assert output.exists()
@@ -284,10 +253,8 @@ def test_wizard_preset_consulting_produces_consulting_collections(tmp_path: Path
 @pytest.mark.unit
 def test_wizard_preset_technical_produces_technical_retrieval(tmp_path: Path) -> None:
     """preset='technical' uses the technical retrieval template."""
-    import yaml
-
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
@@ -299,7 +266,7 @@ def test_wizard_preset_technical_produces_technical_retrieval(tmp_path: Path) ->
         ctx=ctx,
         document_path=str(doc_dir),
         preset="technical",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
     assert result is True
     config = yaml.safe_load(output.read_text())
@@ -308,9 +275,9 @@ def test_wizard_preset_technical_produces_technical_retrieval(tmp_path: Path) ->
 
 @pytest.mark.unit
 def test_wizard_preset_daily_log_aliased_to_general(tmp_path: Path) -> None:
-    """preset='daily-log' is aliased to 'general' (line 148)."""
+    """preset='daily-log' is aliased to 'general'."""
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
@@ -322,7 +289,7 @@ def test_wizard_preset_daily_log_aliased_to_general(tmp_path: Path) -> None:
         ctx=ctx,
         document_path=str(doc_dir),
         preset="daily-log",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
     assert result is True
     assert output.exists()
@@ -330,11 +297,10 @@ def test_wizard_preset_daily_log_aliased_to_general(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_wizard_connection_test_failure_returns_true_non_interactive(tmp_path: Path) -> None:
-    """When connection_test returns False in non-interactive mode, run_setup
-    continues so a config is still emitted (line 187 path).
-    """
+    """When validation fails in non-interactive mode, run_setup continues
+    so a config is still emitted (scripted-bootstrap contract)."""
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
@@ -346,7 +312,7 @@ def test_wizard_connection_test_failure_returns_true_non_interactive(tmp_path: P
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: False),
+        deps=_deps(tmp_path, service=FakeSetupService(validate_ok=False)),
     )
     # Non-interactive mode: continues despite failure (continue_default=True)
     assert result is True
@@ -354,15 +320,37 @@ def test_wizard_connection_test_failure_returns_true_non_interactive(tmp_path: P
 
 
 @pytest.mark.unit
-def test_wizard_json_mode_emits_config_to_stdout(tmp_path: Path, capsys) -> None:
-    """json_mode=True emits the config as JSON to stdout and returns True.
+def test_wizard_validation_failure_prints_backend_guidance(tmp_path: Path, capsys) -> None:
+    """The terminal prints the backend's validation error VERBATIM —
+    including the Azure deployment-name guidance (#484) that used to be
+    web-only (M6 parity)."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import run_setup
 
-    Covers the ctx.json_mode branch.
-    """
+    service = FakeSetupService(validate_deployment_missing=True)
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    run_setup(
+        output_path=str(tmp_path / "config.yaml"),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        preset="general",
+        deps=_deps(tmp_path, service=service),
+    )
+    out = capsys.readouterr().out
+    assert "Your key works" in out, f"deployment guidance missing from terminal output:\n{out}"
+    assert "no deployment named" in out
+
+
+@pytest.mark.unit
+def test_wizard_json_mode_emits_config_to_stdout(tmp_path: Path, capsys) -> None:
+    """json_mode=True emits the config as JSON to stdout and returns True."""
     import json
 
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     doc_dir = tmp_path / "docs"
     doc_dir.mkdir()
@@ -373,7 +361,7 @@ def test_wizard_json_mode_emits_config_to_stdout(tmp_path: Path, capsys) -> None
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
 
     assert result is True
@@ -383,28 +371,9 @@ def test_wizard_json_mode_emits_config_to_stdout(tmp_path: Path, capsys) -> None
     assert "retrieval" in parsed
 
 
-@pytest.mark.unit
-def test_probe_llm_connection_returns_false_on_exception() -> None:
-    """``probe_llm_connection`` catches exceptions and returns False.
-
-    Drives the public ``set_llm_endpoint_fn`` / ``set_llm_api_key_fn``
-    kwarg seams on the public ``probe_llm_connection`` surface — F1
-    + F5 clean.
-    """
-    from kairix.platform.setup.wizard import probe_llm_connection
-
-    def _raise(_value: object) -> None:
-        raise RuntimeError("secrets backend down")
-
-    result = probe_llm_connection(
-        provider="azure",
-        endpoint="https://x.openai.azure.com",
-        api_key="key",  # pragma: allowlist secret
-        embed_model="text-embedding-3-large",
-        set_llm_endpoint_fn=_raise,
-        set_llm_api_key_fn=_raise,
-    )
-    assert result is False
+# ---------------------------------------------------------------------------
+# Interactive-flow helper
+# ---------------------------------------------------------------------------
 
 
 def _interactive_run_setup(
@@ -412,25 +381,23 @@ def _interactive_run_setup(
     monkeypatch,
     *,
     inputs: list[str],
-    connection_ok: bool = True,
-    embed_main: Any = None,
+    service: Any = None,
+    persist: Any = None,
 ) -> tuple[bool, Path]:
     """Helper: run wizard interactively with a fixed input sequence.
 
-    ``embed_main`` (when not ``None``) is threaded through ``WizardDeps``
-    so tests can drive the indexing path with a fake without
-    monkey-patching ``kairix.core.embed.cli.main``.
-
-    ``persist_credentials`` is always faked here: the interactive input
-    sequences supply non-empty API keys, and the production default
-    would otherwise write to the developer's real secrets bundle.
+    ``service`` (when not ``None``) is the FakeSetupService instance the
+    wizard drives; ``persist_credentials`` is always faked here because
+    the interactive sequences supply non-empty API keys and the
+    production default would otherwise write to the developer's real
+    secrets bundle.
     """
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
-    doc_dir.mkdir()
+    doc_dir.mkdir(exist_ok=True)
     (doc_dir / "note.md").write_text("# note", encoding="utf-8")
 
     input_iter = iter(inputs)
@@ -440,122 +407,102 @@ def _interactive_run_setup(
     result = run_setup(
         output_path=str(output),
         ctx=ctx,
-        deps=WizardDeps(
-            connection_test=lambda *_a, **_k: connection_ok,
-            embed_main=embed_main,
-            persist_credentials=lambda *_a: tmp_path / "unwritten-kairix.env",
-        ),
+        deps=_deps(tmp_path, service=service, persist=persist),
     )
     return result, output
 
 
+# Interactive answer script (menu choice "1" = azure_foundry in _MENU):
+#   use-case, provider, endpoint, api key, embed model, chat model,
+#   doc path, storage, neo4j?, collections, index?
+def _script(tmp_path: Path, **overrides: str) -> list[str]:
+    answers = {
+        "use_case": "1",
+        "provider": "1",
+        "endpoint": "https://x.services.ai.azure.com",
+        "api_key": "k",
+        "embed_model": "",
+        "chat_model": "",
+        "doc_path": str(tmp_path / "docs"),
+        "storage": "1",
+        "neo4j": "n",
+        "collections": "1",
+        "index": "n",
+    }
+    answers.update(overrides)
+    return list(answers.values())
+
+
 @pytest.mark.unit
 def test_wizard_interactive_openai_provider(tmp_path: Path, monkeypatch) -> None:
-    """provider_idx=1 → 'openai' branch (lines 168-170)."""
-    inputs = [
-        "1",  # Step 0: use case 'personal' → preset general
-        "2",  # Step 1: provider 'OpenAI'
-        "openai-key",  # API key
-        "",  # embed model default
-        "",  # chat model default
-        str(tmp_path / "docs"),  # Step 2: document path
-        "1",  # Step 3: default storage
-        "n",  # Step 4: skip Neo4j
-        "1",  # Step 6: search everything
-        "5",  # Step 7: skip agent integration
-        "n",  # Step 8: skip indexing
-    ]
-    result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+    """Menu pick 2 → the openai plugin; blank endpoint resolves to the
+    OpenAI default base URL before persistence."""
+    recorded: list[tuple[str, ...]] = []
+
+    def _persist(*args: str) -> Path:
+        recorded.append(args)
+        return tmp_path / "kairix.env"
+
+    inputs = _script(tmp_path, provider="2", endpoint="", api_key="openai-key")
+    result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, persist=_persist)
     assert result is True
     assert output.exists()
+    assert recorded[0][1] == "https://api.openai.com/v1"
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config["provider"] == "openai"
 
 
 @pytest.mark.unit
-def test_wizard_interactive_custom_provider(tmp_path: Path, monkeypatch) -> None:
-    """provider_idx=2 → 'custom' branch (lines 172-176)."""
-    inputs = [
-        "1",
-        "3",  # custom provider
-        "https://my.endpoint",  # endpoint
-        "custom-key",
-        "my-embed",
-        "my-chat",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "1",
-        "5",
-        "n",
-    ]
-    result, _output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+def test_wizard_interactive_third_party_provider(tmp_path: Path, monkeypatch) -> None:
+    """Menu pick 3 → a non-azure registry plugin passes through verbatim."""
+    inputs = _script(tmp_path, provider="3", endpoint="https://proxy.example.invalid/v1", api_key="proxy-key")
+    result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config["provider"] == "litellm_proxy"
+
+
+@pytest.mark.unit
+def test_wizard_interactive_legacy_azure_endpoint_remaps_plugin(tmp_path: Path, monkeypatch) -> None:
+    """An azure_foundry pick with a legacy-shaped endpoint rides the
+    azure_legacy plugin — the same remap the web wizard backend applies."""
+    inputs = _script(tmp_path, endpoint="https://res.openai.azure.com")
+    result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+    assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config["provider"] == "azure_legacy"
 
 
 @pytest.mark.unit
 def test_wizard_interactive_custom_storage_path(tmp_path: Path, monkeypatch) -> None:
-    """storage_idx=1 → custom path branch (lines 225-227)."""
+    """storage choice 2 → custom data-directory path."""
     custom_store = tmp_path / "my-store"
-    inputs = [
-        "1",
-        "1",  # Azure
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "2",  # custom storage
-        str(custom_store),
-        "n",  # skip Neo4j
-        "1",
-        "5",
-        "n",
-    ]
-    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+    inputs = _script(tmp_path, storage="2")
+    # The custom-storage branch asks one extra question (the path) right
+    # after the storage choice.
+    inputs.insert(inputs.index("2", 6) + 1, str(custom_store))
+    result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config["paths"]["db_path"].startswith(str(custom_store))
 
 
 @pytest.mark.unit
-def test_wizard_interactive_docker_storage(tmp_path: Path, monkeypatch) -> None:
-    """storage_idx=2 → Docker paths (line 229)."""
-    inputs = [
-        "1",
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "3",  # Docker storage
-        "n",
-        "1",
-        "5",
-        "n",
-    ]
-    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+def test_wizard_interactive_fhs_storage(tmp_path: Path, monkeypatch) -> None:
+    """storage choice 3 → FHS /var/lib/kairix paths."""
+    inputs = _script(tmp_path, storage="3")
+    result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config["paths"]["db_path"] == "/var/lib/kairix/index.sqlite"
 
 
 @pytest.mark.unit
 def test_wizard_interactive_template_collections_consulting(tmp_path: Path, monkeypatch) -> None:
-    """coll_idx=1 with consulting preset → consulting collections (lines 285+)."""
-    inputs = [
-        "3",  # use case 'consulting'
-        "1",  # Azure
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",  # default storage
-        "n",  # skip Neo4j
-        "2",  # template collections
-        "5",  # skip agent integration
-        "n",
-    ]
+    """collections choice 2 with the consulting preset → consulting collections."""
+    inputs = _script(tmp_path, use_case="3", collections="2")
     result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
-    import yaml
-
     cfg = yaml.safe_load(output.read_text())
     coll = cfg.get("collections", {}).get("shared", [])
     names = {c["name"] for c in coll}
@@ -564,25 +511,10 @@ def test_wizard_interactive_template_collections_consulting(tmp_path: Path, monk
 
 @pytest.mark.unit
 def test_wizard_interactive_template_collections_technical(tmp_path: Path, monkeypatch) -> None:
-    """coll_idx=1 with technical preset → docs/runbooks/reference collections."""
-    inputs = [
-        "2",  # use case 'technical'
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "2",  # template collections
-        "5",
-        "n",
-    ]
+    """collections choice 2 with the technical preset → docs/runbooks/reference."""
+    inputs = _script(tmp_path, use_case="2", collections="2")
     result, output = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
-    import yaml
-
     cfg = yaml.safe_load(output.read_text())
     coll = cfg.get("collections", {}).get("shared", [])
     names = {c["name"] for c in coll}
@@ -591,86 +523,71 @@ def test_wizard_interactive_template_collections_technical(tmp_path: Path, monke
 
 @pytest.mark.unit
 def test_wizard_interactive_workspaces_collection(tmp_path: Path, monkeypatch) -> None:
-    """coll_idx=2 → include agent workspace memories (lines 305-319)."""
-    inputs = [
-        "1",  # use case general
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "3",  # workspaces collection
-        "5",
-        "n",
-    ]
+    """collections choice 3 → include agent workspace memories."""
+    inputs = _script(tmp_path, collections="3")
     result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
 
 
 @pytest.mark.unit
-def test_wizard_interactive_agent_openclaw(tmp_path: Path, monkeypatch) -> None:
-    """agent_idx=1 → OpenClaw instructions (line 351)."""
-    inputs = [
-        "1",
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "1",  # search everything
-        "2",  # OpenClaw
-        "n",
-    ]
-    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+def test_wizard_agent_step_renders_backend_connect_snippets(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Step 7 renders the MCP URL + snippets from the backend's
+    ``agent_connect_info()`` — no terminal-only static instructions, no
+    port probing (M6 parity)."""
+    from kairix.platform.setup.service import AgentConnectInfo, ConnectSnippet
+
+    service = FakeSetupService(
+        mcp_url="http://127.0.0.1:8765/mcp",
+        connect_snippets=(
+            ConnectSnippet(client="Claude Code", config_text='{"mcpServers": {}}'),
+            ConnectSnippet(client="Generic MCP over HTTP", config_text="http://127.0.0.1:8765/mcp"),
+        ),
+    )
+    inputs = _script(tmp_path)
+    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, service=service)
     assert result is True
+    out = capsys.readouterr().out
+    assert "MCP endpoint: http://127.0.0.1:8765/mcp" in out
+    assert "Claude Code" in out
+    assert "Generic MCP over HTTP" in out
+    # The connect info DTO round-trips — guard the import is real.
+    assert isinstance(service.agent_connect_info(), AgentConnectInfo)
 
 
 @pytest.mark.unit
-def test_wizard_interactive_agent_sse(tmp_path: Path, monkeypatch) -> None:
-    """agent_idx=2 → SSE/HTTP MCP instructions (lines 352-362)."""
-    inputs = [
-        "1",
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "1",
-        "3",  # SSE/HTTP
-        "n",
-    ]
-    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
-    assert result is True
+def test_wizard_provider_menu_lists_registry_plugins(tmp_path: Path, monkeypatch, capsys) -> None:
+    """M6 parity: the provider menu lists the installed plugin registry
+    (the same source the web wizard renders), not a hardcoded trio."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.providers import EntryPointRegistry
 
+    registry_names = tuple(EntryPointRegistry().available())
+    assert "azure_foundry" in registry_names
+    assert "openai" in registry_names
 
-@pytest.mark.unit
-def test_wizard_interactive_agent_direct_python(tmp_path: Path, monkeypatch) -> None:
-    """agent_idx=3 → Direct Python import (lines 363-365)."""
-    inputs = [
-        "1",
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "1",
-        "4",  # direct Python
-        "n",
-    ]
-    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+    # Defaults all the way through: provider pick falls to azure_foundry.
+    inputs = iter(["", "", "", "", "", "", "1", "n", "1", "n"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs, ""))
+
+    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
+    deps = WizardDeps(
+        setup_service=lambda: FakeSetupService(),
+        persist_credentials=lambda *_a: tmp_path / "unwritten-kairix.env",
+        index_poll_seconds=0.0,
+    )  # provider_names left at the production default — the real registry
+    result = run_setup(
+        output_path=str(tmp_path / "config.yaml"),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        deps=deps,
+    )
     assert result is True
+    out = capsys.readouterr().out
+    for name in registry_names:
+        assert name in out, f"registry plugin {name!r} missing from the provider menu:\n{out}"
 
 
 # ---------------------------------------------------------------------------
@@ -681,17 +598,26 @@ def test_wizard_interactive_agent_direct_python(tmp_path: Path, monkeypatch) -> 
 
 @pytest.mark.unit
 def test_provider_plugin_name_maps_survey_answer_to_plugin() -> None:
-    """The wizard's provider survey answer + endpoint shape resolve to a
-    registered provider plugin name."""
+    """The azure endpoint shape resolves to a registered plugin name."""
     from kairix.platform.setup.wizard import provider_plugin_name
 
     assert provider_plugin_name("openai", "") == "openai"
     assert provider_plugin_name("azure", "https://res.services.ai.azure.com") == "azure_foundry"
     assert provider_plugin_name("azure", "https://res.openai.azure.com") == "azure_legacy"
     assert provider_plugin_name("azure", "") == "azure_foundry"
-    # "Other OpenAI-compatible endpoint" rides the openai-direct plugin
-    # (base_url is taken verbatim from the stored endpoint).
     assert provider_plugin_name("custom", "https://proxy.example.invalid/v1") == "openai"
+
+
+@pytest.mark.unit
+def test_picked_provider_plugin_remaps_azure_by_endpoint_shape() -> None:
+    """Registry picks pass through; azure picks re-route by endpoint shape."""
+    from kairix.platform.setup.wizard import picked_provider_plugin
+
+    assert picked_provider_plugin("openai", "https://api.openai.com/v1") == "openai"
+    assert picked_provider_plugin("anthropic", "") == "anthropic"
+    assert picked_provider_plugin("azure_foundry", "https://res.openai.azure.com") == "azure_legacy"
+    assert picked_provider_plugin("azure_legacy", "https://res.services.ai.azure.com") == "azure_foundry"
+    assert picked_provider_plugin("azure_foundry", "") == "azure_foundry"
 
 
 @pytest.mark.unit
@@ -699,11 +625,9 @@ def test_wizard_config_includes_provider_and_validates_clean(tmp_path: Path) -> 
     """#474 defect 1: the generated config MUST carry the ``provider:``
     key (factory construction fails without it) and must be
     ``kairix config validate``-clean."""
-    import yaml
-
     from kairix.core.search.config_validator import validate_config
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
@@ -715,7 +639,7 @@ def test_wizard_config_includes_provider_and_validates_clean(tmp_path: Path) -> 
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
 
     assert result is True
@@ -723,6 +647,70 @@ def test_wizard_config_includes_provider_and_validates_clean(tmp_path: Path) -> 
     assert config.get("provider") == "azure_foundry", f"provider key missing/wrong: {config}"
     errors = validate_config(config)
     assert errors == [], f"generated config is not validate-clean: {errors}"
+
+
+@pytest.mark.unit
+def test_rerun_setup_preserves_existing_connector_config(tmp_path: Path) -> None:
+    """#review-H3 clobber regression: a config that already carries
+    ``topology_v2`` + ``agents`` blocks (written by the web wizard or an
+    operator) survives a terminal setup save against the same file —
+    merge, not overwrite.
+
+    Sabotage proof (executed): against the pre-fix whole-file-overwrite
+    ``_write_config_yaml`` path this failed with
+    ``AssertionError: topology_v2 clobbered: {...}`` /
+    ``assert None == {'connectors': [...]}``; it passes after the save
+    routes through the backend's merge write.
+    """
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import run_setup
+
+    output = tmp_path / "kairix.config.yaml"
+    output.write_text(
+        yaml.dump(
+            {
+                "topology_v2": {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]},
+                "agents": {"agent-alpha": {"role": "research"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        preset="general",
+        deps=_deps(tmp_path),
+    )
+    assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config.get("topology_v2") == {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]}, (
+        f"topology_v2 clobbered: {config}"
+    )
+    assert config.get("agents") == {"agent-alpha": {"role": "research"}}, f"agents clobbered: {config}"
+    # And the wizard's own answers still landed.
+    assert config.get("provider") == "azure_foundry"
+    assert "retrieval" in config
+
+
+@pytest.mark.unit
+def test_neo4j_opt_out_writes_explicit_disable_marker(tmp_path: Path, monkeypatch) -> None:
+    """Answering 'no' to the knowledge graph writes an explicit
+    ``graph: {enabled: false}`` marker — a merge save that simply omitted
+    the key would leave a previously enabled graph switched on."""
+    output = tmp_path / "kairix.config.yaml"
+    output.write_text(
+        yaml.dump({"graph": {"enabled": True, "uri": "bolt://old-host:7687"}}),
+        encoding="utf-8",
+    )
+    inputs = _script(tmp_path, neo4j="n")
+    result, output_written = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
+    assert result is True
+    config = yaml.safe_load(output_written.read_text(encoding="utf-8"))
+    assert config["graph"]["enabled"] is False, f"graph opt-out not recorded: {config.get('graph')}"
 
 
 @pytest.mark.unit
@@ -739,6 +727,7 @@ def test_persist_llm_credentials_writes_canonical_names(tmp_path: Path) -> None:
         "example-credential-value",  # pragma: allowlist secret — generic fixture
         "https://example-resource.services.ai.azure.com",
         "text-embedding-3-large",
+        "gpt-4o-mini",
         bundle_path=bundle,
         hydrate_fn=lambda p: hydrated.append(p) or 0,
     )
@@ -747,8 +736,11 @@ def test_persist_llm_credentials_writes_canonical_names(tmp_path: Path) -> None:
     content = bundle.read_text(encoding="utf-8")
     assert "KAIRIX_PROVIDER_LLM_API_KEY=example-credential-value" in content  # pragma: allowlist secret
     assert "KAIRIX_PROVIDER_LLM_ENDPOINT=https://example-resource.services.ai.azure.com" in content
-    # pragma: allowlist secret — model-name fixture below, not a credential
+    # pragma: allowlist secret — model-name fixtures below, not credentials
     assert "KAIRIX_PROVIDER_EMBED_MODEL=text-embedding-3-large" in content  # pragma: allowlist secret
+    # M6: the chat-model answer lands in the llm-model slot (NAME under
+    # test — the slot the credentials resolver reads).
+    assert "KAIRIX_PROVIDER_LLM_MODEL=" in content
     assert hydrated == [bundle], "persisted bundle must be hydrated for the in-process connection test"
 
 
@@ -762,6 +754,7 @@ def test_persist_llm_credentials_skips_empty_values(tmp_path: Path) -> None:
         "example-credential-value",  # pragma: allowlist secret — generic fixture
         "",
         "",
+        "",
         bundle_path=bundle,
         hydrate_fn=lambda _p: 0,
     )
@@ -770,66 +763,43 @@ def test_persist_llm_credentials_skips_empty_values(tmp_path: Path) -> None:
     assert "KAIRIX_PROVIDER_LLM_API_KEY=" in content
     assert "KAIRIX_PROVIDER_LLM_ENDPOINT" not in content
     assert "KAIRIX_PROVIDER_EMBED_MODEL" not in content
+    assert "KAIRIX_PROVIDER_LLM_MODEL" not in content
 
 
 @pytest.mark.unit
-def test_wizard_persists_collected_credentials_via_seam(tmp_path: Path, monkeypatch) -> None:
-    """#474 defect 2: the credentials collected in Step 1 flow into the
-    persistence use-case (recorded through the WizardDeps seam)."""
-    from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+def test_wizard_persists_collected_credentials_including_chat_model(tmp_path: Path, monkeypatch) -> None:
+    """#474 defect 2 + M6: the credentials collected in Step 1 — chat
+    model included — flow into the persistence use-case (recorded through
+    the WizardDeps seam). The old wizard discarded the chat-model answer
+    in every branch."""
+    recorded: list[tuple[str, str, str, str]] = []
 
-    recorded: list[tuple[str, str, str]] = []
-
-    def _fake_persist(api_key: str, endpoint: str, embed_model: str) -> Path:
-        recorded.append((api_key, endpoint, embed_model))
+    def _fake_persist(api_key: str, endpoint: str, embed_model: str, llm_model: str) -> Path:
+        recorded.append((api_key, endpoint, embed_model, llm_model))
         return tmp_path / "kairix.env"
 
-    doc_dir = tmp_path / "docs"
-    doc_dir.mkdir()
-    inputs = [
-        "1",  # use case
-        "1",  # Azure
-        "https://res.services.ai.azure.com",  # endpoint
-        "typed-credential-value",  # API key
-        "embed-deployment",  # embed model
-        "",  # chat model default
-        str(doc_dir),
-        "1",  # default storage
-        "n",  # skip Neo4j
-        "1",  # search everything
-        "5",  # skip agent integration
-        "n",  # skip indexing
-    ]
-    input_iter = iter(inputs)
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(input_iter, ""))
-
-    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
-    result = run_setup(
-        output_path=str(tmp_path / "config.yaml"),
-        ctx=ctx,
-        deps=WizardDeps(
-            connection_test=lambda *_a, **_k: True,
-            persist_credentials=_fake_persist,
-        ),
+    inputs = _script(
+        tmp_path,
+        endpoint="https://res.services.ai.azure.com",
+        api_key="typed-credential-value",  # pragma: allowlist secret — fake fixture value
+        embed_model="embed-deployment",
+        chat_model="chat-deployment",
     )
+    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, persist=_fake_persist)
 
     assert result is True
     assert recorded == [
-        ("typed-credential-value", "https://res.services.ai.azure.com", "embed-deployment"),
+        ("typed-credential-value", "https://res.services.ai.azure.com", "embed-deployment", "chat-deployment"),
     ], f"collected credentials did not reach the persistence use-case: {recorded}"
 
 
 @pytest.mark.unit
 def test_wizard_connection_test_uses_read_back_persisted_values(tmp_path: Path, monkeypatch) -> None:
-    """#474 defect 3 (half 1): the connection test runs against what was
-    PERSISTED (read back from the bundle), not against in-memory copies."""
-    from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
-
+    """#474 defect 3 (half 1): validation runs against what was PERSISTED
+    (read back from the bundle), not against in-memory copies."""
     bundle = tmp_path / "kairix.env"
 
-    def _fake_persist(_api_key: str, _endpoint: str, _embed_model: str) -> Path:
+    def _fake_persist(_api_key: str, _endpoint: str, _embed_model: str, _llm_model: str) -> Path:
         # Simulates a store that normalised the values on write — the
         # probe must see the STORED values, proving read-back happens.
         bundle.write_text(
@@ -839,44 +809,36 @@ def test_wizard_connection_test_uses_read_back_persisted_values(tmp_path: Path, 
         )
         return bundle
 
-    probe_calls: list[tuple[str, str, str, str]] = []
+    service = FakeSetupService()
+    inputs = _script(tmp_path, endpoint="https://typed.example.invalid", api_key="typed-credential-value")
+    _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, service=service, persist=_fake_persist)
 
-    def _probe(provider: str, endpoint: str, api_key: str, embed_model: str) -> bool:
-        probe_calls.append((provider, endpoint, api_key, embed_model))
-        return True
-
-    doc_dir = tmp_path / "docs"
-    doc_dir.mkdir()
-    inputs = [
-        "1",
-        "1",  # Azure
-        "https://typed.example.invalid",
-        "typed-credential-value",
-        "",
-        "",
-        str(doc_dir),
-        "1",
-        "n",
-        "1",
-        "5",
-        "n",
-    ]
-    input_iter = iter(inputs)
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(input_iter, ""))
-
-    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
-    run_setup(
-        output_path=str(tmp_path / "config.yaml"),
-        ctx=ctx,
-        deps=WizardDeps(connection_test=_probe, persist_credentials=_fake_persist),
-    )
-
-    assert len(probe_calls) == 1
-    _provider, endpoint, api_key, _embed = probe_calls[0]
+    assert len(service.validate_calls) == 1
+    _provider, api_key, endpoint, _deployment = service.validate_calls[0]
     assert api_key == "persisted-credential-value", (  # pragma: allowlist secret — generic fixture value
-        f"probe used the typed value, not the stored one: {probe_calls}"
+        f"validation used the typed value, not the stored one: {service.validate_calls}"
     )
     assert endpoint == "https://persisted.example.invalid"
+
+
+class _ConfigSpyService(FakeSetupService):
+    """FakeSetupService that records whether the config existed at
+    validation time — proves the write-then-validate ordering (#474)."""
+
+    def __init__(self, output: Path, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._output = output
+        self.config_exists_at_validate: bool | None = None
+
+    def validate_provider(
+        self,
+        provider: str,
+        api_key: str,
+        endpoint: str | None,
+        deployment: str | None = None,
+    ) -> Any:
+        self.config_exists_at_validate = self._output.exists()
+        return super().validate_provider(provider, api_key, endpoint, deployment)
 
 
 @pytest.mark.unit
@@ -885,16 +847,12 @@ def test_wizard_connection_test_runs_after_config_write(tmp_path: Path) -> None:
     runs against the just-written config — the config file must already
     exist when the probe fires."""
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
     doc_dir.mkdir()
-    seen: dict[str, bool] = {}
-
-    def _probe(_provider: str, _endpoint: str, _api_key: str, _embed_model: str) -> bool:
-        seen["config_exists_at_probe_time"] = output.exists()
-        return True
+    service = _ConfigSpyService(output)
 
     ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
     result = run_setup(
@@ -902,11 +860,11 @@ def test_wizard_connection_test_runs_after_config_write(tmp_path: Path) -> None:
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=_probe),
+        deps=_deps(tmp_path, service=service),
     )
 
     assert result is True
-    assert seen.get("config_exists_at_probe_time") is True, (
+    assert service.config_exists_at_validate is True, (
         "the connection test fired before the config was written — it cannot "
         "validate the just-written config on a fresh machine in that order"
     )
@@ -917,7 +875,7 @@ def test_wizard_epilogue_lists_next_commands_and_paths(tmp_path: Path, capsys) -
     """#474 defect 4: the epilogue prints the exact next commands and
     where the config + secrets were written."""
     from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
+    from kairix.platform.setup.wizard import run_setup
 
     output = tmp_path / "config.yaml"
     doc_dir = tmp_path / "docs"
@@ -929,7 +887,7 @@ def test_wizard_epilogue_lists_next_commands_and_paths(tmp_path: Path, capsys) -
         ctx=ctx,
         document_path=str(doc_dir),
         preset="general",
-        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+        deps=_deps(tmp_path),
     )
 
     assert result is True
@@ -946,37 +904,13 @@ def test_wizard_epilogue_lists_next_commands_and_paths(tmp_path: Path, capsys) -
 @pytest.mark.unit
 def test_wizard_epilogue_names_secrets_path_when_persisted(tmp_path: Path, monkeypatch, capsys) -> None:
     """When credentials were persisted, the epilogue names the bundle file."""
-    from kairix.platform.setup.prompts import SetupContext
-    from kairix.platform.setup.wizard import WizardDeps, run_setup
-
     bundle = tmp_path / "kairix.env"
-    doc_dir = tmp_path / "docs"
-    doc_dir.mkdir()
-    inputs = [
-        "1",
-        "1",
-        "https://res.services.ai.azure.com",
-        "typed-credential-value",
-        "",
-        "",
-        str(doc_dir),
-        "1",
-        "n",
-        "1",
-        "5",
-        "n",
-    ]
-    input_iter = iter(inputs)
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(input_iter, ""))
-
-    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
-    result = run_setup(
-        output_path=str(tmp_path / "config.yaml"),
-        ctx=ctx,
-        deps=WizardDeps(
-            connection_test=lambda *_a, **_k: True,
-            persist_credentials=lambda *_a: bundle,
-        ),
+    inputs = _script(tmp_path, endpoint="https://res.services.ai.azure.com", api_key="typed-credential-value")
+    result, _ = _interactive_run_setup(
+        tmp_path,
+        monkeypatch,
+        inputs=inputs,
+        persist=lambda *_a: bundle,
     )
 
     assert result is True
@@ -984,102 +918,46 @@ def test_wizard_epilogue_names_secrets_path_when_persisted(tmp_path: Path, monke
     assert str(bundle) in out, f"epilogue does not say where secrets were written:\n{out}"
 
 
+# ---------------------------------------------------------------------------
+# Indexing through the backend (#review-H3)
+# ---------------------------------------------------------------------------
+
+
 @pytest.mark.unit
-def test_probe_llm_connection_surfaces_provider_error_verbatim(capsys) -> None:
-    """#474 defect 3 (half 3): on failure the probe surfaces the
-    underlying provider error verbatim with an F21 affordance — it does
-    NOT blame the operator's credentials for a non-credential failure."""
-    from kairix.platform.setup.wizard import probe_llm_connection
-
-    def _raise_dns(_name: str) -> Any:
-        raise RuntimeError("DNS resolution failed for example-host:443 (errno 8)")
-
-    result = probe_llm_connection(
-        provider="azure_foundry",
-        endpoint="https://res.services.ai.azure.com",
-        api_key="example-credential-value",  # pragma: allowlist secret — generic fixture
-        embed_model="text-embedding-3-large",
-        set_llm_endpoint_fn=lambda _v: None,
-        set_llm_api_key_fn=lambda _v: None,
-        get_provider_fn=_raise_dns,
-    )
-
-    assert result is False
+def test_wizard_indexing_drives_backend_and_reports_done(tmp_path: Path, monkeypatch, capsys) -> None:
+    """Answering 'y' to indexing kicks off the backend's index run and
+    polls it to completion — the same code path the web wizard's
+    indexing screen drives."""
+    service = FakeSetupService(chunks_total=100, chunks_per_tick=50)
+    inputs = _script(tmp_path, index="y")
+    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, service=service)
+    assert result is True
+    assert service.start_index_calls == 1, "wizard did not kick off the backend index run"
     out = capsys.readouterr().out
-    assert "DNS resolution failed for example-host:443 (errno 8)" in out, out
-    assert "fix:" in out
-    assert "check your Azure endpoint and API key" not in out
-    assert "check your credentials" not in out
+    assert "Index built" in out, f"indexing success not reported:\n{out}"
 
 
 @pytest.mark.unit
-def test_probe_llm_connection_happy_path_via_fake_provider() -> None:
-    """A plugin that embeds with full dimensionality and answers chat
-    passes the probe."""
-    from kairix.platform.setup.wizard import probe_llm_connection
-    from tests.fakes import FakeProvider
+def test_wizard_indexing_failure_reports_error_and_continues(tmp_path: Path, monkeypatch, capsys) -> None:
+    """An index-run failure surfaces the backend's operator message and
+    the wizard finishes instead of crashing (#review-H3)."""
+    service = FakeSetupService(index_error="Indexing stopped: provider rejected the request.")
+    inputs = _script(tmp_path, index="y")
+    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, service=service)
+    assert result is True, "an indexing failure must not abort setup"
+    out = capsys.readouterr().out
+    assert "Indexing stopped" in out
+    assert "kairix embed" in out
 
-    fake = FakeProvider(vector=[0.1] * 512, dim=512, chat_reply="ok")
-    result = probe_llm_connection(
-        provider="azure_foundry",
-        endpoint="https://res.services.ai.azure.com",
-        api_key="example-credential-value",  # pragma: allowlist secret — generic fixture
-        embed_model="text-embedding-3-large",
-        set_llm_endpoint_fn=lambda _v: None,
-        set_llm_api_key_fn=lambda _v: None,
-        get_provider_fn=lambda _name: fake,
-    )
+
+@pytest.mark.unit
+def test_wizard_index_prompt_shows_one_time_cost_estimate(tmp_path: Path, monkeypatch, capsys) -> None:
+    """M6 parity: the pre-index estimate is the backend scan's
+    token-priced ONE-TIME cost — not the old per-month guess."""
+    service = FakeSetupService(scan_files=2000, scan_words=1_000_000, scan_cost_usd=0.17)
+    inputs = _script(tmp_path, index="n")
+    result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs, service=service)
     assert result is True
-
-
-@pytest.mark.unit
-def test_probe_llm_connection_rejects_short_embedding_and_empty_chat() -> None:
-    """Degenerate provider responses (tiny vectors, empty chat) fail the probe."""
-    from kairix.platform.setup.wizard import probe_llm_connection
-    from tests.fakes import FakeProvider
-
-    common = {
-        "provider": "azure_foundry",
-        "endpoint": "https://res.services.ai.azure.com",
-        "api_key": "example-credential-value",  # pragma: allowlist secret — generic fixture
-        "embed_model": "text-embedding-3-large",
-        "set_llm_endpoint_fn": lambda _v: None,
-        "set_llm_api_key_fn": lambda _v: None,
-    }
-    short_vec = FakeProvider(vector=[0.1] * 3, dim=3, chat_reply="ok")
-    assert probe_llm_connection(**common, get_provider_fn=lambda _n: short_vec) is False
-
-    silent_chat = FakeProvider(vector=[0.1] * 512, dim=512, chat_reply="")
-    assert probe_llm_connection(**common, get_provider_fn=lambda _n: silent_chat) is False
-
-
-@pytest.mark.unit
-def test_wizard_interactive_indexing_attempted(tmp_path: Path, monkeypatch) -> None:
-    """When the operator says 'y' to indexing, the embed CLI is invoked (lines 426-434).
-
-    Drives the public ``WizardDeps.embed_main`` DI seam — F1-clean. The
-    fake raises so the wizard records the 'Indexing failed' branch.
-    """
-
-    def _raise_runtime():
-        raise RuntimeError("simulated indexing failure")
-
-    inputs = [
-        "1",
-        "1",
-        "https://x.azure.com",
-        "k",
-        "",
-        "",
-        str(tmp_path / "docs"),
-        "1",
-        "n",
-        "1",
-        "5",
-        "y",  # YES, start indexing
-    ]
-    result, _ = _interactive_run_setup(
-        tmp_path, monkeypatch, inputs=inputs, connection_ok=True, embed_main=_raise_runtime
-    )
-    # Wizard caught the indexing failure and continued
-    assert result is True
+    out = capsys.readouterr().out
+    assert "one-time indexing cost: ~$0.17" in out, f"scan-priced estimate missing:\n{out}"
+    assert "monthly" not in out.lower(), "the per-month cost guess must be gone"

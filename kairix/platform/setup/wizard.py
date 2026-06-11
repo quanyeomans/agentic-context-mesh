@@ -1,14 +1,21 @@
 """Interactive setup wizard for first-time kairix configuration.
 
-Walks through LLM credentials, document source, knowledge graph,
-search preset, and initial indexing. Produces a kairix.config.yaml.
+The terminal frontend over the SAME :class:`SetupService` backend the
+web setup wizard drives (#review-H3/#review-M6): provider validation,
+folder scanning, the first index run, and agent connect snippets all
+come from the service, so the two surfaces cannot drift apart. The
+wizard owns only the terminal rendering, the survey steps the web
+wizard doesn't have (preset, storage, knowledge graph, collections),
+and the final config save — a MERGE into the existing config, never a
+whole-file overwrite.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -19,29 +26,63 @@ from kairix.platform.setup.prompts import SetupContext, prompt, prompt_choice, p
 
 logger = logging.getLogger(__name__)
 
-# Old _prompt, _prompt_choice, _prompt_yn removed — replaced by
-# kairix.platform.setup.prompts which supports interactive, non-interactive, and JSON modes.
+
+def _default_setup_service() -> Any:  # pragma: no cover  # lazy-import DI-default delegation
+    """Production seam — the same SetupService backend the web wizard drives.
+
+    Lazy call-time import: ``backends`` imports this module at load time
+    (the canonical config writer + azure plugin split live here), so the
+    dependency back up to the service factory must resolve at call time
+    only — never at module import.
+    """
+    from kairix.platform.setup.service import build_setup_service
+
+    return build_setup_service()
 
 
-def _default_set_llm_endpoint(endpoint: str) -> None:
-    """Production seam — defers `kairix.secrets.set_llm_endpoint` to call time."""
-    from kairix.secrets import set_llm_endpoint
+def _default_provider_names() -> tuple[str, ...]:
+    """Production seam — provider plugin names from the installed registry.
 
-    set_llm_endpoint(endpoint)
+    The same source the web wizard's provider screen renders, so a newly
+    installed provider plugin shows up in both surfaces without a wizard
+    change.
+    """
+    from kairix.providers import EntryPointRegistry
 
-
-def _default_set_llm_api_key(api_key: str) -> None:
-    """Production seam — defers `kairix.secrets.set_llm_api_key` to call time."""
-    from kairix.secrets import set_llm_api_key
-
-    set_llm_api_key(api_key)
+    return tuple(EntryPointRegistry().available())
 
 
-def _default_get_provider(name: str) -> Any:
-    """Production seam — resolve the chosen provider plugin by name."""
-    from kairix.providers import get_provider
+def _default_write_config(updates: Mapping[str, Any], output_path: str | None) -> Path:
+    """Production seam — the web wizard backend's merge-write, shared (#485).
 
-    return get_provider(name)
+    With no explicit ``output_path`` the save lands on the SAME target
+    the web wizard resolves (config overlay when configured, else the
+    runtime config file) with the same merge semantics — re-running
+    ``kairix setup`` keeps ``topology_v2``/``agents`` blocks written by
+    the web wizard or the operator. An explicit ``--output`` keeps a
+    direct file write, but it too reads the existing file and deep-merges
+    rather than overwriting.
+
+    Lazy call-time import (see :func:`_default_setup_service` for why).
+    """
+    from kairix.platform.setup.backends import update_config_file, write_config_updates
+
+    if output_path:
+        return update_config_file(Path(output_path), updates)
+    # pragma rationale: lazy-import DI-default delegation — the no-output
+    # branch resolves KAIRIX_CONFIG_OVERLAY_PATH / KAIRIX_CONFIG_PATH
+    # through kairix.paths (F4); the testable merge logic lives in
+    # kairix.platform.setup.backends.write_config_updates.
+    from kairix.paths import (  # pragma: no cover — lazy-import DI-default delegation (rationale block above)
+        config_overlay_path_override,
+        config_path_override,
+    )
+
+    return write_config_updates(  # pragma: no cover  # lazy-import DI-default delegation
+        updates,
+        overlay_path=config_overlay_path_override(),
+        config_path=config_path_override(),
+    )
 
 
 def _default_hydrate(path: Path) -> int:
@@ -62,6 +103,11 @@ _LEGACY_AZURE_ENDPOINT_FRAGMENTS = ("openai.azure.com", "cognitiveservices.azure
 _FOUNDRY_ENDPOINT_FRAGMENT = "services.ai.azure.com"
 _OPENAI_DEFAULT_ENDPOINT = "https://api.openai.com/v1"
 
+# The two azure plugin names as they appear in the provider registry —
+# picks of either re-route through the endpoint-shape split below.
+_PLUGIN_AZURE_FOUNDRY = "azure_foundry"
+_AZURE_PLUGIN_NAMES = (_PLUGIN_AZURE_FOUNDRY, "azure_legacy")
+
 
 def provider_plugin_name(provider_key: str, endpoint: str) -> str:
     """Map the wizard's provider survey answer to a provider plugin name.
@@ -80,19 +126,35 @@ def provider_plugin_name(provider_key: str, endpoint: str) -> str:
         is_legacy = any(fragment in ep for fragment in _LEGACY_AZURE_ENDPOINT_FRAGMENTS)
         if is_legacy and _FOUNDRY_ENDPOINT_FRAGMENT not in ep:
             return "azure_legacy"
-        return "azure_foundry"
+        return _PLUGIN_AZURE_FOUNDRY
     return "openai"
+
+
+def picked_provider_plugin(picked: str, endpoint: str) -> str:
+    """Map a registry pick + endpoint shape to the plugin name to persist.
+
+    Azure picks re-route through :func:`provider_plugin_name` so a legacy
+    ``<r>.openai.azure.com`` endpoint rides ``azure_legacy`` even when the
+    operator picked ``azure_foundry`` (and vice versa) — the same remap
+    the web wizard backend applies. Every other registry name passes
+    through verbatim.
+    """
+    if picked in _AZURE_PLUGIN_NAMES and endpoint:
+        return provider_plugin_name("azure", endpoint)
+    return picked
 
 
 _LLM_API_KEY_SECRET = "kairix-provider-llm-api-key"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
 _LLM_ENDPOINT_SECRET = "kairix-provider-llm-endpoint"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
 _EMBED_MODEL_SECRET = "kairix-provider-embed-model"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
+_LLM_MODEL_SECRET = "kairix-provider-llm-model"  # noqa: S105 — secret SLOT name, not a value  # pragma: allowlist secret
 
 
 def persist_llm_credentials(
     api_key: str,
     endpoint: str,
     embed_model: str,
+    llm_model: str = "",
     *,
     bundle_path: Path | None = None,
     hydrate_fn: Callable[[Path], int] = _default_hydrate,
@@ -101,10 +163,13 @@ def persist_llm_credentials(
 
     Routes every value through :func:`kairix.secrets.set_secret` — the
     same use-case function behind ``kairix secrets set`` — so the wizard
-    and the CLI share one persistence path (#473/#474). Empty values are
-    skipped. After the last write the bundle is hydrated into the
-    process env (``hydrate_fn`` seam; production = ``refresh_secrets``)
-    so the connection test resolves the stored values.
+    and the CLI share one persistence path (#473/#474). ``llm_model`` is
+    the chat model/deployment answer; it lands in the
+    ``kairix-provider-llm-model`` slot the credentials resolver reads,
+    overriding its built-in default. Empty values are skipped. After the
+    last write the bundle is hydrated into the process env
+    (``hydrate_fn`` seam; production = ``refresh_secrets``) so the
+    connection test resolves the stored values.
 
     Returns the bundle path written to, or ``None`` when every value
     was empty (nothing persisted, nothing hydrated).
@@ -115,6 +180,7 @@ def persist_llm_credentials(
         (_LLM_API_KEY_SECRET, api_key),
         (_LLM_ENDPOINT_SECRET, endpoint),
         (_EMBED_MODEL_SECRET, embed_model),
+        (_LLM_MODEL_SECRET, llm_model),
     )
     path: Path | None = None
     for name, value in pairs:
@@ -123,86 +189,6 @@ def persist_llm_credentials(
     if path is not None:
         hydrate_fn(path)
     return path
-
-
-def probe_llm_connection(
-    provider: str,
-    endpoint: str,
-    api_key: str,
-    embed_model: str,
-    *,
-    set_llm_endpoint_fn: Callable[[str], None] = _default_set_llm_endpoint,
-    set_llm_api_key_fn: Callable[[str], None] = _default_set_llm_api_key,
-    get_provider_fn: Callable[[str], Any] = _default_get_provider,
-) -> bool:
-    """Test LLM connectivity with a single embed + chat call.
-
-    ``provider`` is the chosen provider plugin name (the value the
-    wizard writes to the config's ``provider:`` field); the probe
-    resolves it through the plugin registry directly so a fresh machine
-    doesn't depend on any pre-existing config discovery. Credentials
-    resolve through the canonical loader chain — ``run_setup`` persists
-    and hydrates them before this probe fires.
-
-    Public surface for the wizard's connectivity probe — wired through
-    :class:`WizardDeps` ``connection_test`` so production callers leave
-    the defaults and ``run_setup`` invokes it transparently. Exposed
-    directly so tests can exercise the failure branches without
-    reaching past a ``_``-prefix (F5).
-
-    ``set_llm_endpoint_fn`` / ``set_llm_api_key_fn`` / ``get_provider_fn``
-    are public DI seams — production callers leave the defaults; tests
-    pass fakes (raising or canned) to drive each branch without
-    monkey-patching ``kairix.secrets`` or the plugin registry.
-
-    On failure the underlying provider error is printed VERBATIM with an
-    F21 affordance — a DNS failure, a wrong deployment name, or a
-    missing config must never be reported as "bad credentials".
-
-    ``embed_model`` is accepted for signature symmetry with the wizard's
-    other provider-probe helpers (which DO use it); F19 ack.
-    """
-    _ = embed_model
-    try:
-        if endpoint:
-            set_llm_endpoint_fn(endpoint)
-        if api_key:
-            set_llm_api_key_fn(api_key)
-
-        plugin = get_provider_fn(provider)
-        # Test embed
-        vectors = plugin.embed_batch(["test connection"])
-        if not vectors or not vectors[0] or len(vectors[0]) < 100:
-            print("  Warning: embedding returned fewer dimensions than expected")
-            return False
-        # Test chat
-        response = plugin.chat(
-            [{"role": "user", "content": "Say 'ok' and nothing else."}],
-            max_tokens=5,
-        )
-        if not response:
-            print("  Warning: chat returned empty response")
-            return False
-        return True
-    except Exception as exc:
-        logger.warning("wizard: connection check failed — %s", exc)
-        print(f"  Connection test failed: {exc}")
-        print("  The error above is the root cause — it can be the endpoint, the model")
-        print("  deployment name, or the network; your API key may be fine.")
-        print("  fix: correct the failing value, then store it with: kairix secrets set <name>")
-        print("  next: kairix secrets verify")
-        print("  run: kairix setup")
-        return False
-
-
-def count_documents(path: str) -> tuple[int, float]:
-    """Count markdown files and total size in MB."""
-    p = Path(path)
-    if not p.is_dir():
-        return 0, 0.0
-    files = list(p.rglob("*.md"))
-    total_bytes = sum(f.stat().st_size for f in files if f.is_file())
-    return len(files), total_bytes / (1024 * 1024)
 
 
 def load_template(name: str) -> dict[str, Any]:
@@ -219,30 +205,41 @@ def load_template(name: str) -> dict[str, Any]:
 class WizardDeps:
     """Injectable dependencies for ``run_setup``.
 
-    Replaces the F6-violating ``connection_test_fn=None`` test-only kwarg
-    with a typed dataclass. Production code calls ``run_setup`` without
-    ``deps`` — the default factory wires the real LLM connection probe.
-    Tests construct ``WizardDeps(connection_test=lambda *_a, **_k: True)``
-    and pass it through.
-
-    The field is non-Optional with a ``default_factory`` (per CLAUDE.md
-    F6 guidance) so mypy sees the production callable directly — no
-    ``assert deps.x is not None`` ladder is needed inside the wizard.
+    Production code calls ``run_setup`` without ``deps`` — every field's
+    ``default_factory`` wires the real implementation (non-Optional per
+    CLAUDE.md F6 guidance, so no ``assert deps.x is not None`` ladder is
+    needed inside the wizard). Tests construct
+    ``WizardDeps(setup_service=lambda: FakeSetupService(...))`` and pass
+    it through — the service is the primary seam, mirroring how the web
+    wizard's routes are tested.
     """
 
-    connection_test: Callable[[str, str, str, str], bool] = field(default_factory=lambda: probe_llm_connection)
-    # Public DI seam for the initial-embed run — tests inject a fake to
-    # exercise the "indexing failed" branch in _maybe_run_initial_index
-    # without monkey-patching ``kairix.core.embed.cli.main``. The default
-    # factory lazy-imports the production ``embed_main`` at call time.
-    embed_main: Callable[[], Any] = field(default_factory=lambda: _default_embed_main)
+    # The SetupService backend every side-effecting step rides: provider
+    # validation, folder scanning, the first index run, agent connect
+    # snippets. Tests inject ``lambda: FakeSetupService(...)``.
+    setup_service: Callable[[], Any] = field(default_factory=lambda: _default_setup_service)
     # Public DI seam for credential persistence (#474). The production
-    # default writes the collected (api_key, endpoint, embed_model)
-    # through kairix.secrets.set_secret and hydrates the bundle; tests
-    # inject a recorder so no real bundle file or process env is touched.
-    persist_credentials: Callable[[str, str, str], Path | None] = field(
+    # default writes the collected (api_key, endpoint, embed_model,
+    # chat_model) through kairix.secrets.set_secret and hydrates the
+    # bundle; tests inject a recorder so no real bundle file or process
+    # env is touched.
+    persist_credentials: Callable[[str, str, str, str], Path | None] = field(
         default_factory=lambda: persist_llm_credentials,
     )
+    # Provider plugin names for the Step 1 menu — the installed plugin
+    # registry, same source as the web wizard's provider screen.
+    provider_names: Callable[[], tuple[str, ...]] = field(
+        default_factory=lambda: _default_provider_names,
+    )
+    # The final config save — (updates, explicit_output_path) → written
+    # path. The production default merges into the web wizard's config
+    # target (never a whole-file overwrite).
+    write_config: Callable[[Mapping[str, Any], str | None], Path] = field(
+        default_factory=lambda: _default_write_config,
+    )
+    # Seconds between index-progress polls. Tests pass 0.0 so a scripted
+    # FakeSetupService run finishes without sleeping.
+    index_poll_seconds: float = 0.5
 
 
 _USE_CASE_OPTIONS = [
@@ -254,13 +251,6 @@ _USE_CASE_OPTIONS = [
 ]
 # Maps the use-case index to the matching template preset key.
 _USE_CASE_TO_PRESET = ["general", "technical", "consulting", "general", "general"]
-
-_PROVIDER_OPTIONS = [
-    "Azure OpenAI (recommended for enterprise)",
-    "OpenAI",
-    "Other OpenAI-compatible endpoint",
-]
-_PROVIDER_KEYS = ["azure", "openai", "custom"]
 
 _STORAGE_OPTIONS = [
     "Default location (~/.cache/kairix/) — good for personal use",
@@ -275,14 +265,6 @@ _COLLECTION_OPTIONS = [
     "Skip — I'll configure collections later",
 ]
 
-_AGENT_OPTIONS = [
-    "Claude Desktop / Claude Code (stdio MCP)",
-    "OpenClaw or similar agent platform (stdio MCP)",
-    "Docker / HTTP service (SSE MCP on port 8080)",
-    "Direct Python import (no MCP server needed)",
-    "Skip — I'll configure this later",
-]
-
 
 def _resolve_preset(ctx: SetupContext, preset: str | None) -> str:
     """Step 0: pick the template preset from CLI flag or use-case survey."""
@@ -292,48 +274,48 @@ def _resolve_preset(ctx: SetupContext, preset: str | None) -> str:
     return _USE_CASE_TO_PRESET[idx]
 
 
-def _prompt_llm_credentials(ctx: SetupContext) -> tuple[str, str, str, str]:
-    """Step 1a: gather (provider_key, endpoint, api_key, embed_model)."""
-    provider_idx = prompt_choice(ctx, "Which LLM provider are you using?", _PROVIDER_OPTIONS, default=0)
-    provider_key = _PROVIDER_KEYS[provider_idx]
-    if provider_key == "azure":
-        endpoint = prompt(ctx, "Azure OpenAI endpoint")
-        api_key = prompt(ctx, "API key")
-        embed_model = prompt(ctx, "Embedding model deployment name", "text-embedding-3-large")
-        prompt(ctx, "Chat model deployment name", "gpt-4o-mini")  # future config expansion
-    elif provider_key == "openai":
-        endpoint = ""
-        api_key = prompt(ctx, "OpenAI API key")
-        embed_model = prompt(ctx, "Embedding model", "text-embedding-3-large")
-        prompt(ctx, "Chat model", "gpt-4o-mini")  # future config expansion
-    else:
-        endpoint = prompt(ctx, "Endpoint URL")
-        api_key = prompt(ctx, "API key")
-        embed_model = prompt(ctx, "Embedding model name")
-        prompt(ctx, "Chat model name")  # future config expansion
-    return provider_key, endpoint, api_key, embed_model
+def _prompt_llm_credentials(ctx: SetupContext, provider_names: tuple[str, ...]) -> tuple[str, str, str, str, str]:
+    """Step 1a: pick a provider plugin and collect its credential fields.
+
+    The menu lists the installed provider plugin registry — the same
+    list the web wizard's provider screen renders. Returns
+    ``(picked, endpoint, api_key, embed_model, chat_model)``; the chat
+    model answer is PERSISTED (to the llm-model secret slot), not
+    discarded.
+    """
+    names = list(provider_names) or ["openai"]
+    default_idx = names.index(_PLUGIN_AZURE_FOUNDRY) if _PLUGIN_AZURE_FOUNDRY in names else 0
+    idx = prompt_choice(ctx, "Which LLM provider are you using?", names, default=default_idx)
+    picked = names[idx]
+    endpoint = prompt(ctx, "Endpoint URL (blank for the provider's default)")
+    api_key = prompt(ctx, "API key")
+    embed_model = prompt(ctx, "Embedding model or deployment name", "text-embedding-3-large")
+    chat_model = prompt(ctx, "Chat model or deployment name", "gpt-4o-mini")
+    return picked, endpoint, api_key, embed_model, chat_model
 
 
 def _confirm_llm_connection(
     ctx: SetupContext,
-    deps: WizardDeps,
+    service: Any,
     provider_plugin: str,
     endpoint: str,
     api_key: str,
     embed_model: str,
 ) -> bool:
-    """Test the connection against the just-written config + secrets.
+    """Validate the persisted credentials through the SetupService backend.
 
     Runs AFTER the config write + credential persistence so the probe
-    exercises what the operator will actually run with. On failure the
-    probe has already printed the underlying provider error verbatim —
-    this wrapper must not re-blame the operator's credentials.
+    exercises what the operator will actually run with. The backend's
+    validation message already carries the provider's own error verbatim
+    plus the Azure deployment-name guidance (#484) — print it as-is,
+    never re-blame the operator's credentials.
     """
     print("\n  Testing connection to your provider...")
-    if deps.connection_test(provider_plugin, endpoint, api_key, embed_model):
+    validation = service.validate_provider(provider_plugin, api_key, endpoint or None, embed_model or None)
+    if validation.ok:
         print("  ✓ Connected successfully\n")
         return True
-    print("  ✗ Connection test failed — the provider error above shows the cause.")
+    print(f"  ✗ {validation.error}")
     print("  Your config and stored credentials are saved; nothing you entered is lost.\n")
     # Non-interactive mode is for CI/Docker/scripted bootstrap where the
     # operator can't answer a prompt; default to continuing so a config
@@ -365,22 +347,22 @@ def _read_back_credentials(
     )
 
 
-def _resolve_document_root(ctx: SetupContext, document_path: str | None) -> str | None:
-    """Step 2: resolve & validate the document root. Returns None on missing dir."""
+def _resolve_document_root(ctx: SetupContext, document_path: str | None, service: Any) -> str:
+    """Step 2: resolve the candidate document root.
+
+    Inside a container the prompt pre-fills with the mounted documents
+    folder the backend suggests (#486, stock compose: ``/data/documents``);
+    on bare metal it falls back to ``~/Documents``. Validation —
+    existence, the absolute-path requirement, and the container-aware
+    guidance — happens in the backend's ``scan_folder``, so both setup
+    surfaces reject bad paths with the same words.
+    """
     if document_path:
-        doc_root = os.path.expanduser(document_path)
-    else:
-        doc_root = prompt(
-            ctx,
-            "Where are your documents? (path to folder)",
-            default=str(Path.home() / "Documents"),
-        )
-        doc_root = os.path.expanduser(doc_root)
-    if not os.path.isdir(doc_root):
-        print(f"\n  Error: '{doc_root}' does not exist or is not a directory.")
-        print("  Create the folder first, then re-run setup.\n")
-        return None
-    return doc_root
+        return os.path.expanduser(document_path)
+    hint = service.source_hint()
+    default_root = hint.suggested_path or str(Path.home() / "Documents")
+    doc_root = prompt(ctx, "Where are your documents? (path to folder)", default=default_root)
+    return os.path.expanduser(doc_root)
 
 
 def _resolve_storage_dir(ctx: SetupContext) -> str:
@@ -457,51 +439,20 @@ def _resolve_collections(ctx: SetupContext, preset_key: str) -> dict[str, Any] |
     return None
 
 
-def _print_claude_desktop_instructions() -> None:
-    """Print Claude Desktop / Code MCP wiring instructions."""
-    import platform as _platform
+def _print_agent_instructions(service: Any) -> None:
+    """Step 7: print the MCP endpoint + per-client connect snippets.
 
-    if _platform.system() == "Darwin":
-        config_path_hint = "~/Library/Application Support/Claude/claude_desktop_config.json"
-    else:
-        config_path_hint = "~/.config/Claude/claude_desktop_config.json"
-    print(f"\n  To connect Claude Desktop, add this to:\n  {config_path_hint}\n")
-    print("  {")
-    print('    "mcpServers": {')
-    print('      "kairix": {')
-    print('        "command": "kairix",')
-    print('        "args": ["mcp", "serve"]')
-    print("      }")
-    print("    }")
-    print("  }\n")
-
-
-def _print_sse_instructions() -> None:
-    """Print SSE MCP server (Docker/HTTP) startup hint."""
-    from kairix.platform.onboard.ports import find_available_port, is_port_available
-
-    default_port = 8080
-    if is_port_available(default_port):
-        mcp_port = default_port
-    else:
-        mcp_port = find_available_port(preferred=default_port)
-        print(f"\n  Port {default_port} is in use — suggesting {mcp_port} instead.")
-    print(f"\n  MCP endpoint: http://localhost:{mcp_port}")
-    print(f"  Start with: kairix mcp serve --transport sse --port {mcp_port}\n")
-
-
-def _print_agent_instructions(ctx: SetupContext) -> None:
-    """Step 7: agent-platform integration hints."""
-    idx = prompt_choice(ctx, "Select your agent platform:", _AGENT_OPTIONS)
-    if idx == 0:
-        _print_claude_desktop_instructions()
-    elif idx == 1:
-        print('\n  Run: openclaw mcp set mcp-kairix "kairix mcp serve"\n')
-    elif idx == 2:
-        _print_sse_instructions()
-    elif idx == 3:
-        print("\n  Import directly in Python:")
-        print("  from kairix.agents.mcp.server import tool_search, tool_research\n")
+    Rendered from the backend's ``agent_connect_info()`` — the same
+    source the web wizard's connect screen uses — so the terminal and
+    web surfaces can never drift apart on connect instructions.
+    """
+    info = service.agent_connect_info()
+    print(f"  MCP endpoint: {info.mcp_url}\n")
+    for snippet in info.snippets:
+        print(f"  {snippet.client}:")
+        for line in snippet.config_text.splitlines():
+            print(f"    {line}")
+        print()
 
 
 def _build_full_config(
@@ -519,6 +470,11 @@ def _build_full_config(
     ``provider`` is mandatory in the emitted config — factory
     construction fails without it, which was #474's headline defect
     (the wizard asked for the provider and then didn't write it).
+
+    A Neo4j opt-out writes an explicit ``graph: {enabled: false}``
+    marker rather than omitting the key: the wizard's save is a MERGE
+    into any existing config, so omission would leave a previously
+    enabled graph block switched on.
     """
     retrieval = template.get("retrieval") or {"fusion_strategy": "bm25_primary"}
     full_config: dict[str, Any] = {
@@ -530,6 +486,8 @@ def _build_full_config(
     full_config["retrieval"] = retrieval
     if use_neo4j:
         full_config["graph"] = {"enabled": True, "uri": neo4j_uri}
+    else:
+        full_config["graph"] = {"enabled": False}
     return full_config
 
 
@@ -551,55 +509,59 @@ def write_config_yaml(output_path: str | Path, template_name: str, full_config: 
     return output
 
 
-def _write_config_yaml(output_path: str, template_name: str, full_config: dict[str, Any]) -> Path:
-    """Write the YAML config file, confirm on stdout, and return its path."""
-    output = write_config_yaml(output_path, template_name, full_config)
-    print(f"  Config saved to: {output}\n")
-    return output
+def _run_index_to_completion(service: Any, poll_seconds: float) -> Any:
+    """Kick off the backend's first-index run and poll it to completion.
+
+    The index runs on the backend's own worker (the same code path the
+    web wizard's indexing screen drives) — a lock-contention
+    ``SystemExit`` or a provider failure lands in the returned status's
+    ``error`` field instead of killing the wizard process, which is the
+    #review-H3 crash fix.
+    """
+    service.start_index()
+    status = service.index_status()
+    reported = -1
+    while status.running:
+        if status.chunks_total > 0 and status.chunks_done != reported:
+            print(f"  ... {status.chunks_done:,}/{status.chunks_total:,} chunks embedded")
+            reported = status.chunks_done
+        if poll_seconds > 0:
+            time.sleep(poll_seconds)
+        status = service.index_status()
+    return status
 
 
-def _default_embed_main() -> Any:
-    """Production seam — defers `kairix.core.embed.cli.main` to call time."""
-    from kairix.core.embed.cli import main as embed_main
+def _maybe_run_initial_index(ctx: SetupContext, service: Any, scan: Any, *, poll_seconds: float) -> None:
+    """Offer to run the first index through the backend; never raises.
 
-    return embed_main()
-
-
-def _maybe_run_initial_index(
-    ctx: SetupContext,
-    file_count: int,
-    *,
-    embed_main_fn: Callable[[], Any] = _default_embed_main,
-) -> None:
-    """Offer to run the initial embed pass; never raises.
-
-    ``embed_main_fn`` is the public DI seam — production callers leave
-    the default which lazy-imports ``kairix.core.embed.cli.main``; tests
-    pass a fake to drive the failure-handling branch.
+    The size and cost lines come from the backend's folder scan — the
+    same token-priced ONE-TIME estimate the web wizard shows, replacing
+    the old per-month guess.
     """
     print("Ready to index your documents.\n")
-    if file_count <= 0:
+    if scan.files <= 0:
         print("  No documents found to index. Add documents to your document store")
         print("  and run 'kairix embed' when ready.\n")
         return
-    est_minutes = max(1, file_count // 1000)
-    est_cost = max(1, file_count // 800)
-    print("  Ready to index your documents.")
+    est_minutes = max(1, scan.files // 1000)
     print(f"  Estimated time: ~{est_minutes} minute{'s' if est_minutes > 1 else ''}")
-    print(f"  Estimated monthly LLM cost: ~${est_cost}\n")
+    print(f"  Estimated one-time indexing cost: ~${scan.cost_estimate_usd:.2f}\n")
     # Default off in non-interactive: scripted bootstrap shouldn't trigger
     # a side-effecting embed run; the operator can run 'kairix embed' separately.
     if not prompt_yn(ctx, "Start indexing now?", default=ctx.interactive):
         print("  Skipped. Run 'kairix embed' when you're ready.\n")
         return
     print("\n  Indexing...")
-    try:
-        embed_main_fn()
-        print("  ✓ Index built\n")
-    except Exception as exc:
-        logger.warning("wizard: indexing failed — %s", exc)
-        print("  Indexing failed — check server logs for details.")
+    status = _run_index_to_completion(service, poll_seconds)
+    if status.error:
+        logger.warning("wizard: indexing failed — %s", status.error)
+        print(f"  {status.error}")
         print("  You can run 'kairix embed' manually later.\n")
+    elif status.done:
+        print(f"  ✓ Index built ({status.chunks_done:,} chunks)\n")
+    else:
+        print("  Indexing finished without embedding any chunks.")
+        print("  Run 'kairix embed' to retry once documents are in place.\n")
 
 
 def _run_health_check_summary() -> None:
@@ -658,7 +620,7 @@ def _emit_json_config(real_stdout: Any, full_config: dict[str, Any]) -> None:
 
 
 def run_setup(
-    output_path: str = "kairix.config.yaml",
+    output_path: str | None = None,
     ctx: SetupContext | None = None,
     preset: str | None = None,
     document_path: str | None = None,
@@ -670,15 +632,21 @@ def run_setup(
     and JSON output modes via SetupContext.
 
     Args:
+        output_path: Explicit config file to write. ``None`` — the
+              production default — saves to the same merge target the
+              web wizard uses (config overlay when configured, else the
+              runtime config file).
         deps: Injectable dependencies. Tests construct
-              ``WizardDeps(connection_test=fake)``; production omits the kwarg
-              and the default factory wires ``probe_llm_connection``.
+              ``WizardDeps(setup_service=lambda: FakeSetupService(...))``;
+              production omits the kwarg and the default factories wire
+              the real SetupService backend.
 
     Returns True if setup completed successfully.
     """
     deps = deps if deps is not None else WizardDeps()
     if ctx is None:
         ctx = SetupContext.auto_detect()
+    service = deps.setup_service()
 
     real_stdout = _redirect_for_json_mode(ctx.json_mode)
 
@@ -692,25 +660,27 @@ def run_setup(
     # Step 1: LLM backend — collect, then PERSIST. The connection test
     # runs later, against the just-written config + secrets (#474).
     print("Step 1 of 7: LLM Backend\n")
-    provider_key, endpoint, api_key, embed_model = _prompt_llm_credentials(ctx)
-    if provider_key == "openai" and not endpoint:
+    picked, endpoint, api_key, embed_model, chat_model = _prompt_llm_credentials(ctx, deps.provider_names())
+    if picked == "openai" and not endpoint:
         # OpenAI-direct: the plugin takes the endpoint verbatim, so the
         # persisted value must be the real base URL, not "".
         endpoint = _OPENAI_DEFAULT_ENDPOINT
-    provider_plugin = provider_plugin_name(provider_key, endpoint)
+    provider_plugin = picked_provider_plugin(picked, endpoint)
     secrets_path: Path | None = None
     if api_key:
-        secrets_path = deps.persist_credentials(api_key, endpoint, embed_model)
+        secrets_path = deps.persist_credentials(api_key, endpoint, embed_model, chat_model)
         if secrets_path is not None:
             print(f"  ✓ Credentials stored in {secrets_path} (0600)\n")
 
-    # Step 2: document root
+    # Step 2: document root — validated + sized by the backend's scan,
+    # the same counts and token-priced estimate the web wizard shows.
     print("Step 2 of 7: Document Source\n")
-    doc_root = _resolve_document_root(ctx, document_path)
-    if doc_root is None:
+    doc_root = _resolve_document_root(ctx, document_path, service)
+    scan = service.scan_folder(doc_root)
+    if not scan.ok:
+        print(f"\n  Error: {scan.error}\n")
         return False
-    file_count, size_mb = count_documents(doc_root)
-    print(f"\n  Found: {file_count:,} markdown files ({size_mb:.1f} MB)\n")
+    print(f"\n  Found: {scan.files:,} documents (~{scan.words_estimate:,} words)\n")
 
     # Step 3: storage location
     print("Step 3 of 7: Where to store the search index\n")
@@ -743,7 +713,7 @@ def run_setup(
     # Step 7: agent integration
     print("Step 7 of 7: Agent Integration\n")
     print("  How will your agents connect to kairix?\n")
-    _print_agent_instructions(ctx)
+    _print_agent_instructions(service)
 
     # Build config
     full_config = _build_full_config(
@@ -756,17 +726,20 @@ def run_setup(
         _emit_json_config(real_stdout, full_config)
         return True
 
-    output = _write_config_yaml(output_path, template_name, full_config)
+    # MERGE the wizard's answers into the config target — blocks the
+    # wizard doesn't manage (topology_v2, agents, …) survive a re-run.
+    output = deps.write_config(full_config, output_path)
+    print(f"  Config saved to: {output}\n")
 
     # Connection test — against the just-written config + the secrets
     # read back from the bundle (#474: the probe validates what later
     # commands will actually resolve, and it can pass on a fresh
     # machine because everything it needs is now on disk).
     endpoint_rb, api_key_rb = _read_back_credentials(secrets_path, endpoint, api_key)
-    if not _confirm_llm_connection(ctx, deps, provider_plugin, endpoint_rb, api_key_rb, embed_model):
+    if not _confirm_llm_connection(ctx, service, provider_plugin, endpoint_rb, api_key_rb, embed_model):
         return False
 
-    _maybe_run_initial_index(ctx, file_count, embed_main_fn=deps.embed_main)
+    _maybe_run_initial_index(ctx, service, scan, poll_seconds=deps.index_poll_seconds)
     _run_health_check_summary()
     _print_setup_summary(output, secrets_path)
     return True

@@ -1146,11 +1146,18 @@ class KairixSetupService:
         return SearchPreview(results=_to_preview_hits(rows))
 
     def agent_connect_info(self) -> AgentConnectInfo:
-        """MCP URL + copy-paste snippets, shapes from connecting-agents.md."""
+        """MCP URL + copy-paste snippets, shapes from connecting-agents.md.
+
+        Includes a stdio variant (Claude Desktop's
+        ``claude_desktop_config.json`` shape) so the terminal wizard —
+        which renders these same snippets — covers agents that launch
+        kairix as a subprocess instead of connecting over HTTP.
+        """
         from kairix.paths import mcp_endpoint
 
         url = mcp_endpoint(environ=self._deps.environ)
         claude_code = {"mcpServers": {"kairix": {"type": "http", "url": url}}}
+        claude_desktop = {"mcpServers": {"kairix": {"command": "kairix", "args": ["mcp", "serve"]}}}
         openclaw = {
             "mcp": {
                 "servers": {
@@ -1166,6 +1173,10 @@ class KairixSetupService:
             mcp_url=url,
             snippets=(
                 ConnectSnippet(client="Claude Code (.mcp.json)", config_text=json.dumps(claude_code, indent=2)),
+                ConnectSnippet(
+                    client="Claude Desktop (claude_desktop_config.json, stdio)",
+                    config_text=json.dumps(claude_desktop, indent=2),
+                ),
                 ConnectSnippet(client="OpenClaw (openclaw.json)", config_text=json.dumps(openclaw, indent=2)),
                 ConnectSnippet(client="Generic MCP over HTTP", config_text=url),
             ),

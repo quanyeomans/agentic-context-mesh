@@ -22,3 +22,16 @@ Feature: kairix setup CLI
     And the JSON config "paths.document_root" matches the supplied path
     And the JSON config "retrieval" section is a non-empty object
     And the JSON config names the chosen provider plugin
+
+  Scenario: The terminal setup survives indexing
+    Given a temporary document root with one markdown file
+    When the operator completes terminal setup and chooses to index now
+    Then the setup CLI exits with status 0
+    And the setup output reports that the index was built
+
+  Scenario: Re-running setup keeps existing connector config
+    Given a temporary document root with one markdown file
+    And a config file that already lists a connected source
+    When the operator re-runs the setup CLI against that config file
+    Then the setup CLI exits with status 0
+    And the config file still lists the connected source

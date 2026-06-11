@@ -8,15 +8,24 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps
 
 
-def main(argv: list[str] | None = None, *, ctx: SetupContext | None = None) -> None:
+def main(
+    argv: list[str] | None = None,
+    *,
+    ctx: SetupContext | None = None,
+    deps: WizardDeps | None = None,
+) -> None:
     """Entry point for `kairix setup`.
 
     The ``ctx`` keyword lets BDD/integration tests pass an explicit
     ``SetupContext`` (interactive=False, json_mode=…, deterministic
     state_path) instead of relying on ``SetupContext.auto_detect()``,
     which reads ``$XDG_CONFIG_HOME``, ``$CI``, and stdout TTY state.
+    ``deps`` is the same injection seam ``run_setup`` takes — tests pass
+    ``WizardDeps(setup_service=lambda: FakeSetupService(...))`` to drive
+    the full CLI surface against a scripted backend.
     """
     parser = argparse.ArgumentParser(
         prog="kairix setup",
@@ -24,8 +33,11 @@ def main(argv: list[str] | None = None, *, ctx: SetupContext | None = None) -> N
     )
     parser.add_argument(
         "--output",
-        default="kairix.config.yaml",
-        help="Output config file path (default: kairix.config.yaml)",
+        default=None,
+        help=(
+            "Config file to write (default: the standard kairix config"
+            " location, merged — settings the wizard doesn't manage are kept)"
+        ),
     )
     parser.add_argument(
         "--non-interactive",
@@ -72,5 +84,6 @@ def main(argv: list[str] | None = None, *, ctx: SetupContext | None = None) -> N
         output_path=args.output,
         preset=args.preset,
         document_path=args.path,
+        deps=deps,
     )
     sys.exit(0 if success else 1)

@@ -32,6 +32,7 @@ _DOCUMENTED_FLAGS = (
 class _SetupCliCtx:
     state_path: Path
     document_root: Path | None = None
+    config_path: Path | None = None
     exit_code: int = 0
     stdout: str = ""
     stderr: str = ""
@@ -51,7 +52,24 @@ def _given_doc_root(setup_cli_ctx: _SetupCliCtx, tmp_path: Path) -> None:
     setup_cli_ctx.document_root = docroot
 
 
-def _run_setup(setup_cli_ctx: _SetupCliCtx, args: list[str]) -> None:
+@given("a config file that already lists a connected source")
+def _given_config_with_connected_source(setup_cli_ctx: _SetupCliCtx, tmp_path: Path) -> None:
+    import yaml
+
+    config_path = tmp_path / "kairix.config.yaml"
+    config_path.write_text(
+        yaml.dump(
+            {
+                "topology_v2": {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]},
+                "agents": {"agent-alpha": {"role": "research"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    setup_cli_ctx.config_path = config_path
+
+
+def _run_setup(setup_cli_ctx: _SetupCliCtx, args: list[str], *, ctx: Any = None, deps: Any = None) -> None:
     from kairix.platform.setup.cli import main as setup_main
     from kairix.platform.setup.prompts import SetupContext
 
@@ -59,17 +77,18 @@ def _run_setup(setup_cli_ctx: _SetupCliCtx, args: list[str]) -> None:
     # never reads $XDG_CONFIG_HOME, $CI, or sys.stdout.isatty(). Mirrors
     # how prod main() builds it from --non-interactive / --json, but
     # without env-var I/O.
-    ctx = SetupContext(
-        interactive=False,
-        json_mode="--json" in args,
-        state_path=setup_cli_ctx.state_path,
-    )
+    if ctx is None:
+        ctx = SetupContext(
+            interactive=False,
+            json_mode="--json" in args,
+            state_path=setup_cli_ctx.state_path,
+        )
 
     out = io.StringIO()
     err = io.StringIO()
     try:
         with redirect_stdout(out), redirect_stderr(err):
-            setup_main(args, ctx=ctx)
+            setup_main(args, ctx=ctx, deps=deps)
         setup_cli_ctx.exit_code = 0
     except SystemExit as e:  # NOSONAR — BDD test captures CLI exit code; reraising would defeat the test
         setup_cli_ctx.exit_code = int(e.code) if e.code is not None else 0
@@ -87,6 +106,58 @@ def _run_setup_argv(setup_cli_ctx: _SetupCliCtx, argv: str) -> None:
     if setup_cli_ctx.document_root is not None:
         argv = argv.replace("TMP", str(setup_cli_ctx.document_root))
     _run_setup(setup_cli_ctx, shlex.split(argv))
+
+
+@when("the operator completes terminal setup and chooses to index now")
+def _run_setup_interactive_with_indexing(
+    setup_cli_ctx: _SetupCliCtx, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drive the full interactive flow through the CLI surface, answering
+    yes to indexing — the step that used to crash the wizard."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps
+    from tests.fakes import FakeSetupService
+
+    answers = iter(
+        [
+            "1",  # use case
+            "1",  # provider pick
+            "https://res.services.ai.azure.com",  # endpoint
+            "fake-key-for-tests",  # API key
+            "",  # embed model default
+            "",  # chat model default
+            "1",  # storage: default location
+            "n",  # no knowledge graph
+            "1",  # search everything
+            "y",  # start indexing now
+        ]
+    )
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers, ""))
+
+    deps = WizardDeps(
+        setup_service=lambda: FakeSetupService(),
+        persist_credentials=lambda *_a: tmp_path / "kairix.env",
+        provider_names=lambda: ("azure_foundry", "openai"),
+        index_poll_seconds=0.0,
+    )
+    ctx = SetupContext(interactive=True, json_mode=False, state_path=setup_cli_ctx.state_path)
+    args = ["--output", str(tmp_path / "kairix.config.yaml"), "--path", str(setup_cli_ctx.document_root)]
+    _run_setup(setup_cli_ctx, args, ctx=ctx, deps=deps)
+
+
+@when("the operator re-runs the setup CLI against that config file")
+def _rerun_setup_against_config(setup_cli_ctx: _SetupCliCtx) -> None:
+    assert setup_cli_ctx.config_path is not None, "feature is missing the config-file Given step"
+    args = [
+        "--non-interactive",
+        "--preset",
+        "general",
+        "--path",
+        str(setup_cli_ctx.document_root),
+        "--output",
+        str(setup_cli_ctx.config_path),
+    ]
+    _run_setup(setup_cli_ctx, args)
 
 
 @then(parsers.parse("the setup CLI exits with status {code:d}"))
@@ -148,3 +219,23 @@ def _assert_provider_plugin_named(setup_cli_ctx: _SetupCliCtx) -> None:
     assert provider == "azure_foundry", (
         f"expected provider 'azure_foundry'; got {provider!r} in {setup_cli_ctx.json_output}"
     )
+
+
+@then("the setup output reports that the index was built")
+def _assert_index_built_reported(setup_cli_ctx: _SetupCliCtx) -> None:
+    assert "Index built" in setup_cli_ctx.stdout, f"indexing outcome missing from setup output:\n{setup_cli_ctx.stdout}"
+    assert "Setup complete" in setup_cli_ctx.stdout, f"setup did not finish after indexing:\n{setup_cli_ctx.stdout}"
+
+
+@then("the config file still lists the connected source")
+def _assert_connected_source_survives(setup_cli_ctx: _SetupCliCtx) -> None:
+    import yaml
+
+    assert setup_cli_ctx.config_path is not None
+    config = yaml.safe_load(setup_cli_ctx.config_path.read_text(encoding="utf-8"))
+    assert config.get("topology_v2") == {"connectors": [{"type": "slack", "instance": "agent-alpha-workspace"}]}, (
+        f"the connected source was clobbered by the re-run: {config}"
+    )
+    assert config.get("agents") == {"agent-alpha": {"role": "research"}}, f"agents block clobbered: {config}"
+    # The re-run's own answers landed alongside, proving a merge happened.
+    assert config.get("provider"), f"the re-run wrote nothing: {config}"

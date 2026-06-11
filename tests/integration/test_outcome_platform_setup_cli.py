@@ -115,9 +115,8 @@ def test_setup_cli_subprocess_json_envelope_outcome(tmp_path: Path) -> None:
 
 def test_setup_cli_subprocess_exits_non_zero_on_missing_document_root(tmp_path: Path) -> None:
     """Pointing ``--path`` at a non-existent directory must surface a
-    non-zero exit. The wizard's ``_resolve_document_root`` returns
-    ``None`` for a missing dir, ``run_setup`` returns False, and the
-    CLI exits 1.
+    non-zero exit. The backend folder scan rejects the missing dir,
+    ``run_setup`` returns False, and the CLI exits 1.
 
     Closes the binary-surface error path the unit tests cover only
     in-process.
@@ -145,6 +144,7 @@ def test_setup_cli_subprocess_exits_non_zero_on_missing_document_root(tmp_path: 
     assert proc.returncode == 1, f"expected exit 1, got {proc.returncode}. stderr={proc.stderr!r}"
     # The wizard's narrative chatter (including the error line) is
     # diverted to stderr in JSON mode. Combined output is searched so
-    # the test stays robust to any future re-routing.
+    # the test stays robust to any future re-routing. The wording is the
+    # backend scan's rejection — the same the web wizard shows.
     combined = (proc.stdout or "") + (proc.stderr or "")
-    assert "does not exist" in combined.lower(), f"missing 'does not exist' diagnostic: {combined!r}"
+    assert "not found" in combined.lower(), f"missing folder-not-found diagnostic: {combined!r}"

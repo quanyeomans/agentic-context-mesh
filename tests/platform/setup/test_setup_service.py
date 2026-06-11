@@ -1027,6 +1027,12 @@ def test_agent_connect_info_uses_the_default_endpoint(tmp_path: Path) -> None:
     }
     generic = next(s for s in info.snippets if "Generic MCP" in s.client)
     assert generic.config_text == "http://localhost:8080/mcp"
+    # The stdio variant (terminal-wizard parity — agents that launch
+    # kairix as a subprocess instead of connecting over HTTP).
+    claude_desktop = next(s for s in info.snippets if "Claude Desktop" in s.client)
+    assert json.loads(claude_desktop.config_text) == {
+        "mcpServers": {"kairix": {"command": "kairix", "args": ["mcp", "serve"]}}
+    }
 
 
 def test_agent_connect_info_honours_the_endpoint_override(tmp_path: Path) -> None:
