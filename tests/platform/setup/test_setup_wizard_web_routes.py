@@ -408,7 +408,7 @@ def test_indexing_progress_advances_then_redirects() -> None:
     second = client.get("/setup/indexing/progress")
     assert "100%" in second.text
     assert "Indexing complete" in second.text
-    assert second.headers["HX-Redirect"] == "/setup/first-search"
+    assert second.headers["HX-Redirect"] == "/setup/tour"
 
 
 def test_indexing_progress_with_unknown_total_shows_zero_percent() -> None:
@@ -437,16 +437,34 @@ def test_indexing_screen_polls_the_progress_endpoint() -> None:
 
 
 # ---------------------------------------------------------------------------
-# First search
+# Capability tour (#490)
 # ---------------------------------------------------------------------------
 
+# The five MCP tool names the tour and the done screen surface, exactly
+# as agents call them.
+_TOUR_TOOL_NAMES = ("search", "prep", "memory_write", "brief", "timeline")
 
-def test_first_search_screen_offers_suggested_queries() -> None:
+
+def test_tour_screen_offers_five_runnable_cards_with_tool_names() -> None:
     client = _build_client()
-    response = client.get("/setup/first-search")
+    response = client.get("/setup/tour")
     assert response.status_code == 200
-    assert "Try your first search" in response.text
-    assert "kx-query-suggestion" in response.text
+    assert "See what your agents can do" in response.text
+    assert response.text.count("Run it") == 5
+    for tool in _TOUR_TOOL_NAMES:
+        assert f'<code class="kx-tool-tag">{tool}</code>' in response.text
+    # Long-running cards warn honestly about the wait.
+    assert response.text.count("takes up to") == 2
+    assert "real run against your documents" in response.text
+
+
+def test_first_search_path_redirects_to_the_tour() -> None:
+    client = _build_client()
+    response = client.get("/setup/first-search", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/setup/tour"
+    followed = client.get("/setup/first-search", follow_redirects=True)
+    assert "See what your agents can do" in followed.text
 
 
 def test_search_returns_result_cards() -> None:
@@ -458,6 +476,97 @@ def test_search_returns_result_cards() -> None:
     assert "92% match" in response.text
     assert "notes/kickoff.md" in response.text
     assert service.search_queries == ["project kickoff"]
+
+
+def test_tour_prep_renders_summary_and_sources() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/prep", data={"query": "current projects"})
+    assert response.status_code == 200
+    assert "rollout plan is the main thread" in response.text
+    assert "notes/kickoff.md" in response.text
+    assert "notes/rollout.md" in response.text
+    assert service.tour_prep_queries == ["current projects"]
+
+
+def test_tour_prep_failure_renders_guidance_not_a_trace() -> None:
+    service = FakeSetupService(
+        tour_prep_message="The context pack could not be built. fix: check the provider key. next: run it again.",
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/prep", data={"query": "current projects"})
+    assert response.status_code == 200
+    assert "could not be built" in response.text
+    assert "fix:" in response.text
+    assert "next:" in response.text
+    assert "Traceback" not in response.text
+
+
+def test_tour_remember_renders_the_write_then_find_round_trip() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/remember", data={"content": "Setup finished today."})
+    assert response.status_code == 200
+    assert "Saved, then found by search" in response.text
+    assert "240" in response.text
+    assert "agent-alpha" in response.text
+    assert "notes/kickoff.md" in response.text  # the search leg's hit is shown
+    assert service.tour_remember_contents == ["Setup finished today."]
+
+
+def test_tour_remember_not_yet_found_is_reported_honestly() -> None:
+    service = FakeSetupService(tour_remember_found=False)
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/remember", data={"content": "Setup finished today."})
+    assert "Saved in" in response.text
+    assert "hasn't caught up with it yet" in response.text
+    assert "found by search" not in response.text
+
+
+def test_tour_brief_renders_the_briefing_preview() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/brief")
+    assert response.status_code == 200
+    assert "the rollout kicked off and two decisions landed" in response.text
+    assert service.tour_brief_calls == 1
+
+
+def test_tour_brief_empty_on_a_fresh_store_explains_honestly() -> None:
+    service = FakeSetupService(tour_brief_preview="", tour_brief_next_action="Try tool_search for now.")
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/brief")
+    assert "your brief gets richer as your team works" in response.text
+    assert "recent decisions, open work" in response.text
+    assert "Try tool_search for now." in response.text
+
+
+def test_tour_brief_guidance_message_renders_inside_the_honest_empty_state() -> None:
+    service = FakeSetupService(
+        tour_brief_message="Briefings are written for a named agent. fix: add your agent. next: ask it for a brief.",
+    )
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/brief")
+    assert "your brief gets richer as your team works" in response.text
+    assert "fix: add your agent" in response.text
+
+
+def test_tour_timeline_renders_dated_results() -> None:
+    service = FakeSetupService()
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/timeline", data={"query": "last week"})
+    assert response.status_code == 200
+    assert "2026-06-08" in response.text
+    assert "Sprint planning" in response.text
+    assert "notes/kickoff.md" in response.text
+    assert service.tour_timeline_queries == ["last week"]
+
+
+def test_tour_timeline_empty_corpus_explains_the_fill_in() -> None:
+    service = FakeSetupService(tour_timeline_hits=())
+    client = _build_client(service=service)
+    response = client.post("/setup/tour/timeline", data={"query": "last week"})
+    assert "the timeline fills in" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +643,18 @@ def test_done_screen_celebrates_indexed_chunks() -> None:
     assert "chunks indexed" in response.text
 
 
+def test_done_screen_lists_the_five_mcp_tool_names() -> None:
+    """#490 — the finish screen names each capability's MCP tool so the
+    operator can repeat everything from their agent."""
+    client = _build_client()
+    response = client.get("/setup/done")
+    assert response.status_code == 200
+    for tool in _TOUR_TOOL_NAMES:
+        assert f"<code>{tool}</code>" in response.text
+    # The recap keeps the agent-connect pointer.
+    assert "MCP connection you set up" in response.text
+
+
 # ---------------------------------------------------------------------------
 # Shared layout primitive (#488)
 #
@@ -556,30 +677,34 @@ _SCREEN_GETS: tuple[tuple[str, str, dict[str, str]], ...] = (
     ("key", "/setup/key", {"provider": "anthropic"}),
     ("folder", "/setup/folder", {}),
     ("indexing", "/setup/indexing", {}),
-    ("first-search", "/setup/first-search", {}),
+    ("tour", "/setup/tour", {}),
     ("connect-agent", "/setup/connect-agent", {}),
     ("done", "/setup/done", {}),
 )
 
 # Canonical action-row composition per screen: Back (secondary) leftmost,
-# helpers (outline) in the middle, the primary action rightmost.
+# helpers (outline) in the middle, the primary action rightmost. The
+# tour's five per-card "Run it" buttons live in the content area (each
+# with its own fixed result slot), so its action row stays a lone
+# primary — same shape the first-search screen carried.
 _CANONICAL_ROWS: dict[str, tuple[str, ...]] = {
     "welcome": (_BTN_PRIMARY,),
     "provider": (_BTN_SECONDARY, _BTN_PRIMARY),
     "key": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
     "folder": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
     "indexing": (),
-    "first-search": (_BTN_PRIMARY,),
+    "tour": (_BTN_PRIMARY,),
     "connect-agent": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
     "done": (_BTN_PRIMARY,),
 }
 
-# Per-screen HTMX swap target for screens that render async results.
+# Per-screen HTMX swap target for screens that render async results
+# into the shared banner slot. The tour renders into per-card slots
+# instead — covered by test_tour_cards_own_fixed_result_slots below.
 _ASYNC_TARGETS: dict[str, str] = {
     "key": "validation-result",
     "folder": "scan-result",
     "indexing": "indexing-progress",
-    "first-search": "search-results",
     "connect-agent": "handshake-result",
 }
 
@@ -590,6 +715,20 @@ _PARTIAL_REQUESTS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     ("indexing-progress", "GET", "/setup/indexing/progress", {}),
     ("search", "POST", "/setup/search", {"query": "project kickoff"}),
     ("connect-verify", "POST", "/setup/connect-agent/verify", {}),
+    ("tour-prep", "POST", "/setup/tour/prep", {"query": "current projects"}),
+    ("tour-remember", "POST", "/setup/tour/remember", {"content": "Setup finished today."}),
+    ("tour-brief", "POST", "/setup/tour/brief", {}),
+    ("tour-timeline", "POST", "/setup/tour/timeline", {"query": "last week"}),
+)
+
+# The tour's per-card HTMX swap targets — each must be a fixed-size slot
+# present from first paint so the cards below never move (#488).
+_TOUR_RESULT_TARGETS = (
+    "tour-search-result",
+    "tour-prep-result",
+    "tour-remember-result",
+    "tour-brief-result",
+    "tour-timeline-result",
 )
 
 
@@ -650,6 +789,18 @@ def test_async_result_targets_live_inside_the_banner_slot(path: str, params: dic
         f"{target_markup} must sit inside the banner slot (after {_BANNER_SLOT_ID_MARKUP}, "
         f"before the {_ACTION_ROW_CLASS} row) so the buttons never move when results render"
     )
+
+
+def test_tour_cards_own_fixed_result_slots_above_the_action_row() -> None:
+    """#490 — every tour card's swap target is a fixed-size slot rendered
+    from first paint, before the action row, so nothing shifts when a
+    run finishes (the per-card analogue of the banner-slot invariant)."""
+    html = _screen_html("/setup/tour", {})
+    actions_at = html.index(_ACTION_ROW_CLASS)
+    for target_id in _TOUR_RESULT_TARGETS:
+        target_markup = f'id="{target_id}" class="kx-tour-result"'
+        assert target_markup in html, f"{target_id} must hold its slot with the kx-tour-result class"
+        assert html.index(target_markup) < actions_at
 
 
 @pytest.mark.parametrize(

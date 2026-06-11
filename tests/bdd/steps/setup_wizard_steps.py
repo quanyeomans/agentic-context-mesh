@@ -240,12 +240,12 @@ def _indexing_completes(_wizard_state: dict[str, Any]) -> None:
     raise AssertionError("indexing never completed after 10 progress polls")
 
 
-@then("the wizard advances to the first search")
-def _on_first_search(_wizard_state: dict[str, Any]) -> None:
-    assert _wizard_state["redirect_target"] == "/setup/first-search"
+@then("the wizard advances to the capability tour")
+def _on_tour(_wizard_state: dict[str, Any]) -> None:
+    assert _wizard_state["redirect_target"] == "/setup/tour"
     response = _wizard_state["response"]
     assert response.status_code == 200
-    assert "Try your first search" in response.text
+    assert "See what your agents can do" in response.text
 
 
 @when(parsers.parse('the operator searches for "{query}"'))
@@ -253,7 +253,7 @@ def _search_for(_wizard_state: dict[str, Any], query: str) -> None:
     _wizard_state["response"] = _wizard_state["client"].post("/setup/search", data={"query": query})
 
 
-@then("the first search shows results from their documents")
+@then("the search shows results from their documents")
 def _search_shows_results(_wizard_state: dict[str, Any]) -> None:
     response = _wizard_state["response"]
     assert response.status_code == 200
@@ -298,3 +298,104 @@ def _finish_celebrates(_wizard_state: dict[str, Any]) -> None:
     assert response.status_code == 200
     assert "Your knowledge is ready" in response.text
     assert "chunks indexed" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Capability tour (#490)
+# ---------------------------------------------------------------------------
+
+
+@given("the setup wizard is enabled with a wizard backend over a freshly indexed knowledge store")
+def _wizard_enabled_fresh_store(_wizard_state: dict[str, Any]) -> None:
+    # A fresh knowledge store has nothing to brief on yet — the briefing
+    # sample must explain that honestly rather than fabricate content.
+    _compose_client(_wizard_state, flag_on=True, service=FakeSetupService(tour_brief_preview=""))
+
+
+@when("the operator opens the capability tour")
+def _open_tour(_wizard_state: dict[str, Any]) -> None:
+    _wizard_state["response"] = _wizard_state["client"].get("/setup/tour")
+
+
+@then("the tour offers five sample runs, each naming the tool agents use for it")
+def _tour_offers_five(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert response.text.count("Run it") == 5
+    for tool in ("search", "prep", "memory_write", "brief", "timeline"):
+        assert f'<code class="kx-tool-tag">{tool}</code>' in response.text
+
+
+@when("the operator runs the context pack sample")
+def _run_context_pack(_wizard_state: dict[str, Any]) -> None:
+    _wizard_state["response"] = _wizard_state["client"].post(
+        "/setup/tour/prep",
+        data={"query": "What do my documents say about current projects?"},
+    )
+
+
+@then("the context pack sample shows a summary built from their documents")
+def _context_pack_shows_summary(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "rollout plan is the main thread" in response.text
+    assert "notes/kickoff.md" in response.text
+
+
+@when("the operator runs the remember sample")
+def _run_remember(_wizard_state: dict[str, Any]) -> None:
+    _wizard_state["response"] = _wizard_state["client"].post(
+        "/setup/tour/remember",
+        data={"content": "Setup finished today — this knowledge store is live."},
+    )
+
+
+@then("the remember sample shows the memory was saved and found again by search")
+def _remember_shows_roundtrip(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "Saved, then found by search" in response.text
+    assert "ms" in response.text
+
+
+@when("the operator runs the briefing sample")
+def _run_briefing(_wizard_state: dict[str, Any]) -> None:
+    _wizard_state["response"] = _wizard_state["client"].post("/setup/tour/brief")
+
+
+@then("the briefing sample shows a briefing built from recent activity")
+def _briefing_shows_content(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "the rollout kicked off and two decisions landed" in response.text
+
+
+@then("the briefing sample explains the brief fills in as the team works")
+def _briefing_explains_empty(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "your brief gets richer as your team works" in response.text
+
+
+@when("the operator runs the timeline sample")
+def _run_timeline_sample(_wizard_state: dict[str, Any]) -> None:
+    _wizard_state["response"] = _wizard_state["client"].post(
+        "/setup/tour/timeline",
+        data={"query": "What changed in the last week?"},
+    )
+
+
+@then("the timeline sample shows recent activity with dates")
+def _timeline_shows_dates(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    assert "2026-06-08" in response.text
+    assert "Sprint planning" in response.text
+
+
+@then("the finish screen names the tool agents use for each capability")
+def _finish_names_tools(_wizard_state: dict[str, Any]) -> None:
+    response = _wizard_state["response"]
+    assert response.status_code == 200
+    for tool in ("search", "prep", "memory_write", "brief", "timeline"):
+        assert f"<code>{tool}</code>" in response.text

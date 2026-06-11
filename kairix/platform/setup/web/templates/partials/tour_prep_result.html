@@ -1,0 +1,19 @@
+{% if result.message %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ result.message }}</p>
+</div>
+{% else %}
+<div class="kx-tour-output">
+  <p class="kx-result-excerpt">{{ result.summary }}</p>
+  {% if result.sources %}
+  <p class="kx-muted kx-small">Built from:</p>
+  <div class="kx-model-list">
+    {% for s in result.sources %}
+    <code class="kx-model-tag">{{ s }}</code>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="kx-muted kx-small">As your knowledge store grows, packs like this get richer and more specific.</p>
+  {% endif %}
+</div>
+{% endif %}

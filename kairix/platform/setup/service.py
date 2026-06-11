@@ -137,6 +137,80 @@ class HandshakeResult:
     error: str | None
 
 
+# ---------------------------------------------------------------------------
+# Capability tour (#490) — one frozen DTO per sample run. ``message`` is
+# the shared failure convention: empty on success; on any failure it
+# carries grade-8 guidance (never a stack trace) and the payload fields
+# read empty/falsy.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TourPrep:
+    """Outcome of the tour's context-pack sample run (the ``prep`` tool).
+
+    ``summary`` is the LLM-grounded topic summary (or the use case's own
+    honest "no relevant documents" sentence on a thin corpus); ``sources``
+    names the documents the summary was built from.
+    """
+
+    summary: str
+    sources: tuple[str, ...]
+    message: str
+
+
+@dataclass(frozen=True)
+class TourRememberRoundtrip:
+    """Outcome of the tour's write-then-find sample run (``memory_write``).
+
+    The round trip is the proof: ``saved`` says the memory landed on disk,
+    ``found`` says the search leg surfaced that same file, ``elapsed_ms``
+    is the wall-clock for the whole loop, and ``hits`` are the search
+    results shown so the operator sees the memory come back.
+    """
+
+    saved: bool
+    agent: str
+    path: str
+    found: bool
+    elapsed_ms: int
+    hits: tuple[SearchPreviewHit, ...]
+    message: str
+
+
+@dataclass(frozen=True)
+class TourBrief:
+    """Outcome of the tour's session-briefing sample run (the ``brief`` tool).
+
+    ``preview`` is empty on a fresh knowledge store — the screen renders
+    an honest empty state, never fabricated content. ``next_action``
+    passes through the briefing's own suggestion when it has one.
+    """
+
+    agent: str
+    preview: str
+    next_action: str
+    message: str
+
+
+@dataclass(frozen=True)
+class TourTimelineHit:
+    """One date-aware result row in the tour's timeline sample run."""
+
+    title: str
+    snippet: str
+    source: str
+    date: str
+
+
+@dataclass(frozen=True)
+class TourTimeline:
+    """Outcome of the tour's timeline sample run (the ``timeline`` tool)."""
+
+    hits: tuple[TourTimelineHit, ...]
+    message: str
+
+
 class SetupService(Protocol):
     """Boundary Protocol the web wizard composes against.
 
@@ -201,6 +275,18 @@ class SetupService(Protocol):
     def verify_agent_handshake(self) -> HandshakeResult:
         """Probe the running MCP server and count the tools it offers."""
 
+    def tour_prep(self, query: str) -> TourPrep:
+        """Build a compact context pack on ``query`` (#490 — the ``prep`` tool)."""
+
+    def tour_remember_roundtrip(self, content: str) -> TourRememberRoundtrip:
+        """Save ``content`` as a memory, then find it again with search (#490)."""
+
+    def tour_brief(self) -> TourBrief:
+        """Generate a session briefing from recent activity (#490)."""
+
+    def tour_timeline(self, query: str) -> TourTimeline:
+        """Run date-aware retrieval for ``query`` (#490 — the ``timeline`` tool)."""
+
 
 def build_setup_service(
     *,
@@ -237,5 +323,10 @@ __all__ = [
     "SetupService",
     "SetupStatus",
     "SourceHint",
+    "TourBrief",
+    "TourPrep",
+    "TourRememberRoundtrip",
+    "TourTimeline",
+    "TourTimelineHit",
     "build_setup_service",
 ]

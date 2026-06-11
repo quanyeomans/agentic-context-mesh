@@ -93,4 +93,4 @@ def test_on_branch_index_progress_reaches_done() -> None:
     first = client.get("/setup/indexing/progress")
     assert "HX-Redirect" not in first.headers
     second = client.get("/setup/indexing/progress")
-    assert second.headers["HX-Redirect"] == "/setup/first-search"
+    assert second.headers["HX-Redirect"] == "/setup/tour"

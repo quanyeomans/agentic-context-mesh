@@ -175,6 +175,24 @@ body { margin: 0; font-size: 0.9rem; }
 .kx-btn-reveal { visibility: hidden; }
 .kx-btn-reveal.kx-revealed { visibility: visible; }
 
+/* ── Capability tour (#490) ──────────────────────────── */
+.kx-tour-card { border: 1px solid #e5e7eb; border-radius: var(--kx-radius); padding: 1rem 1.1rem; margin-bottom: 1rem; background: #fff; }
+.kx-tour-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; }
+.kx-tour-head h4 { margin: 0; font-size: 0.95rem; }
+.kx-tool-tag { background: var(--kx-accent-faint); color: var(--kx-accent); border-radius: 4px; padding: 0.1rem 0.45rem; font-size: 0.72rem; font-family: monospace; }
+.kx-tour-when { margin: 0 0 0.6rem; font-size: 0.825rem; color: #374151; line-height: 1.5; }
+.kx-tour-run-row { justify-content: flex-start; }
+/* Fixed-size, scrollable per-card result slot — present from first
+   paint so the cards below never move when a run finishes (#488). */
+.kx-tour-result { height: 8rem; overflow-y: auto; margin-top: 0.5rem; border: 1px dashed #e5e7eb; border-radius: var(--kx-radius); padding: 0.5rem 0.65rem; }
+.kx-tour-result > :first-child { margin-top: 0; }
+.kx-tour-output p:first-child { margin-top: 0; }
+.kx-tour-pre { margin: 0; padding: 0.6rem; background: #f9fafb; border-radius: var(--kx-radius); white-space: pre-wrap; font-size: 0.75rem; }
+.kx-result-date { font-size: 0.75rem; font-weight: 600; color: #374151; }
+/* The done screen's tool recap — left-aligned inside the centred card. */
+.kx-tool-recap { margin: 1.25rem 0; }
+.kx-tool-recap-list { text-align: left; justify-content: center; margin: 0.6rem auto 0; width: fit-content; }
+
 /* ── Connect-agent screen ────────────────────────────── */
 .kx-mcp-url { font-size: 0.95rem; background: var(--kx-accent-faint); padding: 0.35rem 0.6rem; border-radius: var(--kx-radius); }
 .kx-connect-snippet { border: 1px solid #e5e7eb; border-radius: var(--kx-radius); padding: 0.6rem 0.9rem; margin-bottom: 0.6rem; }

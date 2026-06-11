@@ -1,0 +1,26 @@
+{% if result.message %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ result.message }}</p>
+</div>
+{% else %}
+<div class="kx-validation-success">
+  {% if result.found %}
+  <p class="kx-success-msg">Saved, then found by search — round trip in {{ "{:,}".format(result.elapsed_ms) }} ms.</p>
+  {% else %}
+  <p class="kx-success-msg">Saved in {{ "{:,}".format(result.elapsed_ms) }} ms.</p>
+  <p class="kx-muted kx-small">Search hasn't caught up with it yet — try the search card in a few seconds.</p>
+  {% endif %}
+  <p class="kx-muted kx-small">Written for agent <code>{{ result.agent }}</code> at <code>{{ result.path }}</code>.</p>
+  {% if result.found %}
+  <p class="kx-muted kx-small">What search returned:</p>
+  {% for hit in result.hits %}
+  <article class="kx-result-card">
+    <div class="kx-result-header">
+      <span class="kx-result-source">{{ hit.source }}</span>
+    </div>
+    <p class="kx-result-excerpt">{{ hit.snippet }}</p>
+  </article>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endif %}

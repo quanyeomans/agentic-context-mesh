@@ -13,8 +13,19 @@
     <span>chunks indexed</span>
   </div>
 </div>
-<p class="kx-muted">Your agents can now search this knowledge through the MCP connection you set up. Add more sources anytime with the kairix CLI.</p>
+<div class="kx-tool-recap">
+  <p class="kx-muted">Everything from the tour is a tool your agents can call right now,
+    over the MCP connection you set up:</p>
+  <dl class="kx-dl kx-dl-compact kx-tool-recap-list">
+    <dt><code>search</code></dt><dd>find the right documents in plain words</dd>
+    <dt><code>prep</code></dt><dd>get a compact context pack on any topic</dd>
+    <dt><code>memory_write</code></dt><dd>save something new — it's findable seconds later</dd>
+    <dt><code>brief</code></dt><dd>start a session with a summary of recent work</dd>
+    <dt><code>timeline</code></dt><dd>see what happened in any time period</dd>
+  </dl>
+</div>
+<p class="kx-muted">Add more sources anytime with the kairix CLI.</p>
 {% endblock %}
 {% block actions %}
-<a href="/setup/first-search" class="kx-btn-primary">Search your knowledge</a>
+<a href="/setup/tour" class="kx-btn-primary">Run the tour again</a>
 {% endblock %}

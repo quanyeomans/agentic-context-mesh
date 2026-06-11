@@ -1109,3 +1109,389 @@ def test_provider_from_credentials_calls_bare_factories_without_the_seam() -> No
     credentials = Credentials(api_key=_FAKE_KEY, endpoint="", model="m")
     provider = provider_from_credentials("plain", credentials, entry_points=fake_entry_points)
     assert provider is built
+
+
+# ---------------------------------------------------------------------------
+# Capability tour (#490) — tour_prep / tour_remember_roundtrip /
+# tour_brief / tour_timeline passthroughs, driven through _deps(**overrides)
+# with the real use-case value objects scripted at the seams.
+# ---------------------------------------------------------------------------
+
+
+def _prep_output(**overrides: Any) -> Any:
+    from kairix.use_cases.prep import PrepOutput
+
+    base: dict[str, Any] = {"query": "projects", "tier": "l0"}
+    base.update(overrides)
+    return PrepOutput(**base)
+
+
+def _remember_result(**overrides: Any) -> Any:
+    from kairix.use_cases.remember import RememberResult
+
+    base: dict[str, Any] = {
+        "path": "/data/documents/04-Agent-Knowledge/agent-alpha/2026-06-11-setup-finished.md",
+        "agent": "agent-alpha",
+        "kind": "note",
+        "classified_as": "unknown",
+        "indexed": True,
+    }
+    base.update(overrides)
+    return RememberResult(**base)
+
+
+def _brief_output(**overrides: Any) -> Any:
+    from kairix.use_cases.brief import BriefOutput
+
+    base: dict[str, Any] = {"agent": "agent-alpha"}
+    base.update(overrides)
+    return BriefOutput(**base)
+
+
+def _timeline_result(**overrides: Any) -> Any:
+    from kairix.use_cases.timeline import TimelineResult
+
+    base: dict[str, Any] = {
+        "original_query": "last week",
+        "rewritten_query": "last week",
+        "is_temporal": True,
+        "fell_back": False,
+        "time_window": {},
+    }
+    base.update(overrides)
+    return TimelineResult(**base)
+
+
+# --- agent resolution -------------------------------------------------------
+
+
+def test_tour_remember_uses_the_first_configured_agent(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def fake_remember(agent: str, content: str) -> Any:
+        seen.append(agent)
+        return _remember_result(agent=agent)
+
+    service = _service(
+        tmp_path,
+        remember_fn=fake_remember,
+        top_level_config_fn=lambda: {"agents": {"agent-alpha": {}, "agent-beta": {}}},
+    )
+    service.tour_remember_roundtrip("Setup finished today.")
+    assert seen == ["agent-alpha"]
+
+
+def test_tour_remember_reads_the_legacy_list_schema_in_order(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def fake_remember(agent: str, content: str) -> Any:
+        seen.append(agent)
+        return _remember_result(agent=agent)
+
+    service = _service(
+        tmp_path,
+        remember_fn=fake_remember,
+        top_level_config_fn=lambda: {"agents": [{"name": "agent-beta"}, {"name": "agent-alpha"}]},
+    )
+    service.tour_remember_roundtrip("Setup finished today.")
+    assert seen == ["agent-beta"]
+
+
+def test_tour_falls_back_to_the_shared_agent_without_configured_agents(tmp_path: Path) -> None:
+    """A fresh install has no agents: block — the tour rides the legacy
+    shared agent, which the config-driven allowlist always accepts."""
+    seen: list[str] = []
+
+    def fake_remember(agent: str, content: str) -> Any:
+        seen.append(agent)
+        return _remember_result(agent=agent)
+
+    service = _service(tmp_path, remember_fn=fake_remember, top_level_config_fn=lambda: None)
+    service.tour_remember_roundtrip("Setup finished today.")
+    assert seen == ["shared"]
+
+
+def test_tour_agent_ignores_a_malformed_agents_block(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def fake_brief(agent: str) -> Any:
+        seen.append(agent)
+        return _brief_output(agent=agent, content="x", preview="x")
+
+    service = _service(
+        tmp_path,
+        brief_fn=fake_brief,
+        top_level_config_fn=lambda: {"agents": "not-a-block"},
+    )
+    service.tour_brief()
+    assert seen == ["shared"]
+
+
+# --- tour_prep ---------------------------------------------------------------
+
+
+def test_tour_prep_passes_the_query_and_maps_summary_and_sources(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    def fake_prep(query: str) -> Any:
+        seen.append(query)
+        return _prep_output(summary="The rollout is the main thread.", sources=["notes/kickoff.md"])
+
+    service = _service(tmp_path, prep_fn=fake_prep)
+    result = service.tour_prep("current projects")
+    assert seen == ["current projects"]
+    assert result.summary == "The rollout is the main thread."
+    assert result.sources == ("notes/kickoff.md",)
+    assert result.message == ""
+
+
+def test_tour_prep_use_case_error_becomes_guidance_without_the_class_name(tmp_path: Path) -> None:
+    service = _service(tmp_path, prep_fn=lambda query: _prep_output(error="ValueError: provider exploded"))
+    result = service.tour_prep("current projects")
+    assert result.summary == ""
+    assert "fix:" in result.message
+    assert "next:" in result.message
+    assert "ValueError" not in result.message
+
+
+def test_tour_prep_raises_returns_guidance(tmp_path: Path) -> None:
+    def boom(query: str) -> Any:
+        raise RuntimeError("kaput")
+
+    service = _service(tmp_path, prep_fn=boom)
+    result = service.tour_prep("current projects")
+    assert result.message != ""
+    assert "kaput" not in result.message
+
+
+def test_tour_prep_empty_corpus_passes_the_honest_summary_through(tmp_path: Path) -> None:
+    service = _service(
+        tmp_path,
+        prep_fn=lambda query: _prep_output(summary="No relevant documents found for this topic."),
+    )
+    result = service.tour_prep("anything")
+    assert result.summary == "No relevant documents found for this topic."
+    assert result.sources == ()
+    assert result.message == ""
+
+
+# --- tour_remember_roundtrip -------------------------------------------------
+
+
+def test_tour_remember_roundtrip_finds_the_memory_through_the_search_leg(tmp_path: Path) -> None:
+    from tests.fakes import FakeSearchPipeline
+
+    memory_path = "/data/documents/04-Agent-Knowledge/shared/2026-06-11-setup-finished.md"
+    pipeline = FakeSearchPipeline(
+        scripted_results=[
+            FakeSearchPipeline.make_chunk_row(
+                path="04-Agent-Knowledge/shared/2026-06-11-setup-finished.md",
+                title="Setup finished",
+                content="Setup finished today — this knowledge store is live.",
+            ),
+        ],
+    )
+    service = _service(
+        tmp_path,
+        remember_fn=lambda agent, content: _remember_result(path=memory_path, agent=agent),
+        search_pipeline_factory=lambda paths: pipeline,
+        top_level_config_fn=lambda: None,
+    )
+    result = service.tour_remember_roundtrip("Setup finished today.")
+    assert result.saved is True
+    assert result.found is True
+    assert result.path == memory_path
+    assert result.elapsed_ms >= 0
+    assert len(result.hits) == 1
+    assert "2026-06-11-setup-finished.md" in result.hits[0].source
+    # The search leg ran against the memory's own content.
+    assert pipeline.calls and pipeline.calls[0]["query"] == "Setup finished today."
+
+
+def test_tour_remember_roundtrip_reports_not_found_when_search_misses(tmp_path: Path) -> None:
+    from tests.fakes import FakeSearchPipeline
+
+    pipeline = FakeSearchPipeline(
+        scripted_results=[
+            FakeSearchPipeline.make_chunk_row(path="notes/other.md", title="Other", content="unrelated"),
+        ],
+    )
+    service = _service(
+        tmp_path,
+        remember_fn=lambda agent, content: _remember_result(),
+        search_pipeline_factory=lambda paths: pipeline,
+    )
+    result = service.tour_remember_roundtrip("Setup finished today.")
+    assert result.saved is True
+    assert result.found is False
+
+
+def test_tour_remember_invalid_agent_returns_agents_block_guidance(tmp_path: Path) -> None:
+    service = _service(
+        tmp_path,
+        remember_fn=lambda agent, content: _remember_result(path="", error="InvalidAgent: nope"),
+    )
+    result = service.tour_remember_roundtrip("Setup finished today.")
+    assert result.saved is False
+    assert result.found is False
+    assert "agents: section of kairix.config.yaml" in result.message
+    assert "InvalidAgent" not in result.message
+
+
+def test_tour_remember_write_failure_returns_guidance(tmp_path: Path) -> None:
+    service = _service(
+        tmp_path,
+        remember_fn=lambda agent, content: _remember_result(path="", error="WriteFailed: disk full"),
+    )
+    result = service.tour_remember_roundtrip("Setup finished today.")
+    assert result.saved is False
+    assert "fix:" in result.message
+    assert "disk full" not in result.message
+
+
+def test_tour_remember_raises_returns_guidance(tmp_path: Path) -> None:
+    def boom(agent: str, content: str) -> Any:
+        raise OSError("read-only file system")
+
+    service = _service(tmp_path, remember_fn=boom)
+    result = service.tour_remember_roundtrip("Setup finished today.")
+    assert result.saved is False
+    assert "fix:" in result.message
+
+
+# --- tour_brief --------------------------------------------------------------
+
+
+def test_tour_brief_maps_preview_and_next_action(tmp_path: Path) -> None:
+    from kairix.core.health import KairixHealth
+
+    service = _service(
+        tmp_path,
+        brief_fn=lambda agent: _brief_output(
+            agent=agent,
+            content="full briefing",
+            preview="Recent activity: two decisions landed.",
+            health=KairixHealth(next_action="All healthy."),
+        ),
+        top_level_config_fn=lambda: {"agents": {"agent-alpha": {}}},
+    )
+    result = service.tour_brief()
+    assert result.agent == "agent-alpha"
+    assert result.preview == "Recent activity: two decisions landed."
+    assert result.next_action == "All healthy."
+    assert result.message == ""
+
+
+def test_tour_brief_invalid_agent_returns_agents_block_guidance(tmp_path: Path) -> None:
+    """The brief use case only accepts its built-in agent set today — a
+    fresh install's shared fallback is rejected, and the tour renders
+    honest guidance instead of the use case's internal error string."""
+    service = _service(
+        tmp_path,
+        brief_fn=lambda agent: _brief_output(agent=agent, error="InvalidAgent: 'shared'."),
+        top_level_config_fn=lambda: None,
+    )
+    result = service.tour_brief()
+    assert result.preview == ""
+    assert "named agent" in result.message
+    assert "agents: section of kairix.config.yaml" in result.message
+    assert "InvalidAgent" not in result.message
+
+
+def test_tour_brief_empty_content_passes_through_with_next_action(tmp_path: Path) -> None:
+    """Chat offline → the use case returns an empty body plus a health
+    directive; the tour passes both through so the screen stays honest."""
+    from kairix.core.health import KairixHealth
+
+    service = _service(
+        tmp_path,
+        brief_fn=lambda agent: _brief_output(
+            agent=agent,
+            health=KairixHealth(chat="offline", next_action="Use the search tool for now."),
+        ),
+    )
+    result = service.tour_brief()
+    assert result.preview == ""
+    assert result.message == ""
+    assert result.next_action == "Use the search tool for now."
+
+
+def test_tour_brief_other_errors_return_guidance(tmp_path: Path) -> None:
+    service = _service(tmp_path, brief_fn=lambda agent: _brief_output(agent=agent, error="RuntimeError: boom"))
+    result = service.tour_brief()
+    assert "fix:" in result.message
+    assert "RuntimeError" not in result.message
+
+
+def test_tour_brief_raises_returns_guidance(tmp_path: Path) -> None:
+    def boom(agent: str) -> Any:
+        raise TimeoutError("too slow")
+
+    service = _service(tmp_path, brief_fn=boom)
+    result = service.tour_brief()
+    assert "fix:" in result.message
+    assert "too slow" not in result.message
+
+
+# --- tour_timeline -----------------------------------------------------------
+
+
+def test_tour_timeline_maps_hits_with_dates(tmp_path: Path) -> None:
+    from kairix.use_cases.timeline import TimelineHit
+
+    seen: list[str] = []
+
+    def fake_timeline(query: str) -> Any:
+        seen.append(query)
+        return _timeline_result(
+            results=[
+                TimelineHit(
+                    path="daily/2026-06-08.md",
+                    title="Sprint planning",
+                    snippet="rollout starts next sprint",
+                    score=0.9,
+                    date="2026-06-08",
+                ),
+            ],
+        )
+
+    service = _service(tmp_path, timeline_fn=fake_timeline)
+    result = service.tour_timeline("last week")
+    assert seen == ["last week"]
+    assert result.message == ""
+    assert len(result.hits) == 1
+    hit = result.hits[0]
+    assert hit.source == "daily/2026-06-08.md"
+    assert hit.title == "Sprint planning"
+    assert hit.date == "2026-06-08"
+
+
+def test_tour_timeline_caps_the_hit_count(tmp_path: Path) -> None:
+    from kairix.platform.setup.backends import TOUR_TIMELINE_TOP_N
+    from kairix.use_cases.timeline import TimelineHit
+
+    rows = [
+        TimelineHit(path=f"daily/2026-06-{i:02d}.md", title=f"Day {i}", snippet="…", score=0.5)
+        for i in range(1, TOUR_TIMELINE_TOP_N + 4)
+    ]
+    service = _service(tmp_path, timeline_fn=lambda query: _timeline_result(results=rows))
+    result = service.tour_timeline("June")
+    assert len(result.hits) == TOUR_TIMELINE_TOP_N
+
+
+def test_tour_timeline_error_returns_guidance(tmp_path: Path) -> None:
+    service = _service(tmp_path, timeline_fn=lambda query: _timeline_result(error="ValueError: bad date"))
+    result = service.tour_timeline("last week")
+    assert result.hits == ()
+    assert "fix:" in result.message
+    assert "ValueError" not in result.message
+
+
+def test_tour_timeline_raises_returns_guidance(tmp_path: Path) -> None:
+    def boom(query: str) -> Any:
+        raise RuntimeError("kaput")
+
+    service = _service(tmp_path, timeline_fn=boom)
+    result = service.tour_timeline("last week")
+    assert result.hits == ()
+    assert "fix:" in result.message

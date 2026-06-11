@@ -36,6 +36,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,6 +54,11 @@ from kairix.platform.setup.service import (
     SearchPreviewHit,
     SetupStatus,
     SourceHint,
+    TourBrief,
+    TourPrep,
+    TourRememberRoundtrip,
+    TourTimeline,
+    TourTimelineHit,
 )
 from kairix.platform.setup.wizard import provider_plugin_name, write_config_yaml
 
@@ -151,6 +157,43 @@ _INDEX_FIX = (
 _HANDSHAKE_FIX = (
     " fix: start the MCP server with kairix mcp serve and check its log. next: verify the connection again."
 )
+
+# ---------------------------------------------------------------------------
+# Capability tour (#490) — operator-facing failure copy. Grade-8, F21-shaped
+# (fix: / next:), and never a raw exception: the underlying error is logged,
+# the screen gets guidance.
+# ---------------------------------------------------------------------------
+
+#: How many timeline hits the tour shows.
+TOUR_TIMELINE_TOP_N = 5
+
+#: Shared F21 tails/fixes (F17 — one definition site each).
+_TOUR_RETRY_NEXT = " next: run it again."
+_TOUR_PROVIDER_FIX = " fix: check the provider key and endpoint from the provider step."
+_TOUR_AGENTS_BLOCK_FIX = " fix: add your agent's name to the agents: section of kairix.config.yaml."
+
+_TOUR_PREP_FAILED = f"The context pack could not be built.{_TOUR_PROVIDER_FIX}{_TOUR_RETRY_NEXT}"
+_TOUR_BRIEF_FAILED = f"The briefing could not be generated.{_TOUR_PROVIDER_FIX}{_TOUR_RETRY_NEXT}"
+_TOUR_TIMELINE_FAILED = (
+    f"The timeline lookup did not finish. fix: check that indexing finished on the indexing step.{_TOUR_RETRY_NEXT}"
+)
+_TOUR_REMEMBER_FAILED = (
+    "The memory could not be saved. fix: check the documents folder from the source step is writable."
+    f"{_TOUR_RETRY_NEXT}"
+)
+_TOUR_REMEMBER_NO_AGENT = (
+    "The memory could not be saved because this knowledge store has no agent set up to own it."
+    f"{_TOUR_AGENTS_BLOCK_FIX}{_TOUR_RETRY_NEXT}"
+)
+_TOUR_BRIEF_NO_AGENT = (
+    "Briefings are written for a named agent, and this knowledge store doesn't have one set up yet."
+    f"{_TOUR_AGENTS_BLOCK_FIX}"
+    " next: once your agent is connected, ask it for a brief."
+)
+
+#: Prefix of the remember use case's invalid-agent rejection — the one
+#: failure that needs agent-setup guidance instead of retry guidance.
+_INVALID_AGENT_PREFIX = "InvalidAgent"
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +473,36 @@ def _default_tools_count() -> int:  # pragma: no cover  # lazy-import DI-default
     return len(asyncio.run(server.list_tools()))
 
 
+def _default_run_prep(query: str) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.use_cases.prep import run_prep
+
+    return run_prep(query)
+
+
+def _default_remember(agent: str, content: str) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.use_cases.remember import remember
+
+    return remember(agent, content)
+
+
+def _default_run_brief(agent: str) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.use_cases.brief import run_brief
+
+    return run_brief(agent)
+
+
+def _default_run_timeline(query: str) -> Any:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.use_cases.timeline import run_timeline
+
+    return run_timeline(query)
+
+
+def _default_top_level_config() -> dict[str, Any] | None:  # pragma: no cover  # lazy-import DI-default delegation
+    from kairix.paths import load_top_level_config
+
+    return load_top_level_config()
+
+
 @dataclass
 class SetupServiceDeps:
     """Injectable collaborators for :class:`KairixSetupService`.
@@ -487,6 +560,21 @@ class SetupServiceDeps:
     # agent_connect_info — env mapping for KAIRIX_MCP_ENDPOINT resolution.
     # None means os.environ (read inside kairix.paths per F4).
     environ: Mapping[str, str] | None = None
+    # ── Capability tour (#490) — one seam per sample run ──────────────
+    # tour_prep — the prep use case (search + one grounded LLM call).
+    prep_fn: Callable[[str], Any] = field(default_factory=lambda: _default_run_prep)
+    # tour_remember_roundtrip — the remember use case (write + immediate index).
+    remember_fn: Callable[[str, str], Any] = field(default_factory=lambda: _default_remember)
+    # tour_brief — the brief use case (session briefing synthesis).
+    brief_fn: Callable[[str], Any] = field(default_factory=lambda: _default_run_brief)
+    # tour_timeline — the timeline use case (date-aware retrieval).
+    timeline_fn: Callable[[str], Any] = field(default_factory=lambda: _default_run_timeline)
+    # tour agent resolution — parsed top-level config (the agents: block).
+    top_level_config_fn: Callable[[], dict[str, Any] | None] = field(
+        default_factory=lambda: _default_top_level_config,
+    )
+    # tour_remember_roundtrip — monotonic clock for the round-trip timing.
+    clock_fn: Callable[[], float] = field(default_factory=lambda: time.monotonic)
 
 
 class KairixSetupService:
@@ -850,6 +938,114 @@ class KairixSetupService:
             )
         return HandshakeResult(ok=True, tools_count=tools, error=None)
 
+    # ------------------------------------------------------------------
+    # Capability tour (#490) — thin passthroughs to the canonical use
+    # cases. Each catches every failure and returns guidance in the
+    # DTO's ``message`` field (the first_search pattern: the screen
+    # renders copy, never a stack trace).
+    # ------------------------------------------------------------------
+
+    def _tour_agent(self) -> str:
+        """The agent the tour writes/briefs as: first configured, else shared.
+
+        ``tour_agent_from_config`` reads the config's ``agents:`` block
+        in declaration order; an install with no configured agents falls
+        back to the legacy built-in shared agent, which the
+        config-driven allowlist (#472) always accepts — so the
+        write-then-find loop works on a fresh install out of the box.
+        """
+        from kairix.core.classify.router import SHARED_AGENT
+
+        return tour_agent_from_config(self._deps.top_level_config_fn()) or SHARED_AGENT
+
+    def tour_prep(self, query: str) -> TourPrep:
+        """One real ``prep`` run: retrieval + a single grounded LLM call."""
+        try:
+            out = self._deps.prep_fn(query)
+        except Exception:
+            logger.warning("setup wizard: tour prep failed", exc_info=True)
+            return TourPrep(summary="", sources=(), message=_TOUR_PREP_FAILED)
+        error = str(getattr(out, "error", "") or "")
+        if error:
+            logger.warning("setup wizard: tour prep reported an error — %s", error)
+            return TourPrep(summary="", sources=(), message=_TOUR_PREP_FAILED)
+        return TourPrep(
+            summary=str(getattr(out, "summary", "") or ""),
+            sources=tuple(str(s) for s in getattr(out, "sources", ()) or ()),
+            message="",
+        )
+
+    def tour_remember_roundtrip(self, content: str) -> TourRememberRoundtrip:
+        """Write a memory, then run the search leg to show it coming back.
+
+        The find leg goes through :meth:`first_search` — the same
+        passthrough the search card uses — and ``found`` is True only
+        when one of the returned hits is the just-written file, so the
+        screen's "found by search" claim is backed by an actual search.
+        """
+        agent = self._tour_agent()
+        started = self._deps.clock_fn()
+        try:
+            result = self._deps.remember_fn(agent, content)
+        except Exception:
+            logger.warning("setup wizard: tour remember failed", exc_info=True)
+            return _failed_roundtrip(agent, _TOUR_REMEMBER_FAILED)
+        error = str(getattr(result, "error", "") or "")
+        if error:
+            logger.warning("setup wizard: tour remember rejected — %s", error)
+            message = _TOUR_REMEMBER_NO_AGENT if error.startswith(_INVALID_AGENT_PREFIX) else _TOUR_REMEMBER_FAILED
+            return _failed_roundtrip(agent, message)
+        preview = self.first_search(content)
+        elapsed_ms = max(0, int((self._deps.clock_fn() - started) * 1000))
+        memory_name = Path(str(getattr(result, "path", ""))).name
+        found = bool(memory_name) and any(memory_name in hit.source for hit in preview.results)
+        return TourRememberRoundtrip(
+            saved=True,
+            agent=agent,
+            path=str(getattr(result, "path", "")),
+            found=found,
+            elapsed_ms=elapsed_ms,
+            hits=preview.results,
+            message="",
+        )
+
+    def tour_brief(self) -> TourBrief:
+        """One real ``brief`` run; an empty preview is reported honestly."""
+        agent = self._tour_agent()
+        try:
+            out = self._deps.brief_fn(agent)
+        except Exception:
+            logger.warning("setup wizard: tour brief failed", exc_info=True)
+            return TourBrief(agent=agent, preview="", next_action="", message=_TOUR_BRIEF_FAILED)
+        next_action = str(getattr(getattr(out, "health", None), "next_action", "") or "")
+        error = str(getattr(out, "error", "") or "")
+        if error.startswith(_INVALID_AGENT_PREFIX):
+            logger.info("setup wizard: tour brief — no brief-capable agent (tried %r)", agent)
+            return TourBrief(agent=agent, preview="", next_action=next_action, message=_TOUR_BRIEF_NO_AGENT)
+        if error:
+            logger.warning("setup wizard: tour brief reported an error — %s", error)
+            return TourBrief(agent=agent, preview="", next_action=next_action, message=_TOUR_BRIEF_FAILED)
+        return TourBrief(
+            agent=agent,
+            preview=str(getattr(out, "preview", "") or ""),
+            next_action=next_action,
+            message="",
+        )
+
+    def tour_timeline(self, query: str) -> TourTimeline:
+        """One real ``timeline`` run — falls back to plain search inside
+        the use case when nothing in the corpus carries dates yet."""
+        try:
+            out = self._deps.timeline_fn(query)
+        except Exception:
+            logger.warning("setup wizard: tour timeline failed", exc_info=True)
+            return TourTimeline(hits=(), message=_TOUR_TIMELINE_FAILED)
+        error = str(getattr(out, "error", "") or "")
+        if error:
+            logger.warning("setup wizard: tour timeline reported an error — %s", error)
+            return TourTimeline(hits=(), message=_TOUR_TIMELINE_FAILED)
+        return TourTimeline(hits=_to_tour_timeline_hits(getattr(out, "results", ()) or ()), message="")
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -1010,6 +1206,55 @@ def _probe_detail(probe: Mapping[str, Any], key: str) -> str:
     return "no detail reported"
 
 
+def tour_agent_from_config(config: Mapping[str, Any] | None) -> str | None:
+    """First agent name declared in the config ``agents:`` block, or ``None``.
+
+    Mirrors the shape-tolerance of the allowlist reader in
+    :mod:`kairix.core.classify.router` (mapping schema and legacy list
+    schema both parse) but preserves declaration order — the tour runs
+    as the FIRST agent the operator configured, not an arbitrary set
+    member. A missing or malformed block yields ``None`` and the caller
+    falls back to the legacy shared agent.
+    """
+    if not config:
+        return None
+    agents_raw = config.get("agents")
+    if isinstance(agents_raw, Mapping):
+        for name in agents_raw:
+            return str(name)
+    if isinstance(agents_raw, list):
+        for item in agents_raw:
+            if isinstance(item, Mapping) and item.get("name"):
+                return str(item["name"])
+    return None
+
+
+def _failed_roundtrip(agent: str, message: str) -> TourRememberRoundtrip:
+    """A failed write-then-find DTO with guidance attached."""
+    return TourRememberRoundtrip(
+        saved=False,
+        agent=agent,
+        path="",
+        found=False,
+        elapsed_ms=0,
+        hits=(),
+        message=message,
+    )
+
+
+def _to_tour_timeline_hits(rows: Sequence[Any]) -> tuple[TourTimelineHit, ...]:
+    """Map TimelineHit rows onto the tour DTO, top-N."""
+    return tuple(
+        TourTimelineHit(
+            title=str(getattr(row, "title", "") or ""),
+            snippet=str(getattr(row, "snippet", "") or ""),
+            source=str(getattr(row, "path", "") or ""),
+            date=str(getattr(row, "date", "") or ""),
+        )
+        for row in list(rows)[:TOUR_TIMELINE_TOP_N]
+    )
+
+
 __all__ = [
     "DEFAULT_PLUGIN_ENDPOINTS",
     "DEFAULT_VALIDATION_PROBE_MODEL",
@@ -1020,6 +1265,7 @@ __all__ = [
     "SCAN_MAX_FILES",
     "SCAN_SAMPLE_FILES",
     "TOKENS_PER_WORD",
+    "TOUR_TIMELINE_TOP_N",
     "VALIDATION_PROBE_MODELS",
     "KairixSetupService",
     "SetupServiceDeps",
@@ -1029,6 +1275,7 @@ __all__ = [
     "probe_provider_roundtrip",
     "provider_from_credentials",
     "run_first_index",
+    "tour_agent_from_config",
     "update_config_file",
     "write_config_updates",
 ]

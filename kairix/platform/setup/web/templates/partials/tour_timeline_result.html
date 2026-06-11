@@ -1,0 +1,23 @@
+{% if result.message %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ result.message }}</p>
+</div>
+{% elif result.hits %}
+<div class="kx-search-results">
+  {% for hit in result.hits %}
+  <article class="kx-result-card">
+    <div class="kx-result-header">
+      {% if hit.date %}<span class="kx-result-date">{{ hit.date }}</span>{% endif %}
+      <span class="kx-result-source">{{ hit.source }}</span>
+    </div>
+    {% if hit.title %}<h4 class="kx-result-title">{{ hit.title }}</h4>{% endif %}
+    <p class="kx-result-excerpt">{{ hit.snippet }}</p>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="kx-tour-output">
+  <p class="kx-result-excerpt">Nothing in that time range yet — as daily notes, meetings, and
+    decisions land in your knowledge store, the timeline fills in.</p>
+</div>
+{% endif %}

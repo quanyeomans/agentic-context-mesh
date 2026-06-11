@@ -4853,8 +4853,19 @@ class FakeSetupService:
         handshake_ok: bool = True,
         tools_count: int = 12,
         handshake_error: str | None = None,
+        tour_agent: str = "agent-alpha",
+        tour_prep_summary: str = "Across your documents the rollout plan is the main thread, with agent-alpha leading.",
+        tour_prep_sources: tuple[str, ...] = ("notes/kickoff.md", "notes/rollout.md"),
+        tour_prep_message: str = "",
+        tour_remember_found: bool = True,
+        tour_remember_message: str = "",
+        tour_brief_preview: str = "Recent activity: the rollout kicked off and two decisions landed.",
+        tour_brief_next_action: str = "",
+        tour_brief_message: str = "",
+        tour_timeline_hits: tuple[Any, ...] | None = None,
+        tour_timeline_message: str = "",
     ) -> None:
-        from kairix.platform.setup.service import ConnectSnippet, SearchPreviewHit
+        from kairix.platform.setup.service import ConnectSnippet, SearchPreviewHit, TourTimelineHit
 
         self._validate_ok = validate_ok
         self._models = models
@@ -4903,12 +4914,39 @@ class FakeSetupService:
         self._handshake_ok = handshake_ok
         self._tools_count = tools_count
         self._handshake_error = handshake_error
+        # Capability tour knobs (#490).
+        self._tour_agent = tour_agent
+        self._tour_prep_summary = tour_prep_summary
+        self._tour_prep_sources = tour_prep_sources
+        self._tour_prep_message = tour_prep_message
+        self._tour_remember_found = tour_remember_found
+        self._tour_remember_message = tour_remember_message
+        self._tour_brief_preview = tour_brief_preview
+        self._tour_brief_next_action = tour_brief_next_action
+        self._tour_brief_message = tour_brief_message
+        self._tour_timeline_hits = (
+            tour_timeline_hits
+            if tour_timeline_hits is not None
+            else (
+                TourTimelineHit(
+                    title="Sprint planning",
+                    snippet="agent-alpha agreed the rollout starts next sprint…",
+                    source="notes/kickoff.md",
+                    date="2026-06-08",
+                ),
+            )
+        )
+        self._tour_timeline_message = tour_timeline_message
         # Recorders + mutable wizard state.
         self.saved_providers: list[tuple[str, str, str | None, str | None, str | None]] = []
         self.saved_sources: list[str] = []
         self.start_index_calls: int = 0
         self.validate_calls: list[tuple[str, str, str | None, str | None]] = []
         self.search_queries: list[str] = []
+        self.tour_prep_queries: list[str] = []
+        self.tour_remember_contents: list[str] = []
+        self.tour_brief_calls: int = 0
+        self.tour_timeline_queries: list[str] = []
         self._chunks_done = 0
         self._index_running = False
 
@@ -5028,6 +5066,61 @@ class FakeSetupService:
             error = self._handshake_error or "No agent handshake observed on the MCP endpoint."
             return HandshakeResult(ok=False, tools_count=0, error=error)
         return HandshakeResult(ok=True, tools_count=self._tools_count, error=None)
+
+    # ------------------------------------------------------------------
+    # Capability tour (#490)
+    # ------------------------------------------------------------------
+
+    def tour_prep(self, query: str) -> Any:
+        from kairix.platform.setup.service import TourPrep
+
+        self.tour_prep_queries.append(query)
+        if self._tour_prep_message:
+            return TourPrep(summary="", sources=(), message=self._tour_prep_message)
+        return TourPrep(summary=self._tour_prep_summary, sources=tuple(self._tour_prep_sources), message="")
+
+    def tour_remember_roundtrip(self, content: str) -> Any:
+        from kairix.platform.setup.service import TourRememberRoundtrip
+
+        self.tour_remember_contents.append(content)
+        if self._tour_remember_message:
+            return TourRememberRoundtrip(
+                saved=False,
+                agent=self._tour_agent,
+                path="",
+                found=False,
+                elapsed_ms=0,
+                hits=(),
+                message=self._tour_remember_message,
+            )
+        return TourRememberRoundtrip(
+            saved=True,
+            agent=self._tour_agent,
+            path=f"04-Agent-Knowledge/{self._tour_agent}/2026-06-11-setup-finished.md",
+            found=self._tour_remember_found,
+            elapsed_ms=240,
+            hits=tuple(self._search_hits) if self._tour_remember_found else (),
+            message="",
+        )
+
+    def tour_brief(self) -> Any:
+        from kairix.platform.setup.service import TourBrief
+
+        self.tour_brief_calls += 1
+        return TourBrief(
+            agent=self._tour_agent,
+            preview="" if self._tour_brief_message else self._tour_brief_preview,
+            next_action=self._tour_brief_next_action,
+            message=self._tour_brief_message,
+        )
+
+    def tour_timeline(self, query: str) -> Any:
+        from kairix.platform.setup.service import TourTimeline
+
+        self.tour_timeline_queries.append(query)
+        if self._tour_timeline_message:
+            return TourTimeline(hits=(), message=self._tour_timeline_message)
+        return TourTimeline(hits=tuple(self._tour_timeline_hits), message="")
 
 
 class FakeMcpTransportServer:

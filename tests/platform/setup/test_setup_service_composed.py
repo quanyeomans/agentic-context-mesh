@@ -148,7 +148,7 @@ def test_real_service_drives_the_full_wizard_journey(tmp_path: Path) -> None:
     done_response: Any = None
     for _ in range(500):
         progress = client.get("/setup/indexing/progress")
-        if progress.headers.get("HX-Redirect") == "/setup/first-search":
+        if progress.headers.get("HX-Redirect") == "/setup/tour":
             done_response = progress
             break
         time.sleep(0.01)

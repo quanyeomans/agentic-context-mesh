@@ -49,7 +49,10 @@ _PROVIDER_URL = f"{SETUP_PATH_PREFIX}/provider"
 _KEY_URL = f"{SETUP_PATH_PREFIX}/key"
 _FOLDER_URL = f"{SETUP_PATH_PREFIX}/folder"
 _INDEXING_URL = f"{SETUP_PATH_PREFIX}/indexing"
-_FIRST_SEARCH_URL = f"{SETUP_PATH_PREFIX}/first-search"
+# The capability tour (#490) replaced the first-search screen as step 6;
+# the legacy /setup/first-search path stays routable as a redirect so
+# old bookmarks and agent notes keep working.
+_TOUR_URL = f"{SETUP_PATH_PREFIX}/tour"
 
 # Operator token header + the canonical secret identity it must match.
 OPERATOR_TOKEN_HEADER = "X-Kairix-Operator-Token"  # noqa: S105 — HTTP header NAME, not a credential value
@@ -66,7 +69,7 @@ _TPL_PROVIDER = "setup/provider.html"
 _TPL_KEY = "setup/key.html"
 _TPL_FOLDER = "setup/folder.html"
 _TPL_INDEXING = "setup/indexing.html"
-_TPL_FIRST_SEARCH = "setup/first_search.html"
+_TPL_TOUR = "setup/tour.html"
 _TPL_CONNECT_AGENT = "setup/connect_agent.html"
 _TPL_DONE = "setup/done.html"
 _TPL_KEY_VALIDATION = "partials/key_validation_result.html"
@@ -74,6 +77,10 @@ _TPL_FOLDER_SCAN = "partials/folder_scan_result.html"
 _TPL_INDEXING_PROGRESS = "partials/indexing_progress.html"
 _TPL_SEARCH_RESULTS = "partials/search_results.html"
 _TPL_HANDSHAKE = "partials/handshake_result.html"
+_TPL_TOUR_PREP = "partials/tour_prep_result.html"
+_TPL_TOUR_REMEMBER = "partials/tour_remember_result.html"
+_TPL_TOUR_BRIEF = "partials/tour_brief_result.html"
+_TPL_TOUR_TIMELINE = "partials/tour_timeline_result.html"
 
 # Total step-indicator positions rendered by setup/base.html.
 _TOTAL_STEPS = 7
@@ -294,7 +301,7 @@ def _string_fields(form: Mapping[str, Any]) -> dict[str, str]:
 def _progress_headers(status: Any) -> dict[str, str] | None:
     """``HX-Redirect`` header set once indexing finished cleanly."""
     if status.done and not status.error:
-        return {"HX-Redirect": _FIRST_SEARCH_URL}
+        return {"HX-Redirect": _TOUR_URL}
     return None
 
 
@@ -426,13 +433,29 @@ def build_setup_wizard_mount(
         pct = _progress_pct(chunks_done=status.chunks_done, chunks_total=status.chunks_total, done=status.done)
         return _render(_TPL_INDEXING_PROGRESS, {"status": status, "pct": pct}, headers=_progress_headers(status))
 
-    def first_search_screen(_request: Request, _service_: SetupService) -> Response:
-        return _render(_TPL_FIRST_SEARCH, {"step": 6})
+    def tour_screen(_request: Request, _service_: SetupService) -> Response:
+        return _render(_TPL_TOUR, {"step": 6})
+
+    def first_search_redirect(_request: Request, _service_: SetupService) -> Response:
+        # The capability tour (#490) absorbed the first-search step.
+        return RedirectResponse(_TOUR_URL, status_code=303)
 
     def search(fields: dict[str, str], service: SetupService) -> Response:
         query = fields.get("query", "")
         preview = service.first_search(query)
         return _render(_TPL_SEARCH_RESULTS, {"preview": preview, "query": query})
+
+    def tour_prep(fields: dict[str, str], service: SetupService) -> Response:
+        return _render(_TPL_TOUR_PREP, {"result": service.tour_prep(fields.get("query", ""))})
+
+    def tour_remember(fields: dict[str, str], service: SetupService) -> Response:
+        return _render(_TPL_TOUR_REMEMBER, {"result": service.tour_remember_roundtrip(fields.get("content", ""))})
+
+    def tour_brief(_fields: dict[str, str], service: SetupService) -> Response:
+        return _render(_TPL_TOUR_BRIEF, {"result": service.tour_brief()})
+
+    def tour_timeline(fields: dict[str, str], service: SetupService) -> Response:
+        return _render(_TPL_TOUR_TIMELINE, {"result": service.tour_timeline(fields.get("query", ""))})
 
     def connect_agent_screen(_request: Request, service: SetupService) -> Response:
         info = service.agent_connect_info()
@@ -457,7 +480,12 @@ def build_setup_wizard_mount(
         Route("/folder/scan", _form_endpoint(folder_scan), methods=["POST"]),
         Route("/indexing", _endpoint(indexing_screen), methods=["GET"]),
         Route("/indexing/progress", _endpoint(indexing_progress), methods=["GET"]),
-        Route("/first-search", _endpoint(first_search_screen), methods=["GET"]),
+        Route("/tour", _endpoint(tour_screen), methods=["GET"]),
+        Route("/tour/prep", _form_endpoint(tour_prep), methods=["POST"]),
+        Route("/tour/remember", _form_endpoint(tour_remember), methods=["POST"]),
+        Route("/tour/brief", _form_endpoint(tour_brief), methods=["POST"]),
+        Route("/tour/timeline", _form_endpoint(tour_timeline), methods=["POST"]),
+        Route("/first-search", _endpoint(first_search_redirect), methods=["GET"]),
         Route("/search", _form_endpoint(search), methods=["POST"]),
         Route("/connect-agent", _endpoint(connect_agent_screen), methods=["GET"]),
         Route("/connect-agent/verify", _form_endpoint(connect_agent_verify), methods=["POST"]),
