@@ -14,8 +14,8 @@ Collect these inputs before you write any files. If the user has not provided on
 
 | Field | What | Where it goes |
 |-------|------|---------------|
-| `KAIRIX_LLM_API_KEY` | Anthropic / OpenAI / Azure key | secrets file (Path B: `~/.config/kairix/secrets/kairix.env`; Path A: `/run/secrets/kairix.env`) |
-| `KAIRIX_LLM_ENDPOINT` | Provider endpoint URL (Azure / OpenAI-compatible / LiteLLM) | secrets file |
+| `KAIRIX_PROVIDER_LLM_API_KEY` | Anthropic / OpenAI / Azure key | secrets file (Path B: `~/.config/kairix/secrets/kairix.env`; Path A: `/run/secrets/kairix.env`) |
+| `KAIRIX_PROVIDER_LLM_ENDPOINT` | Provider endpoint URL (Azure / OpenAI-compatible / LiteLLM) | secrets file |
 | `provider` | Plugin name (`azure_foundry` / `openai` / `azure_legacy` / `bedrock` / `ollama` / `litellm_proxy` / `anthropic`) | `kairix.config.yaml` top-level |
 | document root path | Where the user's markdown / text corpus lives | `paths.document_root` in `kairix.config.yaml` |
 
@@ -26,7 +26,7 @@ Collect these inputs before you write any files. If the user has not provided on
 | `CONNECTOR_M365_TENANT_ID` | AAD tenant GUID | enabling `connector_sharepoint` |
 | `CONNECTOR_M365_CLIENT_ID` | App registration client id | enabling `connector_sharepoint` |
 | `CONNECTOR_M365_CLIENT_SECRET` | App registration client secret | enabling `connector_sharepoint` |
-| `KAIRIX_NEO4J_PASSWORD` (or `kairix-neo4j-password` in KV) | Neo4j bolt password | **required for production** — entity boost, multi-hop, alias resolution, briefing synthesis all need it |
+| `KAIRIX_INFRA_NEO4J_PASSWORD` (or `kairix-infra-neo4j-password` in KV) | Neo4j bolt password | **required for production** — entity boost, multi-hop, alias resolution, briefing synthesis all need it |
 | SharePoint drive id | Graph drive identifier per site | enabling `connector_sharepoint` |
 | `CONNECTOR_SLACK_BOT_TOKEN` | Workspace bot token (`xoxb-...`) | enabling `connector_slack` |
 | `CONNECTOR_SLACK_APP_TOKEN` | App-level token (`xapp-...`) for Socket Mode live events | enabling `connector_slack` with live events |
@@ -35,9 +35,9 @@ Collect these inputs before you write any files. If the user has not provided on
 | `CONNECTOR_GITHUB_WEBHOOK_SECRET` | Random 32-byte hex for webhook HMAC validation | enabling `connector_github` live events |
 | `CONNECTOR_NOTION_TOKEN` | Notion internal-integration token (`secret_...`) | enabling `connector_notion` |
 
-Neo4j is part of every production deployment — the bundled `docker-compose.yml` ships a Neo4j sidecar by default. Provision its password (`kairix-neo4j-password` in KV; `KAIRIX_NEO4J_PASSWORD` in the bundle env file) before standing kairix up. For non-Docker installs, follow the [`docs/operations/runbooks/how-to-install-neo4j.md`](../operations/runbooks/how-to-install-neo4j.md) recipe and use the password it sets.
+Neo4j is part of every production deployment — the bundled `docker-compose.yml` ships a Neo4j sidecar by default. Provision its password (`kairix-infra-neo4j-password` in KV; `KAIRIX_INFRA_NEO4J_PASSWORD` in the bundle env file) before standing kairix up. For non-Docker installs, run `bash scripts/install-neo4j.sh` from the repo and use the password it sets.
 
-For the SharePoint drive id, ask the user to run `kairix sharepoint list-sites` after the basic install and pick the drive id by name. The connector flag stays off until the operator pins a drive id — this keeps a missing id from silently selecting the wrong drive.
+For the SharePoint drive id, look it up via the Microsoft Graph API (the same app registration's credentials work): `GET https://graph.microsoft.com/v1.0/sites?search=<site-name>` to find the site id, then `GET https://graph.microsoft.com/v1.0/sites/<site-id>/drives` to list its drives — the `id` field of the drive you want is the value for the config. A guided in-CLI discovery flow ("pick your site from a list") is planned — see [`docs/architecture/guided-configuration.md`](../architecture/guided-configuration.md). The connector flag stays off until the operator pins a drive id — this keeps a missing id from silently selecting the wrong drive.
 
 For Notion, after the integration token is set, the user has to share each page or database with the integration via the Notion UI before it can be indexed. The integration name appears in Notion's share dialog.
 
@@ -171,13 +171,13 @@ Every secret kairix may resolve. **The name in this column is the literal value 
 
 | KV secret name (= logical name) | Required for | Notes |
 |---|---|---|
-| `kairix-llm-api-key` | LLM calls (briefing, classification, fact extraction) | Always required |
-| `kairix-llm-endpoint` | Same | Required for Azure / OpenAI-compatible / LiteLLM providers |
-| `kairix-llm-model` | Same | Optional override; default model varies per provider |
-| `kairix-embed-api-key` | Embedding calls | Falls back to `kairix-llm-api-key` if absent |
-| `kairix-embed-endpoint` | Same | Falls back to `kairix-llm-endpoint` if absent |
-| `kairix-embed-model` | Same | Optional override |
-| `kairix-neo4j-password` | Neo4j connection (entity boost, multi-hop, alias resolution) | **Required for production** — see §"Neo4j is required" below |
+| `kairix-provider-llm-api-key` | LLM calls (briefing, classification, fact extraction) | Always required |
+| `kairix-provider-llm-endpoint` | Same | Required for Azure / OpenAI-compatible / LiteLLM providers |
+| `kairix-provider-llm-model` | Same | Optional override; default model varies per provider |
+| `kairix-provider-embed-api-key` | Embedding calls | Falls back to `kairix-provider-llm-api-key` if absent |
+| `kairix-provider-embed-endpoint` | Same | Falls back to `kairix-provider-llm-endpoint` if absent |
+| `kairix-provider-embed-model` | Same | Optional override |
+| `kairix-infra-neo4j-password` | Neo4j connection (entity boost, multi-hop, alias resolution) | **Required for production** — see §"Neo4j is required" below |
 | `connector-m365-tenant-id` | SharePoint / m365-email-headers / m365-calendar connectors | Shared across all three M365 connectors |
 | `connector-m365-client-id` | Same | One app registration covers all three |
 | `connector-m365-client-secret` | Same | Required when any M365 connector flag is on |
@@ -198,7 +198,7 @@ After the secrets are in KV and the runtime has Get permission:
 
 ```bash
 # Inside the kairix container or on the VM where kairix runs:
-az keyvault secret show --vault-name $KAIRIX_KV_NAME --name kairix-llm-api-key --query value -o tsv
+az keyvault secret show --vault-name $KAIRIX_KV_NAME --name kairix-provider-llm-api-key --query value -o tsv
 # Should print the value. If it errors, the runtime identity is missing Get permission.
 
 kairix onboard check
@@ -213,9 +213,9 @@ Write the bundle file as `KEY=VALUE` lines:
 
 ```
 # /run/secrets/kairix.env (Docker) OR ~/.config/kairix/secrets/kairix.env (pip)
-KAIRIX_LLM_API_KEY=<value>
-KAIRIX_LLM_ENDPOINT=<value>
-KAIRIX_NEO4J_PASSWORD=<value>          # production-required (see §"Neo4j is required")
+KAIRIX_PROVIDER_LLM_API_KEY=<value>
+KAIRIX_PROVIDER_LLM_ENDPOINT=<value>
+KAIRIX_INFRA_NEO4J_PASSWORD=<value>    # production-required (see §"Neo4j is required")
 ```
 
 All connector secrets are in the env-var map (`CONNECTOR_M365_*`, `CONNECTOR_SLACK_*`, `CONNECTOR_GITHUB_*`, `CONNECTOR_NOTION_TOKEN`) — they resolve from the bundle file like the core secrets do.
@@ -232,9 +232,9 @@ Set permissions on the bundle: `chmod 600 ~/.config/kairix/secrets/kairix.env`.
 
 ### Neo4j is required
 
-Kairix's onboard check reports Neo4j as "optional" because the system loads without it. In practice every production deployment runs Neo4j — without it, entity boost, multi-hop search, alias resolution, and briefing synthesis all degrade significantly on entity-heavy corpora (which most operator vaults are). The bundled `docker-compose.yml` ships a Neo4j sidecar by default for this reason.
+Kairix loads without Neo4j, but every production deployment should run it — without Neo4j, entity boost, multi-hop search, alias resolution, and briefing synthesis all degrade significantly on entity-heavy corpora (which most operator knowledge stores are). The bundled `docker-compose.yml` ships a Neo4j sidecar by default for this reason.
 
-Provision `kairix-neo4j-password` in KV (or `KAIRIX_NEO4J_PASSWORD` in the bundle file). The Neo4j connection URL is set via `KAIRIX_NEO4J_URI` (defaults to `bolt://neo4j:7687` for the bundled compose layout).
+Provision `kairix-infra-neo4j-password` in KV (or `KAIRIX_INFRA_NEO4J_PASSWORD` in the bundle file). The Neo4j connection URL is set via `KAIRIX_NEO4J_URI` (defaults to `bolt://neo4j:7687` for the bundled compose layout).
 
 If you genuinely want a Neo4j-less deployment, expect: search still returns hits, but entity-named queries drop ~5–10 NDCG points, multi-hop queries return single-hop results only, and the briefing pipeline can't resolve entities across documents. Confirm with the user that this trade-off is intentional before skipping Neo4j.
 
@@ -252,13 +252,13 @@ kairix onboard check --json
 
 This emits a structured envelope: `{passed, total, fully_passed, failures: [{check, detail, remediation}]}`. Exit code is 0 only when `fully_passed: true`.
 
-Three new checks landed in v2026.5.24a1:
+Checks worth knowing about for connector setups:
 
-- `topology_v2_config_valid` — when `topology_v2_config` is on, parses + cross-references the `topology_v2:` block
-- `topology_v2_cc_pairs_registered` — when `topology_v2_config` is on, confirms each declared cc_pair has a row in `topology_cc_pairs` (run `kairix worker apply-config` to materialise them)
+- `topology_v2_config_valid` — parses + cross-references the `topology_v2:` block
+- `topology_v2_cc_pairs_registered` — confirms each declared cc_pair has a row in `topology_cc_pairs` (declared cc_pairs register on worker startup — restart the worker after editing the YAML)
 - `sharepoint_credentials_loaded` — when `connector_sharepoint` is on, confirms the three M365 secrets resolve
 
-Every check that is gated by a feature flag reports `ok=true` with a `"skipped — <flag> flag is OFF"` detail when the flag is off — so a fresh install sees the check exists but doesn't block.
+Checks gated by a feature flag (`sharepoint_credentials_loaded`, `maintenance_loop_ticking`) report `ok=true` with a `"skipped — <flag> flag is OFF"` detail when the flag is off — so a fresh install sees the check exists but doesn't block.
 
 ### 4.2 `kairix worker preflight --json`
 
@@ -292,15 +292,15 @@ Every failure path you might hit, with the exact next command. Mirrors the F21 a
 
 | Failure | What it means | Fix |
 |---------|---------------|-----|
-| `secrets_loaded` fails: "LLM credentials missing" | `KAIRIX_LLM_API_KEY` or `KAIRIX_LLM_ENDPOINT` not in env / secrets file | fix: write both keys to the secrets file at the path reported in `detail`. next: re-run `kairix onboard check secrets_loaded`. |
+| `secrets_loaded` fails: "LLM credentials missing" | The LLM key + endpoint are not in env / secrets file | fix: write both keys (see §3) to the secrets file at the path reported in `detail`. next: run `kairix secrets verify`, then re-run `kairix onboard check`. |
 | `document_root_configured` fails: "directory does not exist" | The path you wrote into `paths.document_root` (or `KAIRIX_DOCUMENT_ROOT`) does not exist on disk | fix: `mkdir -p <path>` OR correct the path in `kairix.config.yaml`. next: re-run `kairix onboard check`. |
 | `vector_search_working` fails: "vec_failed=True" | The provider plugin can't reach its endpoint (auth, network, or quota) | fix: `kairix probe-config` reports the specific reason; usually a stale API key. next: rotate the key, re-write the secrets file, re-run. |
 | `topology_v2_config_valid` fails: "<N> cross-reference failure(s)" | A `cc_pair` references a connector / credential that wasn't declared; or a `collection.source` / `scope_profile.entry` references a missing cc_pair / collection | fix: open `kairix.config.yaml` and add the missing entries OR remove the dangling reference. next: run `kairix config validate`. |
-| `topology_v2_cc_pairs_registered` fails: "<N> declared cc_pair(s) not registered" | You wrote new cc_pairs to the YAML but didn't apply them to the DB | fix: `kairix worker apply-config`. next: re-run `kairix onboard check`. |
+| `topology_v2_cc_pairs_registered` fails: "<N> declared cc_pair(s) not registered" | You wrote new cc_pairs to the YAML but the worker hasn't re-applied them | fix: restart the worker (`docker compose restart kairix` or restart your `kairix worker run` process) — declared cc_pairs register on startup. next: re-run `kairix onboard check`. |
 | `sharepoint_credentials_loaded` fails: "<N> SharePoint secret(s) unresolved" | The three M365 secrets are not in env / secrets file / Key Vault | fix: write `CONNECTOR_M365_TENANT_ID` / `CONNECTOR_M365_CLIENT_ID` / `CONNECTOR_M365_CLIENT_SECRET` to the secrets file. next: re-run `kairix onboard check sharepoint_credentials_loaded`. |
 | `neo4j_reachable` fails: "client unavailable" | Neo4j is not installed OR `KAIRIX_NEO4J_URI` is wrong | fix: install via `bash scripts/install-neo4j.sh` OR run the bundled compose (Neo4j is a sidecar in `docker-compose.yml`); set `KAIRIX_NEO4J_URI=bolt://localhost:7687` (pip) or `bolt://neo4j:7687` (compose). next: re-run `kairix onboard check`. Neo4j is required for production — entity boost, multi-hop, and briefing all rely on it. |
 | `mcp_service` fails: "not configured" | No MCP consumer harness has kairix registered | fix: add kairix to the user's `claude_desktop_config.json` OR `~/.openclaw/openclaw.json` (the failure detail names the exact paths). next: re-run `kairix onboard check`. |
-| `kairix worker preflight` fails: "schema version mismatch" | The SQLite DB was created by an older kairix version | fix: `kairix migrate up` (the migration is automatic on next embed; this verb forces it now). next: re-run `kairix worker preflight`. |
+| `kairix worker preflight` fails: "schema version mismatch" | The SQLite DB was created by an older kairix version | fix: restart the worker — schema migrations apply automatically at boot (`kairix.core.db.schema`). next: re-run `kairix worker preflight`. |
 | `kairix benchmark run reflib` fails: gate below threshold | Embed pipeline incomplete or provider mis-tuned | fix: `kairix embed --limit 100` to confirm embed works end-to-end; if green, run `kairix embed` for a full pass; then re-benchmark. next: if the gate still fails, escalate to the user — likely a model-quality issue requiring a provider swap. |
 
 ---
@@ -313,7 +313,7 @@ Do NOT auto-decide these. Stop, surface the question, and wait for the user's an
 - **Permission grants.** AAD app registration consent (Sites.Read.All, Files.Read.All) is a high-trust action; the user — not you — should click through the consent screen.
 - **Any spend.** `kairix embed` against a large corpus costs real money (~$0.50-1.00 per 1000 documents on text-embedding-3-large). Confirm before kicking off a full backfill.
 - **Cutover flag flips on a soaked deployment.** If kairix has been running with `topology_v2_config: false` and the user asks you to flip it to true on a corpus the team is already using, capture a pre-flip baseline (`scripts/cutover/capture_baseline.py`) and tell the user to read `docs/architecture/feature-flag-architecture.md` §"Cutover protocol" before the flip.
-- **Destructive verbs.** `kairix entity purge`, `kairix worker reset-cursor`, `kairix migrate down`, anything that drops data. Always confirm.
+- **Destructive verbs.** `kairix entity purge`, `kairix cc-pair delete`, `kairix uninstall --no-keep-data`, anything that drops data. Always confirm.
 - **Production deployments.** Setup on a shared VM / production host: confirm with the user that the host is the intended target before running.
 
 ---

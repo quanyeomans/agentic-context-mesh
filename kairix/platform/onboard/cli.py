@@ -306,8 +306,8 @@ def _print_check_summary(*, passed: int, total: int, all_ok: bool) -> None:
     print()
     print("  Fix the ✗ items above, then re-run: kairix onboard check")
     print()
-    print("  Common first fix: run scripts/deploy-vm.sh to install the wrapper")
-    print("  and ensure kairix is on PATH for agent exec contexts.")
+    print("  Common first fix: kairix init verify — it reports any missing")
+    print("  install element with a remediation.")
 
 
 # ---------------------------------------------------------------------------

@@ -313,6 +313,10 @@ def test_human_output_summary_line_when_some_fail(monkeypatch, capsys) -> None:
 
     assert "1/2 checks passed" in captured.out
     assert "1 failed" in captured.out
+    # GH #473 — the failure footer points at `kairix init verify`; the old
+    # footer named scripts/deploy-vm.sh, which does not exist.
+    assert "Common first fix: kairix init verify" in captured.out
+    assert "deploy-vm.sh" not in captured.out
 
 
 @pytest.mark.unit

@@ -50,25 +50,26 @@ Or add to your `openclaw.json` manually:
 
 ---
 
-## Docker (SSE transport)
+## Docker (HTTP transport)
 
-When running kairix in Docker, the MCP server uses SSE (Server-Sent Events) over HTTP:
+When running kairix in Docker, the MCP server speaks streamable HTTP — the recommended transport:
 
 ```bash
 docker compose up -d
-# MCP endpoint: http://localhost:8080
+# MCP endpoint: http://localhost:8080/mcp
 ```
 
-Any MCP client that supports SSE can connect to `http://localhost:8080`.
+Any MCP client that supports streamable HTTP can connect to `http://localhost:8080/mcp`. Older clients that only speak SSE can use the legacy `http://localhost:8080/sse` endpoint — it is still served by default.
 
-For Claude Desktop with a Docker-hosted kairix, you can use the SSE transport:
+If host port 8080 is already taken (a reverse proxy, another service), set `KAIRIX_HOST_PORT` in your `.env` before `docker compose up -d` and use that port in the URL instead.
+
+For Claude Desktop / Claude Code with a Docker-hosted kairix:
 
 ```json
 {
   "mcpServers": {
     "kairix": {
-      "transport": "sse",
-      "url": "http://localhost:8080"
+      "url": "http://localhost:8080/mcp"
     }
   }
 }
@@ -98,7 +99,7 @@ If your VS Code setup supports MCP servers, add to your settings:
 If your agent runs in the same Python process, you can call kairix tools directly without an MCP server:
 
 ```python
-from kairix.mcp.server import tool_search, tool_research, tool_entity
+from kairix.agents.mcp.server import tool_search, tool_research, tool_entity
 
 # Simple search
 result = tool_search(query="engineering standards", agent="my-agent")
@@ -122,11 +123,11 @@ This is the fastest integration path — no server, no protocol overhead.
 
 For any framework that supports tool calling (LangChain, CrewAI, AutoGen, etc.):
 
-1. **Option A: MCP client** — connect to `kairix mcp serve` via stdio or SSE
-2. **Option B: Direct import** — import `tool_search`, `tool_research`, etc. from `kairix.mcp.server`
-3. **Option C: HTTP wrapper** — run `kairix mcp serve --transport sse --port 8080` and call via HTTP
+1. **Option A: MCP client** — connect to `kairix mcp serve` via stdio or streamable HTTP
+2. **Option B: Direct import** — import `tool_search`, `tool_research`, etc. from `kairix.agents.mcp.server`
+3. **Option C: HTTP wrapper** — run `kairix mcp serve --transport http --port 8080` and call `http://localhost:8080/mcp`
 
-All three options expose the same 6 tools with identical parameters and return values. See [mcp-tools.md](mcp-tools.md) for the full tool reference.
+All three options expose the same 35 tools with identical parameters and return values. See [mcp-tools.md](../user-guide/mcp-tools.md) for the full tool reference.
 
 ---
 
@@ -134,8 +135,8 @@ All three options expose the same 6 tools with identical parameters and return v
 
 | Problem | Fix |
 |---------|-----|
-| "kairix: command not found" | Run `pip install kairix` or check your PATH |
+| "kairix: command not found" | Run `pipx install kairix-agentic-knowledge-mgt` (or `pip install kairix-agentic-knowledge-mgt` inside a venv) or check your PATH |
 | Tools don't appear in Claude Desktop | Restart Claude Desktop after editing config |
-| SSE connection refused | Check `docker compose ps` — kairix service must be running |
+| Connection refused on `/mcp` (or legacy `/sse`) | Check `docker compose ps` — kairix service must be running |
 | "No results" on first search | Run `kairix embed` to index your documents first |
 | Slow responses | First search embeds the query (~500ms). Subsequent searches use cached index. |
