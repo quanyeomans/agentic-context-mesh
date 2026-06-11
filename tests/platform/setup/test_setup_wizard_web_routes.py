@@ -443,16 +443,19 @@ def test_default_secrets_seam_serves_loopback_without_config() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Backend-missing honesty + cold-start bypass
+# Production default factory + cold-start bypass
 # ---------------------------------------------------------------------------
 
 
-def test_flag_on_without_backend_fails_honestly_at_first_request() -> None:
+def test_flag_on_with_production_default_factory_serves_the_wizard() -> None:
+    """The production ``build_setup_service`` backend now exists — the
+    default factory must serve the welcome screen, not the pre-backend
+    503 stub. Construction is side-effect free (seams resolve lazily on
+    first use), so rendering the welcome screen touches nothing real."""
     client = _build_client(use_default_factory=True)
     response = client.get("/setup", follow_redirects=True)
-    assert response.status_code == 503
-    assert "flip setup_wizard_web off" in response.text
-    assert "kairix features status" in response.text
+    assert response.status_code == 200
+    assert "Welcome to kairix" in response.text
 
 
 def test_wizard_bypasses_the_cold_start_gate() -> None:

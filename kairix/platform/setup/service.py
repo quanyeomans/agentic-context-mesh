@@ -3,23 +3,27 @@
 The flag-gated web wizard (``kairix.platform.setup.web``) renders
 screens against this Protocol only; it never talks to providers,
 connectors, or the index directly. The production implementation
-(:func:`build_setup_service`) is delivered separately — until it
-lands, the stub below raises a structured error so a flag-ON
-deployment without the backend fails honestly at first request
-instead of half-working.
+lives in :mod:`kairix.platform.setup.backends` and is constructed
+through :func:`build_setup_service`.
 
 Frozen dataclasses per F42 — every Protocol method returns a value
 object, never ``dict[str, Any]``.
 
 Tests drive the wizard with ``FakeSetupService`` from ``tests/fakes.py``
 via the ``setup_service_factory`` seam on
-:func:`kairix.agents.mcp.transport.build_mcp_app`.
+:func:`kairix.agents.mcp.transport.build_mcp_app`. Tests of the real
+backend construct through :func:`build_setup_service` with fakes
+injected at the seams below the service (``SetupServiceDeps``).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from kairix.paths import KairixPaths
+    from kairix.platform.setup.backends import SetupServiceDeps
 
 
 @dataclass(frozen=True)
@@ -42,7 +46,14 @@ class ProviderValidation:
 
 @dataclass(frozen=True)
 class FolderScan:
-    """Outcome of scanning a candidate source folder before indexing."""
+    """Outcome of scanning a candidate source folder before indexing.
+
+    ``words_estimate`` is sample-based: the scan reads at most 200 files
+    and extrapolates the per-file average across the full count, and file
+    counting stops at 50,000 so a mistyped path can't hang the wizard.
+    ``cost_estimate_usd`` prices the extrapolated tokens at the embed
+    model's list price — an estimate for the operator, not a bill.
+    """
 
     ok: bool
     files: int
@@ -143,18 +154,27 @@ class SetupService(Protocol):
         """Probe the running MCP server and count the tools it offers."""
 
 
-def build_setup_service() -> SetupService:
+def build_setup_service(
+    *,
+    paths: KairixPaths | None = None,
+    deps: SetupServiceDeps | None = None,
+) -> SetupService:
     """Production factory for the wizard backend.
 
-    The backend implementation ships separately from the wizard UI.
-    Until it lands, a flag-ON deployment reaching this stub gets a
-    structured failure instead of a half-working wizard.
+    Args:
+        paths: Optional :class:`kairix.paths.KairixPaths` pinning the
+            index database (and therefore the embed lockfile and the
+            search pipeline) to an explicit location. ``None`` —
+            the production default — resolves through the platform
+            chain (env vars, config file, platform defaults).
+        deps: Optional :class:`kairix.platform.setup.backends.SetupServiceDeps`
+            carrying the injectable collaborators. ``None`` wires the
+            real implementations; tests pass fakes for the seams a
+            scenario drives.
     """
-    raise NotImplementedError(
-        "Setup wizard backend is not available in this build. "
-        "fix: this build predates the wizard backend; flip setup_wizard_web off. "
-        "next: kairix features status"
-    )
+    from kairix.platform.setup.backends import KairixSetupService
+
+    return KairixSetupService(paths=paths, deps=deps)
 
 
 __all__ = [
