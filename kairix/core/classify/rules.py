@@ -17,7 +17,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from kairix.core.classify.router import VALID_AGENTS
+from kairix.core.classify.router import (
+    VALID_AGENTS,  # noqa: F401 — re-exported for backwards-compat; judge/CLI historically imported it from here
+    invalid_agent_message,
+    valid_agents,
+)
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -181,6 +185,8 @@ def classify_by_rules(content: str) -> tuple[str | None, str]:
 def classify_content(
     content: str,
     agent: str = "shared",
+    *,
+    config: dict[str, object] | None = None,
 ) -> ClassificationResult:
     """
     Classify content using rule-based classifier.
@@ -191,15 +197,20 @@ def classify_content(
     Args:
         content: Raw content string to classify.
         agent:   Agent name for path resolution (used by router). Must be a valid agent.
+        config:  Optional parsed ``kairix.config.yaml`` dict — injection seam
+                 for the config-driven agent allowlist (#472). Production
+                 callers leave it ``None`` and the loader reads the file.
 
     Returns:
         ClassificationResult.
 
     Raises:
-        ValueError: If agent is not in VALID_AGENTS.
+        ValueError: If agent is not in :func:`valid_agents` (configured
+                    ``agents:`` block union the legacy built-in set).
     """
-    if agent not in VALID_AGENTS:
-        raise ValueError(f"Invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)}")
+    allowed = valid_agents(config)
+    if agent not in allowed:
+        raise ValueError(invalid_agent_message(agent, allowed))
 
     from kairix.core.classify.router import resolve_target_path
 
@@ -217,7 +228,7 @@ def classify_content(
 
     # Resolve path
     try:
-        target_path = resolve_target_path(agent, classification_type)
+        target_path = resolve_target_path(agent, classification_type, config=config)
     except (ValueError, KeyError) as e:
         target_path = ""
         reason = f"{reason} (path resolution failed: {e})"

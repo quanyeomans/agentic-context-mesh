@@ -1040,6 +1040,19 @@ def tool_caches_status() -> dict[str, Any]:
     return envelope
 
 
+def tool_remember(agent: str, content: str, kind: str = "note") -> dict[str, Any]:
+    """Real MCP binding for ``kairix remember`` (#472) — F25 affordance.
+
+    Delegates to :func:`kairix.agents.mcp.tools.memory_write.tool_memory_write`,
+    which calls the SAME :func:`kairix.use_cases.remember.remember` use case
+    the CLI uses. Agents see this capability registered under the tool name
+    ``memory_write`` in :func:`build_server`.
+    """
+    from kairix.agents.mcp.tools.memory_write import tool_memory_write
+
+    return tool_memory_write(agent=agent, content=content, kind=kind)
+
+
 # ---------------------------------------------------------------------------
 # Operator-only capability stubs — agents that call these get a structured
 # escalation envelope naming the exact CLI command to ask their admin to run.
@@ -1573,6 +1586,13 @@ def tool_capabilities() -> dict[str, Any]:
                 mcp_tool="facts_about",
                 cli="kairix facts about",
                 category=CAP_CATEGORY_RETRIEVAL,
+            ),
+            # #472 — agent-facing memory write (same use case as `kairix remember`)
+            _cap(
+                name="memory_write",
+                mcp_tool="memory_write",
+                cli="kairix remember",
+                category=CAP_CATEGORY_KNOWLEDGE_WRITE,
             ),
             # Knowledge-write operator-only
             _cap(
@@ -2221,6 +2241,28 @@ def _register_operator_and_ingest_tools(server: Any) -> None:
         from kairix.agents.mcp.tools.facts_about import tool_facts_about
 
         return tool_facts_about(entity=entity, namespace=namespace, top_k=top_k)
+
+    # #472 — the agent-facing memory-write verb. Same use case as the
+    # ``kairix remember`` CLI (kairix/use_cases/remember.py).
+    # F45-feature: tests/bdd/features/mcp_memory_write.feature
+    @server.tool(
+        description=(
+            "Save a memory for an agent. Writes the text as a dated markdown file in the "
+            "agent's memory folder inside the knowledge store, and indexes it right away so "
+            "search finds it in this same session. Use it whenever the agent learns something "
+            "worth keeping: a note (default), a decision, or a fact — pass kind to say which. "
+            "The agent name must be in the team's agent configuration."
+        )
+    )
+    @async_tool_handler
+    @warm_gate
+    def memory_write(
+        agent: str,
+        content: str,
+        kind: str = "note",
+    ) -> dict[str, Any]:
+        """Write a memory for an agent into the knowledge store."""
+        return tool_remember(agent=agent, content=content, kind=kind)
 
 
 def build_server(

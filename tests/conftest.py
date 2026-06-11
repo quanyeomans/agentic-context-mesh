@@ -139,6 +139,9 @@ pytest_plugins = [
     # Plan B-parity Week 5 Stream A — MCP ingest + recall tools.
     "tests.bdd.steps.mcp_ingest_chat_steps",
     "tests.bdd.steps.mcp_facts_about_steps",
+    # #472 — agent memory-write surfaces (kairix remember + memory_write MCP tool).
+    "tests.bdd.steps.remember_cli_steps",
+    "tests.bdd.steps.mcp_memory_write_steps",
     # P5 unified benchmark contract — quality + perf + stability lenses
     # wired through the canonical kairix benchmark run surface. Soak +
     # concurrent scenarios are tagged @pytest.mark.skip in the loader

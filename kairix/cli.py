@@ -32,6 +32,7 @@ Subcommands:
   worker      Background worker: run loop, pause/resume operator controls
   config      Validate kairix.config.yaml against the schema and print errors
   ingest-chat Ingest JSONL chat transcripts into the document + fact stores
+  remember    Save a memory for an agent (dated markdown file + immediate BM25 index)
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
   dead-letter Operator triage view over the connector_deadletter table (status)
   secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
@@ -112,6 +113,8 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "worker": ("kairix.worker_cli", "main", True),
     "config": ("kairix.core.search.config_validator", "main", True),
     "ingest-chat": ("kairix.use_cases.ingest_chat", "main", True),
+    # F45-feature: tests/bdd/features/cli_remember.feature
+    "remember": ("kairix.use_cases.remember", "main", True),
     "features": ("kairix.core.features.cli", "main", True),
     "cc-pair": ("kairix.core.connectors.cc_pair_cli", "main", True),
     "dead-letter": ("kairix.dead_letter_cli", "main", True),

@@ -21,21 +21,84 @@ from typing import Any
 def _resolve_classifiers(
     rule_classifier: Callable[..., Any] | None,
     llm_classifier: Callable[..., Any] | None,
+    config: dict[str, object] | None,
 ) -> tuple[Callable[..., Any], Callable[..., Any]]:
     """Resolve the production rule + LLM classifier when callers leave them ``None``.
 
     Lazy-imports keep heavy modules out of the CLI's import path until
-    actually invoked; tests inject fakes through the public seams.
+    actually invoked; tests inject fakes through the public seams. The
+    production closures thread ``config`` into the classifiers so the
+    config-driven agent allowlist (#472) sees the same ``agents:`` block
+    the CLI validated against; injected fakes keep their historical
+    ``(content, *, agent)`` contract untouched.
     """
     if rule_classifier is None:
         from kairix.core.classify.rules import classify_content
 
-        rule_classifier = classify_content
+        def _rule(content: str, *, agent: str) -> Any:
+            return classify_content(content, agent=agent, config=config)
+
+        rule_classifier = _rule
     if llm_classifier is None:
         from kairix.core.classify.judge import classify_with_llm
 
-        llm_classifier = classify_with_llm
+        def _llm(content: str, *, agent: str) -> Any:
+            return classify_with_llm(content, agent=agent, config=config)
+
+        llm_classifier = _llm
     return rule_classifier, llm_classifier
+
+
+def _load_config() -> dict[str, object] | None:
+    """Production config loader — parsed ``kairix.config.yaml`` or None."""
+    from kairix.paths import load_top_level_config
+
+    return load_top_level_config()
+
+
+def _resolve_content(parsed_content: str | None) -> str:
+    """Return the content to classify — argument or piped stdin.
+
+    Exits 1 with an actionable stderr line when neither is supplied.
+    """
+    if parsed_content is not None:
+        return parsed_content
+    if not sys.stdin.isatty():
+        return sys.stdin.read()
+    print(
+        "Error: no content provided (pass as argument or pipe via stdin)",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def _validate_agent(agent: str, config: dict[str, object] | None) -> None:
+    """Exit 1 with the F21-actionable message when ``agent`` is not allowed.
+
+    The allowlist is configured ``agents:`` names + the legacy built-in
+    set (#472) — same rule the classifiers enforce downstream.
+    """
+    from kairix.core.classify.router import invalid_agent_message, valid_agents
+
+    allowed = valid_agents(config)
+    if agent not in allowed:
+        print(
+            f"Error: {invalid_agent_message(agent, allowed)}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _emit_classification_failure(detail: str, exc: Exception) -> None:
+    """Log the failure detail and exit 1 with the masked JSON error envelope."""
+    print(
+        json.dumps({"error": "Classification failed — check server logs"}),
+        file=sys.stderr,
+    )
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning("classify CLI %s: %s", detail, exc)
+    sys.exit(1)
 
 
 def main(
@@ -43,6 +106,7 @@ def main(
     *,
     rule_classifier: Callable[..., Any] | None = None,
     llm_classifier: Callable[..., Any] | None = None,
+    config: dict[str, object] | None = None,
 ) -> None:
     """Entry point for `kairix classify`.
 
@@ -50,10 +114,14 @@ def main(
     tests that want to drive error paths through the public CLI surface
     instead of monkey-patching the classify-module imports. Production
     callers leave them at ``None`` and the CLI lazy-imports the real ones.
+    ``config`` is the parsed ``kairix.config.yaml`` seam for the
+    config-driven agent allowlist (#472) — production callers leave it
+    ``None`` and the CLI loads the operator's file.
     """
     import argparse
 
-    rule_classifier, llm_classifier = _resolve_classifiers(rule_classifier, llm_classifier)
+    effective_config = config if config is not None else _load_config()
+    rule_classifier, llm_classifier = _resolve_classifiers(rule_classifier, llm_classifier, effective_config)
 
     if args is None:
         args = sys.argv[2:]  # strip 'kairix classify'
@@ -82,31 +150,13 @@ def main(
 
     parsed = parser.parse_args(args)
 
-    # Get content
-    content = parsed.content
-    if content is None:
-        if not sys.stdin.isatty():
-            content = sys.stdin.read()
-        else:
-            print(
-                "Error: no content provided (pass as argument or pipe via stdin)",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
+    content = _resolve_content(parsed.content)
     agent = parsed.agent
     use_llm = not parsed.no_llm
 
     # Run classification
     try:
-        from kairix.core.classify.rules import VALID_AGENTS
-
-        if agent not in VALID_AGENTS:
-            print(
-                f"Error: invalid agent {agent!r}. Must be one of: {sorted(VALID_AGENTS)}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        _validate_agent(agent, effective_config)
 
         result = rule_classifier(content, agent=agent)
 
@@ -126,20 +176,6 @@ def main(
         print(json.dumps(output))
 
     except ValueError as e:
-        print(
-            json.dumps({"error": "Classification failed — check server logs"}),
-            file=sys.stderr,
-        )
-        import logging as _logging
-
-        _logging.getLogger(__name__).warning("classify CLI ValueError: %s", e)
-        sys.exit(1)
+        _emit_classification_failure("ValueError", e)
     except Exception as e:
-        print(
-            json.dumps({"error": "Classification failed — check server logs"}),
-            file=sys.stderr,
-        )
-        import logging as _logging
-
-        _logging.getLogger(__name__).warning("classify CLI unexpected error: %s", e)
-        sys.exit(1)
+        _emit_classification_failure("unexpected error", e)
