@@ -39,8 +39,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _COMPOSE_FILE = _REPO_ROOT / "docker-compose.yml"
 
 # The healthcheck endpoint the supervised api process serves on port 8080
-# inside the container; compose maps 127.0.0.1:8090 → container 8080.
-_READY_URL = "http://127.0.0.1:8090/healthz/ready"
+# inside the container. The compose file defaults the host port to 8080 but
+# reads KAIRIX_HOST_PORT; this test sets KAIRIX_HOST_PORT=8090 (see _compose)
+# so it both exercises the operator-tunable port knob and avoids colliding
+# with anything a developer already runs on 8080.
+_HOST_PORT = "8090"
+_READY_URL = f"http://127.0.0.1:{_HOST_PORT}/healthz/ready"
 
 # Stable container name from docker-compose.yml (`container_name: app-kairix-1`).
 _KAIRIX_CONTAINER = "app-kairix-1"
@@ -79,11 +83,21 @@ def _compose(*args: str, check: bool = True, timeout: int = 180) -> subprocess.C
     step produces a diagnosable failure message rather than a bare returncode.
     Sets ``KAIRIX_IMAGE_TAG`` so compose picks the locally-built image instead
     of pulling from ghcr (the unified-container image isn't published until
-    this PR merges).
+    this PR merges); ``KAIRIX_HOST_PORT`` to exercise the operator-tunable
+    port knob (#470); and ``KAIRIX_NEO4J_PASSWORD`` so the neo4j sidecar's
+    ``NEO4J_AUTH`` interpolation gets a non-empty password without the test
+    touching any developer ``.env``.
     """
     import os as _os
 
-    env = {**_os.environ, "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX}
+    env = {
+        **_os.environ,
+        "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX,
+        "KAIRIX_HOST_PORT": _HOST_PORT,
+        # Throwaway fixture password for the ephemeral test-only neo4j
+        # container; torn down with `compose down -v`.
+        "KAIRIX_NEO4J_PASSWORD": "kairix-e2e-test",  # pragma: allowlist secret
+    }
     cmd = ["docker", "compose", "-f", str(_COMPOSE_FILE), *args]
     return subprocess.run(
         cmd,
@@ -93,6 +107,27 @@ def _compose(*args: str, check: bool = True, timeout: int = 180) -> subprocess.C
         check=check,
         env=env,
     )
+
+
+def _ensure_quickstart_files() -> list[Path]:
+    """Stub `.env` + `kairix.config.yaml` next to the compose file if absent.
+
+    The compose file reads `.env` (env_file) and bind-mounts
+    `kairix.config.yaml` — the quick-start has the operator copy both from
+    the shipped examples. Mirror that on a bare runner; never touch a
+    developer's real files. Returns the files this call created so the
+    caller can remove exactly those (and nothing else) at teardown.
+    """
+    created: list[Path] = []
+    env_file = _REPO_ROOT / ".env"
+    if not env_file.exists():
+        env_file.write_text("# e2e stub — readiness asserts need no secrets\n")
+        created.append(env_file)
+    config_file = _REPO_ROOT / "kairix.config.yaml"
+    if not config_file.exists():
+        config_file.write_text((_REPO_ROOT / "kairix.config.example.yaml").read_text())
+        created.append(config_file)
+    return created
 
 
 @pytest.mark.docker
@@ -127,44 +162,31 @@ def test_compose_up_yields_two_services_both_healthy() -> None:
         check=True,
     )
 
-    # Compose mounts /run/secrets/kairix.env; on a bare runner this doesn't
-    # exist. Create an empty stub — the E2E test asserts on process IDs +
-    # healthcheck, not on any configured secrets. Skip on platforms where
-    # /run is read-only (macOS); Linux CI Stage 4.5 carries the check.
-    secrets_stub = Path("/run/secrets/kairix.env")
-    if not secrets_stub.exists():
-        try:
-            secrets_stub.parent.mkdir(parents=True, exist_ok=True)
-            secrets_stub.write_text("# test stub — empty\n")
-        except OSError as exc:
-            pytest.skip(
-                reason=f"cannot create /run/secrets stub ({exc}); "
-                "this E2E runs on Linux CI where /run is writable. "
-                "fix: re-run under Linux (CI Stage 4.5) or skip-locally as designed.",
-            )
+    created_stubs = _ensure_quickstart_files()
 
     # docker compose up -d --wait: starts containers and blocks until each
     # service's healthcheck passes (or fails). Timeout generous enough to
     # cover an image pull on a cold CI runner.
     try:
-        _compose("up", "-d", "--wait", timeout=240)
-    except subprocess.CalledProcessError as e:
-        # Surface compose logs so a failing boot is diagnosable.
-        logs = _compose("logs", "--no-color", check=False, timeout=60)
-        pytest.fail(
-            "docker compose up --wait failed:\n"
-            f"stdout:\n{e.stdout}\n"
-            f"stderr:\n{e.stderr}\n"
-            f"compose logs:\n{logs.stdout}\n{logs.stderr}",
-        )
+        try:
+            _compose("up", "-d", "--wait", timeout=240)
+        except subprocess.CalledProcessError as e:
+            # Surface compose logs so a failing boot is diagnosable.
+            logs = _compose("logs", "--no-color", check=False, timeout=60)
+            pytest.fail(
+                "docker compose up --wait failed:\n"
+                f"stdout:\n{e.stdout}\n"
+                f"stderr:\n{e.stderr}\n"
+                f"compose logs:\n{logs.stdout}\n{logs.stderr}",
+            )
 
-    try:
         # (1) Real HTTP probe — the supervised api process serves
         # /healthz/ready on port 8080 inside the container, mapped to
-        # 127.0.0.1:8090 on the host by docker-compose.yml. A short retry
-        # loop covers the gap between docker compose --wait returning
-        # (container healthy per Docker's healthcheck) and the host-side
-        # port forward being routable.
+        # 127.0.0.1:${KAIRIX_HOST_PORT} on the host (this test sets 8090;
+        # the compose default is 8080). A short retry loop covers the gap
+        # between docker compose --wait returning (container healthy per
+        # Docker's healthcheck) and the host-side port forward being
+        # routable.
         last_err: Exception | None = None
         response = None
         deadline = time.monotonic() + 30
@@ -216,3 +238,5 @@ def test_compose_up_yields_two_services_both_healthy() -> None:
         # kairix-cache, neo4j-data) so a re-run starts clean. check=False
         # because we still want to clean up after a partial-boot failure.
         _compose("down", "-v", check=False, timeout=120)
+        for stub in created_stubs:
+            stub.unlink(missing_ok=True)

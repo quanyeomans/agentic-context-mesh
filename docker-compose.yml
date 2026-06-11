@@ -1,13 +1,23 @@
-# Kairix — Docker Compose stack
+# Kairix — Docker Compose stack (laptop / single-VM first)
 #
-# Quick start (no clone needed):
-#   1. Download this file: curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/docker-compose.yml
-#   2. Download .env example: curl -O https://raw.githubusercontent.com/three-cubes/kairix/main/.env.example
-#   3. cp .env.example .env && edit .env (add your LLM API key)
+# This base file reads a plain `.env` next to it. VM deploys that feed
+# secrets through a /run/secrets/kairix.env sidecar keep that wiring in
+# their own compose file or override (see docker/README.md) — it is kept
+# out of this base file so a fresh machine never fails on a file it
+# doesn't have.
+#
+# Quick start:
+#   1. git clone https://github.com/three-cubes/kairix && cd kairix
+#      (or download docker-compose.yml, .env.example, kairix.config.example.yaml)
+#   2. cp .env.example .env
+#      Then edit .env: add your LLM API key (KAIRIX_PROVIDER_LLM_*).
+#   3. cp kairix.config.example.yaml kairix.config.yaml
+#      Copy it BEFORE step 5 — compose bind-mounts this file, and docker
+#      replaces a missing bind source with an empty directory.
 #   4. ln -s /path/to/your/documents ./documents
 #   5. docker compose up -d
-#   6. docker compose exec kairix kairix setup
-#   7. docker compose exec kairix kairix search "your question"
+#   6. docker compose exec kairix kairix embed
+#   7. docker compose exec kairix kairix onboard check
 #
 # Services (Plan 2 — unified container):
 #   kairix — one container runs both the MCP api process AND the worker process
@@ -22,24 +32,34 @@ services:
     container_name: app-kairix-1
     restart: unless-stopped
     ports:
-      # Bound to localhost only by default — kairix has no auth. Operators
-      # who already run a reverse proxy on host port 8080 (e.g. caddy)
-      # route from their public port to host 8090 → container 8080.
+      # Bound to localhost only by default — kairix has no auth.
       #
       # KAIRIX_MCP_BIND_HOST overrides the bind host. Set to ``0.0.0.0`` in
-      # your operator-side ``.env`` ONLY if you've put the MCP behind an
-      # auth-enforcing reverse proxy (caddy / nginx / Authentik) or sit on
-      # a private VM network. The env-var indirection means the override
-      # survives every ``git pull`` / image refresh — no need to re-patch
-      # docker-compose.yml after upgrades.
-      - "${KAIRIX_MCP_BIND_HOST:-127.0.0.1}:8090:8080"
+      # your ``.env`` ONLY if you've put the MCP behind an auth-enforcing
+      # reverse proxy (caddy / nginx / Authentik) or sit on a private VM
+      # network. KAIRIX_HOST_PORT moves the host-side port (default 8080)
+      # when another service already owns it. The env-var indirection means
+      # both overrides survive every ``git pull`` / image refresh — no need
+      # to re-patch docker-compose.yml after upgrades.
+      - "${KAIRIX_MCP_BIND_HOST:-127.0.0.1}:${KAIRIX_HOST_PORT:-8080}:8080"
+    environment:
+      # The image bakes KAIRIX_DOCUMENT_ROOT=/var/lib/kairix/documents.
+      # Point it at the ./documents bind mount below so `kairix embed`
+      # sees your files.
+      KAIRIX_DOCUMENT_ROOT: /data/documents
+      # Reach the bundled neo4j service by its compose DNS name.
+      KAIRIX_NEO4J_URI: bolt://neo4j:7687
+      # KAIRIX_SECRETS_FILE is left at the image default — secrets arrive
+      # through env_file: .env on this path.
     volumes:
       - kairix-data:/var/lib/kairix
       - kairix-cache:/var/cache/kairix
       - ./documents:/data/documents:ro  # Your documents folder → container's document store (read-only)
-      - /run/secrets/kairix.env:/run/secrets/kairix.env:ro
+      # Collections + agents config. Copy kairix.config.example.yaml to
+      # kairix.config.yaml before `up -d` (quick-start step 3).
+      - ./kairix.config.yaml:/etc/kairix/kairix.config.yaml:ro
     env_file:
-      - /run/secrets/kairix.env
+      - .env
     depends_on:
       neo4j:
         condition: service_healthy

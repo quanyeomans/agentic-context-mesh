@@ -86,39 +86,45 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
         check=True,
     )
 
-    # Compose mounts /run/secrets/kairix.env into both kairix + neo4j; on a
-    # bare runner this path doesn't exist. Create an empty stub so compose
-    # can mount it; the empty env file is fine for the supervisor probe (the
-    # test asserts on process IDs + uid, not on any configured secrets).
-    # Skip on platforms where /run is read-only (macOS), letting Linux CI
-    # carry the end-to-end check.
-    secrets_stub = Path("/run/secrets/kairix.env")
-    if not secrets_stub.exists():
-        try:
-            secrets_stub.parent.mkdir(parents=True, exist_ok=True)
-            secrets_stub.write_text("# test stub — empty\n")
-        except OSError as exc:
-            pytest.skip(
-                reason=f"cannot create /run/secrets stub ({exc}); "
-                "this integration test runs on Linux CI where /run is writable. "
-                "fix: re-run under Linux (CI Stage 3) or skip-locally as designed.",
-            )
+    # The compose file reads `.env` (env_file) and bind-mounts
+    # `kairix.config.yaml` — the quick-start has the operator copy both from
+    # the shipped examples (#470 replaced the old /run/secrets/kairix.env
+    # mount). Mirror that on a bare runner; never touch a developer's real
+    # files, and remove only what this test created. The empty .env is fine
+    # for the supervisor probe (the test asserts on process IDs + uid, not
+    # on any configured secrets).
+    created_stubs: list[Path] = []
+    env_file = _REPO_ROOT / ".env"
+    if not env_file.exists():
+        env_file.write_text("# test stub — supervisor probe needs no secrets\n")
+        created_stubs.append(env_file)
+    config_file = _REPO_ROOT / "kairix.config.yaml"
+    if not config_file.exists():
+        config_file.write_text((_REPO_ROOT / "kairix.config.example.yaml").read_text())
+        created_stubs.append(config_file)
 
     # Spin up via compose so neo4j comes along for the ride and the
     # healthcheck gating matches what operators see in production.
     # Pass KAIRIX_IMAGE_TAG so compose picks the locally-built image we just
     # tagged (under the ghcr.io/three-cubes/kairix prefix) instead of pulling
-    # from the public registry.
+    # from the public registry; KAIRIX_NEO4J_PASSWORD so the neo4j sidecar's
+    # NEO4J_AUTH interpolation gets a non-empty password.
     import os as _os
 
-    env = {**_os.environ, "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX}
-    subprocess.run(
-        ["docker", "compose", "up", "-d", "--wait"],
-        cwd=str(_REPO_ROOT),
-        check=True,
-        env=env,
-    )
+    env = {
+        **_os.environ,
+        "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX,
+        # Throwaway fixture password for the ephemeral test-only neo4j
+        # container; torn down with `compose down -v`.
+        "KAIRIX_NEO4J_PASSWORD": "kairix-supervisor-test",  # pragma: allowlist secret
+    }
     try:
+        subprocess.run(
+            ["docker", "compose", "up", "-d", "--wait"],
+            cwd=str(_REPO_ROOT),
+            check=True,
+            env=env,
+        )
         ps_proc = subprocess.run(
             ["docker", "exec", _CONTAINER_NAME, "ps", "-ef"],
             capture_output=True,
@@ -142,12 +148,11 @@ def test_container_runs_both_api_and_worker_as_uid_995() -> None:
         assert id_out == "995", f"container must run as kairix uid 995, got uid={id_out!r}"
     finally:
         # Teardown shouldn't break the test if it succeeds — best-effort.
-        import os as _os
-
-        env = {**_os.environ, "KAIRIX_IMAGE_TAG": _IMAGE_TAG_SUFFIX}
         subprocess.run(
             ["docker", "compose", "down", "-v"],
             cwd=str(_REPO_ROOT),
             check=False,
             env=env,
         )
+        for stub in created_stubs:
+            stub.unlink(missing_ok=True)
