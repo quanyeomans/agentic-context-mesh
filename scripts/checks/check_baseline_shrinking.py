@@ -1,12 +1,19 @@
 """F49: Test-discipline baselines shrink per release.
 
 Each release tag (matching ``v[0-9]*.[0-9]*.[0-9]*``) must reduce each of
-the following baseline files by at least one entry compared to the
-previous tagged release, OR keep all three at zero:
+the governed baseline files by at least one entry compared to the
+previous tagged release, OR keep all three at zero. The governed set is
+F30 / F46 / F47; their baseline paths are DERIVED from the rule
+catalogue (``_rule_catalogue.py`` — gate name → baseline filename)
+rather than hand-listed.
 
-    - .architecture/baseline/f30-operator-outcome-tests-files.txt
-    - .architecture/baseline/F46-files.txt
-    - .architecture/baseline/F47-files.txt
+Why derived (#499 Phase 0): the original hand-listed paths drifted —
+``F46-files.txt`` / ``F47-files.txt`` never matched the git-tracked
+files (``f46-files.txt`` / ``f47-integration-factory-files.txt``), so
+on the case-sensitive Linux release runner two of the three legs read
+as permanently-empty and the shrink gate was vacuous for those rules.
+Deriving from the catalogue makes a rename/typo a loud KeyError at
+import time instead of a silent always-pass.
 
 The check runs at release time (in ``.github/workflows/release.yml``)
 BEFORE the tag is cut. It does NOT run per-commit — between commits
@@ -41,13 +48,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+from _rule_catalogue import ALL_ENTRIES
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# The three baseline files governed by F49.
-F49_BASELINE_PATHS: tuple[str, ...] = (
-    ".architecture/baseline/f30-operator-outcome-tests-files.txt",
-    ".architecture/baseline/F46-files.txt",
-    ".architecture/baseline/F47-files.txt",
+# The rule IDs governed by F49 (the shrink-per-release set). The
+# *paths* come from the catalogue's gate names so they can never drift
+# from the real .architecture/baseline/ filenames again.
+F49_GOVERNED_RULE_IDS: tuple[str, ...] = ("F30", "F46", "F47")
+
+_GATE_BY_ID = {entry.id: entry.gate for entry in ALL_ENTRIES}
+
+F49_BASELINE_PATHS: tuple[str, ...] = tuple(
+    f".architecture/baseline/{_GATE_BY_ID[rule_id]}-files.txt" for rule_id in F49_GOVERNED_RULE_IDS
 )
 
 REMEDIATION = """F49: one or more test-discipline baselines did not shrink
@@ -190,6 +204,11 @@ def check_baselines(
 
     failures: list[tuple[str, int, int, set[str]]] = []
     for rel_path in F49_BASELINE_PATHS:
+        if not (repo_root / rel_path).exists():
+            # Paths are catalogue-derived so a miss means the baseline
+            # file was deleted (paid down to zero and removed) — legal,
+            # but say so out loud rather than silently counting 0.
+            lines.append(f"  notice: {rel_path} absent at HEAD — treating as 0 entries (paid down).")
         head_text = _read_head_baseline(repo_root, rel_path)
         prev_text = _read_prev_tag_baseline(repo_root, rel_path, prev_tag)
 

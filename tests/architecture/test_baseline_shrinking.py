@@ -76,10 +76,14 @@ def _commit_baselines(
     (baseline_dir / "f30-operator-outcome-tests-files.txt").write_text(
         "# F30 baseline (synthetic for test).\n" + "\n".join(f30_entries) + ("\n" if f30_entries else "")
     )
-    (baseline_dir / "F46-files.txt").write_text(
+    # Filenames are the catalogue-derived gate names (#499 Phase 0) —
+    # the original hand-listed "F46-files.txt"/"F47-files.txt" never
+    # matched the git-tracked baselines, which made two of the three
+    # F49 legs vacuous on the case-sensitive Linux release runner.
+    (baseline_dir / "f46-files.txt").write_text(
         "# F46 baseline (synthetic for test).\n" + "\n".join(f46_entries) + ("\n" if f46_entries else "")
     )
-    (baseline_dir / "F47-files.txt").write_text(
+    (baseline_dir / "f47-integration-factory-files.txt").write_text(
         "# F47 baseline (synthetic for test).\n" + "\n".join(f47_entries) + ("\n" if f47_entries else "")
     )
     _git(repo, "add", "-A")
@@ -292,7 +296,7 @@ def test_missing_baseline_at_prev_tag_treated_as_zero(tmp_path: Path) -> None:
     )
     exit_code_after, lines_after = detector.check_baselines(repo, prev_tag="v2026.5.1")
     assert exit_code_after == 1
-    assert any("F46-files.txt" in line and "grew from 0 to 1" in line for line in lines_after)
+    assert any("f46-files.txt" in line and "grew from 0 to 1" in line for line in lines_after)
 
 
 def test_first_release_passes(tmp_path: Path) -> None:

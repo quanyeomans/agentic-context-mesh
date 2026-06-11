@@ -2675,6 +2675,32 @@ on new files; this variant generalises to *any* per-file F-rule baseline.
 
 ---
 
+### F81 / F82 / F83 — fresh-install smoke + per-commit flake/gate-runner discipline
+
+Landed via [EPIC #499](https://github.com/three-cubes/kairix/issues/499)
+Phase 0 (registry integrity + first two new rules). F81 was shipped in
+onboarding tranche 3 (2026-06-11) before it had a catalogue entry — the
+registry would have handed the number out twice; Phase 0 registers it
+properly. F82/F83 mechanise the two highest-burn escapes from the
+2026-06-11 review: the #493 wall-clock flake family and the #483
+silent-gate-death class.
+
+| Rule | Locks | Mechanism |
+|---|---|---|
+| **F81** | A stranger's fresh install boots: clean temp dir → `docker compose up` from the shipped compose + `.env.example` → `/healthz/ready` 200 → MCP initialize + tools/list handshake → `GET /setup/` 200 with the wizard flag ON → BM25 search hit on a seeded sample doc. | The smoke itself is `scripts/checks/check-fresh-install-smoke.sh`, run by `.github/workflows/fresh-install-smoke.yml` (needs Docker + minutes — not per-commit). The per-commit leg `scripts/checks/check_f81_fresh_install_smoke.py` proves the smoke can't rot out of the pipeline: script exists, workflow exists, workflow invokes the script. No baseline. |
+| **F82** | No wall-clock ceiling assertions (`assert elapsed < 0.150`, `assert time.monotonic() - t0 <= 2`) in per-commit test tiers — timing measures host scheduling, not kairix behaviour (#493 family burned three gate cycles in one day). Tests carrying a `slow` / `soak` / `load` / `pvt` marker (F8's resolution mechanism) or a `# F82-allowed: <why>` line rationale are exempt. Floors (`assert elapsed >= window`) and variable budgets are deliberately not flagged — precision over recall. | `scripts/checks/check_f82_wall_clock_ceilings.py`; AST walk over `tests/**/*.py` tracking clock-call assignments + elapsed-named values. Baseline: `.architecture/baseline/f82-files.txt` (29 pre-existing files grandfathered). Pre-commit hook `arch-f82-wall-clock-ceilings`. |
+| **F83** | Shell gate scripts (`scripts/*.sh`, `scripts/checks/*.sh`) follow the post-#483 gate-runner contract: (a) no unguarded `VAR=$(...)` capture under `set -e` (the silent-death class — the script dies AT the assignment with no FAIL line); (b) `\|\| true` carries a trailing rationale comment; (c) shellcheck-clean at error severity; (d) `safe-commit.sh` stages announced with `echo -n "  <stage>... "` emit both `OK${NC}` and `FAIL${NC}`/`gate_died` verdicts, and every `run-all.sh` check invocation carries `\|\| overall=1`. | `scripts/checks/check_f83_gate_runner_contract.py`; logical-line shell scan + batched shellcheck. Baseline: `.architecture/baseline/f83-files.txt` (7 pre-existing scripts grandfathered; a listed file masks all sub-rules until paid down). Pre-commit hook `arch-f83-gate-runner-contract`. |
+
+Note on F49 (same Phase 0): the shrink-gate's hand-listed baseline
+paths had drifted (`F46-files.txt` / `F47-files.txt` never matched the
+git-tracked `f46-files.txt` / `f47-integration-factory-files.txt`), so
+two of its three legs were vacuous on the Linux release runner.
+`check_baseline_shrinking.py` now derives the governed paths from the
+rule catalogue (`_rule_catalogue.py` gate names), making a future
+rename a loud `KeyError` instead of a silent always-pass.
+
+---
+
 ## Harness architecture
 
 ### File layout

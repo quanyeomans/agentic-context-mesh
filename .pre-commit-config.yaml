@@ -244,3 +244,17 @@ repos:
         language: system
         pass_filenames: false
         files: ^kairix/.*\.py$
+
+      - id: arch-f82-wall-clock-ceilings
+        name: "arch F82: no wall-clock ceiling assertions outside soak/probe tiers"
+        entry: python3 scripts/checks/check_f82_wall_clock_ceilings.py
+        language: system
+        pass_filenames: false
+        files: ^tests/.*\.py$
+
+      - id: arch-f83-gate-runner-contract
+        name: "arch F83: shell gate scripts follow the gate-runner contract"
+        entry: python3 scripts/checks/check_f83_gate_runner_contract.py
+        language: system
+        pass_filenames: false
+        files: ^scripts/.*\.sh$

@@ -335,6 +335,31 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         summary="every cross-layer integrity invariant has a fixture-scale AND soak-scale test",
         adr_origin="docs/architecture/ADR-024-test-pyramid-redesign.md §F72",
     ),
+    RuleEntry(
+        id="F81",
+        gate="f81-fresh-install-smoke",
+        check="f81_fresh_install_smoke",
+        category="test-discipline",
+        scope="cross-cutting",
+        summary=(
+            "CI fresh-install smoke — clean dir → compose boot → healthz → MCP handshake → "
+            "wizard 200 → BM25 search hit (scripts/checks/check-fresh-install-smoke.sh via "
+            ".github/workflows/fresh-install-smoke.yml; per-commit leg checks the wiring)"
+        ),
+        adr_origin="onboarding tranche 3, 2026-06-11 — registered via EPIC #499 Phase 0",
+    ),
+    RuleEntry(
+        id="F82",
+        gate="f82",
+        check="f82_wall_clock_ceilings",
+        category="test-discipline",
+        scope="per-test",
+        summary=(
+            "wall-clock ceiling assertions banned outside soak/probe tiers — elapsed-time vs numeric "
+            "ceiling requires a slow/soak/load/pvt marker or # F82-allowed: rationale (#493 flake family)"
+        ),
+        adr_origin="EPIC #499 Phase 0 — #493 wall-clock flake family",
+    ),
     # ----- plugin-contract -------------------------------------------------
     RuleEntry(
         id="F28",
@@ -624,6 +649,19 @@ _ENTRIES: tuple[RuleEntry, ...] = (
         category="agent-affordance",
         scope="cross-cutting",
         summary="every top-level directory has a README.md resolver",
+    ),
+    RuleEntry(
+        id="F83",
+        gate="f83",
+        check="f83_gate_runner_contract",
+        category="agent-affordance",
+        scope="per-file",
+        summary=(
+            "gate-runner contract for shell gate scripts — no unguarded VAR=$(...) under set -e (#483 "
+            "silent-death class), || true requires trailing rationale, shellcheck-clean at error "
+            "severity, safe-commit.sh/run-all.sh stages emit named OK/FAIL verdicts"
+        ),
+        adr_origin="EPIC #499 Phase 0 — #483 silent gate-death class",
     ),
     # ----- repo-hygiene ---------------------------------------------------
     RuleEntry(

@@ -2,12 +2,14 @@
 # F49: Test-discipline baselines shrink per release.
 #
 # Each release tag (matching v[0-9]*.[0-9]*.[0-9]*) must reduce each of
-# the following baseline files by at least one entry compared to the
-# previous tagged release, OR keep all three at zero:
+# the governed baseline files (F30 / F46 / F47 — paths derived from
+# scripts/checks/_rule_catalogue.py gate names, see #499 Phase 0) by at
+# least one entry compared to the previous tagged release, OR keep all
+# three at zero:
 #
 #   .architecture/baseline/f30-operator-outcome-tests-files.txt
-#   .architecture/baseline/F46-files.txt
-#   .architecture/baseline/F47-files.txt
+#   .architecture/baseline/f46-files.txt
+#   .architecture/baseline/f47-integration-factory-files.txt
 #
 # Runs at release time only (from .github/workflows/release.yml). Not
 # wired into run-all.sh or pre-commit — per-commit it would always pass
