@@ -1,0 +1,13 @@
+{% if result.ok %}
+<div class="kx-validation-success">
+  <p class="kx-success-msg">Agent connected — {{ result.tools_count }} tools available.</p>
+</div>
+{% else %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ result.error }}</p>
+  <dl class="kx-error-steps">
+    <dt>Fix</dt><dd>Check your agent's config matches one of the snippets above, then restart the agent.</dd>
+    <dt>Next</dt><dd>Verify the connection again.</dd>
+  </dl>
+</div>
+{% endif %}

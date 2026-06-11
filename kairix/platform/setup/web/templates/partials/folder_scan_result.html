@@ -1,0 +1,19 @@
+{% if scan.ok %}
+<div class="kx-scan-result">
+  <p class="kx-success-msg">Scan complete</p>
+  <dl class="kx-dl kx-dl-compact">
+    <dt>Folder</dt><dd><code>{{ folder_path }}</code></dd>
+    <dt>Files found</dt><dd>{{ "{:,}".format(scan.files) }}</dd>
+    <dt>Estimated words</dt><dd>{{ "{:,}".format(scan.words_estimate) }}</dd>
+    <dt>Estimated cost</dt><dd>${{ "%.2f"|format(scan.cost_estimate_usd) }}</dd>
+  </dl>
+</div>
+{% else %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ scan.error }}</p>
+  <dl class="kx-error-steps">
+    <dt>Fix</dt><dd>Check the folder path exists and kairix can read it.</dd>
+    <dt>Next</dt><dd>Enter the path again, then scan once more.</dd>
+  </dl>
+</div>
+{% endif %}

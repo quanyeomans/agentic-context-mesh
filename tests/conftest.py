@@ -304,6 +304,9 @@ pytest_plugins = [
     # affordances; the user-mode sibling scenarios cover the equivalent
     # code paths on every dev box.
     "tests.bdd.steps.install_steps",
+    # Web setup wizard (#474) — composes build_mcp_app + FakeSetupService
+    # through the public seams and drives the wizard with TestClient.
+    "tests.bdd.steps.setup_wizard_steps",
 ]
 
 # PVT placeholder steps — catch-all ``pytest.skip`` until #284 harness ships.

@@ -59,6 +59,9 @@ _LONG_RETIRE_WINDOW_WAVE_E = "v2027.5.24"
 # F51 retire ceiling.
 _FLAG_INTRODUCED_WAVE5_2026_05_30 = "v2026.5.30"
 _FLAG_TARGET_RETIRE_WAVE5_2026_11_30 = "v2026.11.30"
+# Canonical spec for flags whose behaviour is the flag mechanism itself
+# (no dedicated capability ADR yet).
+_FEATURE_FLAG_ARCHITECTURE_SPEC = "docs/architecture/feature-flag-architecture.md"
 
 
 # Public registry. The topology_v2_* family + ``obsidian_connector_primary``
@@ -330,7 +333,32 @@ REGISTRY: dict[str, FeatureFlag] = {
         introduced_in=_FLAG_INTRODUCED_IN_DISPATCH_WINDOW,
         target_retire_in=_FLAG_TARGET_RETIRE_IN,
         owner="search-pipeline",
-        related_spec="docs/architecture/feature-flag-architecture.md",
+        related_spec=_FEATURE_FLAG_ARCHITECTURE_SPEC,
+    ),
+    "setup_wizard_web": FeatureFlag(
+        name="setup_wizard_web",
+        # Default-OFF: merging the wizard is structurally a no-op — no
+        # /setup routes exist until an operator flips this ON, so the
+        # MCP server's HTTP surface is byte-for-byte unchanged.
+        default=False,
+        description=(
+            "When ON, the MCP server also serves the in-box web setup "
+            "wizard at /setup (same container, same port): welcome → "
+            "provider → key → folder → indexing → first-search → "
+            "connect-agent → done, rendered server-side against the "
+            "SetupService boundary. When OFF (default), no /setup routes "
+            "are mounted and requests there 404 exactly as before the "
+            "wizard landed. Non-loopback requests additionally require "
+            "the X-Kairix-Operator-Token header matching the "
+            "kairix-infra-operator-token secret."
+        ),
+        stage="introduce",
+        introduced_in="v2026.6.11",
+        # SCM+6mo per the F51 retire-deadline rule, anchored to the
+        # v2026.6.9 release the wizard lands on top of.
+        target_retire_in="v2026.12.9",
+        owner="onboarding",
+        related_spec=_FEATURE_FLAG_ARCHITECTURE_SPEC,
     ),
     "cli_routes_through_warm_mcp": FeatureFlag(
         name="cli_routes_through_warm_mcp",
@@ -362,7 +390,7 @@ REGISTRY: dict[str, FeatureFlag] = {
         # no operator has overridden it OFF.
         target_retire_in="v2026.12.6",
         owner="cli-warm-mcp",
-        related_spec="docs/architecture/feature-flag-architecture.md",
+        related_spec=_FEATURE_FLAG_ARCHITECTURE_SPEC,
     ),
 }
 

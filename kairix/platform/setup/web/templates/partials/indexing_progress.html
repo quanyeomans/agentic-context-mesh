@@ -1,0 +1,22 @@
+{% if status.error %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ status.error }}</p>
+  <dl class="kx-error-steps">
+    <dt>Fix</dt><dd>Check the kairix logs on this machine for the failing file or credential.</dd>
+    <dt>Next</dt><dd>Go back one step and start indexing again.</dd>
+  </dl>
+</div>
+{% else %}
+<div class="kx-progress-wrap">
+  <progress value="{{ pct }}" max="100"></progress>
+  <span class="kx-progress-label">{{ pct }}%</span>
+</div>
+<dl class="kx-dl kx-dl-compact kx-mt-sm">
+  <dt>Chunks indexed</dt><dd>{{ "{:,}".format(status.chunks_done) }} of {{ "{:,}".format(status.chunks_total) }}</dd>
+</dl>
+{% if status.done %}
+<p class="kx-success-msg">Indexing complete. Moving on…</p>
+{% else %}
+<p class="kx-muted kx-small">Indexing in progress — this page will advance automatically.</p>
+{% endif %}
+{% endif %}

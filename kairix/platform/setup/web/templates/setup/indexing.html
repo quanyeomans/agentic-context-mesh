@@ -1,0 +1,15 @@
+{% extends "setup/base.html" %}
+{% block title %}Indexing — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Indexing your documents</h2>
+  <p>kairix is reading and indexing your files. This page advances automatically when it finishes.</p>
+</hgroup>
+<div id="indexing-progress"
+     hx-get="/setup/indexing/progress"
+     hx-trigger="load, every 1s"
+     hx-swap="innerHTML">
+  <div class="kx-skeleton kx-skeleton-progress"></div>
+  <p class="kx-muted kx-small">Starting…</p>
+</div>
+{% endblock %}

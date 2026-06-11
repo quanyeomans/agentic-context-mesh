@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}kairix setup{% endblock %}</title>
+  <link rel="stylesheet" href="/setup/static/pico.classless.min.css">
+  <link rel="stylesheet" href="/setup/static/kairix.css">
+  <script src="/setup/static/htmx.min.js" defer></script>
+</head>
+<body>
+<main class="kx-setup-page">
+  <div class="kx-setup-card{% block card_class %}{% endblock %}">
+    <div class="kx-setup-wordmark">kairix</div>
+    {% if step is defined %}
+    <div class="kx-setup-steps">
+      {% for i in range(1, total_steps + 1) %}
+      {% if i < step %}<span class="kx-step kx-step-done">✓</span>
+      {% elif i == step %}<span class="kx-step kx-step-active">{{ i }}</span>
+      {% else %}<span class="kx-step">{{ i }}</span>
+      {% endif %}
+      {% if not loop.last %}<span class="kx-step-line{% if i < step %} kx-step-line-done{% endif %}"></span>{% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

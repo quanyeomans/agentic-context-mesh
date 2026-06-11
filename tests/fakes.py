@@ -4801,3 +4801,234 @@ class FakeMcpDispatchClient:
         from kairix.agents.mcp.client_dispatcher import McpToolResult
 
         return McpToolResult(payload=dict(self._envelope), is_error=self._is_error)
+
+
+# ---------------------------------------------------------------------------
+# kairix.platform.setup.web — web setup wizard fakes (#474)
+# ---------------------------------------------------------------------------
+
+
+class FakeSetupService:
+    """In-memory :class:`kairix.platform.setup.service.SetupService`.
+
+    Protocol-compliant fake the web wizard's routes render against.
+    Every screen-visible value is a constructor knob; failure-injection
+    knobs (``validate_ok=False`` / ``scan_ok=False`` / ``index_error`` /
+    ``handshake_ok=False``) drive the wizard's error rendering without
+    any monkey-patching (F1/F2-clean by construction).
+
+    ``index_status()`` advances one tick per call through a simple
+    chunk counter so progress-polling tests observe running → done
+    without sleeping: each call adds ``chunks_per_tick`` until
+    ``chunks_total`` is reached.
+
+    Recorders (``saved_providers`` / ``saved_sources`` /
+    ``start_index_calls`` / ``validate_calls`` / ``search_queries``)
+    let outcome tests assert what the wizard asked the service to do.
+    """
+
+    def __init__(
+        self,
+        *,
+        validate_ok: bool = True,
+        models: tuple[str, ...] = ("model-alpha", "model-beta"),
+        validate_error: str | None = None,
+        scan_ok: bool = True,
+        scan_files: int = 533,
+        scan_words: int = 3_200_000,
+        scan_cost_usd: float = 0.04,
+        scan_error: str | None = None,
+        chunks_total: int = 100,
+        chunks_per_tick: int = 50,
+        index_error: str | None = None,
+        index_statuses: tuple[Any, ...] | None = None,
+        search_hits: tuple[Any, ...] | None = None,
+        mcp_url: str = "http://127.0.0.1:8765/mcp",
+        connect_snippets: tuple[Any, ...] | None = None,
+        handshake_ok: bool = True,
+        tools_count: int = 12,
+        handshake_error: str | None = None,
+    ) -> None:
+        from kairix.platform.setup.service import ConnectSnippet, SearchPreviewHit
+
+        self._validate_ok = validate_ok
+        self._models = models
+        self._validate_error = validate_error
+        self._scan_ok = scan_ok
+        self._scan_files = scan_files
+        self._scan_words = scan_words
+        self._scan_cost_usd = scan_cost_usd
+        self._scan_error = scan_error
+        self._chunks_total = chunks_total
+        self._chunks_per_tick = chunks_per_tick
+        self._index_error = index_error
+        # Optional explicit status script — when provided, index_status()
+        # returns these in order (last one repeats). Lets tests pin edge
+        # states the counter model can't produce (e.g. running with an
+        # unknown chunks_total of 0).
+        self._index_statuses = index_statuses
+        self._index_status_calls = 0
+        self._search_hits = (
+            search_hits
+            if search_hits is not None
+            else (
+                SearchPreviewHit(
+                    title="Project kickoff notes",
+                    snippet="agent-alpha agreed the rollout starts next sprint…",
+                    source="notes/kickoff.md",
+                    score=0.92,
+                ),
+            )
+        )
+        self._mcp_url = mcp_url
+        claude_code_config = '{"mcpServers": {"kairix": {"url": "' + mcp_url + '"}}}'
+        self._connect_snippets = (
+            connect_snippets
+            if connect_snippets is not None
+            else (
+                ConnectSnippet(client="Claude Code", config_text=claude_code_config),
+                ConnectSnippet(client="Generic MCP over HTTP", config_text=mcp_url),
+            )
+        )
+        self._handshake_ok = handshake_ok
+        self._tools_count = tools_count
+        self._handshake_error = handshake_error
+        # Recorders + mutable wizard state.
+        self.saved_providers: list[tuple[str, str, str | None, str | None]] = []
+        self.saved_sources: list[str] = []
+        self.start_index_calls: int = 0
+        self.validate_calls: list[tuple[str, str, str | None]] = []
+        self.search_queries: list[str] = []
+        self._chunks_done = 0
+        self._index_running = False
+
+    def status(self) -> Any:
+        from kairix.platform.setup.service import SetupStatus
+
+        return SetupStatus(
+            provider_done=bool(self.saved_providers),
+            source_done=bool(self.saved_sources),
+            index_done=self._chunks_done >= self._chunks_total,
+        )
+
+    def validate_provider(self, provider: str, api_key: str, endpoint: str | None) -> Any:
+        from kairix.platform.setup.service import ProviderValidation
+
+        self.validate_calls.append((provider, api_key, endpoint))
+        if not self._validate_ok:
+            error = self._validate_error or "Authentication failed — your key was rejected by the provider."
+            return ProviderValidation(ok=False, models=(), error=error)
+        return ProviderValidation(ok=True, models=self._models, error=None)
+
+    def save_provider(self, provider: str, api_key: str, endpoint: str | None, model: str | None) -> None:
+        self.saved_providers.append((provider, api_key, endpoint, model))
+
+    def scan_folder(self, path: str) -> Any:
+        from kairix.platform.setup.service import FolderScan
+
+        if not self._scan_ok:
+            error = self._scan_error or f"Folder not found or not readable: {path}"
+            return FolderScan(ok=False, files=0, words_estimate=0, cost_estimate_usd=0.0, error=error)
+        return FolderScan(
+            ok=True,
+            files=self._scan_files,
+            words_estimate=self._scan_words,
+            cost_estimate_usd=self._scan_cost_usd,
+            error=None,
+        )
+
+    def save_source(self, path: str) -> None:
+        self.saved_sources.append(path)
+
+    def start_index(self) -> None:
+        self.start_index_calls += 1
+        self._index_running = True
+        self._chunks_done = 0
+
+    def index_status(self) -> Any:
+        from kairix.platform.setup.service import IndexStatus
+
+        if self._index_statuses is not None:
+            idx = min(self._index_status_calls, len(self._index_statuses) - 1)
+            self._index_status_calls += 1
+            return self._index_statuses[idx]
+        if self._index_error is not None:
+            return IndexStatus(
+                running=False,
+                done=False,
+                chunks_done=self._chunks_done,
+                chunks_total=self._chunks_total,
+                error=self._index_error,
+            )
+        if self._index_running and self._chunks_done < self._chunks_total:
+            self._chunks_done = min(self._chunks_total, self._chunks_done + self._chunks_per_tick)
+        done = self._chunks_done >= self._chunks_total
+        if done:
+            self._index_running = False
+        return IndexStatus(
+            running=self._index_running,
+            done=done,
+            chunks_done=self._chunks_done,
+            chunks_total=self._chunks_total,
+            error=None,
+        )
+
+    def first_search(self, query: str) -> Any:
+        from kairix.platform.setup.service import SearchPreview
+
+        self.search_queries.append(query)
+        return SearchPreview(results=tuple(self._search_hits))
+
+    def agent_connect_info(self) -> Any:
+        from kairix.platform.setup.service import AgentConnectInfo
+
+        return AgentConnectInfo(mcp_url=self._mcp_url, snippets=tuple(self._connect_snippets))
+
+    def verify_agent_handshake(self) -> Any:
+        from kairix.platform.setup.service import HandshakeResult
+
+        if not self._handshake_ok:
+            error = self._handshake_error or "No agent handshake observed on the MCP endpoint."
+            return HandshakeResult(ok=False, tools_count=0, error=error)
+        return HandshakeResult(ok=True, tools_count=self._tools_count, error=None)
+
+
+class FakeMcpTransportServer:
+    """Minimal FastMCP-shaped object for ``build_mcp_app`` composition.
+
+    Exposes exactly the surface the transport composer consumes:
+    ``settings`` (with ``stateless_http`` / ``json_response``),
+    ``streamable_http_app()`` and ``sse_app(mount_path)``. Lets BDD and
+    integration tests compose the real Starlette app without the
+    ``mcp`` package's real FastMCP and without a network listener.
+    """
+
+    class _Settings:
+        """Mutable stand-in for FastMCP's pydantic Settings model."""
+
+        def __init__(self) -> None:
+            self.stateless_http = False
+            self.json_response = False
+
+    def __init__(self) -> None:
+        self.settings = FakeMcpTransportServer._Settings()
+
+    def streamable_http_app(self) -> Any:
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+
+        async def handler(_request: Any) -> Any:
+            return PlainTextResponse("fake-streamable-ok")
+
+        return Starlette(routes=[Route("/mcp", handler, methods=["GET", "POST"])])
+
+    def sse_app(self, mount_path: str = "/sse") -> Any:
+        from starlette.applications import Starlette
+        from starlette.responses import PlainTextResponse
+        from starlette.routing import Route
+
+        async def handler(_request: Any) -> Any:
+            return PlainTextResponse("fake-sse-ok")
+
+        return Starlette(routes=[Route(mount_path, handler, methods=["GET"])])

@@ -1,0 +1,18 @@
+{% extends "setup/base.html" %}
+{% block title %}You're set up — kairix{% endblock %}
+{% block card_class %} kx-aha-card{% endblock %}
+{% block content %}
+<div class="kx-aha-icon">✦</div>
+<hgroup>
+  <h2>Your knowledge is ready</h2>
+  <p>kairix has indexed your documents and is ready to answer questions across everything you know.</p>
+</hgroup>
+<div class="kx-aha-stats">
+  <div class="kx-stat">
+    <strong>{{ "{:,}".format(status.chunks_done) }}</strong>
+    <span>chunks indexed</span>
+  </div>
+</div>
+<p class="kx-muted">Your agents can now search this knowledge through the MCP connection you set up. Add more sources anytime with the kairix CLI.</p>
+<a href="/setup/first-search" role="button" class="kx-btn-primary">Search your knowledge</a>
+{% endblock %}

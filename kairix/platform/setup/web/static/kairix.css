@@ -1,0 +1,166 @@
+/* kairix setup wizard styles — vendored from the kairix design
+   prototype, trimmed to the wizard's screens. Served locally from
+   /setup/static/ (no CDN — the container may be offline). */
+
+:root {
+  --kx-accent: #1f3a93;
+  --kx-accent-light: #2d52c8;
+  --kx-accent-faint: #eef1fb;
+  --kx-healthy: #16a34a;
+  --kx-error: #dc2626;
+  --kx-success-bg: #f0fdf4;
+  --kx-success-border: #16a34a;
+  --kx-text-muted: #6b7280;
+  --kx-radius: 6px;
+  --pico-primary: var(--kx-accent);
+  --pico-primary-hover: var(--kx-accent-light);
+}
+
+body { margin: 0; font-size: 0.9rem; }
+
+/* ── Buttons ─────────────────────────────────────────── */
+.kx-btn-primary {
+  background: var(--kx-accent);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--kx-radius);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s;
+}
+.kx-btn-primary:hover { background: var(--kx-accent-light); color: #fff; }
+.kx-btn-secondary {
+  background: transparent;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--kx-radius);
+  cursor: pointer;
+  font-size: 0.875rem;
+  text-decoration: none;
+  display: inline-block;
+}
+.kx-btn-secondary:hover { background: #f3f4f6; color: #374151; }
+.kx-btn-outline {
+  background: transparent;
+  color: var(--kx-accent);
+  border: 1px solid var(--kx-accent);
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--kx-radius);
+  cursor: pointer;
+  font-size: 0.825rem;
+  text-decoration: none;
+  display: inline-block;
+  transition: background 0.15s;
+}
+.kx-btn-outline:hover { background: var(--kx-accent-faint); }
+
+/* ── DL pairs ────────────────────────────────────────── */
+.kx-dl { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; font-size: 0.875rem; margin: 0; }
+.kx-dl dt { font-weight: 500; color: var(--kx-text-muted); white-space: nowrap; }
+.kx-dl dd { margin: 0; }
+.kx-dl-compact { gap: 0.25rem 0.75rem; }
+
+/* ── Feature list ────────────────────────────────────── */
+.kx-feature-list { list-style: none; padding: 0; margin: 1rem 0; font-size: 0.9rem; }
+.kx-feature-list li::before { content: "→ "; color: var(--kx-accent); font-weight: 700; }
+.kx-feature-list li { padding: 0.3rem 0; }
+
+/* ── Progress ────────────────────────────────────────── */
+.kx-progress-wrap { display: flex; align-items: center; gap: 0.75rem; }
+.kx-progress-wrap progress { flex: 1; height: 8px; border-radius: 4px; }
+.kx-progress-wrap progress::-webkit-progress-bar { background: #e5e7eb; border-radius: 4px; }
+.kx-progress-wrap progress::-webkit-progress-value { background: var(--kx-accent); border-radius: 4px; }
+.kx-progress-label { font-size: 0.875rem; font-weight: 600; color: var(--kx-accent); min-width: 36px; }
+
+/* ── Skeletons ───────────────────────────────────────── */
+.kx-skeleton { background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%); background-size: 200% 100%; animation: kx-shimmer 1.5s infinite; border-radius: var(--kx-radius); height: 80px; }
+.kx-skeleton-progress { height: 24px; }
+@keyframes kx-shimmer { 0%{ background-position: 200% 0 } 100%{ background-position: -200% 0 } }
+
+/* ── Validation messages ─────────────────────────────── */
+.kx-validation-success { background: var(--kx-success-bg); border: 1px solid var(--kx-success-border); border-radius: var(--kx-radius); padding: 0.75rem 1rem; margin: 0.75rem 0; }
+.kx-validation-error { background: #fef2f2; border: 1px solid var(--kx-error); border-radius: var(--kx-radius); padding: 0.75rem 1rem; margin: 0.75rem 0; }
+.kx-success-msg { color: var(--kx-healthy); font-weight: 600; margin: 0 0 0.5rem; }
+.kx-error-msg { font-weight: 600; color: var(--kx-error); margin: 0.25rem 0 0.75rem; }
+.kx-error-steps { display: grid; grid-template-columns: auto 1fr; gap: 0.25rem 0.75rem; font-size: 0.825rem; margin: 0; }
+.kx-error-steps dt { font-weight: 700; color: #374151; }
+.kx-error-steps dd { margin: 0; color: #374151; }
+
+/* ── Scan result ─────────────────────────────────────── */
+.kx-scan-result { background: var(--kx-success-bg); border: 1px solid var(--kx-success-border); border-radius: var(--kx-radius); padding: 0.75rem 1rem; margin: 0.75rem 0; }
+
+/* ── Search ──────────────────────────────────────────── */
+/* Fix over the prototype: the query input must flex to fill the row
+   next to the Search button (it collapsed under classless pico, which
+   sizes bare inputs to their content basis inside a flex row). */
+.kx-search-row { display: flex; gap: 0.5rem; align-items: flex-start; }
+.kx-search-row input { margin-bottom: 0; }
+.kx-search-input { flex: 1 1 auto; min-width: 0; width: 100%; }
+.kx-search-results-area { margin-top: 1rem; }
+.kx-result-card { border: 1px solid #e5e7eb; border-radius: var(--kx-radius); padding: 0.9rem 1rem; margin-bottom: 0.75rem; background: #fff; }
+.kx-result-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.35rem; flex-wrap: wrap; }
+.kx-result-source { font-size: 0.75rem; font-weight: 600; color: var(--kx-accent); }
+.kx-result-score { font-size: 0.75rem; }
+.kx-result-title { margin: 0 0 0.35rem; font-size: 0.9rem; font-weight: 600; }
+.kx-result-excerpt { margin: 0; font-size: 0.825rem; color: #374151; line-height: 1.5; }
+.kx-canned-queries { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+.kx-query-suggestion { background: var(--kx-accent-faint); border: 1px solid #c7d2f0; border-radius: var(--kx-radius); padding: 0.5rem 0.9rem; text-align: left; cursor: pointer; font-size: 0.875rem; color: var(--kx-accent); }
+.kx-query-suggestion:hover { background: #dde5f9; }
+
+/* ── Model tags ──────────────────────────────────────── */
+.kx-model-list { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+.kx-model-tag { background: #f3f4f6; color: #374151; border-radius: 4px; padding: 0.1rem 0.45rem; font-size: 0.72rem; font-family: monospace; }
+
+/* ── Provider picker ─────────────────────────────────── */
+.kx-provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+.kx-provider-card { display: flex; align-items: flex-start; gap: 0.75rem; border: 2px solid #e5e7eb; border-radius: var(--kx-radius); padding: 0.85rem; cursor: pointer; transition: border-color 0.15s; background: #fff; }
+.kx-provider-card:has(input:checked) { border-color: var(--kx-accent); background: var(--kx-accent-faint); }
+.kx-provider-card input[type="radio"] { margin-top: 0.2rem; flex-shrink: 0; accent-color: var(--kx-accent); }
+.kx-provider-body { flex: 1; }
+.kx-provider-meta { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.75rem; color: var(--kx-text-muted); margin: 0.3rem 0; }
+
+/* ── Setup wizard frame ──────────────────────────────── */
+.kx-setup-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f9fafb; padding: 2rem; }
+.kx-setup-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 2.5rem; max-width: 540px; width: 100%; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+.kx-setup-card-wide { max-width: 780px; }
+.kx-setup-wordmark { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; color: var(--kx-accent); margin-bottom: 1.5rem; }
+.kx-setup-steps { display: flex; align-items: center; gap: 0; margin-bottom: 2rem; }
+.kx-step {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid #d1d5db;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.75rem; font-weight: 700; color: #9ca3af;
+  flex-shrink: 0;
+}
+.kx-step-active { border-color: var(--kx-accent); color: var(--kx-accent); }
+.kx-step-done { border-color: var(--kx-healthy); background: var(--kx-healthy); color: #fff; font-size: 0.7rem; }
+.kx-step-line { flex: 1; height: 2px; background: #e5e7eb; }
+.kx-step-line-done { background: var(--kx-healthy); }
+.kx-setup-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; align-items: center; }
+
+/* ── Connect-agent screen ────────────────────────────── */
+.kx-mcp-url { font-size: 0.95rem; background: var(--kx-accent-faint); padding: 0.35rem 0.6rem; border-radius: var(--kx-radius); }
+.kx-connect-snippet { border: 1px solid #e5e7eb; border-radius: var(--kx-radius); padding: 0.6rem 0.9rem; margin-bottom: 0.6rem; }
+.kx-connect-snippet summary { cursor: pointer; font-size: 0.875rem; }
+.kx-connect-snippet pre { margin: 0.6rem 0 0; padding: 0.75rem; background: #f9fafb; border-radius: var(--kx-radius); overflow-x: auto; font-size: 0.78rem; }
+
+/* ── AHA screen ──────────────────────────────────────── */
+.kx-aha-card { text-align: center; }
+.kx-aha-icon { font-size: 3rem; color: var(--kx-accent); margin: 0.5rem 0 1rem; }
+.kx-aha-stats { display: flex; justify-content: center; gap: 2rem; margin: 1.5rem 0; }
+.kx-stat { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+.kx-stat strong { font-size: 1.5rem; color: var(--kx-accent); font-weight: 700; }
+.kx-stat span { font-size: 0.8rem; color: var(--kx-text-muted); }
+
+/* ── Utility ─────────────────────────────────────────── */
+.kx-muted { color: var(--kx-text-muted); }
+.kx-small { font-size: 0.8rem; }
+.kx-mt { margin-top: 1.5rem; }
+.kx-mt-sm { margin-top: 0.75rem; }
+.kx-indicator { font-size: 0.8rem; display: inline-block; }

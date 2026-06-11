@@ -1,0 +1,42 @@
+{% extends "setup/base.html" %}
+{% block title %}API key — kairix setup{% endblock %}
+{% block content %}
+<hgroup>
+  <h2>Paste your {{ provider }} key</h2>
+  <p>Your key is stored locally on this machine and never leaves it.</p>
+</hgroup>
+<form id="key-form" method="post" action="/setup/key">
+  <input type="hidden" name="provider" value="{{ provider }}">
+  <label>
+    API key
+    <input type="password" name="api_key" placeholder="Paste your key" required autocomplete="off">
+  </label>
+  <label>
+    Endpoint URL <span class="kx-muted kx-small">(only if your provider needs one — Azure, Ollama, proxy)</span>
+    <input type="text" name="endpoint" placeholder="https://...">
+  </label>
+  <div id="validation-result"></div>
+  <span id="validating-indicator" class="kx-indicator kx-muted" aria-busy="true" style="display:none;">Validating…</span>
+  <div class="kx-setup-actions">
+    <a href="/setup/provider" class="kx-btn-secondary">Back</a>
+    <button type="button" class="kx-btn-outline"
+            hx-post="/setup/key/validate"
+            hx-target="#validation-result"
+            hx-swap="innerHTML"
+            hx-include="#key-form"
+            hx-indicator="#validating-indicator">
+      Validate key
+    </button>
+    <button type="submit" class="kx-btn-primary" id="save-key-btn" style="display:none;">Save and continue</button>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.addEventListener('htmx:afterSwap', function () {
+    if (document.querySelector('.kx-validation-success')) {
+      document.getElementById('save-key-btn').style.display = 'inline-block';
+    }
+  });
+</script>
+{% endblock %}

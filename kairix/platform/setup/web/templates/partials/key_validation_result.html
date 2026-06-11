@@ -1,0 +1,30 @@
+{% if validation.ok %}
+<div class="kx-validation-success">
+  <p class="kx-success-msg">Key validated successfully.</p>
+  {% if validation.models %}
+  <p class="kx-muted kx-small">Available models:</p>
+  <div class="kx-model-list">
+    {% for m in validation.models %}
+    <code class="kx-model-tag">{{ m }}</code>
+    {% endfor %}
+  </div>
+  <label class="kx-small">
+    Model to use
+    <select name="model">
+      {% for m in validation.models %}
+      <option value="{{ m }}">{{ m }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
+</div>
+{% else %}
+<div class="kx-validation-error">
+  <p class="kx-error-msg">{{ validation.error }}</p>
+  <dl class="kx-error-steps">
+    <dt>Fix</dt><dd>Check that you copied the key completely with no leading or trailing spaces.</dd>
+    <dt>Next</dt><dd>Paste the key again, then validate once more.</dd>
+    <dt>Then</dt><dd>If the problem persists, generate a new key from your provider dashboard.</dd>
+  </dl>
+</div>
+{% endif %}
