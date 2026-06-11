@@ -248,8 +248,9 @@ def test_wizard_deps_override_used_by_run_setup(tmp_path: Path) -> None:
     )
 
     assert len(calls) == 1, f"injected probe should run exactly once; got {len(calls)} calls"
-    # Provider key from prompt default (Azure)
-    assert calls[0][0] == "azure"
+    # Provider plugin name resolved from the prompt default (Azure, no
+    # legacy-shaped endpoint → the forward-recommended Foundry plugin).
+    assert calls[0][0] == "azure_foundry"
 
 
 @pytest.mark.unit
@@ -419,6 +420,10 @@ def _interactive_run_setup(
     ``embed_main`` (when not ``None``) is threaded through ``WizardDeps``
     so tests can drive the indexing path with a fake without
     monkey-patching ``kairix.core.embed.cli.main``.
+
+    ``persist_credentials`` is always faked here: the interactive input
+    sequences supply non-empty API keys, and the production default
+    would otherwise write to the developer's real secrets bundle.
     """
     from kairix.platform.setup.prompts import SetupContext
     from kairix.platform.setup.wizard import WizardDeps, run_setup
@@ -438,6 +443,7 @@ def _interactive_run_setup(
         deps=WizardDeps(
             connection_test=lambda *_a, **_k: connection_ok,
             embed_main=embed_main,
+            persist_credentials=lambda *_a: tmp_path / "unwritten-kairix.env",
         ),
     )
     return result, output
@@ -665,6 +671,386 @@ def test_wizard_interactive_agent_direct_python(tmp_path: Path, monkeypatch) -> 
     ]
     result, _ = _interactive_run_setup(tmp_path, monkeypatch, inputs=inputs)
     assert result is True
+
+
+# ---------------------------------------------------------------------------
+# #474 — provider in config, credential persistence, honest connection test,
+# next-step epilogue
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_provider_plugin_name_maps_survey_answer_to_plugin() -> None:
+    """The wizard's provider survey answer + endpoint shape resolve to a
+    registered provider plugin name."""
+    from kairix.platform.setup.wizard import provider_plugin_name
+
+    assert provider_plugin_name("openai", "") == "openai"
+    assert provider_plugin_name("azure", "https://res.services.ai.azure.com") == "azure_foundry"
+    assert provider_plugin_name("azure", "https://res.openai.azure.com") == "azure_legacy"
+    assert provider_plugin_name("azure", "") == "azure_foundry"
+    # "Other OpenAI-compatible endpoint" rides the openai-direct plugin
+    # (base_url is taken verbatim from the stored endpoint).
+    assert provider_plugin_name("custom", "https://proxy.example.invalid/v1") == "openai"
+
+
+@pytest.mark.unit
+def test_wizard_config_includes_provider_and_validates_clean(tmp_path: Path) -> None:
+    """#474 defect 1: the generated config MUST carry the ``provider:``
+    key (factory construction fails without it) and must be
+    ``kairix config validate``-clean."""
+    import yaml
+
+    from kairix.core.search.config_validator import validate_config
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+
+    output = tmp_path / "config.yaml"
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        preset="general",
+        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+    )
+
+    assert result is True
+    config = yaml.safe_load(output.read_text(encoding="utf-8"))
+    assert config.get("provider") == "azure_foundry", f"provider key missing/wrong: {config}"
+    errors = validate_config(config)
+    assert errors == [], f"generated config is not validate-clean: {errors}"
+
+
+@pytest.mark.unit
+def test_persist_llm_credentials_writes_canonical_names(tmp_path: Path) -> None:
+    """The wizard's persistence use-case writes the canonical secret
+    lines through the same code path as ``kairix secrets set`` and then
+    hydrates the bundle (seam-recorded here)."""
+    from kairix.platform.setup.wizard import persist_llm_credentials
+
+    bundle = tmp_path / "kairix.env"
+    hydrated: list[Path] = []
+
+    path = persist_llm_credentials(
+        "example-credential-value",  # pragma: allowlist secret — generic fixture
+        "https://example-resource.services.ai.azure.com",
+        "text-embedding-3-large",
+        bundle_path=bundle,
+        hydrate_fn=lambda p: hydrated.append(p) or 0,
+    )
+
+    assert path == bundle
+    content = bundle.read_text(encoding="utf-8")
+    assert "KAIRIX_PROVIDER_LLM_API_KEY=example-credential-value" in content  # pragma: allowlist secret
+    assert "KAIRIX_PROVIDER_LLM_ENDPOINT=https://example-resource.services.ai.azure.com" in content
+    # pragma: allowlist secret — model-name fixture below, not a credential
+    assert "KAIRIX_PROVIDER_EMBED_MODEL=text-embedding-3-large" in content  # pragma: allowlist secret
+    assert hydrated == [bundle], "persisted bundle must be hydrated for the in-process connection test"
+
+
+@pytest.mark.unit
+def test_persist_llm_credentials_skips_empty_values(tmp_path: Path) -> None:
+    """Empty endpoint / model fields are skipped, not written as blank lines."""
+    from kairix.platform.setup.wizard import persist_llm_credentials
+
+    bundle = tmp_path / "kairix.env"
+    path = persist_llm_credentials(
+        "example-credential-value",  # pragma: allowlist secret — generic fixture
+        "",
+        "",
+        bundle_path=bundle,
+        hydrate_fn=lambda _p: 0,
+    )
+    assert path == bundle
+    content = bundle.read_text(encoding="utf-8")
+    assert "KAIRIX_PROVIDER_LLM_API_KEY=" in content
+    assert "KAIRIX_PROVIDER_LLM_ENDPOINT" not in content
+    assert "KAIRIX_PROVIDER_EMBED_MODEL" not in content
+
+
+@pytest.mark.unit
+def test_wizard_persists_collected_credentials_via_seam(tmp_path: Path, monkeypatch) -> None:
+    """#474 defect 2: the credentials collected in Step 1 flow into the
+    persistence use-case (recorded through the WizardDeps seam)."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+
+    recorded: list[tuple[str, str, str]] = []
+
+    def _fake_persist(api_key: str, endpoint: str, embed_model: str) -> Path:
+        recorded.append((api_key, endpoint, embed_model))
+        return tmp_path / "kairix.env"
+
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+    inputs = [
+        "1",  # use case
+        "1",  # Azure
+        "https://res.services.ai.azure.com",  # endpoint
+        "typed-credential-value",  # API key
+        "embed-deployment",  # embed model
+        "",  # chat model default
+        str(doc_dir),
+        "1",  # default storage
+        "n",  # skip Neo4j
+        "1",  # search everything
+        "5",  # skip agent integration
+        "n",  # skip indexing
+    ]
+    input_iter = iter(inputs)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(input_iter, ""))
+
+    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(
+        output_path=str(tmp_path / "config.yaml"),
+        ctx=ctx,
+        deps=WizardDeps(
+            connection_test=lambda *_a, **_k: True,
+            persist_credentials=_fake_persist,
+        ),
+    )
+
+    assert result is True
+    assert recorded == [
+        ("typed-credential-value", "https://res.services.ai.azure.com", "embed-deployment"),
+    ], f"collected credentials did not reach the persistence use-case: {recorded}"
+
+
+@pytest.mark.unit
+def test_wizard_connection_test_uses_read_back_persisted_values(tmp_path: Path, monkeypatch) -> None:
+    """#474 defect 3 (half 1): the connection test runs against what was
+    PERSISTED (read back from the bundle), not against in-memory copies."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+
+    bundle = tmp_path / "kairix.env"
+
+    def _fake_persist(_api_key: str, _endpoint: str, _embed_model: str) -> Path:
+        # Simulates a store that normalised the values on write — the
+        # probe must see the STORED values, proving read-back happens.
+        bundle.write_text(
+            "KAIRIX_PROVIDER_LLM_API_KEY=persisted-credential-value\n"  # pragma: allowlist secret
+            "KAIRIX_PROVIDER_LLM_ENDPOINT=https://persisted.example.invalid\n",
+            encoding="utf-8",
+        )
+        return bundle
+
+    probe_calls: list[tuple[str, str, str, str]] = []
+
+    def _probe(provider: str, endpoint: str, api_key: str, embed_model: str) -> bool:
+        probe_calls.append((provider, endpoint, api_key, embed_model))
+        return True
+
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+    inputs = [
+        "1",
+        "1",  # Azure
+        "https://typed.example.invalid",
+        "typed-credential-value",
+        "",
+        "",
+        str(doc_dir),
+        "1",
+        "n",
+        "1",
+        "5",
+        "n",
+    ]
+    input_iter = iter(inputs)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(input_iter, ""))
+
+    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
+    run_setup(
+        output_path=str(tmp_path / "config.yaml"),
+        ctx=ctx,
+        deps=WizardDeps(connection_test=_probe, persist_credentials=_fake_persist),
+    )
+
+    assert len(probe_calls) == 1
+    _provider, endpoint, api_key, _embed = probe_calls[0]
+    assert api_key == "persisted-credential-value", (  # pragma: allowlist secret — generic fixture value
+        f"probe used the typed value, not the stored one: {probe_calls}"
+    )
+    assert endpoint == "https://persisted.example.invalid"
+
+
+@pytest.mark.unit
+def test_wizard_connection_test_runs_after_config_write(tmp_path: Path) -> None:
+    """#474 defect 3 (half 2): on a fresh machine the connection test
+    runs against the just-written config — the config file must already
+    exist when the probe fires."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+
+    output = tmp_path / "config.yaml"
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+    seen: dict[str, bool] = {}
+
+    def _probe(_provider: str, _endpoint: str, _api_key: str, _embed_model: str) -> bool:
+        seen["config_exists_at_probe_time"] = output.exists()
+        return True
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        preset="general",
+        deps=WizardDeps(connection_test=_probe),
+    )
+
+    assert result is True
+    assert seen.get("config_exists_at_probe_time") is True, (
+        "the connection test fired before the config was written — it cannot "
+        "validate the just-written config on a fresh machine in that order"
+    )
+
+
+@pytest.mark.unit
+def test_wizard_epilogue_lists_next_commands_and_paths(tmp_path: Path, capsys) -> None:
+    """#474 defect 4: the epilogue prints the exact next commands and
+    where the config + secrets were written."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+
+    output = tmp_path / "config.yaml"
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+
+    ctx = SetupContext(interactive=False, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(
+        output_path=str(output),
+        ctx=ctx,
+        document_path=str(doc_dir),
+        preset="general",
+        deps=WizardDeps(connection_test=lambda *_a, **_k: True),
+    )
+
+    assert result is True
+    out = capsys.readouterr().out
+    assert "kairix embed" in out
+    assert "kairix onboard check" in out
+    assert "kairix mcp serve" in out
+    assert str(output) in out
+    # No API key entered in non-interactive mode → the epilogue says so
+    # instead of pointing at an unwritten secrets file.
+    assert "Secrets: none stored" in out
+
+
+@pytest.mark.unit
+def test_wizard_epilogue_names_secrets_path_when_persisted(tmp_path: Path, monkeypatch, capsys) -> None:
+    """When credentials were persisted, the epilogue names the bundle file."""
+    from kairix.platform.setup.prompts import SetupContext
+    from kairix.platform.setup.wizard import WizardDeps, run_setup
+
+    bundle = tmp_path / "kairix.env"
+    doc_dir = tmp_path / "docs"
+    doc_dir.mkdir()
+    inputs = [
+        "1",
+        "1",
+        "https://res.services.ai.azure.com",
+        "typed-credential-value",
+        "",
+        "",
+        str(doc_dir),
+        "1",
+        "n",
+        "1",
+        "5",
+        "n",
+    ]
+    input_iter = iter(inputs)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(input_iter, ""))
+
+    ctx = SetupContext(interactive=True, json_mode=False, state_path=tmp_path / ".state.json")
+    result = run_setup(
+        output_path=str(tmp_path / "config.yaml"),
+        ctx=ctx,
+        deps=WizardDeps(
+            connection_test=lambda *_a, **_k: True,
+            persist_credentials=lambda *_a: bundle,
+        ),
+    )
+
+    assert result is True
+    out = capsys.readouterr().out
+    assert str(bundle) in out, f"epilogue does not say where secrets were written:\n{out}"
+
+
+@pytest.mark.unit
+def test_probe_llm_connection_surfaces_provider_error_verbatim(capsys) -> None:
+    """#474 defect 3 (half 3): on failure the probe surfaces the
+    underlying provider error verbatim with an F21 affordance — it does
+    NOT blame the operator's credentials for a non-credential failure."""
+    from kairix.platform.setup.wizard import probe_llm_connection
+
+    def _raise_dns(_name: str) -> Any:
+        raise RuntimeError("DNS resolution failed for example-host:443 (errno 8)")
+
+    result = probe_llm_connection(
+        provider="azure_foundry",
+        endpoint="https://res.services.ai.azure.com",
+        api_key="example-credential-value",  # pragma: allowlist secret — generic fixture
+        embed_model="text-embedding-3-large",
+        set_llm_endpoint_fn=lambda _v: None,
+        set_llm_api_key_fn=lambda _v: None,
+        get_provider_fn=_raise_dns,
+    )
+
+    assert result is False
+    out = capsys.readouterr().out
+    assert "DNS resolution failed for example-host:443 (errno 8)" in out, out
+    assert "fix:" in out
+    assert "check your Azure endpoint and API key" not in out
+    assert "check your credentials" not in out
+
+
+@pytest.mark.unit
+def test_probe_llm_connection_happy_path_via_fake_provider() -> None:
+    """A plugin that embeds with full dimensionality and answers chat
+    passes the probe."""
+    from kairix.platform.setup.wizard import probe_llm_connection
+    from tests.fakes import FakeProvider
+
+    fake = FakeProvider(vector=[0.1] * 512, dim=512, chat_reply="ok")
+    result = probe_llm_connection(
+        provider="azure_foundry",
+        endpoint="https://res.services.ai.azure.com",
+        api_key="example-credential-value",  # pragma: allowlist secret — generic fixture
+        embed_model="text-embedding-3-large",
+        set_llm_endpoint_fn=lambda _v: None,
+        set_llm_api_key_fn=lambda _v: None,
+        get_provider_fn=lambda _name: fake,
+    )
+    assert result is True
+
+
+@pytest.mark.unit
+def test_probe_llm_connection_rejects_short_embedding_and_empty_chat() -> None:
+    """Degenerate provider responses (tiny vectors, empty chat) fail the probe."""
+    from kairix.platform.setup.wizard import probe_llm_connection
+    from tests.fakes import FakeProvider
+
+    common = {
+        "provider": "azure_foundry",
+        "endpoint": "https://res.services.ai.azure.com",
+        "api_key": "example-credential-value",  # pragma: allowlist secret — generic fixture
+        "embed_model": "text-embedding-3-large",
+        "set_llm_endpoint_fn": lambda _v: None,
+        "set_llm_api_key_fn": lambda _v: None,
+    }
+    short_vec = FakeProvider(vector=[0.1] * 3, dim=3, chat_reply="ok")
+    assert probe_llm_connection(**common, get_provider_fn=lambda _n: short_vec) is False
+
+    silent_chat = FakeProvider(vector=[0.1] * 512, dim=512, chat_reply="")
+    assert probe_llm_connection(**common, get_provider_fn=lambda _n: silent_chat) is False
 
 
 @pytest.mark.unit

@@ -102,6 +102,9 @@ def test_setup_cli_subprocess_json_envelope_outcome(tmp_path: Path) -> None:
     )
     # Resolved config carries the canonical retrieval block.
     assert "retrieval" in envelope, f"retrieval block missing: {sorted(envelope.keys())}"
+    # #474 defect 1: the emitted config must name the provider plugin —
+    # a provider-less config fails at factory construction downstream.
+    assert envelope.get("provider") == "azure_foundry", f"provider missing/wrong: {sorted(envelope.keys())}"
     # And a non-empty collections block — the wizard's idx=0 default
     # ('all documents') populates this in non-interactive mode.
     assert "collections" in envelope, f"collections block missing: {sorted(envelope.keys())}"

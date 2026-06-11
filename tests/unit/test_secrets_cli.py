@@ -1,16 +1,22 @@
-"""Outcome tests for ``kairix secrets verify``.
+"""Outcome tests for ``kairix secrets verify`` and ``kairix secrets set``.
 
 F30-compliant: asserts on stdout / stderr / exit-code envelope, not
 just returncode. F2-clean: passes a :class:`FakeSecretsLoader` through
-the CLI's ``loader_factory`` DI seam — no ``monkeypatch.setenv``.
+the CLI's ``loader_factory`` DI seam — no ``monkeypatch.setenv``; the
+``set`` tests pass the target bundle through the ``bundle_path`` seam
+(in-process) or an explicit ``env=`` dict (subprocess — the established
+outcome-test pattern, see tests/integration/test_connect_google_lifecycle.py).
 """
 
 from __future__ import annotations
 
 import io
 import json
+import os
+import stat
 import sys
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 import pytest
 
@@ -162,6 +168,219 @@ def test_verify_loads_bundle_file_before_reading_env(tmp_path) -> None:
     payload = json.loads(out)
     row = next(r for r in payload["secrets"] if r["leaf"] == "api-key")
     assert row["status"] == "present", f"expected key resolved via bundle hydration; got {row}"
+
+
+# ── set: persistence verb ──────────────────────────────────────────
+
+_SET_NAME = "kairix-provider-llm-api-key"
+_SET_ENV_VAR = "KAIRIX_PROVIDER_LLM_API_KEY"
+_SET_VALUE = "example-credential-value"  # pragma: allowlist secret — generic fixture, not a real key
+
+
+def _capture_both(argv: list[str], **kwargs) -> tuple[str, str, int]:
+    """Run secrets_main(argv, ...) and capture (stdout, stderr, exit_code)."""
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        rc = secrets_main(argv, **kwargs)
+    return out.getvalue(), err.getvalue(), rc if rc is not None else 0
+
+
+def test_set_with_inline_value_reports_path_and_persists(tmp_path: Path) -> None:
+    """``set --value`` upserts the canonical line and reports the
+    destination with the next-step affordance."""
+    bundle = tmp_path / "kairix.env"
+    stdout, stderr, rc = _capture_both(
+        ["set", _SET_NAME, "--value", _SET_VALUE],
+        bundle_path=bundle,
+    )
+    assert rc == 0, f"stderr={stderr!r}"
+    assert f"Stored {_SET_NAME} in {bundle} (0600)." in stdout
+    assert "next: kairix secrets verify" in stdout
+    assert f"{_SET_ENV_VAR}={_SET_VALUE}" in bundle.read_text(encoding="utf-8")
+
+
+def test_set_reads_value_from_stdin_seam(tmp_path: Path) -> None:
+    """Without --value, the value comes from stdin (the leak-safe default).
+    A single trailing newline — what ``echo`` appends — is stripped."""
+    bundle = tmp_path / "kairix.env"
+    stdout, _stderr, rc = _capture_both(
+        ["set", _SET_NAME],
+        bundle_path=bundle,
+        value_reader=lambda: f"{_SET_VALUE}\n",
+    )
+    assert rc == 0
+    assert f"Stored {_SET_NAME}" in stdout
+    assert f"{_SET_ENV_VAR}={_SET_VALUE}\n" in bundle.read_text(encoding="utf-8")
+
+
+def test_set_json_envelope_shape(tmp_path: Path) -> None:
+    """--json emits a parseable envelope naming the secret + path, never the value."""
+    bundle = tmp_path / "kairix.env"
+    stdout, _stderr, rc = _capture_both(
+        ["set", _SET_NAME, "--value", _SET_VALUE, "--json"],
+        bundle_path=bundle,
+    )
+    assert rc == 0
+    envelope = json.loads(stdout)
+    assert envelope["stored"] == _SET_NAME
+    assert envelope["path"] == str(bundle)
+    assert envelope["mode"] == "0600"
+    assert envelope["next"] == "kairix secrets verify"
+    assert _SET_VALUE not in stdout
+
+
+def test_set_rejects_non_canonical_name_with_examples(tmp_path: Path) -> None:
+    """A non-canonical name exits 2 with an F21 affordance on stderr that
+    quotes two valid example names."""
+    bundle = tmp_path / "kairix.env"
+    stdout, stderr, rc = _capture_both(
+        ["set", "MY_API_KEY", "--value", _SET_VALUE],
+        bundle_path=bundle,
+    )
+    assert rc == 2
+    assert "fix:" in stderr
+    assert "kairix-provider-llm-api-key" in stderr
+    assert "kairix-connector-github-pat" in stderr
+    assert not bundle.exists()
+    assert _SET_VALUE not in stdout + stderr
+
+
+def test_set_rejects_missing_value(tmp_path: Path) -> None:
+    """Empty stdin and no --value exits 2 with stdin guidance."""
+    bundle = tmp_path / "kairix.env"
+    _stdout, stderr, rc = _capture_both(
+        ["set", _SET_NAME],
+        bundle_path=bundle,
+        value_reader=lambda: "",
+    )
+    assert rc == 2
+    assert "stdin" in stderr
+    assert not bundle.exists()
+
+
+def test_set_never_echoes_the_secret_value(tmp_path: Path) -> None:
+    """F15: the stored value appears in the bundle file and NOWHERE in
+    the command's combined output."""
+    bundle = tmp_path / "kairix.env"
+    stdout, stderr, rc = _capture_both(
+        ["set", _SET_NAME, "--value", _SET_VALUE],
+        bundle_path=bundle,
+    )
+    assert rc == 0
+    assert _SET_VALUE in bundle.read_text(encoding="utf-8")
+    assert _SET_VALUE not in stdout
+    assert _SET_VALUE not in stderr
+
+
+def test_set_via_subprocess_stdin_persists_with_0600(tmp_path: Path) -> None:
+    """F30: full-dispatcher subprocess outcome — stdin value, explicit
+    ``env=`` carrying KAIRIX_SECRETS_FILE (established outcome-test
+    pattern; never setenv in-process)."""
+    import subprocess
+
+    bundle = tmp_path / "kairix.env"
+    env = dict(os.environ)
+    env["KAIRIX_SECRETS_FILE"] = str(bundle)
+    result = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "secrets", "set", _SET_NAME],
+        input=_SET_VALUE,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 0, f"stderr={result.stderr!r}"
+    assert f"Stored {_SET_NAME} in {bundle} (0600)." in result.stdout
+    assert "next: kairix secrets verify" in result.stdout
+    assert f"{_SET_ENV_VAR}={_SET_VALUE}" in bundle.read_text(encoding="utf-8")
+    assert stat.S_IMODE(bundle.stat().st_mode) == 0o600
+    # F15: value never appears in any output stream.
+    assert _SET_VALUE not in result.stdout
+    assert _SET_VALUE not in result.stderr
+
+
+def test_set_then_verify_round_trip_via_subprocess(tmp_path: Path) -> None:
+    """The persisted secret resolves through the loader on the NEXT
+    command: ``secrets set`` then ``secrets verify --json`` against the
+    same bundle reports the identity as present."""
+    import subprocess
+
+    bundle = tmp_path / "kairix.env"
+    env = dict(os.environ)
+    env["KAIRIX_SECRETS_FILE"] = str(bundle)
+    env.pop(_SET_ENV_VAR, None)  # the bundle, not inherited env, must resolve it
+
+    set_result = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "secrets", "set", _SET_NAME],
+        input=_SET_VALUE,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    assert set_result.returncode == 0, f"stderr={set_result.stderr!r}"
+
+    verify_result = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "secrets", "verify", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    payload = json.loads(verify_result.stdout)
+    row = next(r for r in payload["secrets"] if r["canonical_kv"] == _SET_NAME)
+    assert row["status"] == "present", f"persisted secret did not resolve: {row}"
+
+
+@pytest.mark.skipif(
+    Path("/run/secrets").is_dir(),
+    reason=(
+        "container layout present: the shared bundle resolution legitimately "
+        "prefers /run/secrets/kairix.env over the XDG fallback there, so the "
+        "pip-install round-trip below cannot be exercised on this host. The "
+        "XDG branch itself is unit-pinned in tests/unit/test_secrets_store.py."
+    ),
+)
+def test_set_then_verify_round_trip_via_xdg_default_path(tmp_path: Path) -> None:
+    """Pip-install loop-closer: with NO $KAIRIX_SECRETS_FILE override,
+    ``secrets set`` writes to the XDG bundle and the very next
+    ``secrets verify`` hydrates it back — the read side resolves through
+    the same default path the write side used. Pins the
+    load_secrets → resolve_bundle_path wiring (#473)."""
+    import subprocess
+
+    env = dict(os.environ)
+    env.pop("KAIRIX_SECRETS_FILE", None)
+    env.pop(_SET_ENV_VAR, None)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
+
+    set_result = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "secrets", "set", _SET_NAME],
+        input=_SET_VALUE,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    assert set_result.returncode == 0, f"stderr={set_result.stderr!r}"
+    bundle = tmp_path / "xdg" / "kairix" / "secrets" / "kairix.env"
+    assert bundle.exists(), f"set did not write to the XDG default: {set_result.stdout!r}"
+
+    verify_result = subprocess.run(
+        [sys.executable, "-m", "kairix.cli", "secrets", "verify", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+        env=env,
+    )
+    payload = json.loads(verify_result.stdout)
+    row = next(r for r in payload["secrets"] if r["canonical_kv"] == _SET_NAME)
+    assert row["status"] == "present", f"XDG bundle was not hydrated by the read side: {row}"
 
 
 def test_verify_with_nonexistent_bundle_passes_through_to_loader(tmp_path) -> None:

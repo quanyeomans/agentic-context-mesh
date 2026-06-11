@@ -136,3 +136,15 @@ def _assert_section_non_empty_object(setup_cli_ctx: _SetupCliCtx, section: str) 
     value = setup_cli_ctx.json_output[section]
     assert isinstance(value, dict), f"{section!r} must be an object, got {type(value).__name__}"
     assert value, f"{section!r} must be non-empty, got {value!r}"
+
+
+@then("the JSON config names the chosen provider plugin")
+def _assert_provider_plugin_named(setup_cli_ctx: _SetupCliCtx) -> None:
+    """#474 defect 1: a provider-less config fails at factory
+    construction — every emitted config must carry the provider field.
+    Non-interactive defaults select Azure with no legacy-shaped
+    endpoint, which maps to the azure_foundry plugin."""
+    provider = setup_cli_ctx.json_output.get("provider")
+    assert provider == "azure_foundry", (
+        f"expected provider 'azure_foundry'; got {provider!r} in {setup_cli_ctx.json_output}"
+    )

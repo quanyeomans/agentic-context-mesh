@@ -35,7 +35,7 @@ Subcommands:
   remember    Save a memory for an agent (dated markdown file + immediate BM25 index)
   cc-pair     Operator surface over topology_cc_pairs (list/create/pause/resume/delete)
   dead-letter Operator triage view over the connector_deadletter table (status)
-  secrets     Canonical credential naming: verify resolution + emit legacy->KV migration table
+  secrets     Canonical credential naming: verify resolution + set (persist a secret into the operator bundle)
   connect     Operator-only: capture OAuth2 tokens for connectors (Google + GitHub App)
   maintenance Operator surface for ad-hoc maintenance tasks (analyze: refresh planner stats)
   init        Self-installer: lay down FHS/XDG dir tree, config template, and systemd unit (--system / --user / verify)

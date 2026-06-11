@@ -106,11 +106,19 @@ def test_setup_happy_path_writes_well_formed_config(doc_root: Path, output_path:
 
     config: dict[str, Any] = yaml.safe_load(output_path.read_text(encoding="utf-8"))
     assert isinstance(config, dict)
-    # Documented top-level keys (paths + retrieval are unconditional).
+    # Documented top-level keys (provider + paths + retrieval are
+    # unconditional — a provider-less config fails at factory
+    # construction, #474 defect 1).
+    assert config.get("provider") == "azure_foundry", f"provider missing/wrong: {config}"
     assert "paths" in config
     assert "retrieval" in config
     # paths.document_root points at the tmp doc dir, not at a default.
     assert config["paths"]["document_root"] == str(doc_root)
+    # The emitted config passes the same schema validation
+    # `kairix config validate` runs.
+    from kairix.core.search.config_validator import validate_config
+
+    assert validate_config(config) == []
     # The injected probe ran exactly once.
     assert len(probe.calls) == 1
 

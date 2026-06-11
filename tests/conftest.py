@@ -185,6 +185,7 @@ pytest_plugins = [
     # surface (migrate-list) was retired in #369 once operators
     # migrated to canonical KAIRIX_* env-var names.
     "tests.bdd.steps.secrets_cli_steps",
+    "tests.bdd.steps.secrets_set_steps",
     # MCP tool_secrets_verify — agent-callable preflight envelope.
     "tests.bdd.steps.mcp_secrets_verify_steps",
     # Dead-letter triage surface (kairix dead-letter status CLI +
