@@ -1,6 +1,5 @@
 {% extends "setup/base.html" %}
 {% block title %}Connect {{ label }} — kairix setup{% endblock %}
-{% block card_class %} kx-setup-card-wide{% endblock %}
 {% block content %}
 <hgroup>
   <h2>Connect {{ label }}</h2>
@@ -16,7 +15,7 @@
   <code id="redirect-uri">{{ redirect_uri }}</code>
   <p class="kx-muted kx-small">This is the address of this wizard — the provider sends your browser back here after you approve access.</p>
 </div>
-<form method="post" action="/setup/source/connect">
+<form id="source-connect-form" method="post" action="/setup/source/connect">
   <input type="hidden" name="provider" value="{{ provider }}">
   {% if provider == "slack" %}
   <label>
@@ -64,9 +63,9 @@
   </label>
   <p class="kx-muted kx-small">Download this file from the Google Cloud console (APIs &amp; Services → Credentials → your OAuth client). Add the redirect URL above to the client's authorized redirect URIs, and publish the consent screen so access doesn't expire after 7 days.</p>
   {% endif %}
-  <div class="kx-setup-actions">
-    <a href="/setup/source" class="kx-btn-secondary">Back</a>
-    <button type="submit" class="kx-btn-primary">Connect</button>
-  </div>
 </form>
+{% endblock %}
+{% block actions %}
+<a href="/setup/source" class="kx-btn-secondary">Back</a>
+<button type="submit" form="source-connect-form" class="kx-btn-primary">Connect</button>
 {% endblock %}

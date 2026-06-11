@@ -670,23 +670,34 @@ _BTN_SECONDARY = "kx-btn-secondary"
 _BTN_OUTLINE = "kx-btn-outline"
 _BTN_PRIMARY = "kx-btn-primary"
 
-# (screen id, GET path, query params) for every full screen in the wizard.
-_SCREEN_GETS: tuple[tuple[str, str, dict[str, str]], ...] = (
-    ("welcome", "/setup", {}),
-    ("provider", "/setup/provider", {}),
-    ("key", "/setup/key", {"provider": "anthropic"}),
-    ("folder", "/setup/folder", {}),
-    ("indexing", "/setup/indexing", {}),
-    ("tour", "/setup/tour", {}),
-    ("connect-agent", "/setup/connect-agent", {}),
-    ("done", "/setup/done", {}),
+# (screen id, method, path, query params / form data) for every full
+# screen in the wizard. All screens are GETs except the saved-source
+# confirmation, which the wizard renders as the POST /setup/source/save
+# response (its only render path).
+_SCREEN_REQUESTS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+    ("welcome", "GET", "/setup", {}),
+    ("provider", "GET", "/setup/provider", {}),
+    ("key", "GET", "/setup/key", {"provider": "anthropic"}),
+    ("folder", "GET", "/setup/folder", {}),
+    ("indexing", "GET", "/setup/indexing", {}),
+    ("tour", "GET", "/setup/tour", {}),
+    ("connect-agent", "GET", "/setup/connect-agent", {}),
+    ("done", "GET", "/setup/done", {}),
+    # OAuth source-connect screens (#489) — same primitive, same step.
+    ("source", "GET", "/setup/source", {}),
+    ("source-connect", "GET", "/setup/source/connect", {"provider": "slack"}),
+    ("source-wait", "GET", "/setup/source/wait", {"provider": "slack"}),
+    ("source-picker", "GET", "/setup/source/picker", {"provider": "slack"}),
+    ("source-saved", "POST", "/setup/source/save", {"provider": "slack", "unit": "C001"}),
 )
 
 # Canonical action-row composition per screen: Back (secondary) leftmost,
 # helpers (outline) in the middle, the primary action rightmost. The
 # tour's five per-card "Run it" buttons live in the content area (each
 # with its own fixed result slot), so its action row stays a lone
-# primary — same shape the first-search screen carried.
+# primary — same shape the first-search screen carried. The source and
+# source-wait screens advance through their content (provider cards /
+# the auto-advancing status poll), so their rows carry only Back.
 _CANONICAL_ROWS: dict[str, tuple[str, ...]] = {
     "welcome": (_BTN_PRIMARY,),
     "provider": (_BTN_SECONDARY, _BTN_PRIMARY),
@@ -696,6 +707,11 @@ _CANONICAL_ROWS: dict[str, tuple[str, ...]] = {
     "tour": (_BTN_PRIMARY,),
     "connect-agent": (_BTN_SECONDARY, _BTN_OUTLINE, _BTN_PRIMARY),
     "done": (_BTN_PRIMARY,),
+    "source": (_BTN_SECONDARY,),
+    "source-connect": (_BTN_SECONDARY, _BTN_PRIMARY),
+    "source-wait": (_BTN_SECONDARY,),
+    "source-picker": (_BTN_SECONDARY, _BTN_PRIMARY),
+    "source-saved": (_BTN_SECONDARY, _BTN_PRIMARY),
 }
 
 # Per-screen HTMX swap target for screens that render async results
@@ -706,6 +722,7 @@ _ASYNC_TARGETS: dict[str, str] = {
     "folder": "scan-result",
     "indexing": "indexing-progress",
     "connect-agent": "handshake-result",
+    "source-wait": "source-auth-status",
 }
 
 # (id, method, path, form data) for every partial-rendering endpoint.
@@ -719,6 +736,7 @@ _PARTIAL_REQUESTS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     ("tour-remember", "POST", "/setup/tour/remember", {"content": "Setup finished today."}),
     ("tour-brief", "POST", "/setup/tour/brief", {}),
     ("tour-timeline", "POST", "/setup/tour/timeline", {"query": "last week"}),
+    ("source-auth-status", "GET", "/setup/source/auth-status", {}),
 )
 
 # The tour's per-card HTMX swap targets — each must be a fixed-size slot
@@ -732,9 +750,12 @@ _TOUR_RESULT_TARGETS = (
 )
 
 
-def _screen_html(path: str, params: dict[str, str]) -> str:
+def _screen_html(method: str, path: str, payload: dict[str, str]) -> str:
     client = _build_client()
-    response = client.get(path, params=params, follow_redirects=True)
+    if method == "GET":
+        response = client.get(path, params=payload, follow_redirects=True)
+    else:
+        response = client.post(path, data=payload)
     assert response.status_code == 200
     return response.text
 
@@ -746,11 +767,13 @@ def _action_row(html: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("path", "params"),
-    [pytest.param(path, params, id=name) for name, path, params in _SCREEN_GETS],
+    ("method", "path", "payload"),
+    [pytest.param(method, path, payload, id=name) for name, method, path, payload in _SCREEN_REQUESTS],
 )
-def test_every_screen_renders_the_banner_slot_above_the_action_row(path: str, params: dict[str, str]) -> None:
-    html = _screen_html(path, params)
+def test_every_screen_renders_the_banner_slot_above_the_action_row(
+    method: str, path: str, payload: dict[str, str]
+) -> None:
+    html = _screen_html(method, path, payload)
     assert _BANNER_SLOT_ID_MARKUP in html
     assert _ACTION_ROW_CLASS in html
     # Document order: the banner slot always precedes the action row, so
@@ -759,11 +782,13 @@ def test_every_screen_renders_the_banner_slot_above_the_action_row(path: str, pa
 
 
 @pytest.mark.parametrize(
-    ("name", "path", "params"),
-    [pytest.param(name, path, params, id=name) for name, path, params in _SCREEN_GETS],
+    ("name", "method", "path", "payload"),
+    [pytest.param(name, method, path, payload, id=name) for name, method, path, payload in _SCREEN_REQUESTS],
 )
-def test_action_rows_share_the_canonical_composition(name: str, path: str, params: dict[str, str]) -> None:
-    row = _action_row(_screen_html(path, params))
+def test_action_rows_share_the_canonical_composition(
+    name: str, method: str, path: str, payload: dict[str, str]
+) -> None:
+    row = _action_row(_screen_html(method, path, payload))
     found = tuple(re.findall(r"kx-btn-(?:secondary|outline|primary)", row))
     assert found == _CANONICAL_ROWS[name]
     # No inline styles in the row: hidden-until-revealed actions hold
@@ -772,15 +797,17 @@ def test_action_rows_share_the_canonical_composition(name: str, path: str, param
 
 
 @pytest.mark.parametrize(
-    ("path", "params", "target_id"),
+    ("method", "path", "payload", "target_id"),
     [
-        pytest.param(path, params, _ASYNC_TARGETS[name], id=name)
-        for name, path, params in _SCREEN_GETS
+        pytest.param(method, path, payload, _ASYNC_TARGETS[name], id=name)
+        for name, method, path, payload in _SCREEN_REQUESTS
         if name in _ASYNC_TARGETS
     ],
 )
-def test_async_result_targets_live_inside_the_banner_slot(path: str, params: dict[str, str], target_id: str) -> None:
-    html = _screen_html(path, params)
+def test_async_result_targets_live_inside_the_banner_slot(
+    method: str, path: str, payload: dict[str, str], target_id: str
+) -> None:
+    html = _screen_html(method, path, payload)
     target_markup = f'id="{target_id}"'
     slot_at = html.index(_BANNER_SLOT_ID_MARKUP)
     actions_at = html.index(_ACTION_ROW_CLASS)
@@ -795,7 +822,7 @@ def test_tour_cards_own_fixed_result_slots_above_the_action_row() -> None:
     """#490 — every tour card's swap target is a fixed-size slot rendered
     from first paint, before the action row, so nothing shifts when a
     run finishes (the per-card analogue of the banner-slot invariant)."""
-    html = _screen_html("/setup/tour", {})
+    html = _screen_html("GET", "/setup/tour", {})
     actions_at = html.index(_ACTION_ROW_CLASS)
     for target_id in _TOUR_RESULT_TARGETS:
         target_markup = f'id="{target_id}" class="kx-tour-result"'
@@ -804,15 +831,16 @@ def test_tour_cards_own_fixed_result_slots_above_the_action_row() -> None:
 
 
 @pytest.mark.parametrize(
-    ("path", "params"),
-    [pytest.param(path, params, id=name) for name, path, params in _SCREEN_GETS],
+    ("method", "path", "payload"),
+    [pytest.param(method, path, payload, id=name) for name, method, path, payload in _SCREEN_REQUESTS],
 )
-def test_every_screen_uses_the_uniform_card_width(path: str, params: dict[str, str]) -> None:
-    html = _screen_html(path, params)
+def test_every_screen_uses_the_uniform_card_width(method: str, path: str, payload: dict[str, str]) -> None:
+    html = _screen_html(method, path, payload)
     assert 'class="kx-setup-card' in html
     # The 2026-06-11 demo flagged the provider grid rendering in a wider
-    # card than the other steps. One card width across all 7 steps (#488):
-    # no screen opts into a width-variant class.
+    # card than the other steps. One card width across every screen,
+    # source screens included (#488): no screen opts into a
+    # width-variant class.
     assert "kx-setup-card-wide" not in html
 
 

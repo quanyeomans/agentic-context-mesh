@@ -1,6 +1,5 @@
 {% extends "setup/base.html" %}
 {% block title %}Pick what to index — kairix setup{% endblock %}
-{% block card_class %} kx-setup-card-wide{% endblock %}
 {% block content %}
 <hgroup>
   <h2>Pick what to index</h2>
@@ -15,11 +14,8 @@
 <div class="kx-validation-error">
   <p class="kx-error-msg">{{ units.error }}</p>
 </div>
-<div class="kx-setup-actions">
-  <a href="/setup/source" class="kx-btn-secondary">Back to sources</a>
-</div>
 {% else %}
-<form method="post" action="/setup/source/save">
+<form id="source-picker-form" method="post" action="/setup/source/save">
   <input type="hidden" name="provider" value="{{ provider }}">
   {% if units.pickable %}
   <fieldset class="kx-unit-list">
@@ -53,10 +49,10 @@
   </label>
   {% endif %}
   {% endif %}
-  <div class="kx-setup-actions">
-    <a href="/setup/source" class="kx-btn-secondary">Back</a>
-    <button type="submit" class="kx-btn-primary">Save selection</button>
-  </div>
 </form>
 {% endif %}
+{% endblock %}
+{% block actions %}
+<a href="/setup/source" class="kx-btn-secondary">Back</a>
+{% if not units.error %}<button type="submit" form="source-picker-form" class="kx-btn-primary">Save selection</button>{% endif %}
 {% endblock %}

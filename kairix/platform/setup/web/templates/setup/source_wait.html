@@ -5,6 +5,9 @@
   <h2>Finishing the sign-in</h2>
   <p>Your browser goes to the provider's approval screen, then comes back here. This page advances automatically.</p>
 </hgroup>
+{% endblock %}
+{% block banner_class %} kx-banner-slot-sm{% endblock %}
+{% block banner %}
 <div id="source-auth-status"
      hx-get="/setup/source/auth-status"
      hx-trigger="load, every 1s"
@@ -12,7 +15,7 @@
   <div class="kx-skeleton kx-skeleton-progress"></div>
   <p class="kx-muted kx-small">Preparing the sign-in…</p>
 </div>
-<div class="kx-setup-actions">
-  <a href="/setup/source" class="kx-btn-secondary">Back to sources</a>
-</div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/source" class="kx-btn-secondary">Back to sources</a>
 {% endblock %}

@@ -7,8 +7,8 @@
 </hgroup>
 <p class="kx-success-msg">{{ saved.summary }}</p>
 <p class="kx-muted kx-small">The background worker fetches this source on its next run. You can connect another source, or continue with setup.</p>
-<div class="kx-setup-actions">
-  <a href="/setup/source" class="kx-btn-secondary">Add another source</a>
-  <a href="/setup/indexing" class="kx-btn-primary">Continue</a>
-</div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/source" class="kx-btn-secondary">Add another source</a>
+<a href="/setup/indexing" class="kx-btn-primary">Continue</a>
 {% endblock %}

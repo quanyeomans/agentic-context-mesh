@@ -1,6 +1,5 @@
 {% extends "setup/base.html" %}
 {% block title %}Choose a source — kairix setup{% endblock %}
-{% block card_class %} kx-setup-card-wide{% endblock %}
 {% block content %}
 <hgroup>
   <h2>Choose a source</h2>
@@ -25,7 +24,7 @@
   {% endif %}
   {% endfor %}
 </div>
-<div class="kx-setup-actions">
-  <a href="/setup/key" class="kx-btn-secondary">Back</a>
-</div>
+{% endblock %}
+{% block actions %}
+<a href="/setup/key" class="kx-btn-secondary">Back</a>
 {% endblock %}
