@@ -64,6 +64,13 @@ KAIRIX_PROVIDER_LLM_API_KEY=your-key-here
 ln -s ~/Documents/my-notes ./documents
 ```
 
+Your documents stay read-only — kairix never edits them. The one place kairix writes is the agent-memory folder (`kairix remember` and the `memory_write` tool). Create it now so the container (which runs as uid 995) can write there:
+
+```bash
+mkdir -p documents/04-Agent-Knowledge
+sudo chown -R 995:985 documents/04-Agent-Knowledge
+```
+
 The container includes 5,800+ curated reference library documents, so you can start searching immediately and add your own documents later.
 
 ### A4. Start everything

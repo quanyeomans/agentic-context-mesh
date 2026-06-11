@@ -15,6 +15,9 @@
 #      Copy it BEFORE step 5 — compose bind-mounts this file, and docker
 #      replaces a missing bind source with an empty directory.
 #   4. ln -s /path/to/your/documents ./documents
+#      For agent memory (kairix remember / memory_write), also:
+#        mkdir -p documents/04-Agent-Knowledge
+#        sudo chown -R 995:985 documents/04-Agent-Knowledge
 #   5. docker compose up -d
 #   6. docker compose exec kairix kairix embed
 #   7. docker compose exec kairix kairix onboard check
@@ -55,6 +58,12 @@ services:
       - kairix-data:/var/lib/kairix
       - kairix-cache:/var/cache/kairix
       - ./documents:/data/documents:ro  # Your documents folder → container's document store (read-only)
+      # Agent memory subtree — the one place kairix itself writes
+      # (kairix remember / the memory_write MCP tool). Create it before
+      # `up -d` so docker doesn't auto-create it root-owned:
+      #   mkdir -p documents/04-Agent-Knowledge
+      #   sudo chown -R 995:985 documents/04-Agent-Knowledge
+      - ./documents/04-Agent-Knowledge:/data/documents/04-Agent-Knowledge
       # Collections + agents config. Copy kairix.config.example.yaml to
       # kairix.config.yaml before `up -d` (quick-start step 3).
       - ./kairix.config.yaml:/etc/kairix/kairix.config.yaml:ro

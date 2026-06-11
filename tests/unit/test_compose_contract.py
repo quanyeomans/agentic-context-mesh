@@ -114,6 +114,21 @@ def test_kairix_service_mounts_operator_config_file() -> None:
 
 
 @pytest.mark.unit
+def test_agent_memory_subtree_is_writable() -> None:
+    """The agent-memory subtree mounts read-write while sources stay read-only.
+
+    ``kairix remember`` / the ``memory_write`` MCP tool write dated memory
+    files under ``04-Agent-Knowledge/<agent>/``; with only the ``:ro``
+    documents bind the write path fails with EROFS (live-verified on the
+    2026-06-11 showcase deployment). The nested bind keeps every other
+    document read-only.
+    """
+    volumes = [str(volume) for volume in _kairix_service().get("volumes", [])]
+    assert "./documents:/data/documents:ro" in volumes
+    assert "./documents/04-Agent-Knowledge:/data/documents/04-Agent-Knowledge" in volumes
+
+
+@pytest.mark.unit
 def test_api_run_script_binds_all_container_interfaces() -> None:
     """The s6 api service passes --host 0.0.0.0 to ``kairix mcp serve``.
 
